@@ -26,7 +26,7 @@ import { fmtLen, fmtTime, fmtMass, rSchw, rGrav } from './units.js';
 
 // observed reference values the mock observations are compared against
 const OBS_REFS = {
-    holm15a: { rGammaPc: 4570, rGammaSrc: 'López-Cruz+14', sigma: 346 },
+    holm15a: { rGammaPc: 4110, rGammaSrc: 'Mehrgan+19 r_γ (verified)', sigma: 346 },
     a402: { rGammaPc: 2200, rGammaSrc: 'McDonald+26 core', sigma: null },
     b20402: {},
 };

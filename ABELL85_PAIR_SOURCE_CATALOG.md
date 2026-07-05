@@ -6,6 +6,10 @@
 > methods). Anchor papers (Mehrgan 2019, López-Cruz 2014, Begelman–Blandford–Rees 1980,
 > Peters 1964, Rantala/KETJU, Farris 2014, NANOGrav 15yr) intentionally appear in more than
 > one section — each section is self-contained. Deduplicated unique-source count ≈ 100.
+> A 105-agent adversarial verification workflow subsequently 3-vote-verified the headline
+> claims — verdicts and corrections in `ABELL85_PAIR_RESEARCH.md` §6–7 (notably: core-Sérsic
+> R_b ≈ 2.8 kpc / r_γ = 4.11 kpc is the best Holm 15A core value, and the 2015–16 "no core"
+> position is superseded).
 >
 > **Identity note (read first):** the popular claim this project started from — "most massive
 > pair of black holes, combined 60 billion M☉, 4.4 billion light-years, dark core devoid of
@@ -522,7 +526,7 @@ Observationally the binary sweeps the PTA band (1–100 nHz; a ≈ 0.06 pc at f_
 
 **16. AGN Jets and a Fanciful Trio of Black Holes in the Abell 85 BCG**
 - Madrid et al. — 2021 — PASP 133, 014101 — arXiv:2012.10774
-- High-resolution VLA: two kpc-scale bipolar jets from the Holm 15A AGN — the UMBH is currently active at LOW power. No evidence for a binary SMBH (earlier double-nucleus claims were seeing artifacts); the claimed "third" SMBH is a background quasar at z = 1.560.
+- High-resolution VLA: two kpc-scale bipolar jets from the Holm 15A AGN — the UMBH is currently active at LOW power. No evidence for a binary SMBH (note: a later verification pass refuted 0-3 the stronger framing that earlier double-nucleus reports were mere seeing artifacts — the single-nucleus conclusion rests on the VLA/Chandra data themselves); the claimed "third" SMBH is a background quasar at z = 1.560.
 
 **17. On the Origin of Diffuse Radio Emission in Abell 85 — new GMRT Observations**
 - Rahaman, Raja, Datta, Burns & Rapetti — 2022 — MNRAS 515, 2245 — arXiv:2207.00061

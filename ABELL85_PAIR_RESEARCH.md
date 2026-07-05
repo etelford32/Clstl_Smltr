@@ -79,7 +79,7 @@ dance ends.
 | M_BH (2019 axisymmetric) | (4.0 ± 0.8) × 10^10 M☉ | Mehrgan et al. 2019 (VLT/MUSE) — bracket both in UI |
 | Stellar velocity dispersion σ* | ~310–346 km/s, nearly flat profile | López-Cruz 2014 (310 ± 15); Mehrgan 2019 (~340) |
 | BCG stellar mass | ≈ 2 × 10^12 M☉ | Mehrgan 2019 |
-| Cusp/core radius r_γ | 4.57 ± 0.06 kpc — **contested** (coreless Sérsic+envelope fits exist: Bonfini 2015; Madrid & Donzelli 2016 find a nuclear *excess*) | López-Cruz 2014 vs. rebuttals |
+| Cusp/core radius | core-Sérsic R_b ≈ 2.8 kpc; r_γ = 4.11 kpc (deeper 2019 data) — the 4.57 kpc figure is the 2014 Nuker fit; 2015–16 "no core" claims superseded; model-dependence spans 0–4.6 kpc | Mehrgan 2019 (verified 3-0); López-Cruz 2014 |
 | Redshift / distance | z = 0.0555; D_L ≈ 250 Mpc (~810 Mly); D_A ≈ 222 Mpc (1″ ≈ 1.08 kpc); light-travel ~740 Mly (the press figure) | Distance conventions differ, not measurements |
 | Excess above M–σ scaling | 4–9× (at the 2019 mass) | Mehrgan 2019 |
 | Orbit structure in core | Tangentially biased (β < 0) inside the core — the scouring fingerprint | Mehrgan 2019; Thomas 2014 |
@@ -192,10 +192,77 @@ cluster, staged time compression, GW readout.
 ## 6. Verification status
 
 Compiled from six parallel literature sweeps (~119 annotated entries, ≈100 unique sources; see
-`ABELL85_PAIR_SOURCE_CATALOG.md`). Cross-checks: the Abell 402-BCG identification is supported
-by the McDonald et al. 2026 ApJL paper, the AAS Nova explainer, and Science News coverage; the
-Holm 15A single-BH status by Madrid et al. 2021 (VLA) and Liepold et al. 2025. One sweep agent
-noted it could not fetch arXiv/ADS full texts through the egress proxy and relied on
-cross-confirmed search summaries — flagged inline where it applies (Abell 85 environment
-numbers). An adversarial verification pass over the headline claims was run separately; its
-findings are appended below if they alter any number above.
+`ABELL85_PAIR_SOURCE_CATALOG.md`), then adversarially verified by a 105-agent deep-research
+workflow (fan-out search → fetch → 3-vote refutation attempts per claim → synthesis). The
+verified findings are in §7 below. Corrections the verification pass forced on this document:
+
+- **Core radius, best value:** core-Sérsic **R_b ≈ 2.8 kpc**, with cusp radius **r_γ = 4.11 kpc**
+  from the deeper Mehrgan et al. 2019 photometry — the famous 4.57 kpc is the 2014 Nuker-fit
+  value. The literature spans 0–4.6 kpc across parameterizations; any adopted core radius must
+  carry explicit model-dependence uncertainty (verified 3-0).
+- **The 2015–2016 "no depleted core" position (Bonfini+; Madrid & Donzelli) is superseded** —
+  its sub-claims were refuted 0-3 in verification; deeper 2019 data confirm a real core.
+- **Same-data systematic bracket on the mass:** axisymmetrized refit of the 2025 KCWI data gives
+  2.55 ± 0.20 ×10^10 M☉ (vs 2.16 triaxial) — the method-dependence is now quantified (3-0).
+- **New scaling for constraint-building:** R_b ∝ M_BH^(0.83±0.10) (Dullo 2019, 11 galaxies with
+  direct masses); for large-core galaxies (R_b > 0.5 kpc), σ- and L-based mass predictions are
+  systematically undermassive (3-0).
+- **Binary separation limit:** any surviving pair in Holm 15A is unconstrained below the ~200 pc
+  VLA beam; mass ratio, eccentricity, spins, inspiral timescales survived *no* verified claim —
+  free parameters, as this document already treated them.
+- **Distance conventions confirmed:** z = 0.0555, D_A = 222.3 Mpc, 1″ ≈ 1.08 kpc, light-travel
+  ~700–745 Mly. The 2.7 Gly figure in circulation belongs to Abell 2261-BCG and 4.4 Gly to the
+  Abell 402-BCG story (2-1 medium confidence), consistent with §1's identity resolution.
+- A verifier note: the claim that earlier Holm 15A double-nucleus reports were "atmospheric
+  seeing artifacts" was itself refuted 0-3 as overreach — the single-nucleus conclusion stands
+  on the VLA/Chandra data, not on that framing. The source catalog entry is softened accordingly.
+
+---
+
+## 7. Adversarially verified findings (deep-research workflow, 105 agents, completed 2026-07-05)
+
+Each claim below survived 3-vote adversarial verification (vote shown; REFUTED claims noted).
+
+**V1 [HIGH]** (Merged claims [8], [9], [16] — each 3-0)
+Current best black hole mass: (2.16 +0.23/−0.18)×10^10 M_sun (~22 billion), from Liepold, Ma & Walsh 2025 (ApJ 980, 58) triaxial Schwarzschild (TriOS) modeling of Keck KCWI stellar kinematics — approximately a factor of 2 below the widely cited (4.0 ± 0.8)×10^10 M_sun of Mehrgan et al. 2019 (ApJ 887, 195). This ties Holm 15A with NGC 4889 as the most massive SMBH known in the local universe, and it makes the popular '40 billion' figure (and any '60 billion combined pair' arithmetic built on it) no longer the best available value.
+*Sources: https://iopscience.iop.org/article/10.3847/1538-4357/ada4b0 · https://arxiv.org/pdf/2501.01493 · https://arxiv.org/abs/1907.10608*
+
+**V2 [HIGH]** (Merged claims [2], [10] — each 3-0)
+Measurement methodology: both mass determinations are direct orbit-based Schwarzschild dynamical modeling of stellar kinematics, not scaling-relation estimates. 2019: USM Wendelstein photometry + wide-field VLT/MUSE integral-field spectroscopy, axisymmetric orbit models. 2025: Keck KCWI kinematics in 313 spatial bins over a ~100″×100″ field (observed 2018–2021), 2500 kinematic constraints (313 bins × 8 Gauss–Hermite moments) fed into the TriOS triaxial Schwarzschild code, with a search over ~40,000 galaxy models that simultaneously fit black hole mass, stellar mass-to-light ratio, dark-matter halo mass (M50, enclosed within 50 kpc), and intrinsic 3D shape (p, q, u) — exactly the quantities needed for a simulation-constraints table.
+*Sources: https://www.mpe.mpg.de/7387190/news-publication-03122019 · https://iopscience.iop.org/article/10.3847/1538-4357/ada4b0 · https://arxiv.org/abs/1907.10608*
+
+**V3 [HIGH]** (Claim [17] — 3-0)
+The mass is method-dependent and the galaxy is intrinsically triaxial: refitting the same KCWI data with the axisymmetrized version of TriOS yields worse fits and a higher mass, (2.55 ± 0.20)×10^10 M_sun. The velocity field shows low-amplitude (~20 km/s) rotation along a kinematic axis prominently misaligned from the photometric major axis — a misalignment axisymmetric models cannot reproduce — indicating the earlier axisymmetric 4.0×10^10 M_sun estimate was likely biased high.
+*Sources: https://arxiv.org/pdf/2501.01493 · https://iopscience.iop.org/article/10.3847/1538-4357/ada4b0*
+
+**V4 [HIGH]** (Claim [7] — 3-0; corroborated by [16] 3-0. Related claim asserting the pair hypothesis rests on a seeing artifact was REFUTED 0-3 (the artifact framing overreached).)
+The SMBH BINARY (pair) claim is NOT observationally supported: new high-resolution VLA 10 GHz A-configuration radio imaging plus Chandra X-ray data show no evidence that Holm 15A harbors a binary black hole — the nucleus appears as a single compact source (Madrid 2021, PASP 133, 014101). The purported 'third' black hole is a background quasar at z = 1.560. Every dynamical measurement (2019 and 2025) models a single central point mass. The popular 'most massive black hole pair, combined 60 billion solar masses' claim conflates garbled 2019 press coverage (a 'two-thirds of the Milky Way = 60 billion suns' stellar-mass analogy) and/or a different system entirely (the Science News 'largest pair' story at 4.4 billion ly). Caveat: the VLA beam (~0.2″ ≈ 200 pc at this distance) cannot resolve a parsec-scale bound binary, so this is a non-detection, not an absolute exclusion.
+*Sources: https://arxiv.org/pdf/2012.10774 · https://arxiv.org/pdf/2501.01493 · https://www.syfy.com/syfy-wire/so-how-many-supermassive-black-holes-are-there-in-holmberg-15a-anyway*
+
+**V5 [HIGH]** (Merged claims [4], [13] — each 3-0)
+The binary enters the Holm 15A story only as a PAST core-scouring agent: the extremely diffuse, flat inner light profile (depleted core, ~2 mag fainter than any previously dynamically modeled core) is attributed to stars expelled by three-body interactions with SMBH binaries formed in dry (gas-poor) galaxy mergers — the standard core-scouring mechanism. Mehrgan et al. 2019 conclude Holm 15A is the remnant of a merger of two early-type galaxies with pre-existing depleted cores; follow-up N-body work (Nasim et al. 2021, arXiv:2011.04663) reproduces Holm 15A-scale cores via binary scouring plus gravitational-wave recoil. This supports a merged/merging PAST pair, not a currently resolved binary.
+*Sources: https://www.mpe.mpg.de/7387190/news-publication-03122019 · https://arxiv.org/pdf/1610.00801 · https://arxiv.org/abs/1907.10608*
+
+**V6 [HIGH]** (Merged claims [0], [1], [5], [6] — each 3-0. Note: three related Madrid & Donzelli 2016 no-core sub-claims were REFUTED (0-3, 1-2, 0-3), consistent with that position being superseded.)
+Depleted-core history and controversy (resolved in favor of a real core): (a) 2014 — López-Cruz et al. (ApJL 795, L31) report the largest depleted core known: Nuker cusp radius 4.57 ± 0.06 kpc from 2D fits to R-band imaging out to ~80 kpc, >18× the mean BCG cusp radius and ≥1 kpc larger than prior record-holder A2261-BCG, predicting via core-size scaling a BH of ~10^9–10^11 M_sun (a range that bracketed, five years early, the 2019 direct measurement). (b) 2015–2016 — Bonfini, Dullo & Graham (ApJ 807, 136, 'Too big to be real? No depleted core in Holm 15A') re-fit the same imaging and conclude a coreless low-index Sérsic + outer exponential halo suffices, arguing the 4.57 kpc core is a Nuker-parameterization artifact; Madrid & Donzelli 2016 independently called it 'a nucleated, core-less galaxy.' (c) 2019 — Mehrgan et al., with much deeper Wendelstein photometry and MUSE kinematics, confirm a real, extreme depleted core: core-Sérsic break radius ~2.8 kpc, r_γ = 4.11 ± 0.11 kpc, retained in the 2025 Keck KCWI triaxial study.
+*Sources: https://arxiv.org/abs/1405.7758 · https://arxiv.org/pdf/1506.08560 · https://arxiv.org/abs/1907.10608*
+
+**V7 [HIGH]** (Claim [14] — 3-0)
+Methodological caution for the simulation-constraints table: depleted-core sizes are strongly fit/model-dependent. Bonfini & Graham 2016 shrank 2MASX J09194427+5622012's break radius 3× (to 0.55 kpc) under careful core-Sérsic re-fitting, while measuring A2261-BCG at R_b ≈ 3.6 kpc; Holm 15A's own literature spans 0 (no core, 2015–16) to 4.57 kpc (Nuker, 2014), with core-Sérsic R_b ≈ 2.8 kpc (2019) the best current value. Any adopted core radius must carry an explicit model-dependence uncertainty.
+*Sources: https://arxiv.org/pdf/1610.00801 · https://arxiv.org/abs/1907.10608*
+
+**V8 [HIGH]** (Claim [15] — 3-0)
+Mass-deficit budget for scouring simulations: binary SMBH scouring displaces roughly M_def ≈ 0.5·N·M_BH per dry major merger (Merritt 2006 calibration). The A2261-BCG benchmark shows the limit: its ~3.6 kpc core implies up to ~10^11 M_sun displaced — more than pure binary scouring can achieve — leading Bonfini & Graham to favor a 'stalled infalling perturber' scenario (a cannibalized satellite's remnant core whose dynamical-friction-driven decay stalled) or substantial gravitational-wave-recoil events. With M_BH ≈ 2–4×10^10 M_sun, Holm 15A's ~2.8 kpc core is broadly consistent with scouring across a few dry mergers (possibly plus recoil), so a scouring-only simulation is plausible for Holm 15A but must respect this deficit ceiling.
+*Sources: https://arxiv.org/pdf/1610.00801 · https://arxiv.org/abs/1707.02277*
+
+**V9 [HIGH]** (Merged claims [11], [12] — each 3-0. Note: a related claim tying Holm 15A's extension of the M_BH–R_b sequence to specific 2× figures was REFUTED 0-3; only the relation itself and the factor-40 offset are verified.)
+Scaling relations relevant to constraint-building: (a) a strong log-linear break-radius–BH-mass relation, R_b ∝ M_BH^(0.83 ± 0.10), from the 11 galaxies with directly determined SMBH masses in Dullo 2019's 41-galaxy core-Sérsic sample — usable to predict M_BH from core size and vice versa for depleted-core galaxies like Holm 15A. (b) For the most luminous 'large-core' galaxies (R_b > 0.5 kpc), masses predicted from M_BH–σ (velocity dispersion) and core-Sérsic M_BH–L relations are UNDERMASSIVE by up to a factor of ~40 relative to break-radius expectations — σ-based estimates systematically underpredict ultramassive BHs (Holm 15A's directly measured mass is 4–9× above its σ- and bulge-mass expectations per Mehrgan et al. 2019). Simulations should therefore anchor on the direct dynamical mass and R_b, not on σ-relations.
+*Sources: https://iopscience.iop.org/article/10.3847/1538-4357/ab4d4f · https://iopscience.iop.org/article/10.3847/1538-4357/abceae · https://arxiv.org/abs/1907.10608*
+
+**V10 [MEDIUM]** (Claims [3] and [18] — each 2-1)
+Distance and environment: Abell 85 is a cluster of more than 500 galaxies at z = 0.0555, corresponding to angular diameter distance D_A = 222.3 Mpc (flat ΛCDM, H0 = 70 km/s/Mpc) — a light-travel distance of roughly 700–745 million light-years. This was, in 2019, roughly twice the distance of prior direct stellar-dynamical BH mass measurements. Popular figures of 2.7 or 4.4 billion light-years for 'the' system belong to OTHER objects (2.7 Gly matches Abell 2261's BCG; 4.4 Gly is the Science News 'largest pair, combined ~60 billion M_sun' story about a different galaxy) and are falsified for Holm 15A, since z = 0.0555 cannot correspond to 4.4 Gly under any standard distance measure.
+*Sources: https://www.mpe.mpg.de/7387190/news-publication-03122019 · https://arxiv.org/pdf/2501.01493 · https://iopscience.iop.org/article/10.3847/1538-4357/ada4b0*
+
+**V11 [HIGH]** (Synthesis — component claims 3-0)
+DISTILLED SIMULATION-CONSTRAINTS TABLE (all values from 3-0-verified claims unless noted). MASSES — adopt M_BH,total = 2.16 (+0.23/−0.18)×10^10 M_sun (Liepold 2025, triaxial); sensitivity-test alternative 4.0 ± 0.8×10^10 (Mehrgan 2019, axisymmetric); same-data axisymmetric value 2.55 ± 0.20×10^10 brackets the systematic. BINARY PARAMETERS — no observed binary: separation unconstrained below ~200 pc (VLA beam); mass ratio, eccentricity, and spins have NO verified constraints — treat as free parameters; simulate a PAST binary whose merged mass equals today's M_BH. CORE / DENSITY PROFILE — core-Sérsic break radius R_b ≈ 2.8 kpc (best), Nuker r_γ = 4.11 ± 0.11 kpc (2019) to 4.57 ± 0.06 kpc (2014); model-dependence spans 0–4.6 kpc; ultra-diffuse core ~2 mag fainter than any previously modeled. SCOURING BUDGET — M_def ≈ 0.5·N·M_BH per dry merger; deficits ≳10^11 M_sun require GW recoil or a stalled infalling perturber. HOST — intrinsically triaxial (shape p, q, u fit by TriOS), low rotation ~20 km/s, kinematic axis misaligned from photometric major axis; stellar M/L and DM halo mass M50 (within 50 kpc) fit simultaneously in Liepold 2025 (pull numeric values from that paper's tables). FORMATION SCENARIO — remnant of a merger of two early-type galaxies with PRE-EXISTING depleted cores (multi-generation scouring), per Mehrgan 2019 and Nasim 2021. SCALE — z = 0.0555, D_A = 222.3 Mpc, 1″ ≈ 1.08 kpc.
+*Sources: https://iopscience.iop.org/article/10.3847/1538-4357/ada4b0 · https://arxiv.org/abs/1907.10608 · https://arxiv.org/pdf/1610.00801*
