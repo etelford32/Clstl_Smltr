@@ -20,6 +20,7 @@ import {
     losKinematics, sigmaLosProfile, ptaSensitivity,
 } from './observables.js';
 import { orbitalBasis, bodiesAt } from './geometry.js';
+import { MergerChoreo } from './merger.js';
 import { Renderer, Trail } from './render.js';
 import { GodCamera } from './camera.js';
 import { Diagnostics } from './diagnostics.js';
@@ -111,6 +112,7 @@ export function boot(els) {
     // live PN endgame state
     let livePN = null, pnPredDE = 0, pnRosette = [], lastRosette = 0;
     let shells = [], prevA = -1;
+    let choreo = null;
     const dropPN = () => { livePN = null; pnRosette = []; pnPredDE = 0; };
     // mock-observation state (recomputed on a throttle, not every frame)
     let photoInit = [], obsCache = null, lastObsWall = 0;
@@ -127,6 +129,7 @@ export function boot(els) {
         state.selStar = -1; selTrail.clear();
         photoInit = initialSurfaceDensity(sc, cluster.rMax);
         obsCache = null; lastObsWall = 0;
+        choreo = new MergerChoreo(sc, history);
         const t0 = history.samples[0].t, t1 = history.samples[history.samples.length - 1].t;
         if (!keepTime || state.tNow < t0 || state.tNow > t1) {
             state.tNow = state.scenarioId === 'holm15a' ? 0 : 0; // "today"
@@ -179,7 +182,7 @@ export function boot(els) {
                 livePN = new PNBinary(sc, {
                     a: now.a, e: now.e, phase: state.livePhase,
                     peri: now.peri, incl: state.incl, node: state.node,
-                });
+                }, sc.kick === 'superkick' ? { precess: {} } : {});
                 pnPredDE = 0;
             }
             const want = state.speed * dtWall;
@@ -207,11 +210,16 @@ export function boot(els) {
             dropPN();                   // re-anchor from history on next play
         }
 
-        const bhs = pnActive && livePN ? livePN.positions() : bhPositions(now);
+        let bhs = pnActive && livePN ? livePN.positions() : bhPositions(now);
+        const choreoState = choreo?.state(wall, basis, state.livePhase);
+        if (choreoState) bhs = choreoState.bhs;
 
         // GW-burst shell: crossing the coalescence while playing spawns a 3D
         // expanding wavefront marker (wall-clock life — an event annotation)
-        if (state.playing && prevA > 0 && now.a <= 0) shells.push({ born: wall });
+        if (state.playing && prevA > 0 && now.a <= 0) {
+            shells.push({ born: wall });
+            choreo.trigger(wall);
+        }
         prevA = now.a;
         for (let i = shells.length - 1; i >= 0; i--) {
             if (wall - shells[i].born > 2800) shells.splice(i, 1);
@@ -353,6 +361,14 @@ export function boot(els) {
             rows.push(['t_coalesce (GW only)', tc > 14000 ? '> Hubble time (needs stars)' : fmtTime(tc)]);
         } else if (history.events.remnant) {
             const r = history.events.remnant;
+            const cs = choreo?.state(performance.now(), basis, state.livePhase);
+            if (cs) {
+                rows.push(['merger', `${cs.phaseName.toUpperCase()} · ` +
+                    (cs.phaseName === 'ringdown'
+                        ? `ringing at Kerr Q ≈ ${choreo.qnm.Q.toFixed(1)}`
+                        : 'common horizon forming')]);
+                rows.push(['mass bookkeeping', choreo.bookkeeping()]);
+            }
             rows.push(['remnant', `${fmtMass(r.mass)} · spin ${r.spin.toFixed(2)}`]);
             rows.push(['recoil kick', `${r.kickKms.toFixed(0)} km/s (v_esc ≈ ${sc.vEsc.toFixed(0)})`]);
         }

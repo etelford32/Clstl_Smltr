@@ -371,7 +371,8 @@ export class Renderer {
                 // θE·D = √(2 r_s D)  (world pc) → pixels via perspective scale
                 const pxPerPc = (h / 2) / (Math.tan(this.camera.fov / 2) * D);
                 const tE = Math.sqrt(2 * rs * D) * pxPerPc;
-                const rShadow = Math.sqrt(27) / 2 * rs * pxPerPc;   // photon capture
+                // photon-capture shadow; shadowMod carries the ringdown pulse
+                const rShadow = Math.sqrt(27) / 2 * rs * pxPerPc * (bh.shadowMod ?? 1);
                 lens[nLens * 4] = cx; lens[nLens * 4 + 1] = cy;
                 lens[nLens * 4 + 2] = tE; lens[nLens * 4 + 3] = rShadow;
                 nLens++;

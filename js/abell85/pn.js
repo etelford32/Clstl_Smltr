@@ -30,6 +30,22 @@ import { G, C_KMS, KMS_MYR, keplerPeriodMyr } from './units.js';
 
 const STEPS_PER_ORBIT = 240;
 
+/** Rodrigues rotation of v about unit axis k by angle th. */
+function rotAbout(v, k, th) {
+    const c = Math.cos(th), s = Math.sin(th);
+    const kv = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
+    const cx = [
+        k[1] * v[2] - k[2] * v[1],
+        k[2] * v[0] - k[0] * v[2],
+        k[0] * v[1] - k[1] * v[0],
+    ];
+    return [
+        v[0] * c + cx[0] * s + k[0] * kv * (1 - c),
+        v[1] * c + cx[1] * s + k[1] * kv * (1 - c),
+        v[2] * c + cx[2] * s + k[2] * kv * (1 - c),
+    ];
+}
+
 export class PNBinary {
     /**
      * @param sc   scenario (m1, m2, mTot)
@@ -44,6 +60,33 @@ export class PNBinary {
         this.rr = opts.rr !== false;
         this.incl = el.incl ?? 0;
         this.node = el.node ?? 0;
+
+        // Optional leading-order spin-orbit "simple precession" (Apostolatos
+        // et al. 1994; Kidder 1995): the orbital plane precesses about the
+        // (fixed) total angular momentum direction Ĵ at
+        //   Ω_p = (2 + 3 m₂/(2 m₁)) · (G/c²) · J / r³
+        // Implemented as a rigid rotation of (x⃗, v⃗) about Ĵ each substep —
+        // an isometry, so the energy-conservation contract is untouched.
+        // Ω_p ∝ 1/r³: the wobble accelerates dramatically toward plunge.
+        this.prec = null;
+        if (opts.precess) {
+            const chi = opts.precess.chi ?? 0.7;         // dimensionless spins
+            const lambda = opts.precess.lambda ?? 0.45;  // L̂–Ĵ cone angle
+            // plane basis from incl/node (same convention as geometry.js)
+            const si = Math.sin(this.incl), ci = Math.cos(this.incl);
+            const sn = Math.sin(this.node), cn = Math.cos(this.node);
+            const T = (v) => {
+                const r1 = [v[0], ci * v[1] - si * v[2], si * v[1] + ci * v[2]];
+                return [cn * r1[0] + sn * r1[2], r1[1], -sn * r1[0] + cn * r1[2]];
+            };
+            const nHat = T([0, 1, 0]), e1 = T([1, 0, 0]);
+            this.prec = {
+                jHat: rotAbout(nHat, e1, lambda),
+                // total spin magnitude S = χ·(G/c)·(m₁² + m₂²)  [M☉·pc·km/s]
+                S: chi * (G / C_KMS) * (this.m1 * this.m1 + this.m2 * this.m2),
+                pref: 2 + 3 * this.m2 / (2 * this.m1),
+            };
+        }
 
         // Kepler state → cartesian relative orbit in the tilted plane.
         const { a, e } = el;
@@ -165,6 +208,20 @@ export class PNBinary {
             const h = Math.min(this.period() / STEPS_PER_ORBIT,
                 tLoc / STEPS_PER_ORBIT, dtMyr - done);
             this._rk4(h);
+            if (this.prec) {
+                // Ω_p = pref · (G/c²) · |L⃗+S⃗| / r³, with L = μ|x⃗×v⃗|
+                const mu = this.m1 * this.m2 / this.M;
+                const L = mu * Math.hypot(
+                    this.x[1] * this.v[2] - this.x[2] * this.v[1],
+                    this.x[2] * this.v[0] - this.x[0] * this.v[2],
+                    this.x[0] * this.v[1] - this.x[1] * this.v[0]);
+                const rP = Math.hypot(...this.x) || 1e-12;
+                const omegaP = this.prec.pref * (G / (C_KMS * C_KMS)) *
+                    (L + this.prec.S) / (rP * rP * rP) * KMS_MYR;   // rad/Myr
+                const dphi = omegaP * h;
+                this.x = rotAbout(this.x, this.prec.jHat, dphi);
+                this.v = rotAbout(this.v, this.prec.jHat, dphi);
+            }
             done += h; used++;
             // periapsis passage: ṙ crosses − → + ; measure the apsidal advance
             // as the signed rotation of the Laplace–Runge–Lenz vector between

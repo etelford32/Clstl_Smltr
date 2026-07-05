@@ -365,4 +365,102 @@ const { orbitalBasis, binaryWorldPositions, kickDirection, remnantWorldPosition 
         'superkick ∥ L̂ (out of plane), mass-asymmetry kick in-plane');
 }
 
+// ══ Merger act: QNM ringdown fits + spin-orbit precession ═══════════════════
+const { qnm220, MergerChoreo } = await import('../js/abell85/merger.js');
+
+// ── 18. Berti–Cardoso–Will QNM fits hit the known Kerr values ───────────────
+{
+    // Schwarzschild ℓ=m=2: Mω ≈ 0.3737, Q ≈ 2.0
+    const s = qnm220(0);
+    assert.ok(Math.abs(s.Momega - 0.3737) / 0.3737 < 0.02, `Mω(j=0)=${s.Momega}`);
+    assert.ok(s.Q > 1.9 && s.Q < 2.3, `Q(j=0)=${s.Q}`);
+    // remnant spin ~0.69: Mω ≈ 0.53, Q ≈ 3.2
+    const r = qnm220(0.69);
+    assert.ok(Math.abs(r.Momega - 0.53) < 0.02, `Mω(0.69)=${r.Momega}`);
+    assert.ok(Math.abs(r.Q - 3.2) < 0.3, `Q(0.69)=${r.Q}`);
+    // monotone: faster spin → higher frequency, higher Q
+    assert.ok(qnm220(0.9).Momega > r.Momega && qnm220(0.9).Q > r.Q);
+    ok(`QNM ℓ=m=2 fits: Mω(0)=${s.Momega.toFixed(3)} Q=${s.Q.toFixed(2)}; ` +
+        `Mω(0.69)=${r.Momega.toFixed(3)} Q=${r.Q.toFixed(2)}`);
+}
+
+// ── 19. spin-orbit simple precession: isometric, correct rate, fixed cone ───
+{
+    const sc = makeScenario('holm15a', { massModel: 'mehrgan2019' });
+    const rg = rGrav(sc.mTot);
+    const a = 80 * rg;
+    const pn = new PNBinary(sc, { a, e: 0, phase: 0, peri: 0, incl: 0.4, node: 0.3 },
+        { pn1: false, rr: false, precess: { chi: 0.7, lambda: 0.45 } });
+    const e0 = pn.energy();
+    const lHat = () => {
+        const L = [
+            pn.x[1] * pn.v[2] - pn.x[2] * pn.v[1],
+            pn.x[2] * pn.v[0] - pn.x[0] * pn.v[2],
+            pn.x[0] * pn.v[1] - pn.x[1] * pn.v[0]];
+        const l = Math.hypot(...L);
+        return L.map(c => c / l);
+    };
+    const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    const j = pn.prec.jHat;
+    const cone0 = dot(lHat(), j);
+    // expected rate for the circular orbit (r = a, L = μ√(GMa) constant)
+    const mu = sc.m1 * sc.m2 / sc.mTot;
+    const L = mu * Math.sqrt(G * sc.mTot * a);
+    const omegaP = pn.prec.pref * (G / (299792.458 ** 2)) *
+        (L + pn.prec.S) / (a ** 3) * KMS_MYR;               // rad/Myr
+    const T = 15 * keplerPeriodMyr(a, sc.mTot);
+    const l0 = lHat();
+    pn.step(T, 1e9);
+    // rotation is an isometry → energy contract untouched
+    const drift = Math.abs((pn.energy() - e0) / e0);
+    assert.ok(drift < 1e-6, `precession energy drift ${drift}`);
+    // cone angle L̂·Ĵ conserved
+    assert.ok(Math.abs(dot(lHat(), j) - cone0) < 1e-3, 'cone angle fixed');
+    // measured precession azimuth about Ĵ vs Ω_p·T
+    const perp = (v) => {
+        const par = dot(v, j);
+        const p = [v[0] - par * j[0], v[1] - par * j[1], v[2] - par * j[2]];
+        const l = Math.hypot(...p) || 1;
+        return p.map(c => c / l);
+    };
+    const p0 = perp(l0), p1 = perp(lHat());
+    const cross = [
+        p0[1] * p1[2] - p0[2] * p1[1],
+        p0[2] * p1[0] - p0[0] * p1[2],
+        p0[0] * p1[1] - p0[1] * p1[0]];
+    let meas = Math.atan2(dot(cross, j), dot(p0, p1));
+    const expTot = omegaP * T;
+    // unwrap: expected total may exceed π
+    const wraps = Math.round((expTot - meas) / (2 * Math.PI));
+    meas += wraps * 2 * Math.PI;
+    const err = Math.abs(meas - expTot) / expTot;
+    assert.ok(err < 0.05, `precession rate err ${(err * 100).toFixed(1)}% (meas ${meas.toFixed(3)} vs ${expTot.toFixed(3)})`);
+    ok(`spin-orbit precession: isometric (ΔE/E=${drift.toExponential(1)}), cone fixed, ` +
+        `rate matches Ω_p to ${(err * 100).toFixed(1)}% over 15 orbits`);
+}
+
+// ── 20. merger choreography state machine ───────────────────────────────────
+{
+    const sc = makeScenario('holm15a');
+    const hist = buildHistory(sc);
+    const basis = orbitalBasis(0.4, 0.3);
+    const ch = new MergerChoreo(sc, hist);
+    assert.equal(ch.state(1000, basis), null, 'idle before trigger');
+    ch.trigger(1000);
+    const early = ch.state(1200, basis, 0);
+    assert.equal(early.phaseName, 'plunge');
+    assert.equal(early.bhs.length, 2);
+    const late = ch.state(2300, basis, 0);
+    const sepE = Math.hypot(...early.bhs[0].p.map((c, k) => c - early.bhs[1].p[k]));
+    const sepL = Math.hypot(...late.bhs[0].p.map((c, k) => c - late.bhs[1].p[k]));
+    assert.ok(sepL < sepE, 'plunge separation shrinks');
+    const ring = ch.state(1000 + 1400 + 800, basis, 0);
+    assert.equal(ring.phaseName, 'ringdown');
+    assert.equal(ring.bhs.length, 1);
+    assert.ok(Math.abs((ring.bhs[0].shadowMod ?? 1) - 1) > 1e-4, 'shadow rings');
+    assert.equal(ch.state(1000 + 1400 + 3300, basis, 0), null, 'choreo ends');
+    assert.ok(/radiated/.test(ch.bookkeeping()), 'mass bookkeeping string');
+    ok(`merger choreography: plunge (2 bodies, sep ↓) → ringdown (Q=${ch.qnm.Q.toFixed(1)} pulse) → done`);
+}
+
 console.log(`\nabell85-physics: all ${n} checks passed`);

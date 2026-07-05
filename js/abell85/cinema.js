@@ -16,6 +16,7 @@
 
 import { makeScenario, buildHistory, sampleAt, STAGE } from './physics.js';
 import { orbitalBasis, bodiesAt } from './geometry.js';
+import { MergerChoreo } from './merger.js';
 import { StarCluster } from './nbody.js';
 import { PNBinary } from './pn.js';
 import { Renderer, Trail } from './render.js';
@@ -43,6 +44,7 @@ export function boot(canvas, scenarioId = 'holm15a') {
     const trails = [new Trail(500), new Trail(500)];
     const basis = orbitalBasis(INCL, NODE);
     let shells = [], prevA = -1;
+    const choreo = new MergerChoreo(sc, history);
 
     const idxRate = (S.length - 1) / LOOP_SECONDS;
     let idx = 0;
@@ -154,7 +156,7 @@ export function boot(canvas, scenarioId = 'holm15a') {
                 livePN = new PNBinary(sc, {
                     a: now.a, e: now.e, phase: livePhase, peri: now.peri,
                     incl: INCL, node: NODE,
-                });
+                }, sc.kick === 'superkick' ? { precess: {} } : {});
             }
             const adv = livePN.step(dtSim, 16000);
             if (adv >= dtSim * 0.999) {
@@ -179,6 +181,8 @@ export function boot(canvas, scenarioId = 'holm15a') {
             }
             bhs = keplerPositions(now);
         }
+        const choreoState = choreo.state(wall, basis, livePhase);
+        if (choreoState) bhs = choreoState.bhs;
 
         // star cluster: live catch-up or statistical resync (keep trails)
         const gap = tNow - clusterT;
@@ -192,7 +196,7 @@ export function boot(canvas, scenarioId = 'holm15a') {
         cluster.classify(now.a > 0 ? sc.mTot : 0, now.a);   // cyan loss-cone stars
 
         // GW-burst shell at the coalescence crossing (3D expanding wavefront)
-        if (prevA > 0 && now.a <= 0) shells.push({ born: wall });
+        if (prevA > 0 && now.a <= 0) { shells.push({ born: wall }); choreo.trigger(wall); }
         prevA = now.a;
         for (let i = shells.length - 1; i >= 0; i--) {
             if (wall - shells[i].born > 3000) shells.splice(i, 1);

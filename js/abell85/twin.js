@@ -15,6 +15,7 @@
 
 import { makeScenario, buildHistory, sampleAt } from './physics.js';
 import { orbitalBasis, bodiesAt } from './geometry.js';
+import { MergerChoreo } from './merger.js';
 import { StarCluster } from './nbody.js';
 import { PNBinary } from './pn.js';
 import { surfaceDensity, cuspRadius, ptaSensitivity } from './observables.js';
@@ -57,6 +58,7 @@ class Lane {
         this.orient = ORIENT[id];
         this.basis = orbitalBasis(this.orient.incl, this.orient.node);
         this.shells = []; this.prevA = -1;
+        this.choreo = new MergerChoreo(this.sc, this.history);
         // precompute pre-merger a(τ): monotone table for equal-separation lookups
         this.aTable = this.history.samples
             .filter(s => s.a > 0 && s.t <= this.history.events.merger)
@@ -104,7 +106,7 @@ class Lane {
                 this.livePN = new PNBinary(this.sc, {
                     a: now.a, e: now.e, phase: this.livePhase, peri: now.peri,
                     incl: this.orient.incl, node: this.orient.node,
-                });
+                }, this.sc.kick === 'superkick' ? { precess: {} } : {});
             }
             const adv = this.livePN.step(dtSim, 8000);
             if (adv >= dtSim * 0.999) {
@@ -129,6 +131,8 @@ class Lane {
             }
             bhs = this._keplerPositions(now);
         }
+        const choreoState = this.choreo.state(wall, this.basis, this.livePhase);
+        if (choreoState) bhs = choreoState.bhs;
         this.bhs = bhs;
 
         // star cluster catch-up
@@ -143,7 +147,10 @@ class Lane {
         this.lc = this.cluster.classify(now.a > 0 ? this.sc.mTot : 0, now.a);
 
         // GW-burst shell at this lane's coalescence crossing
-        if (this.prevA > 0 && now.a <= 0 && dtSim > 0) this.shells.push({ born: wall });
+        if (this.prevA > 0 && now.a <= 0 && dtSim > 0) {
+            this.shells.push({ born: wall });
+            this.choreo.trigger(wall);
+        }
         this.prevA = now.a;
         for (let i = this.shells.length - 1; i >= 0; i--) {
             if (wall - this.shells[i].born > 2600) this.shells.splice(i, 1);
