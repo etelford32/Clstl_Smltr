@@ -26,7 +26,7 @@
  * them to IDB; every forecaster, the validator, the worker protocol, and the
  * server cache share that contract. Adding two channels would invalidate
  * stored rings and touch a dozen modules. This feed keeps its own in-memory
- * ring (6 ch × ~10 KB × 96 h ≈ 6 MB) and hands consumers views into it. The
+ * ring (8 ch × ~10 KB × 96 h ≈ 8 MB) and hands consumers views into it. The
  * multi-level forecaster consumes these levels through levelWindSnapshot()
  * rather than through the 9-channel contract precisely so the durable ring,
  * the validator schema, and the worker protocol stay untouched.
@@ -69,13 +69,26 @@ const HOURLY_VARS = [
     'temperature_850hPa', 'temperature_500hPa',
     'wind_speed_850hPa', 'wind_direction_850hPa',
     'wind_speed_500hPa', 'wind_direction_500hPa',
+    'cape', 'freezing_level_height',
 ].join(',');
 
 // Per-frame channel layout (CHW over N cells). Winds are stored decomposed
 // U/V in met convention ("direction FROM" → velocity), lockstep with the
-// surface feed's channel 3/4 semantics.
-export const LVL = Object.freeze({ T850: 0, T500: 1, U850: 2, V850: 3, U500: 4, V500: 5 });
-const LVL_CHANNELS = 6;
+// surface feed's channel 3/4 semantics. CAPE (J/kg) and freezing-level
+// height (m) are NWP diagnostics — they ride the ring for the scrub but are
+// NOT advected by the multi-level model (CAPE is a column integral of the
+// very profile advection would deform; transporting the diagnostic instead
+// of re-deriving it would be pseudo-physics).
+export const LVL = Object.freeze({
+    T850: 0, T500: 1, U850: 2, V850: 3, U500: 4, V500: 5, CAPE: 6, FLH: 7,
+});
+const LVL_CHANNELS = 8;
+
+// Aux-texture encodings (sampleAux): CAPE normalised against the top of the
+// operational scale (4000 J/kg ≈ "extreme instability"), freezing level
+// against 10 km (above any real-world value).
+const CAPE_FULL_SCALE_J = 4000;
+const FLH_FULL_SCALE_M  = 10_000;
 
 // Seam between the model-owned near term and the NWP ring, mirroring
 // WeatherFrameResolver's DEFAULT_SEAM_BLEND_MS so the volume and the
@@ -151,6 +164,8 @@ export function pivotLevelResponses(merged) {
             data[LVL.V850 * GRID_N + cell] = ok850 ? -Math.cos(d850 * DEG2RAD) * s850 : NaN;
             data[LVL.U500 * GRID_N + cell] = ok500 ? -Math.sin(d500 * DEG2RAD) * s500 : NaN;
             data[LVL.V500 * GRID_N + cell] = ok500 ? -Math.cos(d500 * DEG2RAD) * s500 : NaN;
+            data[LVL.CAPE * GRID_N + cell] = loc?.cape?.[h] ?? NaN;
+            data[LVL.FLH  * GRID_N + cell] = loc?.freezing_level_height?.[h] ?? NaN;
         }
         frames.push({ t, data });
     }
@@ -241,9 +256,8 @@ export class TempVolumeFeed {
         return this._inflight;
     }
 
-    // NWP-ring level temperatures at tMs, lerped between bracketing hourly
-    // frames and clamped at the ring's ends. Writes °C into t850/t500 (N).
-    _nwpLevelsInto(tMs, t850, t500) {
+    // Bracketing NWP-ring frames for tMs, clamped at the ring's ends.
+    _bracket(tMs) {
         const fr = this._frames;
         let lo = fr[0], hi = fr[fr.length - 1], frac = 0;
         if (tMs <= lo.t)      { hi = lo; }
@@ -254,12 +268,42 @@ export class TempVolumeFeed {
             }
             frac = (tMs - lo.t) / Math.max(1, hi.t - lo.t);
         }
-        const a = lo.data, b = hi.data;
+        return { a: lo.data, b: hi.data, frac };
+    }
+
+    // NWP-ring level temperatures at tMs, lerped between bracketing hourly
+    // frames and clamped at the ring's ends. Writes °C into t850/t500 (N).
+    _nwpLevelsInto(tMs, t850, t500) {
+        const { a, b, frac } = this._bracket(tMs);
         const o850 = LVL.T850 * GRID_N, o500 = LVL.T500 * GRID_N;
         for (let k = 0; k < GRID_N; k++) {
             t850[k] = a[o850 + k] + (b[o850 + k] - a[o850 + k]) * frac;
             t500[k] = a[o500 + k] + (b[o500 + k] - a[o500 + k]) * frac;
         }
+    }
+
+    /**
+     * Write the encoded convective diagnostics at tMs into `out` (RGBA
+     * Float32, GRID_N×4): R = CAPE / 4000 J/kg, G = freezing level / 10 km,
+     * both clamped [0,1]; B unused; A = 1. Pure NWP-ring interpolation —
+     * see the LVL comment for why these diagnostics are not model-advected.
+     * NaN (upstream gap) encodes as 0 → overlay paints nothing there.
+     *
+     * @returns {boolean} false when the ring is empty (out untouched)
+     */
+    sampleAux(tMs, out) {
+        if (this._frames.length === 0) return false;
+        const { a, b, frac } = this._bracket(tMs);
+        const oCape = LVL.CAPE * GRID_N, oFlh = LVL.FLH * GRID_N;
+        for (let k = 0; k < GRID_N; k++) {
+            const cape = a[oCape + k] + (b[oCape + k] - a[oCape + k]) * frac;
+            const flh  = a[oFlh + k]  + (b[oFlh + k]  - a[oFlh + k])  * frac;
+            out[k * 4]     = Math.max(0, Math.min(1, cape / CAPE_FULL_SCALE_J)) || 0;
+            out[k * 4 + 1] = Math.max(0, Math.min(1, flh / FLH_FULL_SCALE_M)) || 0;
+            out[k * 4 + 2] = 0;
+            out[k * 4 + 3] = 1;
+        }
+        return true;
     }
 
     // Model-ring weight at tMs: 1 inside the model-owned span, ramping to 0

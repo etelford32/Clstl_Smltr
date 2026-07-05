@@ -39,6 +39,7 @@ const MODE_CODE = Object.freeze({
     'precip-rate': 1,
     'mist':        2,
     'convergence': 3,
+    'cape':        4,
 });
 
 // Per-mode default opacity. Picked so the overlay reads as a hint about
@@ -49,6 +50,7 @@ const DEFAULT_OPACITY = Object.freeze({
     'precip-rate': 0.70,
     'mist':        0.55,
     'convergence': 0.60,
+    'cape':        0.62,
 });
 
 const VERT = /* glsl */`
@@ -67,7 +69,8 @@ ${GEO_GLSL}
 uniform sampler2D u_weather;        // R=T G=P B=RH A=wind
 uniform sampler2D u_cloud_layers;   // R=low G=mid B=high A=precip
 uniform sampler2D u_uplift;         // R=signed convergence [-1,1] A=|magnitude|
-uniform int       u_mode;           // 0=humidity 1=precip 2=mist 3=convergence
+uniform sampler2D u_aux;            // R=CAPE/4000 J/kg  G=freezing level/10 km
+uniform int       u_mode;           // 0=humidity 1=precip 2=mist 3=convergence 4=cape
 uniform float     u_opacity;
 uniform float     u_has_data;       // 0 until first weather frame ingested
 
@@ -142,6 +145,26 @@ vec4 convergenceColor(float signed, float mag) {
     return vec4(col, a);
 }
 
+// CAPE — convective available potential energy (J/kg), the thunderstorm
+// fuel gauge. Banded at the thresholds operational forecasters actually
+// use: < 100 negligible (no paint); 100–1000 marginal instability (sage →
+// yellow); 1000–2500 moderate, organised storms possible (yellow → hot
+// orange); 2500+ strong-to-extreme, severe potential (orange → magenta).
+// Input arrives normalised against 4000 J/kg (temp-volume-feed sampleAux).
+// Alpha stays whisper-thin through the marginal band so fair-weather
+// cumulus regions don't shout, then climbs hard where a forecaster's eye
+// should land.
+vec4 capeColor(float norm) {
+    float j = norm * 4000.0;
+    if (j < 100.0) return vec4(0.0);
+    vec3 col;
+    if      (j < 1000.0) col = mix(vec3(0.45, 0.72, 0.52), vec3(0.93, 0.88, 0.30), smoothstep( 100.0, 1000.0, j));
+    else if (j < 2500.0) col = mix(vec3(0.93, 0.88, 0.30), vec3(0.95, 0.45, 0.15), smoothstep(1000.0, 2500.0, j));
+    else                 col = mix(vec3(0.95, 0.45, 0.15), vec3(0.82, 0.10, 0.48), smoothstep(2500.0, 4000.0, j));
+    float a = smoothstep(150.0, 1500.0, j) * 0.80 + 0.20;
+    return vec4(col, a);
+}
+
 vec4 mistColor(float rh, float cloudLow) {
     float gate = smoothstep(0.85, 1.0, rh) * smoothstep(0.30, 0.90, cloudLow);
     if (gate < 0.05) return vec4(0.0);
@@ -179,6 +202,8 @@ void main() {
     } else if (u_mode == 3) {
         vec4 up = texture2D(u_uplift, uv);
         col = convergenceColor(up.r, up.a);
+    } else if (u_mode == 4) {
+        col = capeColor(texture2D(u_aux, uv).r);
     } else {
         col = vec4(0.0);
     }
@@ -211,6 +236,7 @@ export function createWeatherOverlay({
     weatherTexture,
     cloudTexture,
     upliftTexture = null,
+    auxTexture = null,     // R=CAPE/4000, G=freezing level/10 km — 'cape' mode
     opacity,
 }) {
     if (!(mode in MODE_CODE)) {
@@ -226,6 +252,7 @@ export function createWeatherOverlay({
             u_weather:      { value: weatherTexture },
             u_cloud_layers: { value: cloudTexture },
             u_uplift:       { value: upliftTexture },
+            u_aux:          { value: auxTexture ?? upliftTexture ?? weatherTexture },
             u_mode:         { value: MODE_CODE[mode] },
             u_opacity:      { value: op },
             // 0 until the weather feed has produced its first frame —

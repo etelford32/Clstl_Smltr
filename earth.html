@@ -2597,6 +2597,9 @@ import './js/telemetry.js';
                         <input type="checkbox" id="lyr-convergence"><label for="lyr-convergence">Convergence / Uplift</label>
                         <label class="lyr-rd" for="rd-convergence" title="Show convergence/uplift (10⁻⁵ s⁻¹) on cursor hover"><input type="checkbox" id="rd-convergence"><span class="lyr-rd-badge">#</span></label>
                     </div>
+                    <div class="lyr" title="CAPE — convective available potential energy (J/kg), the thunderstorm fuel gauge. Sage = marginal (100–1000), yellow→orange = moderate (1000–2500, organised storms possible), red→magenta = strong-to-extreme (2500+, severe potential). NWP diagnostic on the pressure-level feed; scrub the timeline to watch instability build and release out to +72 h. Pair with Convergence/Uplift: fuel here, trigger there.">
+                        <input type="checkbox" id="lyr-cape"><span class="lyr-status" data-layer="tempvol" title="waiting"></span><label for="lyr-cape">Convective Energy (CAPE)</label>
+                    </div>
                 </div>
             </div>
             </div>
@@ -3047,6 +3050,27 @@ import './js/telemetry.js';
         <div class="wx-row"><span class="wx-k">T° min</span>   <span class="wx-v" id="wx-tmin">—</span></div>
         <div class="wx-row"><span class="wx-k">T° max</span>   <span class="wx-v" id="wx-tmax">—</span></div>
         <div class="wx-row"><span class="wx-k">T° mean</span>  <span class="wx-v" id="wx-tmean">—</span></div>
+        <!-- Temperature colour key. Hidden until a temperature layer
+             (surface tint or 3-D volume) is on — see the lyr-weather /
+             lyr-tempvol listeners. The canvas is painted from the SAME
+             256×1 LUT pixels the surface and volume shaders sample
+             (js/temp-ramp.js), so this is a true key, not an
+             approximation. The dark notch marks 0 °C — the ramp's
+             diverging pivot and the freezing line highlighted on-globe.
+             Tick labels sit at their true fractions of the −60…+50 °C
+             encode domain (0 °C is NOT the geometric centre). -->
+        <div id="wx-temp-legend-box" style="display:none;">
+            <div style="margin:4px 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Temperature scale</div>
+            <canvas id="wx-temp-legend" width="200" height="8"
+                    style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+            <div style="position:relative;height:12px;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+                <span style="position:absolute;left:0;">−60</span>
+                <span style="position:absolute;left:27.3%;transform:translateX(-50%);">−30</span>
+                <span style="position:absolute;left:54.5%;transform:translateX(-50%);color:#8ab;">0</span>
+                <span style="position:absolute;left:77.3%;transform:translateX(-50%);">25</span>
+                <span style="position:absolute;right:0;">50 °C</span>
+            </div>
+        </div>
         <hr class="ir-sep">
         <div class="wx-row"><span class="wx-k">P low</span>    <span class="wx-v" id="wx-pmin">—</span></div>
         <div class="wx-row"><span class="wx-k">P high</span>   <span class="wx-v" id="wx-pmax">—</span></div>
@@ -3075,6 +3099,22 @@ import './js/telemetry.js';
                     style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
             <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
                 <span>↓ subsidence</span><span>0</span><span>uplift ↑</span>
+            </div>
+        </div>
+        <!-- CAPE legend. Hidden until the "Convective Energy (CAPE)" layer
+             is toggled on (see the lyr-cape listener). The canvas mirrors
+             the overlay shader's capeColor() exactly — banded at the
+             operational thresholds (1000 / 2500 J/kg), labels at their true
+             fractions of the linear 0–4000 J/kg axis. -->
+        <div id="wx-cape-legend-box" style="display:none;">
+            <div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Convective energy (CAPE)</div>
+            <canvas id="wx-cape-legend" width="200" height="8"
+                    style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+            <div style="position:relative;height:12px;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+                <span style="position:absolute;left:0;">0</span>
+                <span style="position:absolute;left:25%;transform:translateX(-50%);">1k</span>
+                <span style="position:absolute;left:62.5%;transform:translateX(-50%);">2.5k</span>
+                <span style="position:absolute;right:0;">4k J/kg</span>
             </div>
         </div>
         <hr class="ir-sep">
@@ -3483,6 +3523,7 @@ import {
     loadEarthTextures,
 } from './js/earth-skin.js';
 import { TempVolumeFeed } from './js/temp-volume-feed.js';
+import { buildTempLUTPixels, tempToRampFrac } from './js/temp-ramp.js';
 import { StormFeed } from './js/storm-feed.js';
 import { initDebugOverlay } from './js/debug-overlay.js';
 
@@ -4048,6 +4089,21 @@ tempVolU.u_vol_levels.value = volLevelsTex;
 tempVolU.u_weather.value    = earthU.u_weather.value;
 const tempVolFeed = new TempVolumeFeed();
 
+// Convective diagnostics texture (R=CAPE/4000 J/kg, G=freezing level/10 km)
+// — fed by tempVolFeed.sampleAux() from the same −24 h → +72 h ring the
+// volume uses, so the CAPE overlay scrubs through time like everything
+// else. Zero-initialised → capeColor paints nothing until data lands.
+const capeTex = new THREE.DataTexture(
+    new Float32Array(72 * 36 * 4), 72, 36,
+    THREE.RGBAFormat, THREE.FloatType
+);
+capeTex.magFilter = THREE.LinearFilter;
+capeTex.minFilter = THREE.LinearFilter;
+capeTex.wrapS     = THREE.RepeatWrapping;
+capeTex.wrapT     = THREE.ClampToEdgeWrapping;
+capeTex.flipY     = true;
+capeTex.needsUpdate = true;
+
 // ── Derived weather overlays — humidity / precip / mist / convergence ──────
 // Three thin shells parented to earthMesh, each reading the same
 // u_weather + u_cloud_layers DataTextures the surface/cloud shaders use.
@@ -4085,6 +4141,17 @@ const _weatherOverlays = {
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
         upliftTexture:  upliftTex,
+    }),
+    // CAPE — convective available potential energy, the thunderstorm fuel
+    // gauge (NWP diagnostic from the pressure-level feed; scrubs −24 h →
+    // +72 h). Topmost derived shell: instability potential reads over the
+    // convergence trigger beneath it — fuel above, spark below.
+    cape: createWeatherOverlay({
+        THREE, radius: R_EARTH * 1.0050, icoLevel: ICO_LEVEL, mode: 'cape',
+        weatherTexture: earthU.u_weather.value,
+        cloudTexture:   cloudU.u_cloud_layers.value,
+        upliftTexture:  upliftTex,
+        auxTexture:     capeTex,
     }),
 };
 for (const ov of Object.values(_weatherOverlays)) earthMesh.add(ov.mesh);
@@ -4813,12 +4880,22 @@ document.getElementById('lyr-tropic').addEventListener('change', e => {
 document.getElementById('lyr-subsolar').addEventListener('change', e => {
     subsolarMarker.group.visible = e.target.checked;
 });
+// The °C colour key is meaningful whenever EITHER temperature layer is
+// painting — surface tint or 3-D volume — and dead chrome otherwise.
+function _refreshTempLegendVisibility() {
+    const box = document.getElementById('wx-temp-legend-box');
+    if (!box) return;
+    const on = document.getElementById('lyr-weather')?.checked
+            || document.getElementById('lyr-tempvol')?.checked;
+    box.style.display = on ? '' : 'none';
+}
 document.getElementById('lyr-weather').addEventListener('change', e => {
     const v = e.target.checked ? 1.0 : 0.0;
     earthU.u_weather_on.value  = v;
     cloudU.u_weather_on.value  = v;   // sync cloud layer + precip modulation
     // Keep satellite blend active regardless of weather toggle
     // (satellite gives correct large-scale cloud structure independently)
+    _refreshTempLegendVisibility();
 });
 document.getElementById('lyr-wind').addEventListener('change', e => {
     windParticles.setVisible(e.target.checked);
@@ -4844,6 +4921,19 @@ const _refreshVolLevels = () => {
         tempVolU.u_has_levels.value = 1;
     }
 };
+// CAPE / freezing-level diagnostics for the convective-energy overlay —
+// same ring, same scrub instant, own texture (~41 KB upload, only while
+// the layer is on). The overlay's has-data gate flips HERE, not in the
+// weather-update bulk setHasData: this layer's source of truth is the
+// pressure-level feed, so it paints exactly when that feed has delivered
+// (even if the surface grid is down on its demo fallback, and never
+// before its own data exists).
+const _refreshCapeAux = () => {
+    if (tempVolFeed.sampleAux(_volLastSimT ?? Date.now(), capeTex.image.data)) {
+        capeTex.needsUpdate = true;
+        _weatherOverlays.cape?.setHasData(true);
+    }
+};
 document.getElementById('lyr-tempvol')?.addEventListener('change', e => {
     tempVolMesh.visible = e.target.checked;
     if (e.target.checked) {
@@ -4853,10 +4943,12 @@ document.getElementById('lyr-tempvol')?.addEventListener('change', e => {
         tempVolFeed.start();
         _refreshVolLevels();
     }
+    _refreshTempLegendVisibility();
 });
 document.addEventListener('temp-volume-update', () => {
-    _setVolPip('loaded', '850/500 hPa anchors · Open-Meteo pressure levels · −24 h → +72 h');
+    _setVolPip('loaded', '850/500 hPa anchors + CAPE · Open-Meteo pressure levels · −24 h → +72 h');
     if (tempVolMesh.visible) _refreshVolLevels();
+    if (_weatherOverlays.cape?.mesh.visible) _refreshCapeAux();
 });
 document.addEventListener('temp-volume-error', () => {
     _setVolPip('error', 'pressure-level fetch failed — rendering standard-lapse fallback');
@@ -4878,6 +4970,21 @@ document.addEventListener('temp-volume-error', () => {
     wireOverlay('lyr-precip-rate', 'precip-rate');
     wireOverlay('lyr-mist',        'mist');
     wireOverlay('lyr-convergence', 'convergence');
+    wireOverlay('lyr-cape',        'cape');
+    // CAPE rides the lazy pressure-level feed (same ring as the 3-D
+    // volume): first enable starts the fetch, and the legend follows the
+    // dead-chrome rule like the convergence key.
+    document.getElementById('lyr-cape')?.addEventListener('change', e => {
+        const box = document.getElementById('wx-cape-legend-box');
+        if (box) box.style.display = e.target.checked ? '' : 'none';
+        if (e.target.checked) {
+            if (!tempVolFeed.hasData && !tempVolFeed.isFetching) {
+                _setVolPip('fetching', 'loading 850/500 hPa + CAPE…');
+            }
+            tempVolFeed.start();
+            _refreshCapeAux();
+        }
+    });
     // Reveal the convergence/uplift colour key in the wx-panel only while its
     // layer is on, so the swatch isn't dead chrome the rest of the time. The
     // first-render synthetic dispatch fires this with checked=false → hidden.
@@ -5974,6 +6081,58 @@ function _sampleUpliftAt(lat, lon) {
     }
 })();
 
+// ── CAPE legend ─────────────────────────────────────────────────────────
+// Mirrors the overlay shader's capeColor() piecewise ramp exactly (same
+// anchors, same smoothsteps) so the swatch is a true key. Sub-100 J/kg is
+// painted as transparent-dark — the shader draws nothing there.
+(function _paintCapeLegend() {
+    const cv = document.getElementById('wx-cape-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const mix = (a, b, t) => a + (b - a) * t;
+    const ss  = (e0, e1, x) => {
+        const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+        return t * t * (3 - 2 * t);
+    };
+    for (let x = 0; x < cv.width; x++) {
+        const j = (x / (cv.width - 1)) * 4000;
+        let r, g, b;
+        if (j < 100)        { r = 0.10; g = 0.12; b = 0.16; }
+        else if (j < 1000)  { const t = ss(100, 1000, j);  r = mix(0.45, 0.93, t); g = mix(0.72, 0.88, t); b = mix(0.52, 0.30, t); }
+        else if (j < 2500)  { const t = ss(1000, 2500, j); r = mix(0.93, 0.95, t); g = mix(0.88, 0.45, t); b = mix(0.30, 0.15, t); }
+        else                { const t = ss(2500, 4000, j); r = mix(0.95, 0.82, t); g = mix(0.45, 0.10, t); b = mix(0.15, 0.48, t); }
+        ctx.fillStyle = `rgb(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0})`;
+        ctx.fillRect(x, 0, 1, cv.height);
+    }
+})();
+
+// ── Temperature legend ──────────────────────────────────────────────────
+// Painted from the SAME 256×1 LUT pixels the surface tint and the 3-D
+// volume shaders sample (js/temp-ramp.js via buildTempLUTPixels) — a true
+// quantitative key by construction, immune to ramp edits drifting the two
+// apart. The 1-px offscreen ImageData is stretched with smoothing on,
+// matching the GPU's LinearFilter interpolation of the same texture. A
+// dark notch marks the 0 °C diverging pivot (the freezing line that gets
+// the bright seam on-globe).
+(function _paintTempLegend() {
+    const cv = document.getElementById('wx-temp-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const px  = buildTempLUTPixels();
+    const off = document.createElement('canvas');
+    off.width = px.length / 4; off.height = 1;
+    const octx = off.getContext('2d');
+    const img  = octx.createImageData(off.width, 1);
+    img.data.set(px);
+    octx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(off, 0, 0, cv.width, cv.height);
+    // 0 °C notch at its true fraction of the encode domain.
+    const x0 = Math.round(tempToRampFrac(0) * cv.width);
+    ctx.fillStyle = 'rgba(8, 12, 24, 0.9)';
+    ctx.fillRect(x0, 0, 1, cv.height);
+})();
+
 // ── SST legend ──────────────────────────────────────────────────────────
 // Mirror NASA GIBS GHRSST_L4_MUR_Sea_Surface_Temperature standard palette
 // (−2 °C … 32 °C). Values are pulled from the GIBS WMS GetLegendGraphic
@@ -6752,6 +6911,7 @@ window._wxPaintProvider  = wxPaintProvider;
 window._wxForecastWorker = wxForecastWorker;
 window._wxForecastRegistry = wxForecastRegistry;
 window._wxGridHistory      = wxGridHistory;
+window._tempVolFeed        = tempVolFeed;
 
 // ── Multi-level model → 3-D temperature volume coupling ──────────────────
 // The volume's near term (0..+24 h) paints the multi-level model's advected
@@ -7860,6 +8020,10 @@ document.addEventListener('weather-update', e => {
     _volLastSimT = scrubT ?? Date.now();
     if (tempVolMesh.visible) {
         _refreshVolLevels();
+        tempVolFeed.start();
+    }
+    if (_weatherOverlays.cape?.mesh.visible) {
+        _refreshCapeAux();
         tempVolFeed.start();
     }
 
