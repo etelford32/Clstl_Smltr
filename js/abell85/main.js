@@ -19,6 +19,7 @@ import {
     surfaceDensity, initialSurfaceDensity, cuspRadius,
     losKinematics, sigmaLosProfile, ptaSensitivity,
 } from './observables.js';
+import { orbitalBasis, bodiesAt } from './geometry.js';
 import { Renderer, Trail } from './render.js';
 import { GodCamera } from './camera.js';
 import { Diagnostics } from './diagnostics.js';
@@ -93,7 +94,9 @@ export function boot(els) {
         follow: false,
         mode: 'live',
         incl: 25 * Math.PI / 180,   // binary orbital-plane tilt (view param)
+        node: 0.55,                 // line-of-nodes rotation (full 3D orientation)
     };
+    let basis = orbitalBasis(state.incl, state.node);
 
     state.pnOn = true;
     state.selStar = -1;
@@ -107,6 +110,7 @@ export function boot(els) {
     let sc, history, cluster;
     // live PN endgame state
     let livePN = null, pnPredDE = 0, pnRosette = [], lastRosette = 0;
+    let shells = [], prevA = -1;
     const dropPN = () => { livePN = null; pnRosette = []; pnPredDE = 0; };
     // mock-observation state (recomputed on a throttle, not every frame)
     let photoInit = [], obsCache = null, lastObsWall = 0;
@@ -136,38 +140,10 @@ export function boot(els) {
 
     // ── binary geometry ──────────────────────────────────────────────────────
 
-    function keplerSolve(M, e) {                 // mean anomaly → eccentric anomaly
-        let E = M;
-        for (let i = 0; i < 6; i++) E -= (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
-        return E;
-    }
-
-    /** BH world positions for the sampled state. Returns [{p, m}, ...]. */
+    /** BH world positions: oriented binary pre-merger, 3D-kicked remnant
+     *  after (superkicks leave the orbital plane along ±L̂ — geometry.js). */
     function bhPositions(now) {
-        if (now.a <= 0) {
-            // merged: single remnant on its damped recoil excursion (along x̂)
-            const rem = history.events.remnant;
-            const dtM = now.t - history.events.merger;
-            const off = (now.remnantOffset ?? 0) *
-                Math.sin(history.events.recoil ? Math.min(dtM * history.events.recoil.omega, 1e6) : 0);
-            return [{ p: [off, 0, 0], m: rem ? rem.mass : sc.mTot }];
-        }
-        const E = keplerSolve(state.livePhase, now.e);
-        const r = now.a * (1 - now.e * Math.cos(E));
-        const nu = 2 * Math.atan2(
-            Math.sqrt(1 + now.e) * Math.sin(E / 2),
-            Math.sqrt(1 - now.e) * Math.cos(E / 2));
-        const ang = nu + now.peri;
-        const ux = Math.cos(ang), uz = Math.sin(ang);
-        const f1 = sc.m2 / sc.mTot, f2 = sc.m1 / sc.mTot;
-        // tilt the orbital plane out of the galaxy equator so the scene is
-        // genuinely three-dimensional (rotation about the x-axis)
-        const si = Math.sin(state.incl), ci = Math.cos(state.incl);
-        const tilt = (x, z) => [x, z * si, z * ci];
-        return [
-            { p: tilt(r * f1 * ux, r * f1 * uz), m: sc.m1 },
-            { p: tilt(-r * f2 * ux, -r * f2 * uz), m: sc.m2 },
-        ];
+        return bodiesAt(sc, history, now, state.livePhase, basis);
     }
 
     function resyncCluster() {
@@ -202,7 +178,7 @@ export function boot(els) {
             if (!livePN) {
                 livePN = new PNBinary(sc, {
                     a: now.a, e: now.e, phase: state.livePhase,
-                    peri: now.peri, incl: state.incl,
+                    peri: now.peri, incl: state.incl, node: state.node,
                 });
                 pnPredDE = 0;
             }
@@ -232,6 +208,14 @@ export function boot(els) {
         }
 
         const bhs = pnActive && livePN ? livePN.positions() : bhPositions(now);
+
+        // GW-burst shell: crossing the coalescence while playing spawns a 3D
+        // expanding wavefront marker (wall-clock life — an event annotation)
+        if (state.playing && prevA > 0 && now.a <= 0) shells.push({ born: wall });
+        prevA = now.a;
+        for (let i = shells.length - 1; i >= 0; i--) {
+            if (wall - shells[i].born > 2800) shells.splice(i, 1);
+        }
 
         // cluster catch-up: live-integrate toward the timeline, or resync
         const gap = state.tNow - state.clusterT;
@@ -296,6 +280,14 @@ export function boot(els) {
             rings: state.ringsOn ? ringSet() : null,
             lensOn: state.lensOn,
             extraLines, marker,
+            shells: shells.map(sh => {
+                const age = (wall - sh.born) / 2800;
+                return {
+                    center: [0, 0, 0],
+                    radius: Math.pow(age, 0.6) * cam.dist * 1.6,
+                    alpha: 0.55 * (1 - age),
+                };
+            }),
         });
 
         // mock observations: O(N) sweeps, throttled — telescopes don't need 60 fps
@@ -581,6 +573,8 @@ export function boot(els) {
 
     els.incl?.addEventListener('input', () => {
         state.incl = parseFloat(els.incl.value) * Math.PI / 180;
+        basis = orbitalBasis(state.incl, state.node);
+        dropPN();
     });
 
     function setModeChip(now) {

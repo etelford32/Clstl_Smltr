@@ -15,6 +15,7 @@
 // scrolling pauses the director for a while, then it eases back in.
 
 import { makeScenario, buildHistory, sampleAt, STAGE } from './physics.js';
+import { orbitalBasis, bodiesAt } from './geometry.js';
 import { StarCluster } from './nbody.js';
 import { PNBinary } from './pn.js';
 import { Renderer, Trail } from './render.js';
@@ -27,6 +28,7 @@ const DT_LIVE_MAX = 1.0;         // Myr of cluster time integrated per frame
 const RESYNC_GAP = 200;          // Myr timeline lead before statistical resync
 const USER_CAM_HOLD_S = 15;      // director pause after user input
 const INCL = 25 * Math.PI / 180;
+const NODE = 0.55;
 
 export function boot(canvas, scenarioId = 'holm15a') {
     const sc = makeScenario(scenarioId);
@@ -39,6 +41,8 @@ export function boot(canvas, scenarioId = 'holm15a') {
     cam.dist = 14000;
     cam.distClamp = [rSchw(sc.mTot) * 20, 4e4];
     const trails = [new Trail(500), new Trail(500)];
+    const basis = orbitalBasis(INCL, NODE);
+    let shells = [], prevA = -1;
 
     const idxRate = (S.length - 1) / LOOP_SECONDS;
     let idx = 0;
@@ -86,33 +90,9 @@ export function boot(canvas, scenarioId = 'holm15a') {
         userCamUntil = performance.now() / 1000 + USER_CAM_HOLD_S;
     }, { passive: false });
 
-    // ── binary geometry (Kepler fallback outside the live PN window) ────────
-    function keplerSolve(M, e) {
-        let E = M;
-        for (let i = 0; i < 6; i++) E -= (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
-        return E;
-    }
+    // ── binary geometry: fully oriented plane; 3D-kicked remnant post-merger
     function keplerPositions(now) {
-        if (now.a <= 0) {
-            const rem = history.events.remnant;
-            const dtM = now.t - history.events.merger;
-            const off = (now.remnantOffset ?? 0) *
-                Math.sin(history.events.recoil ? Math.min(dtM * history.events.recoil.omega, 1e6) : 0);
-            return [{ p: [off, 0, 0], m: rem ? rem.mass : sc.mTot }];
-        }
-        const E = keplerSolve(livePhase, now.e);
-        const r = now.a * (1 - now.e * Math.cos(E));
-        const nu = 2 * Math.atan2(Math.sqrt(1 + now.e) * Math.sin(E / 2),
-            Math.sqrt(1 - now.e) * Math.cos(E / 2));
-        const ang = nu + now.peri;
-        const ux = Math.cos(ang), uz = Math.sin(ang);
-        const f1 = sc.m2 / sc.mTot, f2 = sc.m1 / sc.mTot;
-        const si = Math.sin(INCL), ci = Math.cos(INCL);
-        const tilt = (x, z) => [x, z * si, z * ci];
-        return [
-            { p: tilt(r * f1 * ux, r * f1 * uz), m: sc.m1 },
-            { p: tilt(-r * f2 * ux, -r * f2 * uz), m: sc.m2 },
-        ];
+        return bodiesAt(sc, history, now, livePhase, basis);
     }
 
     // ── camera director ──────────────────────────────────────────────────────
@@ -172,7 +152,8 @@ export function boot(canvas, scenarioId = 'holm15a') {
         if (inWin) {
             if (!livePN) {
                 livePN = new PNBinary(sc, {
-                    a: now.a, e: now.e, phase: livePhase, peri: now.peri, incl: INCL,
+                    a: now.a, e: now.e, phase: livePhase, peri: now.peri,
+                    incl: INCL, node: NODE,
                 });
             }
             const adv = livePN.step(dtSim, 16000);
@@ -210,6 +191,13 @@ export function boot(canvas, scenarioId = 'holm15a') {
         }
         cluster.classify(now.a > 0 ? sc.mTot : 0, now.a);   // cyan loss-cone stars
 
+        // GW-burst shell at the coalescence crossing (3D expanding wavefront)
+        if (prevA > 0 && now.a <= 0) shells.push({ born: wall });
+        prevA = now.a;
+        for (let i = shells.length - 1; i >= 0; i--) {
+            if (wall - shells[i].born > 3000) shells.splice(i, 1);
+        }
+
         if (bhs.length) {
             trails[0].push(...bhs[0].p);
             if (bhs[1]) trails[1].push(...bhs[1].p);
@@ -234,6 +222,14 @@ export function boot(canvas, scenarioId = 'holm15a') {
                 buf: r.buf, count: r.count,
                 color: [0.62, 0.58, 1.0, 0.05 + 0.06 * (i + 1)],
             })),
+            shells: shells.map(sh => {
+                const age = (wall - sh.born) / 3000;
+                return {
+                    center: [0, 0, 0],
+                    radius: Math.pow(age, 0.6) * cam.dist * 1.7,
+                    alpha: 0.6 * (1 - age),
+                };
+            }),
         });
 
         // probe/smoke-test handle (same pattern as sun.html's window.__sun)

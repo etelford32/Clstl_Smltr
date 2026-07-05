@@ -43,6 +43,7 @@ export class PNBinary {
         this.pn1 = opts.pn1 !== false;
         this.rr = opts.rr !== false;
         this.incl = el.incl ?? 0;
+        this.node = el.node ?? 0;
 
         // Kepler state → cartesian relative orbit in the tilted plane.
         const { a, e } = el;
@@ -57,9 +58,14 @@ export class PNBinary {
         const vTan = vScale * (1 + e * Math.cos(nu));
         const th = nu + el.peri;
         const cu = Math.cos(th), su = Math.sin(th);
-        // in-plane (X,Z) → tilt about x-axis into world (X, Z·sin i, Z·cos i)
+        // in-plane (u, w) → world via full orbital orientation (incl + node):
+        // v' = Ry(node) · Rx(incl) · v — same convention as geometry.js
         const si = Math.sin(this.incl), ci = Math.cos(this.incl);
-        const to3 = (X, Z) => [X, Z * si, Z * ci];
+        const sn = Math.sin(this.node), cn = Math.cos(this.node);
+        const to3 = (U, W) => {
+            const y = -si * W, z = ci * W;      // Rx(incl) of (U, 0, W)
+            return [cn * U + sn * z, y, -sn * U + cn * z];
+        };
         this.x = to3(r * cu, r * su);
         this.v = to3(vRad * cu - vTan * su, vRad * su + vTan * cu);
 

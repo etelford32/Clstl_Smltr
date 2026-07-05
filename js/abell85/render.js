@@ -321,6 +321,14 @@ export class Renderer {
             }
         }
 
+        // GW-burst shells: three orthogonal great circles read as a sphere —
+        // the coalescence moment as a 3D expanding wavefront marker
+        if (s.shells?.length) {
+            gl.useProgram(this.progLines);
+            gl.uniformMatrix4fv(gl.getUniformLocation(this.progLines, 'uMvp'), false, mvp);
+            for (const sh of s.shells) this._drawShell(sh, eye);
+        }
+
         // selected-star marker (hollow ring sprite, flag 9)
         if (s.marker) {
             gl.useProgram(this.progPoints);
@@ -386,6 +394,34 @@ export class Renderer {
         if (!ndc) return null;
         const [w, h] = this._fboSize;
         return [(ndc[0] * 0.5 + 0.5) * w, (1 - (ndc[1] * 0.5 + 0.5)) * h];
+    }
+
+    /** One expanding shell: {center:[x,y,z], radius, alpha} in world units. */
+    _drawShell(sh, eye) {
+        const { gl } = this;
+        const N = 72;
+        const v = this._shellBuf || (this._shellBuf = new Float32Array((N + 1) * 3));
+        gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'),
+            0.85, 0.80, 1.0, Math.max(sh.alpha, 0));
+        const cx = sh.center[0] - eye[0], cy = sh.center[1] - eye[1], cz = sh.center[2] - eye[2];
+        const R = sh.radius;
+        // three orthogonal great circles: xy, yz, xz
+        const planes = [
+            (a) => [Math.cos(a) * R, Math.sin(a) * R, 0],
+            (a) => [0, Math.cos(a) * R, Math.sin(a) * R],
+            (a) => [Math.cos(a) * R, 0, Math.sin(a) * R],
+        ];
+        for (const f of planes) {
+            for (let i = 0; i <= N; i++) {
+                const [x, y, z] = f((i / N) * 2 * Math.PI);
+                v[i * 3] = cx + x; v[i * 3 + 1] = cy + y; v[i * 3 + 2] = cz + z;
+            }
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.bufLine);
+            gl.bufferData(gl.ARRAY_BUFFER, v, gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.LINE_STRIP, 0, N + 1);
+        }
     }
 
     _drawRing(R, eye) {

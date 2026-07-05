@@ -314,4 +314,55 @@ const { tauOf, tAt, buildTauAxis, eventsTau, indexOfTau } =
         `merged axis ${axis.length} samples`);
 }
 
+// ══ 3D merger geometry ═══════════════════════════════════════════════════════
+const { orbitalBasis, binaryWorldPositions, kickDirection, remnantWorldPosition } =
+    await import('../js/abell85/geometry.js');
+
+// ── 17. oriented binary preserves separation, COM, and kick physics ─────────
+{
+    const sc = makeScenario('holm15a');
+    const basis = orbitalBasis(0.5, 0.7);
+    // basis orthonormality
+    const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    for (const [u, v] of [[basis.e1, basis.e2], [basis.e1, basis.n], [basis.e2, basis.n]]) {
+        assert.ok(Math.abs(dot(u, v)) < 1e-12, 'basis orthogonal');
+    }
+    for (const u of [basis.e1, basis.e2, basis.n]) {
+        assert.ok(Math.abs(Math.hypot(...u) - 1) < 1e-12, 'basis unit');
+    }
+    // separation and COM invariant under orientation
+    const now = { a: 10, e: 0.3, peri: 0.4 };
+    const seps = [];
+    for (const [i2, n2] of [[0, 0], [0.5, 0.7], [1.2, -2.1]]) {
+        const b = orbitalBasis(i2, n2);
+        const [p1, p2] = binaryWorldPositions(sc, now, 1.1, b);
+        const sep = Math.hypot(p1.p[0] - p2.p[0], p1.p[1] - p2.p[1], p1.p[2] - p2.p[2]);
+        seps.push(sep);
+        const com = [0, 1, 2].map(k => p1.p[k] * p1.m + p2.p[k] * p2.m);
+        assert.ok(Math.hypot(...com) / (sc.mTot * sep) < 1e-12, 'COM at origin');
+        assert.ok(sep > 0 && sep < 2 * now.a, `separation sane (${sep})`);
+    }
+    // Kepler r at fixed phase must not depend on orientation
+    for (const s of seps) assert.ok(Math.abs(s - seps[0]) < 1e-9, 'separation orientation-invariant');
+    // kick physics: superkick along ±L̂ (out of plane), mass-asymmetry in-plane
+    const kSuper = kickDirection('superkick', basis);
+    const kPlane = kickDirection('nonspinning', basis);
+    assert.ok(Math.abs(dot(kSuper, basis.n)) > 0.999, 'superkick ∥ L̂');
+    assert.ok(Math.abs(dot(kPlane, basis.n)) < 1e-12, 'mass-asymmetry kick in-plane');
+    // superkicked remnant actually leaves the orbital plane
+    const scK = makeScenario('holm15a', { kick: 'superkick', superkickKms: 1500 });
+    const hK = buildHistory(scK);
+    const rec = hK.samples.find(s => (s.remnantOffset ?? 0) > 1);
+    assert.ok(rec, 'recoil samples carry an offset');
+    const pos = remnantWorldPosition(scK, hK, { ...rec, t: rec.t + 0.31 / hK.events.recoil.omega * Math.PI / 2 }, basis);
+    // offset direction parallel to n̂ (allow sign)
+    const pl = Math.hypot(...pos[0].p);
+    if (pl > 1e-6) {
+        const along = Math.abs(dot(pos[0].p.map(x => x / pl), basis.n));
+        assert.ok(along > 0.999, `superkicked remnant moves along L̂ (cos=${along})`);
+    }
+    ok('3D geometry: orthonormal oriented basis, separation/COM invariant, ' +
+        'superkick ∥ L̂ (out of plane), mass-asymmetry kick in-plane');
+}
+
 console.log(`\nabell85-physics: all ${n} checks passed`);
