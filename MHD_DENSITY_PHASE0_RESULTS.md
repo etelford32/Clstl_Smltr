@@ -24,20 +24,32 @@ the tracked record of what each run produced.
   definitive Ap sits pinned at 400. This is the marketing-slide timeseries;
   it lands below the runbook's provisional 600–800 guess but demonstrates
   the ceiling cleanly.
-* **Ground-mag track:** NOT fit — `dsmc/fixtures/hindcast/gannon_may_2024/
-  ground_mag.csv` turns out to carry `_is_placeholder` (synthetic). The
-  real magnetometer reconstruction still needs to be imported via
-  `import_ground_mag.py` before the second track can be scored.
+* **Ground-mag track (real data, 2026-07-05):** the placeholder fixture is
+  replaced with the real ground-magnetometer record: OMNI HRO 1-min
+  **AE/AU/AL + SYM-H** (INTERMAGNET-derived; AE↦sme, AU↦smu, AL↦sml,
+  SYM-H↦h_comp_mean), extracted from `omni_min202405.asc` and canonicalised
+  by `import_ground_mag.py` (knipp Joule proxy). Sanity: peak AE 4 098 nT
+  @ 19:48Z May 10; SYM-H min **−518 nT** (matches the published Gannon
+  value exactly). Fit:
+  `Ap* = +3.21 + 0.311·SME[nT] − 1.594·JH[GW]`, R² = 0.452; peak ground
+  Ap* 315 (does not exceed the 400 ceiling — the negative JH coefficient
+  is a collinearity artefact of fitting against saturated Ap).
 
 ### Skill vs GRACE-FO (single truth; Swarm-C not yet staged)
 
-| Backend | Baseline | Storm-time skill | Gate ≥ 25 % |
-|---|---|---|---|
-| **pymsis 0.12 (NRLMSIS — honest)** | MSIS + real Ap | **+3.1 %** | ❌ FAIL |
-| exponential fallback (legacy) | exp + real Ap | +14.9 % | ❌ FAIL |
+Storm-time RMSE skill, pymsis 0.12 (NRLMSIS) backend:
 
-All-window skill on the honest backend is −4.2 % (candidate slightly
-overcorrects in the recovery phase).
+| Track | vs MSIS + real Ap (hindcast gate) | vs MSIS + persistence Ap (forecast regime) |
+|---|---|---|
+| MHD (GM+IE+**IM/RCM2**) | **+3.1 %** | +12.1 % |
+| Ground-mag (AE + JH proxy) | **+6.2 %** | +15.0 % |
+| *legacy exp-fallback, MHD* | *+14.9 % (not comparable)* | — |
+
+Gate ≥ 25 %: **❌ FAIL on every honest combination.** All-window skill on
+the hindcast baseline is −4.2 % (MHD) — the candidate slightly
+overcorrects in the recovery phase. The ground track outperforms the MHD
+track in both regimes, consistent with the runbook's remediation
+hypothesis, but neither clears the bar alone.
 
 ### ⚠ Backend correction to the historical record
 
@@ -56,11 +68,21 @@ NRLMSIS residuals for this window are ~2.5e-12. Consequences:
 
 ### Next steps
 
-1. Import the real ground-magnetometer reconstruction (owner has it;
-   fixture is placeholder) and score the second track.
-2. Stage Swarm-C density for the two-truth comparison.
+1. ~~Import the real ground-magnetometer reconstruction~~ Done — OMNI
+   AE/SYM-H, see above.
+2. Stage Swarm-C density for the two-truth comparison (the R2 mirror
+   behind `/api/density/tudelft` may already hold it — see
+   `GANNON_LIVE_DATA.md` lift 3).
 3. Regenerate the page replay bundle from the RCM-run drivers.
-4. Fit quality: single-event OLS against saturated Ap under-fits the peak
-   by construction — consider fitting on ramp+recovery only, or jointly
-   with Feb 2022 / Halloween 2003, before concluding the MHD track can't
-   clear 25 %.
+4. Fit quality is now the binding constraint, not the physics: single-event
+   OLS against an Ap series pinned at 400 for ~24 h under-fits the peak by
+   construction (both tracks' R² and the ground track's negative JH
+   coefficient say so). Candidate remedies, in order of likely impact:
+   a. joint fit across events (Feb 2022 + Gannon; Halloween 2003 later);
+   b. fit on ramp+recovery samples only (Ap < 400) and extrapolate through
+      the saturated peak;
+   c. combined 4-feature fit (Φ_PC, HPI, SME, JH) — the two tracks carry
+      partially independent information;
+   d. check whether validate_density coarsens pseudo-Ap to 3-h bins before
+      driving MSIS — if so the high-cadence advantage is being discarded
+      at scoring time.
