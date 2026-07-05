@@ -237,6 +237,10 @@ export function createWeatherOverlay({
     cloudTexture,
     upliftTexture = null,
     auxTexture = null,     // R=CAPE/4000, G=freezing level/10 km — 'cape' mode
+    geometry = null,       // optional SHARED unit-radius icosphere — the caller
+                           // owns its lifetime; radius applied via mesh scale.
+                           // The vertex shader derives everything from
+                           // normalize(position), so uniform scaling is exact.
     opacity,
 }) {
     if (!(mode in MODE_CODE)) {
@@ -244,7 +248,7 @@ export function createWeatherOverlay({
     }
     const op = Number.isFinite(opacity) ? opacity : DEFAULT_OPACITY[mode];
 
-    const geom = new THREE.IcosahedronGeometry(radius, icoLevel);
+    const geom = geometry ?? new THREE.IcosahedronGeometry(radius, icoLevel);
     const mat = new THREE.ShaderMaterial({
         vertexShader:   VERT,
         fragmentShader: FRAG,
@@ -268,6 +272,7 @@ export function createWeatherOverlay({
     });
 
     const mesh = new THREE.Mesh(geom, mat);
+    if (geometry) mesh.scale.setScalar(radius);
     // Render order matches the NASA observation overlays: above the
     // surface (0), below the cloud shell (3) and aurora (4) so cloud
     // tops still occlude the moisture/precip sheet at high altitudes.

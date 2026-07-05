@@ -3888,7 +3888,10 @@ scene.add(cloudMesh);
 // an undulating band near the auroral oval boundary. Shares SUN_EQ so
 // its nightside mask stays in sync with the earth/cloud terminators.
 const auroraU   = createAuroraUniforms(SUN_EQ.clone());
-const auroraGeo = new THREE.IcosahedronGeometry(R_AURORA, ICO_LEVEL);
+// Level 5, not ICO_LEVEL: the oval is a smooth fragment-shader band, so
+// vertex density only matters at the silhouette — 20k tris is plenty and
+// it quarters this shell's boot-time geometry cost (see perf-trace).
+const auroraGeo = new THREE.IcosahedronGeometry(R_AURORA, 5);
 const auroraMat = new THREE.ShaderMaterial({
     vertexShader: AURORA_VERT, fragmentShader: AURORA_FRAG,
     uniforms: auroraU,
@@ -4129,21 +4132,29 @@ capeTex.needsUpdate = true;
 // these layers paint nothing while we're still on the procedural
 // fallback (the zero-initialised DataTexture would otherwise paint every
 // pixel as "max humidity / no precip" which is misleading).
+// One shared unit-radius icosphere for every derived-overlay shell. Boot
+// telemetry (perf-trace) showed scene construction as a multi-second main-
+// thread task; five separate level-6 icospheres (~82k tris each) for
+// checkbox-off-by-default overlays were a large slice of it. Level 5
+// (~20k tris) is indistinguishable for smooth scalar fields — the fields
+// live in fragment shaders; vertex density only affects the silhouette.
+const _overlayShellGeo = new THREE.IcosahedronGeometry(1, 5);
+
 const _weatherOverlays = {
     humidity:    createWeatherOverlay({
-        THREE, radius: R_EARTH * 1.0035, icoLevel: ICO_LEVEL, mode: 'humidity',
+        THREE, radius: R_EARTH * 1.0035, icoLevel: ICO_LEVEL, geometry: _overlayShellGeo, mode: 'humidity',
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
         upliftTexture:  upliftTex,
     }),
     'precip-rate': createWeatherOverlay({
-        THREE, radius: R_EARTH * 1.0040, icoLevel: ICO_LEVEL, mode: 'precip-rate',
+        THREE, radius: R_EARTH * 1.0040, icoLevel: ICO_LEVEL, geometry: _overlayShellGeo, mode: 'precip-rate',
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
         upliftTexture:  upliftTex,
     }),
     mist: createWeatherOverlay({
-        THREE, radius: R_EARTH * 1.0028, icoLevel: ICO_LEVEL, mode: 'mist',
+        THREE, radius: R_EARTH * 1.0028, icoLevel: ICO_LEVEL, geometry: _overlayShellGeo, mode: 'mist',
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
         upliftTexture:  upliftTex,
@@ -4152,7 +4163,7 @@ const _weatherOverlays = {
     // from. Sits just above the precip shell so storm-genesis lines read on
     // top of the rain they're about to produce.
     convergence: createWeatherOverlay({
-        THREE, radius: R_EARTH * 1.0045, icoLevel: ICO_LEVEL, mode: 'convergence',
+        THREE, radius: R_EARTH * 1.0045, icoLevel: ICO_LEVEL, geometry: _overlayShellGeo, mode: 'convergence',
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
         upliftTexture:  upliftTex,
@@ -4162,7 +4173,7 @@ const _weatherOverlays = {
     // +72 h). Topmost derived shell: instability potential reads over the
     // convergence trigger beneath it — fuel above, spark below.
     cape: createWeatherOverlay({
-        THREE, radius: R_EARTH * 1.0050, icoLevel: ICO_LEVEL, mode: 'cape',
+        THREE, radius: R_EARTH * 1.0050, icoLevel: ICO_LEVEL, geometry: _overlayShellGeo, mode: 'cape',
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
         upliftTexture:  upliftTex,
@@ -4274,10 +4285,19 @@ function _scheduleBaseUpgrade() {
             tex.wrapS     = THREE.RepeatWrapping;
             tex.wrapT     = THREE.ClampToEdgeWrapping;
             tex.anisotropy = EARTH_TEX_ANISO;
-            const old = earthU.u_day.value;
-            earthU.u_day.value = tex;
-            old?.dispose?.();
-            console.info('[EarthSkin] base texture upgraded to 8K GIBS Blue Marble');
+            // Split the stitch task from the upload task: the 8K
+            // texImage2D + mip generation is a synchronous GPU stall
+            // (perf-trace measured it stacked with the stitch as a single
+            // ~2 s long task), so give it its own idle slice.
+            const swap = () => {
+                renderer.initTexture(tex);          // upload happens HERE, controlled
+                const old = earthU.u_day.value;
+                earthU.u_day.value = tex;
+                old?.dispose?.();
+                console.info('[EarthSkin] base texture upgraded to 8K GIBS Blue Marble');
+            };
+            if ('requestIdleCallback' in window) requestIdleCallback(swap, { timeout: 10_000 });
+            else setTimeout(swap, 1_500);
         });
     };
     if ('requestIdleCallback' in window) requestIdleCallback(kick, { timeout: 15_000 });
@@ -10700,6 +10720,16 @@ let _flyProgress = 0;
 // ── First HUD update immediately (simTimeMs is initialised to Date.now()
 // at module load, so this matches the scrubber's starting position).
 updateAstroHUD(new Date(simTimeMs));
+// NOTE (perf-trace, measured 2026-07): do NOT "optimise" this into
+// renderer.compileAsync(scene, camera) before the first frame. It looks
+// like the textbook fix for the ~1 s first-render shader-compile stall,
+// but compile() traverses EVERYTHING including the ~15 hidden overlay /
+// volume materials that lazy compilation never touches, and without
+// KHR_parallel_shader_compile it degenerates into one synchronous
+// compile-the-world task — measured 6.7 s vs the 1 s lazy stall on a
+// software renderer, and it would also lengthen boot on real GPUs by
+// compiling programs nothing draws. Hidden shells compile on their first
+// toggle, which is where that cost belongs.
 animate();
 
 // ═══════════════════════════════════════════════════════════════
