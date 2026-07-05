@@ -105,7 +105,8 @@ test.describe('Signup Form Validation', () => {
     });
 
     test('plan pills are selectable', async ({ page }) => {
-        // Default should be free (from URL param)
+        // Bare /signup.html — no ?plan param, so the picker is visible.
+        await page.goto('/signup.html');
         const freePill = page.locator('#pill-free');
         await expect(freePill).toHaveClass(/selected/);
 
@@ -113,6 +114,21 @@ test.describe('Signup Form Validation', () => {
         await page.click('#pill-basic');
         await expect(page.locator('#pill-basic')).toHaveClass(/selected/);
         await expect(freePill).not.toHaveClass(/selected/);
+    });
+
+    test('?plan=free hides the picker behind a change-plan reveal', async ({ page }) => {
+        // beforeEach landed on /signup.html?plan=free — the decision was
+        // made upstream, so the five-pill picker is replaced by a note.
+        await expect(page.locator('#plan-pills')).toBeHidden();
+        await expect(page.locator('#plan-locked-note')).toBeVisible();
+        await expect(page.locator('#pill-free input')).toBeChecked();
+
+        // "Change plan" reveals the picker and the note goes away.
+        await page.click('#plan-change-btn');
+        await expect(page.locator('#plan-pills')).toBeVisible();
+        await expect(page.locator('#plan-locked-note')).toBeHidden();
+        await page.click('#pill-basic');
+        await expect(page.locator('#pill-basic')).toHaveClass(/selected/);
     });
 
     test('password strength indicator works', async ({ page }) => {
