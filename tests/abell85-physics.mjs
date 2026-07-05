@@ -281,4 +281,37 @@ const {
     ok('PTA sensitivity curve: minimum near 4 nHz at ~2e-15, degrading both ways');
 }
 
+// ══ Merger Twins: τ-sync (merger-relative time) ══════════════════════════════
+const { tauOf, tAt, buildTauAxis, eventsTau, indexOfTau } =
+    await import('../js/abell85/twinsync.js');
+
+// ── 15. τ-sync maps coalescences together and "today" apart ─────────────────
+{
+    const hA = buildHistory(makeScenario('a402'));
+    const hH = buildHistory(makeScenario('holm15a'));
+    // τ = 0 is each system's own merger
+    assert.ok(Math.abs(tauOf(hA, hA.events.merger)) < 1e-9);
+    assert.ok(Math.abs(tauOf(hH, hH.events.merger)) < 1e-9);
+    assert.ok(Math.abs(tAt(hA, 0) - hA.events.merger) < 1e-6);
+    // merged axis is strictly increasing and spans both systems
+    const axis = buildTauAxis([hA, hH]);
+    assert.ok(axis.length > hA.samples.length * 0.5 + hH.samples.length * 0.5);
+    for (let i = 1; i < axis.length; i++) assert.ok(axis[i] > axis[i - 1]);
+    // each system's "today" marker: A402's lies before coalescence (its merger
+    // is in the future), Holm 15A's after (its merger is in the past)
+    const todayA = eventsTau(hA).find(e => e.today).tau;
+    const todayH = eventsTau(hH).find(e => e.today).tau;
+    assert.ok(todayA < 0 && Math.abs(todayA + hA.events.merger) < 1e-9, `A402 today τ=${todayA}`);
+    assert.ok(todayH > 0 && Math.abs(todayH - (-hH.events.merger)) < 1e-9, `Holm today τ=${todayH}`);
+    // index lookup round-trips
+    const i0 = indexOfTau(axis, 0);
+    assert.ok(Math.abs(axis[i0]) < 50, `axis has a point near τ=0 (got ${axis[i0]})`);
+    // clamping: far-future τ clamps to each history's end
+    const tEndA = hA.samples[hA.samples.length - 1].t;
+    assert.equal(tAt(hA, 1e7), tEndA);
+    ok(`τ-sync: A402 today at τ=${(todayA / 1000).toFixed(2)} Gyr, ` +
+        `Holm 15A today at τ=+${(todayH / 1000).toFixed(2)} Gyr, ` +
+        `merged axis ${axis.length} samples`);
+}
+
 console.log(`\nabell85-physics: all ${n} checks passed`);

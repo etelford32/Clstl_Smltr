@@ -1,6 +1,6 @@
 # Abell 85 Pair Timeline Lab — Enhancement Roadmap to Research Grade
 
-**Page:** `abell85.html` + `js/abell85/` · **Status:** Phases 1–3 shipped; Phase 4 next
+**Pages:** `abell85.html` (lab) · `holm15a.html` (cinematic) · `merger-twins.html` (parallel observatory) · **Status:** Phases 1–3 + Twins shipped; Phase 4 next
 **Goal:** the highest-grade *studyable* environment for ultramassive black hole binary
 evolution on the open web — every number inspectable, every approximation labeled,
 every claim traceable to `ABELL85_PAIR_SOURCE_CATALOG.md`.
@@ -104,6 +104,32 @@ Shipped: mock photometry Σ(R) with live cusp-radius r_γ measurement vs observe
 point); mock IFU line-of-sight velocity map + aperture σ_LOS quote (304 km/s emerges vs
 346 observed); schematic PTA single-source sensitivity + "resolvable?" verdict; GW audio
 chirp with displayed ×3·10¹⁰ frequency shift. Closed-loop hardening remains open.
+
+## Phase T — Merger Twins: parallel dual-simulation observatory  ✅ SHIPPED
+
+The unifying insight of the whole project, made into an instrument: **Abell 402-BCG's
+future is Holm 15A's past** — one evolutionary story observed at two different epochs.
+`merger-twins.html` runs both simulations side by side on one stage, synchronized on
+**merger-relative time τ = t − t_coalescence**:
+
+- **τ-sync**: at any shared τ both lanes show the same evolutionary phase; each lane
+  wears its own absolute timestamp ("+1.9 Gyr from now" vs "7.4 Gyr ago"). On the shared
+  τ axis each system's *today* becomes a marker — A402's at τ ≈ −2.4 Gyr, Holm 15A's at
+  τ ≈ +6.9 Gyr — literally the same film at two playback positions.
+- **Dual canvas, shared camera**: two full engines (cluster + PN endgame + lensing +
+  loss-cone coloring), one logical camera whose distance is expressed in units of each
+  system's influence radius — geometrically honest comparison, with per-lane absolute
+  scale bars showing the real size difference (toggle to absolute-scale mirror mode).
+- **Timeline & analytics dock**: merged adaptive τ-scrubber (interest-paced from the
+  union of both sample sets) with dual event ticks (binary forms / GW takeover /
+  coalescence / "today" per system); an a(τ) overlay chart — both separation curves on
+  one axis with hover crosshair — as the centerpiece comparison; dual GW tracks on the
+  PTA chart; a live comparison grid (epoch, stage, a, f_GW, strain, M_ej/M_bin, mock
+  r_γ vs observed, loss-cone counts, separation ratio + lead/lag).
+- **Event flashes**: crossing an event marker during playback pulses a caption in the
+  lane it belongs to — the timestamped narrative of interactions, visually.
+- System identity colors: A402 = violet #a99bff, Holm 15A = gold #f0bd55 (CVD ΔE 107,
+  double-encoded by lane position + direct labels).
 
 ## Phase 4 — Scale & performance
 
