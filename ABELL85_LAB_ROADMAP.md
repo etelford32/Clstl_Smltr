@@ -131,6 +131,18 @@ future is Holm 15A's past** — one evolutionary story observed at two different
 - System identity colors: A402 = violet #a99bff, Holm 15A = gold #f0bd55 (CVD ΔE 107,
   double-encoded by lane position + direct labels).
 
+## Phase U — Unified Black Hole Observatory  ✅ SHIPPED
+
+`blackhole-observatory.html` condenses the lab, the cinematic, and the twins into one
+instrument: three systems STACKED on one canvas (identity-tinted, up to six simultaneous
+lenses), physics in a module Web Worker (`simworker.js` hosting `laneengine.js`, transferable
+star buffers ping-ponged; synchronous fallback), an explicit ECS (`ecs.js`) wiring
+Timeline → Physics → Choreo → Trails → Camera → Render → HUD → Analytics → UI, the shared
+τ axis extended with the stalled B2 lane on A402's absolute clock, and the constraint panel
+OPENED: every dial tagged measured/inferred/assumed/free with its source, driving live
+history rebuilds (raise B2's refill and the stuck pair acquires a coalescence on the shared
+axis). Nav consolidated to this single entry; the three source pages remain reachable.
+
 ## Phase 4 — Scale & performance
 
 - **N-body in Rust → WASM** (fits the existing `build-wasm.sh` pipeline): 10⁵+ stars at

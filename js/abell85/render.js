@@ -80,6 +80,7 @@ layout(location=1) in float aFlag;
 uniform mat4 uMvp;
 uniform float uPxScale;      // pixels per world unit at unit depth
 out float vFlag;
+// (tint is applied in the fragment stage via uTint)
 void main() {
     vFlag = aFlag;
     gl_Position = uMvp * vec4(aPos, 1.0);
@@ -91,6 +92,7 @@ void main() {
 const FS_POINTS = `#version 300 es
 precision mediump float;
 in float vFlag;
+uniform vec3 uTint;          // per-lane identity tint (1,1,1 = neutral)
 out vec4 o;
 void main() {
     vec2 d = gl_PointCoord - 0.5;
@@ -106,7 +108,7 @@ void main() {
     else if (vFlag < 1.5) c = vec3(1.00, 0.45, 0.25);   // slingshot ejecta
     else if (vFlag < 2.5) c = vec3(0.50, 0.30, 0.24);   // frozen far ejecta
     else                  c = vec3(0.35, 0.95, 1.00);   // loss-cone star
-    o = vec4(c, a * (vFlag < 0.5 ? 0.75 : 0.95));
+    o = vec4(c * uTint, a * (vFlag < 0.5 ? 0.75 : 0.95));
 }`;
 
 const VS_LINES = `#version 300 es
@@ -132,7 +134,7 @@ precision highp float;
 in vec2 vUv;
 uniform sampler2D uScene;
 uniform vec2 uRes;
-uniform vec4 uLens[2];
+uniform vec4 uLens[6];
 uniform int uNLens;
 out vec4 o;
 void main() {
@@ -140,7 +142,7 @@ void main() {
     vec2 samplePx = px;
     float shadow = 0.0;
     float ring = 0.0;
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 6; i++) {
         if (i >= uNLens) break;
         vec2 c = uLens[i].xy;
         float tE = uLens[i].z;
@@ -211,16 +213,30 @@ export class Renderer {
     }
 
     /**
-     * @param s {pos, flags, n, bhs:[{p:[x,y,z], m}], trails:[Float32Array...],
-     *           rings:[radiusPc...], lensOn:boolean}
+     * Single-lane wrapper (legacy pages): identical to the old signature.
+     */
+    render(s) {
+        this.renderComposite({
+            lanes: [{
+                pos: s.pos, flags: s.flags, n: s.n, bhs: s.bhs,
+                trails: s.trails, extraLines: s.extraLines, shells: s.shells,
+                tint: [1, 1, 1],
+            }],
+            rings: s.rings, lensOn: s.lensOn, marker: s.marker,
+        });
+    }
+
+    /**
+     * Composite path: any number of lanes STACKED into one scene — each lane
+     * carries its own star buffers, bodies, trails, overlays, and identity
+     * tint; the lens pass gathers every lane's holes (up to 6 lenses).
      *
      * Floating origin: the eye sits at (0,0,0) in the GL frame — the view
      * matrix is rotation-only, and every vertex is uploaded camera-relative
-     * after a double-precision subtract on the CPU. Float32 therefore only
-     * ever holds *local* offsets, which is what keeps the horizon-scale view
-     * (0.006 pc) jitter-free inside a 30 kpc scene.
+     * after a double-precision subtract on the CPU, so float32 never sees
+     * large world coordinates at horizon zoom inside a 30 kpc scene.
      */
-    render(s) {
+    renderComposite({ lanes, rings, lensOn, marker }) {
         this.resize();
         const { gl } = this;
         const [w, h] = this._fboSize;
@@ -240,24 +256,95 @@ export class Renderer {
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 
-        // scale rings in the galaxy equatorial plane
-        if (s.rings?.length) {
+        // scale rings in the galaxy equatorial plane (shared by all lanes)
+        if (rings?.length) {
             gl.useProgram(this.progLines);
             gl.uniformMatrix4fv(gl.getUniformLocation(this.progLines, 'uMvp'), false, mvp);
             gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'), 0.4, 0.55, 0.9, 0.12);
-            for (const R of s.rings) this._drawRing(R, eye);
+            for (const R of rings) this._drawRing(R, eye);
         }
 
-        // trails
-        if (s.trails) {
+        for (const lane of lanes) {
+            this._drawLane(lane, mvp, eye, h);
+        }
+
+        // selected-star marker (hollow ring sprite, flag 9)
+        if (marker) {
+            gl.useProgram(this.progPoints);
+            gl.uniformMatrix4fv(gl.getUniformLocation(this.progPoints, 'uMvp'), false, mvp);
+            gl.uniform1f(gl.getUniformLocation(this.progPoints, 'uPxScale'), h * 0.9);
+            gl.uniform3f(gl.getUniformLocation(this.progPoints, 'uTint'), 1, 1, 1);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.bufPos);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+                marker[0] - eye[0], marker[1] - eye[1], marker[2] - eye[2]]), gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.bufFlag);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([9]), gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(1);
+            gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.POINTS, 0, 1);
+        }
+
+        // lens + shadow composite to screen: gather every lane's holes
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, w, h);
+        gl.disable(gl.BLEND);
+        gl.useProgram(this.progLens);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.tex);
+        gl.uniform1i(gl.getUniformLocation(this.progLens, 'uScene'), 0);
+        gl.uniform2f(gl.getUniformLocation(this.progLens, 'uRes'), w, h);
+
+        const lens = new Float32Array(24);
+        let nLens = 0;
+        if (lensOn !== false) {
+            for (const lane of lanes) {
+                for (const bh of (lane.bhs || [])) {
+                    if (!bh.m || nLens >= 6) continue;
+                    const relP = [bh.p[0] - eye[0], bh.p[1] - eye[1], bh.p[2] - eye[2]];
+                    const ndc = project(mvp, relP);
+                    if (!ndc) continue;
+                    const cx = (ndc[0] * 0.5 + 0.5) * w, cy = (ndc[1] * 0.5 + 0.5) * h;
+                    const D = Math.hypot(relP[0], relP[1], relP[2]);
+                    const rs = rSchw(bh.m);
+                    // physical Einstein radius for a source far behind the lens:
+                    // θE·D = √(2 r_s D)  (world pc) → pixels via perspective scale
+                    const pxPerPc = (h / 2) / (Math.tan(this.camera.fov / 2) * D);
+                    const tE = Math.sqrt(2 * rs * D) * pxPerPc;
+                    // photon-capture shadow; shadowMod carries the ringdown pulse
+                    const rShadow = Math.sqrt(27) / 2 * rs * pxPerPc * (bh.shadowMod ?? 1);
+                    lens[nLens * 4] = cx; lens[nLens * 4 + 1] = cy;
+                    lens[nLens * 4 + 2] = tE; lens[nLens * 4 + 3] = rShadow;
+                    nLens++;
+                }
+            }
+        }
+        gl.uniform4fv(gl.getUniformLocation(this.progLens, 'uLens'), lens);
+        gl.uniform1i(gl.getUniformLocation(this.progLens, 'uNLens'), nLens);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bufQuad);
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    /** One lane's geometry: trails, stars (tinted), overlays, shells. */
+    _drawLane(lane, mvp, eye, h) {
+        const { gl } = this;
+
+        if (lane.trails) {
             gl.useProgram(this.progLines);
             gl.uniformMatrix4fv(gl.getUniformLocation(this.progLines, 'uMvp'), false, mvp);
-            const cols = [[0.55, 0.8, 1.0, 0.55], [1.0, 0.62, 0.35, 0.55]];
-            s.trails.forEach((tr, i) => {
+            const tint = lane.tint ?? [1, 1, 1];
+            const cols = [
+                [0.55 * tint[0] + 0.2, 0.8 * tint[1], 1.0 * tint[2], 0.55],
+                [1.0 * tint[0], 0.62 * tint[1] + 0.1, 0.35 * tint[2], 0.55],
+            ];
+            lane.trails.forEach((tr, i) => {
                 if (tr.count < 2) return;
                 const o = tr.ordered();
                 const rel = this._trailRel && this._trailRel.length >= o.length
-                    ? this._trailRel : (this._trailRel = new Float32Array(tr.cap * 3));
+                    ? this._trailRel : (this._trailRel = new Float32Array(Math.max(o.length, 1536)));
                 for (let k = 0; k < o.length; k += 3) {
                     rel[k] = o[k] - eye[0];
                     rel[k + 1] = o[k + 1] - eye[1];
@@ -272,37 +359,38 @@ export class Renderer {
             });
         }
 
-        // stars
-        if (s.n) {
+        if (lane.n) {
             gl.useProgram(this.progPoints);
             gl.uniformMatrix4fv(gl.getUniformLocation(this.progPoints, 'uMvp'), false, mvp);
             gl.uniform1f(gl.getUniformLocation(this.progPoints, 'uPxScale'), h * 0.9);
-            const rel = this._starRel && this._starRel.length === s.n * 3
-                ? this._starRel : (this._starRel = new Float32Array(s.n * 3));
-            for (let k = 0; k < s.n * 3; k += 3) {
-                rel[k] = s.pos[k] - eye[0];
-                rel[k + 1] = s.pos[k + 1] - eye[1];
-                rel[k + 2] = s.pos[k + 2] - eye[2];
+            const t = lane.tint ?? [1, 1, 1];
+            gl.uniform3f(gl.getUniformLocation(this.progPoints, 'uTint'), t[0], t[1], t[2]);
+            const len = lane.n * 3;
+            const rel = this._starRel && this._starRel.length >= len
+                ? this._starRel : (this._starRel = new Float32Array(len));
+            for (let k = 0; k < len; k += 3) {
+                rel[k] = lane.pos[k] - eye[0];
+                rel[k + 1] = lane.pos[k + 1] - eye[1];
+                rel[k + 2] = lane.pos[k + 2] - eye[2];
             }
             gl.bindBuffer(gl.ARRAY_BUFFER, this.bufPos);
-            gl.bufferData(gl.ARRAY_BUFFER, rel, gl.DYNAMIC_DRAW);
+            gl.bufferData(gl.ARRAY_BUFFER, rel.subarray(0, len), gl.DYNAMIC_DRAW);
             gl.enableVertexAttribArray(0);
             gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
             gl.bindBuffer(gl.ARRAY_BUFFER, this.bufFlag);
-            const ff = this._flagsF32 && this._flagsF32.length === s.n
-                ? this._flagsF32 : (this._flagsF32 = new Float32Array(s.n));
-            for (let i = 0; i < s.n; i++) ff[i] = s.flags[i];
-            gl.bufferData(gl.ARRAY_BUFFER, ff, gl.DYNAMIC_DRAW);
+            const ff = this._flagsF32 && this._flagsF32.length >= lane.n
+                ? this._flagsF32 : (this._flagsF32 = new Float32Array(lane.n));
+            for (let i = 0; i < lane.n; i++) ff[i] = lane.flags[i];
+            gl.bufferData(gl.ARRAY_BUFFER, ff.subarray(0, lane.n), gl.DYNAMIC_DRAW);
             gl.enableVertexAttribArray(1);
             gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
-            gl.drawArrays(gl.POINTS, 0, s.n);
+            gl.drawArrays(gl.POINTS, 0, lane.n);
         }
 
-        // generic overlay polylines (PN rosette, inspected-star trail)
-        if (s.extraLines?.length) {
+        if (lane.extraLines?.length) {
             gl.useProgram(this.progLines);
             gl.uniformMatrix4fv(gl.getUniformLocation(this.progLines, 'uMvp'), false, mvp);
-            for (const ln of s.extraLines) {
+            for (const ln of lane.extraLines) {
                 if (!ln.buf || ln.count < 2) continue;
                 const len = ln.count * 3;
                 const rel = this._extraRel && this._extraRel.length >= len
@@ -321,69 +409,11 @@ export class Renderer {
             }
         }
 
-        // GW-burst shells: three orthogonal great circles read as a sphere —
-        // the coalescence moment as a 3D expanding wavefront marker
-        if (s.shells?.length) {
+        if (lane.shells?.length) {
             gl.useProgram(this.progLines);
             gl.uniformMatrix4fv(gl.getUniformLocation(this.progLines, 'uMvp'), false, mvp);
-            for (const sh of s.shells) this._drawShell(sh, eye);
+            for (const sh of lane.shells) this._drawShell(sh, eye);
         }
-
-        // selected-star marker (hollow ring sprite, flag 9)
-        if (s.marker) {
-            gl.useProgram(this.progPoints);
-            gl.uniformMatrix4fv(gl.getUniformLocation(this.progPoints, 'uMvp'), false, mvp);
-            gl.uniform1f(gl.getUniformLocation(this.progPoints, 'uPxScale'), h * 0.9);
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.bufPos);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-                s.marker[0] - eye[0], s.marker[1] - eye[1], s.marker[2] - eye[2]]), gl.DYNAMIC_DRAW);
-            gl.enableVertexAttribArray(0);
-            gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.bufFlag);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([9]), gl.DYNAMIC_DRAW);
-            gl.enableVertexAttribArray(1);
-            gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
-            gl.drawArrays(gl.POINTS, 0, 1);
-        }
-
-        // lens + shadow composite to screen
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, w, h);
-        gl.disable(gl.BLEND);
-        gl.useProgram(this.progLens);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.tex);
-        gl.uniform1i(gl.getUniformLocation(this.progLens, 'uScene'), 0);
-        gl.uniform2f(gl.getUniformLocation(this.progLens, 'uRes'), w, h);
-
-        const lens = new Float32Array(8);
-        let nLens = 0;
-        if (s.lensOn !== false) {
-            for (const bh of (s.bhs || [])) {
-                if (!bh.m || nLens >= 2) continue;
-                const relP = [bh.p[0] - eye[0], bh.p[1] - eye[1], bh.p[2] - eye[2]];
-                const ndc = project(mvp, relP);
-                if (!ndc) continue;
-                const cx = (ndc[0] * 0.5 + 0.5) * w, cy = (ndc[1] * 0.5 + 0.5) * h;
-                const D = Math.hypot(relP[0], relP[1], relP[2]);
-                const rs = rSchw(bh.m);
-                // physical Einstein radius for a source far behind the lens:
-                // θE·D = √(2 r_s D)  (world pc) → pixels via perspective scale
-                const pxPerPc = (h / 2) / (Math.tan(this.camera.fov / 2) * D);
-                const tE = Math.sqrt(2 * rs * D) * pxPerPc;
-                // photon-capture shadow; shadowMod carries the ringdown pulse
-                const rShadow = Math.sqrt(27) / 2 * rs * pxPerPc * (bh.shadowMod ?? 1);
-                lens[nLens * 4] = cx; lens[nLens * 4 + 1] = cy;
-                lens[nLens * 4 + 2] = tE; lens[nLens * 4 + 3] = rShadow;
-                nLens++;
-            }
-        }
-        gl.uniform4fv(gl.getUniformLocation(this.progLens, 'uLens'), lens);
-        gl.uniform1i(gl.getUniformLocation(this.progLens, 'uNLens'), nLens);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.bufQuad);
-        gl.enableVertexAttribArray(0);
-        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
     /** World → framebuffer-pixel projection of the last rendered frame

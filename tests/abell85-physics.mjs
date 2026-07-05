@@ -463,4 +463,26 @@ const { qnm220, MergerChoreo } = await import('../js/abell85/merger.js');
     ok(`merger choreography: plunge (2 bodies, sep ↓) → ringdown (Q=${ch.qnm.Q.toFixed(1)} pulse) → done`);
 }
 
+// ── 21. LaneEngine (worker core) smoke: identical engine, both threads ──────
+{
+    const { LaneEngine } = await import('../js/abell85/laneengine.js');
+    const eng = new LaneEngine('holm15a', { nStars: 1024, seed: 7 });
+    const s0 = eng.setTime(0, 1);              // present day (post-merger)
+    assert.ok(s0.bhs.length === 1, 'single remnant at present');
+    assert.ok(Number.isFinite(s0.bhs[0].p[0]));
+    const s1 = eng.setTime(-7300000 / 1000, 2); // jump deep into the past (Myr)
+    assert.ok(s1.now.a > 0, 'binary exists before coalescence');
+    const s2 = eng.setTime(s1.t + 5, 3);
+    assert.ok(s2.now.a <= s1.now.a + 1e-6, 'separation non-increasing');
+    // stalled lane: B2 today sits near its observed 7.3 pc
+    const b2 = new LaneEngine('b20402', { nStars: 512, seed: 7 });
+    const sb = b2.setTime(0, 1);
+    assert.ok(Math.abs(sb.now.a - 7.3) / 7.3 < 0.3, `B2 today a=${sb.now.a}`);
+    // reconfigure un-sticks it
+    b2.reconfigure({ refill: 0.9 });
+    assert.ok(b2.history.events.merger !== undefined, 'raised refill → merger exists');
+    ok(`LaneEngine: remnant at present, binary in past, B2 stalled at ` +
+        `${sb.now.a.toFixed(1)} pc and un-stuck by refill=0.9`);
+}
+
 console.log(`\nabell85-physics: all ${n} checks passed`);
