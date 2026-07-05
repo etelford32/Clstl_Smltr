@@ -74,15 +74,42 @@ NRLMSIS residuals for this window are ~2.5e-12. Consequences:
    behind `/api/density/tudelft` may already hold it — see
    `GANNON_LIVE_DATA.md` lift 3).
 3. Regenerate the page replay bundle from the RCM-run drivers.
-4. Fit quality is now the binding constraint, not the physics: single-event
-   OLS against an Ap series pinned at 400 for ~24 h under-fits the peak by
-   construction (both tracks' R² and the ground track's negative JH
-   coefficient say so). Candidate remedies, in order of likely impact:
-   a. joint fit across events (Feb 2022 + Gannon; Halloween 2003 later);
-   b. fit on ramp+recovery samples only (Ap < 400) and extrapolate through
-      the saturated peak;
-   c. combined 4-feature fit (Φ_PC, HPI, SME, JH) — the two tracks carry
-      partially independent information;
-   d. check whether validate_density coarsens pseudo-Ap to 3-h bins before
-      driving MSIS — if so the high-cadence advantage is being discarded
-      at scoring time.
+4. Fit-quality remediation sweep (run 2026-07-05, results below).
+
+### Fit-remediation sweep (2026-07-05)
+
+(d) **Cadence check — cleared.** validate_density step-interpolates
+pseudo-Ap at native 5-min cadence (no 3-h coarsening); pymsis receives
+`aps=[[ap]*7]` identically for baseline and candidate. Not a factor.
+
+(b) **Saturation-masked fit (`fit_pseudo_ap --max-ap 400`, new flag) —
+the big lever.** Excluding the pinned-at-400 bins (72/864 MHD pairs,
+360/4321 ground pairs) and extrapolating through the peak:
+
+| Fit variant | vs real Ap (gate) | vs persistence Ap |
+|---|---|---|
+| MHD, all samples | +3.1 % | +12.1 % |
+| Ground, all samples | +6.2 % | +15.0 % |
+| **MHD, Ap<400** | **+12.0 %** | **+20.2 %** |
+| **Ground, Ap<400** | **+13.9 %** | **+22.0 %** |
+| Combined 4-feature, Ap<400 | +11.2 % | +19.5 % |
+| Ground SME-only, Ap<400 | +13.7 % | +21.7 % |
+
+Cap-free MHD formula: `Ap* = +32.30 +1.284·Φ_PC +0.396·HPI` (R² 0.595).
+SME-only ground formula: `Ap* = +41.41 +0.122·SME` (R² 0.417), peak
+Ap* 527 — crosses the 400 ceiling.
+
+(c) **Combined 4-feature fit — no additional density skill.** Best
+Ap-space R² (0.672) but scores below the single-track cap-free fits;
+better Ap fit ≠ better density skill. The JH proxy adds nothing over SME
+(SME-only ≈ two-feature ground), and its negative coefficient is
+SME-collinearity, not physics.
+
+**Where this leaves the gate:** best single-event result is the cap-free
+ground track at **+13.9 %** vs the hindcast gate (25 %) and **+22.0 %**
+vs persistence — a 4.5× improvement over the pre-sweep MHD number, but
+the single-event ceiling appears to be ~14 %/22 %. Remaining levers, in
+order: (a) joint fit across events (needs Feb 2022 hindcast re-staged);
+possibly a nonlinear Ap→density response term; or accept the
+persistence-regime framing (22 % ≈ gate) as the operational story, since
+that is the regime where the product actually competes.
