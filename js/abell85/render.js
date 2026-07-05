@@ -81,23 +81,32 @@ uniform mat4 uMvp;
 uniform float uPxScale;      // pixels per world unit at unit depth
 out float vFlag;
 void main() {
+    vFlag = aFlag;
     gl_Position = uMvp * vec4(aPos, 1.0);
     float w = max(gl_Position.w, 1e-3);
-    gl_PointSize = clamp(uPxScale / w, 1.2, 5.0);
-    vFlag = aFlag;
+    gl_PointSize = aFlag > 8.0 ? 22.0 : clamp(uPxScale / w, 1.2, 5.0);
 }`;
 
+// star flags: 0 bound · 1 ejected · 2 frozen ejecta · 3 loss-cone · 9 marker
 const FS_POINTS = `#version 300 es
 precision mediump float;
 in float vFlag;
 out vec4 o;
 void main() {
     vec2 d = gl_PointCoord - 0.5;
-    float a = smoothstep(0.5, 0.05, length(d));
-    vec3 bound   = vec3(1.00, 0.93, 0.78);   // old stellar population
-    vec3 ejected = vec3(1.00, 0.45, 0.25);   // slingshot ejecta
-    vec3 c = vFlag < 0.5 ? bound : ejected;
-    o = vec4(c, a * (vFlag < 0.5 ? 0.75 : 0.9));
+    float r = length(d);
+    if (vFlag > 8.0) {                       // selection marker: hollow ring
+        float ring = smoothstep(0.50, 0.44, r) * smoothstep(0.30, 0.36, r);
+        o = vec4(0.55, 1.0, 0.95, ring * 0.95);
+        return;
+    }
+    float a = smoothstep(0.5, 0.05, r);
+    vec3 c;
+    if      (vFlag < 0.5) c = vec3(1.00, 0.93, 0.78);   // bound population
+    else if (vFlag < 1.5) c = vec3(1.00, 0.45, 0.25);   // slingshot ejecta
+    else if (vFlag < 2.5) c = vec3(0.50, 0.30, 0.24);   // frozen far ejecta
+    else                  c = vec3(0.35, 0.95, 1.00);   // loss-cone star
+    o = vec4(c, a * (vFlag < 0.5 ? 0.75 : 0.95));
 }`;
 
 const VS_LINES = `#version 300 es
@@ -221,6 +230,7 @@ export class Renderer {
         const near = 1e-5, far = 1e6;   // no depth test → only clip planes matter
         const mvp = mul4(perspective(cam.fov, w / h, near, far),
             lookAt([0, 0, 0], fwd, up));
+        this._lastMvp = mvp; this._lastEye = eye;   // for click-picking
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
         gl.viewport(0, 0, w, h);
@@ -281,11 +291,51 @@ export class Renderer {
             gl.bindBuffer(gl.ARRAY_BUFFER, this.bufFlag);
             const ff = this._flagsF32 && this._flagsF32.length === s.n
                 ? this._flagsF32 : (this._flagsF32 = new Float32Array(s.n));
-            for (let i = 0; i < s.n; i++) ff[i] = s.flags[i] > 0 ? 1 : 0;
+            for (let i = 0; i < s.n; i++) ff[i] = s.flags[i];
             gl.bufferData(gl.ARRAY_BUFFER, ff, gl.DYNAMIC_DRAW);
             gl.enableVertexAttribArray(1);
             gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
             gl.drawArrays(gl.POINTS, 0, s.n);
+        }
+
+        // generic overlay polylines (PN rosette, inspected-star trail)
+        if (s.extraLines?.length) {
+            gl.useProgram(this.progLines);
+            gl.uniformMatrix4fv(gl.getUniformLocation(this.progLines, 'uMvp'), false, mvp);
+            for (const ln of s.extraLines) {
+                if (!ln.buf || ln.count < 2) continue;
+                const len = ln.count * 3;
+                const rel = this._extraRel && this._extraRel.length >= len
+                    ? this._extraRel : (this._extraRel = new Float32Array(Math.max(len, 1024)));
+                for (let k = 0; k < len; k += 3) {
+                    rel[k] = ln.buf[k] - eye[0];
+                    rel[k + 1] = ln.buf[k + 1] - eye[1];
+                    rel[k + 2] = ln.buf[k + 2] - eye[2];
+                }
+                gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'), ...ln.color);
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.bufLine);
+                gl.bufferData(gl.ARRAY_BUFFER, rel.subarray(0, len), gl.DYNAMIC_DRAW);
+                gl.enableVertexAttribArray(0);
+                gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+                gl.drawArrays(gl.LINE_STRIP, 0, ln.count);
+            }
+        }
+
+        // selected-star marker (hollow ring sprite, flag 9)
+        if (s.marker) {
+            gl.useProgram(this.progPoints);
+            gl.uniformMatrix4fv(gl.getUniformLocation(this.progPoints, 'uMvp'), false, mvp);
+            gl.uniform1f(gl.getUniformLocation(this.progPoints, 'uPxScale'), h * 0.9);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.bufPos);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+                s.marker[0] - eye[0], s.marker[1] - eye[1], s.marker[2] - eye[2]]), gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.bufFlag);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([9]), gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(1);
+            gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.POINTS, 0, 1);
         }
 
         // lens + shadow composite to screen
@@ -325,6 +375,17 @@ export class Renderer {
         gl.enableVertexAttribArray(0);
         gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    /** World → framebuffer-pixel projection of the last rendered frame
+     *  (returns null if behind the camera or before first render). */
+    worldToScreen(p) {
+        if (!this._lastMvp) return null;
+        const e = this._lastEye;
+        const ndc = project(this._lastMvp, [p[0] - e[0], p[1] - e[1], p[2] - e[2]]);
+        if (!ndc) return null;
+        const [w, h] = this._fboSize;
+        return [(ndc[0] * 0.5 + 0.5) * w, (1 - (ndc[1] * 0.5 + 0.5)) * h];
     }
 
     _drawRing(R, eye) {

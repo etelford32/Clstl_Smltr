@@ -1,6 +1,6 @@
 # Abell 85 Pair Timeline Lab — Enhancement Roadmap to Research Grade
 
-**Page:** `abell85.html` + `js/abell85/` · **Status:** Phase 1 shipped; Phase 2 next
+**Page:** `abell85.html` + `js/abell85/` · **Status:** Phases 1–2 shipped; Phase 3 next
 **Goal:** the highest-grade *studyable* environment for ultramassive black hole binary
 evolution on the open web — every number inspectable, every approximation labeled,
 every claim traceable to `ABELL85_PAIR_SOURCE_CATALOG.md`.
@@ -32,22 +32,58 @@ same, but across ~7 orders of magnitude of scale (30 kpc cluster core → 0.006 
 next to a hole at photon-ring distance during the final orbits, and read clean HUD state
 the whole way — 60 fps, no precision shimmer.
 
-## Phase 2 — Dynamics fidelity upgrades
+## Phase 2 — Live PN endgame + loss-cone visualization  ✅ SHIPPED
 
-- **Live post-Newtonian endgame**: below a ≈ 50 GM/c², hand the binary from the Peters
-  master clock to a direct two-body integration with 1PN + 2PN conservative + 2.5PN
-  radiation-reaction terms (Blanchet LRR; Mikkola–Merritt auxiliary-velocity leapfrog so
-  the integrator stays explicit). Visible orbit-by-orbit precession and chirp; energy
-  bookkeeping shown as an integrator-quality readout.
-- **Closed-loop scouring**: hardening rate uses the *measured* live density at the
-  influence radius, s = H·G·ρ_measured(t)/σ, instead of the frozen initial value — the
-  N-body and the semi-analytic engine stop being one-way. (Behind a toggle: "textbook
-  rates" vs "self-consistent", with the difference plotted.)
-- **Loss-cone visualization**: color stars by specific angular momentum vs the loss-cone
-  boundary L_lc ≈ √(2 G M_bin a); watch the cone drain (spherical) or refill (triaxial).
-  Star inspector: click a star → energy, L, pericenter, ejection status, trail.
-- **Kick direction sampling** in 3D with the remnant trajectory rendered through the
-  core, plus spin-flip jet reorientation as a visual epilogue.
+### 2A. Live post-Newtonian two-body endgame (`pn.js`)
+
+Inside the relativistic window (a ≲ 300 GM/c², pre-plunge) the binary's rendered motion
+hands off from Kepler-phase playback to a **direct two-body integration** of the
+harmonic-gauge PN equations of motion, a = −(GM/r²)[(1+A)n̂ + B v⃗] with
+
+- **1PN conservative** (EIH): A₁ = [(1+3η)v² − (3/2)η ṙ² − 2(2+η)GM/r]/c²,
+  B₁ = −2(2−η) ṙ/c²  → produces the orbit-by-orbit periapsis rosette.
+- **2.5PN radiation reaction** (Burke–Thorne gauge): the standard drag term whose orbit
+  average reproduces Peters (1964) → produces the live chirp.
+- 2PN conservative terms are deliberately **excluded until they can be validated**
+  against an independent result (they are a few-% precession correction in this
+  window); the methods panel says so. Bleeding edge ≠ unverifiable.
+
+**Validation contract** (enforced in `tests/abell85-physics.mjs`):
+1. RR off → specific orbital energy conserved to |ΔE/E| < 10⁻⁶ over ≥50 orbits.
+2. Measured periapsis advance matches Δϖ = 6πGM/(c²a(1−e²)) to <2%.
+3. RR on → orbit-averaged ⟨da/dt⟩ matches the Peters ODE to ≲10%.
+
+Integrator: fixed-substep RK4 at ~240 steps/orbit (transparent, testable; the
+Mikkola–Merritt auxiliary-velocity leapfrog is the Phase 4 upgrade path alongside the
+WASM port). If the timeline runs faster than ~20k substeps/frame the lab falls back to
+Kepler-phase rendering and says so — new ultra-slow speeds (5 kyr/s, 50 kyr/s) exist
+precisely to *watch individual final orbits*.
+
+**On-screen science**: osculating ellipse + fading rosette trace of previous orbits;
+live comparison rows — a_PN vs a_Peters (direct integration vs orbit-averaged theory,
+agreeing in real time), measured Δϖ/orbit vs the 1PN formula, cumulative ΔE vs the
+Peters–Mathews GW luminosity (doubling as the integrator-quality readout).
+
+### 2B. Loss-cone visualization + star inspector
+
+- Every bound star is classified each frame against the loss-cone boundary
+  **L_lc = √(2 G M_bin a(t))** (Merritt): stars with L < L_lc plunge to pericenters
+  ≲ a and are next in line for the three-body slingshot. They render in cyan; watch the
+  cone *drain* as the binary hardens and its boundary shrink as a(t) decays.
+- New diagnostics chart: live histogram of N(L/L_lc) over core stars with the boundary
+  marked — the textbook loss-cone depletion notch forms in real time. (The test-particle
+  cloud shows pure draining; collisional/triaxial *refill* is what the semi-analytic
+  refill dial represents — stated honestly in the methods panel.)
+- **Star inspector**: click any star → specific energy, angular momentum, L/L_lc,
+  pericenter estimate, radius, speed, status; selected star gets a highlight ring and a
+  live trail. Click empty space to deselect.
+- Scouring becomes depletion-aware: the expected-deficit bookkeeping already carves the
+  statistical profile; the live histogram now shows *which* stars pay for it.
+
+### Phase 2 leftovers rolled to Phase 3+
+- Closed-loop hardening (s ∝ live measured ρ) — pairs naturally with the mock-photometry
+  observables work.
+- 3D kick-direction sampling + spin-flip jet epilogue.
 
 ## Phase 3 — Observables layer ("what would a telescope see?")
 

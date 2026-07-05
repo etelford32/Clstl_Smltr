@@ -187,6 +187,33 @@ export class Diagnostics {
         ctx.stroke();
     }
 
+    /** Loss-cone chart: live histogram of L/L_lc for bound core stars with
+     *  the cone boundary marked — the depletion notch forms in real time. */
+    drawLossCone(cluster, lc) {
+        const cv = this.els.chartLc; if (!cv) return;
+        const { ctx, w, h } = setupCanvas(cv);
+        frame(ctx, w, h, 'loss cone: N(L/L_lc) · slingshot fodder left of red');
+        if (!lc || !(lc.lLc > 0)) {
+            ctx.fillStyle = '#667';
+            ctx.fillText('no binary — cone undefined', 8, h / 2);
+            return;
+        }
+        const hist = cluster.lHistogram(lc.lLc);
+        if (!hist.nTotal) return;
+        const xMax = 3;
+        const maxC = Math.max(...hist.bins.map(b => b.count), 1);
+        const X = (x) => 4 + (w - 8) * (x / xMax);
+        for (const b of hist.bins) {
+            const bh = (h - 28) * (b.count / maxC);
+            ctx.fillStyle = b.x1 <= 1 ? 'rgba(90,235,255,0.8)' : 'rgba(138,123,255,0.45)';
+            ctx.fillRect(X(b.x0) + 0.5, h - 8 - bh, X(b.x1) - X(b.x0) - 1, bh);
+        }
+        ctx.strokeStyle = '#ff5a4e';
+        ctx.beginPath(); ctx.moveTo(X(1), 14); ctx.lineTo(X(1), h - 6); ctx.stroke();
+        ctx.fillStyle = '#9ee';
+        ctx.fillText(`${lc.nCone} in cone`, X(1) + 6, 24);
+    }
+
     readout(now, sc, cluster, extra = {}) {
         const el = this.els.readout; if (!el) return;
         const p = now.a > 0 ? (2 / Math.max(now.fgw, 1e-30)) : 0; // s (orbital period = 2/fgw)

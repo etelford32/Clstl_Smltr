@@ -185,8 +185,8 @@ export class StarCluster {
             this._accel(pos[j], pos[j + 1], pos[j + 2], bh1, m1, bh2, m2, acc);
             vel[j] += 0.5 * h * acc[0]; vel[j + 1] += 0.5 * h * acc[1]; vel[j + 2] += 0.5 * h * acc[2];
 
-            // ejection bookkeeping
-            if (flags[i] === 0) {
+            // ejection bookkeeping (flags 0 and 3 are both "bound")
+            if (flags[i] === 0 || flags[i] === 3) {
                 const x = pos[j], y = pos[j + 1], z = pos[j + 2];
                 const r = Math.sqrt(x * x + y * y + z * z);
                 if (r > R_EJECT_FLAG * this.sc.rInfl) {
@@ -201,6 +201,76 @@ export class StarCluster {
         }
     }
 
+    /**
+     * Loss-cone classification (Merritt): bound stars with specific angular
+     * momentum L < L_lc = √(2 G m_bin a_bin) reach pericenters ≲ a_bin and are
+     * next in line for the three-body slingshot. Flags them 3 (bound stars
+     * outside the cone go back to 0). Pass mBin = 0 (merged) to clear.
+     * Returns { nCone, lLc }.
+     */
+    classify(mBin, aBin) {
+        const { pos, vel, flags, n } = this;
+        if (!(mBin > 0) || !(aBin > 0)) {
+            for (let i = 0; i < n; i++) if (flags[i] === 3) flags[i] = 0;
+            this.lLc = 0;
+            return { nCone: 0, lLc: 0 };
+        }
+        const lLc = Math.sqrt(2 * G * mBin * aBin);
+        let nCone = 0;
+        for (let i = 0; i < n; i++) {
+            if (flags[i] === 1 || flags[i] === 2) continue;
+            const j = i * 3;
+            const lx = pos[j + 1] * vel[j + 2] - pos[j + 2] * vel[j + 1];
+            const ly = pos[j + 2] * vel[j] - pos[j] * vel[j + 2];
+            const lz = pos[j] * vel[j + 1] - pos[j + 1] * vel[j];
+            const L = Math.sqrt(lx * lx + ly * ly + lz * lz);
+            if (L < lLc) { flags[i] = 3; nCone++; } else flags[i] = 0;
+        }
+        this.lLc = lLc;
+        return { nCone, lLc };
+    }
+
+    /** Histogram of L/L_lc for bound stars inside 2 r_infl — the loss-cone
+     *  depletion notch chart. Returns { bins:[{x0,x1,count}], nTotal }. */
+    lHistogram(lLc, nBins = 24, xMax = 3) {
+        const { pos, vel, flags, n } = this;
+        const bins = new Float64Array(nBins);
+        let nTotal = 0;
+        if (!(lLc > 0)) return { bins: [], nTotal: 0 };
+        const rMax = 2 * this.sc.rInfl;
+        for (let i = 0; i < n; i++) {
+            if (flags[i] === 1 || flags[i] === 2) continue;
+            const j = i * 3;
+            const r = Math.hypot(pos[j], pos[j + 1], pos[j + 2]);
+            if (r > rMax) continue;
+            const lx = pos[j + 1] * vel[j + 2] - pos[j + 2] * vel[j + 1];
+            const ly = pos[j + 2] * vel[j] - pos[j] * vel[j + 2];
+            const lz = pos[j] * vel[j + 1] - pos[j + 1] * vel[j];
+            const x = Math.sqrt(lx * lx + ly * ly + lz * lz) / lLc;
+            const b = Math.floor((x / xMax) * nBins);
+            if (b >= 0 && b < nBins) { bins[b]++; nTotal++; }
+        }
+        const out = [];
+        for (let b = 0; b < nBins; b++) {
+            out.push({ x0: (b / nBins) * xMax, x1: ((b + 1) / nBins) * xMax, count: bins[b] });
+        }
+        return { bins: out, nTotal };
+    }
+
+    /** Full state of one star for the click-to-inspect panel.
+     *  @param mBh current central black-hole mass (binary total or remnant) */
+    starState(i, mBh = 0) {
+        const j = i * 3;
+        const x = this.pos[j], y = this.pos[j + 1], z = this.pos[j + 2];
+        const vx = this.vel[j], vy = this.vel[j + 1], vz = this.vel[j + 2];
+        const r = Math.hypot(x, y, z) || 1e-9;
+        const v = Math.hypot(vx, vy, vz);
+        const lx = y * vz - z * vy, ly = z * vx - x * vz, lz = x * vy - y * vx;
+        const L = Math.sqrt(lx * lx + ly * ly + lz * lz);
+        const eSpec = 0.5 * v * v + this.sc.host.phi(r) - (mBh > 0 ? G * mBh / r : 0);
+        return { i, r, v, L, eSpec, flag: this.flags[i], lRatio: this.lLc > 0 ? L / this.lLc : NaN };
+    }
+
     /** Radial density + anisotropy profile from the live particles — feeds the
      *  "studyable" diagnostics charts. Returns log-spaced bins. */
     profile(nBins = 24) {
@@ -210,7 +280,7 @@ export class StarCluster {
         const vr2 = new Float64Array(nBins), vt2 = new Float64Array(nBins);
         const { pos, vel, n, flags } = this;
         for (let i = 0; i < n; i++) {
-            if (flags[i] !== 0) continue;
+            if (flags[i] === 1 || flags[i] === 2) continue;   // bound: 0 and 3
             const j = i * 3;
             const x = pos[j], y = pos[j + 1], z = pos[j + 2];
             const r = Math.sqrt(x * x + y * y + z * z) || 1e-6;

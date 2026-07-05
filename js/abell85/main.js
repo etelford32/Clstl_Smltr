@@ -14,13 +14,16 @@
 
 import { makeScenario, buildHistory, sampleAt, STAGE, timeToCoalescence } from './physics.js';
 import { StarCluster } from './nbody.js';
+import { PNBinary, gwPowerSpecific } from './pn.js';
 import { Renderer, Trail } from './render.js';
 import { GodCamera } from './camera.js';
 import { Diagnostics } from './diagnostics.js';
-import { fmtLen, fmtTime, fmtMass, rSchw } from './units.js';
+import { fmtLen, fmtTime, fmtMass, rSchw, rGrav } from './units.js';
 
 const DT_LIVE_MAX = 0.6;        // Myr of cluster time we can honestly integrate per frame
 const RESYNC_GAP = 150;         // Myr of cluster-vs-timeline lag before statistical resync
+const PN_WINDOW_RG = 300;       // a < 300 GM/c² → live PN integration takes over
+const PN_MAX_SUBSTEPS = 20000;  // per frame; beyond this the PN view can't keep up
 
 export function boot(els) {
     const state = {
@@ -40,12 +43,19 @@ export function boot(els) {
         incl: 25 * Math.PI / 180,   // binary orbital-plane tilt (view param)
     };
 
+    state.pnOn = true;
+    state.selStar = -1;
+
     const renderer = new Renderer(els.canvas);
     const cam = new GodCamera();
     renderer.camera = cam;
     const diag = new Diagnostics(els);
     const trails = [new Trail(400), new Trail(400)];
+    const selTrail = new Trail(240);
     let sc, history, cluster;
+    // live PN endgame state
+    let livePN = null, pnPredDE = 0, pnRosette = [], lastRosette = 0;
+    const dropPN = () => { livePN = null; pnRosette = []; pnPredDE = 0; };
 
     function rebuild(keepTime = false) {
         sc = makeScenario(state.scenarioId, state.overrides);
@@ -53,6 +63,8 @@ export function boot(els) {
         cluster = new StarCluster(sc, state.nStars, state.seed);
         diag.setHistory(history, cluster);
         cam.distClamp = [rSchw(sc.mTot) * 5, 6e4];
+        dropPN();
+        state.selStar = -1; selTrail.clear();
         const t0 = history.samples[0].t, t1 = history.samples[history.samples.length - 1].t;
         if (!keepTime || state.tNow < t0 || state.tNow > t1) {
             state.tNow = state.scenarioId === 'holm15a' ? 0 : 0; // "today"
@@ -106,6 +118,7 @@ export function boot(els) {
         state.clusterT = state.tNow;
         state.livePhase = now.phase;
         state.mode = 'statistical resync';
+        state.selStar = -1; selTrail.clear();   // star identities change on resample
     }
 
     // ── main loop ────────────────────────────────────────────────────────────
@@ -124,13 +137,50 @@ export function boot(els) {
 
         const now = sampleAt(history, state.tNow);
 
+        // ── live PN endgame: direct 1PN+2.5PN integration inside the window ──
+        let pnActive = false;
+        const inPnWindow = now.a > 0 && now.a < PN_WINDOW_RG * rGrav(sc.mTot);
+        if (state.playing && state.pnOn && inPnWindow) {
+            if (!livePN) {
+                livePN = new PNBinary(sc, {
+                    a: now.a, e: now.e, phase: state.livePhase,
+                    peri: now.peri, incl: state.incl,
+                });
+                pnPredDE = 0;
+            }
+            const want = state.speed * dtWall;
+            if (want > 0) {
+                const adv = livePN.step(want, PN_MAX_SUBSTEPS);
+                if (adv >= want * 0.999) {
+                    pnActive = true;
+                    const el = livePN.elements();
+                    if (el.a > 0) {
+                        pnPredDE += gwPowerSpecific(sc.m1, sc.m2, el.a, Math.min(el.e, 0.94)) * adv;
+                        if (wall - lastRosette > 450) {       // osculating-ellipse rosette
+                            const pts = livePN.ellipsePoints(96);
+                            if (pts) {
+                                pnRosette.push({ buf: pts, count: 97 });
+                                if (pnRosette.length > 10) pnRosette.shift();
+                            }
+                            lastRosette = wall;
+                        }
+                    }
+                } else {
+                    livePN = null;      // can't keep up at this speed → Kepler view
+                }
+            }
+        } else if (!state.playing && livePN) {
+            dropPN();                   // re-anchor from history on next play
+        }
+
+        const bhs = pnActive && livePN ? livePN.positions() : bhPositions(now);
+
         // cluster catch-up: live-integrate toward the timeline, or resync
         const gap = state.tNow - state.clusterT;
         if (Math.abs(gap) > RESYNC_GAP || gap < 0) {
             resyncCluster();
         } else if (gap > 0) {
             const dt = Math.min(gap, DT_LIVE_MAX);
-            const bhs = bhPositions(now);
             cluster.step(dt, bhs[0].p, bhs[0].m, bhs[1]?.p ?? [0, 0, 0], bhs[1]?.m ?? 0);
             state.clusterT += dt;
             state.mode = dt >= gap - 1e-9 ? 'live' : 'live (lagging)';
@@ -141,7 +191,8 @@ export function boot(els) {
             }
         }
 
-        const bhs = bhPositions(now);
+        // loss-cone classification (O(N), every frame while a binary exists)
+        const lc = cluster.classify(now.a > 0 ? sc.mTot : 0, now.a);
         if (state.playing && bhs.length) {
             trails[0].push(...bhs[0].p);
             if (bhs[1]) trails[1].push(...bhs[1].p);
@@ -160,19 +211,41 @@ export function boot(els) {
         cam.update(dtWall, dNear);
         updateCamHud(dNear);
 
+        // selected-star marker + trail
+        let marker = null;
+        if (state.selStar >= 0 && state.selStar < cluster.n) {
+            const j = state.selStar * 3;
+            marker = [cluster.pos[j], cluster.pos[j + 1], cluster.pos[j + 2]];
+            if (state.playing) selTrail.push(marker[0], marker[1], marker[2]);
+        }
+
+        // overlay polylines: PN osculating-orbit rosette + inspected-star trail
+        const extraLines = pnRosette.map((r, i) => ({
+            buf: r.buf, count: r.count,
+            color: [0.62, 0.58, 1.0, 0.05 + 0.05 * (i + 1)],
+        }));
+        if (state.selStar >= 0 && selTrail.count > 1) {
+            extraLines.push({
+                buf: selTrail.ordered(), count: selTrail.count,
+                color: [0.45, 1.0, 0.9, 0.55],
+            });
+        }
+
         renderer.render({
             pos: cluster.pos, flags: cluster.flags, n: cluster.n,
             bhs,
             trails: state.playing ? trails : trails,
             rings: state.ringsOn ? ringSet() : null,
             lensOn: state.lensOn,
+            extraLines, marker,
         });
 
         diag.drawSeparation(state.tNow);
         diag.drawGw(now);
         diag.drawDensity(cluster);
         diag.drawAnisotropy(cluster);
-        diag.readout(now, sc, cluster, { rows: extraRows(now) });
+        diag.drawLossCone(cluster, lc);
+        diag.readout(now, sc, cluster, { rows: extraRows(now, pnActive, lc, inPnWindow) });
         setModeChip(now);
 
         requestAnimationFrame(tick);
@@ -208,7 +281,7 @@ export function boot(els) {
         }
     }
 
-    function extraRows(now) {
+    function extraRows(now, pnActive, lc, inPnWindow) {
         const rows = [];
         if (now.a > 0) {
             const tc = timeToCoalescence(sc, now.a, now.e);
@@ -218,8 +291,53 @@ export function boot(els) {
             rows.push(['remnant', `${fmtMass(r.mass)} · spin ${r.spin.toFixed(2)}`]);
             rows.push(['recoil kick', `${r.kickKms.toFixed(0)} km/s (v_esc ≈ ${sc.vEsc.toFixed(0)})`]);
         }
+        // live PN endgame: direct integration vs orbit-averaged theory, on screen
+        if (pnActive && livePN) {
+            const el = livePN.elements();
+            rows.push(['PN endgame', `LIVE · ${livePN.orbits} orbits · 1PN+2.5PN RK4`]);
+            rows.push(['a: PN | Peters', `${fmtLen(el.a)} | ${fmtLen(now.a)}`]);
+            if (livePN.measuredAdvance != null) {
+                rows.push(['Δϖ/orbit: meas | 1PN', `${(livePN.measuredAdvance * 180 / Math.PI).toFixed(2)}° | ` +
+                    `${(livePN.theoryAdvance() * 180 / Math.PI).toFixed(2)}°`]);
+            }
+            const dE = livePN.energy() - livePN.e0;
+            if (pnPredDE < -1e-30) rows.push(['ΔE / GW predicted', `${(dE / pnPredDE).toFixed(2)}×`]);
+        } else if (state.pnOn && inPnWindow) {
+            rows.push(['PN endgame', state.playing ? 'catching up — slow the timeline' : 'armed — press play']);
+        }
+        if (lc && lc.lLc > 0) rows.push(['loss cone', `${lc.nCone} stars with L < √(2GM_bin·a)`]);
+        // star inspector
+        if (state.selStar >= 0 && state.selStar < cluster.n) {
+            const mBh = now.a > 0 ? sc.mTot : (history.events.remnant?.mass ?? 0);
+            const st = cluster.starState(state.selStar, mBh);
+            const status = ['bound', 'EJECTED', 'escaped (frozen)', 'LOSS CONE'][st.flag] ?? '?';
+            rows.push(['★ star #' + st.i, status]);
+            rows.push(['★ r · |v|', `${fmtLen(st.r)} · ${st.v.toFixed(0)} km/s`]);
+            rows.push(['★ L/L_lc', Number.isFinite(st.lRatio) ? st.lRatio.toFixed(2) : '—']);
+            rows.push(['★ E_specific', `${st.eSpec > 0 ? '+' : ''}${st.eSpec.toExponential(2)} (km/s)²`]);
+        }
         rows.push(['star-field mode', state.mode]);
         return rows;
+    }
+
+    /** Click-to-inspect: nearest bound star within ~18 px of the click. */
+    function pickStar(e) {
+        const rect = els.canvas.getBoundingClientRect();
+        const dpr = (renderer._fboSize?.[0] || 1) / Math.max(rect.width, 1);
+        const px = (e.clientX - rect.left) * dpr, py = (e.clientY - rect.top) * dpr;
+        let best = -1, bestD = 18 * dpr;
+        for (let i = 0; i < cluster.n; i++) {
+            const f = cluster.flags[i];
+            if (f === 1 || f === 2) continue;
+            const j = i * 3;
+            const s = renderer.worldToScreen(
+                [cluster.pos[j], cluster.pos[j + 1], cluster.pos[j + 2]]);
+            if (!s) continue;
+            const d = Math.hypot(s[0] - px, s[1] - py);
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        state.selStar = best;
+        selTrail.clear();
     }
 
     // ── UI wiring ────────────────────────────────────────────────────────────
@@ -240,6 +358,7 @@ export function boot(els) {
         state.tNow = S[Math.min(Math.max(i, 0), S.length - 1)].t;
         state.playing = false; syncPlayBtn();
         trails.forEach(t => t.clear());
+        dropPN();
         updateTimelineFromT();
     });
 
@@ -284,6 +403,10 @@ export function boot(els) {
     els.lens?.addEventListener('change', () => { state.lensOn = els.lens.checked; });
     els.ringsChk?.addEventListener('change', () => { state.ringsOn = els.ringsChk.checked; });
     els.follow?.addEventListener('change', () => { state.follow = els.follow.checked; });
+    els.pnChk?.addEventListener('change', () => {
+        state.pnOn = els.pnChk.checked;
+        if (!state.pnOn) dropPN();
+    });
 
     els.exportBtn?.addEventListener('click', () => {
         const blob = new Blob([diag.exportCsv()], { type: 'text/csv' });
@@ -306,16 +429,20 @@ export function boot(els) {
     els.flyBtn?.addEventListener('click', () => { cam.toggleMode(); if (cam.mode === 'fly') unfollow(); syncFlyBtn(); });
     syncFlyBtn();
 
-    // pointer camera: one pointer = look/orbit, two pointers = pinch zoom
+    // pointer camera: one pointer = look/orbit, two = pinch zoom, tap = inspect
     const pointers = new Map();
+    let tap = null;
     els.canvas.addEventListener('pointerdown', (e) => {
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        tap = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
         els.canvas.setPointerCapture(e.pointerId);
     });
     els.canvas.addEventListener('pointermove', (e) => {
         const prev = pointers.get(e.pointerId);
         if (!prev) return;
+        if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 5) tap.moved = true;
         if (pointers.size === 2) {
+            if (tap) tap.moved = true;
             const [a, b] = [...pointers.values()];
             const dOld = Math.hypot(a.x - b.x, a.y - b.y);
             pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -328,7 +455,14 @@ export function boot(els) {
             pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         }
     });
-    const clearPointer = (e) => pointers.delete(e.pointerId);
+    const clearPointer = (e) => {
+        pointers.delete(e.pointerId);
+        if (tap && !tap.moved && pointers.size === 0 &&
+            performance.now() - tap.t < 500 && e.type === 'pointerup') {
+            pickStar(e);          // clean tap → star inspector
+        }
+        if (pointers.size === 0) tap = null;
+    };
     els.canvas.addEventListener('pointerup', clearPointer);
     els.canvas.addEventListener('pointercancel', clearPointer);
     els.canvas.addEventListener('wheel', (e) => {

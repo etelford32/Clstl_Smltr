@@ -188,6 +188,7 @@ canvas.bhl-chart { width:100%; height:92px; display:block; border:1px solid rgba
                     </select>
                 </label>
                 <label>gravitational lensing <input id="lens" type="checkbox" checked></label>
+                <label>live PN endgame <input id="pnChk" type="checkbox" checked></label>
                 <label>scale rings <input id="ringsChk" type="checkbox" checked></label>
                 <label>auto-follow binary <input id="follow" type="checkbox"></label>
             </div>
@@ -209,6 +210,7 @@ canvas.bhl-chart { width:100%; height:92px; display:block; border:1px solid rgba
                 <canvas id="chartGw" class="bhl-chart" style="margin-top:6px;"></canvas>
                 <canvas id="chartRho" class="bhl-chart" style="margin-top:6px;"></canvas>
                 <canvas id="chartBeta" class="bhl-chart" style="margin-top:6px;"></canvas>
+                <canvas id="chartLc" class="bhl-chart" style="margin-top:6px;"></canvas>
             </div>
         </aside>
     </div>
@@ -216,6 +218,8 @@ canvas.bhl-chart { width:100%; height:92px; display:block; border:1px solid rgba
     <div class="bhl-bar">
         <button id="playBtn" type="button">▶ play</button>
         <select id="speed" title="timeline speed">
+            <option value="0.0005">0.5 kyr/s · PN orbits</option>
+            <option value="0.005">5 kyr/s · PN orbits</option>
             <option value="0.05">0.05 Myr/s</option>
             <option value="0.5">0.5 Myr/s</option>
             <option value="5" selected>5 Myr/s</option>
@@ -276,6 +280,35 @@ canvas.bhl-chart { width:100%; height:92px; display:block; border:1px solid rgba
                 (θ_E·D = √(2r_s·D)) and an event-horizon shadow at the √27·GM/c² photon-capture radius —
                 the size the EHT confirmed is spin-insensitive to ≲4% (EHT Collaboration 2019).</li>
         </ul>
+
+        <h3>Live post-Newtonian endgame (Phase 2)</h3>
+        <p>Inside a &lt; 300&nbsp;GM/c² the rendered binary stops being a Kepler ellipse driven by
+        the orbit-averaged history and becomes a <b>direct RK4 integration</b> (≈240 adaptive
+        substeps per orbit) of the harmonic-gauge PN equations of motion:
+        the <b>1PN</b> conservative terms (EIH; Blanchet, Living Rev. Relativ. 17, 2) that produce
+        the orbit-by-orbit periapsis rosette drawn behind the holes, and the <b>2.5PN</b>
+        Burke–Thorne radiation-reaction drag whose orbit average reproduces Peters (1964).
+        The live-state panel shows the direct integration against the orbit-averaged theory in
+        real time: osculating a (PN) vs the Peters track, measured Δϖ per orbit vs
+        6πGM/(c²a(1−e²)), and cumulative ΔE vs the Peters–Mathews GW luminosity (which doubles
+        as the integrator-quality readout). The validation contract lives in
+        <code>tests/abell85-physics.mjs</code>: Kepler energy conservation |ΔE/E| ≈ 10⁻⁷ over 40
+        orbits, 1PN apsidal advance within 0.5% of theory, 2.5PN decay within 0.4% of Peters.
+        <b>2PN conservative terms are deliberately excluded</b> until they can be validated
+        against an independent result — they are a few-percent precession correction in this
+        window. Use the 0.5–5 kyr/s speeds to watch individual final orbits; at faster timeline
+        speeds the PN view hands back to Kepler rendering and says so.</p>
+
+        <h3>Loss cone &amp; star inspector (Phase 2)</h3>
+        <p>Every bound star is classified each frame against the loss-cone boundary
+        <code>L_lc = √(2·G·M_bin·a)</code> (Merritt): stars below it reach pericenters ≲ a and
+        are next in line for the three-body slingshot — they render <b>cyan</b>. The loss-cone
+        chart histograms L/L_lc for core stars with the boundary in red: watch the depletion
+        notch form as the binary consumes its fodder, and the boundary itself collapse as a(t)
+        decays. The test-particle cloud shows pure <em>draining</em>; collisional and triaxial
+        <em>refill</em> is the physics the semi-analytic refill dial stands in for.
+        <b>Click any star</b> to inspect it: specific energy, angular momentum, L/L_lc, radius,
+        speed, and status, with a live trail on the selected star. Click empty space to release.</p>
 
         <h3>Controls</h3>
         <ul>
@@ -338,12 +371,14 @@ const els = {
     scenario: $('scenario'), massModel: $('massModel'), massModelWrap: $('massModelWrap'),
     refill: $('refill'), ecc: $('ecc'), q: $('q'), kick: $('kick'), nStars: $('nStars'),
     lens: $('lens'), ringsChk: $('ringsChk'), follow: $('follow'), incl: $('incl'),
+    pnChk: $('pnChk'),
     exportBtn: $('exportBtn'),
     viewCore: $('viewCore'), viewBinary: $('viewBinary'), viewGalaxy: $('viewGalaxy'),
     flyBtn: $('flyBtn'), camChip: $('camChip'),
     scaleBar: $('scaleBar'), scaleLabel: $('scaleLabel'),
     modeChip: $('modeChip'), staticPanel: $('staticPanel'), readout: $('readout'),
     chartA: $('chartA'), chartGw: $('chartGw'), chartRho: $('chartRho'), chartBeta: $('chartBeta'),
+    chartLc: $('chartLc'),
 };
 
 try {

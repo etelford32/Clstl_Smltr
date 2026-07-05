@@ -141,4 +141,92 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     ok(`A402 pair: today a≈${now.a.toFixed(0)} pc → merger at +${(hist.events.merger / 1000).toFixed(2)} Gyr`);
 }
 
+// ══ Phase 2: live post-Newtonian endgame — validation contract ══════════════
+const { PNBinary, gwPowerSpecific } = await import('../js/abell85/pn.js');
+const { StarCluster } = await import('../js/abell85/nbody.js');
+const { rGrav, keplerPeriodMyr } = await import('../js/abell85/units.js');
+
+// ── 8. integrator: pure-Kepler energy conservation ───────────────────────────
+{
+    const sc = makeScenario('holm15a', { massModel: 'mehrgan2019' });
+    const rg = rGrav(sc.mTot);
+    const pn = new PNBinary(sc, { a: 400 * rg, e: 0.4, phase: 0.3, peri: 0.1, incl: 0.4 },
+        { pn1: false, rr: false });
+    const e0 = pn.energy();
+    pn.step(40 * keplerPeriodMyr(400 * rg, sc.mTot), 1e9);
+    const drift = Math.abs((pn.energy() - e0) / e0);
+    assert.ok(drift < 1e-6, `Kepler energy drift ${drift}`);
+    assert.ok(pn.orbits >= 39, `completed ${pn.orbits} orbits`);
+    ok(`RK4 integrator: |ΔE/E| = ${drift.toExponential(1)} over ${pn.orbits} Kepler orbits`);
+}
+
+// ── 9. 1PN periapsis advance vs Δϖ = 6πGM/(c²a(1−e²)) ──────────────────────
+{
+    const sc = makeScenario('holm15a', { massModel: 'mehrgan2019' });
+    const rg = rGrav(sc.mTot);
+    const a = 300 * rg;
+    const pn = new PNBinary(sc, { a, e: 0.3, phase: 0, peri: 0, incl: 0.3 },
+        { pn1: true, rr: false });
+    pn.step(12 * keplerPeriodMyr(a, sc.mTot), 1e9);
+    assert.ok(pn.orbits >= 8, `orbits = ${pn.orbits}`);
+    assert.ok(pn.measuredAdvance !== null, 'apsidal advance measured');
+    const theory = pn.theoryAdvance();
+    const err = Math.abs(pn.measuredAdvance - theory) / theory;
+    assert.ok(pn.measuredAdvance > 0, 'prograde precession');
+    assert.ok(err < 0.03, `1PN advance err ${(err * 100).toFixed(2)}%`);
+    ok(`1PN apsidal advance: measured ${(pn.measuredAdvance * 180 / Math.PI).toFixed(3)}° ` +
+        `vs theory ${(theory * 180 / Math.PI).toFixed(3)}° per orbit (err ${(err * 100).toFixed(1)}%)`);
+}
+
+// ── 10. 2.5PN radiation reaction vs Peters orbit-averaged decay ─────────────
+{
+    const sc = makeScenario('holm15a', { massModel: 'mehrgan2019' });
+    const rg = rGrav(sc.mTot);
+    const a0 = 60 * rg, e0 = 0.2;
+    // pn1 off: 1PN makes the *Newtonian osculating* a wobble at the (v/c)²
+    // ≈ 1.7% level, which would contaminate the ~2% decay signal — the RR
+    // term must be validated in isolation.
+    const pn = new PNBinary(sc, { a: a0, e: e0, phase: 0, peri: 0, incl: 0 },
+        { pn1: false, rr: true });
+    const span = 30 * keplerPeriodMyr(a0, sc.mTot);
+    pn.step(span, 1e9);
+    const aPn = pn.elements().a;
+    // Peters reference over the same span
+    const beta = petersBeta(sc.m1, sc.m2);
+    let aP = a0, eP = e0, t = 0;
+    while (t < span) {
+        const dt = span / 4000;
+        aP += petersDaDt(aP, eP, beta) * dt;
+        eP = Math.max(0, eP + petersDeDt(aP, eP, sc.m1, sc.m2) * dt);
+        t += dt;
+    }
+    const dPn = a0 - aPn, dPe = a0 - aP;
+    const err = Math.abs(dPn - dPe) / dPe;
+    assert.ok(dPn > 0, 'RR shrinks the orbit');
+    assert.ok(err < 0.12, `RR vs Peters decay err ${(err * 100).toFixed(1)}%`);
+    ok(`2.5PN decay over ${pn.orbits} orbits: Δa(PN)=${(dPn / rg).toFixed(2)} r_g ` +
+        `vs Peters ${(dPe / rg).toFixed(2)} r_g (err ${(err * 100).toFixed(1)}%)`);
+    // GW power bookkeeping is negative (energy loss)
+    assert.ok(gwPowerSpecific(sc.m1, sc.m2, a0, e0) < 0);
+}
+
+// ── 11. loss-cone classification ─────────────────────────────────────────────
+{
+    const sc = makeScenario('holm15a');
+    const cl = new StarCluster(sc, 2048, 7);
+    const { nCone, lLc } = cl.classify(sc.mTot, 100);
+    assert.ok(lLc > 0, 'L_lc positive');
+    assert.ok(nCone > 0 && nCone < cl.n, `nCone = ${nCone}`);
+    const hist = cl.lHistogram(lLc);
+    assert.ok(hist.nTotal > 0, 'histogram populated');
+    // shrinking a shrinks the cone
+    const tighter = cl.classify(sc.mTot, 1);
+    assert.ok(tighter.nCone <= nCone, 'cone drains as a decreases');
+    // merged → cone cleared
+    const cleared = cl.classify(0, 0);
+    assert.equal(cleared.nCone, 0);
+    ok(`loss cone: ${nCone}/${cl.n} stars inside L_lc at a=100 pc; ` +
+        `${tighter.nCone} at a=1 pc; cleared on merge`);
+}
+
 console.log(`\nabell85-physics: all ${n} checks passed`);
