@@ -3526,6 +3526,16 @@ import { TempVolumeFeed } from './js/temp-volume-feed.js';
 import { buildTempLUTPixels, tempToRampFrac } from './js/temp-ramp.js';
 import { StormFeed } from './js/storm-feed.js';
 import { initDebugOverlay } from './js/debug-overlay.js';
+import { perfTrace } from './js/perf-trace.js';
+import { telemetry } from './js/telemetry.js';   // module singleton — same instance the header script init()s
+
+// Boot-phase tracing. This statement runs after every static import above
+// has fetched, parsed, and evaluated — so this first mark IS the module-
+// graph cost. Milestone marks below (scene-built, first-frame, textures);
+// feed milestones are picked up from their existing events inside the
+// tracer. Report: window._perfTrace.table(), auto-printed with ?debug=1.
+perfTrace.start({ telemetry }).mark('modules-evaluated');
+window._perfTrace = perfTrace;
 
 // ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
 initScaleNav('earth');
@@ -3933,6 +3943,11 @@ const atmMesh = new THREE.Mesh(atmGeo, atmMat);
 atmMesh.renderOrder = 1;     // same as strat — additive blending is order-independent
 scene.add(atmMesh);
 
+// All core shells exist (geometry generated, materials constructed — GPU
+// shader compilation still deferred to first draw, visible as a long task
+// between here and first-frame).
+perfTrace.mark('scene-built');
+
 // ── Subsolar debug marker ──────────────────────────────────────────────
 // A small yellow pip that sits on the sphere surface at the sub-solar point.
 // Parented to earthMesh so we only have to supply (lat, lon) — the mesh's
@@ -4228,6 +4243,7 @@ const EARTH_TEX_ANISO = IS_MOBILE_UA
     ? Math.min(4, renderer.capabilities.getMaxAnisotropy())
     : renderer.capabilities.getMaxAnisotropy();
 loadEarthTextures(earthU, cloudU, { anisotropy: EARTH_TEX_ANISO }).then(() => {
+    perfTrace.mark('base-textures-loaded');
     document.getElementById('loading').classList.add('done');
     _scheduleBaseUpgrade();
 });
@@ -10397,6 +10413,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 function animate() {
+    perfTrace.mark('first-frame');   // no-op after the first call
     requestAnimationFrame(animate);
     const t  = clock.getElapsedTime();
     const dt = Math.min(t - lastT, 0.1);  // cap dt at 100 ms (tab unfocus recovery)
@@ -10657,6 +10674,9 @@ function animate() {
 
     controls.update();
     renderer.render(scene, camera);
+    // First completed render — the gap from 'first-frame' to here is the
+    // synchronous GPU shader-compile + first-upload stall. O(1) after #1.
+    perfTrace.mark('first-render-done');
 }
 
 // ═══════════════════════════════════════════════════════════════
