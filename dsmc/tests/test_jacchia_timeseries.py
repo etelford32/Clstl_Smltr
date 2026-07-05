@@ -42,11 +42,13 @@ from dsmc.pipeline.jacchia_timeseries import (   # noqa: E402
 # ─── Loader ──────────────────────────────────────────────────────────────────
 
 def test_load_indices_csv_feb_2022_fixture() -> None:
+    # Fixture is the REAL GFZ definitive 3-hourly ap for 2022-02-01 → 02-07
+    # (replaced the synthetic 16-row ramp on 2026-07-05): 7 days × 8 bins.
     path = REPO / "dsmc" / "fixtures" / "hindcast" / "feb_2022_starlink" / "historical_ap.csv"
     rows = load_indices_csv(path)
-    assert len(rows) == 16
+    assert len(rows) == 56
     assert rows[0].t.tzinfo is not None
-    # Ap rises from ~12 to ~55 then back; check the peak is somewhere in the middle.
+    # The Feb 3 storm peaks at ap=56 (09-12 UT bin); quiet at the window edges.
     aps = [r.ap for r in rows]
     assert max(aps) > 50.0
     assert aps[0] < 15.0 and aps[-1] < 15.0

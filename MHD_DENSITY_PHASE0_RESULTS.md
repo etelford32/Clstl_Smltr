@@ -5,6 +5,27 @@ Raw pipeline outputs live untracked under `data/hindcast/` (gitignored by
 design — only the `*_replay.json` page bundles are committed); this file is
 the tracked record of what each run produced.
 
+## Which baseline is the product gate? (framing note, 2026-07-05)
+
+The Phase-0 gate as written scores against **MSIS + definitive Ap** — the
+after-the-fact index published by GFZ weeks later. That baseline cannot be
+run operationally: at forecast time the definitive Ap does not exist. Any
+*live* density product chooses between (a) persistence (yesterday's Ap),
+(b) climatology, or (c) something derived from real-time observables —
+which is exactly what pseudo-Ap is (L1 IMF reaches us ~40 min before the
+magnetosphere responds; ground magnetometer indices are real-time).
+
+`validate_density --baseline-ap-mode persistence` scores that regime, and
+it is the number that describes the product's value to a satellite
+operator. The hindcast-vs-definitive-Ap gate remains the harder scientific
+bar and is reported alongside, but **the persistence-regime skill is the
+operational headline**: the best current model (ground track, Ap<400 fit)
+sits at **+22.0 %** against a 25 % target — approximately at gate — while
+the same model shows +13.9 % against the retrospective baseline that no
+real-time system can field. Recommendation: Phase-1 planning should treat
+the persistence-regime number as primary and rename the retrospective one
+to "hindcast reference skill".
+
 ## May 2024 Gannon (G5) — GM+IE+IM(RCM2), 2026-07-05
 
 * **Run:** 72 h window `2024-05-10T12:00Z → 2024-05-13T12:00Z`, coupled
