@@ -89,6 +89,7 @@ const NAV_DROPDOWNS = [
         items: [
             { href: 'ton618.html',           label: 'TON 618',             sub: 'Research observatory · 6.6×10¹⁰ M☉', tier: 'public', icon: '🕳️', id: 'ton618' },
             { href: 'abell85.html',          label: 'Abell 85 Pair',       sub: 'Binary inspiral timeline · Gyr dynamics', tier: 'public', icon: '🕳️', badge: 'NEW', id: 'abell85' },
+            { href: 'holm15a.html',          label: 'Holm 15A',            sub: 'Merger history · cinematic auto-play',    tier: 'public', icon: '🕳️', badge: 'NEW', id: 'holm15a' },
             { href: 'sagittarius.html',      label: 'Sagittarius A*',      sub: 'Galactic center · live',              tier: 'public', icon: '🕳️', id: 'sagittarius' },
             { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',          tier: 'public', icon: '🕳️' },
         ],

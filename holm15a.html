@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Holm 15A — Ultramassive Black Hole Merger Simulation — Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/holm15a.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/holm15a.html">
+<meta property="og:title" content="Holm 15A — Ultramassive Black Hole Merger Simulation — Parkers Physics">
+<meta property="og:description" content="Nine billion years of black hole binary evolution in one continuous shot: two ultramassive black holes sink, harden, scour the core of Abell 85's central galaxy starless, spiral together on gravitational waves, and merge. Physics-calibrated, auto-playing.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Holm 15A — Ultramassive Black Hole Merger Simulation">
+<meta name="twitter:description" content="The reconstructed history of the most massive dynamically measured black hole in the local universe — auto-playing, physics-calibrated.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta name="description" content="Auto-playing simulation of the reconstructed merger history of Holm 15A, the central galaxy of Abell 85: dynamical friction, three-body core scouring with a live N-body star cluster, post-Newtonian final orbits, gravitational-wave coalescence and recoil. Same validated engine as the Abell 85 Pair lab.">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Courier New',monospace; background:#000; color:#c8cbe0; overflow:hidden; }
+.h15-stage { position:fixed; inset:0; top:56px; }
+.h15-canvas { display:block; width:100%; height:100%; cursor:grab; touch-action:none; }
+.h15-canvas:active { cursor:grabbing; }
+.h15-fallback {
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    color:#ff6a5e; font-size:14px; text-align:center; padding:24px;
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Holm 15A — Ultramassive Black Hole Merger Simulation",
+  "url": "https://parkersphysics.com/holm15a.html",
+  "applicationCategory": "EducationalApplication",
+  "description": "Auto-playing, physics-calibrated simulation of the reconstructed black hole merger history of Holm 15A (Abell 85): dynamical friction, core scouring, post-Newtonian inspiral, gravitational-wave coalescence and recoil.",
+  "operatingSystem": "Any",
+  "browserRequirements": "WebGL2"
+}
+</script>
+</head>
+<body>
+
+<nav aria-label="Primary navigation"></nav>
+<link rel="stylesheet" href="js/nav-styles.css">
+<script type="module">import { initNav } from "./js/nav.js?v=20260705"; initNav("holm15a");</script>
+
+<div class="h15-stage">
+    <canvas id="h15Canvas" class="h15-canvas" aria-label="Auto-playing simulation of the Holm 15A black hole merger history"></canvas>
+    <div id="h15Fallback" class="h15-fallback"></div>
+</div>
+
+<script type="module">
+import './js/telemetry.js';
+</script>
+<script type="module">
+import { boot } from './js/abell85/cinema.js';
+try {
+    boot(document.getElementById('h15Canvas'));
+} catch (err) {
+    const fb = document.getElementById('h15Fallback');
+    fb.textContent = '⚠ ' + (err?.message || 'failed to start') + ' — this simulation requires WebGL2.';
+    fb.style.display = 'flex';
+    console.error('[holm15a] boot failed:', err);
+}
+</script>
+
+</body>
+</html>
