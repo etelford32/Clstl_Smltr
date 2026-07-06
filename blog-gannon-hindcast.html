@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Index That Lied — Gannon Superstorm Write-up · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/blog-gannon-hindcast">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/blog-gannon-hindcast">
+<meta property="og:title" content="The index that lied: replaying the Gannon superstorm with a ring current">
+<meta property="og:description" content="Ap pegged at 400 for a day while the magnetosphere kept going. We replayed the May 2024 G5 storm through coupled MHD + ring-current physics on a desktop — and measured what the index couldn't. In English, español, français.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/gannon-superstorm.jpg">
+<meta property="og:image:alt" content="Gannon May 2024 G5 superstorm hindcast">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The index that lied: replaying the Gannon superstorm with a ring current">
+<meta name="twitter:description" content="Ap pegged at 400 while the magnetosphere kept going. Coupled MHD + ring-current physics measured what the index couldn't.">
+<meta name="twitter:image" content="https://parkersphysics.com/static/og/gannon-superstorm.jpg">
+<meta name="description" content="Technical write-up of the May 2024 Gannon G5 hindcast: BATS-R-US + Ridley + RCM ring current on a desktop, the Ap=400 saturation exposed at Ap*=524, and a 48% storm-time density-error reduction validated against GRACE-FO and Swarm-C. Available in English, Spanish, and French.">
+
+<link rel="stylesheet" href="colors_and_type.css">
+<link rel="stylesheet" href="js/nav-styles.css">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#040210; color:#d0cce8;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    line-height:1.65;
+}
+
+.bp-wrap { max-width:760px; margin:0 auto; padding:88px 20px 80px; }
+
+/* ── language switcher ── */
+.bp-langs {
+    display:flex; gap:8px; justify-content:flex-end; margin-bottom:28px;
+}
+.bp-langs button {
+    background:rgba(160,128,255,.08); border:1px solid rgba(160,128,255,.25);
+    color:#b9aef0; font:inherit; font-size:.78rem; font-weight:600;
+    padding:5px 14px; border-radius:999px; cursor:pointer;
+    transition:background .15s, color .15s;
+}
+.bp-langs button:hover { background:rgba(160,128,255,.18); }
+.bp-langs button[aria-pressed="true"] {
+    background:linear-gradient(45deg,#7b5cff,#4fc3f7); color:#040210; border-color:transparent;
+}
+
+/* ── article ── */
+article[data-lang] { display:none; }
+article[data-lang].bp-active { display:block; }
+
+.bp-kicker {
+    font-size:.72rem; letter-spacing:.18em; text-transform:uppercase;
+    color:#4fc3f7; font-weight:700; margin-bottom:14px;
+}
+h1 {
+    font-size:clamp(1.7rem, 4.6vw, 2.6rem); line-height:1.15; color:#f0edff;
+    font-weight:800; margin-bottom:16px;
+}
+.bp-standfirst { font-size:1.06rem; color:#a79fd0; margin-bottom:10px; }
+.bp-meta { font-size:.74rem; color:#6f6996; margin-bottom:36px; }
+
+h2 { font-size:1.18rem; color:#e8e2ff; margin:38px 0 12px; font-weight:750; }
+p  { margin-bottom:16px; font-size:.95rem; }
+strong { color:#f0edff; }
+em { color:#cfc6f2; }
+
+/* ── stat cards ── */
+.bp-stats {
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin:30px 0;
+}
+.bp-stat {
+    background:rgba(123,92,255,.07); border:1px solid rgba(123,92,255,.22);
+    border-radius:10px; padding:16px 14px; text-align:center;
+}
+.bp-stat .n {
+    display:block; font-size:1.55rem; font-weight:800;
+    background:linear-gradient(45deg,#a080ff,#4fc3f7);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.bp-stat .l { display:block; font-size:.68rem; color:#8d85b8; margin-top:5px; }
+
+/* ── pull quote ── */
+.bp-pull {
+    border-left:3px solid #7b5cff; padding:6px 0 6px 18px; margin:28px 0;
+    font-size:1.05rem; color:#cfc6f2; font-style:italic;
+}
+
+/* ── CTA ── */
+.bp-cta {
+    display:block; margin:44px 0 0; padding:18px 22px; border-radius:12px;
+    background:linear-gradient(120deg, rgba(123,92,255,.16), rgba(79,195,247,.10));
+    border:1px solid rgba(123,92,255,.35); text-decoration:none;
+}
+.bp-cta .t { color:#f0edff; font-weight:750; font-size:.98rem; }
+.bp-cta .s { color:#9a92c4; font-size:.78rem; margin-top:4px; display:block; }
+.bp-cta:hover { border-color:rgba(79,195,247,.55); }
+
+.bp-foot { margin-top:40px; font-size:.74rem; color:#6f6996; }
+.bp-foot a { color:#4fc3f7; text-decoration:none; }
+
+@media (max-width:768px) {
+    .bp-wrap { padding:76px 16px 60px; }
+    .bp-stats { grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260429"; initNav("blog-gannon-hindcast");</script>
+
+<main class="bp-wrap">
+
+  <div class="bp-langs" role="group" aria-label="Article language">
+    <button data-setlang="en" aria-pressed="true">English</button>
+    <button data-setlang="es" aria-pressed="false">Español</button>
+    <button data-setlang="fr" aria-pressed="false">Français</button>
+  </div>
+
+  <!-- ═══════════════════════ ENGLISH ═══════════════════════ -->
+  <article data-lang="en" class="bp-active">
+    <div class="bp-kicker">Research note · MHD density hindcast</div>
+    <h1>The index that lied: replaying the Gannon superstorm with a ring current</h1>
+    <p class="bp-standfirst">On May 10, 2024, the strongest geomagnetic storm in two decades hit Earth — and the index the entire industry uses to model satellite drag quietly stopped telling the truth.</p>
+    <p class="bp-meta">Parkers Physics · July 2026 · 6 min read</p>
+
+    <p>Auroras reached Mexico. Satellite operators watched their spacecraft sink into suddenly-thickened air. And the planetary Ap index — the driver behind every empirical density model in operational use — hit a wall.</p>
+
+    <p><strong>Ap has a ceiling.</strong> The scale tops out at 400, a design decision inherited from the 1930s Kp network. For roughly 24 hours during the Gannon storm, Ap sat <strong>pinned at exactly 400</strong> — not because the magnetosphere stopped getting more disturbed, but because the ruler ran out of markings. Every Ap-driven density model (NRLMSIS included) was flying blind above the clamp, and the drag forecasts derived from them inherited the lie.</p>
+
+    <p>This is the same failure family that cost SpaceX 38 Starlink satellites in February 2022 — an event where the models' underestimate of storm-time density turned a routine insertion into a mass reentry. Gannon is that problem at ten times the energy.</p>
+
+    <h2>What we did</h2>
+    <p>We replayed the full 72-hour storm through a coupled physics stack — BATS-R-US global magnetohydrodynamics, the Ridley ionosphere solver, and (new to this run) the <strong>RCM ring-current model</strong> — driven by nothing but real L1 solar-wind measurements: the data a forecaster would actually have in real time. The whole simulation ran on a single Apple-Silicon desktop in 13.4 hours: 1.15 million timesteps, ten MPI ranks, one Docker image. Physics that used to demand a cluster now fits under a desk.</p>
+
+    <div class="bp-stats">
+      <div class="bp-stat"><span class="n">524</span><span class="l">peak Ap* while the official index sat clamped at 400</span></div>
+      <div class="bp-stat"><span class="n">48%</span><span class="l">storm-time density-error reduction vs real-time-Ap MSIS</span></div>
+      <div class="bp-stat"><span class="n">13.4 h</span><span class="l">wall-clock for 72 simulated hours, on a desktop</span></div>
+    </div>
+
+    <h2>What the physics said</h2>
+    <p>The simulation's polar-cap potential peaked at 307&nbsp;kV, and the pseudo-Ap we regress from it climbed to <strong>Ap* = 524</strong> while the official index sat clamped at 400. The magnetosphere kept going where the index could not follow — that gap is invisible to every Ap-driven model on the market.</p>
+
+    <h2>Does it help?</h2>
+    <p>Scored against real GRACE-FO and Swarm-C accelerometer densities with NRLMSIS as the baseline: in the <em>operational</em> regime — where the competition is the Ap you actually have at forecast time, not the definitive value published weeks later — the physics-derived Ap surrogate alone cuts storm-time density error by <strong>23%</strong>. And when the same real-time drivers power a density model with the thermosphere's true heating-cooling memory (a ~5-hour relaxation the empirical models lack), the improvement reaches <strong>48%</strong> — clearing the program's 25% validation gate.</p>
+
+    <p>We then replayed February 2022 — the Starlink-killer storm — through the same pipeline and fit both events jointly: the coefficients barely moved. <strong>The physics transfers across storms;</strong> it isn't tuned to one lucky event.</p>
+
+    <h2>The honest parts</h2>
+    <p>Two findings we're publishing because trust is the product. First, an earlier internal skill number (10.3%) turned out to be scored against a fallback atmosphere rather than real NRLMSIS — the honest baseline is harder to beat, and we say so. Second, the single biggest skill gain came not from more physics but from refusing to let the saturated Ap bins poison the regression: <em>you cannot fit what the ruler cannot measure.</em></p>
+
+    <div class="bp-pull">When the driving index saturates exactly when drag is most violent, fuel margins are fiction. A physics pipeline that keeps measuring where the index clips is the difference between "the model said 400" and knowing it was really 524.</div>
+
+    <h2>Why it matters</h2>
+    <p>Every LEO operator budgets fuel and collision-avoidance margin against a density forecast. The Gannon storm proved those forecasts inherit a hard ceiling from a 90-year-old index — and that a coupled MHD pipeline running on operations-room hardware can measure past it, in real time, from L1 data that arrives ~40 minutes before the magnetosphere responds.</p>
+
+    <a class="bp-cta" href="gannon-superstorm.html">
+      <span class="t">⚡ Explore the interactive Gannon hindcast →</span>
+      <span class="s">The full 72-hour replay — drivers, density tracks, and validation against accelerometer truth, live in your browser.</span>
+    </a>
+
+    <p class="bp-foot">Methods, fits, and residual reports live in the ParkersPhysics repository (<code>MHD_DENSITY_PHASE0_RESULTS.md</code>). Questions or operator inquiries: <a href="request-access.html">request access</a>.</p>
+  </article>
+
+  <!-- ═══════════════════════ ESPAÑOL ═══════════════════════ -->
+  <article data-lang="es">
+    <div class="bp-kicker">Nota de investigación · Hindcast de densidad MHD</div>
+    <h1>El índice que mintió: recreando la supertormenta de Gannon con corriente de anillo</h1>
+    <p class="bp-standfirst">El 10 de mayo de 2024, la tormenta geomagnética más intensa en dos décadas golpeó la Tierra — y el índice que toda la industria usa para modelar el arrastre satelital dejó de decir la verdad, en silencio.</p>
+    <p class="bp-meta">Parkers Physics · Julio 2026 · 6 min de lectura</p>
+
+    <p>Las auroras llegaron hasta México. Los operadores de satélites vieron a sus naves hundirse en un aire repentinamente más denso. Y el índice planetario Ap — el motor de todos los modelos empíricos de densidad en uso operacional — chocó contra un muro.</p>
+
+    <p><strong>Ap tiene un techo.</strong> La escala termina en 400, una decisión de diseño heredada de la red Kp de los años treinta. Durante unas 24 horas de la tormenta de Gannon, Ap quedó <strong>clavado exactamente en 400</strong> — no porque la magnetosfera dejara de perturbarse, sino porque a la regla se le acabaron las marcas. Todos los modelos de densidad que dependen de Ap (incluido NRLMSIS) volaban a ciegas por encima del tope, y los pronósticos de arrastre heredaron la mentira.</p>
+
+    <p>Es la misma familia de fallos que le costó a SpaceX 38 satélites Starlink en febrero de 2022, cuando la subestimación de la densidad durante la tormenta convirtió una inserción rutinaria en una reentrada masiva. Gannon es ese mismo problema con diez veces más energía.</p>
+
+    <h2>Qué hicimos</h2>
+    <p>Recreamos las 72 horas completas de la tormenta con una cadena de física acoplada — magnetohidrodinámica global BATS-R-US, el resolvedor ionosférico de Ridley y, novedad de esta ejecución, el <strong>modelo de corriente de anillo RCM</strong> — alimentada únicamente con mediciones reales del viento solar en L1: los datos que un pronosticador tendría de verdad en tiempo real. Toda la simulación corrió en un solo escritorio Apple Silicon en 13,4 horas: 1,15 millones de pasos, diez procesos MPI, una imagen Docker. Física que antes exigía un clúster ahora cabe bajo una mesa.</p>
+
+    <div class="bp-stats">
+      <div class="bp-stat"><span class="n">524</span><span class="l">pico de Ap* mientras el índice oficial seguía clavado en 400</span></div>
+      <div class="bp-stat"><span class="n">48%</span><span class="l">reducción del error de densidad en tormenta vs MSIS con Ap en tiempo real</span></div>
+      <div class="bp-stat"><span class="n">13,4 h</span><span class="l">de reloj para 72 horas simuladas, en un escritorio</span></div>
+    </div>
+
+    <h2>Qué dijo la física</h2>
+    <p>El potencial de casquete polar simulado alcanzó 307&nbsp;kV, y el pseudo-Ap que ajustamos a partir de él subió hasta <strong>Ap* = 524</strong> mientras el índice oficial seguía clavado en 400. La magnetosfera siguió avanzando donde el índice no podía seguirla — y esa brecha es invisible para todos los modelos del mercado que dependen de Ap.</p>
+
+    <h2>¿Sirve de algo?</h2>
+    <p>Evaluado contra densidades reales de los acelerómetros GRACE-FO y Swarm-C con NRLMSIS como referencia: en el régimen <em>operacional</em> — donde la competencia es el Ap disponible en el momento del pronóstico, no el valor definitivo publicado semanas después — el sustituto de Ap derivado de la física reduce por sí solo el error de densidad en tormenta un <strong>23%</strong>. Y cuando esos mismos datos en tiempo real alimentan un modelo de densidad con la verdadera memoria térmica de la termosfera (una relajación de ~5 horas que los modelos empíricos no tienen), la mejora llega al <strong>48%</strong> — superando la meta de validación del 25%.</p>
+
+    <p>Después recreamos febrero de 2022 — la tormenta que mató a los Starlink — con la misma cadena y ajustamos ambos eventos conjuntamente: los coeficientes apenas se movieron. <strong>La física se transfiere entre tormentas;</strong> no está calibrada a un evento afortunado.</p>
+
+    <h2>La parte honesta</h2>
+    <p>Publicamos dos hallazgos porque la confianza es el producto. Primero, una métrica interna anterior (10,3%) resultó estar evaluada contra una atmósfera de respaldo y no contra el NRLMSIS real — la referencia honesta es más difícil de superar, y lo decimos. Segundo, la mayor ganancia no vino de más física, sino de negarnos a que los tramos saturados de Ap envenenaran la regresión: <em>no se puede ajustar lo que la regla no puede medir.</em></p>
+
+    <div class="bp-pull">Cuando el índice se satura justo cuando el arrastre es más violento, los márgenes de combustible son ficción. Una cadena de física que sigue midiendo donde el índice se recorta es la diferencia entre «el modelo dijo 400» y saber que en realidad eran 524.</div>
+
+    <h2>Por qué importa</h2>
+    <p>Todo operador en órbita baja presupuesta combustible y márgenes de evasión contra un pronóstico de densidad. La tormenta de Gannon demostró que esos pronósticos heredan un techo rígido de un índice con 90 años de historia — y que una cadena MHD acoplada, corriendo en hardware de sala de operaciones, puede medir más allá de él, en tiempo real, con datos de L1 que llegan ~40 minutos antes de que responda la magnetosfera.</p>
+
+    <a class="bp-cta" href="gannon-superstorm.html">
+      <span class="t">⚡ Explora el hindcast interactivo de Gannon →</span>
+      <span class="s">La recreación completa de 72 horas — forzantes, trazas de densidad y validación contra la verdad de los acelerómetros, en tu navegador.</span>
+    </a>
+
+    <p class="bp-foot">Métodos, ajustes e informes de residuos en el repositorio de ParkersPhysics (<code>MHD_DENSITY_PHASE0_RESULTS.md</code>). Consultas de operadores: <a href="request-access.html">solicitar acceso</a>.</p>
+  </article>
+
+  <!-- ═══════════════════════ FRANÇAIS ═══════════════════════ -->
+  <article data-lang="fr">
+    <div class="bp-kicker">Note de recherche · Hindcast de densité MHD</div>
+    <h1>L'indice qui mentait : rejouer la supertempête de Gannon avec un courant annulaire</h1>
+    <p class="bp-standfirst">Le 10 mai 2024, la plus forte tempête géomagnétique en vingt ans a frappé la Terre — et l'indice que toute l'industrie utilise pour modéliser la traînée des satellites a cessé, en silence, de dire la vérité.</p>
+    <p class="bp-meta">Parkers Physics · Juillet 2026 · 6 min de lecture</p>
+
+    <p>Les aurores sont descendues jusqu'au Mexique. Les opérateurs de satellites ont regardé leurs engins s'enfoncer dans un air soudainement densifié. Et l'indice planétaire Ap — le moteur de tous les modèles empiriques de densité en usage opérationnel — a heurté un mur.</p>
+
+    <p><strong>Ap possède un plafond.</strong> L'échelle s'arrête à 400, un choix de conception hérité du réseau Kp des années 1930. Pendant environ 24 heures de la tempête de Gannon, Ap est resté <strong>bloqué à exactement 400</strong> — non pas parce que la magnétosphère avait cessé de se perturber, mais parce que la règle n'avait plus de graduations. Tous les modèles de densité pilotés par Ap (NRLMSIS compris) volaient à l'aveugle au-dessus du plafond, et les prévisions de traînée en ont hérité le mensonge.</p>
+
+    <p>C'est la même famille de défaillances qui a coûté à SpaceX 38 satellites Starlink en février 2022 — un événement où la sous-estimation de la densité en tempête a transformé une insertion de routine en rentrée massive. Gannon, c'est ce problème-là, avec dix fois plus d'énergie.</p>
+
+    <h2>Ce que nous avons fait</h2>
+    <p>Nous avons rejoué les 72 heures de la tempête à travers une chaîne physique couplée — la magnétohydrodynamique globale BATS-R-US, le solveur ionosphérique de Ridley et, nouveauté de cette exécution, le <strong>modèle de courant annulaire RCM</strong> — pilotée uniquement par de vraies mesures du vent solaire en L1 : les données dont un prévisionniste disposerait réellement en temps réel. La simulation entière a tourné sur un seul poste de travail Apple Silicon en 13,4 heures : 1,15 million de pas de temps, dix rangs MPI, une image Docker. Une physique qui exigeait hier un cluster tient aujourd'hui sous un bureau.</p>
+
+    <div class="bp-stats">
+      <div class="bp-stat"><span class="n">524</span><span class="l">pic d'Ap* pendant que l'indice officiel restait cloué à 400</span></div>
+      <div class="bp-stat"><span class="n">48%</span><span class="l">de réduction de l'erreur de densité en tempête vs MSIS + Ap temps-réel</span></div>
+      <div class="bp-stat"><span class="n">13,4 h</span><span class="l">de temps réel pour 72 heures simulées, sur un poste de travail</span></div>
+    </div>
+
+    <h2>Ce que la physique a dit</h2>
+    <p>Le potentiel de calotte polaire simulé a culminé à 307&nbsp;kV, et le pseudo-Ap que nous en régressons est monté à <strong>Ap* = 524</strong> pendant que l'indice officiel restait cloué à 400. La magnétosphère a continué là où l'indice ne pouvait plus suivre — et cet écart est invisible pour tous les modèles du marché pilotés par Ap.</p>
+
+    <h2>Est-ce que ça aide ?</h2>
+    <p>Évalué contre les densités réelles des accéléromètres GRACE-FO et Swarm-C, NRLMSIS servant de référence : dans le régime <em>opérationnel</em> — où la concurrence est l'Ap dont on dispose vraiment au moment de la prévision, et non la valeur définitive publiée des semaines plus tard — le substitut d'Ap dérivé de la physique réduit à lui seul l'erreur de densité en tempête de <strong>23%</strong>. Et quand ces mêmes données temps-réel alimentent un modèle de densité doté de la vraie mémoire thermique de la thermosphère (une relaxation d'environ 5 heures que les modèles empiriques n'ont pas), le gain atteint <strong>48%</strong> — franchissant l'objectif de validation de 25%.</p>
+
+    <p>Nous avons ensuite rejoué février 2022 — la tempête qui a tué les Starlink — dans la même chaîne et ajusté les deux événements conjointement : les coefficients ont à peine bougé. <strong>La physique se transfère d'une tempête à l'autre ;</strong> elle n'est pas réglée sur un événement chanceux.</p>
+
+    <h2>La part d'honnêteté</h2>
+    <p>Nous publions deux constats, parce que la confiance est le produit. D'abord, un chiffre interne antérieur (10,3%) s'est révélé évalué contre une atmosphère de secours et non le vrai NRLMSIS — la référence honnête est plus dure à battre, et nous le disons. Ensuite, le plus grand gain n'est pas venu d'un supplément de physique, mais du refus de laisser les créneaux d'Ap saturés empoisonner la régression : <em>on ne peut pas ajuster ce que la règle ne sait pas mesurer.</em></p>
+
+    <div class="bp-pull">Quand l'indice sature précisément au moment où la traînée est la plus violente, les marges de carburant sont une fiction. Une chaîne physique qui continue de mesurer là où l'indice écrête, c'est la différence entre « le modèle disait 400 » et savoir qu'il fallait lire 524.</div>
+
+    <h2>Pourquoi c'est important</h2>
+    <p>Chaque opérateur en orbite basse budgète son carburant et ses marges d'évitement sur une prévision de densité. La tempête de Gannon a prouvé que ces prévisions héritent d'un plafond rigide d'un indice vieux de 90 ans — et qu'une chaîne MHD couplée, tournant sur du matériel de salle d'opérations, peut mesurer au-delà, en temps réel, à partir de données L1 qui arrivent ~40 minutes avant la réponse de la magnétosphère.</p>
+
+    <a class="bp-cta" href="gannon-superstorm.html">
+      <span class="t">⚡ Explorer le hindcast interactif de Gannon →</span>
+      <span class="s">La reconstitution complète des 72 heures — forçages, traces de densité et validation contre la vérité accélérométrique, dans votre navigateur.</span>
+    </a>
+
+    <p class="bp-foot">Méthodes, ajustements et rapports de résidus dans le dépôt ParkersPhysics (<code>MHD_DENSITY_PHASE0_RESULTS.md</code>). Demandes d'opérateurs : <a href="request-access.html">demander l'accès</a>.</p>
+  </article>
+
+</main>
+
+<script>
+(() => {
+    const KEY = 'pp-blog-lang';
+    const supported = ['en', 'es', 'fr'];
+    const buttons = document.querySelectorAll('.bp-langs button');
+
+    function setLang(lang) {
+        if (!supported.includes(lang)) lang = 'en';
+        document.querySelectorAll('article[data-lang]').forEach(a =>
+            a.classList.toggle('bp-active', a.dataset.lang === lang));
+        buttons.forEach(b =>
+            b.setAttribute('aria-pressed', String(b.dataset.setlang === lang)));
+        document.documentElement.lang = lang;
+        try { localStorage.setItem(KEY, lang); } catch (_) { /* private mode */ }
+    }
+
+    buttons.forEach(b => b.addEventListener('click', () => setLang(b.dataset.setlang)));
+
+    let initial = null;
+    try { initial = localStorage.getItem(KEY); } catch (_) { /* private mode */ }
+    if (!initial) initial = (navigator.language || 'en').slice(0, 2);
+    setLang(initial);
+})();
+</script>
+
+</body>
+</html>
