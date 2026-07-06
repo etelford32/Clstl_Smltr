@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Black Hole Observatory — Three Ultramassive Systems, One Canvas — Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/blackhole-observatory.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/blackhole-observatory.html">
+<meta property="og:title" content="Black Hole Observatory — Three Ultramassive Systems, One Canvas">
+<meta property="og:description" content="The Abell 402-BCG candidate pair, Holm 15A's reconstructed merger, and the stalled B2 0402+379 — stacked in one scene, synchronized on time-to-coalescence, physics in a Web Worker, every constraint an adjustable dial with its observational provenance.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Black Hole Observatory — Parkers Physics">
+<meta name="twitter:description" content="Three ultramassive black hole binaries, one canvas, one τ axis — worker-threaded physics, open constraints, live comparison analytics.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta name="description" content="Unified observatory for ultramassive black hole binary evolution: Abell 402-BCG, Holm 15A (Abell 85) and B2 0402+379 stacked on one WebGL canvas, synchronized on merger-relative time, with worker-threaded N-body + post-Newtonian physics, ECS architecture, open observational constraints, and live comparison analytics.">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Courier New',monospace; background:#000; color:#c8cbe0; overflow:hidden; }
+
+:root {
+    --pp-accent:        #8a7bff;
+    --pp-accent-soft:   rgba(138, 123, 255, .12);
+    --pp-accent-border: rgba(138, 123, 255, .28);
+    --pp-surface-1:     rgba(8, 7, 18, .90);
+    --pp-surface-2:     rgba(14, 12, 30, .92);
+}
+
+.obs-app { position:fixed; inset:0; top:56px; display:flex; }
+
+/* left rail: systems + constraints */
+.obs-rail {
+    width:300px; flex:none; overflow-y:auto; padding:10px;
+    background:var(--pp-surface-1); border-right:1px solid var(--pp-accent-border);
+    display:flex; flex-direction:column; gap:10px;
+}
+.obs-rail h2 { font-size:11px; letter-spacing:.12em; color:var(--pp-accent); text-transform:uppercase; margin-bottom:4px; }
+.obs-lane {
+    display:flex; align-items:center; gap:8px; font-size:10.5px; padding:6px;
+    border:1px solid; border-radius:6px; background:var(--pp-surface-2);
+    margin-bottom:6px; cursor:pointer;
+}
+.obs-lane i { width:9px; height:9px; border-radius:50%; flex:none; }
+.obs-lane input { accent-color:var(--pp-accent); }
+.obs-lane span { flex:1; line-height:1.35; color:#bbc; }
+.obs-lane b { color:#e8eaff; }
+.obs-lane .sel {
+    font-family:inherit; font-size:9.5px; background:transparent; color:#9aa;
+    border:1px solid var(--pp-accent-border); border-radius:4px; padding:2px 6px; cursor:pointer;
+}
+.obs-lane .sel:hover { color:#fff; border-color:var(--pp-accent); }
+
+.obs-ctl { margin:7px 0; }
+.obs-ctl label { display:flex; align-items:center; gap:6px; font-size:10.5px; color:#aab; margin-bottom:2px; }
+.obs-ctl label b.val { margin-left:auto; color:#e8eaff; }
+.obs-ctl input[type=range] { width:100%; accent-color:var(--pp-accent); }
+.obs-ctl select { width:100%; background:#111426; color:#dde; border:1px solid var(--pp-accent-border); font-family:inherit; font-size:10.5px; padding:2px; }
+.tag { font-style:normal; font-size:8.5px; letter-spacing:.08em; text-transform:uppercase; padding:1px 5px; border-radius:8px; }
+.tag-measured { background:rgba(120,220,140,.15); color:#8fe0a0; }
+.tag-inferred { background:rgba(216,178,90,.15); color:#d8b25a; }
+.tag-assumed  { background:rgba(255,150,90,.15); color:#ffab70; }
+.tag-free     { background:rgba(138,123,255,.15); color:#b0a5ff; }
+
+.obs-rail-close { display:none; }
+.obs-engine { font-size:10px; color:#9fb4d8; padding:2px 0 4px; }
+.obs-nstars { display:flex; align-items:center; gap:6px; font-size:10.5px; color:#aab; }
+.obs-nstars select { flex:1; background:#111426; color:#dde; border:1px solid var(--pp-accent-border); font-family:inherit; font-size:10.5px; padding:2px; }
+
+.obs-presets { margin-top:10px; }
+.obs-presets button {
+    font-family:inherit; font-size:10px; background:var(--pp-accent-soft); color:#cfd0ff;
+    border:1px solid var(--pp-accent-border); border-radius:4px; padding:3px 8px;
+    margin:2px 3px 2px 0; cursor:pointer;
+}
+.obs-presets button:hover { border-color:var(--pp-accent); color:#fff; }
+.obs-warn {
+    margin-top:8px; font-size:10.5px; color:#ffb454; border:1px solid rgba(255,180,84,.4);
+    border-radius:6px; padding:6px; background:rgba(255,180,84,.08);
+}
+
+/* main column: canvas + dock */
+.obs-main { flex:1; min-width:0; display:flex; flex-direction:column; }
+.obs-stage { position:relative; flex:1; min-height:0; }
+.obs-canvas { display:block; width:100%; height:100%; cursor:grab; touch-action:none; }
+.obs-canvas:active { cursor:grabbing; }
+
+.obs-chips { position:absolute; top:10px; left:10px; display:flex; flex-direction:column; gap:5px; pointer-events:none; max-width:66%; }
+.obs-chip {
+    font-size:10px; padding:3px 8px; border-radius:8px; border:1px solid;
+    background:var(--pp-surface-1); color:#d8daf0; display:flex; align-items:center; gap:6px;
+}
+.obs-chip i { width:7px; height:7px; border-radius:50%; flex:none; }
+.obs-event {
+    position:absolute; top:36%; left:0; right:0; text-align:center; font-size:15px;
+    letter-spacing:.1em; pointer-events:none; opacity:0; transition:opacity .3s linear;
+    text-shadow:0 0 12px #000;
+}
+.obs-scalebar { position:absolute; bottom:12px; left:12px; display:flex; align-items:center; gap:7px; pointer-events:none; }
+.obs-scalebar .bar { height:0; border-top:2px solid #cfd0ff; border-left:2px solid #cfd0ff; border-right:2px solid #cfd0ff; padding-top:3px; }
+.obs-scalebar span { font-size:10.5px; color:#dfe1ff; text-shadow:0 0 4px #000; }
+.obs-inspector {
+    position:absolute; right:10px; bottom:12px; width:236px; font-size:10.5px;
+    background:var(--pp-surface-1); border:1px solid var(--pp-accent-border);
+    border-radius:6px; padding:7px 9px;
+}
+.obs-inspector .head { display:flex; align-items:center; gap:6px; font-weight:700; margin-bottom:4px; }
+.obs-inspector .head button {
+    margin-left:auto; font-family:inherit; font-size:10px; background:transparent; color:#9aa;
+    border:1px solid var(--pp-accent-border); border-radius:4px; padding:1px 6px; cursor:pointer;
+}
+.obs-inspector .row { display:flex; justify-content:space-between; gap:8px; padding:1.5px 0; border-bottom:1px dotted rgba(138,123,255,.12); }
+.obs-inspector .row span { color:#889; }
+.obs-inspector .row b { color:#dfe1ff; text-align:right; }
+
+.obs-rail-toggle { display:none; }
+.obs-views { position:absolute; top:10px; right:10px; display:flex; gap:6px; }
+.obs-views button, .obs-timerow button, .obs-timerow select {
+    font-family:inherit; font-size:11px; background:var(--pp-surface-2); color:#cfd0ff;
+    border:1px solid var(--pp-accent-border); border-radius:4px; padding:3px 9px; cursor:pointer;
+}
+.obs-views button:hover { border-color:var(--pp-accent); color:#fff; }
+
+.obs-dock {
+    flex:none; display:flex; flex-direction:column; gap:6px; padding:8px 12px;
+    background:var(--pp-surface-1); border-top:1px solid var(--pp-accent-border);
+}
+.obs-timerow { display:flex; align-items:center; gap:10px; }
+.obs-timerow input[type=range] { flex:1; accent-color:var(--pp-accent); }
+.obs-timerow .tau { font-size:11.5px; color:#dfe1ff; min-width:205px; text-align:right; }
+.obs-timerow label { font-size:10.5px; color:#aab; display:flex; align-items:center; gap:5px; }
+.obs-timerow input[type=checkbox] { accent-color:var(--pp-accent); }
+
+.obs-analytics { display:flex; gap:8px; height:148px; }
+canvas.obs-chart { height:100%; border:1px solid rgba(138,123,255,.18); border-radius:4px; background:rgba(5,5,12,.6); }
+#chartTau { flex:1.7; min-width:0; cursor:pointer; }
+#chartGw { flex:0.9; min-width:0; }
+.obs-grid { flex:1.25; min-width:0; overflow-y:auto; border:1px solid rgba(138,123,255,.18); border-radius:4px; padding:5px 8px; background:rgba(5,5,12,.6); }
+.obs-gr { display:grid; grid-template-columns:1.05fr 1fr 1fr 1fr; gap:4px; font-size:10px; padding:1.5px 0; border-bottom:1px dotted rgba(138,123,255,.12); }
+.obs-gr span { color:#889; }
+.obs-gr b { font-weight:600; text-align:right; color:#dfe1ff; }
+.obs-gr-head b { font-size:9.5px; }
+
+.obs-methods {
+    position:fixed; inset:56px 0 0 0; z-index:60; overflow-y:auto; display:none;
+    background:rgba(3,3,10,.96); padding:28px 18px 60px;
+}
+.obs-methods.open { display:block; }
+.obs-methods .inner { max-width:860px; margin:0 auto; font-size:13px; line-height:1.55; color:#c5c9e2; }
+.obs-methods h1 { color:var(--pp-accent); font-size:18px; margin-bottom:12px; }
+.obs-methods h3 { color:#e8eaff; font-size:14px; margin:18px 0 6px; }
+.obs-methods p, .obs-methods li { margin-bottom:8px; }
+.obs-methods ul { margin-left:20px; }
+.obs-methods code { color:#ffd27f; }
+
+@media (max-width: 900px) {
+    body { overflow:auto; }
+    .obs-app { position:static; height:auto; flex-direction:column; }
+    /* rail becomes a slide-in drawer so the canvas keeps the full viewport */
+    .obs-rail {
+        position:fixed; z-index:55; top:56px; bottom:0; left:0;
+        width:min(85vw, 340px); background:rgb(8,7,18);
+        transform:translateX(-105%); transition:transform .22s ease;
+        box-shadow:6px 0 24px rgba(0,0,0,.55);
+        -webkit-overflow-scrolling:touch; overscroll-behavior:contain;
+    }
+    .obs-rail.open { transform:none; }
+    .obs-rail-close {
+        display:block; font-family:inherit; font-size:11px; align-self:flex-end;
+        background:var(--pp-surface-2); color:#cfd0ff; cursor:pointer;
+        border:1px solid var(--pp-accent-border); border-radius:4px; padding:7px 12px;
+    }
+    .obs-rail-toggle { display:inline-block; }
+    .obs-stage { height:52vh; }
+    .obs-analytics { flex-direction:column; height:auto; }
+    canvas.obs-chart { height:110px; width:100%; }
+    .obs-timerow { flex-wrap:wrap; row-gap:6px; }
+    .obs-timerow .tau { min-width:0; font-size:10.5px; text-align:left; flex-basis:100%; order:9; }
+    .obs-timerow input[type=range] { flex-basis:100%; order:8; height:28px; }
+    /* comfortable touch targets */
+    .obs-timerow button, .obs-timerow select { padding:8px 12px; font-size:12px; }
+    .obs-views button { padding:7px 11px; font-size:12px; }
+    .obs-lane { padding:10px 8px; }
+    .obs-lane .sel { padding:6px 10px; }
+    .obs-presets button { padding:7px 10px; margin:3px 4px 3px 0; }
+    .obs-ctl input[type=range] { height:28px; }
+    .obs-nstars select { padding:6px; }
+    .obs-inspector { width:200px; right:8px; bottom:8px; }
+    .obs-chips { max-width:78%; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Black Hole Observatory — Parkers Physics",
+  "url": "https://parkersphysics.com/blackhole-observatory.html",
+  "applicationCategory": "EducationalApplication",
+  "description": "Unified, worker-threaded observatory for ultramassive black hole binary evolution: three real systems stacked on one canvas, synchronized on merger-relative time, with adjustable observational constraints and live comparison analytics.",
+  "operatingSystem": "Any",
+  "browserRequirements": "WebGL2"
+}
+</script>
+</head>
+<body>
+
+<nav aria-label="Primary navigation"></nav>
+<link rel="stylesheet" href="js/nav-styles.css">
+<script type="module">import { initNav } from "./js/nav.js?v=20260706"; initNav("blackhole-observatory");</script>
+
+<div class="obs-app">
+    <aside id="rail" class="obs-rail">
+        <button id="railClose" type="button" class="obs-rail-close">✕ close panel</button>
+        <div>
+            <h2>Systems · stacked on one canvas</h2>
+            <div id="laneToggles"></div>
+        </div>
+        <div>
+            <h2>Engine</h2>
+            <div id="engineChip" class="obs-engine">starting…</div>
+            <label class="obs-nstars">stars / lane
+                <select id="nStars" title="test particles per system — WASM kernel makes 10⁵+ affordable">
+                    <option value="auto" selected>auto</option>
+                    <option value="8192">8,192</option>
+                    <option value="32768">32,768</option>
+                    <option value="65536">65,536</option>
+                    <option value="131072">131,072</option>
+                </select>
+            </label>
+        </div>
+        <div id="constraints"></div>
+    </aside>
+
+    <div class="obs-main">
+        <div class="obs-stage">
+            <canvas id="obsCanvas" class="obs-canvas" aria-label="Stacked simulation of three ultramassive black hole systems"></canvas>
+            <div id="chips" class="obs-chips"></div>
+            <div id="eventCap" class="obs-event"></div>
+            <div class="obs-scalebar"><div id="scaleBar" class="bar"></div><span id="scaleLabel">—</span></div>
+            <div id="inspector" class="obs-inspector" hidden></div>
+            <div class="obs-views">
+                <button id="viewCore" type="button">core</button>
+                <button id="viewInfl" type="button">influence</button>
+                <button id="methodsBtn" type="button">methods</button>
+            </div>
+        </div>
+        <div class="obs-dock">
+            <div class="obs-timerow">
+                <button id="railToggle" type="button" class="obs-rail-toggle" title="systems &amp; constraints">⚙</button>
+                <button id="playBtn" type="button">⏸</button>
+                <select id="speed" title="playback speed">
+                    <option value="0.25">¼×</option>
+                    <option value="1" selected>1×</option>
+                    <option value="4">4×</option>
+                </select>
+                <input id="timeline" type="range" min="0" max="1" step="0.0002" value="0"
+                       title="shared timeline in τ = time to coalescence">
+                <span id="tauLabel" class="tau">—</span>
+                <label>follow binaries <input id="follow" type="checkbox"></label>
+                <button id="audioBtn" type="button" title="sonified GW chirp of the selected system (frequency ×3·10¹⁰)">🔇 GW audio</button>
+            </div>
+            <div class="obs-analytics">
+                <canvas id="chartTau" class="obs-chart" title="click to scrub"></canvas>
+                <canvas id="chartGw" class="obs-chart"></canvas>
+                <div id="grid" class="obs-grid"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="methods" class="obs-methods">
+    <div class="inner">
+        <button id="methodsClose" type="button" style="float:right; font-family:inherit; font-size:12px; background:var(--pp-surface-2); color:#cfd0ff; border:1px solid var(--pp-accent-border); border-radius:4px; padding:4px 10px; cursor:pointer;">✕ close</button>
+        <h1>Black Hole Observatory — methods</h1>
+        <p>Three real ultramassive systems run as parallel simulations <b>stacked in one scene</b>,
+        each tinted by identity: <b style="color:#a99bff">Abell 402-BCG</b> (candidate 60±20 ×10⁹ M☉
+        pair — the pair that <em>is</em>), <b style="color:#f0bd55">Holm 15A / Abell 85</b>
+        (reconstructed history of the measured 2.2×10¹⁰ M☉ remnant — the pair that <em>was</em>),
+        and <b style="color:#4fd1b8">B2 0402+379</b> (the confirmed 2.8×10¹⁰ M☉ pair stalled at
+        7.3 pc for ≳3 Gyr — the pair that is <em>stuck</em>).</p>
+        <h3>Time stamping</h3>
+        <p>Systems with a coalescence are synchronized on <code>τ = t − t_merge</code>: identical
+        evolutionary phases at identical timeline positions, each lane wearing its own absolute
+        epoch. The stalled B2 lane runs on the same absolute clock as A402 (same universe, same
+        "today") — while the others complete the story, it stays stuck. Open its constraints and
+        raise the loss-cone refill: it gains a coalescence and the shared τ axis rebuilds to
+        include it.</p>
+        <h3>Architecture</h3>
+        <ul>
+            <li><b>Worker-threaded physics</b>: every lane's N-body star cluster, loss-cone
+                classification, live 1PN+2.5PN endgame (with spin-orbit precession when spins are
+                present), and mock photometry run in a module Web Worker
+                (<code>simworker.js</code> hosting <code>laneengine.js</code>); star buffers travel
+                as transferables and are ping-ponged, so the steady state allocates nothing. A
+                synchronous fallback runs the identical engine on the main thread if workers are
+                unavailable.</li>
+            <li><b>Rust→WASM N-body kernel</b>: inside that worker the star-cluster KDK
+                integrator and loss-cone classifier run as a Rust kernel compiled to
+                WebAssembly (<code>rust-abell85</code> → <code>abell85_nbody.wasm</code>),
+                making 10⁵+ test particles per lane affordable — the "stars / lane" dial in
+                the left rail goes to 131,072. Substeps are per-star adaptive: full 0.05 Myr
+                resolution goes to stars near the holes and the cusp, while the slow outer halo
+                takes one kick–drift–kick per frame. The kernel is a <em>bit-exact</em> port of
+                the JavaScript engine (same substep rule, same float32 store/reload sequence),
+                asserted in the test suite: identical seeds give identical clusters on either
+                backend.
+                The engine chip shows which backend is live; if WASM or the worker is
+                unavailable the JS engine takes over transparently.</li>
+            <li><b>Star inspector</b>: tap any bound star in any lane to pin a marker and
+                trail on it and stream its live state — radius, speed, angular momentum
+                relative to the loss-cone boundary L/L_lc = L/√(2GM_bin·a), and specific
+                orbital energy — from the physics engine.</li>
+            <li><b>GW sonification</b>: the dock's audio button plays the selected system's
+                chirp, frequency-shifted by the honest factor ×3·10¹⁰ (these binaries emit at
+                nanohertz); pitch tracks f_GW, loudness tracks log-strain.</li>
+            <li><b>ECS</b>: an explicit entity-component-system (<code>ecs.js</code>) wires
+                Timeline → Physics → Choreography → Trails → Camera → Render → HUD → Analytics →
+                UI, one system per concern, all state inspectable.</li>
+            <li><b>Stacked rendering</b>: one WebGL2 pass per lane into a shared scene with
+                identity tinting, then a single lens composite handling up to six event-horizon
+                shadows/Einstein rings at once. Floating-origin (camera-relative) uploads keep
+                horizon zoom jitter-free.</li>
+        </ul>
+        <h3>Open constraints, with provenance</h3>
+        <p>Every dial in the left rail is labeled
+        <em class="tag tag-measured">measured</em> /
+        <em class="tag tag-inferred">inferred</em> /
+        <em class="tag tag-assumed">assumed</em> /
+        <em class="tag tag-free">free</em> with its source in the tooltip — the same taxonomy as
+        <code>ABELL85_PAIR_RESEARCH.md</code>. Moving a dial rebuilds that lane's full history
+        (Chandrasekhar sink → slingshot hardening → Peters GW decay → NR-calibrated remnant), the
+        shared τ axis, and the analytics. The physics engine and its 20-check validation contract
+        are documented on the <a href="abell85.html" style="color:#8a7bff">Abell 85 Pair lab</a>
+        methods panel; the full source catalog is in the repository.</p>
+        <h3>Suggested experiments</h3>
+        <ul>
+            <li><b>Final-parsec stall</b> — set Holm 15A's refill to spherical and watch its
+                reconstruction contradict the observed single black hole.</li>
+            <li><b>Un-stick B2 0402+379</b> — raise its refill (triaxiality) and watch the stuck
+                pair acquire a future coalescence on the shared axis.</li>
+            <li><b>Superkick escape</b> — give any lane in-plane spins; the remnant leaves along
+                its orbital angular momentum axis, out of the plane, exceeding escape velocity.</li>
+            <li><b>OJ 287-like eccentricity</b> — e ≈ 0.65 coalesces dramatically faster
+                (Peters 1964's (1−e²)^{7/2}).</li>
+        </ul>
+    </div>
+</div>
+
+<script type="module">
+import './js/telemetry.js';
+</script>
+<script type="module">
+import { boot } from './js/abell85/observatory.js';
+
+const $ = (id) => document.getElementById(id);
+try {
+    boot({
+        canvas: $('obsCanvas'),
+        chips: $('chips'), eventCap: $('eventCap'),
+        scaleBar: $('scaleBar'), scaleLabel: $('scaleLabel'),
+        laneToggles: $('laneToggles'), constraints: $('constraints'),
+        rail: $('rail'), railToggle: $('railToggle'), railClose: $('railClose'),
+        engineChip: $('engineChip'), nStars: $('nStars'),
+        inspector: $('inspector'), audioBtn: $('audioBtn'),
+        playBtn: $('playBtn'), speed: $('speed'),
+        timeline: $('timeline'), tauLabel: $('tauLabel'), follow: $('follow'),
+        viewCore: $('viewCore'), viewInfl: $('viewInfl'),
+        chartTau: $('chartTau'), chartGw: $('chartGw'), grid: $('grid'),
+        methods: $('methods'), methodsBtn: $('methodsBtn'), methodsClose: $('methodsClose'),
+    });
+} catch (err) {
+    $('chips').innerHTML = '<div class="obs-chip" style="border-color:#ff6a5e">⚠ ' +
+        (err?.message || 'failed to start — WebGL2 required') + '</div>';
+    console.error('[observatory] boot failed:', err);
+}
+</script>
+
+</body>
+</html>
