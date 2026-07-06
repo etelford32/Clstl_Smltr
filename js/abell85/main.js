@@ -19,6 +19,9 @@ import {
     surfaceDensity, initialSurfaceDensity, cuspRadius,
     losKinematics, sigmaLosProfile, ptaSensitivity,
 } from './observables.js';
+import { orbitalBasis, bodiesAt } from './geometry.js';
+import { MergerChoreo } from './merger.js';
+import { GwAudio } from './gwaudio.js';
 import { Renderer, Trail } from './render.js';
 import { GodCamera } from './camera.js';
 import { Diagnostics } from './diagnostics.js';
@@ -30,47 +33,6 @@ const OBS_REFS = {
     a402: { rGammaPc: 2200, rGammaSrc: 'McDonald+26 core', sigma: null },
     b20402: {},
 };
-
-const GW_AUDIO_SHIFT = 3e10;    // audio Hz per physical Hz — displayed in the UI
-
-/** WebAudio sonification of the GW chirp (frequency-shifted, factor shown). */
-class GwAudio {
-    constructor() { this.on = false; this.ctx = null; }
-    toggle() {
-        if (!this.on) {
-            if (!this.ctx) {
-                const AC = window.AudioContext || window.webkitAudioContext;
-                if (!AC) return false;
-                this.ctx = new AC();
-                this.osc = this.ctx.createOscillator();
-                this.osc.type = 'sine';
-                this.gain = this.ctx.createGain();
-                this.gain.gain.value = 0;
-                this.osc.connect(this.gain).connect(this.ctx.destination);
-                this.osc.start();
-            }
-            this.ctx.resume();
-            this.on = true;
-        } else {
-            this.gain?.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
-            this.on = false;
-            setTimeout(() => { if (!this.on) this.ctx?.suspend(); }, 250);
-        }
-        return this.on;
-    }
-    update(fgw, strain) {
-        if (!this.on || !this.ctx) return;
-        const t = this.ctx.currentTime;
-        if (fgw > 0 && strain > 0) {
-            const f = Math.min(Math.max(fgw * GW_AUDIO_SHIFT, 25), 2600);
-            this.osc.frequency.setTargetAtTime(f, t, 0.08);
-            const g = 0.2 * Math.min(Math.max((Math.log10(strain) + 17.5) / 4, 0), 1);
-            this.gain.gain.setTargetAtTime(g, t, 0.1);
-        } else {
-            this.gain.gain.setTargetAtTime(0, t, 0.1);
-        }
-    }
-}
 
 const DT_LIVE_MAX = 0.6;        // Myr of cluster time we can honestly integrate per frame
 const RESYNC_GAP = 150;         // Myr of cluster-vs-timeline lag before statistical resync
@@ -93,7 +55,9 @@ export function boot(els) {
         follow: false,
         mode: 'live',
         incl: 25 * Math.PI / 180,   // binary orbital-plane tilt (view param)
+        node: 0.55,                 // line-of-nodes rotation (full 3D orientation)
     };
+    let basis = orbitalBasis(state.incl, state.node);
 
     state.pnOn = true;
     state.selStar = -1;
@@ -107,6 +71,8 @@ export function boot(els) {
     let sc, history, cluster;
     // live PN endgame state
     let livePN = null, pnPredDE = 0, pnRosette = [], lastRosette = 0;
+    let shells = [], prevA = -1;
+    let choreo = null;
     const dropPN = () => { livePN = null; pnRosette = []; pnPredDE = 0; };
     // mock-observation state (recomputed on a throttle, not every frame)
     let photoInit = [], obsCache = null, lastObsWall = 0;
@@ -123,6 +89,7 @@ export function boot(els) {
         state.selStar = -1; selTrail.clear();
         photoInit = initialSurfaceDensity(sc, cluster.rMax);
         obsCache = null; lastObsWall = 0;
+        choreo = new MergerChoreo(sc, history);
         const t0 = history.samples[0].t, t1 = history.samples[history.samples.length - 1].t;
         if (!keepTime || state.tNow < t0 || state.tNow > t1) {
             state.tNow = state.scenarioId === 'holm15a' ? 0 : 0; // "today"
@@ -136,38 +103,10 @@ export function boot(els) {
 
     // ── binary geometry ──────────────────────────────────────────────────────
 
-    function keplerSolve(M, e) {                 // mean anomaly → eccentric anomaly
-        let E = M;
-        for (let i = 0; i < 6; i++) E -= (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
-        return E;
-    }
-
-    /** BH world positions for the sampled state. Returns [{p, m}, ...]. */
+    /** BH world positions: oriented binary pre-merger, 3D-kicked remnant
+     *  after (superkicks leave the orbital plane along ±L̂ — geometry.js). */
     function bhPositions(now) {
-        if (now.a <= 0) {
-            // merged: single remnant on its damped recoil excursion (along x̂)
-            const rem = history.events.remnant;
-            const dtM = now.t - history.events.merger;
-            const off = (now.remnantOffset ?? 0) *
-                Math.sin(history.events.recoil ? Math.min(dtM * history.events.recoil.omega, 1e6) : 0);
-            return [{ p: [off, 0, 0], m: rem ? rem.mass : sc.mTot }];
-        }
-        const E = keplerSolve(state.livePhase, now.e);
-        const r = now.a * (1 - now.e * Math.cos(E));
-        const nu = 2 * Math.atan2(
-            Math.sqrt(1 + now.e) * Math.sin(E / 2),
-            Math.sqrt(1 - now.e) * Math.cos(E / 2));
-        const ang = nu + now.peri;
-        const ux = Math.cos(ang), uz = Math.sin(ang);
-        const f1 = sc.m2 / sc.mTot, f2 = sc.m1 / sc.mTot;
-        // tilt the orbital plane out of the galaxy equator so the scene is
-        // genuinely three-dimensional (rotation about the x-axis)
-        const si = Math.sin(state.incl), ci = Math.cos(state.incl);
-        const tilt = (x, z) => [x, z * si, z * ci];
-        return [
-            { p: tilt(r * f1 * ux, r * f1 * uz), m: sc.m1 },
-            { p: tilt(-r * f2 * ux, -r * f2 * uz), m: sc.m2 },
-        ];
+        return bodiesAt(sc, history, now, state.livePhase, basis);
     }
 
     function resyncCluster() {
@@ -202,8 +141,8 @@ export function boot(els) {
             if (!livePN) {
                 livePN = new PNBinary(sc, {
                     a: now.a, e: now.e, phase: state.livePhase,
-                    peri: now.peri, incl: state.incl,
-                });
+                    peri: now.peri, incl: state.incl, node: state.node,
+                }, sc.kick === 'superkick' ? { precess: {} } : {});
                 pnPredDE = 0;
             }
             const want = state.speed * dtWall;
@@ -231,7 +170,20 @@ export function boot(els) {
             dropPN();                   // re-anchor from history on next play
         }
 
-        const bhs = pnActive && livePN ? livePN.positions() : bhPositions(now);
+        let bhs = pnActive && livePN ? livePN.positions() : bhPositions(now);
+        const choreoState = choreo?.state(wall, basis, state.livePhase);
+        if (choreoState) bhs = choreoState.bhs;
+
+        // GW-burst shell: crossing the coalescence while playing spawns a 3D
+        // expanding wavefront marker (wall-clock life — an event annotation)
+        if (state.playing && prevA > 0 && now.a <= 0) {
+            shells.push({ born: wall });
+            choreo.trigger(wall);
+        }
+        prevA = now.a;
+        for (let i = shells.length - 1; i >= 0; i--) {
+            if (wall - shells[i].born > 2800) shells.splice(i, 1);
+        }
 
         // cluster catch-up: live-integrate toward the timeline, or resync
         const gap = state.tNow - state.clusterT;
@@ -296,6 +248,14 @@ export function boot(els) {
             rings: state.ringsOn ? ringSet() : null,
             lensOn: state.lensOn,
             extraLines, marker,
+            shells: shells.map(sh => {
+                const age = (wall - sh.born) / 2800;
+                return {
+                    center: [0, 0, 0],
+                    radius: Math.pow(age, 0.6) * cam.dist * 1.6,
+                    alpha: 0.55 * (1 - age),
+                };
+            }),
         });
 
         // mock observations: O(N) sweeps, throttled — telescopes don't need 60 fps
@@ -361,6 +321,14 @@ export function boot(els) {
             rows.push(['t_coalesce (GW only)', tc > 14000 ? '> Hubble time (needs stars)' : fmtTime(tc)]);
         } else if (history.events.remnant) {
             const r = history.events.remnant;
+            const cs = choreo?.state(performance.now(), basis, state.livePhase);
+            if (cs) {
+                rows.push(['merger', `${cs.phaseName.toUpperCase()} · ` +
+                    (cs.phaseName === 'ringdown'
+                        ? `ringing at Kerr Q ≈ ${choreo.qnm.Q.toFixed(1)}`
+                        : 'common horizon forming')]);
+                rows.push(['mass bookkeeping', choreo.bookkeeping()]);
+            }
             rows.push(['remnant', `${fmtMass(r.mass)} · spin ${r.spin.toFixed(2)}`]);
             rows.push(['recoil kick', `${r.kickKms.toFixed(0)} km/s (v_esc ≈ ${sc.vEsc.toFixed(0)})`]);
         }
@@ -581,6 +549,8 @@ export function boot(els) {
 
     els.incl?.addEventListener('input', () => {
         state.incl = parseFloat(els.incl.value) * Math.PI / 180;
+        basis = orbitalBasis(state.incl, state.node);
+        dropPN();
     });
 
     function setModeChip(now) {

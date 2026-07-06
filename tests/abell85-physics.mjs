@@ -314,4 +314,267 @@ const { tauOf, tAt, buildTauAxis, eventsTau, indexOfTau } =
         `merged axis ${axis.length} samples`);
 }
 
+// ══ 3D merger geometry ═══════════════════════════════════════════════════════
+const { orbitalBasis, binaryWorldPositions, kickDirection, remnantWorldPosition } =
+    await import('../js/abell85/geometry.js');
+
+// ── 17. oriented binary preserves separation, COM, and kick physics ─────────
+{
+    const sc = makeScenario('holm15a');
+    const basis = orbitalBasis(0.5, 0.7);
+    // basis orthonormality
+    const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    for (const [u, v] of [[basis.e1, basis.e2], [basis.e1, basis.n], [basis.e2, basis.n]]) {
+        assert.ok(Math.abs(dot(u, v)) < 1e-12, 'basis orthogonal');
+    }
+    for (const u of [basis.e1, basis.e2, basis.n]) {
+        assert.ok(Math.abs(Math.hypot(...u) - 1) < 1e-12, 'basis unit');
+    }
+    // separation and COM invariant under orientation
+    const now = { a: 10, e: 0.3, peri: 0.4 };
+    const seps = [];
+    for (const [i2, n2] of [[0, 0], [0.5, 0.7], [1.2, -2.1]]) {
+        const b = orbitalBasis(i2, n2);
+        const [p1, p2] = binaryWorldPositions(sc, now, 1.1, b);
+        const sep = Math.hypot(p1.p[0] - p2.p[0], p1.p[1] - p2.p[1], p1.p[2] - p2.p[2]);
+        seps.push(sep);
+        const com = [0, 1, 2].map(k => p1.p[k] * p1.m + p2.p[k] * p2.m);
+        assert.ok(Math.hypot(...com) / (sc.mTot * sep) < 1e-12, 'COM at origin');
+        assert.ok(sep > 0 && sep < 2 * now.a, `separation sane (${sep})`);
+    }
+    // Kepler r at fixed phase must not depend on orientation
+    for (const s of seps) assert.ok(Math.abs(s - seps[0]) < 1e-9, 'separation orientation-invariant');
+    // kick physics: superkick along ±L̂ (out of plane), mass-asymmetry in-plane
+    const kSuper = kickDirection('superkick', basis);
+    const kPlane = kickDirection('nonspinning', basis);
+    assert.ok(Math.abs(dot(kSuper, basis.n)) > 0.999, 'superkick ∥ L̂');
+    assert.ok(Math.abs(dot(kPlane, basis.n)) < 1e-12, 'mass-asymmetry kick in-plane');
+    // superkicked remnant actually leaves the orbital plane
+    const scK = makeScenario('holm15a', { kick: 'superkick', superkickKms: 1500 });
+    const hK = buildHistory(scK);
+    const rec = hK.samples.find(s => (s.remnantOffset ?? 0) > 1);
+    assert.ok(rec, 'recoil samples carry an offset');
+    const pos = remnantWorldPosition(scK, hK, { ...rec, t: rec.t + 0.31 / hK.events.recoil.omega * Math.PI / 2 }, basis);
+    // offset direction parallel to n̂ (allow sign)
+    const pl = Math.hypot(...pos[0].p);
+    if (pl > 1e-6) {
+        const along = Math.abs(dot(pos[0].p.map(x => x / pl), basis.n));
+        assert.ok(along > 0.999, `superkicked remnant moves along L̂ (cos=${along})`);
+    }
+    ok('3D geometry: orthonormal oriented basis, separation/COM invariant, ' +
+        'superkick ∥ L̂ (out of plane), mass-asymmetry kick in-plane');
+}
+
+// ══ Merger act: QNM ringdown fits + spin-orbit precession ═══════════════════
+const { qnm220, MergerChoreo } = await import('../js/abell85/merger.js');
+
+// ── 18. Berti–Cardoso–Will QNM fits hit the known Kerr values ───────────────
+{
+    // Schwarzschild ℓ=m=2: Mω ≈ 0.3737, Q ≈ 2.0
+    const s = qnm220(0);
+    assert.ok(Math.abs(s.Momega - 0.3737) / 0.3737 < 0.02, `Mω(j=0)=${s.Momega}`);
+    assert.ok(s.Q > 1.9 && s.Q < 2.3, `Q(j=0)=${s.Q}`);
+    // remnant spin ~0.69: Mω ≈ 0.53, Q ≈ 3.2
+    const r = qnm220(0.69);
+    assert.ok(Math.abs(r.Momega - 0.53) < 0.02, `Mω(0.69)=${r.Momega}`);
+    assert.ok(Math.abs(r.Q - 3.2) < 0.3, `Q(0.69)=${r.Q}`);
+    // monotone: faster spin → higher frequency, higher Q
+    assert.ok(qnm220(0.9).Momega > r.Momega && qnm220(0.9).Q > r.Q);
+    ok(`QNM ℓ=m=2 fits: Mω(0)=${s.Momega.toFixed(3)} Q=${s.Q.toFixed(2)}; ` +
+        `Mω(0.69)=${r.Momega.toFixed(3)} Q=${r.Q.toFixed(2)}`);
+}
+
+// ── 19. spin-orbit simple precession: isometric, correct rate, fixed cone ───
+{
+    const sc = makeScenario('holm15a', { massModel: 'mehrgan2019' });
+    const rg = rGrav(sc.mTot);
+    const a = 80 * rg;
+    const pn = new PNBinary(sc, { a, e: 0, phase: 0, peri: 0, incl: 0.4, node: 0.3 },
+        { pn1: false, rr: false, precess: { chi: 0.7, lambda: 0.45 } });
+    const e0 = pn.energy();
+    const lHat = () => {
+        const L = [
+            pn.x[1] * pn.v[2] - pn.x[2] * pn.v[1],
+            pn.x[2] * pn.v[0] - pn.x[0] * pn.v[2],
+            pn.x[0] * pn.v[1] - pn.x[1] * pn.v[0]];
+        const l = Math.hypot(...L);
+        return L.map(c => c / l);
+    };
+    const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    const j = pn.prec.jHat;
+    const cone0 = dot(lHat(), j);
+    // expected rate for the circular orbit (r = a, L = μ√(GMa) constant)
+    const mu = sc.m1 * sc.m2 / sc.mTot;
+    const L = mu * Math.sqrt(G * sc.mTot * a);
+    const omegaP = pn.prec.pref * (G / (299792.458 ** 2)) *
+        (L + pn.prec.S) / (a ** 3) * KMS_MYR;               // rad/Myr
+    const T = 15 * keplerPeriodMyr(a, sc.mTot);
+    const l0 = lHat();
+    pn.step(T, 1e9);
+    // rotation is an isometry → energy contract untouched
+    const drift = Math.abs((pn.energy() - e0) / e0);
+    assert.ok(drift < 1e-6, `precession energy drift ${drift}`);
+    // cone angle L̂·Ĵ conserved
+    assert.ok(Math.abs(dot(lHat(), j) - cone0) < 1e-3, 'cone angle fixed');
+    // measured precession azimuth about Ĵ vs Ω_p·T
+    const perp = (v) => {
+        const par = dot(v, j);
+        const p = [v[0] - par * j[0], v[1] - par * j[1], v[2] - par * j[2]];
+        const l = Math.hypot(...p) || 1;
+        return p.map(c => c / l);
+    };
+    const p0 = perp(l0), p1 = perp(lHat());
+    const cross = [
+        p0[1] * p1[2] - p0[2] * p1[1],
+        p0[2] * p1[0] - p0[0] * p1[2],
+        p0[0] * p1[1] - p0[1] * p1[0]];
+    let meas = Math.atan2(dot(cross, j), dot(p0, p1));
+    const expTot = omegaP * T;
+    // unwrap: expected total may exceed π
+    const wraps = Math.round((expTot - meas) / (2 * Math.PI));
+    meas += wraps * 2 * Math.PI;
+    const err = Math.abs(meas - expTot) / expTot;
+    assert.ok(err < 0.05, `precession rate err ${(err * 100).toFixed(1)}% (meas ${meas.toFixed(3)} vs ${expTot.toFixed(3)})`);
+    ok(`spin-orbit precession: isometric (ΔE/E=${drift.toExponential(1)}), cone fixed, ` +
+        `rate matches Ω_p to ${(err * 100).toFixed(1)}% over 15 orbits`);
+}
+
+// ── 20. merger choreography state machine ───────────────────────────────────
+{
+    const sc = makeScenario('holm15a');
+    const hist = buildHistory(sc);
+    const basis = orbitalBasis(0.4, 0.3);
+    const ch = new MergerChoreo(sc, hist);
+    assert.equal(ch.state(1000, basis), null, 'idle before trigger');
+    ch.trigger(1000);
+    const early = ch.state(1200, basis, 0);
+    assert.equal(early.phaseName, 'plunge');
+    assert.equal(early.bhs.length, 2);
+    const late = ch.state(2300, basis, 0);
+    const sepE = Math.hypot(...early.bhs[0].p.map((c, k) => c - early.bhs[1].p[k]));
+    const sepL = Math.hypot(...late.bhs[0].p.map((c, k) => c - late.bhs[1].p[k]));
+    assert.ok(sepL < sepE, 'plunge separation shrinks');
+    const ring = ch.state(1000 + 1400 + 800, basis, 0);
+    assert.equal(ring.phaseName, 'ringdown');
+    assert.equal(ring.bhs.length, 1);
+    assert.ok(Math.abs((ring.bhs[0].shadowMod ?? 1) - 1) > 1e-4, 'shadow rings');
+    assert.equal(ch.state(1000 + 1400 + 3300, basis, 0), null, 'choreo ends');
+    assert.ok(/radiated/.test(ch.bookkeeping()), 'mass bookkeeping string');
+    ok(`merger choreography: plunge (2 bodies, sep ↓) → ringdown (Q=${ch.qnm.Q.toFixed(1)} pulse) → done`);
+}
+
+// ── 21. LaneEngine (worker core) smoke: identical engine, both threads ──────
+{
+    const { LaneEngine } = await import('../js/abell85/laneengine.js');
+    const eng = new LaneEngine('holm15a', { nStars: 1024, seed: 7 });
+    const s0 = eng.setTime(0, 1);              // present day (post-merger)
+    assert.ok(s0.bhs.length === 1, 'single remnant at present');
+    assert.ok(Number.isFinite(s0.bhs[0].p[0]));
+    const s1 = eng.setTime(-7300000 / 1000, 2); // jump deep into the past (Myr)
+    assert.ok(s1.now.a > 0, 'binary exists before coalescence');
+    const s2 = eng.setTime(s1.t + 5, 3);
+    assert.ok(s2.now.a <= s1.now.a + 1e-6, 'separation non-increasing');
+    // stalled lane: B2 today sits near its observed 7.3 pc
+    const b2 = new LaneEngine('b20402', { nStars: 512, seed: 7 });
+    const sb = b2.setTime(0, 1);
+    assert.ok(Math.abs(sb.now.a - 7.3) / 7.3 < 0.3, `B2 today a=${sb.now.a}`);
+    // reconfigure un-sticks it
+    b2.reconfigure({ refill: 0.9 });
+    assert.ok(b2.history.events.merger !== undefined, 'raised refill → merger exists');
+    ok(`LaneEngine: remnant at present, binary in past, B2 stalled at ` +
+        `${sb.now.a.toFixed(1)} pc and un-stuck by refill=0.9`);
+}
+
+// ── 22. WASM kernel parity (skips with a warning if artifact not built) ─────
+{
+    const { readFile } = await import('node:fs/promises');
+    let wasmBytes = null;
+    try {
+        wasmBytes = await readFile(new URL('../js/abell85-wasm/abell85_nbody.wasm', import.meta.url));
+    } catch { /* not built */ }
+    if (!wasmBytes) {
+        console.log('  ⚠ wasm parity SKIPPED — run build-wasm.sh (or cargo build in rust-abell85/)');
+    } else {
+        const { WasmCluster } = await import('../js/abell85/wasmcluster.js');
+        const { instance } = await WebAssembly.instantiate(wasmBytes, {});
+        const sc = makeScenario('holm15a');
+        const js = new StarCluster(sc, 2048, 42);
+        const wa = new WasmCluster(sc, 2048, 42, instance);
+        // identical deterministic ICs (same sampler)
+        let icMax = 0;
+        for (let i = 0; i < js.pos.length; i++) {
+            icMax = Math.max(icMax, Math.abs(js.pos[i] - wa.pos[i]));
+        }
+        assert.ok(icMax === 0, `ICs bit-identical (max Δ ${icMax})`);
+        // (1) SMOOTH-regime trajectory parity: host potential only (no holes)
+        //     — non-chaotic, so the engines must track each other tightly
+        for (let k = 0; k < 30; k++) {
+            js.step(0.5, [0, 0, 0], 0, [0, 0, 0], 0);
+            wa.step(0.5, [0, 0, 0], 0, [0, 0, 0], 0);
+        }
+        let worst = 0;
+        for (let i = 0; i < js.pos.length; i++) {
+            worst = Math.max(worst,
+                Math.abs(js.pos[i] - wa.pos[i]) / Math.max(Math.abs(js.pos[i]), 1));
+        }
+        assert.ok(worst < 1e-4, `smooth-regime parity ${worst}`);
+        // (2) STATISTICAL parity with the binary active: slingshots are chaotic
+        //     (float32 rounding-point differences amplify exponentially per
+        //     star), so the honest contract is ensemble statistics, not
+        //     per-star microstates.
+        js.reset(0); wa.reset(0);
+        for (let k = 0; k < 60; k++) {
+            const ang = k * 0.3;
+            const b1 = [40 * Math.cos(ang), 0, 40 * Math.sin(ang)];
+            const b2 = [-40 * Math.cos(ang), 0, -40 * Math.sin(ang)];
+            js.step(0.5, b1, sc.m1, b2, sc.m2);
+            wa.step(0.5, b1, sc.m1, b2, sc.m2);
+        }
+        const meanR = (c) => {
+            let s = 0, m = 0;
+            for (let i = 0; i < c.n; i++) {
+                if (c.flags[i] === 1 || c.flags[i] === 2) continue;
+                const j = i * 3;
+                s += Math.hypot(c.pos[j], c.pos[j + 1], c.pos[j + 2]); m++;
+            }
+            return s / m;
+        };
+        const rj = meanR(js), rw = meanR(wa);
+        assert.ok(Math.abs(rj - rw) / rj < 0.02, `bound mean radius ${rj} vs ${rw}`);
+        assert.ok(Math.abs(wa.ejectedCount - js.ejectedCount) <=
+            Math.max(4, 0.25 * js.ejectedCount + 2),
+            `ejections statistically consistent (${wa.ejectedCount} vs ${js.ejectedCount})`);
+        const cj = js.classify(sc.mTot, 100), cw = wa.classify(sc.mTot, 100);
+        assert.ok(Math.abs(cw.nCone - cj.nCone) <= Math.max(6, 0.15 * cj.nCone),
+            `cone counts consistent (${cw.nCone} vs ${cj.nCone})`);
+        assert.ok(Math.abs(cw.lLc - cj.lLc) < 1e-9);
+        const ejJ = js.ejectedCount, ejW = wa.ejectedCount;   // rebind resets them
+        // (3) reconfigure path: rebind() must REUSE the WASM allocations (the
+        //     kernel's bump allocator never frees) and resample bit-identically
+        //     to a fresh JS cluster of the new scenario
+        const sc2 = makeScenario('holm15a', { eccH: 0.5 });
+        const js2 = new StarCluster(sc2, 2048, 42);
+        const posPtr = wa._pPos;
+        wa.rebind(sc2);
+        assert.ok(wa._pPos === posPtr, 'rebind reuses the same WASM allocation');
+        let icMax2 = 0;
+        for (let i = 0; i < js2.pos.length; i++) {
+            icMax2 = Math.max(icMax2, Math.abs(wa.pos[i] - js2.pos[i]));
+        }
+        assert.ok(icMax2 === 0, `rebind ICs bit-identical (max Δ ${icMax2})`);
+        assert.ok(Math.abs(wa.mParticle - js2.mParticle) < 1e-9, 'rebind mParticle refreshed');
+        // capacity smoke: 65k stars step in bounded time
+        const big = new WasmCluster(sc, 65536, 7, instance);
+        const t0 = performance.now();
+        big.step(0.5, [40, 0, 0], sc.m1, [-40, 0, 0], sc.m2);
+        const ms = performance.now() - t0;
+        assert.ok(ms < 400, `65k-star frame took ${ms.toFixed(0)} ms`);
+        ok(`WASM kernel parity: ICs bit-identical, smooth-regime Δ ` +
+            `${worst.toExponential(1)}, ensemble stats consistent (⟨r⟩ ` +
+            `${rj.toFixed(0)}≈${rw.toFixed(0)} pc, ej ${ejJ}/${ejW}, ` +
+            `cone ${cj.nCone}/${cw.nCone}), rebind reuses buffers; ` +
+            `65,536-star frame in ${ms.toFixed(0)} ms`);
+    }
+}
+
 console.log(`\nabell85-physics: all ${n} checks passed`);

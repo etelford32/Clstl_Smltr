@@ -14,6 +14,8 @@
 // chart, and a live comparison grid with cross-system metrics.
 
 import { makeScenario, buildHistory, sampleAt } from './physics.js';
+import { orbitalBasis, bodiesAt } from './geometry.js';
+import { MergerChoreo } from './merger.js';
 import { StarCluster } from './nbody.js';
 import { PNBinary } from './pn.js';
 import { surfaceDensity, cuspRadius, ptaSensitivity } from './observables.js';
@@ -22,7 +24,11 @@ import { GodCamera } from './camera.js';
 import { tauOf, tAt, buildTauAxis, eventsTau, indexOfTau } from './twinsync.js';
 import { fmtLen, fmtTime, fmtMass, fmtFreq, rSchw, rGrav } from './units.js';
 
-const INCL = 25 * Math.PI / 180;
+// distinct 3D orientations per lane (real orientations are unconstrained)
+const ORIENT = {
+    a402: { incl: 0.42, node: -0.5 },
+    holm15a: { incl: 0.50, node: 0.7 },
+};
 const PN_WINDOW_RG = 300;
 const LOOP_SECONDS = 240;
 const LANES = {
@@ -49,6 +55,10 @@ class Lane {
         this.lc = { nCone: 0, lLc: 0 };
         this.rGamma = NaN; this.lastPhoto = -1e9;
         this.flash = null;
+        this.orient = ORIENT[id];
+        this.basis = orbitalBasis(this.orient.incl, this.orient.node);
+        this.shells = []; this.prevA = -1;
+        this.choreo = new MergerChoreo(this.sc, this.history);
         // precompute pre-merger a(τ): monotone table for equal-separation lookups
         this.aTable = this.history.samples
             .filter(s => s.a > 0 && s.t <= this.history.events.merger)
@@ -67,33 +77,8 @@ class Lane {
         return T[lo].tau;
     }
 
-    _keplerSolve(M, e) {
-        let E = M;
-        for (let i = 0; i < 6; i++) E -= (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
-        return E;
-    }
-
     _keplerPositions(now) {
-        if (now.a <= 0) {
-            const rem = this.history.events.remnant;
-            const dtM = now.t - this.history.events.merger;
-            const off = (now.remnantOffset ?? 0) *
-                Math.sin(this.history.events.recoil ? Math.min(dtM * this.history.events.recoil.omega, 1e6) : 0);
-            return [{ p: [off, 0, 0], m: rem ? rem.mass : this.sc.mTot }];
-        }
-        const E = this._keplerSolve(this.livePhase, now.e);
-        const r = now.a * (1 - now.e * Math.cos(E));
-        const nu = 2 * Math.atan2(Math.sqrt(1 + now.e) * Math.sin(E / 2),
-            Math.sqrt(1 - now.e) * Math.cos(E / 2));
-        const ang = nu + now.peri;
-        const ux = Math.cos(ang), uz = Math.sin(ang);
-        const f1 = this.sc.m2 / this.sc.mTot, f2 = this.sc.m1 / this.sc.mTot;
-        const si = Math.sin(INCL), ci = Math.cos(INCL);
-        const tilt = (x, z) => [x, z * si, z * ci];
-        return [
-            { p: tilt(r * f1 * ux, r * f1 * uz), m: this.sc.m1 },
-            { p: tilt(-r * f2 * ux, -r * f2 * uz), m: this.sc.m2 },
-        ];
+        return bodiesAt(this.sc, this.history, now, this.livePhase, this.basis);
     }
 
     _resync(now) {
@@ -119,8 +104,9 @@ class Lane {
         if (inWin && dtSim > 0) {
             if (!this.livePN) {
                 this.livePN = new PNBinary(this.sc, {
-                    a: now.a, e: now.e, phase: this.livePhase, peri: now.peri, incl: INCL,
-                });
+                    a: now.a, e: now.e, phase: this.livePhase, peri: now.peri,
+                    incl: this.orient.incl, node: this.orient.node,
+                }, this.sc.kick === 'superkick' ? { precess: {} } : {});
             }
             const adv = this.livePN.step(dtSim, 8000);
             if (adv >= dtSim * 0.999) {
@@ -145,6 +131,8 @@ class Lane {
             }
             bhs = this._keplerPositions(now);
         }
+        const choreoState = this.choreo.state(wall, this.basis, this.livePhase);
+        if (choreoState) bhs = choreoState.bhs;
         this.bhs = bhs;
 
         // star cluster catch-up
@@ -157,6 +145,17 @@ class Lane {
             this.clusterT += dt;
         }
         this.lc = this.cluster.classify(now.a > 0 ? this.sc.mTot : 0, now.a);
+
+        // GW-burst shell at this lane's coalescence crossing
+        if (this.prevA > 0 && now.a <= 0 && dtSim > 0) {
+            this.shells.push({ born: wall });
+            this.choreo.trigger(wall);
+        }
+        this.prevA = now.a;
+        for (let i = this.shells.length - 1; i >= 0; i--) {
+            if (wall - this.shells[i].born > 2600) this.shells.splice(i, 1);
+        }
+        this._wall = wall;
 
         if (bhs.length) {
             this.trails[0].push(...bhs[0].p);
@@ -182,6 +181,14 @@ class Lane {
                 buf: r.buf, count: r.count,
                 color: [...this.meta.rgb, 0.05 + 0.06 * (i + 1)],
             })),
+            shells: this.shells.map(sh => {
+                const age = (this._wall - sh.born) / 2600;
+                return {
+                    center: [0, 0, 0],
+                    radius: Math.pow(age, 0.6) * this.cam.dist * 1.7,
+                    alpha: 0.6 * (1 - age),
+                };
+            }),
         });
     }
 
