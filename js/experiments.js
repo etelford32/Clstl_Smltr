@@ -46,12 +46,11 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'punch',   w: 50 },   // loss-framed / urgency headline
         ],
     },
-    // Legacy index.html hero headline. Variants are owned by the page's
-    // inline copy map; experiments.js only does the bucketing + exposure.
-    // New variants can be added without code change to the renderer — any
-    // id not in the page map falls back to `control` at render time.
+    // CONCLUDED 2026-07 — the homepage redesign shipped deliberate hero
+    // copy and index.html no longer assigns this experiment. Kept paused
+    // (not deleted) so historical exposure/goal rows keep resolving.
     home_headline: {
-        status: 'running',
+        status: 'paused',
         variants: [
             { id: 'control', w: 25 },   // "Space-Grade Data. On Demand."
             { id: 'palm',    w: 25 },   // "Space-Grade Data, in your palm"
@@ -59,10 +58,10 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'wonder',  w: 25 },   // "Real Physics. Real Data. Real Wonder."
         ],
     },
-    // Legacy index.html hero sub-paragraph. control = short punchy blurb,
-    // long = the expanded narrative variant marketing wants to test.
+    // CONCLUDED 2026-07 — same as home_headline: the redesigned index.html
+    // ships deliberate sub copy and no longer assigns this experiment.
     home_sub: {
-        status: 'running',
+        status: 'paused',
         variants: [
             { id: 'control', w: 50 },
             { id: 'long',    w: 50 },
@@ -85,13 +84,16 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'constellation', w: 50 },
         ],
     },
-    // Page-level: which homepage HTML is served at `/`. The 50/50 split is
-    // owned by Vercel Edge Middleware (middleware.js), which pins the choice
-    // in the `pp_home_v` cookie. `cookie`/`cookieMap` make this experiment
-    // read that server decision instead of hashing independently, so the
-    // recorded assignment can never disagree with the page actually served.
+    // CONCLUDED 2026-07 — the redesign shipped in place as index.html and
+    // the middleware 50/50 split was retired (`/` always serves index.html;
+    // middleware.js keeps only host canonicalization). No page calls
+    // assign('home_redesign') anymore — do NOT re-add one: the cookie
+    // mapping below would record stale pp_home_v=v2 exposures against a
+    // page that no longer varies. Entry kept (with cookie/cookieMap, for
+    // documentation) so admin.html's loadExperimentAB() keeps charting the
+    // historical rows.
     home_redesign: {
-        status: 'running',
+        status: 'paused',
         cookie: 'pp_home_v',
         cookieMap: { index: 'control', v2: 'redesign' },
         variants: [

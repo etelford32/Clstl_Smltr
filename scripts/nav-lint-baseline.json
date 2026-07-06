@@ -47,9 +47,6 @@
     "noNavJs",
     "noNavStyles"
   ],
-  "index.html": [
-    "ghostCss"
-  ],
   "pricing.html": [
     "ghostCss"
   ],
