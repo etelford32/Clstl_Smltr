@@ -298,10 +298,19 @@ export class TempForecaster {
             const high = Math.round(mlHigh * mlWeight + gfsDay.high * gfsWeight);
             const low  = Math.round(mlLow  * mlWeight + gfsDay.low  * gfsWeight);
 
-            // Confidence interval from model RMSE + horizon decay
+            // Uncertainty model. σ from the residual-RMSE prediction interval,
+            // growing with lead time, widened in quadrature by the 2-member
+            // (ML vs GFS) disagreement so the band reflects ensemble spread —
+            // not just historical error. high_ci/low_ci stay the ±95% half-
+            // width (1.96σ) for back-compat; p10/p50/p90 drive the fan chart.
             const horizonFactor = 1 + d * 0.15;  // uncertainty grows with time
-            const highCI = Math.round(this._highModel.rmse * horizonFactor * 1.96);
-            const lowCI  = Math.round(this._lowModel.rmse  * horizonFactor * 1.96);
+            const sigmaHigh = Math.hypot(this._highModel.rmse * horizonFactor,
+                                         Math.abs(mlHigh - gfsDay.high) / 2);
+            const sigmaLow  = Math.hypot(this._lowModel.rmse  * horizonFactor,
+                                         Math.abs(mlLow  - gfsDay.low)  / 2);
+            const highCI = Math.round(sigmaHigh * 1.96);
+            const lowCI  = Math.round(sigmaLow  * 1.96);
+            const Z80 = 1.2816;  // z-score for the P10/P90 (80% central) band
 
             // Update extended series with blended prediction for next iteration
             extended[idx].high = high;
@@ -313,6 +322,12 @@ export class TempForecaster {
                 low,
                 high_ci:   highCI,   // ±95% confidence
                 low_ci:    lowCI,
+                high_p10:  Math.round(high - Z80 * sigmaHigh),
+                high_p50:  high,
+                high_p90:  Math.round(high + Z80 * sigmaHigh),
+                low_p10:   Math.round(low - Z80 * sigmaLow),
+                low_p50:   low,
+                low_p90:   Math.round(low + Z80 * sigmaLow),
                 gfs_high:  Math.round(gfsDay.high),
                 gfs_low:   Math.round(gfsDay.low),
                 ml_high:   Math.round(mlHigh),
@@ -338,19 +353,29 @@ export class TempForecaster {
 
     _gfsFallback() {
         return {
-            predictions: this._gfsForecast.map(d => ({
-                date:     d.date,
-                high:     Math.round(d.high),
-                low:      Math.round(d.low),
-                high_ci:  5,
-                low_ci:   5,
-                gfs_high: Math.round(d.high),
-                gfs_low:  Math.round(d.low),
-                precip_mm: d.precip_mm,
-                cloud:     d.cloud,
-                wind_max:  Math.round(d.wind_max),
-                source:   'gfs_only',
-            })),
+            predictions: this._gfsForecast.map((d, i) => {
+                const hi = Math.round(d.high), lo = Math.round(d.low);
+                // No local history → flat ±5° (95%) base, widened slightly with
+                // lead time so the fan still reads as growing uncertainty.
+                const sd = (5 / 1.96) * (1 + i * 0.1);
+                const band = Math.round(1.2816 * sd);
+                const ci = Math.round(sd * 1.96);
+                return {
+                    date:     d.date,
+                    high:     hi,
+                    low:      lo,
+                    high_ci:  ci,
+                    low_ci:   ci,
+                    high_p10: hi - band, high_p50: hi, high_p90: hi + band,
+                    low_p10:  lo - band, low_p50:  lo, low_p90:  lo + band,
+                    gfs_high: hi,
+                    gfs_low:  lo,
+                    precip_mm: d.precip_mm,
+                    cloud:     d.cloud,
+                    wind_max:  Math.round(d.wind_max),
+                    source:   'gfs_only',
+                };
+            }),
             model: null,
             fetched_at: Date.now(),
         };

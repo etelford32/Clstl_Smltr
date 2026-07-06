@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * dev-server.mjs — Local development server for Clstl_Smltr
+ * dev-server.mjs — Local development server for ParkersPhysics
  *
  * Serves static files AND runs the Vercel Edge Functions locally by dynamically
  * importing them.  Node.js 18+ ships `fetch`, `Request`, `Response` as globals,
@@ -17,7 +17,7 @@
 import { createServer }         from 'node:http';
 import { readFileSync }         from 'node:fs';
 import { readFile, stat }       from 'node:fs/promises';
-import { extname, join, resolve } from 'node:path';
+import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
@@ -86,6 +86,7 @@ const API_ROUTES = {
     '/api/noaa/protons':           'api/noaa/protons.js',
     '/api/noaa/electrons':         'api/noaa/electrons.js',
     '/api/noaa/aurora':            'api/noaa/aurora.js',
+    '/api/noaa/aurora-grid':       'api/noaa/aurora-grid.js',
     '/api/noaa/alerts':            'api/noaa/alerts.js',
     '/api/noaa/dst':               'api/noaa/dst.js',
     '/api/noaa/flares':            'api/noaa/flares.js',
@@ -97,9 +98,15 @@ const API_ROUTES = {
     '/api/donki/gst':              'api/donki/gst.js',
     '/api/donki/sep':              'api/donki/sep.js',
     '/api/donki/notifications':    'api/donki/notifications.js',
+    '/api/omni/imf':               'api/omni/imf.js',
+    '/api/density/tudelft':        'api/density/tudelft.js',
+    '/api/hindcast/gannon':        'api/hindcast/gannon.js',
+    '/api/hindcast/gannon-model':  'api/hindcast/gannon-model.js',
     '/api/launches/upcoming':      'api/launches/upcoming.js',
     '/api/weather/grid':           'api/weather/grid.js',
     '/api/weather/forecast':       'api/weather/forecast.js',
+    '/api/aurora/outlook':         'api/aurora/outlook.js',
+    '/api/aurora/skill':           'api/aurora/skill.js',
     '/api/lightning/strikes':      'api/lightning/strikes.js',
     '/api/nws/convective':         'api/nws/convective.js',
     '/api/mars/weather':           'api/mars/weather.js',
@@ -218,9 +225,14 @@ async function handleApi(pathname, rawUrl, nodeRes, nodeReq) {
 // ── Handle static file requests ───────────────────────────────────────────────
 
 async function handleStatic(pathname, nodeRes) {
-    // Safety: prevent directory traversal
+    // Safety: prevent directory traversal. `resolve(ROOT)` normalizes away the
+    // trailing separator that `new URL('.', …)` leaves on ROOT — without this,
+    // the root request `/` resolves to ROOT-without-slash and fails the prefix
+    // test, 403-ing the homepage (and the CI health check). Compare against
+    // `rootDir + sep` so a sibling like `…/ParkersPhysics-evil` can't sneak past.
     const safePath = resolve(ROOT, '.' + pathname);
-    if (!safePath.startsWith(ROOT)) {
+    const rootDir  = resolve(ROOT);
+    if (safePath !== rootDir && !safePath.startsWith(rootDir + sep)) {
         nodeRes.writeHead(403);
         nodeRes.end('Forbidden');
         return;
@@ -301,7 +313,7 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, () => {
     console.log('');
-    console.log('  Clstl_Smltr dev server');
+    console.log('  ParkersPhysics dev server');
     console.log(`  → http://localhost:${PORT}`);
     console.log(`  → http://localhost:${PORT}/space-weather.html`);
     console.log('');

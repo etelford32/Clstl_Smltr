@@ -769,6 +769,62 @@ function buildSkyTexture() {
     return tex;
 }
 
+// Procedural equirectangular environment for image-based lighting (IBL).
+//
+// WHY this exists: every vehicle surface is a PBR MeshStandard/Physical
+// material — Starship is near-pure metal (metalness 0.92) and Falcon/Dragon
+// are glossy clearcoat white. A metal with no environment to reflect renders
+// almost black (it has no diffuse term; its colour IS its reflection), and a
+// clearcoat coat with nothing to mirror looks like flat matte plastic. Direct
+// lights alone give a single hard highlight and dead shadow side. Feeding the
+// scene a PMREM-prefiltered environment (set as scene.environment in init)
+// makes the steel read as steel and the white panels pick up a soft sheen —
+// the single biggest realism lever for hard-surface vehicles.
+//
+// It's built procedurally (no HDR fetch — this module must work offline) and
+// keyed to the SAME dusk palette as buildSkyTexture(), plus a warm horizon
+// glint roughly aligned with the key light and a cooler bounce opposite it,
+// so the reflections agree with the three directional lights instead of
+// fighting them. EquirectangularReflectionMapping: v=top → zenith (+Y),
+// v=bottom → ground (−Y); u → azimuth.
+function buildEnvTexture() {
+    const W = 512, H = 256;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    // Sky → horizon → ground vertical gradient.
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0.00, '#02010a');   // zenith
+    grad.addColorStop(0.38, '#0c0a22');
+    grad.addColorStop(0.48, '#231a33');   // horizon band (brightest sky)
+    grad.addColorStop(0.52, '#3a2842');
+    grad.addColorStop(0.60, '#1b1525');
+    grad.addColorStop(1.00, '#0a0712');   // ground bounce / nadir
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    // Warm key-light glow just above the horizon — gives metals a specular
+    // hot spot so stainless steel reads as polished metal rather than matte.
+    const gx = W * 0.18, gy = H * 0.46, gr = H * 0.6;
+    const warm = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
+    warm.addColorStop(0.0, 'rgba(255,228,184,0.85)');
+    warm.addColorStop(0.4, 'rgba(255,184,120,0.30)');
+    warm.addColorStop(1.0, 'rgba(255,160,100,0.0)');
+    ctx.fillStyle = warm;
+    ctx.fillRect(0, 0, W, H);
+    // Cool blue fill bounce opposite the key — mirrors the rim/fill lights so
+    // the shadow side of the stack still catches a faint reflection.
+    const bx = W * 0.68, by = H * 0.5, br = H * 0.7;
+    const cool = ctx.createRadialGradient(bx, by, 0, bx, by, br);
+    cool.addColorStop(0.0, 'rgba(120,150,225,0.28)');
+    cool.addColorStop(1.0, 'rgba(120,150,225,0.0)');
+    ctx.fillStyle = cool;
+    ctx.fillRect(0, 0, W, H);
+    const tex = new THREE.CanvasTexture(c);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+}
+
 // Custom-shader starfield with subtle per-star twinkle.
 function buildStarfield() {
     const N = 1500;
@@ -836,14 +892,31 @@ function buildStarfield() {
 //   distMul       → multiply fit-distance for tighter / wider shots
 
 const VIEW_PRESETS = {
-    threequarter: { dir: [ 0.62, 0.30,  0.85], biasY:  0.00, distMul: 1.10 },
-    front:        { dir: [ 0.00, 0.18,  1.00], biasY:  0.00, distMul: 1.20 },
-    side:         { dir: [ 1.00, 0.18,  0.00], biasY:  0.00, distMul: 1.20 },
+    // Default shot. Intentionally NARROW — distMul 1.0 frames the vehicle to
+    // fill the viewport (the fit already bakes in 5% padding, so the whole
+    // stack stays visible; going below 1.0 starts clipping the nose/bells),
+    // at a modest elevation so the pad/tower scaffold stays out of the lower
+    // frame. This is the "easily see the vehicle at load" frame. The looser,
+    // pulled-back context shot that used to be the default (distMul 1.10) now
+    // lives under the `wide` preset (a button), so it no longer silently
+    // "takes over" after the canvas finishes laying out.
+    // dir = unit vector from target → camera. The previous eye-line (Y 0.22)
+    // sat too low — at the rocket-fit distance it framed the pad/tower base
+    // across the bottom of the viewport on load. Raise Y to 0.34 to look
+    // slightly DOWN onto the stack (tower base drops below frame) and bump
+    // distMul to 1.12 for a little extra margin so the whole stack clears the
+    // edges after the canvas settles its aspect-ratio/min-height layout.
+    threequarter: { dir: [ 0.55, 0.34,  0.82], biasY:  0.00, distMul: 1.12 },
+    // Pulled-back establishing shot: shows the full stack plus the pad/tower
+    // for context. This is the former default — kept as an explicit option.
+    wide:         { dir: [ 0.62, 0.34,  0.85], biasY:  0.06, distMul: 1.65 },
+    front:        { dir: [ 0.00, 0.16,  1.00], biasY:  0.00, distMul: 1.02 },
+    side:         { dir: [ 1.00, 0.16,  0.00], biasY:  0.00, distMul: 1.02 },
     top:          { dir: [ 0.00, 1.00,  0.001], biasY:  0.00, distMul: 0.85 },
     // Engines preset — bias the look-at toward the booster base. distMul is
     // a fraction of the full-stack fit-distance; we floor it to a meters
     // value below to stop tall stacks from clipping inside the booster skirt.
-    closeup:      { dir: [ 0.55, 0.20,  0.78], biasY: -0.48, distMul: 0.28, distMinM: 14 },
+    closeup:      { dir: [ 0.55, 0.20,  0.78], biasY: -0.48, distMul: 0.28, distMinM: 14, crop: true },
 };
 
 // Compute world-space bounding box of just the visible vehicle hardware,
@@ -903,27 +976,36 @@ function frameForView(name, vehicle, fovDeg, aspect) {
     const center = bbox.getCenter(new THREE.Vector3());
     const size   = bbox.getSize(new THREE.Vector3());
 
-    // Look-at locked to the rocket's vertical axis (x=0, z=0) — every vehicle
-    // builder anchors its stack at that line. Using bbox.center.x/z instead
-    // would aim the camera at the bbox geometric centroid, which for an
-    // asymmetric stack (Shuttle: orbiter mounted ~8.5 m to +Z of the ET;
-    // anything with a side payload / boattail) sits several meters off the
-    // stack axis. The result is a permanently lopsided 3/4 frame where the
-    // rocket appears shoved to one side. autoRotate previously hid this by
-    // sweeping the camera continuously around the off-axis target.
+    // Look-at aimed at the bbox CENTER (x, y, z) so the visible silhouette is
+    // screen-centred for every vehicle.
+    //
+    // This used to be hard-locked to the stack axis (x=0, z=0) on the theory
+    // that aiming at the geometric centroid produced a "lopsided" frame for
+    // asymmetric stacks. That reasoning was inverted: putting the look-at on
+    // the centroid is exactly what centres the visible mass on screen, while
+    // forcing it to the axis left genuinely asymmetric stacks shoved to one
+    // side. The Shuttle is the clearest case (and the default vehicle) — its
+    // orbiter sits ~8.5 m to +Z of the ET, so an axis-locked look-at framed
+    // the empty +X side and pushed the whole stack off-centre the instant the
+    // page loaded. Symmetric vehicles (Falcon 9, Starship) have center.x/z ≈ 0,
+    // so this is a no-op for them; only off-axis stacks move, and they move
+    // toward centre. (The old "lopsided" symptom actually came from the
+    // ThrustOverlay bloating the bbox — fixed separately in computeVehicleBBox
+    // — and from auto-rotate sweeping around an off-axis target; auto-rotate is
+    // now off by default and the orbit camera is gone, so neither applies.)
     const target = new THREE.Vector3(
-        0,
+        center.x,
         center.y + preset.biasY * size.y,
-        0,
+        center.z,
     );
 
-    // Fit-distance must use the *radial* extents of the bbox measured from
-    // the on-axis target, not bbox.size/2. For an asymmetric stack
-    // size.z/2 underestimates how far the bbox actually reaches in +Z away
-    // from x=z=0 — the orbiter would clip out of frame. Take the max of the
-    // four signed extents per horizontal axis.
-    const halfX = Math.max(Math.abs(bbox.max.x), Math.abs(bbox.min.x));
-    const halfZ = Math.max(Math.abs(bbox.max.z), Math.abs(bbox.min.z));
+    // Analytic seed for the probe-fit bracket below. With the look-at on the
+    // bbox centre, the radial half-extents from the target are simply
+    // size.x/2 and size.z/2. This only seeds the iterative solver — the probe
+    // refines the true fit distance — so it just needs to be in the right
+    // ballpark, not exact.
+    const halfX = size.x * 0.5;
+    const halfZ = size.z * 0.5;
     const halfYV = Math.max(size.y, 1) * 0.5 * 1.05;
     const halfH  = Math.max(halfX, halfZ, 1) * 1.05;
 
@@ -934,16 +1016,87 @@ function frameForView(name, vehicle, fovDeg, aspect) {
     const halfFovH = Math.atan(Math.tan(halfFovV) * aspect);
     const distFitV = halfYV / Math.tan(halfFovV);
     const distFitH = halfH  / Math.tan(halfFovH);
-    let dist = Math.max(distFitV, distFitH) * preset.distMul;
-
-    // Clamp so we don't punch through the near plane on tiny vehicles or
-    // sail past the far plane on huge ones. Per-preset floor (distMinM) lets
-    // tight presets like 'closeup' stop short of clipping into the booster
-    // skirt on tall stacks (Starship's 9 m booster + 0.28 distMul → ~5 m,
-    // which puts the camera inside the skirt; floor to ~14 m).
-    dist = Math.max(dist, preset.distMinM ?? 8);
+    // Analytic seed only. This classic perpendicular fit systematically
+    // UNDER-estimates the projected size from an elevated 3/4 angle: the far,
+    // low corners of a tall stack swing wider on screen than a flat
+    // head-on fit predicts, so distMul≈1 clipped the nose and engine skirt
+    // off the top and bottom of the frame. We refine it below.
+    let dist = Math.max(distFitV, distFitH);
 
     const dir = new THREE.Vector3(...preset.dir).normalize();
+
+    // Angle/aspect-correct refinement.
+    //
+    // Place a probe camera along `dir`, oriented exactly like the live camera,
+    // and project the eight bbox corners to NDC. Solve for the smallest
+    // distance at which the most-extreme corner sits at FILL of the way to the
+    // frame edge — i.e. the whole stack fits with constant padding. This is
+    // correct for every vehicle, canvas aspect and view direction, unlike a
+    // flat perpendicular fit (which under-shoots from an elevated 3/4 angle
+    // and clipped the nose/skirt). Cropping presets (engines close-up) opt out
+    // via `preset.crop` and keep the analytic distance so they stay tight on
+    // the booster base instead of zooming out to fit the nose.
+    if (!preset.crop) {
+        const FILL = 0.92;     // most-extreme corner sits 92% of the way out
+        const NEAR = 0.1;
+        const probe = new THREE.PerspectiveCamera(fovDeg, aspect, NEAR, 1e6);
+        // Orient the probe with the SAME yaw/pitch math the live camera uses
+        // (see setLookAt + applyCamToThree), not lookAt(): they agree for
+        // shallow angles but diverge near straight-down, where lookAt's roll
+        // is undefined. Look direction is −dir (the camera sits along +dir
+        // from the target and looks back at it).
+        const yaw   = Math.atan2(dir.x, dir.z);
+        const pitch = THREE.MathUtils.clamp(Math.asin(-dir.y),
+                                            -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
+        probe.rotation.set(pitch, yaw, 0, 'YXZ');
+        probe.updateProjectionMatrix();
+        const c = new THREE.Vector3();
+        // Largest |NDC| over the 8 corners at camera distance d. Returns
+        // Infinity if any corner falls at/behind the near plane — that means
+        // the camera is too close (or, for a top-down look at a tall stack,
+        // sitting inside the vehicle's height), which must read as "too tight"
+        // so the solver pushes the camera further out rather than blowing up
+        // on the divide-by-≈0 in the perspective projection.
+        const maxNdc = (d) => {
+            probe.position.copy(target).addScaledVector(dir, d);
+            probe.updateMatrixWorld(true);
+            let m = 0;
+            for (let xi = 0; xi < 2; xi++)
+                for (let yi = 0; yi < 2; yi++)
+                    for (let zi = 0; zi < 2; zi++) {
+                        c.set(xi ? bbox.max.x : bbox.min.x,
+                              yi ? bbox.max.y : bbox.min.y,
+                              zi ? bbox.max.z : bbox.min.z)
+                         .applyMatrix4(probe.matrixWorldInverse);
+                        if (c.z > -NEAR) return Infinity;   // at/behind near plane
+                        c.applyMatrix4(probe.projectionMatrix);   // → clip, then NDC
+                        m = Math.max(m, Math.abs(c.x), Math.abs(c.y));
+                    }
+            return m;
+        };
+        // Bracket then bisect for the distance where maxNdc == FILL. maxNdc is
+        // monotonically decreasing in d (move back → smaller on screen), so a
+        // clean bracket exists. Seed from the analytic estimate.
+        let hi = Math.max(dist, NEAR * 10), guard = 0;
+        while (maxNdc(hi) > FILL && guard++ < 80) hi *= 1.4;     // grow until it fits
+        let lo = hi, g2 = 0;
+        while (maxNdc(lo) <= FILL && g2++ < 80) lo *= 0.7;       // shrink until it doesn't
+        for (let i = 0; i < 30; i++) {
+            const mid = (lo + hi) * 0.5;
+            if (maxNdc(mid) <= FILL) hi = mid; else lo = mid;
+        }
+        dist = hi;
+    }
+
+    // distMul tunes the framed shot AFTER the exact fit: 1.0 = fills the
+    // frame, >1 pulls back for context (the `wide` preset), <1 tightens.
+    dist *= preset.distMul;
+
+    // Floor so we don't punch through the near plane on tiny vehicles. The
+    // per-preset distMinM lets the engines close-up stop short of clipping
+    // into the booster skirt on tall stacks.
+    dist = Math.max(dist, preset.distMinM ?? 8);
+
     const pos = target.clone().addScaledVector(dir, dist);
     return { pos: pos.toArray(), target: target.toArray(), dist };
 }
@@ -1105,6 +1258,20 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // and hides the hard edge where the ground plane cuts off.
     scene.fog = new THREE.FogExp2(0x1a1428, 0.0025);
 
+    // Image-based lighting. PMREM-prefilter the procedural dusk environment
+    // (see buildEnvTexture) and hang it on scene.environment so every PBR
+    // material in the scene gets reflections/IBL for free — no per-material
+    // wiring. Background stays the gradient sky; environment only drives
+    // reflections. Generated once at init; the source canvas texture and the
+    // generator are disposed immediately, the prefiltered render target
+    // (envRT) lives for the canvas lifetime and is freed in dispose().
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const _envSrc = buildEnvTexture();
+    const envRT = pmrem.fromEquirectangular(_envSrc);
+    scene.environment = envRT.texture;
+    _envSrc.dispose();
+    pmrem.dispose();
+
     const stars = buildStarfield();
     scene.add(stars);
 
@@ -1209,8 +1376,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
     //
     // `controls` is kept as a compat shim with .target (Vector3) so the
     // existing liftoff / view-tween code can continue to write to it. The
-    // target is purely informational — camera orientation comes from
-    // (yaw, pitch), not from look-at.
+    // target is the ORBIT ANCHOR: pointer-drag orbits the camera around it and
+    // the wheel dollies toward/away from it (radius clamped to min/maxDistance
+    // so you can't tunnel through the vehicle). WASD/QE still free-fly cam.pos
+    // directly; (yaw, pitch) are kept in sync via setLookAt after each orbit.
     const cam = {
         pos:       new THREE.Vector3(0, 30, 80),
         yaw:       0,
@@ -1221,8 +1390,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         lastY:     0,
         moveSpeed: 80,       // m/s base
         sprintMul: 3,
-        lookSpeed: 0.003,    // rad/px of mouse drag
-        dollyStep: 6,        // m per wheel notch
+        lookSpeed: 0.003,    // rad/px of orbit drag
         pitchMin: -Math.PI / 2 + 0.02,
         pitchMax:  Math.PI / 2 - 0.02,
     };
@@ -1238,6 +1406,8 @@ export function initVehicleCanvas(canvas, opts = {}) {
     const _fwd   = new THREE.Vector3();
     const _right = new THREE.Vector3();
     const _move  = new THREE.Vector3();
+    const _orbitOffset = new THREE.Vector3();
+    const _spherical   = new THREE.Spherical();
 
     function camForward(out) {
         return out.set(
@@ -1259,6 +1429,38 @@ export function initVehicleCanvas(canvas, opts = {}) {
     function applyCamToThree() {
         camera.position.copy(cam.pos);
         camera.rotation.set(cam.pitch, cam.yaw, 0, 'YXZ');
+    }
+
+    // Orbit the camera AROUND controls.target (the rocket) by a pixel delta,
+    // preserving the current orbit radius. This is the model-viewer drag:
+    // the rocket stays centered, the camera swings around it — as opposed to
+    // free-look (rotate-in-place), which swings the aim off onto the tower.
+    // phi (polar from +Y) is clamped off the poles so we never gimbal-flip.
+    function orbitAroundTarget(dx, dy) {
+        _orbitOffset.subVectors(cam.pos, controls.target);
+        _spherical.setFromVector3(_orbitOffset);
+        _spherical.theta -= dx * cam.lookSpeed;
+        _spherical.phi   -= dy * cam.lookSpeed;
+        const EPS = 0.02;
+        _spherical.phi = Math.max(EPS, Math.min(Math.PI - EPS, _spherical.phi));
+        _spherical.makeSafe();
+        _orbitOffset.setFromSpherical(_spherical);
+        cam.pos.copy(controls.target).add(_orbitOffset);
+        setLookAt(controls.target);
+    }
+
+    // Dolly toward / away from the target by scaling the orbit radius, clamped
+    // to [minDistance, maxDistance] so the camera can never fly THROUGH the
+    // rocket and end up staring at the tower behind it. factor < 1 = zoom in.
+    function dollyToTarget(factor) {
+        _orbitOffset.subVectors(cam.pos, controls.target);
+        const r = THREE.MathUtils.clamp(
+            _orbitOffset.length() * factor,
+            controls.minDistance, controls.maxDistance,
+        );
+        _orbitOffset.setLength(r);
+        cam.pos.copy(controls.target).add(_orbitOffset);
+        setLookAt(controls.target);
     }
 
     // Compat shim — old code reads/writes `controls.target` and calls
@@ -1326,10 +1528,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
         const dy = e.clientY - cam.lastY;
         cam.lastX = e.clientX;
         cam.lastY = e.clientY;
-        if (dx || dy) userControlledCamera = true;   // real look-drag
-        cam.yaw   -= dx * cam.lookSpeed;
-        cam.pitch -= dy * cam.lookSpeed;
-        cam.pitch  = THREE.MathUtils.clamp(cam.pitch, cam.pitchMin, cam.pitchMax);
+        if (!dx && !dy) return;
+        userControlledCamera = true;                 // real orbit-drag
+        orbitAroundTarget(dx, dy);                    // rotate AROUND the rocket
     }
     function onPointerUp(e) {
         if (!cam.dragging) return;
@@ -1342,14 +1543,13 @@ export function initVehicleCanvas(canvas, opts = {}) {
         e.preventDefault();
     }
     function onWheel(e) {
-        // Smooth dolly along view direction. Negative deltaY (scroll up)
-        // moves forward. We do preventDefault here because we want the
-        // wheel to drive the camera when the cursor is on the canvas.
+        // Zoom toward / away from the rocket. Scroll up (deltaY < 0) zooms in.
+        // Radius-based + clamped so you can't tunnel through the vehicle into
+        // the tower. preventDefault so the wheel drives the camera, not the
+        // page scroll, while the cursor is on the canvas.
         e.preventDefault();
         userControlledCamera = true;                 // wheel-dolly
-        camForward(_fwd);
-        const dir = e.deltaY > 0 ? -1 : 1;
-        cam.pos.addScaledVector(_fwd, dir * cam.dollyStep);
+        dollyToTarget(e.deltaY > 0 ? 1.12 : 1 / 1.12);
     }
     function setKey(key, down) {
         const k = key.length === 1 ? key.toLowerCase() : key;
@@ -1738,10 +1938,31 @@ export function initVehicleCanvas(canvas, opts = {}) {
     //   passed through. Once the user actually drags / wheels / WASDs the
     //   camera (userControlledCamera = true) we stop yanking it — they own
     //   it from then until the next vehicle swap or explicit recenter.
+    // Last applied box. Tracked so we can skip a setSize when nothing changed
+    // (see resize()) — that's what gives the Firefox/Safari feedback loop a
+    // fixed point and lets it settle.
+    let _lastW = 0, _lastH = 0;
     function resize() {
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
         if (!w || !h) return;                 // collapsed / not yet laid out
+        // BREAK THE RESIZEOBSERVER FEEDBACK LOOP (the load-time "camera stares
+        // at the orange tower" bug on Mac Firefox/Safari).
+        //
+        // renderer.setSize() writes the canvas's width/height ATTRIBUTES — its
+        // intrinsic content size. Despite minmax(0,1fr) + contain:layout size
+        // on the host, those engines leak that intrinsic size back into grid
+        // track sizing, which resizes the host, which re-fires this observer,
+        // which calls setSize again… an oscillation that never delivers a
+        // clean "settled" box. The camera was then left framed against whatever
+        // transient (wrong-aspect) box happened to be current when the browser
+        // throttled the observer — hence the rocket vanishing off-frame.
+        //
+        // If the box hasn't actually changed, do nothing. No attribute write →
+        // no intrinsic-size change → the loop has a fixed point and stops. On
+        // Chromium (where the size is stable anyway) this is just a cheap skip.
+        if (w === _lastW && h === _lastH) return;
+        _lastW = w; _lastH = h;
         // pixelRatio is locked to 1 (see WebGLRenderer init), so the drawing
         // buffer always equals the CSS box and can't overflow the grid track.
         renderer.setSize(w, h, false);
@@ -1749,13 +1970,23 @@ export function initVehicleCanvas(canvas, opts = {}) {
         camera.updateProjectionMatrix();
         if (!userControlledCamera) reframeCurrentView();
     }
+    // Coalesce a burst of observer callbacks into a single measurement on the
+    // next animation frame, by which point layout for this frame has settled.
+    // We always act on the LATEST box, so an intermediate reflow box can never
+    // be the one the camera ends up framed against — the other half of the
+    // feedback-loop fix above.
+    let _resizeRaf = 0;
+    function scheduleResize() {
+        if (_resizeRaf) return;
+        _resizeRaf = requestAnimationFrame(() => { _resizeRaf = 0; resize(); });
+    }
     // Observe the host element, not just the canvas: the host is what
     // gains/loses its layout box when the collapse panel toggles
     // display:none ⇄ block, so observing it guarantees the expand
     // notification (and the density aspect-ratio change) in every browser.
     const resizeHost = canvas.parentElement || canvas;
     resize();
-    const ro = new ResizeObserver(resize);
+    const ro = new ResizeObserver(scheduleResize);
     ro.observe(resizeHost);
 
     // Initial vehicle.
@@ -1870,13 +2101,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
         );
     }
 
-    // God-mode dolly along the current view direction. factor < 1 zooms
-    // in (forward), > 1 zooms out (back). 20 m per click is comfortable.
+    // Toolbar zoom buttons. factor < 1 zooms in (toward the rocket), > 1 zooms
+    // out. Radius-based + clamped, same as the wheel — never tunnels through
+    // the vehicle. ~25% per click is a comfortable step.
     function setZoom(factor) {
         userControlledCamera = true;                 // deliberate user dolly
-        camForward(_fwd);
-        const stepM = (factor < 1) ? 20 : -20;
-        cam.pos.addScaledVector(_fwd, stepM);
+        dollyToTarget(factor < 1 ? 0.8 : 1.25);
     }
 
     function recenter() {
@@ -1917,9 +2147,11 @@ export function initVehicleCanvas(canvas, opts = {}) {
         dispose() {
             running = false;
             cancelAnimationFrame(rafId);
+            if (_resizeRaf) cancelAnimationFrame(_resizeRaf);
             ro.disconnect();
             io.disconnect();
             controls.dispose();
+            envRT.dispose();
             renderer.dispose();
             scene.traverse(o => {
                 if (o.geometry) o.geometry.dispose();
@@ -1948,6 +2180,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
             // Explicit host request to re-fit — re-arm auto-framing so the
             // reframe actually happens even if the user had grabbed the cam.
             userControlledCamera = false;
+            // Clear the last-applied box so resize()'s change-guard can't skip
+            // this (the panel may have toggled display:none→block at the SAME
+            // size, which is precisely when a forced re-fit is needed).
+            _lastW = 0; _lastH = 0;
             resize();
         },
         resize(w, h) {

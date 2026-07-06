@@ -88,14 +88,35 @@ def check_imf_freshness(imf_path: Path) -> bool:
     return True
 
 
-def check_param_in(run_dir: Path) -> bool:
+def check_swmf_binary() -> bool:
+    """Pre-flight for the COUPLED build. A GM+IE run launches SWMF.exe, not the
+    IH-standalone BATSRUS.exe check_batsrus_binary() looks for — the Dockerfile
+    builds and ships SWMF.exe at /opt/swmf/bin/."""
+    if not SWMF_EXE.exists():
+        log.error("SWMF.exe not found at %s", SWMF_EXE)
+        log.error("Run 'docker build' to compile the coupled SWMF first (see swmf/Dockerfile)")
+        return False
+    if not os.access(SWMF_EXE, os.X_OK):
+        log.error("%s is not executable", SWMF_EXE)
+        return False
+    log.info("SWMF binary OK: %s", SWMF_EXE)
+    return True
+
+
+# Forecast (IH-only) PARAM.in drives from #SOLARWINDFILE; the coupled GM+IE
+# hindcast template drives GM from #UPSTREAM_INPUT_FILE instead. Keep the two
+# block sets distinct so neither pre-flight falsely rejects the other's PARAM.in.
+_REQUIRED_BLOCKS_FORECAST = ["#STARTTIME", "#SOLARWINDFILE", "#STOP", "#SCHEME"]
+_REQUIRED_BLOCKS_GM_IE    = ["#STARTTIME", "#UPSTREAM_INPUT_FILE", "#STOP", "#SCHEME"]
+
+
+def check_param_in(run_dir: Path, required: list[str] | None = None) -> bool:
     param = run_dir / "PARAM.in"
     if not param.exists():
         log.error("PARAM.in not found in %s", run_dir)
         return False
     content = param.read_text()
-    required = ["#STARTTIME", "#SOLARWINDFILE", "#STOP", "#SCHEME"]
-    for block in required:
+    for block in (required or _REQUIRED_BLOCKS_FORECAST):
         if block not in content:
             log.error("PARAM.in missing required block: %s", block)
             return False
@@ -105,11 +126,16 @@ def check_param_in(run_dir: Path) -> bool:
 
 # ── BATS-R-US launcher ─────────────────────────────────────────────────────────
 
-def launch_batsrus(run_dir: Path, nproc: int = MPI_NPROC) -> subprocess.Popen:
+def launch_batsrus(run_dir: Path, nproc: int = MPI_NPROC,
+                   exe: Path | None = None) -> subprocess.Popen:
     """
-    Launch BATS-R-US via mpiexec from run_dir.
-    Returns the Popen handle for monitoring.
+    Launch the solver via mpiexec from run_dir. Returns the Popen handle for
+    monitoring.
+
+    `exe` selects the binary: the default IH-standalone BATSRUS.exe for the
+    forecast path, or SWMF.exe for a coupled GM+IE hindcast (pass SWMF_EXE).
     """
+    exe = exe or BATSRUS_IH
     log_path = run_dir / "batsrus_stdout.log"
     err_path = run_dir / "batsrus_stderr.log"
 
@@ -122,7 +148,7 @@ def launch_batsrus(run_dir: Path, nproc: int = MPI_NPROC) -> subprocess.Popen:
         *(["--allow-run-as-root"] if allow_root else []),
         "-n", str(nproc),
         "--bind-to", "core",
-        str(BATSRUS_IH),
+        str(exe),
     ]
     log.info("Launching: %s", " ".join(cmd))
     log.info("Run directory: %s", run_dir)
@@ -288,6 +314,39 @@ def write_result_json(result: dict, run_id: str) -> Path:
 
 
 # ── Full forecast cycle ────────────────────────────────────────────────────────
+
+def launch_prepared_run(run_dir: Path, nproc: int, timeout_s: float) -> bool:
+    """
+    Launch BATS-R-US on an ALREADY-GENERATED run directory (PARAM.in + LAYOUT.in
+    already written — e.g. by `gen_param gm_ie`), monitor it to completion, and
+    leave the raw solver output in place for a downstream parser.
+
+    This is the *hindcast* launch primitive. Unlike run_forecast_cycle() it does
+    NOT ingest fresh L1, regenerate PARAM.in, or touch the forecast DB / forecast
+    JSON — the coupled GM+IE hindcast is post-processed separately by
+    `hindcast_runner.py`, which reads the IE log for Phi_PC / HPI. Keeping it off
+    the forecast path means the live forecast pipeline is unaffected.
+
+    Returns True on a clean solver finish.
+    """
+    run_dir = Path(run_dir)
+    if not run_dir.is_dir():
+        log.error("run dir not found: %s", run_dir)
+        return False
+    if not check_swmf_binary():
+        return False
+    if not check_param_in(run_dir, required=_REQUIRED_BLOCKS_GM_IE):
+        return False
+
+    log.info("── Launch BATS-R-US on prepared run dir: %s ──", run_dir)
+    proc = launch_batsrus(run_dir, nproc=nproc, exe=SWMF_EXE)
+    ok = monitor_run(proc, run_dir, timeout_s=timeout_s)
+    if not ok:
+        log.error("BATS-R-US run failed — check %s", run_dir)
+        return False
+    log.info("── Prepared run complete → %s  (parse with hindcast_runner) ──", run_dir)
+    return True
+
 
 def run_forecast_cycle() -> bool:
     """
@@ -469,7 +528,13 @@ def main() -> None:
     group.add_argument("--once",   action="store_true", help="One forecast cycle + exit")
     group.add_argument("--daemon", action="store_true", help="Continuous forecast daemon")
     group.add_argument("--mock",   action="store_true", help="Write mock result (no solver)")
+    group.add_argument("--launch-run-dir", metavar="DIR",
+                       help="Launch BATS-R-US on a pre-generated run dir "
+                            "(e.g. from `gen_param gm_ie`) and exit. Hindcast path.")
     parser.add_argument("--nproc", type=int, default=MPI_NPROC)
+    parser.add_argument("--timeout-hours", type=float, default=24.0,
+                        help="Wall-clock timeout for --launch-run-dir (default 24 h; "
+                             "the 72 h Gannon GM+IE run is an overnight job)")
     args = parser.parse_args()
 
     MPI_NPROC = args.nproc
@@ -478,6 +543,12 @@ def main() -> None:
         _write_mock_result()
     elif args.once:
         ok = run_forecast_cycle()
+        sys.exit(0 if ok else 1)
+    elif args.launch_run_dir:
+        ok = launch_prepared_run(
+            Path(args.launch_run_dir), nproc=args.nproc,
+            timeout_s=args.timeout_hours * 3600.0,
+        )
         sys.exit(0 if ok else 1)
     elif args.daemon:
         run_daemon()

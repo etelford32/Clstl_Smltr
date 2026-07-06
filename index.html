@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <script type="importmap">
 {"imports":{
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three": "/js/vendor/three-0.160.0/three.module.js",
+    "three/addons/": "/js/vendor/three-0.160.0/jsm/"
 }}
 </script>
 <!-- perf-hints:start -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js" crossorigin>
 <!-- perf-hints:end --><link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
@@ -114,7 +114,10 @@ nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgb
 .hero-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;background:rgba(157,58,255,.10);border:1px solid rgba(183,101,255,.35);border-radius:20px;font-family:var(--font-display);font-size:.7rem;color:var(--uv-300);letter-spacing:var(--tracking-cyber);text-transform:uppercase;margin-bottom:28px;box-shadow:var(--glow-uv-sm)}
 .hero-badge::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 8px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite;flex-shrink:0}
 @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
-.hero-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(2rem,5.6vw,3.6rem);letter-spacing:.04em;line-height:1.12;margin-bottom:22px;text-transform:uppercase;background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 18px rgba(157,58,255,.25))}
+/* Blue outline + halo: text-shadows render behind the gradient-clipped
+   transparent fill, giving the gradient text a crisp blue stroke and
+   ambient glow without overriding the fill. */
+.hero-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(2rem,5.6vw,3.6rem);letter-spacing:.04em;line-height:1.12;margin-bottom:22px;text-transform:uppercase;background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 18px rgba(60,160,255,.45));text-shadow:-2px -2px 0 #1e90ff,2px -2px 0 #1e90ff,-2px 2px 0 #1e90ff,2px 2px 0 #1e90ff,-2px 0 0 #1e90ff,2px 0 0 #1e90ff,0 -2px 0 #1e90ff,0 2px 0 #1e90ff,0 0 22px rgba(30,144,255,.7),0 0 40px rgba(30,144,255,.35)}
 .hero-sub{font-family:var(--font-sans);font-size:clamp(.95rem,2.2vw,1.15rem);color:var(--fg-3);line-height:1.75;max-width:580px;margin:0 auto 36px}
 .hero-cta{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-bottom:52px}
 .btn-primary{padding:14px 32px;background:var(--grad-uv-pink);border-radius:8px;color:#fff;font-family:var(--font-display);font-weight:700;font-size:.95rem;letter-spacing:.12em;text-transform:uppercase;transition:filter .2s,transform .15s,box-shadow .25s;border:none;cursor:pointer;box-shadow:var(--glow-uv-md)}
@@ -467,6 +470,29 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
     // experiments.track keeps control and the home-v2 variant measured
     // identically — same visitor id, same persona + exp segmentation.
     experiments.assign('home_redesign');
+
+    // Hero copy A/B: headline (4 variants) + sub-paragraph (2 variants).
+    // Variants are owned here as a data map — adding/retiring copy is a
+    // single object edit, no JS logic change. Assignment is read before
+    // landing_view so every subsequent funnel/analytics event carries
+    // both exp_home_headline and exp_home_sub in its segmentation.
+    const HEADLINES = {
+        control: 'Space-Grade Data.<br>On Demand.',
+        palm:    'Space-Grade Data<br>in your palm',
+        cosmos:  'Hold the cosmos<br>in your hand',
+        wonder:  'Real Physics.<br>Real Data. Real Wonder.',
+    };
+    const SUBS = {
+        control: "Hold the cosmos in your hand. Watch the Sun's corona breathe with live NOAA flux, feel a coronal mass ejection slam Earth's magnetosphere in real time, and drift through Wolf-Rayet winds and the gravitational dance of binary stars — every field line modeled from the equations NASA publishes, every photon rendered in your browser. For researchers who need precision, educators who need wonder, and anyone who has ever looked up and wanted the universe a little closer.",
+        long:    "Hold the cosmos in your hand. Feel a coronal mass ejection impact Earth’s magnetosphere in real time, track the solar corona breathing with live NOAA flux, and navigate the volatile winds of Wolf-Rayet stars. From the complex gravitational dance of binary systems to individual magnetic field lines, everything is derived from NASA-published equations and rendered natively in your browser. Built for researchers who require absolute precision, and educators who demand pure wonder.",
+    };
+    const headlineVar = experiments.assign('home_headline');
+    const subVar      = experiments.assign('home_sub');
+    const heroH1El  = document.querySelector('[data-pp-headline]');
+    const heroSubEl = document.querySelector('[data-pp-sub]');
+    if (heroH1El  && HEADLINES[headlineVar]) heroH1El.innerHTML  = HEADLINES[headlineVar];
+    if (heroSubEl && SUBS[subVar])           heroSubEl.textContent = SUBS[subVar];
+
     experiments.track('landing_view', { page: 'home' });
 
     // Delegated click capture for any element with data-funnel-cta.
@@ -495,8 +521,8 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
   <canvas id="hero-canvas" aria-hidden="true"></canvas>
   <div class="hero-content">
     <div class="hero-badge" role="status" aria-live="polite">Live NASA &amp; NOAA Data — Updated Every 60 Seconds</div>
-    <h1 class="hero-h1">Space-Grade Data<br>in your palm</h1>
-    <p class="hero-sub">Hold the cosmos in your hand. Watch the Sun's corona breathe with live NOAA flux, feel a coronal mass ejection slam Earth's magnetosphere in real time, and drift through Wolf-Rayet winds and the gravitational dance of binary stars — every field line modeled from the equations NASA publishes, every photon rendered in your browser. For researchers who need precision, educators who need wonder, and anyone who has ever looked up and wanted the universe a little closer.</p>
+    <h1 class="hero-h1" data-pp-headline>Space-Grade Data.<br>On Demand.</h1>
+    <p class="hero-sub" data-pp-sub>Hold the cosmos in your hand. Watch the Sun's corona breathe with live NOAA flux, feel a coronal mass ejection slam Earth's magnetosphere in real time, and drift through Wolf-Rayet winds and the gravitational dance of binary stars — every field line modeled from the equations NASA publishes, every photon rendered in your browser. For researchers who need precision, educators who need wonder, and anyone who has ever looked up and wanted the universe a little closer.</p>
     <div class="hero-cta" role="group" aria-label="Primary actions">
       <a href="galactic-map.html" class="btn-matrix" id="hero-cta-primary" data-explore-tour-start data-funnel-cta="hero_explore" aria-label="Start the guided tour: galaxy, real-time solar system, and sign-up"><span class="matrix-rain" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="matrix-label">Explore the App</span></a>
       <a href="earth.html" class="btn-portal" data-explore-demo-start aria-label="Start the live data demo tour: Earth, Sun, Space Weather, Operations, sign-up"><span class="portal-depth" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="portal-label">Explore Live Demo <span aria-hidden="true">→</span></span></a>
@@ -565,7 +591,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
           <span class="sim-tier basic" aria-label="Available on Basic tier">Basic</span>
         </div>
         <p class="sim-card-desc">Multi-star system simulator — Sirius binary orbital mechanics, Betelgeuse convection, Vega rapid rotation, WR 102 Wolf-Rayet winds. Kepler integration with real stellar parameters.</p>
-        <a href="star3d.html" class="sim-link" aria-label="Explore Stellar Physics Simulator" style="--accent:#ffd700">Explore simulation <span aria-hidden="true">→</span></a>
+        <a href="sirius-planetary.html" class="sim-link" aria-label="Explore Stellar Physics Simulator" style="--accent:#ffd700">Explore simulation <span aria-hidden="true">→</span></a>
       </article>
 
       <article class="sim-card fade-in" style="--accent:#7b2ff7;--thumb-bg:linear-gradient(135deg,#050010 0%,#140030 50%,#050010 100%)">
@@ -695,6 +721,29 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
   </div>
 </section>
 
+<!-- ── AURORA ALERT CAPTURE ──────────────────────────────────────────────────
+     Anonymous, zero-friction email capture for burst aurora/storm traffic.
+     Styles are injected by js/aurora-capture.js. See AURORA_ALERT_CAPTURE_SPEC.md. -->
+<section class="aurora-capture-band" aria-label="Aurora alerts signup">
+  <div class="aurora-capture-copy">
+    <span class="aurora-kicker">Aurora Alerts · Free</span>
+    <h2>Don't miss the next storm.</h2>
+    <p>We'll email you the moment Kp spikes and the aurora comes within reach — with a live link to watch it hit Earth's magnetosphere.</p>
+  </div>
+  <form data-aurora-capture data-source="home" novalidate>
+    <input type="email" inputmode="email" autocomplete="email" placeholder="you@email.com" aria-label="Email" required>
+    <!-- honeypot: keep visually hidden, not display:none (some bots skip those) -->
+    <input type="text" name="company" tabindex="-1" autocomplete="off"
+           aria-hidden="true" style="position:absolute;left:-9999px;opacity:0;height:0;width:0">
+    <button type="submit">Alert me →</button>
+    <span data-aurora-status class="aurora-status" role="status" aria-live="polite"></span>
+  </form>
+</section>
+<script type="module">
+  import { initAuroraCapture } from './js/aurora-capture.js';
+  initAuroraCapture();
+</script>
+
 <!-- ── FINAL CTA ───────────────────────────────────────────────────────────── -->
 <section id="cta" aria-labelledby="cta-heading">
   <div class="section-inner">
@@ -728,7 +777,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
           <a href="earth.html">Earth Magnetosphere</a>
           <a href="sun.html">Solar Surface</a>
           <a href="space-weather.html">Space Weather</a>
-          <a href="star3d.html">Stellar Physics</a>
+          <a href="sirius-planetary.html">Stellar Physics</a>
           <a href="galactic-map.html">Galactic Map</a>
         </div>
       </nav>

@@ -27,14 +27,14 @@
      remapped to anything." Same CDN + version as every other sim page. -->
 <script type="importmap">
 {"imports":{
-    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three":         "/js/vendor/three-0.160.0/three.module.js",
+    "three/addons/": "/js/vendor/three-0.160.0/jsm/"
 }}
 </script>
 <!-- perf-hints:start -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js" crossorigin>
 <!-- perf-hints:end -->
 
 <style>
@@ -598,6 +598,9 @@ footer a:hover{color:var(--text)}
         </div>
       </div>
 
+      <!-- Today & Sun — solar day-arc, feels-like, and physics advisories -->
+      <div id="local-sky"></div>
+
       <!-- 7-Day Temperature Forecast -->
       <div id="briefing-forecast-section" style="display:none">
         <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px">
@@ -612,6 +615,15 @@ footer a:hover{color:var(--text)}
       </div>
 
     </div>
+  </div>
+
+  <!-- ── MONTH-AHEAD OUTLOOK (weeks 3–6, probabilistic / driver-attributed) ── -->
+  <div class="card" id="month-outlook-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Month-Ahead Outlook</span>
+      <span style="font-size:.6rem;color:var(--muted)">weeks 3–6 · probabilistic</span>
+    </div>
+    <div class="card-body" id="month-outlook"></div>
   </div>
 
   <!-- ── PERSONALIZED SPACE WEATHER REPORT ── -->
@@ -895,7 +907,7 @@ footer a:hover{color:var(--text)}
       </div>
     </a>
 
-    <a href="star3d.html" class="sim-card" aria-label="Launch Stellar Physics simulation">
+    <a href="sirius-planetary.html" class="sim-card" aria-label="Launch Stellar Physics simulation">
       <div class="sim-thumb th-star">
         <span>⭐</span>
         <span class="sim-badge badge-live">Live</span>
@@ -1088,7 +1100,7 @@ const _imp = (m) => import(m).then(x => x, e => {
     return null;
 });
 const [
-    _mUL, _mSWF, _mAE, _mISE, _mOT, _mDSE, _mSL, _mTP, _mCR, _mACT,
+    _mUL, _mSWF, _mAE, _mISE, _mOT, _mDSE, _mSL, _mTP, _mCR, _mACT, _mLS, _mMO,
 ] = await Promise.all([
     _imp('./js/user-location.js'),
     _imp('./js/swpc-feed.js'),
@@ -1100,6 +1112,8 @@ const [
     _imp('./js/trip-planner.js'),
     _imp('./js/class-roster.js'),
     _imp('./js/activation.js'),
+    _imp('./js/local-sky.js'),
+    _imp('./js/month-outlook.js'),
 ]);
 // Missing export → a stub that throws when actually used, so the
 // failure surfaces inside a runCard()/runSafe() boundary rather than
@@ -1124,6 +1138,11 @@ const AlertEngine        = _pick(_mAE,  'alert-engine', 'AlertEngine');
 const ImpactScoreEngine  = _pick(_mISE, 'impact-score', 'ImpactScoreEngine');
 const OnboardingTour     = _pick(_mOT,  'onboarding-tour', 'OnboardingTour');
 const DailySummaryEngine = _pick(_mDSE, 'daily-summary', 'DailySummaryEngine');
+// local-sky.js — "Today & Sun" panel; no-op controller fallback so a failed
+// import can't throw at the daily-briefing card's mount site.
+const mountLocalSky      = _pick(_mLS, 'local-sky', 'mountLocalSky', () => ({ refresh() {}, destroy() {} }));
+// month-outlook.js — weeks 3–6 probabilistic outlook; no-op controller fallback.
+const mountMonthOutlook  = _pick(_mMO, 'month-outlook', 'mountMonthOutlook', () => ({ refresh() {}, destroy() {} }));
 // saved-locations.js (its card lives on /settings now; IIFE early-returns)
 const listLocations      = _pick(_mSL, 'saved-locations', 'listLocations');
 const addLocation        = _pick(_mSL, 'saved-locations', 'addLocation');
@@ -3319,6 +3338,74 @@ runCard('Daily briefing', 'daily-briefing-card', () => {
     const summaryEngine = new DailySummaryEngine().start();
     const _el = id => document.getElementById(id);
 
+    // Today & Sun panel — solar day-arc + feels-like + physics advisories.
+    // Independent of the summary engine: it self-refreshes on location change
+    // and ticks the live sun position. Defensive internally (never throws).
+    mountLocalSky({ host: _el('local-sky') });
+
+    // 7-day temperature fan: two plumes (daytime high, overnight low), each a
+    // P50 line with a shaded P10–P90 band that widens with lead time. Reads
+    // the quantile fields temp-forecast.js now emits; degrades to deriving
+    // them from the legacy ±CI (σ = ci/1.96) for older payloads.
+    function buildForecastFan(fc) {
+        const n = fc.length;
+        if (!n) return '';
+        const Z = 1.2816;
+        const days = fc.map((d, i) => {
+            const hp50 = d.high_p50 ?? d.high;
+            const lp50 = d.low_p50  ?? d.low;
+            const hsd  = (d.high_ci ?? 4) / 1.96;
+            const lsd  = (d.low_ci  ?? 4) / 1.96;
+            return {
+                i,
+                label: i === 0 ? 'Today' : i === 1 ? 'Tom'
+                     : new Date(d.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' }),
+                hp10: d.high_p10 ?? Math.round(hp50 - Z * hsd), hp50, hp90: d.high_p90 ?? Math.round(hp50 + Z * hsd),
+                lp10: d.low_p10  ?? Math.round(lp50 - Z * lsd), lp50, lp90: d.low_p90  ?? Math.round(lp50 + Z * lsd),
+            };
+        });
+        let tMin = Infinity, tMax = -Infinity;
+        for (const d of days) { tMin = Math.min(tMin, d.lp10); tMax = Math.max(tMax, d.hp90); }
+        if (!isFinite(tMin) || !isFinite(tMax)) return '';
+        const pad = Math.max(2, (tMax - tMin) * 0.12);
+        tMin -= pad; tMax += pad;
+        const W = 340, H = 156, xL = 26, xR = 314, yT = 20, yB = 118, span = (tMax - tMin) || 1;
+        const xFor = i => n === 1 ? (xL + xR) / 2 : xL + (i / (n - 1)) * (xR - xL);
+        const yFor = t => yB - ((t - tMin) / span) * (yB - yT);
+        const band = (k10, k90) => {
+            const top = days.map(d => `${xFor(d.i).toFixed(1)},${yFor(d[k90]).toFixed(1)}`);
+            const bot = days.map(d => `${xFor(d.i).toFixed(1)},${yFor(d[k10]).toFixed(1)}`).reverse();
+            return [...top, ...bot].join(' ');
+        };
+        const line = k => days.map(d => `${xFor(d.i).toFixed(1)},${yFor(d[k]).toFixed(1)}`).join(' ');
+        const HIGH = '#ff9f43', LOW = '#5aa9e6';
+        let marks = '';
+        for (const d of days) {
+            const x = xFor(d.i), yh = yFor(d.hp50), yl = yFor(d.lp50), today = d.i === 0;
+            marks += `<g><title>${d.label}: High ${d.hp50}° (P10 ${d.hp10}–P90 ${d.hp90}) · Low ${d.lp50}° (${d.lp10}–${d.lp90})</title>`
+                + `<circle cx="${x.toFixed(1)}" cy="${yh.toFixed(1)}" r="2.6" fill="${HIGH}"/>`
+                + `<circle cx="${x.toFixed(1)}" cy="${yl.toFixed(1)}" r="2.6" fill="${LOW}"/>`
+                + `<text x="${x.toFixed(1)}" y="${(yh - 6).toFixed(1)}" text-anchor="middle" font-size="8.5" fill="#e8f4ff" font-weight="700">${d.hp50}°</text>`
+                + `<text x="${x.toFixed(1)}" y="${(yl + 11).toFixed(1)}" text-anchor="middle" font-size="8.5" fill="#9aabbb">${d.lp50}°</text>`
+                + `<text x="${x.toFixed(1)}" y="${H - 14}" text-anchor="middle" font-size="8" fill="${today ? '#ffd700' : '#7788aa'}" font-weight="${today ? '700' : '400'}">${d.label}</text>`
+                + `</g>`;
+        }
+        return `<div style="flex:1 1 100%;min-width:0">
+            <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" style="display:block;min-width:300px" role="img" aria-label="7-day temperature forecast with P10 to P90 uncertainty band">
+                <polygon points="${band('hp10', 'hp90')}" fill="${HIGH}" opacity="0.16"/>
+                <polygon points="${band('lp10', 'lp90')}" fill="${LOW}" opacity="0.16"/>
+                <polyline points="${line('hp50')}" fill="none" stroke="${HIGH}" stroke-width="1.6"/>
+                <polyline points="${line('lp50')}" fill="none" stroke="${LOW}" stroke-width="1.6"/>
+                ${marks}
+            </svg>
+            <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:6px 14px;font-size:.55rem;color:#8899aa;margin-top:2px">
+                <span><span style="color:${HIGH}">●</span> High</span>
+                <span><span style="color:${LOW}">●</span> Low</span>
+                <span>line = most likely (P50) · shaded = P10–P90 (80% range)</span>
+            </div>
+        </div>`;
+    }
+
     async function refreshBriefing() {
         const result = await summaryEngine.generate();
         if (!result) return;
@@ -3364,20 +3451,7 @@ runCard('Daily briefing', 'daily-briefing-card', () => {
                 modelBadge.textContent = 'GFS';
             }
 
-            fcGrid.innerHTML = fc.map((d, i) => {
-                const dayName = i === 0 ? 'Today' : i === 1 ? 'Tomorrow'
-                    : new Date(d.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' });
-                const isToday = i === 0;
-                const borderCol = isToday ? 'rgba(255,200,0,.25)' : 'var(--border)';
-                const precipIcon = d.precip_mm > 5 ? '&#127783;' : d.precip_mm > 0.5 ? '&#127782;' : d.cloud > 70 ? '&#9729;' : '&#9728;';
-                return `<div style="flex:0 0 auto;min-width:72px;background:var(--surface);border:1px solid ${borderCol};border-radius:8px;padding:8px 10px;text-align:center${isToday ? ';box-shadow:0 0 8px rgba(255,200,0,.06)' : ''}">
-                    <div style="font-size:.65rem;font-weight:700;color:${isToday ? '#ffd700' : '#889'};margin-bottom:4px">${dayName}</div>
-                    <div style="font-size:1.1rem;margin-bottom:2px">${precipIcon}</div>
-                    <div style="font-size:.85rem;font-weight:700;color:#e8f4ff">${d.high}°</div>
-                    <div style="font-size:.7rem;color:#667">${d.low}°</div>
-                    <div style="font-size:.55rem;color:#445;margin-top:2px">±${d.high_ci}°</div>
-                </div>`;
-            }).join('');
+            fcGrid.innerHTML = buildForecastFan(fc);
         }
 
         // Share button
@@ -3404,6 +3478,11 @@ runCard('Daily briefing', 'daily-briefing-card', () => {
             refreshBriefing();
         }
     });
+});
+
+// ── Month-Ahead Outlook (weeks 3–6 probabilistic) ────────────────────────────
+runCard('Month-ahead outlook', 'month-outlook-card', () => {
+    mountMonthOutlook({ host: document.getElementById('month-outlook') });
 });
 
 // ── Alert History Panel ──────────────────────────────────────────────────────

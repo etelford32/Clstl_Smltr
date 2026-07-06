@@ -63,10 +63,26 @@ import { TEX_W, TEX_H } from './weather-feed.js';
 
 const NTEX        = TEX_W * TEX_H;
 const TEX_FLOATS  = NTEX * 4;
-const DEFAULT_LRU_SIZE       = 4;
+// 8 decoded trios ≈ 24 MB. 4 was enough for a slow drag's two bracketing
+// frames, but a fast back-and-forth scrub over a day thrashed it — every
+// re-visited hour paid the 30-50 ms main-thread decode again. 8 holds a
+// full day of one-way scrubbing at hourly frames. Freed on tab-hidden.
+const DEFAULT_LRU_SIZE       = 8;
 const DEFAULT_REDRAW_THRESH  = 60_000;            // 1 min
+// Wall-clock floor between replay dispatches. Each dispatch downstream costs
+// three ~1 MB DataTexture uploads + isobar/jet rebuilds + a panel of DOM
+// writes (earth.html weather-update handler). The sim-time threshold alone
+// doesn't bound a fast drag — 1 px on the slider is already ≥60 s of sim
+// time — so without this floor a drag repainted at the full frame rate.
+// ~11 Hz is indistinguishable during a scrub of hourly-lerped data; the
+// settle frame still lands because tick() runs every rAF and dispatches as
+// soon as the window reopens. Mode transitions (live↔replay) bypass it.
+const DEFAULT_MIN_REPAINT_MS = 90;
 const DEFAULT_LIVE_BYPASS_MS = 30 * 60_000;       // 30 min — anything newer
                                                   // than this is "live"
+const DEFAULT_SEAM_BLEND_MS  = 4 * 3_600_000;     // 4 h crossfade window where
+                                                  // the pinned model fades into
+                                                  // the NWP ring at the handoff
 
 // ── Tiny insertion-order LRU ────────────────────────────────────────────────
 // Built on Map (which preserves insertion order). Keeps the resolver
@@ -108,9 +124,11 @@ export class WeatherFrameResolver {
      * @param {object} opts
      * @param {import('./weather-feed.js').WeatherFeed}        opts.feed
      * @param {import('./weather-history.js').WeatherHistory}  opts.history
-     * @param {number} [opts.lruSize=4]                — LRU capacity (frames)
+     * @param {number} [opts.lruSize=8]                — LRU capacity (frames)
      * @param {number} [opts.redrawThreshMs=60000]     — quantize window for tick()
      * @param {number} [opts.liveBypassMs=1800000]     — within this of now → live
+     * @param {number} [opts.minRepaintMs=90]          — wall-clock floor between
+     *   replay dispatches (scrub repaint rate cap); 0 disables
      */
     constructor({
         feed,
@@ -118,15 +136,25 @@ export class WeatherFrameResolver {
         lruSize       = DEFAULT_LRU_SIZE,
         redrawThreshMs = DEFAULT_REDRAW_THRESH,
         liveBypassMs   = DEFAULT_LIVE_BYPASS_MS,
+        minRepaintMs   = DEFAULT_MIN_REPAINT_MS,
+        forecastProvider = null,
+        seamBlendMs    = DEFAULT_SEAM_BLEND_MS,
     } = {}) {
         if (!feed)    throw new Error('WeatherFrameResolver: feed is required');
         if (!history) throw new Error('WeatherFrameResolver: history is required');
 
         this._feed    = feed;
         this._history = history;
+        // Optional custom-forecast paint source (ForecastPaintProvider).
+        // When set, it takes precedence over the history forecast ring for
+        // future timestamps, so the globe renders our model instead of the
+        // upstream NWP frames. null → unchanged bracket-the-ring behaviour.
+        this._forecastProvider = forecastProvider;
         this._lru     = new LRU(lruSize);
         this._redrawThreshMs = redrawThreshMs;
         this._liveBypassMs   = liveBypassMs;
+        this._minRepaintMs   = Math.max(0, minRepaintMs);
+        this._lastDispatchWall = -Infinity;
 
         // Scratch buffers — one allocation per resolver, mutated in place
         // every dispatch. Sized to match earth.html's u_weather DataTexture
@@ -134,6 +162,16 @@ export class WeatherFrameResolver {
         this._weatherScratch = new Float32Array(TEX_FLOATS);
         this._windScratch    = new Float32Array(TEX_FLOATS);
         this._cloudScratch   = new Float32Array(TEX_FLOATS);
+
+        // Seam crossfade. In the `seamBlendMs` window just before the pinned
+        // model's deepest horizon, the dispatch blends the model (RK2) field
+        // toward the NWP-ring field so scrubbing across the handoff has no
+        // visible pop. The model trio is lerped into these temps, then mixed
+        // into the main scratch (which holds the NWP side). 0 disables.
+        this._seamBlendMs  = seamBlendMs;
+        this._blendWxTmp   = new Float32Array(TEX_FLOATS);
+        this._blendWindTmp = new Float32Array(TEX_FLOATS);
+        this._blendCloudTmp = new Float32Array(TEX_FLOATS);
 
         // Change-detection state. -Infinity guarantees the first tick()
         // dispatches regardless of where simTimeMs lands.
@@ -189,6 +227,12 @@ export class WeatherFrameResolver {
 
         if (!modeChanged && !movedEnough) return;
 
+        // Wall-clock repaint cap for the replay path. Returning WITHOUT
+        // updating the memo keeps the pending change pending, so the very
+        // next tick after the window reopens paints the settle frame.
+        if (!modeChanged && !isLive
+            && wallNow - this._lastDispatchWall < this._minRepaintMs) return;
+
         if (isLive) {
             // Only flush live on the transition (or first tick). When
             // already parked at live, we leave the renderer alone — the
@@ -196,6 +240,7 @@ export class WeatherFrameResolver {
             if (this._lastWasLive !== true) this._dispatchLive();
         } else {
             this._dispatchReplay(tEff);
+            this._lastDispatchWall = wallNow;
         }
 
         this._lastRenderT = tEff;
@@ -211,6 +256,16 @@ export class WeatherFrameResolver {
     invalidate() {
         this._lastRenderT = -Infinity;
         this._lastWasLive = null;
+    }
+
+    /**
+     * Install (or replace) the custom-forecast paint source. Invalidates
+     * the change-detection memo so the next tick re-dispatches through the
+     * provider. Pass null to revert to bracket-the-ring behaviour.
+     */
+    setForecastProvider(provider) {
+        this._forecastProvider = provider;
+        this.invalidate();
     }
 
     /** Tear down: remove listeners, clear LRU. */
@@ -241,6 +296,33 @@ export class WeatherFrameResolver {
     }
 
     _dispatchReplay(tEff) {
+        // Custom-forecast paint takes precedence for future timestamps.
+        // The provider returns null for past/live (bracket-the-ring owns
+        // those) and past its deepest horizon (hands off to the NWP ring).
+        if (this._forecastProvider) {
+            const fp = this._forecastProvider.bracket(tEff);
+            if (fp) {
+                // Seam crossfade: within seamBlendMs of the model's deepest
+                // horizon, fade the model field toward the NWP ring so the
+                // handoff at the edge is continuous instead of a one-frame
+                // pop. Only when the ring actually has a forecast frame to
+                // hand off to here; otherwise paint the model alone.
+                const edge = this._seamBlendMs > 0 && this._forecastProvider.horizonEndMs
+                    ? this._forecastProvider.horizonEndMs()
+                    : null;
+                if (Number.isFinite(edge) && tEff > edge - this._seamBlendMs) {
+                    const nwp = this._history.bracket(tEff);
+                    const nwpBase = nwp && (nwp.before ?? nwp.after);
+                    if (nwpBase && nwpBase.isForecast) {
+                        this._dispatchSeamBlend(fp, nwp, tEff, edge);
+                        return;
+                    }
+                }
+                this._dispatchForecast(fp, tEff);
+                return;
+            }
+        }
+
         const br = this._history.bracket(tEff);
         if (!br) {
             // Ring is empty — the very first session before any live
@@ -322,6 +404,141 @@ export class WeatherFrameResolver {
                 windBuffer:    this._windScratch,
                 cloudBuffer:   this._cloudScratch,
                 meta,
+                texW: TEX_W, texH: TEX_H,
+                replay: true,
+            },
+        }));
+    }
+
+    /**
+     * Paint a custom-forecast frame from the provider. `fp` carries two
+     * already-decoded trios (a, b) and a frac; we lerp into scratch and
+     * dispatch with forecast meta. Mirrors _dispatchReplay's lerp, but the
+     * decode/caching lives in the provider (its frames are keyed by stable
+     * target_ms, not the resolver's 4-slot LRU).
+     */
+    _dispatchForecast(fp, tEff) {
+        const { a, b, frac, meta } = fp;
+        if (a === b || frac <= 0) {
+            this._weatherScratch.set(a.weatherBuf);
+            this._windScratch   .set(a.windBuf);
+            this._cloudScratch  .set(a.cloudBuf);
+        } else if (frac >= 1) {
+            this._weatherScratch.set(b.weatherBuf);
+            this._windScratch   .set(b.windBuf);
+            this._cloudScratch  .set(b.cloudBuf);
+        } else {
+            this._lerpInto(this._weatherScratch, a.weatherBuf, b.weatherBuf, frac);
+            this._lerpInto(this._windScratch,    a.windBuf,    b.windBuf,    frac);
+            this._lerpInto(this._cloudScratch,   a.cloudBuf,   b.cloudBuf,   frac);
+        }
+
+        const dtSec  = Math.floor((tEff - Date.now()) / 1000);
+        const absMin = Math.round(Math.abs(dtSec) / 60);
+        const dtLabel = absMin < 60 ? `${absMin}m` : `${(absMin / 60).toFixed(1)}h`;
+        const issued = Number.isFinite(meta?.issued_ms) ? meta.issued_ms : Date.now();
+        const live   = this._feed.meta;
+        const md = {
+            ...live,
+            source:    `forecast · in ${dtLabel} · ${meta?.source ?? 'model'}`,
+            fetchTime: new Date(issued),
+            demo:      false,
+            loaded:    true,
+            replay:    false,
+            isForecast: true,
+            replayT:   tEff,
+            cacheAgeSeconds: 0,
+            cacheFetchedAt:  new Date(issued).toISOString(),
+            gridW:   meta?.gridW ?? live?.gridW,
+            gridH:   meta?.gridH ?? live?.gridH,
+            gridDeg: meta?.gridH ? 180 / meta.gridH : live?.gridDeg,
+        };
+
+        document.dispatchEvent(new CustomEvent('weather-update', {
+            detail: {
+                weatherBuffer: this._weatherScratch,
+                windBuffer:    this._windScratch,
+                cloudBuffer:   this._cloudScratch,
+                meta:          md,
+                texW: TEX_W, texH: TEX_H,
+                replay: true,    // resolver-origin marker (echo discriminator)
+            },
+        }));
+    }
+
+    /**
+     * Crossfade the pinned model field into the NWP-ring field across the
+     * seam window, eliminating the one-frame pop at the model→NWP handoff.
+     *
+     *   w = 0 at (edge − seamBlendMs)  → 100 % model  (continuous with the
+     *                                     pure-model paint just below the window)
+     *   w = 1 at edge                  → 100 % NWP     (continuous with the
+     *                                     pure-NWP paint just past the edge)
+     *
+     * @param {{a,b,frac}} fp   model bracket from ForecastPaintProvider
+     * @param {{before,after,frac}} nwp  NWP-ring bracket from history
+     * @param {number} tEff
+     * @param {number} edge    provider.horizonEndMs()
+     */
+    _dispatchSeamBlend(fp, nwp, tEff, edge) {
+        // NWP side → main scratch (decode is LRU-cached, so repeated scrubs
+        // across the seam don't re-decode).
+        const a = this._decodeCached(nwp.before ?? nwp.after);
+        const b = (nwp.before && nwp.after) ? this._decodeCached(nwp.after) : a;
+        const nf = (nwp.before && nwp.after) ? nwp.frac : 0;
+        if (a === b || nf <= 0) {
+            this._weatherScratch.set(a.weatherBuf);
+            this._windScratch   .set(a.windBuf);
+            this._cloudScratch  .set(a.cloudBuf);
+        } else {
+            this._lerpInto(this._weatherScratch, a.weatherBuf, b.weatherBuf, nf);
+            this._lerpInto(this._windScratch,    a.windBuf,    b.windBuf,    nf);
+            this._lerpInto(this._cloudScratch,   a.cloudBuf,   b.cloudBuf,   nf);
+        }
+
+        // Model side → temp buffers.
+        this._lerpInto(this._blendWxTmp,    fp.a.weatherBuf, fp.b.weatherBuf, fp.frac);
+        this._lerpInto(this._blendWindTmp,  fp.a.windBuf,    fp.b.windBuf,    fp.frac);
+        this._lerpInto(this._blendCloudTmp, fp.a.cloudBuf,   fp.b.cloudBuf,   fp.frac);
+
+        // Crossfade weight, clamped to [0,1]. _lerpInto(out, model, out, w)
+        // computes out = model·(1−w) + out·w in place: out already holds the
+        // NWP side, and reading out[i] before writing it in the same
+        // iteration is safe (no cross-element dependency).
+        let w = (tEff - (edge - this._seamBlendMs)) / this._seamBlendMs;
+        w = w < 0 ? 0 : w > 1 ? 1 : w;
+        this._lerpInto(this._weatherScratch, this._blendWxTmp,    this._weatherScratch, w);
+        this._lerpInto(this._windScratch,    this._blendWindTmp,  this._windScratch,    w);
+        this._lerpInto(this._cloudScratch,   this._blendCloudTmp, this._cloudScratch,   w);
+
+        const dtSec   = Math.floor((tEff - Date.now()) / 1000);
+        const absMin  = Math.round(Math.abs(dtSec) / 60);
+        const dtLabel = absMin < 60 ? `${absMin}m` : `${(absMin / 60).toFixed(1)}h`;
+        const issued  = Number.isFinite(fp.meta?.issued_ms) ? fp.meta.issued_ms : Date.now();
+        const live    = this._feed.meta;
+        const md = {
+            ...live,
+            source:    `forecast · in ${dtLabel} · ${fp.meta?.source ?? 'model'}→nwp`,
+            fetchTime: new Date(issued),
+            demo:      false,
+            loaded:    true,
+            replay:    false,
+            isForecast: true,
+            replayT:   tEff,
+            cacheAgeSeconds: 0,
+            cacheFetchedAt:  new Date(issued).toISOString(),
+            gridW:   fp.meta?.gridW ?? live?.gridW,
+            gridH:   fp.meta?.gridH ?? live?.gridH,
+            gridDeg: fp.meta?.gridH ? 180 / fp.meta.gridH : live?.gridDeg,
+            seamBlend: w,
+        };
+
+        document.dispatchEvent(new CustomEvent('weather-update', {
+            detail: {
+                weatherBuffer: this._weatherScratch,
+                windBuffer:    this._windScratch,
+                cloudBuffer:   this._cloudScratch,
+                meta:          md,
                 texW: TEX_W, texH: TEX_H,
                 replay: true,
             },

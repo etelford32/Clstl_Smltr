@@ -24,12 +24,39 @@
 // dims [x,y,z] metres (z = thrust axis), mass kg, cd ≈ free-molecular drag
 // coefficient for that shape, broad = broadside projected area (m²) used as
 // the default ram area when the bus flies belly-to-the-wind.
+//
+// momentArmMul = how off-axis the *centre of pressure* sits relative to the
+// centre of mass, normalised to (max-side / 2). It feeds the engine's drag-
+// torque term: tall buses (telescopes, tugs) want active attitude control
+// or they tumble; symmetric cubes resist disturbance naturally.
+//
+// rcs = optional reaction-control thruster suite — { thrust, isp } (per-axis
+// authority [N] and propellant Isp [s]). Bodies that carry it gain
+// *multidirectional* translation in flight (engine reads design.rcs*): they
+// can push along and across the velocity vector at once, decoupled from the
+// main engine. Only the bigger buses fly RCS — CubeSats hold attitude with
+// magnetorquers/wheels and have no translation clusters. The orbital tug is
+// servicing-grade and carries the strongest, finest RCS in the catalogue.
+//
+// attCtrl = how the bus *re-points* (steers its attitude) — never aero
+// surfaces; space has no air. { sys, slewDeg } names the dominant actuator and
+// its base slew rate [deg/s]. Real hardware classes:
+//   • Reaction wheels        — ubiquitous, precise, moderate authority
+//   • Control-moment gyros   — agile high-torque pointing (Pléiades, ISS)
+//   • Magnetorquers + wheels — torque against Earth's B-field, slow (CubeSats)
+//   • RCS thrusters          — fast but propellant-fed (added as a bonus when
+//                              the bus also carries an rcs suite)
+// deriveDesign() turns this into a per-design slewRate, scaled by mass and bus
+// tier — the number the flight model uses for A/D steering.
 export const BODIES = {
-    cubesat_3u:  { label: '3U CubeSat',        dims: [0.10, 0.10, 0.34], mass: 4,   cd: 2.2, shape: 'box' },
-    cubesat_12u: { label: '12U CubeSat',       dims: [0.20, 0.20, 0.34], mass: 14,  cd: 2.2, shape: 'box' },
-    smallsat:    { label: 'SmallSat bus',      dims: [0.60, 0.60, 0.80], mass: 90,  cd: 2.2, shape: 'box' },
-    bus_med:     { label: 'Medium bus',        dims: [1.20, 1.20, 1.50], mass: 320, cd: 2.2, shape: 'box' },
-    tank_cyl:    { label: 'Cylindrical bus',   dims: [1.00, 1.00, 2.00], mass: 240, cd: 2.0, shape: 'cyl' },
+    cubesat_3u:   { label: '3U CubeSat',        dims: [0.10, 0.10, 0.34], mass: 4,    cd: 2.2, shape: 'box',  momentArmMul: 0.15, attCtrl: { sys: 'Reaction wheels',        slewDeg: 1.5 } },
+    cubesat_12u:  { label: '12U CubeSat',       dims: [0.20, 0.20, 0.34], mass: 14,   cd: 2.2, shape: 'box',  momentArmMul: 0.18, attCtrl: { sys: 'Magnetorquers + wheels', slewDeg: 1.1 } },
+    cubesat_grid: { label: '6U Grid (3×2)',     dims: [0.30, 0.20, 0.34], mass: 22,   cd: 2.3, shape: 'grid', momentArmMul: 0.22, gridCells: [3, 2, 1], attCtrl: { sys: 'Magnetorquers + wheels', slewDeg: 1.0 } },
+    smallsat:     { label: 'SmallSat bus',      dims: [0.60, 0.60, 0.80], mass: 90,   cd: 2.2, shape: 'box',  momentArmMul: 0.18, rcs: { thrust:  2, isp:  80 }, attCtrl: { sys: 'Reaction wheels',        slewDeg: 1.4 } },
+    bus_med:      { label: 'Medium bus',        dims: [1.20, 1.20, 1.50], mass: 320,  cd: 2.2, shape: 'box',  momentArmMul: 0.20, rcs: { thrust: 10, isp: 220 }, attCtrl: { sys: 'Reaction wheels',        slewDeg: 0.9 } },
+    tank_cyl:     { label: 'Cylindrical bus',   dims: [1.00, 1.00, 2.00], mass: 240,  cd: 2.0, shape: 'cyl',  momentArmMul: 0.30, rcs: { thrust:  8, isp: 220 }, attCtrl: { sys: 'Reaction wheels',        slewDeg: 0.8 } },
+    tug:          { label: 'Orbital tug',       dims: [1.60, 1.60, 1.10], mass: 480,  cd: 2.1, shape: 'cyl',  momentArmMul: 0.22, tug: true, rcs: { thrust: 40, isp: 230 }, attCtrl: { sys: 'RCS thrusters',          slewDeg: 1.6 } },
+    telescope:    { label: 'Optical telescope', dims: [1.10, 1.10, 3.20], mass: 540,  cd: 2.4, shape: 'tube', momentArmMul: 0.55, rcs: { thrust:  4, isp: 200 }, attCtrl: { sys: 'Control-moment gyros',   slewDeg: 2.4 } },
 };
 
 // ── Thruster units ──────────────────────────────────────────────────────────
@@ -43,16 +70,50 @@ export const BODIES = {
 //   power > 0   → electric: needs that many watts (≈ ½·T·Isp·g₀ / η) to
 //                 make rated thrust. Starve it of array power and thrust
 //                 throttles down linearly (deriveDesign, below).
+//
+//   gimbalDeg   → maximum gimbal half-angle the nozzle can vector through
+//                 (the engine reads control.gimbal in rad, clamped here).
+//                 Chemicals gimbal a few degrees mechanically; electrics
+//                 vector electrostatically and have wider authority.
+//   throatLifeS → how many *full-throttle seconds* the throat lasts before
+//                 erosion costs you Isp and thrust (capped at 25 % loss).
+//                 Ion engines have huge life; bipropellants are aggressive.
 export const THRUSTER_UNITS = {
-    cold_gas:      { label: 'Cold-gas (N₂)',          unitMass: 0.6,  nozzle: 0.04, power: 0    },
-    monoprop:      { label: 'Monoprop hydrazine',     unitMass: 4.0,  nozzle: 0.07, power: 0    },
-    biprop:        { label: 'Bipropellant (MMH/NTO)', unitMass: 12.0, nozzle: 0.11, power: 0    },
-    hall_ion:      { label: 'Hall-effect ion',        unitMass: 8.0,  nozzle: 0.09, power: 1100 },
-    gridded_ion:   { label: 'Gridded ion (Xe)',       unitMass: 10.0, nozzle: 0.10, power: 650  },
-    hall_shielded: { label: 'Mag-shielded Hall',      unitMass: 11.0, nozzle: 0.09, power: 1500 },
-    iodine_ion:    { label: 'Iodine gridded ion',     unitMass: 2.2,  nozzle: 0.06, power: 220  },
-    electrospray:  { label: 'Electrospray / FEEP',    unitMass: 0.5,  nozzle: 0.035, power: 35  },
-    water_resisto: { label: 'Water electrothermal',   unitMass: 1.6,  nozzle: 0.05, power: 90   },
+    cold_gas:      { label: 'Cold-gas (N₂)',          unitMass: 0.6,  nozzle: 0.04, power: 0,    gimbalDeg: 0,   throatLifeS:  8_000 },
+    monoprop:      { label: 'Monoprop hydrazine',     unitMass: 4.0,  nozzle: 0.07, power: 0,    gimbalDeg: 4,   throatLifeS:  4_500 },
+    biprop:        { label: 'Bipropellant (MMH/NTO)', unitMass: 12.0, nozzle: 0.11, power: 0,    gimbalDeg: 8,   throatLifeS:  2_400 },
+    hall_ion:      { label: 'Hall-effect ion',        unitMass: 8.0,  nozzle: 0.09, power: 1100, gimbalDeg: 15,  throatLifeS: 60_000 },
+    gridded_ion:   { label: 'Gridded ion (Xe)',       unitMass: 10.0, nozzle: 0.10, power: 650,  gimbalDeg: 18,  throatLifeS: 90_000 },
+    hall_shielded: { label: 'Mag-shielded Hall',      unitMass: 11.0, nozzle: 0.09, power: 1500, gimbalDeg: 12,  throatLifeS:120_000 },
+    iodine_ion:    { label: 'Iodine gridded ion',     unitMass: 2.2,  nozzle: 0.06, power: 220,  gimbalDeg: 18,  throatLifeS: 30_000 },
+    electrospray:  { label: 'Electrospray / FEEP',    unitMass: 0.5,  nozzle: 0.035, power: 35,  gimbalDeg: 22,  throatLifeS: 40_000 },
+    water_resisto: { label: 'Water electrothermal',   unitMass: 1.6,  nozzle: 0.05, power: 90,   gimbalDeg: 6,   throatLifeS:  6_000 },
+};
+
+// ── Payloads ────────────────────────────────────────────────────────────────
+// A fourth assembly slot — the *reason* the bird is up there. Payloads add
+// dry mass, drag-area, and a fixed electrical load, and they introduce new
+// failure / opportunity modes:
+//
+//   optical_cam  — narrow-FOV imager; very mass-efficient, modest power.
+//   wide_imager  — staring multi-band camera; bigger aperture, more area.
+//   commsat_dish — high-gain X-band reflector; large frontal area when
+//                  pointed cross-track, big housekeeping power.
+//   sar_radar    — phased-array side-looker; heavy, power-hungry, mostly
+//                  flat-plate drag.
+//   mass_driver  — experimental electromagnetic launcher (gameplay flavour
+//                  payload); very heavy, exotic power draw, lots of area.
+//
+// All payloads have a centreOffset (m, along +z) describing how far above
+// the bus deck they sit, used both for the 3-D model and (eventually) for
+// CG-offset moments in the flight model.
+export const PAYLOADS = {
+    none:         { label: 'None',                mass:   0, area:  0,  cd: 0,   powerW:   0, centreOffset: 0,    shape: null     },
+    optical_cam:  { label: 'Optical camera',      mass:  18, area: 0.25, cd: 2.3, powerW:  40, centreOffset: 0.45, shape: 'scope'  },
+    wide_imager:  { label: 'Wide-field imager',   mass:  46, area: 0.70, cd: 2.3, powerW:  85, centreOffset: 0.55, shape: 'imager' },
+    commsat_dish: { label: 'Comms HG dish',       mass:  32, area: 1.10, cd: 2.6, powerW: 110, centreOffset: 0.60, shape: 'dish'   },
+    sar_radar:    { label: 'SAR phased array',    mass: 120, area: 2.40, cd: 2.6, powerW: 320, centreOffset: 0.30, shape: 'plate'  },
+    mass_driver:  { label: 'Mass driver (exp.)',  mass: 240, area: 1.60, cd: 2.4, powerW: 480, centreOffset: 0.95, shape: 'driver' },
 };
 
 // ── Solar arrays ────────────────────────────────────────────────────────────
@@ -80,7 +141,8 @@ const HOUSEKEEPING_W = 20;   // W  — baseline bus load drawn before any propul
 
 export function defaultBuild() {
     return { body: 'smallsat', thruster: 'monoprop', thrusterCount: 2,
-             panel: 'dual', panelSpan: 2.2 };
+             panel: 'dual', panelSpan: 2.2,
+             payload: 'optical_cam' };
 }
 
 /** Per-wing panel area (m²): span (root→tip) × a fixed 0.45 m chord. */
@@ -96,45 +158,87 @@ function wingArea(span) { return clampNum(span, 0.3, 8, 2) * 0.45; }
  *            bodyArea,panelArea,panelMass,
  *            power,powerReq,powerMargin,powerFrac,electric}}
  */
-export function deriveDesign(build, presets = null) {
-    const b = BODIES[build.body] || BODIES.smallsat;
+export function deriveDesign(build, presets = null, tierMods = null) {
+    const b  = BODIES[build.body] || BODIES.smallsat;
     const tu = THRUSTER_UNITS[build.thruster] || THRUSTER_UNITS.monoprop;
-    const p = PANELS[build.panel] || PANELS.none;
+    const p  = PANELS[build.panel] || PANELS.none;
+    const pl = PAYLOADS[build.payload] || PAYLOADS.none;
     const count = Math.max(1, Math.round(build.thrusterCount || 1));
 
-    // Bus broadside ram area (largest face for box, side rectangle for cyl).
+    // ── Tier modifiers ──────────────────────────────────────────────────
+    // tierMods is supplied by the progression module — { body:{massMul,...},
+    // thruster:{...}, panel:{...}, payload:{...} } — so the builder stays
+    // decoupled from XP/persistence. Missing entries default to 1× (Mk I).
+    const tm = tierMods || {};
+    const mB  = tm.body     || {};
+    const mTu = tm.thruster || {};
+    const mP  = tm.panel    || {};
+    const mPl = tm.payload  || {};
+
+    // Bus broadside ram area (largest face for box, side rectangle for cyl,
+    // length × diameter for the long telescope tube).
     const [dx, dy, dz] = b.dims;
-    const bodyArea = b.shape === 'cyl'
+    const bodyArea = b.shape === 'cyl' || b.shape === 'tube'
         ? dx * dz                                   // diameter × length
         : Math.max(dx * dy, dx * dz, dy * dz);      // biggest box face
 
     const perWing = wingArea(build.panelSpan);
     const totalPanelArea = perWing * p.wings;
-    const panelRamArea = totalPanelArea * p.ramFactor;
-    const panelMass = totalPanelArea * p.areaKgM2;
+    const panelRamArea = totalPanelArea * p.ramFactor * (mP.cdMul ?? 1);
+    const panelMass = totalPanelArea * p.areaKgM2 * (mP.massMul ?? 1);
 
-    const area = bodyArea + panelRamArea;
-    // Area-weighted blend of body vs. flat-plate panel drag coefficients.
-    const cd = panelRamArea > 0
-        ? (b.cd * bodyArea + p.cd * panelRamArea) / area
-        : b.cd;
+    // Apply per-slot Cd multipliers to each contribution (Mk II/III bodies
+    // are slicker, etc) — area is unchanged but blended Cd shifts.
+    const bodyCdEff    = b.cd  * (mB.cdMul  ?? 1);
+    const panelCdEff   = p.cd  * (mP.cdMul  ?? 1);
+    const payloadCdEff = pl.cd * (mPl.cdMul ?? 1);
+    const payloadArea  = pl.area * (mPl.cdMul ? 1 : 1);   // area unchanged by Cd; reserved hook
 
-    const dryMass = b.mass + tu.unitMass * count + panelMass + AVIONICS_MASS;
+    const area = bodyArea + panelRamArea + payloadArea;
+    const cd = area > 0
+        ? (bodyCdEff * bodyArea + panelCdEff * panelRamArea + payloadCdEff * payloadArea) / area
+        : bodyCdEff;
+
+    const dryMass = b.mass * (mB.massMul ?? 1)
+                  + tu.unitMass * count * (mTu.massMul ?? 1)
+                  + panelMass
+                  + pl.mass * (mPl.massMul ?? 1)
+                  + AVIONICS_MASS;
 
     // ── Power budget ──────────────────────────────────────────────────────
-    // Sun-tracking arrays generate from their *full* area (orientation only
-    // affects drag, not illumination). The bus draws a fixed housekeeping
-    // load first; whatever is left feeds propulsion.
-    const powerGen   = totalPanelArea * p.wPerM2;             // W generated
+    const powerGen   = totalPanelArea * p.wPerM2 * (mP.wMul ?? 1);
     const electric   = tu.power > 0;
     const thrPwrFull = tu.power * count;                      // W at rated thrust
-    const powerReq   = HOUSEKEEPING_W + (electric ? thrPwrFull : 0);
-    const powerAvail = Math.max(0, powerGen - HOUSEKEEPING_W);
-    // Electric thrust scales linearly with the power it actually gets; a
-    // chemical thruster ignores the array entirely.
+    const payloadW   = pl.powerW * (mPl.powerMul ?? 1);
+    const fixedLoad  = HOUSEKEEPING_W + payloadW;
+    const powerReq   = fixedLoad + (electric ? thrPwrFull : 0);
+    const powerAvail = Math.max(0, powerGen - fixedLoad);
     const powerFrac  = electric
         ? (thrPwrFull > 0 ? Math.min(1, powerAvail / thrPwrFull) : 1)
         : 1;
+
+    // Centre-of-pressure offset (m): the lever arm between the geometric
+    // centre of drag and the centre of mass, used by the engine to compute
+    // disturbance torques.
+    const maxSide = Math.max(dx, dy, dz);
+    const baseArm = maxSide * (b.momentArmMul ?? 0.18);
+    const payloadArmRaw = pl.centreOffset * (pl.mass / Math.max(1, dryMass));
+    const copOffset = baseArm + payloadArmRaw * 0.5;
+
+    // Thruster gimbal / throat life with tier mods. Default 1× (Mk I).
+    const gimbalDeg   = tu.gimbalDeg   * (mTu.gimbalMul     ?? 1);
+    const throatLifeS = tu.throatLifeS * (mTu.throatLifeMul ?? 1);
+
+    // ── Attitude control / slew authority ───────────────────────────────
+    // How fast the bus can re-point (steer). RCS jets add a slew bonus and a
+    // combined label; lighter craft turn faster (slew ∝ 1/√mass); a tiered
+    // bus adds reaction-wheel authority (mB.slewMul). The flight model reads
+    // slewRate [rad/s] for A/D steering; slewDeg/attSys are for the HUD.
+    const att = b.attCtrl || { sys: 'Reaction wheels', slewDeg: 1.0 };
+    const rcsSlewBonus = b.rcs ? 0.8 : 0;
+    const massSlew = Math.max(0.5, Math.min(1.6, Math.sqrt(180 / Math.max(40, dryMass))));
+    const slewDeg = round((att.slewDeg + rcsSlewBonus) * massSlew * (mB.slewMul ?? 1), 2);
+    const attSys  = (b.rcs && /wheel/i.test(att.sys)) ? 'Reaction wheels + RCS' : att.sys;
 
     const out = {
         dryMass:      round(dryMass, 1),
@@ -145,15 +249,37 @@ export function deriveDesign(build, presets = null) {
         bodyArea:     round(bodyArea, 3),
         panelArea:    round(totalPanelArea, 3),
         panelMass:    round(panelMass, 2),
+        payload:      build.payload || 'none',
+        payloadMass:  round(pl.mass * (mPl.massMul ?? 1), 1),
+        payloadArea:  round(payloadArea, 3),
+        payloadPower: round(payloadW, 0),
         power:        round(powerGen, 0),
         powerReq:     round(powerReq, 0),
         powerMargin:  round(powerGen - powerReq, 0),
         powerFrac:    round(powerFrac, 3),
         electric,
+        gimbalDeg:    round(gimbalDeg, 1),
+        gimbalRad:    gimbalDeg * Math.PI / 180,
+        throatLifeS:  Math.round(throatLifeS),
+        copOffset:    round(copOffset, 3),
+        maxSide:      round(maxSide, 3),
+        // ── Multidirectional RCS suite (body-dependent) ──────────────────
+        // Per-axis translation authority [N] and propellant Isp [s]. Zero /
+        // false for CubeSat-class buses that carry no translation clusters.
+        // Mass of the suite is folded into the bus mass already, so this is
+        // purely the flight-model capability the engine consumes.
+        rcs:          !!b.rcs,
+        rcsThrust:    b.rcs ? round(b.rcs.thrust, 2) : 0,
+        rcsIsp:       b.rcs ? b.rcs.isp : 0,
+        // Attitude / steering authority (see above).
+        slewDeg:      slewDeg,
+        slewRate:     round(slewDeg * Math.PI / 180, 4),   // rad/s
+        attSys:       attSys,
     };
     if (presets && presets[build.thruster]) {
-        out.thrust = round(presets[build.thruster].thrust * count * powerFrac, 4);
-        out.isp = presets[build.thruster].isp;
+        const ptu = presets[build.thruster];
+        out.thrust = round(ptu.thrust * count * powerFrac * (mTu.thrustMul ?? 1), 4);
+        out.isp    = round(ptu.isp * (mTu.ispMul ?? 1), 1);
     }
     return out;
 }
@@ -164,9 +290,10 @@ export function deriveDesign(build, presets = null) {
  */
 export function buildGroup(THREE, build) {
     const g = new THREE.Group();
-    const b = BODIES[build.body] || BODIES.smallsat;
+    const b  = BODIES[build.body] || BODIES.smallsat;
     const tu = THRUSTER_UNITS[build.thruster] || THRUSTER_UNITS.monoprop;
-    const p = PANELS[build.panel] || PANELS.none;
+    const p  = PANELS[build.panel] || PANELS.none;
+    const pl = PAYLOADS[build.payload] || PAYLOADS.none;
     const count = Math.max(1, Math.round(build.thrusterCount || 1));
     const [dx, dy, dz] = b.dims;
 
@@ -175,14 +302,56 @@ export function buildGroup(THREE, build) {
         color: 0xb9a05a, metalness: 0.65, roughness: 0.42,
         emissive: 0x141005, emissiveIntensity: 0.4,
     });
+    const goldMat = new THREE.MeshStandardMaterial({
+        color: 0xddc77b, metalness: 0.78, roughness: 0.32,
+        emissive: 0x1a1408, emissiveIntensity: 0.55,
+    });
     let bus;
     if (b.shape === 'cyl') {
         bus = new THREE.Mesh(new THREE.CylinderGeometry(dx / 2, dx / 2, dz, 28), busMat);
         bus.rotation.x = Math.PI / 2;                // align cylinder to +z
+        g.add(bus);
+    } else if (b.shape === 'tube') {
+        // Telescope: hollow tube + sun-shade baffle on the +z end.
+        bus = new THREE.Mesh(new THREE.CylinderGeometry(dx / 2, dx / 2, dz, 36), busMat);
+        bus.rotation.x = Math.PI / 2;
+        g.add(bus);
+        const baffleMat = new THREE.MeshStandardMaterial({
+            color: 0x222831, metalness: 0.6, roughness: 0.65,
+            emissive: 0x05070a, emissiveIntensity: 0.4,
+        });
+        const baffle = new THREE.Mesh(
+            new THREE.CylinderGeometry(dx / 2 * 1.18, dx / 2, dz * 0.18, 36, 1, true),
+            baffleMat);
+        baffle.rotation.x = Math.PI / 2;
+        baffle.position.z = dz / 2 + dz * 0.09;
+        g.add(baffle);
+    } else if (b.shape === 'grid') {
+        // Bolted multi-cube grid (e.g. 3×2 array of 1-U cubes). Each cell
+        // gets its own box so seams are visible; gives the silhouette real
+        // multi-cube character instead of one fat box.
+        const [gx, gy, gz] = b.gridCells || [Math.round(dx/0.1), Math.round(dy/0.1), 1];
+        const cx = dx / gx, cy = dy / gy, cz = dz / gz;
+        const inset = 0.0035;            // visible gap between cubes
+        for (let i = 0; i < gx; i++) for (let j = 0; j < gy; j++) for (let k = 0; k < gz; k++) {
+            const cell = new THREE.Mesh(
+                new THREE.BoxGeometry(cx - inset, cy - inset, cz - inset), busMat);
+            cell.position.set((i - (gx - 1) / 2) * cx,
+                              (j - (gy - 1) / 2) * cy,
+                              (k - (gz - 1) / 2) * cz);
+            g.add(cell);
+        }
     } else {
         bus = new THREE.Mesh(new THREE.BoxGeometry(dx, dy, dz), busMat);
+        g.add(bus);
     }
-    g.add(bus);
+    // Tugs get a docking ring on the +z face — useful narrative cue.
+    if (b.tug) {
+        const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(dx * 0.42, dx * 0.04, 12, 36), goldMat);
+        ring.position.z = dz / 2 + 0.02;
+        g.add(ring);
+    }
 
     // ── Thrusters: nozzle cones on the −z face, packed in a tidy grid ──
     const nozMat = new THREE.MeshStandardMaterial({
@@ -198,6 +367,25 @@ export function buildGroup(THREE, build) {
         noz.position.set(cx * pitch, cy * pitch, -dz / 2 - tu.nozzle * 0.9);
         noz.rotation.x = -Math.PI / 2;               // bell points −z (aft)
         g.add(noz);
+    }
+
+    // ── RCS clusters — tiny lateral thruster pods at the bus corners ──
+    // Visual cue for the multidirectional-thrust suite. Four pods straddling
+    // the +z deck, canted outward, so a glance tells you this bus can strafe.
+    if (b.rcs) {
+        const rcsMat = new THREE.MeshStandardMaterial({
+            color: 0x9a6b3a, metalness: 0.7, roughness: 0.45,
+            emissive: 0x2a1605, emissiveIntensity: 0.5,
+        });
+        const podR = Math.min(dx, dy) * 0.07 + 0.012;
+        for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+            const pod = new THREE.Mesh(
+                new THREE.ConeGeometry(podR, podR * 2.0, 10), rcsMat);
+            pod.position.set(sx * dx * 0.46, sy * dy * 0.46, dz * 0.30);
+            // Bell points outward along the corner diagonal.
+            pod.rotation.z = Math.atan2(sy, sx) - Math.PI / 2;
+            g.add(pod);
+        }
     }
 
     // ── Solar wings along ±x, with a short yoke ──
@@ -226,22 +414,112 @@ export function buildGroup(THREE, build) {
         }
     }
 
-    // Antenna whip for a little silhouette character.
-    const antMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.6, roughness: 0.4 });
-    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, dz * 0.5, 8), antMat);
-    ant.position.set(0, dy / 2 + dz * 0.25, dz * 0.3);
-    g.add(ant);
+    // ── Payload (mounted on the +z deck) ─────────────────────────────────
+    if (pl.shape) {
+        const payMat = new THREE.MeshStandardMaterial({
+            color: 0xc6cfd6, metalness: 0.55, roughness: 0.45,
+            emissive: 0x0a0e14, emissiveIntensity: 0.45,
+        });
+        const lensMat = new THREE.MeshStandardMaterial({
+            color: 0x6fdcff, metalness: 0.8, roughness: 0.15,
+            emissive: 0x062537, emissiveIntensity: 0.85,
+        });
+        const dishMat = new THREE.MeshStandardMaterial({
+            color: 0xe2eef7, metalness: 0.5, roughness: 0.35,
+            emissive: 0x10202c, emissiveIntensity: 0.5, side: THREE.DoubleSide,
+        });
+        const zBase = dz / 2;
+        if (pl.shape === 'scope') {
+            // Cylinder + glass eye on the bus's +z face.
+            const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.45, 24), payMat);
+            tube.rotation.x = Math.PI / 2;
+            tube.position.z = zBase + 0.22;
+            g.add(tube);
+            const lens = new THREE.Mesh(new THREE.CircleGeometry(0.12, 24), lensMat);
+            lens.position.z = zBase + 0.45;
+            g.add(lens);
+        } else if (pl.shape === 'imager') {
+            // Wider, shorter — multi-aperture imager block.
+            const box = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.4, 0.3), payMat);
+            box.position.z = zBase + 0.16;
+            g.add(box);
+            // Three lens dots in a triangle.
+            for (const [px, py] of [[-0.16, 0.07], [0.16, 0.07], [0, -0.12]]) {
+                const lens = new THREE.Mesh(new THREE.CircleGeometry(0.07, 18), lensMat);
+                lens.position.set(px, py, zBase + 0.31);
+                g.add(lens);
+            }
+        } else if (pl.shape === 'dish') {
+            // Parabolic-ish dish on a short pedestal, slightly canted.
+            const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 12), payMat);
+            ped.rotation.x = Math.PI / 2;
+            ped.position.z = zBase + 0.09;
+            g.add(ped);
+            const dish = new THREE.Mesh(
+                new THREE.SphereGeometry(0.42, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.32),
+                dishMat);
+            dish.rotation.x = -Math.PI * 0.45;
+            dish.position.z = zBase + 0.32;
+            g.add(dish);
+            const feed = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), lensMat);
+            feed.position.set(0, 0.25, zBase + 0.35);
+            g.add(feed);
+        } else if (pl.shape === 'plate') {
+            // Flat phased-array panel.
+            const plate = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.04, 0.7), payMat);
+            plate.position.z = zBase + 0.18;
+            g.add(plate);
+            // Element grid pattern as a wireframe overlay.
+            const grid = new THREE.LineSegments(
+                new THREE.WireframeGeometry(new THREE.PlaneGeometry(1.2, 0.7, 6, 4)),
+                new THREE.LineBasicMaterial({ color: 0x55aaff, transparent: true, opacity: 0.55 }));
+            grid.rotation.x = -Math.PI / 2;
+            grid.position.z = zBase + 0.20;
+            g.add(grid);
+        } else if (pl.shape === 'driver') {
+            // Mass driver — a long open rail-launch tube with coil rings.
+            const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 1.4, 18, 1, true), payMat);
+            rail.rotation.x = Math.PI / 2;
+            rail.position.z = zBase + 0.75;
+            g.add(rail);
+            for (let i = 0; i < 5; i++) {
+                const coil = new THREE.Mesh(
+                    new THREE.TorusGeometry(0.16, 0.025, 8, 18), goldMat);
+                coil.position.z = zBase + 0.18 + i * 0.28;
+                coil.rotation.x = Math.PI / 2;
+                g.add(coil);
+            }
+        }
+    }
+
+    // Antenna whip for a little silhouette character (skip if a dish or
+    // mass-driver dominates the top — they're the comms / payload feature).
+    if (pl.shape !== 'dish' && pl.shape !== 'driver') {
+        const antMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.6, roughness: 0.4 });
+        const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, dz * 0.5, 8), antMat);
+        ant.position.set(0, dy / 2 + dz * 0.25, dz * 0.3);
+        g.add(ant);
+    }
 
     return g;
 }
 
 /** Largest bounding dimension (m) — handy for fitting the camera. */
 export function buildExtent(build) {
-    const b = BODIES[build.body] || BODIES.smallsat;
-    const p = PANELS[build.panel] || PANELS.none;
+    const b  = BODIES[build.body] || BODIES.smallsat;
+    const p  = PANELS[build.panel] || PANELS.none;
+    const pl = PAYLOADS[build.payload] || PAYLOADS.none;
     const [dx, dy, dz] = b.dims;
     const span = p.wings > 0 ? clampNum(build.panelSpan, 0.3, 8, 2) : 0;
-    return Math.max(dz, dy, dx + 2 * (span + 0.2));
+    // Long payloads (mass driver, telescope baffle) extend the +z silhouette;
+    // account for them so the camera frames the whole stack.
+    const payloadStackZ = pl.shape === 'driver' ? 1.6
+                       : pl.shape === 'dish'   ? 0.7
+                       : pl.shape === 'scope'  ? 0.55
+                       : pl.shape === 'imager' ? 0.35
+                       : pl.shape === 'plate'  ? 0.25
+                       : 0;
+    return Math.max(dz + payloadStackZ, dy, dx + 2 * (span + 0.2));
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -278,14 +556,14 @@ export function selfTest() {
     T(s5.area > s1.area && s5.dryMass > s1.dryMass,
         `+wing span ⇒ +area & +mass (A ${s1.area}→${s5.area})`);
 
-    // No panels ⇒ Cd collapses to the bare bus value.
-    const np = deriveDesign({ ...defaultBuild(), panel: 'none' }, presets);
+    // No panels AND no payload ⇒ Cd collapses to the bare bus value.
+    const np = deriveDesign({ ...defaultBuild(), panel: 'none', payload: 'none' }, presets);
     T(Math.abs(np.cd - BODIES[defaultBuild().body].cd) < 1e-6,
-        `no panels ⇒ Cd = bus Cd (${np.cd})`);
+        `no panels & no payload ⇒ Cd = bus Cd (${np.cd})`);
 
     // A big bus is heavier and draggier than a CubeSat.
-    const cube = deriveDesign({ ...defaultBuild(), body: 'cubesat_3u', panel: 'none' }, presets);
-    const big = deriveDesign({ ...defaultBuild(), body: 'bus_med', panel: 'none' }, presets);
+    const cube = deriveDesign({ ...defaultBuild(), body: 'cubesat_3u', panel: 'none', payload: 'none' }, presets);
+    const big = deriveDesign({ ...defaultBuild(), body: 'bus_med', panel: 'none', payload: 'none' }, presets);
     T(big.dryMass > cube.dryMass && big.area > cube.area,
         `bus_med ≫ 3U (m ${cube.dryMass}→${big.dryMass}, A ${cube.area}→${big.area})`);
 
@@ -325,5 +603,43 @@ export function selfTest() {
     T(rosa.power / rosa.panelMass > rigid.power / rigid.panelMass,
         `ROSA > rigid on W/kg (${(rosa.power/rosa.panelMass).toFixed(0)} vs ${(rigid.power/rigid.panelMass).toFixed(0)})`);
 
+    // ── Multidirectional RCS suite ────────────────────────────────────────
+    // The bigger buses carry RCS clusters; CubeSats don't. The orbital tug
+    // has the strongest per-axis authority of the lot.
+    const cubeRcs = deriveDesign({ ...defaultBuild(), body: 'cubesat_3u' }, presets);
+    const smallRcs = deriveDesign({ ...defaultBuild(), body: 'smallsat' }, presets);
+    const tugRcs = deriveDesign({ ...defaultBuild(), body: 'tug' }, presets);
+    T(cubeRcs.rcs === false && cubeRcs.rcsThrust === 0,
+        `CubeSat carries no RCS (rcs=${cubeRcs.rcs})`);
+    T(smallRcs.rcs === true && smallRcs.rcsThrust > 0 && smallRcs.rcsIsp > 0,
+        `SmallSat has RCS (${smallRcs.rcsThrust} N @ ${smallRcs.rcsIsp}s)`);
+    T(tugRcs.rcs === true && tugRcs.rcsThrust > smallRcs.rcsThrust,
+        `tug RCS ≫ smallsat (${smallRcs.rcsThrust} → ${tugRcs.rcsThrust} N)`);
+
+    // ── Attitude / slew authority ─────────────────────────────────────────
+    // Every design names a steering system and a positive slew rate. CMG and
+    // RCS buses out-slew a plain reaction-wheel bus; a bus tier upgrade adds
+    // authority.
+    const scope = deriveDesign({ ...defaultBuild(), body: 'telescope' }, presets);
+    const medBus = deriveDesign({ ...defaultBuild(), body: 'bus_med' }, presets);
+    T(medBus.slewRate > 0 && /wheel|RCS/i.test(medBus.attSys),
+        `bus reports slew + attitude system (${medBus.slewDeg}°/s · ${medBus.attSys})`);
+    T(scope.slewDeg > medBus.slewDeg,
+        `CMG telescope out-slews medium bus (${medBus.slewDeg} < ${scope.slewDeg} °/s)`);
+    T(/RCS/.test(tugRcs.attSys),
+        `tug steers on RCS (${tugRcs.attSys})`);
+    const med3 = PROG_BODY_T3(medBus); // computed below via tier mods
+    T(med3 > medBus.slewDeg, `bus tier-III adds slew authority (${medBus.slewDeg} → ${med3} °/s)`);
+
     return out;
+}
+
+// Helper for the slew tier self-test — re-derives a medium bus with the
+// Mk III body slew bonus applied, mirroring the progression tierMods shape.
+function PROG_BODY_T3(_baseline) {
+    const d = deriveDesign({ body: 'bus_med', thruster: 'monoprop', thrusterCount: 2,
+        panel: 'dual', panelSpan: 2.2, payload: 'optical_cam' },
+        { monoprop: { thrust: 22, isp: 225 } },
+        { body: { massMul: 0.85, cdMul: 0.92, slewMul: 1.28 } });
+    return d.slewDeg;
 }

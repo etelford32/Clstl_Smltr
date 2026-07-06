@@ -748,6 +748,37 @@ export async function fetchPipelineHeartbeat() {
     }
 }
 
+// ── Synthetic auth robots (journey health) ──────────────────────────────────
+// Reads synthetic_journey_summary(), backed by synthetic_journey_log written by
+// the api/cron/synthetic-auth-* robots. Each robot drives a throwaway account
+// through a real auth journey (signup → login → profile/RLS → upgrade …),
+// asserts the outcome, then deletes the account. This card answers "can a real
+// user actually sign up and sign in right now?" with a per-journey verdict +
+// recent pass-rate. The RPC is SECURITY DEFINER + is_admin()-gated; this
+// wrapper keeps the client-side admin gate for consistency + early-out.
+
+/**
+ * Returns { ok, data:[{ journey, last_ran_at, last_ok, last_latency_ms,
+ *           last_steps, last_detail, runs, passes, pass_rate }] }.
+ * `missing:true` in the pre-migration state so the card shows an install hint
+ * instead of a generic error. Empty data is normal before the first run.
+ */
+export async function fetchSyntheticJourneys(limit = 20) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    try {
+        const { data, error } = await client.rpc('synthetic_journey_summary', { p_limit: limit });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        const msg = err?.message || String(err);
+        const missing = /function .* does not exist/i.test(msg) || /not found/i.test(msg);
+        return { ok: false, error: msg, missing };
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Activation analytics — backed by activation_events + supabase-class-seats
 // migration. All queries gated on requireAdmin(); RLS on activation_events
@@ -1648,7 +1679,7 @@ export async function fetchConversionRate(weeks = 8) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Top sims / pages — already exists as fetchTopPages, but admin/analytics
 // surface wants a per-plan breakdown for "do paid users actually use Advanced
-// features?". We piggyback on user_analytics + user_profiles via a join.
+// features?". We piggyback on analytics_events + user_profiles via a join.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function fetchTopSimsByPlan(days = 7) {
@@ -1656,14 +1687,15 @@ export async function fetchTopSimsByPlan(days = 7) {
     if (!client) return { ok: false, error: 'Supabase not configured' };
     if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
     try {
-        // user_analytics lacks plan; we map user_id -> plan in two queries
+        // analytics_events lacks plan; we map user_id -> plan in two queries
         // and join client-side. Cheaper than a SQL view, simple to reason
-        // about.
+        // about. (Filter by event_type — analytics_events.event_name carries
+        // the page slug, not the event kind.)
         const { data: analytics, error: aErr } = await client
-            .from('user_analytics')
-            .select('user_id, page_path, event_name, created_at')
+            .from('analytics_events')
+            .select('user_id, page_path, event_type, created_at')
             .gte('created_at', daysAgo(days))
-            .eq('event_name', 'page_view')
+            .eq('event_type', 'page_view')
             .limit(20000);
         if (aErr) throw aErr;
 

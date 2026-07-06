@@ -158,10 +158,12 @@ BEGIN
     p_days := LEAST(GREATEST(COALESCE(p_days, 60), 30), 180);
 
     RETURN QUERY
+    -- NB: variant aliased to `arm` inside the body to avoid colliding with
+    -- the RETURNS TABLE OUT-param `variant` ("column reference is ambiguous").
     WITH exposures AS (
         SELECT DISTINCT ON (ae.properties->>'visitor_id')
                ae.properties->>'visitor_id' AS vid,
-               ae.properties->>'variant'    AS variant,
+               ae.properties->>'variant'    AS arm,
                ae.created_at                AS exposed_at
         FROM public.analytics_events ae
         WHERE ae.event_name = 'experiment_exposure'
@@ -172,15 +174,15 @@ BEGIN
         ORDER BY ae.properties->>'visitor_id', ae.created_at
     ),
     cohort AS (
-        SELECT e.variant, b.day_n, e.vid, e.exposed_at
+        SELECT e.arm, b.bucket_n AS day_n, e.vid, e.exposed_at
         FROM exposures e
-        CROSS JOIN unnest(day_buckets) AS b(day_n)
+        CROSS JOIN unnest(day_buckets) AS b(bucket_n)
         -- Need a full follow-up window to score the bucket fairly: a
         -- visitor exposed yesterday can't possibly be a Day-7 returner.
-        WHERE e.exposed_at <= now() - ((b.day_n + 1) || ' days')::interval
+        WHERE e.exposed_at <= now() - ((b.bucket_n + 1) || ' days')::interval
     ),
     returns AS (
-        SELECT c.variant,
+        SELECT c.arm,
                c.day_n,
                COUNT(*)::BIGINT AS exposed,
                COUNT(*) FILTER (WHERE EXISTS (
@@ -191,11 +193,11 @@ BEGIN
                      AND ae.created_at <= c.exposed_at + ((c.day_n+1) || ' days')::interval
                ))::BIGINT AS returned
         FROM cohort c
-        GROUP BY c.variant, c.day_n
+        GROUP BY c.arm, c.day_n
     )
-    SELECT variant, day_n, exposed, returned
-    FROM returns
-    ORDER BY variant, day_n;
+    SELECT r.arm AS variant, r.day_n, r.exposed, r.returned
+    FROM returns r
+    ORDER BY r.arm, r.day_n;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 

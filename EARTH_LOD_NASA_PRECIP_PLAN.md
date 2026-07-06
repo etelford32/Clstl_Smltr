@@ -52,7 +52,9 @@ Precipitation specifically benefits because:
 | Per-cell bias EWMA tracker | `PrecipBiasTracker` (IDB-persisted, paired on `nasa-precip-update`) | **shipped this session** |
 | Bias-corrected fusion forecast | `PrecipFusionForecaster` (modelled − bias → anomaly → climatology) | **shipped this session** |
 | Long-memory coverage HUD | `#wx-precip-coverage` in `wx-panel` | **shipped this session** |
-| Optical-flow / advective nowcast (Phase 3) | `js/weather-flow.js` | next session |
+| Optical-flow / advective nowcast (Phase 3) | `js/weather-flow.js` | shipped (`wind-advection-v1`, `optical-flow-v1`, `wind-advection-rk2-v1`) |
+| Horizontal eddy diffusion (advection-diffusion) | `weather-flow.js::applyHorizontalDiffusion`, id `advection-diffusion-rk2-v1` | shipped — competes vs rk2 on the leaderboard |
+| Multi-level advection (per-level steering flows, thermal-wind coupling) | `weather-flow.js::MultiLevelAdvectionForecaster`, id `multilevel-advection-v1`; level winds from `js/temp-volume-feed.js` | shipped — also drives the 3-D temp volume's near term |
 | Server-trained NN (Phase 4) | requires 30 d retention bump | gated on backend |
 
 ## Concrete answer: "Can we get more detailed predictions if we do more historical analysis?"

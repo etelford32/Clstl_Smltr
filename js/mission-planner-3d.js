@@ -314,7 +314,10 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         simAnchor: null,
         // Auto-frame on launch — when true, a launch automatically chases
         // the new spacecraft via followMission(). Toggleable from the UI.
-        autoFrame:  true,
+        // Default OFF: the camera stays under the user's control unless they
+        // explicitly opt into the cinematic chase (🎬 Auto button). Keeps the
+        // planner feeling like a tool you drive, not a movie that pans itself.
+        autoFrame:  false,
         // Auto-incrementing mission ID so the UI can address a specific
         // mission (telemetry panel, "follow this one" actions). All five
         // mission collections (rockets, payloads, lunar, mars, tours)
@@ -1449,6 +1452,14 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     // the entire earthSystem group), update Earth-relative animations,
     // update heliocentric planet positions + cruise spacecraft, then render
     // the one scene through the one camera.
+    //
+    // Real wall-clock delta for the previous frame. Distinct from the sim-time
+    // `dt` (which is gated by timeScale and goes to 0 when paused): a few
+    // purely-cosmetic rotations (Earth + Sun idle spin) keep a gentle, constant
+    // ambient motion even while the clock is paused so a stopped scene still
+    // looks alive rather than frozen-dead. Clamped so a backgrounded tab can't
+    // snap the globe forward on refocus.
+    let _lastWallMs = null;
     function tick() {
         // ── Deterministic JD-anchored time base ──────────────────────────────
         // Replaces `clock.getDelta() * timeScale` accumulation with an anchor
@@ -1457,6 +1468,10 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         // Pausing (timeScale=0), framerate hiccups, and tab-throttling no
         // longer drift the propagation; scrubbing re-anchors automatically.
         const _wallNow = performance.now();
+        const wallDt   = _lastWallMs == null
+            ? 0
+            : Math.min(0.1, Math.max(0, (_wallNow - _lastWallMs) / 1000));
+        _lastWallMs = _wallNow;
         if (!state.simAnchor ||
             state.simAnchor.timeScale     !== state.timeScale ||
             state.simAnchor.simDaysPerSec !== state.simDaysPerSec) {
@@ -1508,8 +1523,8 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         }
 
         prof.frameStart();
-        prof.measure('earth',  () => updateEarthSystem(dt));   // earthSystem heliocentric pos + Earth-frame anims
-        prof.measure('helio',  () => updateHelio(dt));          // Sun spin + Mercury/Venus/Mars + helio cruises
+        prof.measure('earth',  () => updateEarthSystem(dt, wallDt));   // earthSystem heliocentric pos + Earth-frame anims
+        prof.measure('helio',  () => updateHelio(dt, wallDt));          // Sun spin + Mercury/Venus/Mars + helio cruises
         // Off-thread Earth-system ground truth: the worker propagates Moon /
         // Phobos / Deimos / Earth heliocentric in deterministic Keplerian form
         // and emits an FNV-1a hash per reply. The simSpeed argument is "sim
@@ -1533,10 +1548,14 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         requestAnimationFrame(tick);
     }
 
-    function updateEarthSystem(dt) {
+    function updateEarthSystem(dt, wallDt = dt) {
         // Earth rotation (cosmetic — slow enough that pinned launch sites
-        // don't whip around the globe between frames).
-        geo.earth.rotation.y += dt * 0.04;
+        // don't whip around the globe between frames). While the clock runs we
+        // use the sim `dt` so the spin tracks playback speed; while paused
+        // (dt == 0) we fall back to a gentle wall-clock idle so the globe still
+        // turns slowly rather than locking up entirely.
+        const spinDt = state.timeScale > 0 ? dt : wallDt;
+        geo.earth.rotation.y += spinDt * 0.04;
 
         // Park the entire Earth system at Earth's heliocentric scene
         // position. Everything inside earthSystem (atmosphere, launch
@@ -1753,9 +1772,12 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         });
     }
 
-    function updateHelio(dt) {
-        // Sun spin (purely cosmetic).
-        hel.sun.rotation.y += dt * 0.04;
+    function updateHelio(dt, wallDt = dt) {
+        // Sun spin (purely cosmetic). Same idle-while-paused treatment as the
+        // Earth: track playback speed when running, gentle wall-clock idle when
+        // the clock is paused.
+        const spinDt = state.timeScale > 0 ? dt : wallDt;
+        hel.sun.rotation.y += spinDt * 0.04;
 
         // Update planet positions from live ephemeris at scenarioJD.
         // (Earth's position is handled by updateEarthSystem, which moves

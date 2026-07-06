@@ -112,6 +112,10 @@ const CACHE_LABELS = Object.freeze({
     stale:     { dot: '#fc6', label: 'Stale'     },
     synthetic: { dot: '#f9a', label: 'Synthetic' },
     derived:   { dot: '#9bd', label: 'Derived'   },
+    // Time-model regimes (sw-model.js): the past is persisted observation,
+    // the future is forecast. Honesty surface — the label says which.
+    observed:  { dot: '#6cf', label: 'Observed'  },
+    forecast:  { dot: '#fc6', label: 'Forecast'  },
 });
 
 /* ─── Tooltip element ────────────────────────────────────────── */

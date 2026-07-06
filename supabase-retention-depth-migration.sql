@@ -186,10 +186,12 @@ BEGIN
     p_window_days := LEAST(GREATEST(COALESCE(p_window_days, 7), 1), 30);
 
     RETURN QUERY
+    -- NB: page_path aliased to `page` inside the body to avoid colliding with
+    -- the RETURNS TABLE OUT-param `feature` ("column reference is ambiguous").
     WITH uses AS (
-        SELECT ae.page_path                  AS feature,
+        SELECT ae.page_path                  AS page,
                ae.properties->>'visitor_id'  AS vid,
-               ae.created_at
+               ae.created_at                 AS created_at
         FROM public.analytics_events ae
         WHERE ae.event_type             = 'page_view'
           AND ae.properties->>'visitor_id' IS NOT NULL
@@ -197,37 +199,37 @@ BEGIN
           AND ae.created_at > now() - (p_days || ' days')::interval
     ),
     first_use AS (
-        SELECT DISTINCT ON (feature, vid)
-               feature, vid, created_at AS first_at
-        FROM uses
-        WHERE created_at <= now() - (p_window_days || ' days')::interval
-        ORDER BY feature, vid, created_at
+        SELECT DISTINCT ON (u.page, u.vid)
+               u.page, u.vid, u.created_at AS first_at
+        FROM uses u
+        WHERE u.created_at <= now() - (p_window_days || ' days')::interval
+        ORDER BY u.page, u.vid, u.created_at
     ),
-    top_features AS (
-        SELECT feature
-        FROM uses
-        GROUP BY feature
+    top_pages AS (
+        SELECT u.page
+        FROM uses u
+        GROUP BY u.page
         ORDER BY COUNT(*) DESC
         LIMIT p_limit
     ),
     counts AS (
-        SELECT f.feature,
+        SELECT f.page,
                COUNT(DISTINCT fu.vid)::BIGINT AS first_users,
                COUNT(DISTINCT fu.vid) FILTER (WHERE EXISTS (
                    SELECT 1 FROM uses u
-                   WHERE u.feature    = fu.feature
+                   WHERE u.page       = fu.page
                      AND u.vid        = fu.vid
                      AND u.created_at >  fu.first_at
                      AND u.created_at <= fu.first_at + (p_window_days || ' days')::interval
                ))::BIGINT AS returners,
-               (SELECT COUNT(*) FROM uses u WHERE u.feature = f.feature)::BIGINT AS total_uses
-        FROM top_features f
-        LEFT JOIN first_use fu ON fu.feature = f.feature
-        GROUP BY f.feature
+               (SELECT COUNT(*) FROM uses u WHERE u.page = f.page)::BIGINT AS total_uses
+        FROM top_pages f
+        LEFT JOIN first_use fu ON fu.page = f.page
+        GROUP BY f.page
     )
-    SELECT feature, first_users, returners, total_uses
-    FROM counts
-    ORDER BY total_uses DESC;
+    SELECT c.page AS feature, c.first_users, c.returners, c.total_uses
+    FROM counts c
+    ORDER BY c.total_uses DESC;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 

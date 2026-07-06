@@ -39,6 +39,10 @@
   "galactic-map.html": [
     "ghostCss"
   ],
+  "grs-lab.html": [
+    "noNavJs",
+    "noNavStyles"
+  ],
   "hydro-demo.html": [
     "noNavJs",
     "noNavStyles"
@@ -85,7 +89,7 @@
   "star2d.html": [
     "ghostCss"
   ],
-  "star3d.html": [
+  "sirius-planetary.html": [
     "ghostCss"
   ],
   "stellar-wind.html": [
@@ -94,7 +98,7 @@
   "sun.html": [
     "ghostCss"
   ],
-  "threejs.html": [
+  "solar-system.html": [
     "ghostCss"
   ],
   "ton618.html": [

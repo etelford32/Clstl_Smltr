@@ -164,6 +164,37 @@
         .plan-pill-name { font-size: .76rem; font-weight: 700; color: #ddd; display: block; }
         .plan-pill-price { font-size: .68rem; color: #777; display: block; margin-top: 2px; }
         .plan-pill input[type=radio] { display: none; }
+
+        /* Live per-tier feature summary */
+        .plan-summary {
+            margin: 0 0 18px; padding: 14px 16px;
+            border: 1px solid rgba(255,255,255,.12); border-radius: 10px;
+            background: rgba(255,255,255,.03);
+            transition: border-color .2s, background .2s;
+        }
+        .plan-summary .ps-head {
+            display: flex; align-items: baseline; justify-content: space-between;
+            gap: 10px; margin-bottom: 6px;
+        }
+        .plan-summary .ps-name { font-size: .95rem; font-weight: 800; color: #fff; }
+        .plan-summary .ps-price { font-size: .8rem; font-weight: 700; color: #4eff91; white-space: nowrap; }
+        .plan-summary .ps-tag { font-size: .8rem; color: #aab; margin-bottom: 10px; line-height: 1.5; }
+        .plan-summary ul { list-style: none; }
+        .plan-summary li {
+            display: flex; align-items: flex-start; gap: 8px;
+            font-size: .82rem; color: #cdd; line-height: 1.45; padding: 4px 0;
+        }
+        .plan-summary li .ck { color: #4eff91; flex-shrink: 0; font-size: .82rem; margin-top: 1px; }
+        /* Accent the summary to match the selected pill */
+        .plan-summary.basic       { border-color: rgba(255,215,0,.4);   background: rgba(255,215,0,.05); }
+        .plan-summary.basic .ps-price       { color: #ffd700; }
+        .plan-summary.educator    { border-color: rgba(154,211,111,.4); background: rgba(154,211,111,.05); }
+        .plan-summary.educator .ps-price    { color: #9ad36f; }
+        .plan-summary.advanced    { border-color: rgba(128,64,255,.45); background: rgba(128,64,255,.08); }
+        .plan-summary.advanced .ps-price    { color: #b18cff; }
+        .plan-summary.institution { border-color: rgba(255,140,200,.4);  background: rgba(255,140,200,.06); }
+        .plan-summary.institution .ps-price { color: #ff8cc8; }
+
         .enterprise-link {
             display: block; margin: 0 0 22px; text-align: center;
             font-size: .78rem; color: #888;
@@ -297,13 +328,13 @@
         <div class="auth-side">
             <img src="ParkerPhaysics_logo1.png" class="auth-side-logo" alt="Logo">
             <h1>Sign Up — Explore the Universe</h1>
-            <p>Join Parkers Physics and get access to real-time astrophysics simulations powered by WebGL, live NASA/NOAA data feeds, and more.</p>
+            <p>Parkers Physics is a physics-first space-weather platform: real-time NASA/NOAA data, MHD-grounded models, and interactive 3D simulations — straight in your browser, no install.</p>
             <ul class="side-features">
-                <li><span class="dot"></span> 17 interactive simulations</li>
-                <li><span class="dot"></span> Live solar wind &amp; Kp index</li>
-                <li><span class="dot"></span> 3D stars, black holes, galaxies</li>
-                <li><span class="dot"></span> Real NASA DONKI event feed</li>
-                <li><span class="dot"></span> Rust/WASM high-perf engine</li>
+                <li><span class="dot"></span> 17 interactive 3D simulations</li>
+                <li><span class="dot"></span> Live solar wind, Kp index &amp; IMF Bz</li>
+                <li><span class="dot"></span> Real NASA DONKI &amp; NOAA SWPC feeds</li>
+                <li><span class="dot"></span> Stars, black holes &amp; the galactic map</li>
+                <li><span class="dot"></span> Rust/WASM high-performance engine</li>
                 <li><span class="dot"></span> Free tier — no card required</li>
             </ul>
         </div>
@@ -342,6 +373,12 @@
                         <span class="plan-pill-price">$500 / mo</span>
                     </label>
                 </div>
+
+                <!-- Live per-tier feature breakdown. Populated by
+                     renderPlanSummary() in the script block below; copy is
+                     kept in sync with pricing.html's canonical feature lists. -->
+                <div class="plan-summary" id="plan-summary" aria-live="polite"></div>
+
                 <div class="enterprise-link">
                     Need a custom plan, custom data, or 200+ seats?
                     <a href="contact-enterprise.html">Talk to Enterprise sales →</a>
@@ -566,8 +603,10 @@
     // form, so it has no pill — but we accept the URL param so that
     // marketing copy linking ?plan=enterprise still pre-selects something
     // sensible (advanced) instead of crashing the renderer.
-    const _rawUrlPlan = new URLSearchParams(location.search).get('plan') || 'free';
-    const urlPlan     = _rawUrlPlan === 'enterprise' ? 'advanced' : _rawUrlPlan;
+    const _rawUrlPlan = (new URLSearchParams(location.search).get('plan') || 'free').toLowerCase();
+    // AurOracle intro + legacy 'intro' invite codes map to the Basic tier.
+    const _aliasedPlan = (_rawUrlPlan === 'auroracle' || _rawUrlPlan === 'intro') ? 'basic' : _rawUrlPlan;
+    const urlPlan     = _aliasedPlan === 'enterprise' ? 'advanced' : _aliasedPlan;
     const planMap = {
         free:        'pill-free',
         basic:       'pill-basic',
@@ -581,6 +620,81 @@
         advanced:    ' advanced-plan',
         institution: ' institution-plan',
     };
+
+    // Per-tier feature copy — the actual functionality each plan unlocks.
+    // Kept in sync with the canonical feature lists in pricing.html and the
+    // capability flags in js/tier-config.js. Update all three together.
+    const PLAN_FEATURES = {
+        free: {
+            name: '🔭 Free', price: 'Always free',
+            tag: 'Start exploring — no credit card required.',
+            items: [
+                '3 live simulations: Sun, Earth & Space Weather',
+                'Live NOAA solar-wind & Kp index readout',
+                '2D stellar modeler',
+                'Community access',
+            ],
+        },
+        basic: {
+            name: '⭐ Basic', price: '$10 / mo',
+            tag: 'The whole platform, fully unlocked.',
+            items: [
+                'All 17 simulations in full 3D (WebGL)',
+                'Live NASA DONKI & NOAA SWPC feeds',
+                'Stellar Wind, Fluid NSE & Black Hole sims',
+                'Galactic map + real-time solar system',
+                'Real-time Kp, Bz & X-ray flare alerts',
+            ],
+        },
+        educator: {
+            name: '🎓 Educator', price: '$25 / mo',
+            tag: 'Everything in Basic, built for the classroom.',
+            items: [
+                'Everything in Basic',
+                'Classroom license — 30 student seats',
+                'Embed simulations on your LMS or site',
+                'Lesson-plan templates, rubrics & educator Discord',
+            ],
+        },
+        advanced: {
+            name: '🚀 Advanced', price: '$100 / mo',
+            tag: 'For researchers and satellite operators.',
+            items: [
+                'Everything in Basic',
+                'Rust/WASM high-performance engine',
+                'SWMF magnetosphere pipeline access',
+                'REST API + CSV/JSON data export',
+                'Solar-wind prediction models',
+                'Priority & dedicated support',
+            ],
+        },
+        institution: {
+            name: '🏛️ Institution', price: '$500 / mo',
+            tag: 'Site-wide access, white-labeled.',
+            items: [
+                'Everything in Advanced',
+                'Site license — 200 named users',
+                'Custom branding & white-label',
+                'Single Sign-On (SAML / OIDC)',
+                'Department admin dashboard',
+                'SLA-backed priority support',
+            ],
+        },
+    };
+
+    function renderPlanSummary(val) {
+        const el = document.getElementById('plan-summary');
+        if (!el) return;
+        const f = PLAN_FEATURES[val] || PLAN_FEATURES.free;
+        el.className = 'plan-summary' + (val !== 'free' ? ' ' + val : '');
+        el.innerHTML =
+            '<div class="ps-head"><span class="ps-name">' + f.name + '</span>' +
+            '<span class="ps-price">' + f.price + '</span></div>' +
+            '<div class="ps-tag">' + f.tag + '</div>' +
+            '<ul>' + f.items.map(i =>
+                '<li><span class="ck">✓</span><span>' + i + '</span></li>').join('') +
+            '</ul>';
+    }
     // Funnel helper — populated by js/auth-funnel.js's window-side-effect.
     // Same fallback pattern as signin.html so a module-load failure
     // never breaks the sign-up form.
@@ -597,6 +711,7 @@
         }
         const btn = document.getElementById('btn-submit');
         btn.className = 'btn-submit' + (PLAN_BTN_CLASS[val] || '');
+        renderPlanSummary(val);
     }
     // Expose for the invite-validation module above to auto-pick the
     // tier the invite was issued for.

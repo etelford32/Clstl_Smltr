@@ -499,17 +499,32 @@ def main() -> None:
     p_hind.add_argument("--event",  default="event", help="Short event label")
     p_hind.add_argument("--imf",    default="IMF_latest.dat", help="IMF.dat filename in IMF_DIR")
 
-    # gm-ie sub-command — the coupled magnetosphere run that produces the IE
-    # log (Φ_PC + HPI) for the pseudo-Ap fit. IM/RCM2 is on by default; pass
+    # coupled GM+IE(+IM) sub-command — the ONLY generator that writes the
+    # PARAM.in.GM_IE* templates and thus produces the IE log parse_ie_log.py
+    # reads for Phi_PC / HPI. This is the launch path for the Phase-0 pseudo-Ap
+    # hindcasts (Gannon, Feb 2022). See MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md and
+    # the solver cold-start ladder note. IM/RCM2 is coupled by default; pass
     # --no-im to reproduce the pre-RCM GM+IE-only configuration.
-    p_gmie = subparsers.add_parser("gm-ie", help="Coupled GM+IE(+IM) storm run")
-    p_gmie.add_argument("--start",  required=True, help="ISO datetime UTC, e.g. 2024-05-10T12:00:00Z")
-    p_gmie.add_argument("--hours",  type=float, default=72.0)
-    p_gmie.add_argument("--event",  default="event", help="Short event label")
-    p_gmie.add_argument("--imf",    default="IMF_latest.dat", help="IMF.dat filename in IMF_DIR")
-    p_gmie.add_argument("--f107",   type=float, required=True, help="F10.7 flux [sfu] for IE conductance")
-    p_gmie.add_argument("--nproc",  type=int, default=4, help="Total MPI ranks (>= 4 with IM)")
-    p_gmie.add_argument("--no-im",  action="store_true", help="Disable IM/RCM2 coupling")
+    p_gmie = subparsers.add_parser(
+        "gm_ie", aliases=["gm-ie"],
+        help="Coupled GM+IE(+IM) hindcast run (emits the IE log for Phi_PC/HPI)")
+    p_gmie.add_argument("--start", required=True,
+                        help="ISO datetime UTC, e.g. 2024-05-10T12:00:00Z (Gannon window open)")
+    p_gmie.add_argument("--hours", type=float, default=72.0)
+    # NB: hindcast_runner's registered event KEY is `may_2024_gannon` (reversed
+    # from the `gannon_may_2024` fixtures dir + front-end bundle). This label
+    # only names the run dir; keep it matching hindcast_runner's key so the
+    # downstream `hindcast_runner --event may_2024_gannon --run-dir <here>` reads
+    # cleanly. Do not "unify" the two spellings — the split is load-bearing (see
+    # CLAUDE.md); just pass the right one to each tool.
+    p_gmie.add_argument("--event", default="may_2024_gannon", help="Short event label")
+    p_gmie.add_argument("--imf",   default="imf_l1.dat", help="IMF.dat filename in IMF_DIR")
+    p_gmie.add_argument("--f107",  type=float, default=227.1,
+                        help="F10.7 flux (sfu); the May-2024 Gannon window ran ~227")
+    p_gmie.add_argument("--nproc", type=int, default=4,
+                        help="Total MPI ranks (>= 4 with IM, >= 2 without)")
+    p_gmie.add_argument("--no-im", action="store_true",
+                        help="Disable IM/RCM2 coupling (pre-RCM GM+IE-only config)")
 
     args = parser.parse_args()
 
@@ -529,7 +544,7 @@ def main() -> None:
         print(f"Run dir: {run_dir}")
         print(f"PARAM.in: {param}")
 
-    elif args.command == "gm-ie":
+    elif args.command in ("gm_ie", "gm-ie"):
         start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
         run_dir, param = generate_gm_ie_run(
             start_time  = start,

@@ -274,37 +274,139 @@ What they verify is the pipeline plumbing: pairing, OLS, refusal
 contract, output schema. Real BATS-R-US output will overwrite
 the hindcast JSON in place and these tables get re-populated.
 
-### Generate PARAM.in
+### Generate PARAM.in — coupled GM+IE
+
+The pseudo-Ap story needs **Φ_PC and HPI**, which only the coupled **GM+IE**
+run emits (via the Ridley IE log). That path is the `gm_ie` sub-command — *not*
+`hindcast` (which is the IH-only inline template) and *not* `run_forecast
+--once` (which is the real-time forecast cycle). One command generates the
+coupled `PARAM.in` (Boris + cold-start ladder already baked into
+`config/PARAM.in.GM_IE`):
 
 ```sh
 cd swmf
-python3 -m pipeline.gen_param \
-  --mode hindcast \
-  --start 2024-05-10T12:00:00Z --end 2024-05-13T12:00:00Z \
-  --imf-file fixtures/hindcast/gannon_may_2024/imf_l1.dat \
-  --out runs/gannon_may_2024/PARAM.in
+# imf_l1.dat must already be staged in IMF_DIR (default /data/imf; set IMF_DIR
+# to point elsewhere). --f107 227.1 is the Gannon-window F10.7 from
+# historical_ap.csv. Prints "Run dir: <RUN_DIR>" — capture it for the next step.
+python3 -m pipeline.gen_param gm_ie \
+  --start 2024-05-10T12:00:00 --hours 72 \
+  --f107 227.1 --nproc 4 --imf imf_l1.dat
 ```
 
 ### Launch BATS-R-US
 
-72 h of simulated time on `MPI_NPROC=4` is a longer wall-clock run than
-the Feb 2022 hindcast — budget overnight. Tail
-`runs/gannon_may_2024/batsrus_stdout.log`. Kick off this step in the
-background and let the ground-mag-only fit (next step) produce a
-same-day result.
+72 h of simulated time on `nproc 4` is a longer wall-clock run than the Feb
+2022 hindcast — budget overnight. Tail `<RUN_DIR>/batsrus_stdout.log`. The
+`--launch-run-dir` mode launches `SWMF.exe` (the coupled binary) on the
+prepared run dir; it is distinct from `--once` (which regenerates a *forecast*
+run) and does not touch the forecast DB.
 
 ```sh
 cd swmf
-RUNS_DIR=runs python3 -m pipeline.run_forecast --once \
-  --run-dir runs/gannon_may_2024
+python3 -m pipeline.run_forecast --launch-run-dir <RUN_DIR> \
+  --nproc 4 --timeout-hours 24
 ```
+
+> **Or run the whole coupled sequence with one command inside the container:**
+> `docker compose -f docker-compose.swmf.yml run --rm swmf-hindcast` invokes
+> `swmf/run-gannon-hindcast.sh`, which does the IMF gate → `gen_param gm_ie` →
+> `run_forecast --launch-run-dir` → `hindcast_runner` in order. See
+> `NEW_COMPUTER_RUNBOOK.md`.
+
+### Solver stability — the cold-start ladder, Boris, and the CflExpl ≤ 0.65 rule
+
+> **Load-bearing. Read before editing `swmf/config/PARAM.in.GM_IE`.** Getting
+> this Gannon run to advance a single second of simulated time took four
+> non-obvious fixes in a row (2026-06-07 session). Each one is a re-discoverable
+> trap. Do not "simplify" the three-session structure or move the `#BORIS`
+> block without reading this.
+
+The template `swmf/config/PARAM.in.GM_IE` drives GM (BATS-R-US) + IE only — no
+IM/RB ring-current component, on a coarser inner grid than SWPC operational. A
+cold dipole magnetosphere **cannot** be integrated directly in 2nd-order,
+time-accurate mode; it overshoots into negative density/pressure on iteration 1
+("negative fast speed squared"). The validated recipe is a three-session ladder
+and **all three sessions matter**:
+
+| Session | `#TIMEACCURATE` | `#SCHEME` | `#TIMESTEPPING` | Purpose |
+|---|---|---|---|---|
+| 1 | `F` (steady, local dt) | `1` Rusanov (1st order) | `1` stage, **CflExpl 0.6** | relax the cold start in the most diffusive scheme |
+| 2 | `F` (steady, local dt) | `2` Rusanov mc3 1.2 | `2` stage, **CflExpl 0.6** | converge the magnetosphere shape in 2nd order |
+| 3 | `T` (time-accurate) | (inherits 2nd order) | `2` stage, CflExpl 0.6 | drive the storm from the relaxed state |
+
+**Boris must be ON from session 1 — not switched on at session 3.** This is the
+single most expensive trap in the file. The Boris semi-relativistic correction
+caps the artificial fast/Alfvén speed near Earth (huge B, low ρ), but it also
+**redefines the conserved momentum** (it folds in the v×B electric-field term).
+If you relax sessions 1–2 *without* Boris and enable it only in the
+time-accurate session 3, the relaxed state carries the non-Boris momentum
+definition and is inconsistent with the integrator. Result: the inner-boundary
+cell at **r ≈ 3.57 R_E** (just outside `rCurrents = 3.5`) detonates on the
+*first* time-accurate step — `NaN from advance_explicit`, density → 1e88…1e100,
+at `iteration = 1524`, **identically regardless of `nStage` or `CflExpl`**. That
+integrator-independence is the tell: it is not a CFL problem, it is a
+conserved-state inconsistency. Relaxing *with* Boris on fixed it; the run then
+sailed past 1524 with the simulated clock advancing.
+
+**The `CflExpl ≤ 0.65` rule.** BATS-R-US hard-rejects Boris correction combined
+with **local (steady-state) time stepping** at CFL > 0.65:
+
+```
+GM_set_parameters WARNING: CFL number above 0.65 may be unstable for
+local timestepping with Boris correction !!!
+... ERROR: Correct PARAM.in!     (fatal — aborts at session 1, iteration 0)
+```
+
+So once Boris is in session 1, sessions 1 **and** 2 (both steady-state) need an
+explicit `#TIMESTEPPING` with `CflExpl ≤ 0.65`. A session with **no**
+`#TIMESTEPPING` block inherits a default CFL above 0.65 and aborts before
+iteration 1 with `Correct PARAM.in!` (and `highest iteration reached = 0`). The
+time-accurate session 3 is not subject to this limit (it is global, not local
+time stepping), but we keep it at 0.6 anyway.
+
+**Failure-signature cheat sheet** (so the next session recognises which trap it
+hit without re-deriving it):
+
+| Symptom in `batsrus_stdout.log` | Cause | Fix |
+|---|---|---|
+| `ERROR: Correct PARAM.in!`, iter 0, `Correct PARAM` after a Boris+CFL warning | Boris + local dt with CflExpl > 0.65 | add `#TIMESTEPPING` `CflExpl 0.6` to the steady-state session(s) |
+| `NaN from advance_explicit` at `r≈3.57`, iter **1524**, density→1e100, independent of `nStage`/`CflExpl` | Boris enabled only at session 3 (inconsistent conserved state) | enable `#BORIS` from session 1 so the relaxation is Boris-consistent |
+| `negative fast speed squared`, iter 1, at the **+x upstream face** (`x≈34`) | garbage IMF (negative/huge ρ, B) at the driven boundary | re-fetch `imf_l1.dat`, see data gate below |
+| relaxes to 1500 then crashes only in session 3 | usually the Boris-transition trap above | — |
+
+**Input data gate (don't skip — a stale `imf_l1.dat` masquerades as a solver
+bug).** The upstream driver file is column-sensitive; a parser regression once
+wrote density into the temperature column, producing negative/huge ρ that blew
+up the +x boundary at iteration 1. Always re-fetch with **`python3`** (the
+container has no `python` alias — `python -m …` silently no-ops and leaves the
+old file in place) and gate before launching:
+
+```sh
+# inside the swmf container, after fetch_omni_imf writes /data/imf/imf_l1.dat:
+head -6 /data/imf/imf_l1.dat                       # density col 14, Bz col 10
+awk '$1 ~ /^[0-9]/{print $14}' /data/imf/imf_l1.dat | sort -n | sed -n '1p;$p'
+awk '$1 ~ /^[0-9]/{print $10}' /data/imf/imf_l1.dat | sort -n | sed -n '1p;$p'
+```
+
+Gate: density strictly **positive** (Gannon ≈ 0.7 → 70 /cc), Bz in **tens of
+nT** (≈ −47 → +49 nT). A negative-density min or a Bz in the thousands means the
+columns are misparsed — fix the fetch, not the PARAM.
+
+**Crash-safe resume.** Session 3 sets `#SAVERESTART` every 3600 s of simulated
+time → `GM/restartOUT/`. A long run that is interrupted resumes from the last
+checkpoint instead of re-running the cold-start ladder.
 
 ### Extract Φ_PC and HPI
 
+`hindcast_runner`'s registered event **key is `may_2024_gannon`** — reversed
+from the `gannon_may_2024` fixtures dir + front-end bundle. Pass the key form
+here (argparse `choices` rejects `gannon_may_2024`), and point `--run-dir` at
+the `gm_ie` run dir printed above:
+
 ```sh
 cd swmf
-python3 -m pipeline.hindcast_runner --event gannon_may_2024 \
-  --run-dir runs/gannon_may_2024 \
+python3 -m pipeline.hindcast_runner --event may_2024_gannon \
+  --run-dir <RUN_DIR> \
   --out ../data/hindcast -v
 ```
 

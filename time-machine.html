@@ -802,17 +802,20 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 <script type="importmap">
 {
     "imports": {
-        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
     }
 }
 </script>
 <!-- perf-hints:start -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js" crossorigin>
 <!-- perf-hints:end --><nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260508"; initNav("time-machine");</script>
+<script type="module">
+import './js/telemetry.js';
+</script>
 
 <div id="tm-hero">
     <span class="tm-tag">Live Preview · ±2 kyr Validated Window</span>
@@ -1115,7 +1118,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 
     <section class="tm-panel tm-construct">
         <div class="tm-status">Phase 1 — Validated Window Live</div>
-        <p>The orrery above is driven by the unified ephemeris engine that powers the <a href="threejs.html" style="color:#b78cff;">Solar System</a> and <a href="space-weather.html" style="color:#b78cff;">Space Weather</a> pages. Inner planets use Meeus three-term Kepler with Standish secular rates; outer planets use VSOP87D truncated series. Sub-arcminute residuals across ±200 yr; degraded but useful out to ±2,000 yr. Beyond that band, results drift — the long-horizon Yoshida-4 and Wisdom-Holman tiers below are still in development.</p>
+        <p>The orrery above is driven by the unified ephemeris engine that powers the <a href="solar-system.html" style="color:#b78cff;">Solar System</a> and <a href="space-weather.html" style="color:#b78cff;">Space Weather</a> pages. Inner planets use Meeus three-term Kepler with Standish secular rates; outer planets use VSOP87D truncated series. Sub-arcminute residuals across ±200 yr; degraded but useful out to ±2,000 yr. Beyond that band, results drift — the long-horizon Yoshida-4 and Wisdom-Holman tiers below are still in development.</p>
         <p class="tm-warn">Predictions over kyr–Myr scales are inherently uncertain — the inner solar system is chaotic with a Lyapunov time of ~5 Myr (Laskar 1989). Anything past ~60 Myr is statistical, not deterministic.</p>
     </section>
 

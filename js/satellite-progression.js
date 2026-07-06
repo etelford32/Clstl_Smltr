@@ -31,11 +31,12 @@ export const UNLOCKS = {
   prograde:      { name: 'Prograde burn',      rank: 0, desc: 'Burn along the velocity vector to raise the orbit.' },
   retrograde:    { name: 'Retrograde burn',    rank: 0, desc: 'Burn opposite the velocity vector to lower the orbit.' },
   warp_x10:      { name: 'Time warp ×10',      rank: 0, desc: 'Accelerate sim time tenfold.' },
+  // Core arcade flight — available from the first launch so new pilots can fly.
+  manual_steer:  { name: 'Pilot flight',       rank: 0, desc: 'W/↑ gas · S/↓ ease · A/← · D/→ steer. Arcade attitude control.' },
   // Tier 1 — Pilot
   radial:        { name: 'Radial burns',       rank: 1, desc: 'Radial-out / radial-in for plane shaping & rendezvous.' },
   warp_x100:     { name: 'Time warp ×100',     rank: 1, desc: 'Survey multi-orbit drag decay quickly.' },
   // Tier 2 — Operator
-  manual_steer:  { name: 'Manual steering',    rank: 2, desc: 'A/D rotate heading · W/S fire fwd/rev. Real attitude control.' },
   pulse_fire:    { name: 'Pulse fire',         rank: 2, desc: 'Tap-fire for precise impulse burns (< 1 s).' },
   // Tier 3 — Navigator
   warp_x1000:    { name: 'Time warp ×1000',    rank: 3, desc: 'Long-duration station-keeping & decay analysis.' },
@@ -57,7 +58,88 @@ export const RANKS = [
 const STORAGE_KEY = 'pp_sd_profile_v1';
 
 export function defaultProfile() {
-  return { xp: 0, completions: {}, totalMissions: 0, bestScore: 0 };
+  return {
+    xp: 0,
+    completions: {}, totalMissions: 0, bestScore: 0,
+    // Roguelike *part-tier* progression — orthogonal to rank unlocks.
+    // partTiers[slot][key] = 1 | 2 | 3. Tier 1 is free; 2/3 cost spendXp.
+    // Tier modifiers are computed by tierMods() at use time so balance
+    // changes don't break saved profiles.
+    partTiers: {},
+    spentXp: 0,
+  };
+}
+
+// ── Part tiers (Mk I / II / III) ───────────────────────────────────────────
+// Each part slot has three tiers. Tier 1 is the base hardware that already
+// ships with deriveDesign(); upgrading bumps stats with a small downside so
+// upgrades are decisions, not strictly-better. Costs scale per slot to match
+// how often you actually swap them.
+//
+// PART_TIER_COST[tier-1] gives the XP needed to *unlock* that tier on a
+// specific part instance. The cost is per-part-per-slot so e.g. upgrading
+// monoprop Mk II doesn't also upgrade biprop.
+export const PART_TIER_COST = [0, 120, 320];      // Mk I free, II 120 XP, III 320 XP
+export const PART_TIER_NAMES = ['Mk I', 'Mk II', 'Mk III'];
+
+/**
+ * Modifier multipliers a given tier applies to a part's raw stats. Returned
+ * shape matches what buildModified() applies; missing keys default to 1.
+ *
+ *   massMul       — dry-mass multiplier (lower is better)
+ *   thrustMul     — thrust output multiplier
+ *   ispMul        — Isp multiplier
+ *   gimbalMul     — gimbal authority multiplier
+ *   throatLifeMul — erosion-life multiplier
+ *   powerMul      — power-generation (panels) or draw (thrusters/payloads) mult
+ *   cdMul         — drag-coefficient multiplier (lower is better for parts
+ *                   in the airflow; matters at orbital altitudes)
+ *   wMul          — solar-wing W/m² multiplier
+ */
+export function tierMods(slot, tier) {
+  if (tier <= 1) return {};
+  if (slot === 'thruster') {
+    if (tier === 2) return { thrustMul: 1.08, ispMul: 1.05, throatLifeMul: 1.4, massMul: 1.05 };
+    if (tier === 3) return { thrustMul: 1.18, ispMul: 1.12, throatLifeMul: 2.2, gimbalMul: 1.6, massMul: 1.12 };
+  }
+  if (slot === 'body') {
+    if (tier === 2) return { massMul: 0.92, cdMul: 0.96, slewMul: 1.12 };
+    if (tier === 3) return { massMul: 0.85, cdMul: 0.92, gimbalMul: 1.0 /* reaction-wheel boost handled in engine */, slewMul: 1.28 };
+  }
+  if (slot === 'panel') {
+    if (tier === 2) return { wMul: 1.15, massMul: 0.92 };
+    if (tier === 3) return { wMul: 1.32, massMul: 0.78, cdMul: 0.95 };
+  }
+  if (slot === 'payload') {
+    if (tier === 2) return { massMul: 0.92, powerMul: 0.9 };
+    if (tier === 3) return { massMul: 0.82, powerMul: 0.78, cdMul: 0.94 };
+  }
+  return {};
+}
+
+export function partTier(profile, slot, key) {
+  return profile.partTiers?.[slot]?.[key] || 1;
+}
+
+/** Spend XP to bump a part to the next tier. Returns { ok, cost, newTier }. */
+export function upgradePart(profile, slot, key) {
+  const cur = partTier(profile, slot, key);
+  if (cur >= 3) return { ok: false, reason: 'Max tier' };
+  const cost = PART_TIER_COST[cur];               // cost to reach (cur+1)
+  if (profile.xp - (profile.spentXp || 0) < cost) {
+    return { ok: false, reason: 'Not enough XP', need: cost };
+  }
+  profile.spentXp = (profile.spentXp || 0) + cost;
+  profile.partTiers = profile.partTiers || {};
+  profile.partTiers[slot] = profile.partTiers[slot] || {};
+  profile.partTiers[slot][key] = cur + 1;
+  saveProfile(profile);
+  return { ok: true, cost, newTier: cur + 1 };
+}
+
+/** Available XP — total earned minus what's been spent on part upgrades. */
+export function availableXp(profile) {
+  return Math.max(0, (profile.xp || 0) - (profile.spentXp || 0));
 }
 
 export function loadProfile() {

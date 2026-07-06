@@ -204,14 +204,14 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 <link rel="stylesheet" href="js/nav-styles.css">
 <script type="importmap">
 {"imports":{
-    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three":         "/js/vendor/three-0.160.0/three.module.js",
+    "three/addons/": "/js/vendor/three-0.160.0/jsm/"
 }}
 </script>
 <!-- perf-hints:start -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js" crossorigin>
 <!-- perf-hints:end --><script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -241,6 +241,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 <div id="msn-hero">
     <h1>Space Missions — Inner Solar System Fleet</h1>
     <p>Every operational, cruising, and historically-important spacecraft measuring the Sun, the inner planets, and near-Earth small bodies. Parker Solar Probe is the namesake of this app and the first vehicle ever to cross the Alfvén surface.</p>
+    <p style="font-size:.78rem; color:#aa9; margin-top:8px;">Beyond the inner system → <a href="jupiter-system.html" style="color:#ffb830; text-decoration:none; border-bottom:1px dotted rgba(255,184,48,.5);">Jupiter system &amp; the Galilean moons</a></p>
     <div id="msn-hero-stats"></div>
 </div>
 

@@ -6,6 +6,10 @@
   "installCommand": "export PATH=/rust/bin:$HOME/.cargo/bin:$PATH && rustup target add wasm32-unknown-unknown",
   "crons": [
     {
+      "path": "/api/cron/refresh-solar-wind",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/refresh-weather-grid",
       "schedule": "0 * * * *"
     },
@@ -34,12 +38,36 @@
       "schedule": "15,45 * * * *"
     },
     {
+      "path": "/api/cron/synthetic-auth-daily",
+      "schedule": "30 12 * * *"
+    },
+    {
+      "path": "/api/cron/synthetic-auth-weekly",
+      "schedule": "40 12 * * 1"
+    },
+    {
+      "path": "/api/cron/auth-health-digest",
+      "schedule": "0 13 * * *"
+    },
+    {
       "path": "/api/cron/onboarding-nudge",
       "schedule": "30 16 * * *"
     },
     {
       "path": "/api/cron/archive-forecasts",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/aurora-storm-blast",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/farside-ingest",
+      "schedule": "30 1,13 * * *"
+    },
+    {
+      "path": "/api/cron/aurora-outlook",
+      "schedule": "0 */6 * * *"
     }
   ],
   "headers": [
@@ -197,6 +225,18 @@
           "value": "public, max-age=0, must-revalidate"
         }
       ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/threejs.html",
+      "destination": "/solar-system.html",
+      "statusCode": 301
+    },
+    {
+      "source": "/star3d.html",
+      "destination": "/sirius-planetary.html",
+      "statusCode": 301
     }
   ],
   "rewrites": [

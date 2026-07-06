@@ -154,14 +154,14 @@
 
 <script type="importmap">
 {"imports":{
-    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three":         "/js/vendor/three-0.160.0/three.module.js",
+    "three/addons/": "/js/vendor/three-0.160.0/jsm/"
 }}
 </script>
 <!-- perf-hints:start -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js" crossorigin>
 <!-- perf-hints:end --><nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("admin");</script>
 
@@ -954,6 +954,29 @@
             </h3>
             <div id="heartbeat-container"><div class="empty">Loading...</div></div>
         </div>
+        <!-- ── Synthetic Auth Robots (can a real user sign up + sign in?) ─ -->
+        <!-- Per-journey verdict + recent pass-rate from synthetic_journey_log,
+             written by the api/cron/synthetic-auth-* robots. Each run drives a
+             throwaway account through a real auth flow (signup → login →
+             profile/RLS → upgrade …), asserts the outcome, then deletes the
+             account so nothing pollutes real metrics. The cross-browser badge
+             reflects the GitHub Actions e2e-auth workflow (Chromium / Firefox /
+             WebKit). Together: backend + browser auth health at a glance. -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Synthetic Auth Robots
+                <button class="btn btn-sm" id="btn-refresh-synthetic" style="float:right">Refresh</button>
+            </h3>
+            <div style="margin:-2px 0 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <span style="color:#8895aa;font-size:.78rem">Cross-browser E2E:</span>
+                <a href="https://github.com/etelford32/parkersphysics/actions/workflows/e2e-auth.yml" target="_blank" rel="noopener"
+                   title="GitHub Actions · Chromium / Firefox / WebKit auth E2E">
+                    <img src="https://github.com/etelford32/parkersphysics/actions/workflows/e2e-auth.yml/badge.svg"
+                         alt="e2e-auth workflow status" style="height:20px;vertical-align:middle">
+                </a>
+            </div>
+            <div id="synthetic-journeys-container"><div class="empty">Loading...</div></div>
+        </div>
         <!-- ── Proxy Freshness (what the browser actually sees) ────── -->
         <!-- Hits the public proxy endpoints the Earth + Sun sims
              consume. Complements Pipeline Health by reporting what the
@@ -1020,7 +1043,7 @@ import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
 import { EXPERIMENTS, EXPERIMENT_GOALS } from './js/experiments.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, fetchDailyRetentionCurve, fetchStickiness, fetchFeatureReturnRates, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchSyntheticJourneys, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, fetchDailyRetentionCurve, fetchStickiness, fetchFeatureReturnRates, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -2917,6 +2940,105 @@ async function loadPipelineHeartbeat() {
 document.getElementById('btn-refresh-heartbeat').addEventListener('click', loadPipelineHeartbeat);
 loadPipelineHeartbeat();
 
+// ── Synthetic Auth Robots card (per-journey verdict + pass-rate) ───────────
+// Reads synthetic_journey_summary(). Each journey is one robot flow; last_ok
+// is the most recent run's verdict, pass_rate is over the recent window. On
+// failure we surface the failing step names inline so the incident is
+// actionable without opening the DB. Reuses _hbFmtRel/_esc from above.
+const SYNTH_JOURNEY_LABELS = {
+    daily_free:             'Daily · Free signup + login',
+    weekly_full:            'Weekly · Full journey',
+    weekly_direct_basic:    'Weekly · Direct Basic',
+    weekly_direct_advanced: 'Weekly · Direct Advanced',
+};
+
+// Fresh-enough thresholds per cadence: a daily journey older than ~26h or a
+// weekly older than ~8d means the robot itself stopped running (vs. a failing
+// assertion), which is its own incident.
+function _synthStale(journey, iso) {
+    const ageMin = _hbAgeMin(iso);
+    if (ageMin == null) return false;
+    const isDaily = journey.startsWith('daily');
+    return ageMin > (isDaily ? 26 * 60 : 8 * 24 * 60);
+}
+
+function _synthFailedSteps(steps) {
+    if (!Array.isArray(steps)) return [];
+    return steps.filter(s => s && s.ok === false);
+}
+
+async function loadSyntheticJourneys() {
+    const el = document.getElementById('synthetic-journeys-container');
+    const res = await fetchSyntheticJourneys();
+
+    if (!res.ok) {
+        el.innerHTML = res.missing
+            ? `<div class="empty">Not installed yet.<br><br>Apply <code>supabase-synthetic-auth-migration.sql</code> and let <code>/api/cron/synthetic-auth-daily</code> run once.</div>`
+            : `<div class="empty">Failed to load: ${_esc(res.error)}</div>`;
+        return;
+    }
+
+    const rows = res.data || [];
+    if (rows.length === 0) {
+        el.innerHTML = `<div class="empty">No synthetic runs recorded yet.<br><br>The daily robot runs at <strong>12:30 UTC</strong> — trigger it now with<br><code>/api/cron/synthetic-auth-daily?source=manual</code>.</div>`;
+        return;
+    }
+
+    // Stable order: known journeys first (in declaration order), then any
+    // extras the DB knows about but we don't recognise yet.
+    const order = Object.keys(SYNTH_JOURNEY_LABELS);
+    rows.sort((a, b) => {
+        const ia = order.indexOf(a.journey), ib = order.indexOf(b.journey);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+
+    let html = '<table><thead><tr>'
+             + '<th>Journey</th><th>Last run</th><th>Latency</th>'
+             + '<th>Pass rate</th><th>Status</th>'
+             + '</tr></thead><tbody>';
+
+    for (const r of rows) {
+        const label = SYNTH_JOURNEY_LABELS[r.journey] || r.journey;
+        const stale = _synthStale(r.journey, r.last_ran_at);
+        const failed = _synthFailedSteps(r.last_steps);
+
+        let color, emoji, status;
+        if (!r.last_ok)   { color = '#ff6b6b'; emoji = '●'; status = 'failing'; }
+        else if (stale)   { color = '#ffaa44'; emoji = '●'; status = 'stale (not running)'; }
+        else              { color = '#4eff91'; emoji = '●'; status = 'passing'; }
+
+        const pr = (r.pass_rate == null) ? '—' : `${r.pass_rate}%`;
+        const prColor = (r.pass_rate == null) ? '#778'
+                      : r.pass_rate >= 95 ? '#4eff91'
+                      : r.pass_rate >= 80 ? '#ffaa44' : '#ff6b6b';
+        const latency = (r.last_latency_ms == null) ? '—'
+                      : r.last_latency_ms >= 1000 ? `${(r.last_latency_ms / 1000).toFixed(1)}s`
+                      : `${r.last_latency_ms}ms`;
+
+        // On failure, name the failing steps inline (with the detail as a hover
+        // title) so the admin can triage without querying the log table.
+        const failLine = (!r.last_ok && failed.length)
+            ? `<div style="color:#ff8a8a;font-size:.72rem;margin-top:3px" title="${_esc(failed.map(s => s.name + ': ' + s.detail).join(' | '))}">✗ ${_esc(failed.map(s => s.name).join(', '))}</div>`
+            : '';
+
+        html += `<tr>`
+             +  `<td><strong style="color:#cde">${_esc(label)}</strong>`
+             +      `<div style="color:#556;font-size:.7rem;font-family:ui-monospace,monospace;margin-top:2px">${_esc(r.journey)}</div>`
+             +      failLine + `</td>`
+             +  `<td style="color:#aab;font-size:.78rem">${_hbFmtRel(r.last_ran_at)}</td>`
+             +  `<td style="color:#9ab;font-size:.78rem">${latency}</td>`
+             +  `<td style="color:${prColor};font-weight:600;font-size:.78rem">${pr}`
+             +      `<span style="color:#556;font-weight:400"> · ${Number(r.passes || 0)}/${Number(r.runs || 0)}</span></td>`
+             +  `<td style="color:${color};font-weight:600;font-size:.78rem">${emoji} ${_esc(status)}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+document.getElementById('btn-refresh-synthetic').addEventListener('click', loadSyntheticJourneys);
+loadSyntheticJourneys();
+
 // ── Proxy Freshness card (what the CDN actually serves) ────────────────────
 // Pings the same public proxies the sims consume. If /api/weather/grid is
 // 500ing while Pipeline Health says the pg_cron succeeded, that's an edge
@@ -3127,7 +3249,18 @@ function _perfSection(title, bodyHtml) {
          + bodyHtml + `</div>`;
 }
 function _perfErr(res, what) {
-    return `<div class="empty" style="color:#ff9090">${what}: ${_esc(res.error || 'failed')}</div>`;
+    const msg = String(res.error || 'failed');
+    // Common case: an RPC reports back "telemetry_perf_summary RPC missing
+    // — apply supabase-client-telemetry-migration.sql". Surface that
+    // filename as a one-click copy so the operator can paste it into the
+    // Supabase SQL editor without having to retype it from the screen.
+    const sqlMatch = msg.match(/([a-z0-9_-]+\.sql)/i);
+    let extra = '';
+    if (sqlMatch) {
+        const file = sqlMatch[1];
+        extra = ` <button class="btn btn-sm" data-copy-text="${_esc(file)}" style="margin-left:8px;vertical-align:middle">Copy ${_esc(file)}</button>`;
+    }
+    return `<div class="empty" style="color:#ff9090">${what}: ${_esc(msg)}${extra}</div>`;
 }
 function _perfEmpty(msg) {
     return `<div class="empty">${_esc(msg)}</div>`;
@@ -3243,6 +3376,24 @@ async function loadPerfErrors() {
 
     el.innerHTML = html;
 }
+
+// Delegate "Copy <filename>.sql" affordances rendered inside _perfErr. Doing
+// this once at mount time so we don't have to re-bind after every redraw.
+document.getElementById('perf-errors-container')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-copy-text]');
+    if (!btn) return;
+    const text = btn.getAttribute('data-copy-text') || '';
+    try {
+        await navigator.clipboard.writeText(text);
+        const prev = btn.textContent;
+        btn.textContent = 'Copied ✓';
+        setTimeout(() => { btn.textContent = prev; }, 1400);
+    } catch (_) {
+        // Clipboard API can be blocked (insecure context, denied permission).
+        // Fall back to a window.prompt so the operator can still copy manually.
+        try { window.prompt('Copy this filename:', text); } catch (_) {}
+    }
+});
 
 document.getElementById('btn-refresh-perf')?.addEventListener('click', loadPerfErrors);
 document.getElementById('perf-window')?.addEventListener('change', loadPerfErrors);

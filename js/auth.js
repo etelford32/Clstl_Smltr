@@ -411,6 +411,16 @@ class AuthManager {
             return data;
         } catch (err) {
             console.warn('[Auth] Profile fetch error:', err.message);
+            // Previously swallowed silently. A transient failure here (RLS
+            // blip, network) leaves role/plan stale — and on a TOKEN_REFRESHED
+            // event can silently demote an admin mid-session — with zero
+            // signal. Surface it on the admin "Top auth failures" card.
+            try {
+                telemetry.recordAuthFailure('profile_fetch_failed', {
+                    source: 'fetchProfile',
+                    message: err?.message || 'unknown',
+                });
+            } catch (_) { /* fire-and-forget */ }
             return null;
         }
     }

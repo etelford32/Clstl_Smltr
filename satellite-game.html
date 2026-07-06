@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Satellite Game · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/satellite-game">
+<meta name="description" content="Phase-gated satellite designer game. Pick a ship, fly the real thermosphere, hold station through space-weather storms.">
+
+<script type="importmap">
+{"imports":{
+  "three": "./js/vendor/three-0.160.0/three.module.js",
+  "three/addons/": "./js/vendor/three-0.160.0/jsm/"
+}}
+</script>
+
+<style>
+:root{
+  --c-accent:#00c6ff; --c-accent-rgb:0,200,255;
+  --c-accent-soft:rgba(0,200,255,.15);
+  --c-accent-border:rgba(0,200,255,.22);
+  --c-accent-border-hi:rgba(0,200,255,.34);
+  --c-warn:#ffb066; --c-warn-rgb:255,176,102;
+  --c-warn-soft:rgba(255,176,102,.14);
+  --c-warn-border:rgba(255,176,102,.4);
+  --c-good:#5fe39a; --c-bad:#ff6b7d;
+  --c-surface-1:rgba(8,12,26,.86);
+  --c-surface-2:rgba(2,4,12,.94);
+  --c-overlay-bg:rgba(2,4,12,.55);
+  --c-text:#d6dee6; --c-text-2:#9fb6c6; --c-text-3:#6f8a9a;
+  --r-md:6px; --r-lg:10px; --r-xl:14px;
+  --blur:blur(13px) saturate(1.15);
+  --shadow:0 4px 26px rgba(0,16,40,.55);
+  --transition:.18s ease;
+}
+
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden}
+body{
+  background:radial-gradient(120% 90% at 70% -10%,#0a1530,#040210 60%);
+  color:var(--c-text);
+  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  font-size:13px;
+  display:flex;flex-direction:column;
+}
+
+/* Site nav sits at top in normal flow; #game-root takes the remainder. The
+   nav has its own height set by js/nav-styles.css — don't restate it here. */
+#game-root{position:relative;flex:1 1 auto;min-height:0;overflow:hidden}
+
+#world{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  display:block;
+}
+
+#ui-overlay{position:absolute;inset:0;pointer-events:none;z-index:10}
+#ui-overlay .phase-panel{pointer-events:auto}
+
+#transition-veil{
+  position:absolute;inset:0;z-index:20;
+  background:#040210;
+  opacity:0;pointer-events:none;
+  transition:opacity .35s ease;
+}
+#transition-veil.show{opacity:1;pointer-events:auto}
+
+.phase-panel{
+  position:absolute;inset:0;
+  display:flex;flex-direction:column;
+  padding:24px 28px;
+  opacity:0;
+  transition:opacity .25s ease;
+}
+.phase-panel.active{opacity:1}
+.phase-panel[hidden]{display:none !important}
+
+.panel{
+  background:linear-gradient(180deg,var(--c-surface-1),var(--c-surface-2));
+  backdrop-filter:var(--blur);
+  -webkit-backdrop-filter:var(--blur);
+  border:1px solid var(--c-accent-border);
+  border-radius:var(--r-lg);padding:10px 11px;box-shadow:var(--shadow);
+}
+
+.btn{
+  appearance:none;border:1px solid var(--c-accent-border);
+  background:rgba(var(--c-accent-rgb),.10);color:var(--c-text);
+  border-radius:var(--r-md);padding:8px 14px;font:inherit;font-size:.78rem;
+  font-weight:700;letter-spacing:.04em;cursor:pointer;
+  transition:var(--transition);
+}
+.btn:hover{border-color:var(--c-accent-border-hi);background:rgba(var(--c-accent-rgb),.22)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.primary{
+  background:linear-gradient(180deg,#0090c8,#006a98);
+  border-color:var(--c-accent-border-hi);color:#fff;
+}
+.btn.ghost{background:transparent;color:var(--c-text-2)}
+.btn.ghost:hover{color:var(--c-text);background:rgba(255,255,255,.04)}
+.btn.sm{padding:5px 10px;font-size:.7rem}
+
+.eyebrow{
+  font-size:.62rem;text-transform:uppercase;letter-spacing:.14em;
+  color:var(--c-accent);font-weight:800;
+}
+.micro-eyebrow{
+  font-size:.6rem;text-transform:uppercase;letter-spacing:.12em;
+  color:var(--c-text-3);font-weight:700;margin-bottom:6px;
+}
+.panel-head{margin-bottom:14px}
+.panel-head h2{font-size:1.15rem;font-weight:700;color:#fff;margin-top:4px}
+.panel-foot{
+  margin-top:auto;display:flex;justify-content:space-between;align-items:center;
+  padding-top:14px;border-top:1px solid var(--c-accent-border);
+}
+.panel-foot.wide{justify-content:stretch;gap:8px}
+.panel-foot.wide .btn{flex:1}
+
+.phase-panel[data-phase="title"]{
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(2,4,12,.25);
+  -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
+}
+.title-stack{text-align:center}
+.title-eyebrow{
+  font-size:.7rem;letter-spacing:.3em;color:var(--c-text-3);
+  text-transform:uppercase;margin-bottom:6px;
+}
+.title-main{
+  font-size:2.4rem;font-weight:300;letter-spacing:.08em;
+  color:#fff;text-transform:uppercase;
+  background:linear-gradient(100deg,#fff 40%,#7fdcff);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+}
+.title-sub{
+  font-size:.72rem;letter-spacing:.18em;color:var(--c-text-2);
+  text-transform:uppercase;margin-top:6px;
+}
+.title-start{margin-top:32px;font-size:.9rem;padding:12px 28px}
+.title-corners .corner{position:absolute;font-size:.7rem;color:var(--c-text-3)}
+.title-corners .tl{top:24px;left:28px;letter-spacing:.12em}
+.title-corners .br{bottom:24px;right:28px;display:flex;gap:8px}
+
+.card-grid{display:grid;gap:10px}
+.card-grid.four{grid-template-columns:repeat(4,1fr)}
+@media (max-width:980px){.card-grid.four{grid-template-columns:repeat(2,1fr)}}
+
+.mode-card{
+  appearance:none;background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:var(--r-lg);padding:16px;text-align:left;cursor:pointer;
+  color:var(--c-text);font:inherit;
+  transition:var(--transition);
+}
+.mode-card:hover{border-color:var(--c-accent-border-hi);background:var(--c-accent-soft)}
+.mode-card.primary,.mode-card[aria-selected="true"]{
+  border-color:var(--c-accent-border-hi);
+  background:var(--c-accent-soft);
+}
+.mode-eyebrow{
+  font-size:.62rem;text-transform:uppercase;letter-spacing:.14em;
+  color:var(--c-text-2);font-weight:700;
+}
+.mode-title{font-size:.95rem;font-weight:700;color:#fff;margin-top:4px}
+.mode-sub{font-size:.72rem;color:var(--c-text-3);margin-top:6px}
+
+.ship-select-grid{
+  display:grid;grid-template-columns:200px 1fr 220px;gap:14px;
+  flex:1;min-height:0;
+}
+@media (max-width:980px){.ship-select-grid{grid-template-columns:1fr}}
+.ship-list{display:flex;flex-direction:column;gap:6px}
+.ship-row{
+  appearance:none;background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:var(--r-md);padding:9px 11px;text-align:left;cursor:pointer;
+  color:var(--c-text);font:inherit;
+  display:flex;justify-content:space-between;align-items:center;
+  transition:var(--transition);
+}
+.ship-row:hover{border-color:var(--c-accent-border-hi);background:rgba(var(--c-accent-rgb),.08)}
+.ship-row.active{border-color:var(--c-accent-border-hi);background:var(--c-accent-soft);color:#fff}
+.ship-row.new{justify-content:center;border-style:dashed;color:var(--c-text-3)}
+.ship-row-tag{font-size:.65rem;color:var(--c-text-3);letter-spacing:.08em}
+.ship-preview{
+  background:rgba(255,255,255,.02);
+  border:1px dashed rgba(255,255,255,.12);
+  border-radius:var(--r-md);
+  display:flex;align-items:flex-end;justify-content:center;
+  padding:12px;min-height:240px;
+}
+.preview-hint{font-size:.65rem;color:var(--c-text-3);letter-spacing:.08em}
+.ship-specs{display:flex;flex-direction:column;gap:5px;font-size:.78rem}
+.spec-eyebrow{
+  font-size:.62rem;text-transform:uppercase;letter-spacing:.14em;
+  color:var(--c-text-3);font-weight:700;margin-bottom:4px;
+}
+.spec-row{
+  display:flex;justify-content:space-between;
+  background:rgba(255,255,255,.04);padding:6px 9px;border-radius:var(--r-md);
+}
+.spec-row span{color:var(--c-text-3)}
+.spec-row b{color:#fff;font-variant-numeric:tabular-nums}
+.spec-edit{margin-top:8px;align-self:flex-start}
+
+.briefing-grid{
+  display:grid;grid-template-columns:1.4fr 1fr;gap:14px;
+  flex:1;min-height:0;
+}
+@media (max-width:980px){.briefing-grid{grid-template-columns:1fr}}
+.briefing-left{display:flex;flex-direction:column;gap:10px}
+.briefing-right{display:flex;flex-direction:column;gap:6px}
+.weather-card .weather-stats{
+  display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px;
+}
+.ws-label{font-size:.65rem;color:var(--c-text-3);text-transform:uppercase;letter-spacing:.08em}
+.ws-value{font-size:1.1rem;color:#fff;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+.ws-spark{
+  height:36px;margin-top:10px;border-radius:var(--r-md);
+  background:linear-gradient(90deg,rgba(0,200,255,.05),rgba(255,107,125,.25),rgba(0,200,255,.05));
+}
+.warn-card{
+  background:var(--c-warn-soft) !important;
+  border-color:var(--c-warn-border) !important;
+  color:var(--c-warn);font-size:.8rem;
+}
+.scoring-card{color:var(--c-text-2);font-size:.78rem}
+.loadout-row{
+  display:flex;justify-content:space-between;
+  background:rgba(255,255,255,.04);padding:8px 11px;border-radius:var(--r-md);
+  font-size:.78rem;
+}
+.loadout-row span{color:var(--c-text-3)}
+.loadout-row b{color:#fff;font-variant-numeric:tabular-nums}
+.loadout-row b.warn{color:var(--c-warn)}
+.launch-btn{margin-top:auto;font-size:.9rem;padding:12px;letter-spacing:.1em}
+
+#flight-hud{padding:0;pointer-events:none}
+#flight-hud > *{pointer-events:auto}
+.hud-top{
+  position:absolute;top:0;left:0;right:0;
+  display:flex;justify-content:space-between;align-items:center;
+  padding:10px 16px;
+  background:linear-gradient(180deg,rgba(0,0,0,.55),rgba(0,0,0,0));
+}
+.hud-readouts{display:flex;gap:18px;align-items:center}
+.hud-r{display:flex;flex-direction:column;font-size:.7rem;line-height:1.2}
+.hud-r span{color:var(--c-text-3);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em}
+.hud-r b{color:#fff;font-variant-numeric:tabular-nums;font-weight:700}
+
+.hud-side{
+  position:absolute;top:50%;transform:translateY(-50%);
+  display:flex;flex-direction:column;gap:4px;
+}
+.hud-left{left:14px}
+.hud-right{right:14px;align-items:flex-end}
+
+.vec-btn,.warp-btn{
+  appearance:none;background:rgba(0,0,0,.5);
+  border:1px solid rgba(255,255,255,.15);
+  color:var(--c-text-2);font:inherit;font-size:.72rem;
+  padding:6px 10px;border-radius:var(--r-md);cursor:pointer;
+  min-width:96px;text-align:left;
+  transition:var(--transition);
+}
+.vec-btn .k,.warp-btn .k{
+  display:inline-block;width:14px;margin-right:6px;
+  color:var(--c-text-3);font-size:.65rem;
+}
+.warp-btn{min-width:60px;text-align:center}
+.vec-btn:hover,.warp-btn:hover{border-color:var(--c-accent-border-hi);color:#fff}
+.vec-btn.active,.warp-btn.active{
+  background:var(--c-accent-soft);
+  border-color:var(--c-accent-border-hi);color:#fff;
+}
+
+.hud-storm-warn{
+  position:absolute;top:54px;left:14px;
+  background:rgba(0,0,0,.45);
+  border:1px solid var(--c-warn-border);
+  color:var(--c-warn);
+  padding:6px 12px;border-radius:var(--r-md);
+  font-size:.72rem;
+}
+
+.hud-bottom{
+  position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
+  display:flex;gap:8px;align-items:center;
+}
+.burn-btn{
+  appearance:none;background:var(--c-accent-soft);
+  border:1px solid var(--c-accent-border-hi);
+  color:#fff;font:inherit;font-size:.85rem;font-weight:700;
+  padding:12px 32px;border-radius:var(--r-md);cursor:pointer;
+  letter-spacing:.12em;text-transform:lowercase;
+  display:flex;align-items:center;gap:10px;
+  transition:var(--transition);
+}
+.burn-btn:hover{background:rgba(var(--c-accent-rgb),.28)}
+.burn-btn.burning{
+  background:rgba(var(--c-accent-rgb),.5);
+  box-shadow:0 0 24px rgba(var(--c-accent-rgb),.4);
+}
+.burn-icon{font-size:1.05rem}
+.throttle-readout{
+  background:rgba(0,0,0,.5);padding:10px 14px;border-radius:var(--r-md);
+  font-size:.72rem;display:flex;flex-direction:column;line-height:1.2;
+}
+.throttle-readout span{color:var(--c-text-3);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em}
+.throttle-readout b{color:#fff;font-variant-numeric:tabular-nums}
+.expand-hud{font-size:.65rem !important}
+
+.resolution-grid{
+  display:grid;grid-template-columns:1.2fr 1fr 1.2fr;gap:14px;
+  flex:1;min-height:0;
+}
+@media (max-width:980px){.resolution-grid{grid-template-columns:1fr}}
+.resolution-score,.resolution-coach{display:flex;flex-direction:column;gap:10px}
+.score-card{
+  background:var(--c-accent-soft) !important;
+  border-color:var(--c-accent-border-hi) !important;
+}
+.score-big{font-size:2.4rem;font-weight:300;color:#fff;line-height:1;margin-top:4px;font-variant-numeric:tabular-nums}
+.score-delta{font-size:.72rem;color:var(--c-good);margin-top:4px}
+.breakdown-card .bd-row,
+.coach-card p{font-size:.78rem}
+.bd-row{display:flex;justify-content:space-between;padding:3px 0}
+.bd-row b{color:#fff;font-variant-numeric:tabular-nums}
+.bd-row span{color:var(--c-text-2)}
+.bd-row.total{border-top:1px solid var(--c-accent-border);padding-top:6px;margin-top:4px}
+.coach-card p{color:var(--c-text);line-height:1.5;margin-top:4px}
+.replay-track{
+  height:38px;margin-top:4px;
+  background:rgba(255,255,255,.04);border-radius:var(--r-md);
+  display:flex;align-items:center;padding:0 10px;
+  font-size:.65rem;color:var(--c-text-3);letter-spacing:.06em;
+}
+.resolution-scores{display:flex;flex-direction:column;gap:6px}
+.hs-list{list-style:none;display:flex;flex-direction:column;gap:3px;font-size:.78rem}
+.hs-list li{
+  display:flex;justify-content:space-between;
+  background:rgba(255,255,255,.04);padding:6px 10px;border-radius:var(--r-md);
+}
+.hs-list li span{color:var(--c-text-2)}
+.hs-list li b{color:#fff;font-variant-numeric:tabular-nums}
+.hs-list li.you{
+  background:var(--c-accent-soft);border:1px solid var(--c-accent-border);
+}
+.hs-list li.you b{color:#fff;font-weight:700}
+
+@keyframes ping{0%{transform:scale(1);opacity:1}100%{transform:scale(1.4);opacity:0}}
+</style>
+</head>
+<body>
+
+<!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("satellite-designer");</script>
+
+<div id="game-root">
+
+  <canvas id="world"></canvas>
+
+  <div id="ui-overlay">
+
+    <section class="phase-panel" data-phase="title" hidden>
+      <div class="title-stack">
+        <div class="title-eyebrow">parkers physics</div>
+        <h1 class="title-main">satellite designer</h1>
+        <div class="title-sub">fly the real thermosphere</div>
+        <button class="btn primary title-start" data-action="start">▶ press any key</button>
+      </div>
+      <div class="title-corners">
+        <div class="corner tl">v0.1 · alpha</div>
+        <div class="corner br">
+          <button class="btn sm" data-action="open-scores">🏆 high scores</button>
+          <button class="btn sm" data-action="open-options">⚙ options</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="phase-panel" data-phase="gameType" hidden>
+      <header class="panel-head">
+        <div class="eyebrow">select mode</div>
+        <h2>how do you want to fly today?</h2>
+      </header>
+      <div class="card-grid four">
+        <button class="mode-card primary" data-mode="campaign">
+          <div class="mode-eyebrow">campaign</div>
+          <div class="mode-title">12 missions</div>
+          <div class="mode-sub">unlock ships &amp; orbits</div>
+        </button>
+        <button class="mode-card" data-mode="quick">
+          <div class="mode-eyebrow">quick play</div>
+          <div class="mode-title">one mission</div>
+          <div class="mode-sub">pick &amp; fly</div>
+        </button>
+        <button class="mode-card" data-mode="daily">
+          <div class="mode-eyebrow">daily</div>
+          <div class="mode-title">today's storm</div>
+          <div class="mode-sub">real space weather</div>
+        </button>
+        <button class="mode-card" data-mode="sandbox">
+          <div class="mode-eyebrow">sandbox</div>
+          <div class="mode-title">no rules</div>
+          <div class="mode-sub">tweak everything</div>
+        </button>
+      </div>
+      <footer class="panel-foot">
+        <button class="btn ghost" data-action="back">← back</button>
+        <button class="btn primary" data-action="confirm-mode">continue →</button>
+      </footer>
+    </section>
+
+    <section class="phase-panel" data-phase="shipSelect" hidden>
+      <header class="panel-head">
+        <div class="eyebrow">select ship</div>
+        <h2>your hangar</h2>
+      </header>
+      <div class="ship-select-grid">
+        <div class="ship-list" id="ship-list">
+          <button class="ship-row active" data-ship="falcon-lite">
+            <span class="ship-row-name">falcon-lite</span>
+            <span class="ship-row-tag">starter</span>
+          </button>
+          <button class="ship-row" data-ship="sparrow-ii">
+            <span class="ship-row-name">sparrow ii</span>
+            <span class="ship-row-tag">balanced</span>
+          </button>
+          <button class="ship-row new" data-ship="new">＋ new build</button>
+        </div>
+        <div class="ship-preview">
+          <div class="preview-hint">drag · scroll · keys to inspect</div>
+        </div>
+        <div class="ship-specs">
+          <div class="spec-eyebrow">specs</div>
+          <div class="spec-row"><span>dry</span><b data-spec="dry">120 kg</b></div>
+          <div class="spec-row"><span>Δv</span><b data-spec="dv">340 m/s</b></div>
+          <div class="spec-row"><span>Cd·A</span><b data-spec="cda">1.8 m²</b></div>
+          <div class="spec-row"><span>thrust</span><b data-spec="thrust">22 N</b></div>
+          <div class="spec-row"><span>Iₛₚ</span><b data-spec="isp">225 s</b></div>
+          <button class="btn ghost sm spec-edit" data-action="edit-parts">⚙ edit parts</button>
+        </div>
+      </div>
+      <footer class="panel-foot">
+        <button class="btn ghost" data-action="back">← back</button>
+        <button class="btn primary" data-action="confirm-ship">to briefing →</button>
+      </footer>
+    </section>
+
+    <section class="phase-panel" data-phase="briefing" hidden>
+      <header class="panel-head">
+        <div class="eyebrow" data-bind="mission-id">mission 03 · briefing</div>
+        <h2 data-bind="mission-title">hold station at 400 km through a G3 storm</h2>
+      </header>
+      <div class="briefing-grid">
+        <div class="briefing-left">
+          <div class="panel weather-card">
+            <div class="micro-eyebrow">space weather · next 24h</div>
+            <div class="weather-stats">
+              <div class="ws-stat">
+                <div class="ws-label">F10.7 peak</div>
+                <div class="ws-value" data-bind="f107">220 sfu ▲</div>
+              </div>
+              <div class="ws-stat">
+                <div class="ws-label">Ap peak</div>
+                <div class="ws-value" data-bind="ap">48</div>
+              </div>
+            </div>
+            <div class="ws-spark" id="ws-spark"></div>
+          </div>
+          <div class="panel warn-card">⚠ density at 400 km projected +3.2× nominal. expect strong drag.</div>
+          <div class="panel scoring-card">
+            <div class="micro-eyebrow">scoring</div>
+            altitude held · Δv saved · forecast-aligned burns
+          </div>
+        </div>
+        <div class="briefing-right">
+          <div class="micro-eyebrow">loadout</div>
+          <div class="loadout-row"><span>Δv onboard</span><b>280 m/s</b></div>
+          <div class="loadout-row"><span>Δv predicted need</span><b class="warn">310 m/s</b></div>
+          <div class="loadout-row"><span>margin</span><b class="warn">−30 m/s</b></div>
+          <button class="btn primary launch-btn" data-action="launch">▶ launch</button>
+        </div>
+      </div>
+      <footer class="panel-foot">
+        <button class="btn ghost" data-action="back">← back</button>
+      </footer>
+    </section>
+
+    <div id="flight-hud" class="phase-panel" data-phase="flight" hidden>
+      <header class="hud-top">
+        <div class="hud-readouts">
+          <div class="hud-r"><span>alt</span><b data-hud="alt">— km</b></div>
+          <div class="hud-r"><span>pe/ap</span><b data-hud="peap">— / —</b></div>
+          <div class="hud-r"><span>Δv</span><b data-hud="dv">— m/s</b></div>
+          <div class="hud-r"><span>T+</span><b data-hud="t">00:00</b></div>
+        </div>
+        <div class="hud-readouts">
+          <div class="hud-r"><span>×</span><b data-hud="warp">1</b></div>
+          <div class="hud-r"><span>score</span><b data-hud="score">0</b></div>
+          <button class="btn sm ghost" data-action="open-menu">esc</button>
+        </div>
+      </header>
+
+      <aside class="hud-side hud-left" aria-label="burn vector">
+        <button class="vec-btn active" data-vec="off"><span class="k">1</span>⏹ off</button>
+        <button class="vec-btn" data-vec="prograde"><span class="k">2</span>⏩ prograde</button>
+        <button class="vec-btn" data-vec="retro"><span class="k">3</span>⏪ retro</button>
+        <button class="vec-btn" data-vec="radial-out"><span class="k">4</span>⬆ radial+</button>
+        <button class="vec-btn" data-vec="radial-in"><span class="k">5</span>⬇ radial−</button>
+      </aside>
+
+      <aside class="hud-side hud-right" aria-label="time warp">
+        <button class="warp-btn active" data-warp="1">×1</button>
+        <button class="warp-btn" data-warp="10">×10</button>
+        <button class="warp-btn" data-warp="100">×100</button>
+        <button class="warp-btn" data-warp="1000">×1000</button>
+      </aside>
+
+      <div class="hud-storm-warn" id="storm-warn" hidden>📡 storm peaks in <span data-hud="storm-eta">—</span></div>
+
+      <footer class="hud-bottom">
+        <button class="burn-btn" data-action="burn" aria-label="hold space to burn">
+          <span class="burn-icon">🚀</span>
+          <span class="burn-text">hold space</span>
+        </button>
+        <div class="throttle-readout"><span>throttle</span><b data-hud="throttle">80%</b></div>
+        <button class="btn sm ghost expand-hud" data-action="expand-hud">~ expand hud</button>
+      </footer>
+    </div>
+
+    <section class="phase-panel" data-phase="resolution" hidden>
+      <header class="panel-head">
+        <div class="eyebrow">mission complete</div>
+        <h2 data-bind="resolution-summary">held 397 km · 24h · −30 m/s remaining</h2>
+      </header>
+      <div class="resolution-grid">
+        <div class="resolution-score">
+          <div class="panel score-card">
+            <div class="micro-eyebrow">final score</div>
+            <div class="score-big" data-bind="final-score">2,140</div>
+            <div class="score-delta" data-bind="score-delta">+300 vs personal best</div>
+          </div>
+          <div class="panel breakdown-card">
+            <div class="micro-eyebrow">breakdown</div>
+            <div class="bd-row"><span>burn timing</span><b>+820</b></div>
+            <div class="bd-row"><span>Δv efficiency</span><b>+640</b></div>
+            <div class="bd-row"><span>forecast bonus</span><b>+280</b></div>
+            <div class="bd-row total"><span>storm survival</span><b>+400</b></div>
+          </div>
+        </div>
+        <div class="resolution-coach">
+          <div class="panel coach-card">
+            <div class="micro-eyebrow">🎓 coach</div>
+            <p data-bind="coach-line">burn 2 fired 40s after the forecast peak — burning at peak density would have netted +180 and saved 8 m/s.</p>
+          </div>
+          <div class="panel replay-card">
+            <div class="micro-eyebrow">replay</div>
+            <div class="replay-track" id="replay-track">[ orbit trace · burn markers · density overlay ]</div>
+          </div>
+        </div>
+        <div class="resolution-scores">
+          <div class="micro-eyebrow">🏆 high scores · mission 03</div>
+          <ol class="hs-list" data-bind="high-scores">
+            <li><span>1 · orbiter-x</span><b>3,420</b></li>
+            <li><span>2 · kepler-99</span><b>2,890</b></li>
+            <li class="you"><span>3 · you</span><b>2,140</b></li>
+            <li><span>4 · drag-knight</span><b>1,960</b></li>
+            <li><span>5 · sparrow</span><b>1,710</b></li>
+          </ol>
+        </div>
+      </div>
+      <footer class="panel-foot wide">
+        <button class="btn ghost" data-action="retry">↺ try again</button>
+        <button class="btn primary" data-action="next-mission">→ next mission</button>
+        <button class="btn ghost" data-action="hangar">🛠 hangar</button>
+        <button class="btn ghost" data-action="title">⌂ title</button>
+      </footer>
+    </section>
+
+  </div>
+
+  <div id="transition-veil"></div>
+
+</div>
+
+<script type="module" src="./js/satellite-game.js"></script>
+
+</body>
+</html>

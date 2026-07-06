@@ -38,103 +38,7 @@ nav {
     border-bottom:1px solid rgba(255,255,255,.07);
     display:flex; align-items:center; padding:0 16px; gap:6px;
 }
-.nav-brand {
-    display:flex; align-items:center; gap:8px;
-    font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap;
-    background:linear-gradient(45deg,#ffd700,#ff8c00);
-    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
-    margin-right:2px;
-}
-
-/* nav-menu stretches to fill all remaining space */
-
-.nav-item {
-    padding:5px 10px; background:rgba(255,255,255,.07);
-    border:1px solid rgba(255,255,255,.12); border-radius:5px;
-    color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap;
-    transition:background .2s, border-color .2s; flex-shrink:0;
-}
-.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
-
-.nav-drop-btn {
-    padding:5px 10px; background:rgba(255,255,255,.07);
-    border:1px solid rgba(255,255,255,.12); border-radius:5px;
-    color:#ccc; font-size:.8rem; cursor:pointer; font-family:inherit;
-    transition:background .2s, border-color .2s; white-space:nowrap;
-}
-.nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
-
-/* Rich dropdown panel */
-.nav-drop-menu {
-    display:block; position:absolute; top:calc(100% + 5px); left:0;
-    background:rgba(5,2,18,.97); backdrop-filter:blur(18px);
-    border:1px solid rgba(255,255,255,.11); border-radius:9px;
-    padding:6px 0 8px; min-width:268px; z-index:800;
-    box-shadow:0 14px 44px rgba(0,0,0,.80);
-    opacity:0; visibility:hidden; pointer-events:none;
-    transform:translateY(-4px);
-    transition:opacity .18s ease, visibility .18s ease, transform .18s ease;
-}
-.nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu {
-    opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0);
-}
-/* Each item in the dropdown */
-.nav-drop-link {
-    display:flex; align-items:center; gap:11px;
-    padding:7px 16px; text-decoration:none; transition:background .15s;
-}
-.nav-drop-link:hover { background:rgba(255,255,255,.07); }
-
-.nav-drop-link.active .ndl-icon  { opacity:1; }
-.ndl-icon  { font-size:1.05rem; width:20px; text-align:center; flex-shrink:0; opacity:.72; }
-
-.ndl-title { color:#c8c8c8; font-size:.82rem; font-weight:500; line-height:1.25; }
-.ndl-sub   { color:#484e60; font-size:.70rem; line-height:1.2; }
-.nav-drop-link:hover .ndl-title { color:#fff; }
-.nav-drop-link:hover .ndl-sub   { color:#7a8090; }
-/* Section label inside dropdown */
-
-/* Spacer that pushes auth buttons to the far right */
-
-/* Auth */
-
-.nav-login:hover  { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
-.nav-signup { background:linear-gradient(45deg,#ff8c00,#ffd700) !important; border-color:#ff8c00 !important; color:#000 !important; font-weight:700 !important; letter-spacing:.01em; }
-
-/* Burger */
-.nav-burger {
-    display:none; margin-left:auto;
-    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
-    border-radius:5px; color:#fff; padding:5px 10px; font-size:1.1rem;
-    cursor:pointer; line-height:1; transition:background .2s;
-}
-.nav-burger:hover { background:rgba(255,255,255,.18); }
-@media (max-width:1024px) {
-    .nav-burger { display:block; }
-    .nav-menu {
-        display:none; flex-direction:column; align-items:stretch;
-        position:absolute; top:50px; left:0; right:0;
-        background:rgba(3,1,14,.98); backdrop-filter:blur(18px);
-        border-bottom:1px solid rgba(255,255,255,.1);
-        padding:8px 12px 14px; gap:3px; z-index:700;
-        max-height:calc(100vh - 50px); overflow-y:auto;
-    }
-    .nav-menu.open { display:flex; }
-    .nav-item, .nav-drop-btn { padding:11px 14px; font-size:.9rem; }
-    .nav-drop-menu {
-        position:static; box-shadow:none; border-radius:5px; min-width:0;
-        background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.07);
-        display:none; opacity:1; visibility:visible; transform:none;
-        transition:none; pointer-events:auto; padding:2px 0 6px;
-    }
-    .nav-drop-link { padding:8px 14px 8px 22px; }
-    .ndl-sub { display:none; }
-    .nav-drop-section { padding:5px 14px 2px 22px; }
-    .nav-drop:hover .nav-drop-menu { display:none !important; }
-    .nav-drop.open  .nav-drop-menu { display:block !important; }
-    .nav-spacer { display:none; }
-    .nav-auth-sep { display:none; }
-}
+/* nav-* class styling lives in js/nav-styles.css (loaded on every page) */
 
 #app { position: relative; width: 100%; height: calc(100vh - 50px); overflow: hidden; }
 /* On mobile the canvas is ~78 % of the viewport so the description section
@@ -163,6 +67,42 @@ nav {
 #hud .dim { color:#555; font-size:10px; }
 #hud .sep { border-top:1px solid rgba(255,180,0,.2); margin:5px 0; }
 #fps-display { color:#40ff80; font-weight:600; }
+
+/* ─── Smart tour overlay ─────────────────────────────────────── */
+#smart-tour-overlay {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    z-index:55; min-width:300px; max-width:420px;
+    background:rgba(8,4,0,.78); backdrop-filter:blur(10px);
+    border:1px solid rgba(255,140,40,.35); border-radius:9px;
+    padding:8px 14px; font-size:11px; line-height:1.55;
+    pointer-events:none; display:none;
+    box-shadow:0 4px 22px rgba(255,120,0,.18);
+}
+#smart-tour-overlay.show { display:block; animation:tour-fade .35s ease-out; }
+#smart-tour-overlay.interrupt { border-color:rgba(255,60,0,.7); box-shadow:0 0 26px rgba(255,80,0,.45); }
+@keyframes tour-fade { from{opacity:0;transform:translate(-50%,-6px)} to{opacity:1;transform:translate(-50%,0)} }
+#sto-hd {
+    display:flex; align-items:center; gap:8px; font-size:10px;
+    text-transform:uppercase; letter-spacing:.08em; color:#ff9944;
+    border-bottom:1px solid rgba(255,140,40,.18); padding-bottom:4px; margin-bottom:5px;
+}
+#sto-hd .dot { width:7px; height:7px; border-radius:50%; background:#ff8800; box-shadow:0 0 8px #ff8800; animation:tour-pulse 1.6s ease-in-out infinite; }
+@keyframes tour-pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+#sto-title { font-size:15px; font-weight:700; color:#ffd080; letter-spacing:.04em; }
+#sto-loc   { color:#ffaa66; font-weight:600; }
+#sto-row   { display:flex; gap:14px; flex-wrap:wrap; margin-top:3px; color:#ddccaa; }
+#sto-row .k { color:#776655; margin-right:3px; }
+#sto-tier  { display:inline-block; padding:1px 8px; border-radius:9px;
+             font-size:10px; font-weight:700; letter-spacing:.06em; }
+.tier-low      { background:rgba(80,180,120,.18);  border:1px solid rgba(80,180,120,.4); color:#88dd99; }
+.tier-mod      { background:rgba(220,180,60,.18);  border:1px solid rgba(220,180,60,.4); color:#ffd864; }
+.tier-high     { background:rgba(255,140,40,.20);  border:1px solid rgba(255,140,40,.5); color:#ffaa66; }
+.tier-severe   { background:rgba(255,60,40,.22);   border:1px solid rgba(255,60,40,.6);  color:#ff8866;
+                 animation:tour-pulse 1.2s ease-in-out infinite; }
+#sto-progress {
+    height:2px; background:rgba(255,140,40,.12); border-radius:2px; overflow:hidden; margin-top:6px;
+}
+#sto-progress .bar { height:100%; background:linear-gradient(90deg,#ff8800,#ffd864); width:0%; transition:width .25s linear; }
 
 .cv-btn {
     position: absolute; z-index: 60;
@@ -288,9 +228,6 @@ nav {
 .sw-r-letter.R3 { color:#ff9900; text-shadow:0 0 8px #ff990060; }
 .sw-r-letter.R4 { color:#ff5500; text-shadow:0 0 10px #ff550080; }
 .sw-r-letter.R5 { color:#ff2200; text-shadow:0 0 12px #ff220099; animation:xpulse 0.9s ease-in-out infinite; }
-
-/* ── CME shock wave arrival indicator ───────────────────────── */
-.cme-shock-active #sw-earth-chip { border-color:rgba(255,140,0,.7); box-shadow:0 0 12px rgba(255,100,0,.3); }
 
 #panel {
     position: absolute; top:0; right:0; bottom:0; width: min(296px, 88vw);
@@ -483,7 +420,6 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
     background:rgba(100,200,80,.12); border-color:rgba(100,200,80,.3); color:#88dd66;
 }
 .cme-meta   { font-size:9px; color:#664433; line-height:1.5; }
-.cme-eta    { font-size:9.5px; font-weight:600; color:#ffcc44; }
 .cme-time-ago { font-size:8.5px; color:#554433; }
 
 /* ── SWPC Alerts section ───────────────────────────────────── */
@@ -642,12 +578,6 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 .flare-row[data-lat] { cursor:pointer; }
 .flare-row[data-lat]:hover { background:rgba(255,140,0,.09); border-radius:3px; }
 
-/* ── Wind speed dial ───────────────────────────────────────── */
-.wind-dial-wrap { display:flex; align-items:center; gap:10px; margin:6px 0 10px; }
-.wind-dial-svg  { flex-shrink:0; }
-.wind-dial-info { font-size:10px; color:#885544; line-height:1.6; }
-.wind-dial-val  { font-size:16px; font-weight:800; color:#ffaa44; }
-
 /* ── Sparkline ─────────────────────────────────────────────── */
 .sparkline-wrap { margin:6px 0 10px; }
 .sparkline-lbl  { font-size:9px; color:#664433; margin-bottom:3px; }
@@ -770,19 +700,22 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 <script type="importmap">
 {
     "imports": {
-        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
     }
 }
 </script>
 <!-- perf-hints:start -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js" crossorigin>
 <!-- perf-hints:end --><!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260508"; initNav("sun");</script>
+<script type="module">
+import './js/telemetry.js';
+</script>
 
 <div id="app">
     <!-- scroll affordance: absolute, pointer-events:none — never blocks canvas -->
@@ -793,6 +726,12 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
         </svg>
     </div>
     <div id="canvas-wrap" data-preview-stage="1">
+        <div id="doppler-legend" style="display:none;position:absolute;left:16px;bottom:16px;z-index:7;background:rgba(8,10,20,.74);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;font:11px/1.45 system-ui,-apple-system,sans-serif;color:#cfd6e6;pointer-events:none;max-width:236px">
+            <div style="font-weight:600;margin-bottom:6px">Doppler velocity (line-of-sight)</div>
+            <div style="height:10px;border-radius:5px;background:linear-gradient(90deg,#2d6bff,#76767f,#ff4730)"></div>
+            <div style="display:flex;justify-content:space-between;margin-top:3px"><span>approaching</span><span>receding</span></div>
+            <div style="margin-top:6px;opacity:.82">Granule up/downflow + supergranule outflow (the limb "donut") + rotation. Granule ~1 Mm · supergranule ~30 Mm.</div>
+        </div>
         <div id="hud">
             <h3>Sol — G2V</h3>
             <div>T<sub>eff</sub>: <span class="val" id="hud-teff">5778</span> <span class="dim">K</span></div>
@@ -810,6 +749,20 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
             <div style="margin-top:3px">FPS: <span id="fps-display">--</span></div>
             <div class="dim" style="margin-top:2px">Drag · Pinch · Scroll</div>
         </div>
+        <!-- Smart Tour overlay — populated by smartTour module -->
+        <div id="smart-tour-overlay">
+            <div id="sto-hd"><span class="dot"></span><span id="sto-mode">SMART TOUR</span><span style="flex:1"></span><span id="sto-tier"></span></div>
+            <div><span id="sto-title">—</span> <span style="color:#665544;font-size:10px">·</span> <span id="sto-loc">—</span></div>
+            <div id="sto-row">
+                <div><span class="k">Mag:</span><span id="sto-mag">—</span></div>
+                <div><span class="k">Δλ to Earth-line:</span><span id="sto-merid">—</span></div>
+                <div><span class="k">Area:</span><span id="sto-area">—</span></div>
+                <div><span class="k">Last flare:</span><span id="sto-lastflare">—</span></div>
+            </div>
+            <div id="sto-why" style="margin-top:3px;color:#aa9988;font-size:10px;font-style:italic">—</div>
+            <div id="sto-progress"><div class="bar"></div></div>
+        </div>
+
         <!-- Flare Alert Banner -->
         <div id="flare-alert-banner"></div>
 
@@ -1102,6 +1055,40 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                             <span class="layer-meta">white light · 10⁶ K</span>
                         </label>
                     </div>
+                    <div class="layer-grp">Cutaway</div>
+                    <div class="toggle-row layer-row" id="lr-cutaway">
+                        <input type="checkbox" id="tog-cutaway">
+                        <label for="tog-cutaway">
+                            <span class="layer-dot cz"></span>
+                            <span class="layer-name">Peel &amp; cutaway</span>
+                            <span class="layer-meta">slice in to the convection</span>
+                        </label>
+                    </div>
+                    <div class="toggle-row" id="row-cutdepth" style="display:none;align-items:center;gap:8px">
+                        <label for="sl-cutdepth" style="font-size:11px;opacity:.75;white-space:nowrap">Cut depth</label>
+                        <input type="range" id="sl-cutdepth" min="0" max="100" step="1" value="45" style="flex:1">
+                    </div>
+                    <div class="layer-grp">Views</div>
+                    <div class="toggle-row" style="align-items:center;gap:8px">
+                        <label for="view-mode" style="font-size:11px;opacity:.75;white-space:nowrap">Wavelength</label>
+                        <select id="view-mode" style="flex:1;background:#1a1410;color:#e8d8c0;border:1px solid #3a2e22;border-radius:4px;padding:3px 6px;font-size:11px">
+                            <option value="0">White light · photosphere</option>
+                            <option value="1">AIA 304 Å · chromosphere</option>
+                            <option value="2">AIA 171 Å · coronal loops</option>
+                            <option value="3">AIA 193 Å · corona + holes</option>
+                            <option value="4">AIA 211 Å · active corona</option>
+                            <option value="5">AIA 131 Å · flare plasma</option>
+                            <option value="6">HMI · magnetogram</option>
+                        </select>
+                    </div>
+                    <div class="toggle-row layer-row" id="lr-doppler">
+                        <input type="checkbox" id="tog-doppler">
+                        <label for="tog-doppler">
+                            <span class="layer-dot ph"></span>
+                            <span class="layer-name">Doppler velocity</span>
+                            <span class="layer-meta">line-of-sight flow map</span>
+                        </label>
+                    </div>
                 </div>
             </div>
 
@@ -1168,6 +1155,17 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <button id="cam-default" class="active">Default</button>
                         <button id="cam-close">Close-up</button>
                         <button id="cam-wide">Wide</button>
+                    </div>
+                    <div class="toggle-row" style="margin-top:8px">
+                        <input type="checkbox" id="tog-smart-tour">
+                        <label for="tog-smart-tour" title="Auto-cycle the camera through the most Earth-affecting active regions">⚡ Smart tour — Earth-affecting regions</label>
+                    </div>
+                    <div class="btn-row" id="smart-tour-controls" style="margin-top:4px;display:none">
+                        <button id="tour-next" title="Skip to next active region">↻ Next AR</button>
+                        <button id="tour-pause" title="Pause/resume auto-cycle">⏸ Pause</button>
+                    </div>
+                    <div style="font-size:9.5px;color:#776655;margin-top:6px;line-height:1.45">
+                        Scoring: meridian proximity (Earth-firing line) × magnetic complexity (β/γ/δ) × area × recent flare class. Live M/X flares interrupt the cycle.
                     </div>
                 </div>
             </div>
@@ -1686,6 +1684,7 @@ import {
     aggregateFusionStats, radialProfile, PhotonPool,
     L_SUN_W, R_SUN_M, AU_M,
 } from './js/solar-interior-engine.js';
+import { SolarFluid } from './js/solar-fluid.js';
 import { SolarDynamo } from './js/solar-dynamo.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
@@ -1693,7 +1692,7 @@ import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.
 import { ShaderPass }         from 'three/addons/postprocessing/ShaderPass.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
 import { loadRealHistory } from './js/history-loader.js';
-import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
+import { SolarWeatherForecaster, solarCyclePhase } from './js/solar-weather-forecast.js';
 import { ModelValidator }     from './js/model-validation.js';
 import { SolarLSTM, normalise as lstmNormalise, denormalise as lstmDenorm, FEATURES } from './js/solar-lstm.js';
 
@@ -1848,7 +1847,6 @@ const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
         const sl = document.getElementById('sl-scrub');
         sl.max   = Math.max(0, swpcTimeline.length - 1);
         sl.value = scrubLiveIdx;   // start at live (not forecast)
-        console.log(`[SWPC] Timeline: ${observed.length} observed + ${forecastPts.length} forecast (LSTM confidence ${(_lstm.confidence * 100).toFixed(0)}%)`);
 
         // Mark feeds as live
         ['fd-wind','fd-imf'].forEach(id => {
@@ -2052,6 +2050,20 @@ const uniforms = {
     u_teff:              { value: 5778.0 },
     u_activity:          { value: 0.5 },
     u_rot:               { value: 1.0 },
+    // Phase 2 cutaway/peel: one world-space clip plane shared by the
+    // photosphere (discard) and the convective shell (depth grading).
+    // u_cutaway gates it (0=off); u_cut is the plane normal (aimed at the
+    // camera on enable); u_cutOffset is the slice depth (>1 = disabled).
+    u_cut:               { value: new THREE.Vector3(0, 0, 1) },
+    u_cutOffset:         { value: 2.0 },
+    u_cutaway:           { value: 0.0 },
+    u_doppler:           { value: 0.0 },   // 1 = Doppler line-of-sight velocity view
+    u_viewMode:          { value: 0.0 },   // 0=white light 1=304 2=171 3=193 4=211 5=131 6=magnetogram
+    u_fluidTex:          { value: null },  // GPU thermal-convection sim (T in .r, vel in .gb)
+    u_fluidOn:           { value: 0.0 },   // 1 = sim drives the granulation
+    u_fluidT0:           { value: 1.0 },
+    u_fluidScale:        { value: 3.2 },
+    u_fluidDebug:        { value: 0.0 },
     u_showSpots:         { value: 1.0 },   // 1 = show sunspots, 0 = hide
     u_showFlares:        { value: 1.0 },   // 1 = show flares,   0 = hide
     // ── Live solar wind uniforms (driven by DSCOVR/ACE L1 pipeline) ──
@@ -2189,7 +2201,7 @@ let composer, bloomAmbient, bloomFlare, radialDiffusePass;
     //
     // URL flag ?bloom=ambient|flare|both|off (default both) sets initial
     // visibility; the two checkboxes in the rendering panel override.
-    bloomAmbient = new UnrealBloomPass(new THREE.Vector2(W, H), 0.18, 0.85, 0.55);
+    bloomAmbient = new UnrealBloomPass(new THREE.Vector2(W, H), 0.18, 0.28, 0.85);
     bloomFlare   = new UnrealBloomPass(new THREE.Vector2(W, H), 0.00, 0.20, 1.10);
     composer.addPass(bloomAmbient);
     composer.addPass(bloomFlare);
@@ -2300,6 +2312,7 @@ let composer, bloomAmbient, bloomFlare, radialDiffusePass;
     };
     radialDiffusePass = new ShaderPass(diffuseShader);
     composer.addPass(radialDiffusePass);
+    radialDiffusePass.enabled = false;   // off: produced radial glow circles
 
     // ── Space occlusion — corona-to-space shadow boundary ────────────────────
     // Final pass: smoothly darkens pixels beyond the bright corona annulus,
@@ -2519,6 +2532,16 @@ const sunFS = /* glsl */`
     uniform float u_flare_intensity; // 0-1 white-light flash intensity at flare onset
     uniform float u_chromoIso;       // 1.0 when chromosphere isolated (this shader inactive)
     uniform float u_photIso;         // 1.0 when photosphere is isolated (boost upper-layer features)
+    uniform vec3  u_cut;             // cutaway plane normal (world space)
+    uniform float u_cutOffset;       // plane offset along u_cut; >1 = disabled
+    uniform float u_cutaway;         // 1 = cutaway/peel active
+    uniform float u_doppler;         // 1 = Doppler velocity view
+    uniform float u_viewMode;        // 0=white 1=304 2=171 3=193 4=211 5=131 6=magnetogram
+    uniform sampler2D u_fluidTex;    // GPU convection sim
+    uniform float u_fluidOn;
+    uniform float u_fluidT0;
+    uniform float u_fluidScale;
+    uniform float u_fluidDebug;
     varying vec3  vNormal;
     varying vec3  vPosition;
     varying vec3  vViewDir;
@@ -2598,6 +2621,31 @@ const sunFS = /* glsl */`
         return vec2(sqrt(d1), sqrt(d2));
     }
 
+    // Same Worley partition as voronoi() above (visible cells unchanged) but
+    // also returns the surface gradient direction toward the nearest cell
+    // centre, used to drive analytic granule relief and supergranular flow.
+    // convectiveFS keeps the plain voronoi(); only the photosphere needs grad.
+    vec2 voronoiGrad(vec3 p, out vec3 grad) {
+        vec3 ip = floor(p), fp = fract(p);
+        float d1 = 1e9, d2 = 1e9;
+        vec3  off1 = vec3(0.0);
+        for (int z = -1; z <= 1; z++) {
+            for (int y = -1; y <= 1; y++) {
+                for (int x = -1; x <= 1; x++) {
+                    vec3 nb  = vec3(float(x), float(y), float(z));
+                    vec3 pos = nb - fp + hash3(ip + nb);   // fragment -> centre
+                    float d  = dot(pos, pos);
+                    if (d < d1) { d2 = d1; d1 = d; off1 = pos; }
+                    else if (d < d2) { d2 = d; }
+                }
+            }
+        }
+        d1 = sqrt(d1); d2 = sqrt(d2);
+        // height grad ~ +off1/d1 -> points uphill toward the raised interior.
+        grad = off1 / max(d1, 1e-4);
+        return vec2(d1, d2);
+    }
+
     // ── Blackbody colour (Planck peak approximation) ───────────────────────────
     // Correct G-star colours: T 4000–7000 K
     vec3 blackbody(float T) {
@@ -2614,7 +2662,31 @@ const sunFS = /* glsl */`
         return mix(c3, c4, (t-0.8)/0.2);
     }
 
+    // ── ACES filmic tonemap (Narkowicz 2015 approximation) ────────────────────
+    // Compresses HDR highlights into a graceful S-curve so flares saturate
+    // creamy-white instead of clipping to pure white, and dim regions get a
+    // touch more shoulder contrast. Channel-independent so colour shifts
+    // slightly in the highlights (the "filmic" look). Applied in linear-light
+    // space before the global ACES the renderer already applies — kept gentle
+    // so the two don't double up.
+    // AIA-style false-colour ramp: black -> channel tint -> bright -> white.
+    vec3 aiaRamp(float I, vec3 c1, vec3 c2, vec3 c3) {
+        I = max(I, 0.0);
+        vec3 c = mix(vec3(0.0), c1, smoothstep(0.0, 0.22, I));
+        c = mix(c, c2, smoothstep(0.22, 0.72, I));
+        c = mix(c, c3, smoothstep(0.72, 1.35, I));
+        return c;
+    }
+
+    vec3 acesFilm(vec3 x) {
+        const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+        return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    }
+
     void main() {
+        // Cutaway peel: drop the near cap so the boiling interior shows through.
+        // vPosition is the unit object/world position (sun mesh = identity).
+        if (u_cutaway > 0.5 && dot(vPosition, u_cut) > u_cutOffset) discard;
         vec3  nrm  = normalize(vNormal);
         vec3  vDir = normalize(vViewDir);
         float mu   = max(dot(nrm, vDir), 0.0);
@@ -2629,85 +2701,153 @@ const sunFS = /* glsl */`
         float lon = atan(vPosition.x, vPosition.z);
 
         // Differential rotation (Snodgrass 1990): Ω(lat) = A + B sin²(lat) + C sin⁴(lat)
+        // Equator turns ~25 d, poles ~34 d — diffRot ranges from 1.0 at equator
+        // down to ~0.72 at the poles. We apply it to ALL latitude-keyed scrolls
+        // (granulation, supergranulation, domain warp, fine turbulence, spicules)
+        // so high-latitude features visibly drift slower than equatorial ones.
         float sinLat2 = sin(lat) * sin(lat);
         float diffRot  = 1.0 - 0.19 * sinLat2 - 0.09 * sinLat2 * sinLat2;
         float rotLon   = lon + u_time * 0.014 * u_rot * diffRot;
+        // Combined rotation factor used by all texture-scrolling terms below
+        float rotF     = u_rot * diffRot;
 
         // ── Supergranulation (~30 000 km cells, flow pattern beneath granules) ──
-        vec3  sgPos  = vPosition * 2.2 + vec3(u_time * 0.0008 * u_rot);
-        vec2  sgCell = voronoi(sgPos);
+        vec3  sgPos  = vPosition * 2.2 + vec3(u_time * 0.0008 * rotF);
+        vec3  sgGrad;
+        vec2  sgCell = voronoiGrad(sgPos, sgGrad);
+        // Supergranular horizontal outflow: plasma streams from cell centres
+        // out to the boundary network (-grad points away from the centre).
+        vec3  sgFlow = -sgGrad;
         // Bright cell centres (upwelling), dark lanes (downflow at boundaries)
         float superGran = smoothstep(0.0, 0.45, sgCell.x) * 0.08;
 
-        // ── Granulation (~1 000 km cells) ─────────────────────────────────────
-        // Domain-warp: slow turbulent deformation gives a "boiling" look.
-        // Phase 4.6: domain warp + fine turbulence both use the pre-baked
-        // noise atlas via fbmTex (triplanar 2D lookups). Same visual feel,
-        // ~5× cheaper per fragment than the procedural fbm path.
-        vec3 dwarp = vec3(
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032)),
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 + 1.7)),
-            fbmTex(vPosition * 5.5 + vec3(u_time * 0.0032 + 3.4))
-        ) * 0.18;
-        vec3 gPos   = vPosition * 10.5 + dwarp + vec3(u_time * 0.0065 * u_rot);
-        vec2 gCell  = voronoi(gPos);
-        // Crisper cell structure: narrower lane-transition for sharp dark
-        // edges between bright cell interiors. Adds a subtle radial-bulge
-        // brightness so each cell reads as 3D rather than flat.
-        float laneD     = smoothstep(0.02, 0.16, gCell.y - gCell.x);   // 0=lane, 1=interior
-        float cellBulge = 1.0 - 0.18 * smoothstep(0.0, 0.30, gCell.x); // bright centre, slightly dim edge
+        // Granulation - flow-advected convective cells (fluid). A divergence-
+        // free convective flow advects the granulation each frame so the cells
+        // genuinely stream, shear and swirl, converging into the dark
+        // intergranular downflow lanes -- real fluid motion, not a translating
+        // texture.
+        vec3 nLocal  = normalize(vPosition);
+        vec3 objView = normalize(cameraPosition - vPosition);
 
-        // ── Schwarzschild centre-to-limb contrast attenuation ─────────────
-        // Granulation contrast (~16% intensity ratio at disk centre) drops
-        // toward the limb because we're sampling a higher, cooler part of
-        // the photosphere where convection has overshot and decoupled. The
-        // band of lane/interior brightnesses compresses toward a common mean.
-        float schw    = pow(mu, 0.5);                              // 1 at centre, ~0.55 at μ=0.3
-        float bright  = mix(0.78, 1.04, schw);                     // cell interior maximum
-        float dark    = mix(0.78, 0.32, schw);                     // dark-lane minimum
-        float granLight = mix(dark, bright, laneD) * cellBulge;
+        // Flow = supergranular outflow (divergent: out of hot cell centres into
+        // the lanes) + curl-noise turbulence (rotational eddies), kept tangential.
+        vec3 swirlG = vec3(
+            fbmTex(vPosition * 3.0 + vec3(u_time * 0.020 * rotF)),
+            fbmTex(vPosition * 3.0 + vec3(u_time * 0.020 * rotF + 5.1)),
+            fbmTex(vPosition * 3.0 + vec3(u_time * 0.020 * rotF + 9.7))
+        ) - 0.5;
+        vec3 flow = sgFlow * 0.7 + cross(swirlG, nLocal) * 1.3;
+        flow = flow - dot(flow, nLocal) * nLocal;
 
-        // ── Granule lifetime breathing ────────────────────────────────────
-        // Real granules form (~30 s rise), live (~5–10 min), then fade as
-        // mass piles up at the boundary. Cheap proxy: hash the integer
-        // cell-grid position to a per-cell phase, sin-modulate brightness.
-        vec3 cellGrid = floor(gPos);
-        float cellSeed  = hash(cellGrid);
-        float cellPhase = cellSeed * 6.2832;
-        // Two-tone breath: slow main lifecycle (~3 sim-sec ≈ 5 min) +
-        // fast micro-flicker (~0.6 sim-sec) for sub-granule turbulence.
-        float granLife  = 0.5 + 0.5 * sin(u_time * 1.85 + cellPhase * 3.7);
-        float granJit   = 0.5 + 0.5 * sin(u_time * 9.2  + cellPhase * 17.0);
-        granLight *= 0.85 + granLife * 0.22 * laneD + granJit * 0.05 * laneD;
-        // "Exploding granule" rare bright burst: cells whose seed falls in
-        // the top 6% of [0,1] flash bright at random phase (~3% of frames).
-        float explode = smoothstep(0.94, 0.99, cellSeed) * pow(granLife, 6.0);
-        granLight *= 1.0 + explode * 0.45;
+        // Domain warp breaks the regular Voronoi lattice into ORGANIC cells --
+        // kills the honeycomb / "egg-shell" facet look.
+        vec3 gWarp = vec3(
+            fbmTex(vPosition * 10.0 + vec3(u_time * 0.012 * rotF)),
+            fbmTex(vPosition * 10.0 + vec3(u_time * 0.012 * rotF + 3.3)),
+            fbmTex(vPosition * 10.0 + vec3(u_time * 0.012 * rotF + 6.6))
+        ) - 0.5;
+
+        // Flow-map advection: two cross-faded phases of FINE granule cells
+        // (~1 Mm -> a dense carpet, not a few big facets), streamed by the flow.
+        float fT     = u_time * 0.55;
+        float ph0    = fract(fT);
+        float ph1    = fract(fT + 0.5);
+        float fblend = abs(ph0 - 0.5) * 2.0;
+        vec3  gBase  = vPosition * 46.0 + gWarp * 5.0;
+        vec3  gGradA, gGradB;
+        vec2  cA = voronoiGrad(gBase - flow * (ph0 * 0.9), gGradA);
+        vec2  cB = voronoiGrad(gBase - flow * (ph1 * 0.9), gGradB);
+        vec2  gCell = mix(cA, cB, fblend);
+        vec3  gGrad = mix(gGradA, gGradB, fblend);
+        vec3  gPos  = gBase - flow * (mix(ph0, ph1, fblend) * 0.9);
+
+        // Soft intergranular lanes (no razor-sharp facet edges).
+        float laneD = smoothstep(0.03, 0.30, gCell.y - gCell.x);
+
+        // Warm photospheric brightness: bright granules, warm (not black) lanes.
+        float schw   = pow(mu, 0.5);
+        float bright = mix(0.98, 1.14, schw);
+        float dark   = mix(0.80, 0.56, schw);
+        float granLight = mix(dark, bright, laneD);
+        // Fine sub-granule mottling so the surface never reads as flat facets.
+        granLight *= 0.90 + 0.20 * fbmTex(vPosition * 95.0 + vec3(u_time * 0.02 * rotF));
+
+        // Per-cell lifecycle: a little young/mature/dying variety + the classic
+        // exploding-granule dark dot, with a SMALL brightness swing (stays crisp).
+        vec3  cellGrid = floor(gPos);
+        float cellSeed = hash(cellGrid);
+        float age      = fract(u_time / 6.0 + cellSeed);
+        float lifeEnv  = smoothstep(0.0, 0.16, age) * (1.0 - smoothstep(0.74, 1.0, age));
+        granLight *= 0.92 + 0.12 * lifeEnv * laneD;
+        float doomed = smoothstep(0.86, 0.99, cellSeed);
+        float splitT = smoothstep(0.72, 0.84, age) * (1.0 - smoothstep(0.84, 0.96, age));
+        granLight *= 1.0 - doomed * splitT * (1.0 - smoothstep(0.0, 0.20, gCell.x)) * 0.45;
+
+        // Gentle 3-D relief from the granule-height gradient (limb-weighted,
+        // subtle -- no exaggerated domes, keeps the photographic read).
+        vec3  gTang   = gGrad - dot(gGrad, nLocal) * nLocal;
+        vec3  microN  = normalize(nLocal - gTang * (0.18 * laneD));
+        float muR     = max(dot(microN, objView), 0.0);
+        float reliefW = smoothstep(0.0, 0.9, 1.0 - mu);
+        granLight *= clamp(mix(1.0, muR / max(mu, 0.25), reliefW), 0.88, 1.12);
+
+        // GPU fluid-solver convection: when the thermal-convection sim is
+        // running it OWNS the granulation -- sample its temperature field
+        // (hot upwelling = bright cell interior, cool = dark sinking lane).
+        if (u_fluidOn > 0.5) {
+            // Hybrid: keep the fine procedural granulation as the rice-grain
+            // texture, and overlay the NS sim's turbulent field -- cool plasma
+            // reads as dark sinuous filaments, hot as the bright network.
+            float Tn = (texture2D(u_fluidTex, vUv).r - u_fluidT0) * u_fluidScale;
+            float fil = smoothstep(0.10, -0.55, Tn);     // cool -> dark filament
+            float net = smoothstep(0.20, 0.90, Tn);      // hot  -> bright network
+            granLight *= mix(1.0, 0.58, fil);            // dark turbulent filaments (gentler)
+            granLight *= 1.0 + net * 0.30;               // bright network
+            laneD = max(laneD, net * 0.6);
+        }
+        if (u_fluidDebug > 0.5) {
+            float Td = (texture2D(u_fluidTex, vUv).r - u_fluidT0) * u_fluidScale;
+            gl_FragColor = vec4(smoothstep(-0.7, 0.7, Td) * vec3(1.0, 0.84, 0.52), 1.0);
+            return;
+        }
 
         // ── Fine sub-granulation turbulence ─────────────────────────────────
-        float fineTurb = fbmTex(vPosition * 30.0 + vec3(u_time * 0.012)) * 0.08;
+        float fineTurb = fbmTex(vPosition * 30.0 + vec3(u_time * 0.012 * rotF)) * 0.08;
 
         // ── Magnetic bright points at intergranular lanes ─────────────────────
         // Tiny intense specks where kG flux tubes emerge between granules
-        float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.030));
+        float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.030 * rotF));
         float laneMask = 1.0 - laneD;  // 1=dark lane, 0=bright interior (for MBP placement)
-        float mbp = smoothstep(0.82, 0.92, mbpNoise) * laneMask * 0.55;
+        // Bright points cluster in the supergranular network (1d): kG flux
+        // tubes are swept to and pumped at the cell boundaries.
+        float sgNet = smoothstep(0.18, 0.42, sgCell.y - sgCell.x);
+        float mbp = smoothstep(0.82, 0.92, mbpNoise) * laneMask * (0.35 + 0.65 * sgNet) * 0.55;
 
         // ── Nanoflare / microflare transient brightenings ─────────────────────
         // Small-scale magnetic reconnection events (Parker 1988).
-        // 6 independent sites that blink on/off over ~1-2 second timescales.
+        // Concentrated in/around the active-region footpoints (Parker 1988),
+        // firing as impulsive hot bursts -- not scattered at random.
         float microflare = 0.0;
-        for (int mf = 0; mf < 6; mf++) {
-            float fi = float(mf);
-            vec3 mfSeed = vec3(fi * 1.7 + 0.3, fi * 2.3, fi * 0.9);
-            float mfNoise = vnoise(vPosition * 14.0 + mfSeed + vec3(u_time * 0.008));
-            // Sharp threshold → small bright point
-            float mfSpot = smoothstep(0.88, 0.96, mfNoise);
-            // Blink envelope: sin^4 gives sharp pulses
-            float mfBlink = pow(max(0.0, sin(u_time * (1.2 + fi * 0.5) + fi * 11.0)), 4.0);
-            microflare += mfSpot * mfBlink;
+        vec3  nfUnit = normalize(vPosition);
+        for (int k = 0; k < 8; k++) {
+            if (k >= u_arSpotCount) break;
+            vec3  arP   = normalize(u_arSpots[k].xyz);
+            float arInt = abs(u_arSpots[k].w);
+            float cosA  = dot(nfUnit, arP);
+            if (cosA < 0.88) continue;                  // only in/near the active region
+            float ang   = acos(clamp(cosA, -1.0, 1.0));
+            // Several reconnection sites sprinkled through the AR footpoints.
+            vec3  site  = vPosition * 34.0 + vec3(float(k) * 7.3);
+            float spot  = smoothstep(0.78, 0.94, vnoise(site));
+            // Impulsive flare lightcurve: each site on its own fast clock,
+            // sharp rise then quick decay (pow(sin,9) = a hot spike + tail).
+            float ph    = vnoise(site * 1.7) * 31.0;
+            float flash = pow(max(0.0, sin(u_time * (2.4 + arInt * 4.0) + ph)), 9.0);
+            // Footpoint gating: brightest at the AR core, fading outward.
+            float gate  = exp(-ang * ang / (0.008 + 0.020 * arInt));
+            microflare += spot * flash * gate * (0.6 + arInt);
         }
-        microflare = min(microflare, 1.0) * 0.65;
+        microflare = min(microflare, 1.5);
 
         // ── Per-AR sunspot rendering (Phase 4.4) ──────────────────────────────
         // Replaces the previous noise-blot spotNoise/penNoise/facNoise/flareNoise
@@ -2720,6 +2860,15 @@ const sunFS = /* glsl */`
         float facular     = 0.0;
         float flareActive = 0.0;
         float fibrils     = 0.0;
+        // ── Facular / plage network — bright magnetic carpet around each AR.
+        // Accumulated separately from the spot-local Wilson facular term so
+        // the wider halo can be coloured independently. SDO HMI continuum
+        // shows a faint bright veil 3-5 spot-radii beyond the penumbra,
+        // brightest near the limb (Wilson depression of the bright flux-tube
+        // walls), and modulated by the underlying supergranular network --
+        // bright on cell boundaries, dim in cell interiors. This is the
+        // "plage" you see ringing every AR in EUV/UV.
+        float plage = 0.0;
 
         vec3 fragUnit = normalize(vPosition);
 
@@ -2732,7 +2881,30 @@ const sunFS = /* glsl */`
             float complexFlag = arWS < 0.0 ? 1.0 : 0.0;
 
             float cosAng = dot(fragUnit, arSP);
-            if (cosAng < 0.985) continue;          // skip if > ~10° away
+
+            // ── Plage halo (Tier-A facular network) ────────────────────────
+            // Sample a much wider zone (~6x spot radius) so the halo precedes
+            // the spot itself in the AR loop cosAng > 0.985 cutoff. Done
+            // separately to avoid the per-AR continue gate.
+            if (cosAng > 0.94) {                  // ~20° angular reach
+                float plageAng  = acos(clamp(cosAng, -1.0, 1.0));
+                float plageR    = 0.045 + areaN * 0.060;      // outer halo radius
+                float plageCore = 0.012 + areaN * 0.020;      // inner exclusion (spot itself)
+                float halo      = smoothstep(plageR, plageCore, plageAng)
+                                * smoothstep(plageCore * 0.55, plageCore * 1.00, plageAng);
+                // Brightest near the limb (Wilson walls of the flux tubes).
+                halo *= 0.55 + 0.85 * (1.0 - mu);
+                // Modulate by the underlying supergranular network — plage
+                // concentrates in cell boundaries (kG flux tubes pumped there).
+                float netGran = smoothstep(0.20, 0.45, sgCell.y - sgCell.x);
+                halo *= 0.30 + 0.70 * netGran;
+                // Sprinkle in fine network-element pops (~1-3 Mm flux tubes)
+                float netSeed = vnoise(vPosition * 36.0 + vec3(u_time * 0.018 * rotF));
+                halo *= 0.75 + 0.45 * smoothstep(0.55, 0.85, netSeed);
+                plage = max(plage, halo * areaN);
+            }
+
+            if (cosAng < 0.985) continue;          // skip spot-local code if > ~10° away
             float ang = acos(clamp(cosAng, -1.0, 1.0));
 
             // Spot radii scale with normalised area (NOAA millionths/800).
@@ -2825,18 +2997,40 @@ const sunFS = /* glsl */`
 
         // ── Base photospheric colour at T_eff ─────────────────────────────────
         vec3 baseCol = blackbody(u_teff);
+        // Per-cell convective temperature contrast (1c): hot bright upflow
+        // interiors run ~+250 K, cool sinking lanes ~-250 K (real granulation
+        // dT ~ +/-300 K). Driving colour -- not just brightness -- makes
+        // interiors read whiter and lanes redder.
+        vec3 granCol = blackbody(u_teff + (laneD - 0.5) * 500.0);
 
         // ── Compose surface brightness ────────────────────────────────────────
-        vec3 col = baseCol * (granLight + fineTurb + superGran);
+        vec3 col = granCol * granLight + baseCol * (fineTurb + superGran);
 
         // Magnetic bright points — intensely white
         col += vec3(1.4, 1.2, 0.9) * mbp * (1.0 - umbra) * u_showSpots;
 
         // Nanoflare transient brightenings — hot white-yellow pops
-        col += vec3(1.5, 1.3, 0.8) * microflare * (1.0 - umbra) * u_showFlares;
+        col += mix(vec3(1.7, 1.5, 1.1), vec3(0.85, 0.95, 1.7), 0.55) * microflare * 1.1 * (1.0 - umbra) * u_showFlares;
 
-        // Facular brightening near limb
+        // Facular brightening near limb (spot-local Wilson walls)
         col += baseCol * facular * 0.65;
+
+        // ── Plage / facular network around active regions ──────────────────
+        // Warm-white halo: hotter than the photosphere (~6500-7000 K) with a
+        // slight blue-violet tint where Ca II K and UV continuum dominate.
+        // Coupled to u_showSpots so the user's "Sunspot regions" toggle owns
+        // the entire AR visual chain (spots + plage together).
+        // Active-region emission: bright Ca/EUV plage that visibly PULSES
+        // (chromospheric/coronal heating flickers even on a quiet Sun) so active
+        // regions read as ALIVE, with a hot core glow like the EUV references --
+        // not static dark spots. Much brighter than the old 0.42.
+        vec3 plageColor = mix(baseCol * 1.25, vec3(1.12, 1.00, 0.82), 0.60);
+        float arPulse = 0.70 + 0.30 * sin(u_time * 2.3 + plage * 8.0)
+                      + 0.14 * sin(u_time * 5.7 + plage * 3.0);
+        col += plageColor * plage * (0.95 + u_f107_norm * 0.6) * arPulse * u_showSpots;
+        // Hot EUV core glow at the brightest plage (the active-region cores).
+        float arCore = smoothstep(0.45, 1.15, plage);
+        col += vec3(1.25, 0.80, 0.45) * arCore * (0.55 + 0.6 * arPulse) * u_showSpots;
 
         // ── Sunspot umbra (T_umbra ~ 0.60 × T_eff ≈ 3470 K) ──────────────────
         float umbraT = u_teff * (0.60 - umbra * 0.18);
@@ -2886,8 +3080,8 @@ const sunFS = /* glsl */`
             float sigKern  = 0.022 + u_flare_t * 5.0e-5;
             float uvKern   = exp(-df * df / (sigKern * sigKern)) * fDecay;
             // White-light flash brightens the kernel dramatically at onset
-            float kernBoost = 1.0 + u_flare_intensity * 2.2;
-            col += vec3(2.6, 2.1, 1.2) * uvKern * kernBoost * u_showFlares;
+            float kernBoost = 1.0 + u_flare_intensity * 0.9;   // bright kernel, but not a disc-wide bloom
+            col += vec3(2.0, 1.7, 1.1) * uvKern * kernBoost * u_showFlares;
 
             // ── Hα ribbon pair (AIA 304 Å proxy) ────────────────────────────
             // Two arcs straddling the polarity-inversion line (PIL). When the
@@ -2918,7 +3112,7 @@ const sunFS = /* glsl */`
                 rib1 = exp(-pow((dlat - sep) / rWid, 2.0)) * lonEnv;
                 rib2 = exp(-pow((dlat + sep) / rWid, 2.0)) * lonEnv;
             }
-            float ribMask = (rib1 + rib2) * fDecay * 0.85;
+            float ribMask = (rib1 + rib2) * fDecay * 1.25;   // brighter, more defined two-ribbon arcs
             // Colour: UV white at onset → Hα red as it cools
             vec3 ribHot  = vec3(1.6, 1.3, 0.9);    // bright UV continuum
             vec3 ribCool = vec3(1.1, 0.18, 0.06);  // Hα 656 nm red
@@ -2930,7 +3124,7 @@ const sunFS = /* glsl */`
             // the disk as a diffuse warm glow centred on the flare site.
             float arcadeSig  = 0.055 + u_flare_t * 8.0e-5;
             float arcadeGlow = exp(-df * df / (arcadeSig * arcadeSig))
-                             * exp(-u_flare_t / 350.0) * 0.45;
+                             * exp(-u_flare_t / 350.0) * 0.60;
             vec3 arcadeCol   = mix(vec3(0.55, 1.30, 1.20),  // AIA 131 teal (10 MK)
                                    vec3(1.00, 0.80, 0.30),  // AIA 171 gold (1 MK)
                                    clamp(u_flare_t / 250.0, 0.0, 1.0));
@@ -2977,15 +3171,20 @@ const sunFS = /* glsl */`
         // more of the upper-altitude colouring (warmer rim, brighter spicule
         // fringe) so the photosphere reads as a complete picture on its own.
         if (u_photIso > 0.5) {
-            // Stronger spicule fringe + chromospheric tint at extreme limb
-            float isoRim = pow(1.0 - mu, 3.0);
-            col += vec3(1.10, 0.32, 0.10) * isoRim * 0.40;
+            // Stronger spicule fringe + chromospheric tint at extreme limb.
+            // Tier-C: sharpen the falloff (was pow 3.0 → 2.0) and lift the
+            // amplitude so the isolated photosphere reads with a clear pink
+            // ring instead of a faint blush — closer to eclipse appearance.
+            float isoRim = pow(1.0 - mu, 2.0);
+            col += vec3(1.20, 0.42, 0.18) * isoRim * 0.75;
         }
 
         // ── HDR amplification — drives the bloom glow ─────────────────────────
         // Kept moderate so granulation contrast and sunspot detail remain visible.
         // Only flare impulsive phase pushes significantly above bloom threshold.
-        col *= 2.20 + u_flare_intensity * 1.10;
+        // Pre-exposure for ACES tonemap below.
+        col *= 1.00 + u_flare_intensity * 0.12;   // only a subtle global lift; the flare
+                                                  // brightness is localized (kernel/ribbons/arcade)
 
         // ── F10.7 solar-cycle boost — solar maximum = hotter, brighter photosphere ──
         // Higher radio flux index → more magnetic heating → brighter surface
@@ -3002,17 +3201,138 @@ const sunFS = /* glsl */`
         // ── Spicule forest at extreme limb ────────────────────────────────────
         // Type II spicules (fast jets, 50-150 km/s, ~10 Mm tall) create a
         // "hairy" fringe at the solar limb, visible in Hα and Ca II.
-        float spiculeNoise = vnoise(vPosition * 40.0 + vec3(u_time * 0.05));
-        float spicule2     = vnoise(vPosition * 65.0 - vec3(u_time * 0.07));
+        float spiculeNoise = vnoise(vPosition * 40.0 + vec3(u_time * 0.05 * rotF));
+        float spicule2     = vnoise(vPosition * 65.0 - vec3(u_time * 0.07 * rotF));
         float spiculePattern = spiculeNoise * 0.55 + spicule2 * 0.45;
         float spiculeMask = smoothstep(0.20, 0.03, mu);  // only at extreme limb
         float spiculeHairs = spiculeMask * spiculePattern * 0.50;
         col += vec3(0.85, 0.40, 0.15) * spiculeHairs;
 
         // ── Chromospheric / transition-region emission at extreme limb ─────────
-        // Pink-red Hα + Ca H&K + extreme-UV pink at very low μ.
-        float fr = pow(max(1.0 - mu, 0.0), 3.0);
-        col += vec3(1.10, 0.32, 0.10) * fr * 0.75;
+        // Pink-red Hα + Ca H&K + extreme-UV pink at very low μ. Tier-C:
+        // brightened and lifted slightly inward (pow 3.0 → 2.4) so the
+        // chromospheric rim hint is visible even at modest zooms, not only
+        // at extreme limb — closer to SDO AIA 304 Å limb appearance.
+        float fr  = pow(max(1.0 - mu, 0.0), 2.4);
+        col += vec3(1.18, 0.34, 0.12) * fr * 0.95;
+        // Inner pink "lip" — narrow band right at the disc edge that hints
+        // at chromosphere even when only the photosphere layer is on.
+        float lip = pow(max(1.0 - mu, 0.0), 8.0);
+        col += vec3(1.30, 0.55, 0.35) * lip * 0.50;
+
+        // ── Tier-C chromatic aberration on flare flash ────────────────────────
+        // Real bright impulsive sources observed through any imager show a
+        // subtle radial RGB dispersion (atmospheric/optic dispersion). When a
+        // flare drives u_flare_intensity high, push the red channel inward
+        // and blue outward in screen-radial direction to mimic this. Per-
+        // fragment trick using vNormal projected onto the view plane —
+        // cheap and avoids a separate post-process pass.
+        if (u_flare_intensity > 0.10) {
+            // Project surface normal onto view plane → screen-space radial vector
+            vec3 viewN  = normalize(nrm - dot(nrm, vDir) * vDir + vec3(1e-6));
+            // Strength scales with flash + edge-fall (centre-of-disc unaffected)
+            float caStr = u_flare_intensity * (0.18 + 0.42 * (1.0 - mu));
+            // Modulate luminance per channel: shift toward red on inner side,
+            // blue on outer side — colours diverge radially.
+            // (Cheap radial-dispersion proxy: sin-shift on projected normal.)
+            float dispR = sin(viewN.x * 9.0 + viewN.y * 11.0) * caStr * 0.10;
+            float dispB = sin(viewN.x * 9.0 + viewN.y * 11.0 + 1.57) * caStr * 0.10;
+            col.r *= 1.0 + dispR;
+            col.b *= 1.0 - dispB;
+        }
+
+        // ── ACES filmic tonemap — Tier-A HDR roll-off ─────────────────────────
+        // Compresses bright flare/limb/AR-stack regions onto a graceful curve
+        // so they saturate cream-white instead of pure-white, lifting shoulder
+        // detail. The renderer also has THREE.ACESFilmicToneMapping on, so this
+        // pre-conditioning is intentionally gentle (the post-stage will run on
+        // the bloom-accumulated output).
+        col = acesFilm(col * 0.95) * 1.18;
+
+        // ── EUV / magnetogram wavelength views ─────────────────────────────
+        // Recolour the whole disc to an SDO channel, synthesised from structural
+        // fields already computed: magnetic network (sgNet), active-region plage,
+        // sunspot umbra, fluid-temperature filaments, synthetic coronal holes.
+        //   1=304Å  2=171Å  3=193Å  4=211Å  5=131Å  6=HMI magnetogram
+        if (u_viewMode > 0.5) {
+            float netw = sgNet;
+            float arEm = clamp(plage * 1.5 + facular * 0.7 + mbp * 0.4, 0.0, 2.2);
+            float Tf   = texture2D(u_fluidTex, vUv).r;
+            float filament = smoothstep(0.92, 0.62, Tf);                 // cool plasma -> dark filament
+            float holeN = vnoise(fragUnit * 2.1 + vec3(11.0));
+            float polar = smoothstep(0.58, 0.86, abs(fragUnit.y));
+            float hole  = clamp(max(polar, smoothstep(0.60, 0.40, holeN)), 0.0, 1.0);
+            float moss  = 0.22 + 0.22 * vnoise(fragUnit * 16.0 + vec3(u_time * 0.02));
+            float hot   = microflare + plage * u_flare_intensity * 1.5;
+            float limb  = 0.55 + 0.45 * mu;
+            float rim   = pow(max(1.0 - mu, 0.0), 3.2);
+            vec3 euv;
+            if (u_viewMode < 1.5) {                                      // 304 — chromosphere, warm red
+                float I = (moss * 0.55 + netw * 1.0 + arEm * 1.3) * limb;
+                I *= (1.0 - filament * 0.85);
+                euv  = aiaRamp(I, vec3(0.50,0.11,0.04), vec3(1.00,0.42,0.16), vec3(1.00,0.90,0.70));
+                euv += vec3(1.00,0.35,0.12) * rim * 0.9;
+            } else if (u_viewMode < 2.5) {                              // 171 — quiet corona, gold
+                float I = (moss * 0.70 + netw * 0.85 + arEm * 1.25) * limb;
+                I *= (1.0 - hole * 0.65);
+                euv  = aiaRamp(I, vec3(0.22,0.15,0.03), vec3(0.92,0.68,0.20), vec3(1.00,0.96,0.80));
+                euv += vec3(0.90,0.75,0.30) * rim * 0.5;
+            } else if (u_viewMode < 3.5) {                              // 193 — corona + holes, bronze
+                float I = (moss * 0.70 + netw * 0.50 + arEm * 1.15) * limb;
+                I *= (1.0 - hole * 0.92);
+                euv  = aiaRamp(I, vec3(0.14,0.12,0.06), vec3(0.80,0.72,0.28), vec3(0.92,1.00,0.72));
+                euv += vec3(0.60,0.80,0.40) * rim * 0.45;
+            } else if (u_viewMode < 4.5) {                              // 211 — active corona, purple
+                float I = (moss * 0.45 + netw * 0.40 + arEm * 1.6) * limb;
+                I *= (1.0 - hole * 0.85);
+                euv  = aiaRamp(I, vec3(0.16,0.06,0.22), vec3(0.72,0.38,0.95), vec3(1.00,0.90,1.00));
+                euv += vec3(0.70,0.40,0.95) * rim * 0.4;
+            } else if (u_viewMode < 5.5) {                              // 131 — flare plasma, teal
+                float I = (moss * 0.28 + arEm * 0.7 + hot * 1.8) * limb;
+                euv  = aiaRamp(I, vec3(0.03,0.13,0.13), vec3(0.18,0.78,0.80), vec3(0.85,1.00,1.00));
+                euv += vec3(0.20,0.85,0.90) * rim * 0.35;
+            } else {                                                    // HMI magnetogram — bipolar grey
+                float b = 0.0;
+                for (int k = 0; k < 8; k++) {
+                    if (k >= u_arSpotCount) break;
+                    vec3  arP = normalize(u_arSpots[k].xyz);
+                    float ints = clamp(0.4 + abs(u_arSpots[k].w), 0.3, 1.2);
+                    vec3  east = normalize(cross(vec3(0.0,1.0,0.0), arP) + vec3(1e-6));
+                    vec3  pP = normalize(arP + east * 0.05);            // leading polarity (+)
+                    vec3  nP = normalize(arP - east * 0.05);            // trailing polarity (-)
+                    float ap = acos(clamp(dot(fragUnit, pP), -1.0, 1.0));
+                    float an = acos(clamp(dot(fragUnit, nP), -1.0, 1.0));
+                    b += ints * (exp(-ap*ap/0.0016) - exp(-an*an/0.0016));
+                }
+                b += (netw - 0.45) * 0.30;                              // faint network salt-and-pepper
+                b  = clamp(b, -1.0, 1.0);
+                euv = vec3(0.5 + b * 0.5) * (0.65 + 0.35 * mu);
+            }
+            if (u_viewMode < 5.5) euv *= (1.0 - umbra * 0.85);          // sunspots read dark in EUV too
+            col = euv;
+        }
+
+        // ── Doppler velocity mode (Phase 5) ───────────────────────────────
+        // Recolour the surface by line-of-sight convective velocity — the
+        // canonical Dopplergram. Blue = plasma approaching, red = receding.
+        // Three physical terms, all from quantities already computed above:
+        //   • granule vertical up/downflow (radial)   — shows at disc centre
+        //   • supergranule horizontal outflow (tangential) — the limb "donut"
+        //   • differential rotation — the broad approaching/receding gradient
+        if (u_doppler > 0.5) {
+            float vGran = (laneD - 0.5) * 2.0 * dot(nLocal, objView);   // interiors rise, lanes sink
+            vec3  sgTang = sgFlow - dot(sgFlow, nLocal) * nLocal;       // tangential supergranule outflow
+            float vSgr  = dot(sgTang, objView);
+            vec3  vRot  = cross(vec3(0.0, 1.0, 0.0), nLocal);           // rotation about spin axis
+            float vRotL = dot(vRot, objView);
+            float vLOS  = clamp(vRotL * 0.65 + vSgr * 1.25 + vGran * 0.40, -1.0, 1.0);
+            vec3 cBlue = vec3(0.18, 0.42, 1.00);
+            vec3 cRed  = vec3(1.00, 0.28, 0.18);
+            vec3 cNeu  = vec3(0.46, 0.46, 0.50);
+            vec3 dop = vLOS > 0.0 ? mix(cNeu, cBlue, vLOS) : mix(cNeu, cRed, -vLOS);
+            dop *= 0.52 + 0.22 * mu;     // dim + gentle limb shading (flatter map, less bloom)
+            col = dop;
+        }
 
         gl_FragColor = vec4(col, 1.0);
     }
@@ -3036,6 +3356,18 @@ sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0, 128, 128), sunMat),
 sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0,  72,  72), sunMat),  3.5);
 sunLOD.addLevel(new THREE.Mesh(new THREE.SphereGeometry(1.0,  40,  30), sunMat), 10.0);
 scene.add(sunLOD);
+
+// ── GPU thermal-convection solver -> drives the photosphere granulation ──
+let solarFluid = null;
+try {
+    solarFluid = new SolarFluid(THREE, renderer, { size: 192, iters: 20 });
+    solarFluid.prewarm(renderer, 40);
+    uniforms.u_fluidTex.value = solarFluid.getTexture();
+    uniforms.u_fluidOn.value  = 1.0;
+} catch (e) {
+    console.warn('[Sun] fluid solver unavailable, using procedural granulation:', e.message);
+    uniforms.u_fluidOn.value = 0.0;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  ☉ INTERIOR LAYERS — cutaway-style ghost shells for the structural layers
@@ -3078,20 +3410,35 @@ const coreFS = /* glsl */`
     void main() {
         float mu  = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
         float rim = 1.0 - mu;
-        // p-p chain rate proxy: high-freq noise modulating a hot white core.
-        float ppRate = vn(vWorldPos * 18.0 + vec3(u_time * 0.7));
-        float dWave  = 0.5 + 0.5 * sin(u_time * 0.78 + length(vWorldPos) * 9.0);
-        float energy = 0.55 + 0.30 * ppRate + 0.25 * dWave;
-        // Center white-hot, edge red-orange (15 MK → 7 MK at the radiative boundary)
-        vec3 hotCore = vec3(1.00, 0.96, 0.78);   // 15 MK blackbody-ish white
-        vec3 outer   = vec3(1.00, 0.55, 0.18);   // edge of core, cooler
-        vec3 col = mix(hotCore, outer, rim * 0.6);
-        col *= energy;
-        // Sharp filamentary plasma streaks
-        float fil = smoothstep(0.62, 0.92, vn(vWorldPos * 8.0 + vec3(u_time * 0.20)));
-        col += vec3(1.0, 0.85, 0.50) * fil * 0.35;
-        // Alpha falls off at rim so it reads as a glowing volumetric ball
-        float a = (0.55 + energy * 0.35) * (0.65 + 0.35 * mu);
+        float r   = length(vWorldPos) / 0.25;        // 0 centre -> 1 core edge
+        // Hot white centre cooling to orange at the radiative boundary
+        // (15 MK -> ~7 MK). Limb-dim so it reads as a glowing volume.
+        vec3 hotCore = vec3(1.00, 0.97, 0.82);
+        vec3 outer   = vec3(1.00, 0.52, 0.16);
+        vec3 col = mix(hotCore, outer, pow(r, 1.5) * 0.85);
+
+        // Smooth thermonuclear base glow.
+        float base = 0.55 + 0.18 * sin(u_time * 0.8 + length(vWorldPos) * 9.0);
+
+        // Discrete pp-chain fusion pops: sparse bright knots flashing on short
+        // timescales, so the core reads as a furnace of individual fusion
+        // events rather than smooth noise (three octaves, each blinking).
+        float pops = 0.0;
+        for (int k = 0; k < 3; k++) {
+            float fk = float(k);
+            float n  = vn(vWorldPos * (22.0 + fk * 14.0) + vec3(fk * 5.1, fk * 2.7, u_time * (0.6 + fk * 0.4)));
+            float knot  = smoothstep(0.80, 0.93, n);
+            float blink = pow(max(0.0, sin(u_time * (3.0 + fk * 2.5) + n * 30.0)), 6.0);
+            pops += knot * blink;
+        }
+        pops = min(pops, 1.0);
+
+        col *= base;
+        col += vec3(1.00, 0.92, 0.66) * pops * 0.9;            // fusion flashes
+        float fil = smoothstep(0.64, 0.92, vn(vWorldPos * 8.0 + vec3(u_time * 0.2)));
+        col += vec3(1.00, 0.82, 0.46) * fil * 0.25;            // wispy filaments
+
+        float a = (0.55 + base * 0.30 + pops * 0.25) * (0.65 + 0.35 * mu);
         gl_FragColor = vec4(col, a);
     }
 `;
@@ -3114,22 +3461,25 @@ const radiativeFS = /* glsl */`
     void main() {
         float mu  = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
         float rim = 1.0 - mu;
-        // Stratified shells — photons diffuse outward; each shell at slightly
-        // lower T (Wien displacement reddens with radius).
-        float r = length(vWorldPos);
-        float shells = 0.5 + 0.5 * sin(r * 50.0 + u_time * 0.4);
-        // Random-walk sparkles: short-lived bright pixels representing
-        // individual photon scatter events.
-        float walk = vn(vWorldPos * 26.0 + vec3(u_time * 1.2, 0.0, 0.0));
-        float spark = pow(walk, 16.0) * 1.8;
-        vec3 hot   = vec3(1.00, 0.78, 0.32);   // 7 MK
-        vec3 cool  = vec3(1.00, 0.42, 0.10);   // 2 MK boundary with CZ
-        vec3 col = mix(hot, cool, 0.5 + 0.3 * sin(r * 12.0));
-        col *= 0.45 + shells * 0.30;
-        col += vec3(1.0, 0.95, 0.70) * spark;
-        // Stronger at limb to read as a hollow shell
-        float a = (0.30 + 0.35 * rim) * (0.55 + 0.45 * shells);
-        gl_FragColor = vec4(col, a);
+        float r   = length(vWorldPos);               // 0..0.70 (mesh radius)
+        // Concentric diffusion shells drifting slowly OUTWARD over time --
+        // photons random-walking their way out, each shell cooler with radius.
+        float shells = 0.5 + 0.5 * sin(r * 52.0 - u_time * 0.5);
+        // Discrete scatter events: sharp sparse bright specks (a photon
+        // bouncing off an ion) twinkling as they migrate outward, plus a
+        // slower large-scale shimmer for depth.
+        float walk   = vn(vWorldPos * 30.0 + vec3(u_time * 1.4, u_time * 0.3, 0.0));
+        float spark  = pow(walk, 20.0) * 2.4;
+        float walk2  = vn(vWorldPos * 12.0 + vec3(0.0, u_time * 0.6, u_time * 0.2));
+        float spark2 = pow(walk2, 10.0) * 0.6;
+        vec3 hot  = vec3(1.00, 0.80, 0.34);          // ~7 MK inner
+        vec3 cool = vec3(1.00, 0.40, 0.10);          // ~2 MK outer (CZ boundary)
+        vec3 col = mix(hot, cool, smoothstep(0.0, 0.70, r));
+        col *= 0.42 + shells * 0.30;
+        col += vec3(1.00, 0.95, 0.72) * spark;
+        col += vec3(1.00, 0.80, 0.45) * spark2;
+        float a = (0.30 + 0.34 * rim) * (0.55 + 0.45 * shells) + spark * 0.15;
+        gl_FragColor = vec4(col, clamp(a, 0.0, 0.9));
     }
 `;
 
@@ -3165,26 +3515,20 @@ const convectiveFS = /* glsl */`
     precision highp float;
     uniform float u_time;
     uniform float u_rot;
+    uniform vec3  u_cut;        // cutaway plane normal (world space)
+    uniform float u_cutOffset;  // plane offset along u_cut; >1 disables the cut
+    uniform float u_cutaway;    // 0 = overlay ghost shell, 1 = solid cutaway bowl
     varying vec3 vNormal;
     varying vec3 vViewDir;
     varying vec3 vWorldPos;
 
-    // Match photosphere sun shader hash + Voronoi exactly so cell
-    // boundaries align across the cutaway.
+    // Worley basis -- identical hash to the photosphere shader so the
+    // supergranule cells line up across the cutaway seam in overlay mode.
     vec3 hash3(vec3 p) {
         p = fract(p * vec3(443.897, 441.423, 437.195));
         p += dot(p.zxy, p.yzx + 19.19);
         return fract(p.xyx * p.yzy * p.zxz);
     }
-    float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
-    float vn(vec3 p){
-        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
-        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
-                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
-    }
-    // Worley voronoi — returns (d1, d2): nearest & second-nearest cell distances.
-    // Identical implementation to the photosphere shader so the cell
-    // partition lines up across both layers.
     vec2 voronoi(vec3 p) {
         vec3 ip = floor(p), fp = fract(p);
         float d1 = 1e9, d2 = 1e9;
@@ -3205,66 +3549,64 @@ const convectiveFS = /* glsl */`
     void main() {
         float mu  = max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
         float rim = 1.0 - mu;
-        // Direction from origin (radially outward) — independent of mesh radius.
-        // Photosphere uses vPosition (|v|=1); convective mesh sits at r=0.97
-        // so we normalise to recover the same direction-on-sphere coordinate.
-        vec3 n3d = normalize(vWorldPos);
+        vec3  n3d = normalize(vWorldPos);   // unit direction on the shell
 
-        // ── Supergranulation — SAME basis as the photosphere shader ──
-        // (sgPos = n3d * 2.2 + u_time * 0.0008 * u_rot)
-        // Use voronoi.x (distance to nearest cell centre): cell interiors
-        // are upwellings (low d1, bright); cell boundaries are downflows
-        // (high d1, dark lanes). Identical to the photosphere sgCell.x
-        // term, so the patterns align under the cutaway.
-        vec3  sgPos  = n3d * 2.2 + vec3(u_time * 0.0008 * u_rot);
-        vec2  sgCell = voronoi(sgPos);
-        float sgLane = smoothstep(0.05, 0.32, sgCell.y - sgCell.x);
-        float sgUp   = 1.0 - smoothstep(0.0, 0.30, sgCell.x);
+        // Cutaway depth: signed distance past the cut plane (>0 inside the
+        // exposed window), growing toward its centre where we look straight
+        // down into the zone. Drives cell scale + plume contrast so the cells
+        // visibly enlarge with depth. When the cut is disabled (u_cutOffset
+        // >> 1) this is 0 everywhere and the shell keeps its photosphere-
+        // aligned overlay look, so the additive ghost-shell mode is unchanged.
+        float cut    = dot(n3d, u_cut) - u_cutOffset;
+        float inHole = step(0.0, cut);
+        float depth  = clamp(cut * 1.2, 0.0, 1.0);
 
-        // ── Giant convective cells (~200 Mm) — broader scale grouping ──
-        vec3  gcPos  = n3d * 0.7 + vec3(u_time * 0.0002 * u_rot);
-        vec2  gcCell = voronoi(gcPos);
-        float gcLane = smoothstep(0.02, 0.40, gcCell.y - gcCell.x);
+        // Depth-graded convection cells: fine supergranules near the surface
+        // (photosphere-aligned basis) cross-fade to broad giant cells with
+        // depth. Two Worley passes only -- the whole effect is fragment work.
+        vec2  fineC   = voronoi(n3d * 2.2 + vec3(u_time * 0.0008 * u_rot));   // supergranule
+        vec2  coarseC = voronoi(n3d * 0.7 + vec3(u_time * 0.0002 * u_rot));   // giant cells
+        float d1   = mix(fineC.x, coarseC.x, depth);
+        float d2   = mix(fineC.y, coarseC.y, depth);
+        float lane = smoothstep(0.04, 0.34, d2 - d1);   // 1 = cell interior (upflow)
+        float up   = 1.0 - smoothstep(0.0, 0.32, d1);   // bright upwelling centre
 
-        // Combined upwell pattern: bright cell interiors at both scales,
-        // dark sinking lanes between them.
-        float upwell = sgLane * 0.65 + gcLane * 0.35;
+        // Per-cell brightness variation (hash the active cell grid) so the boil
+        // looks alive and dynamic rather than a uniform array of equal cells.
+        vec3  cellId  = floor(mix(n3d * 2.2, n3d * 0.7, depth) + 7.0);
+        float cellVar = 0.55 + 0.45 * fract(sin(dot(cellId, vec3(12.9898, 78.233, 37.719))) * 43758.5453
+                                            + u_time * 0.15 * u_rot);
+        up *= cellVar;
 
-        // ── Heat plumes — bright cores rising from the radiative boundary ──
-        // Sub-cell hot upwellings centred on supergranule cell interiors.
-        // Pulses on a slow ~3-min timescale (matching real plume lifetime
-        // proxy at the upper convective zone).
-        float plumePulse = 0.5 + 0.5 * sin(u_time * 1.8 + sgCell.x * 17.0);
-        float plume      = pow(sgUp, 2.5) * plumePulse * 0.55;
+        // Downflow plumes: the lanes are sinking plasma -- darker, narrower and
+        // more contrasty with depth, with a slow inward "drip" so they plunge.
+        float laneMask = 1.0 - lane;
+        float drip  = 0.5 + 0.5 * sin(u_time * 1.2 - depth * 9.0 + d1 * 28.0);
+        float plume = laneMask * (0.45 + 0.55 * depth) * (0.6 + 0.4 * drip);
 
-        // ── Velocity-shear streaks — toroidal differential-rotation flow ──
-        // Anisotropic noise stretched along longitude (the φ direction)
-        // shows the surface-equatorial fast / pole-slow flow.
-        float shear = vn(n3d * vec3(38.0, 8.0, 38.0) + vec3(u_time * 0.18 * u_rot, 0.0, 0.0));
-        shear = pow(max(0.0, shear), 4.0) * 0.18;
+        // Rising hot plume cores at the upwelling centres (pulse on a plume
+        // lifetime proxy), brighter and more frequent with depth.
+        float coreRise = pow(up, 2.4) * (0.30 + 0.55 * depth)
+                       * (0.6 + 0.4 * sin(u_time * 1.8 + d1 * 17.0));
 
-        // ── Tachocline edge glow — bright thin rim at the inner shell base ──
-        // The convective-zone mesh sits at r=0.97. The tachocline is the
-        // shear layer at r≈0.713 where the convective zone meets the
-        // radiative zone. Encode this as a glow on the bottom-facing side
-        // of the cutaway (the back-facing geometry from the viewer when
-        // we look "down through" the photosphere).
-        float tachoEdge = pow(rim, 4.0) * 0.30;
+        // Tachocline glow at the deep base + a bright cutaway rim.
+        float tacho = pow(rim, 4.0) * 0.30 + depth * depth * 0.18;
 
-        // ── Compose colour ──
-        vec3 hot      = vec3(1.00, 0.62, 0.22);   // hot rising plasma
-        vec3 plumeCol = vec3(1.00, 0.85, 0.40);   // brighter plume cores
-        vec3 lane     = vec3(0.40, 0.16, 0.04);   // sinking dark lanes
-        vec3 tachoCol = vec3(1.00, 0.90, 0.55);   // tachocline edge, dynamo source
+        // Colour: hotter / whiter deep (toward the radiative boundary), cooler
+        // orange near the surface; dark sinking lanes deepen with depth.
+        vec3 upCol   = mix(vec3(1.00, 0.62, 0.22), vec3(1.00, 0.86, 0.56), depth);
+        vec3 laneCol = mix(vec3(0.42, 0.17, 0.05), vec3(0.16, 0.05, 0.02), depth);
+        vec3 col = mix(laneCol, upCol, up);
+        col *= 1.0 - plume * 0.72;                  // sink the downflow lanes (crisper cells)
+        col += vec3(1.00, 0.85, 0.45) * coreRise;   // bright rising plume cores
+        col += vec3(1.00, 0.90, 0.55) * tacho;      // tachocline / dynamo base
 
-        vec3 col = mix(lane, hot, upwell);
-        col     += plumeCol * plume;
-        col     += vec3(1.00, 0.70, 0.30) * shear;
-        col     += tachoCol * tachoEdge;
-
-        // Alpha: hollow-shell read — slightly stronger at rim, modulated by upwell
-        float a = (0.30 + 0.32 * rim) * (0.55 + upwell * 0.45) + plume * 0.12;
-        gl_FragColor = vec4(col, clamp(a, 0.0, 0.85));
+        // Alpha: overlay mode keeps the faint hollow-shell read; inside the
+        // cutaway window the exposed convection reads solid and bright.
+        float aOverlay = (0.30 + 0.32 * rim) * (0.55 + up * 0.45) + coreRise * 0.10;
+        float aCut     = clamp(0.62 + up * 0.40 + depth * 0.25, 0.0, 1.0);
+        float a = mix(aOverlay, aCut, u_cutaway * inHole);
+        gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
     }
 `;
 
@@ -3719,6 +4061,19 @@ for (let i = 0; i < PHOTON_COUNT; i++) {
     _photonLines.push(line);
 }
 
+// Bright trackable "head" point per walker -- the photon's current position
+// -- so individual random walks are legible against the dense interior glow.
+const _photonHeadPos = new Float32Array(PHOTON_COUNT * 3);
+const _photonHeadGeo = new THREE.BufferGeometry();
+_photonHeadGeo.setAttribute('position', new THREE.BufferAttribute(_photonHeadPos, 3));
+const _photonHeadMat = new THREE.PointsMaterial({
+    color: 0xfff2cc, size: 0.07, transparent: true, opacity: 1.0,
+    depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+});
+const _photonHeads = new THREE.Points(_photonHeadGeo, _photonHeadMat);
+_photonHeads.frustumCulled = false;
+_photonGroup.add(_photonHeads);
+
 // Update each line's vertex buffer from the walker's circular trail.
 // Vertices are unrolled head→tail with opacity ramping from 1.0 (head) to
 // 0.0 (tail). Colour gradient encodes radial fraction: deep red at the
@@ -3774,7 +4129,12 @@ function _updatePhotonTrails() {
         ln.geometry.attributes.position.needsUpdate = true;
         ln.geometry.attributes.aColor.needsUpdate   = true;
         ln.geometry.attributes.aOpacity.needsUpdate = true;
+        // Bright trackable head at the photon's current position.
+        _photonHeadPos[wi * 3]     = w.x;
+        _photonHeadPos[wi * 3 + 1] = w.y;
+        _photonHeadPos[wi * 3 + 2] = w.z;
     }
+    _photonHeadGeo.attributes.position.needsUpdate = true;
 }
 
 // Per-frame step: bound nSteps so the walk visibly progresses without
@@ -3783,13 +4143,59 @@ function _stepPhotonPool() {
     if (!_photonGroup.visible) return;
     _photonPool.step(2);
     _updatePhotonTrails();
+    _stepNeutrinos();
+}
+
+// ── Neutrino escape streaks ──────────────────────────────────────────────────
+// The counterpoint to the trapped photon random-walk: pp-chain neutrinos barely
+// interact, so they stream straight out of the core at ~c and leave the Sun in
+// ~2 s (vs ~170 000 yr for a photon). Rendered as fast radial streaks that spawn
+// in the core and shoot outward, respawning on exit. Lives in _photonGroup so it
+// shares the "Photon walks" overlay toggle.
+const NEUTRINO_COUNT = 60;
+const _neutrinoState = [];
+const _neutrinoPos = new Float32Array(NEUTRINO_COUNT * 2 * 3);   // 2 verts/streak
+const _neutrinoGeo = new THREE.BufferGeometry();
+_neutrinoGeo.setAttribute('position', new THREE.BufferAttribute(_neutrinoPos, 3));
+const _neutrinoMat = new THREE.LineBasicMaterial({
+    color: 0x9fe8ff, transparent: true, opacity: 0.4,
+    depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
+});
+const _neutrinoLines = new THREE.LineSegments(_neutrinoGeo, _neutrinoMat);
+_neutrinoLines.frustumCulled = false;
+_photonGroup.add(_neutrinoLines);
+function _spawnNeutrino(i) {
+    const cosT = 2 * Math.random() - 1;
+    const sinT = Math.sqrt(Math.max(0, 1 - cosT * cosT));
+    const phi  = Math.random() * Math.PI * 2;
+    _neutrinoState[i] = {
+        dx: sinT * Math.cos(phi), dy: cosT, dz: sinT * Math.sin(phi),
+        r: Math.random() * 0.18,
+        speed: 0.045 + Math.random() * 0.05,   // R_sun units / frame (fast)
+        len: 0.10 + Math.random() * 0.12,
+    };
+}
+for (let i = 0; i < NEUTRINO_COUNT; i++) _spawnNeutrino(i);
+function _stepNeutrinos() {
+    if (!_photonGroup.visible) return;
+    for (let i = 0; i < NEUTRINO_COUNT; i++) {
+        const n = _neutrinoState[i];
+        n.r += n.speed;
+        if (n.r > 1.6) { _spawnNeutrino(i); continue; }
+        const o = i * 6;
+        const rt = Math.max(0, n.r - n.len);
+        _neutrinoPos[o]     = n.dx * rt;  _neutrinoPos[o + 1] = n.dy * rt;  _neutrinoPos[o + 2] = n.dz * rt;
+        _neutrinoPos[o + 3] = n.dx * n.r; _neutrinoPos[o + 4] = n.dy * n.r; _neutrinoPos[o + 5] = n.dz * n.r;
+    }
+    _neutrinoGeo.attributes.position.needsUpdate = true;
 }
 
 // ─── CHROMOSPHERE (r=1.15) — Ca H&K / Hα pink-red layer ──────────────────────
 const glowVS = /* glsl */`
-    varying vec3 vNormal; varying vec3 vViewDir;
+    varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vObjDir;
     void main() {
         vNormal  = normalize(normalMatrix * normal);
+        vObjDir  = normalize(normal);   // object-space radial dir (sun mesh = identity)
         vec4 mv  = modelViewMatrix * vec4(position,1.0);
         vViewDir = normalize(-mv.xyz);
         gl_Position = projectionMatrix * mv;
@@ -3839,6 +4245,8 @@ const chromoFS = /* glsl */`
     uniform float u_chromoIso;    // 1.0 when photosphere hidden — boost on-disk presence
     varying vec3 vNormal;
     varying vec3 vViewDir;
+    varying vec3 vObjDir;
+    uniform float u_rot;
 
     float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
     float vn(vec3 p){
@@ -3859,6 +4267,26 @@ const chromoFS = /* glsl */`
                       vn(p + vec3(5.2, 1.3, t * 0.04)),
                       vn(p + vec3(2.8, 6.7, t * 0.03)));
         return vn(p + q * 1.8);
+    }
+
+    vec3 hash3(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p.zxy, p.yzx + 19.19);
+        return fract(p.xyx * p.yzy * p.zxz);
+    }
+    vec2 voronoi(vec3 p) {
+        vec3 ip = floor(p), fp = fract(p);
+        float d1 = 1e9, d2 = 1e9;
+        for (int z = -1; z <= 1; z++)
+        for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++) {
+            vec3 nb = vec3(float(x), float(y), float(z));
+            vec3 pos = nb - fp + hash3(ip + nb);
+            float d = dot(pos, pos);
+            if (d < d1) { d2 = d1; d1 = d; }
+            else if (d < d2) { d2 = d; }
+        }
+        return vec2(sqrt(d1), sqrt(d2));
     }
 
     void main() {
@@ -3887,11 +4315,19 @@ const chromoFS = /* glsl */`
         //  Hα filtergrams show a "salt and pepper" carpet: bright network
         //  on cell boundaries, dark internetwork inside.
         // ══════════════════════════════════════════════════════════════════
-        float sg = vn(n3d * 7.0 + vec3(u_time * 0.010));      // supergranules
+        float sg = vn(n3d * 7.0 + vec3(u_time * 0.010));      // fine Ha texture
         float mg = vn(n3d * 22.0 + vec3(u_time * 0.025));     // mesogranules
         float mottle  = worley(n3d * 14.0 + vec3(u_time * 0.018));
-        // Network: bright thin lanes between cells (high mottle, peaked).
-        float network = smoothstep(0.32, 0.55, mottle);
+        // Network anchored to the SAME supergranule Voronoi the photosphere
+        // and convective zone use (object-space dir + matching diff-rotation
+        // drift), so the chromospheric network sits on the real supergranule
+        // boundaries and all the layers read as one coupled system.
+        float latO     = asin(clamp(vObjDir.y, -1.0, 1.0));
+        float s2o      = sin(latO) * sin(latO);
+        float diffRotO = 1.0 - 0.19 * s2o - 0.09 * s2o * s2o;
+        vec2  sgCell   = voronoi(vObjDir * 2.2 + vec3(u_time * 0.0008 * u_rot * diffRotO));
+        float sgNet    = smoothstep(0.06, 0.34, sgCell.y - sgCell.x);
+        float network  = sgNet * (0.55 + 0.45 * smoothstep(0.30, 0.55, mottle));
         // Internetwork: dark cell interiors.
         float intern  = 1.0 - smoothstep(0.10, 0.30, mottle);
 
@@ -3972,8 +4408,9 @@ const chromoFS = /* glsl */`
             alpha = max(alpha, isoFloor);
             // Slight cooling of the disk colour to distinguish it from the
             // photosphere look — pulls toward deeper Hα red, then plage on top.
-            col = mix(col, hAlpha * 1.15, diskFactor * 0.35);
-            col = mix(col, caKplage,      plageStruct * 0.45);
+            // (isolation colour tweak relocated to after section 8 -- col,
+            //  hAlpha and caKplage are not declared until then; using them
+            //  here was a pre-existing fragment-shader compile error.)
         }
         alpha = clamp(alpha, 0.0, u_chromoIso > 0.5 ? 0.95 : 0.82);
 
@@ -3994,6 +4431,13 @@ const chromoFS = /* glsl */`
         col = mix(col, vec3(1.00, 0.50, 0.25), network * 0.30 * diskFactor);
         // Plage — bright orange-pink Ca K halo
         col = mix(col, caKplage, plageStruct * 0.55);
+        // Isolation-mode colour tweak (relocated here so col/hAlpha/caKplage
+        // exist): cool the disk toward deeper Ha red, then plage on top, so the
+        // isolated chromosphere reads as a coherent shell, not the photosphere.
+        if (u_chromoIso > 0.5) {
+            col = mix(col, hAlpha * 1.15, diskFactor * 0.35);
+            col = mix(col, caKplage,      plageStruct * 0.45);
+        }
         // Spicules — slightly bluer hot tips
         col = mix(col, vec3(1.00, 0.45, 0.30), jets * pow(rim, 2.5) * 0.3);
         // Fibrils + filaments — pull color toward dark Hα absorption
@@ -4081,9 +4525,15 @@ const spiculeVS = /* glsl */`
         // Activity modulates overall density (more spicules at solar max)
         vAlpha *= 0.5 + u_activity * 0.5;
 
+        // Spicules read as a fine fringe at the LIMB, not fat sprites blanketing
+        // the disc. Fade out on the Earth-facing hemisphere, and CLAMP the point
+        // size so zooming in doesn't balloon them into "bubbles".
+        vec3 nv = normalize(normalMatrix * aDir);
+        vAlpha *= smoothstep(0.60, 0.04, nv.z);
+
         vec4 mv = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mv;
-        gl_PointSize = mix(1.2, 2.0, aSpeed) * (200.0 / -mv.z);
+        gl_PointSize = clamp(mix(0.8, 1.5, aSpeed) * (150.0 / -mv.z), 0.5, 3.0);
     }
 `;
 const spiculeFS = /* glsl */`
@@ -4093,9 +4543,11 @@ const spiculeFS = /* glsl */`
     varying float vAlpha;
 
     void main() {
-        // Circular point sprite
+        // Soft round jet tip (no hard-edged disc -> no "bubble" look).
         vec2 c = gl_PointCoord - 0.5;
-        if (dot(c, c) > 0.25) discard;
+        float cd = dot(c, c);
+        if (cd > 0.25) discard;
+        float soft = smoothstep(0.25, 0.0, cd);
 
         // Colour: Hα deep red at base → warm pink at tip (heating as it rises)
         // Type II (fast) spicules are hotter → more orange-white at tips
@@ -4107,7 +4559,7 @@ const spiculeFS = /* glsl */`
         );
         vec3 col = mix(baseCol, tipCol, vHeight);
 
-        gl_FragColor = vec4(col, vAlpha * 0.7);
+        gl_FragColor = vec4(col, vAlpha * 0.5 * soft);
     }
 `;
 {
@@ -4116,13 +4568,45 @@ const spiculeFS = /* glsl */`
     const seeds  = new Float32Array(N_SPICULES);
     const speeds = new Float32Array(N_SPICULES);
 
+    // Supergranule-boundary field in JS, matching the shader voronoi(dir*2.2)
+    // so spicules root in the same network lanes the chromosphere/TR paint.
+    const _fr = (v) => v - Math.floor(v);
+    const _sgHash = (x, y, z) => {            // shader hash3 -> scalar (xyz equal)
+        let px = _fr(x * 443.897), py = _fr(y * 441.423), pz = _fr(z * 437.195);
+        const d = pz * (py + 19.19) + px * (pz + 19.19) + py * (px + 19.19);
+        px += d; py += d; pz += d;
+        return _fr(px * py * pz);
+    };
+    const _sgBoundary = (dx, dy, dz) => {     // voronoi(dir*2.2): d2 - d1
+        const px = dx * 2.2, py = dy * 2.2, pz = dz * 2.2;
+        const ix = Math.floor(px), iy = Math.floor(py), iz = Math.floor(pz);
+        const fx = px - ix, fy = py - iy, fz = pz - iz;
+        let d1 = 1e9, d2 = 1e9;
+        for (let z = -1; z <= 1; z++)
+        for (let y = -1; y <= 1; y++)
+        for (let x = -1; x <= 1; x++) {
+            const q = _sgHash(ix + x, iy + y, iz + z);
+            const ox = x - fx + q, oy = y - fy + q, oz = z - fz + q;
+            const dd = ox*ox + oy*oy + oz*oz;
+            if (dd < d1) { d2 = d1; d1 = dd; } else if (dd < d2) { d2 = dd; }
+        }
+        return Math.sqrt(d2) - Math.sqrt(d1);
+    };
+    const _smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
     for (let i = 0; i < N_SPICULES; i++) {
-        // Distribute launch points over the sphere (uniform random)
-        const theta = Math.acos(2 * Math.random() - 1);
-        const phi   = Math.random() * Math.PI * 2;
-        dirs[i*3]   = Math.sin(theta) * Math.cos(phi);
-        dirs[i*3+1] = Math.sin(theta) * Math.sin(phi);
-        dirs[i*3+2] = Math.cos(theta);
+        // Rejection-sample a launch direction biased to supergranule
+        // boundaries (network lanes), with a uniform-random fallback.
+        let dx = 0, dy = 1, dz = 0;
+        for (let t = 0; t < 8; t++) {
+            const theta = Math.acos(2 * Math.random() - 1);
+            const phi   = Math.random() * Math.PI * 2;
+            dx = Math.sin(theta) * Math.cos(phi);
+            dy = Math.sin(theta) * Math.sin(phi);
+            dz = Math.cos(theta);
+            const net = _smooth(0.06, 0.34, _sgBoundary(dx, dy, dz));
+            if (Math.random() < 0.15 + 0.85 * net) break;
+        }
+        dirs[i*3] = dx; dirs[i*3+1] = dy; dirs[i*3+2] = dz;
         phases[i]   = Math.random();
         seeds[i]    = Math.random();
         // ~80% Type I (slow), ~20% Type II (fast)
@@ -4196,6 +4680,8 @@ const trFS = /* glsl */`
     uniform int   u_arSpotCount;
     varying vec3 vNormal;
     varying vec3 vViewDir;
+    varying vec3 vObjDir;
+    uniform float u_rot;
 
     float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
     float vn(vec3 p){
@@ -4219,6 +4705,26 @@ const trFS = /* glsl */`
         return vn(p + q * 1.8);
     }
 
+    vec3 hash3(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p.zxy, p.yzx + 19.19);
+        return fract(p.xyx * p.yzy * p.zxz);
+    }
+    vec2 voronoi(vec3 p) {
+        vec3 ip = floor(p), fp = fract(p);
+        float d1 = 1e9, d2 = 1e9;
+        for (int z = -1; z <= 1; z++)
+        for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++) {
+            vec3 nb = vec3(float(x), float(y), float(z));
+            vec3 pos = nb - fp + hash3(ip + nb);
+            float d = dot(pos, pos);
+            if (d < d1) { d2 = d1; d1 = d; }
+            else if (d < d2) { d2 = d; }
+        }
+        return vec2(sqrt(d1), sqrt(d2));
+    }
+
     void main() {
         vec3  n3d = normalize(vNormal);
         vec3  vd  = normalize(vViewDir);
@@ -4236,7 +4742,15 @@ const trFS = /* glsl */`
         // ══════════════════════════════════════════════════════════════════
         float sg     = vn(n3d * 7.0 + vec3(u_time * 0.010));
         float mottle = worley(n3d * 14.0 + vec3(u_time * 0.018));
-        float network = smoothstep(0.32, 0.55, mottle);
+        // Network anchored to the shared supergranule Voronoi (object space
+        // + matching diff-rotation drift) so the EUV-moss footpoints sit on
+        // the same supergranule boundaries as the photosphere/chromosphere.
+        float latO     = asin(clamp(vObjDir.y, -1.0, 1.0));
+        float s2o      = sin(latO) * sin(latO);
+        float diffRotO = 1.0 - 0.19 * s2o - 0.09 * s2o * s2o;
+        vec2  sgCell   = voronoi(vObjDir * 2.2 + vec3(u_time * 0.0008 * u_rot * diffRotO));
+        float sgNet    = smoothstep(0.06, 0.34, sgCell.y - sgCell.x);
+        float network  = sgNet * (0.55 + 0.45 * smoothstep(0.30, 0.55, mottle));
         float intern  = 1.0 - smoothstep(0.10, 0.30, mottle);
 
         // ══════════════════════════════════════════════════════════════════
@@ -4683,8 +5197,36 @@ const coronaFS = /* glsl */`
         // CBPs — small bright Fe XII green dots (gentler)
         col += col193 * cbpMask * pow(max(1.0 - rim, 0.0), 0.4) * 0.40;
 
-        // Coronal-hole darkening
-        col *= 1.0 - poleHole * 0.45;
+        // ── Tier-B helmet-streamer cusps ──────────────────────────────────────
+        // Where the closed-field streamer belt meets open field, a sharp
+        // cusp forms — the "tip" of the helmet. Observed in white-light
+        // eclipse data as a bright narrow point on top of each streamer.
+        // We model it as a brightening along the HCS where the belt is
+        // narrowest (high helmetBelt) AND we are at the rim (high rim var).
+        // The cusp's vertical extent is gated by openField so it only fires
+        // at the streamer-belt / open-field boundary.
+        float cusp = pow(helmetBelt, 4.0) * pow(rim, 1.4)
+                   * smoothstep(0.0, 0.35, openField);
+        col += vec3(1.20, 1.05, 0.78) * cusp * (0.55 + u_activity * 0.55);
+        alpha += cusp * 0.22;
+
+        // ── Tier-A polar coronal holes — enhanced signature ───────────────────
+        // Real polar holes are not only darker — they're slightly blue-shifted
+        // in EUV (fast plasma escaping = Doppler shift toward shorter λ in
+        // line-of-sight; observers see a cooler/dimmer Fe-XII glow). Plus
+        // they show fine radial striping from the open-field plumes that
+        // accelerate the fast solar wind. We add (a) a darker base, (b) a
+        // cool blue tint, (c) sharper radial fine-stripe modulation.
+        float holeStripe = pow(0.5 + 0.5 * sin(lon * 41.0 + u_time * 0.003), 3.0);
+        holeStripe = mix(0.85, 1.10, holeStripe);   // gentle radial striation
+        // Deeper darkening (was 0.45 → 0.55) and apply stripe inside hole
+        col *= 1.0 - poleHole * 0.55;
+        col *= mix(1.0, holeStripe, poleHole * 0.60);
+        // Cool-blue tint where the hole is strongest — signature of the fast
+        // wind source. Modulated by u_wind_speed_norm so visibly intensifies
+        // during fast-wind streams.
+        vec3 holeTint = vec3(0.62, 0.82, 1.20);
+        col = mix(col, col * holeTint, poleHole * (0.18 + 0.22 * u_wind_speed_norm));
 
         // ══════════════════════════════════════════════════════════════════
         // 10.  Live-data couplings (preserved from previous shader)
@@ -4744,6 +5286,7 @@ const coronaFS = /* glsl */`
         // out when many channels stack, while keeping the punch in the
         // bright streamer/AR-ray regions.
         col = col / (1.0 + col * 0.42);
+        alpha *= smoothstep(1.0, 0.42, rim);   // fade the hard 2.5R shell silhouette (no ring)
 
         gl_FragColor = vec4(col, alpha);
     }
@@ -4790,7 +5333,6 @@ if (_coronaMode === 'volumetric' || _coronaMode === 'vol') {
             }
             // Initial population from whatever liveRegions are loaded.
             _refreshVolumetricCorona();
-            console.log(`[corona-vol] mounted (channel=${_coronaChannel})`);
         } catch (e) {
             console.warn('[corona-vol] init failed, falling back to legacy:', e);
             coronaMesh.visible = true;
@@ -4914,9 +5456,11 @@ const outerGlowFS = /* glsl */`
         gl_FragColor = vec4(col, alpha * 0.40);
     }
 `;
-scene.add(new THREE.Mesh(new THREE.SphereGeometry(4.0, 24, 24),
+const _outerGlowMesh = new THREE.Mesh(new THREE.SphereGeometry(4.0, 24, 24),
     new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:outerGlowFS, uniforms,
-        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide })));
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide }));
+scene.add(_outerGlowMesh);
+_outerGlowMesh.visible = false;   // removed: read as a giant glow circle
 
 // ─── SOLAR WIND PARTICLES ─────────────────────────────────────────────────────
 const N_SOLAR = 2500;
@@ -5235,6 +5779,7 @@ const cmeShockFS = /* glsl */`
 `;
 
 function spawnCMEShock(speedNorm) {
+    return;   // DISABLED (owner): removed the translucent expanding CME shock sphere
     const su = { u_age: { value: 0.0 }, u_speed: { value: speedNorm }, u_time: uniforms.u_time };
     const mat = new THREE.ShaderMaterial({
         vertexShader: cmeShockVS, fragmentShader: cmeShockFS, uniforms: su,
@@ -5244,7 +5789,6 @@ function spawnCMEShock(speedNorm) {
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.0, 40, 24), mat);
     scene.add(mesh);
     cmeShockWaves.push({ mesh, t0: uniforms.u_time.value, speed: speedNorm });
-    console.log(`[CME Shock] Spawned — speed_norm=${speedNorm.toFixed(2)}`);
 }
 
 // ─── CME MAGNETIC FLUX ROPE ───────────────────────────────────────────────────
@@ -5358,6 +5902,7 @@ function _buildFluxRopePts(latRad, lonRad, speedNorm) {
 }
 
 function spawnFluxRope(latRad, lonRad, speedNorm) {
+    return;   // DISABLED (owner): removed the CME flux-rope tube ("the flare thing")
     const pts    = _buildFluxRopePts(latRad, lonRad, speedNorm);
     const curve  = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.45);
     const tubeR  = 0.042 + speedNorm * 0.032;   // thicker for faster CMEs
@@ -5377,7 +5922,6 @@ function spawnFluxRope(latRad, lonRad, speedNorm) {
     const mesh = new THREE.Mesh(geo, mat);
     scene.add(mesh);
     cmeFluxRopes.push({ mesh, t0: uniforms.u_time.value, speed: speedNorm, lat: latRad, lon: lonRad });
-    console.log(`[FluxRope] Spawned at lat=${(latRad*180/Math.PI).toFixed(1)}° lon=${(lonRad*180/Math.PI).toFixed(1)}° apex=${(1.85+speedNorm*2.8).toFixed(1)} R☉`);
 }
 
 // ─── SEP SOLAR ENERGETIC PARTICLES ───────────────────────────────────────────
@@ -5557,7 +6101,8 @@ let loopGroup = null;
 const LOOP_VS = /* glsl */`
     attribute float aS;       // [0,1] arclength fraction along the loop
     attribute vec3  aTangent; // unit tangent at this vertex (precomputed)
-    varying vec3 vColor;
+    varying vec3  vColor;
+    varying float vS;
     uniform float uTime;
     uniform float uAmp;       // R☉ — peak displacement at apex
     uniform float uFreq;      // rad / sim-time
@@ -5573,14 +6118,45 @@ const LOOP_VS = /* glsl */`
         // 70% transverse + 30% radial bobbing — looks like a kink mode.
         vec3 disp = nLoop * wave + outward * (wave * 0.30);
         vColor = color;
+        vS     = aS;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p + disp, 1.0);
     }
 `;
 const LOOP_FS = /* glsl */`
-    varying vec3 vColor;
+    varying vec3  vColor;
+    varying float vS;
     uniform float uOpacity;
+    uniform float uTime;
     void main() {
-        gl_FragColor = vec4(vColor, uOpacity);
+        // ── Tier-B opacity gradient along arclength ───────────────────────────
+        // Real coronal loops are radiometrically brightest near the chromos-
+        // pheric footpoints (dense 1-2 MK plasma being fed by evaporation),
+        // dim through the mid-leg, and have a faint hot apex (the
+        // reconnection-fed top is hotter but ~10× less dense — so emission
+        // measure ∝ n² makes it dimmer in EUV).
+        //
+        // Profile: U-shape — peak at s=0 and s=1, minimum at s=0.5.
+        //   foot   = 0.55 + 0.45 * |2s-1|^1.6      → 1.00 at feet, 0.55 at apex
+        //   hotApx = bonus glow at s≈0.5 from hot plasma                       (subtle)
+        float ss     = clamp(vS, 0.0, 1.0);
+        float foot   = 0.55 + 0.45 * pow(abs(2.0 * ss - 1.0), 1.6);
+        float hotApx = exp(-(ss - 0.5) * (ss - 0.5) / 0.020) * 0.12;
+        float profile = foot + hotApx;
+
+        // ── Footpoint flicker — chromospheric evaporation jitter ──────────────
+        // The base of each loop pulses on ~1-3 s timescales as upflows arrive.
+        // Gated to the bottom 15% of the loop so the apex stays steady.
+        float footMask = smoothstep(0.85, 1.00, abs(2.0 * ss - 1.0));
+        float flick    = 0.5 + 0.5 * sin(uTime * 5.3 + ss * 11.0);
+        profile *= 1.0 + footMask * flick * 0.18;
+
+        // Slight per-fragment colour shift: cooler at apex (whiter/bluer),
+        // warmer at footpoints (gold-pink chromospheric tinge).
+        vec3 hot = vColor * vec3(0.85, 0.92, 1.10);     // apex (hotter look)
+        vec3 ftc = vColor * vec3(1.10, 0.92, 0.72);     // footpoint (warm)
+        vec3 colOut = mix(hot, ftc, foot * foot);
+
+        gl_FragColor = vec4(colOut, uOpacity * profile);
     }
 `;
 
@@ -5673,7 +6249,7 @@ function _initNanoflareSystem() {
 
     const pool = new Array(NANOFLARE_POOL_SIZE);
     for (let i = 0; i < NANOFLARE_POOL_SIZE; i++) {
-        pool[i] = { alive: false, t0: 0, life: 1, peakSize: 1, peakAlpha: 0 };
+        pool[i] = { alive: false, t0: 0, life: 1, peakSize: 1, peakAlpha: 0, bx: 0, by: 0, bz: 0 };
     }
 
     // Permanent host group co-rotates with the photosphere so SOC-spawned
@@ -5749,6 +6325,7 @@ function _spawnNanoflare(loopIdx, sArc, energyE) {
     sys.positions[slot * 3]     = px * lift;
     sys.positions[slot * 3 + 1] = py * lift;
     sys.positions[slot * 3 + 2] = pz * lift;
+    ent.bx = px * lift; ent.by = py * lift; ent.bz = pz * lift;   // base for the rise
     sys.colors[slot * 3]     = r;
     sys.colors[slot * 3 + 1] = gC;
     sys.colors[slot * 3 + 2] = b;
@@ -5824,6 +6401,12 @@ function _updateNanoflares(t) {
         let env;
         if (age < 0.15) env = age / 0.15;
         else            env = Math.exp(-(age - 0.15) * 4.5);
+        // Hot plasma rises: drift the spark radially outward over its life so
+        // it reads as an ejected particle burst, not a static blink.
+        const rise = 1.0 + age * 0.05;
+        positions[i * 3]     = ent.bx * rise;
+        positions[i * 3 + 1] = ent.by * rise;
+        positions[i * 3 + 2] = ent.bz * rise;
         alphas[i] = ent.peakAlpha * env;
         sizes[i]  = ent.peakSize  * (0.55 + 0.45 * env);
         liveCount++;
@@ -6255,6 +6838,7 @@ function _spawnNanoflareAtSurface(latRad, lonRad, energyE) {
     sys.positions[slot * 3]     = px * lift;
     sys.positions[slot * 3 + 1] = py * lift;
     sys.positions[slot * 3 + 2] = pz * lift;
+    ent.bx = px * lift; ent.by = py * lift; ent.bz = pz * lift;   // base for the rise
     sys.colors[slot * 3]     = r;
     sys.colors[slot * 3 + 1] = gC;
     sys.colors[slot * 3 + 2] = b;
@@ -6463,7 +7047,6 @@ if (DEBUG_ANY_ATLAS) {
         try {
             const mod = await import('./js/field-atlas.js');
             await mod.ensureFieldAtlasWasm();
-            console.log('[sunfield] field-atlas WASM ready');
             return mod;
         } catch (e) {
             console.warn('[sunfield] init failed:', e);
@@ -6490,7 +7073,6 @@ if (DEBUG_ANY_ATLAS) {
             ]);
             _flareRibbonsModule = r;
             _flareHxrModule = h;
-            console.log('[flare-ribbons + hxr] modules loaded');
         } catch (e) {
             console.warn('[flare-ribbons / hxr] init failed:', e);
         }
@@ -6506,7 +7088,6 @@ if (DEBUG_PROMINENCE) {
                 import('./js/eruption-scorecard.js'),
             ]);
             _scorecardModule = scorecardMod;
-            console.log('[prominence] bundle + classifier + scorecard modules loaded');
             return { bundle: bundleMod, classifier: classifierMod };
         } catch (e) {
             console.warn('[prominence] init failed:', e);
@@ -6528,14 +7109,8 @@ if (DEBUG_PROMINENCE) {
 // fragment shader. Falls through silently when no atlas / no ribbons —
 // shader keeps using the legacy straight-arc fallback.
 function _refreshFlareRibbons(latRad, lonRad) {
-    if (!_flareRibbonsModule) {
-        console.log('[flare-ribbons] module not loaded yet — legacy ribbons render');
-        return;
-    }
-    if (!_promCachedAtlas) {
-        console.log('[flare-ribbons] no atlas — load with ?debug=prominence and wait for AR feed');
-        return;
-    }
+    if (!_flareRibbonsModule) return;
+    if (!_promCachedAtlas) return;
 
     // Find the live AR closest to the flare site (must match meta[2] arIdx).
     let bestArIdx = -1, bestDist = 25 * Math.PI / 180;
@@ -6549,10 +7124,7 @@ function _refreshFlareRibbons(latRad, lonRad) {
         const d = Math.acos(Math.max(-1, Math.min(1, c)));
         if (d < bestDist) { bestDist = d; bestArIdx = i; }
     }
-    if (bestArIdx < 0) {
-        console.log(`[flare-ribbons] no AR within 25° of flare site — legacy ribbons render`);
-        return;
-    }
+    if (bestArIdx < 0) return;
 
     const n = _flareRibbonsModule.updateRibbonsForAr(_promCachedAtlas, bestArIdx);
     if (n >= 2) {
@@ -6561,10 +7133,8 @@ function _refreshFlareRibbons(latRad, lonRad) {
         }
         uniforms.u_flare_ribbons_count.value  = n;
         uniforms.u_flare_ribbons_active.value = 1.0;
-        console.log(`[flare-ribbons] AR #${bestArIdx} → ${n}-pt polyline ribbons`);
     } else {
         uniforms.u_flare_ribbons_active.value = 0.0;
-        console.log(`[flare-ribbons] AR #${bestArIdx} has no PIL bundles in atlas — legacy ribbons render`);
     }
 
     // Phase 3.2 — light up the HXR footpoint kernels with the same atlas
@@ -6576,9 +7146,6 @@ function _refreshFlareRibbons(latRad, lonRad) {
         }
         const pairs = _flareRibbonsModule.getCurrentFootpointPairs();
         _flareHxrSystem.update(pairs);
-        if (pairs.length > 0) {
-            console.log(`[flare-hxr] ${_flareHxrSystem.activeKernels} kernels (${pairs.length} pairs)`);
-        }
     }
 }
 
@@ -6656,7 +7223,6 @@ function _eruptNearestFilament() {
     const loc = `${ns}${String(Math.round(Math.abs(latDeg))).padStart(2,'0')}` +
                 `${ew}${String(Math.round(Math.abs(lonDeg))).padStart(2,'0')}`;
     status(`▲ Erupting bundle #${bestIdx} at ${loc}`);
-    console.log(`[erupt] manual EP triggered on bundle ${bestIdx} at ${loc} (cos∠cam=${bestDot.toFixed(2)})`);
 
     // ── Educational scorecard (manual eruptions only) ────────────────────────
     // Compute metrics now from the bundle's current state, schedule the card
@@ -6727,7 +7293,6 @@ async function rebuildDebugFieldAtlas() {
                     scene,
                     quality: bMod.getQualityFromString(PROMINENCE_QUALITY),
                 });
-                console.log(`[prominence] system created (quality=${prominenceBundleSystem.quality}, budget=${prominenceBundleSystem.threadBudget})`);
             }
 
             // Cache for the per-frame classifier tick in animate().
@@ -6735,7 +7300,6 @@ async function rebuildDebugFieldAtlas() {
             _promCachedTextures = textures;
             _promClassifierRef  = cMod;
 
-            // One-shot classify + log so the console reflects new AR state.
             const bundles = cMod.classifyBundles({
                 atlas,
                 liveRegions,
@@ -6748,14 +7312,8 @@ async function rebuildDebugFieldAtlas() {
                 activity: uniforms?.u_activity?.value ?? 0.5,
                 bundles,
             });
-            const counts = bundles.reduce((m, b) => { m[b.classId] = (m[b.classId] || 0) + 1; return m; }, {});
-            const NAMES = ['QP','IP','ARP','HEDGEROW','TORNADO','EP','RAIN'];
-            const summary = Object.keys(counts).map(k => `${NAMES[k]}=${counts[k]}`).join(' ');
-            console.log(`[prominence] ${bundles.length} bundles · ${prominenceBundleSystem.activeThreads} threads · ${summary}`);
         }
     }
-
-    console.log(`[sunfield] ${atlas.lineCount} lines (${ars.length} ARs) in ${dt.toFixed(1)} ms`);
 }
 
 function buildFieldLines() {
@@ -7241,6 +7799,7 @@ function eruptNearestProminence(lat_r, lon_r) {
 const eruptionMeshes = [];
 
 function spawnEruptingProminence(lat_r, lon_r, classCh) {
+    return;   // DISABLED (owner): removed the erupting-prominence / CME-front bubble
     // Determine size and colour by flare class
     const isX    = classCh === 'X';
     const isM    = classCh === 'M';
@@ -7336,6 +7895,176 @@ document.getElementById('tog-tr').addEventListener('change', e => {
     _setLayerActive('lr-tr', e.target.checked);
     _refreshLayerIsolation();
 });
+
+// ── Cutaway / peel ────────────────────────────────────────────────────────────
+// Slices the photosphere away on the viewer-facing side (one world-space clip
+// plane, evaluated per-fragment as a discard in sunFS) so the boiling
+// convective zone + nested interior shells are revealed. Depth into the cut
+// drives cell scale and plume contrast in convectiveFS.
+let _cutSaved = null;
+function _cutDepthFromSlider() {
+    const s = parseFloat(document.getElementById('sl-cutdepth')?.value ?? '45') / 100;
+    return 0.85 - s * 1.40;   // 0.85 (shallow window) -> -0.55 (deep slice past centre)
+}
+function _syncLayerUI(togId, rowId, on) {
+    const t = document.getElementById(togId);
+    if (t) t.checked = on;
+    _setLayerActive(rowId, on);
+}
+function _setCutaway(on) {
+    const row = document.getElementById('row-cutdepth');
+    const cm  = convectiveMesh.material;
+    if (on) {
+        _cutSaved = {
+            core: coreMesh.visible, radiative: radiativeMesh.visible,
+            convective: convectiveMesh.visible, chrom: chromoMesh.visible,
+            tr: trMesh.visible, corona: coronaMesh.visible,
+        };
+        // Aim the cut at the current camera so the window faces the viewer.
+        const d = camera.position.clone().normalize();
+        uniforms.u_cut.value.set(d.x, d.y, d.z);
+        uniforms.u_cutOffset.value = _cutDepthFromSlider();
+        uniforms.u_cutaway.value = 1.0;
+        // Turn the convective shell into a SOLID, depth-tested boiling surface so
+        // the peeled window shows real structured convection occluding space —
+        // not the additive ghost-glow it uses as an overlay. (The additive
+        // interior glows just stack into a featureless fireball under bloom.)
+        cm.blending    = THREE.NoBlending;   // fully solid (ignore the shell alpha)
+        cm.transparent = false;
+        cm.depthTest   = true;
+        cm.depthWrite  = true;
+        cm.needsUpdate = true;
+        convectiveMesh.renderOrder = 0;
+        convectiveMesh.visible = true;  _syncLayerUI('tog-convective', 'lr-convective', true);
+        // Hide the outer halos for a clean slice; leave core/radiative to the
+        // user (they are tiny additive glows that would wash out the cut).
+        chromoMesh.visible = false;     _syncLayerUI('tog-chrom', 'lr-chrom', false);
+        trMesh.visible = false;         _syncLayerUI('tog-tr', 'lr-tr', false);
+        coronaMesh.visible = false;     _syncLayerUI('tog-corona', 'lr-corona', false);
+        if (row) row.style.display = 'flex';
+    } else {
+        uniforms.u_cutaway.value = 0.0;
+        uniforms.u_cutOffset.value = 2.0;   // plane beyond the sphere = no clip
+        // Restore the additive ghost-shell overlay material.
+        cm.blending    = THREE.AdditiveBlending;
+        cm.transparent = true;
+        cm.depthTest   = false;
+        cm.depthWrite  = false;
+        cm.needsUpdate = true;
+        convectiveMesh.renderOrder = -1;
+        if (_cutSaved) {
+            coreMesh.visible = _cutSaved.core;             _syncLayerUI('tog-core', 'lr-core', _cutSaved.core);
+            radiativeMesh.visible = _cutSaved.radiative;   _syncLayerUI('tog-radiative', 'lr-radiative', _cutSaved.radiative);
+            convectiveMesh.visible = _cutSaved.convective; _syncLayerUI('tog-convective', 'lr-convective', _cutSaved.convective);
+            chromoMesh.visible = _cutSaved.chrom;          _syncLayerUI('tog-chrom', 'lr-chrom', _cutSaved.chrom);
+            trMesh.visible = _cutSaved.tr;                 _syncLayerUI('tog-tr', 'lr-tr', _cutSaved.tr);
+            coronaMesh.visible = _cutSaved.corona;         _syncLayerUI('tog-corona', 'lr-corona', _cutSaved.corona);
+            _cutSaved = null;
+        }
+        if (row) row.style.display = 'none';
+    }
+    _refreshLayerIsolation();
+}
+document.getElementById('tog-cutaway')?.addEventListener('change', e => {
+    _setLayerActive('lr-cutaway', e.target.checked);
+    // Cutaway and Doppler are mutually exclusive.
+    if (e.target.checked) {
+        const d = document.getElementById('tog-doppler');
+        if (d && d.checked) { d.checked = false; _setLayerActive('lr-doppler', false); _setDoppler(false); }
+    }
+    _setCutaway(e.target.checked);
+});
+document.getElementById('sl-cutdepth')?.addEventListener('input', () => {
+    uniforms.u_cutOffset.value = _cutDepthFromSlider();
+});
+
+// ── Doppler velocity view ─────────────────────────────────────────────────────
+// Recolours the photosphere by line-of-sight convective velocity (a Dopplergram)
+// in sunFS. Hides the other shells so the flow map reads cleanly and shows a
+// blue/red scale legend. Mutually exclusive with cutaway.
+let _dopSaved = null;
+function _setDoppler(on) {
+    const legend = document.getElementById('doppler-legend');
+    if (on) {
+        const cut = document.getElementById('tog-cutaway');
+        if (cut && cut.checked) { cut.checked = false; _setLayerActive('lr-cutaway', false); _setCutaway(false); }
+        _dopSaved = {
+            phot: sunLOD.visible, chrom: chromoMesh.visible, tr: trMesh.visible, corona: coronaMesh.visible,
+            core: coreMesh.visible, radiative: radiativeMesh.visible, convective: convectiveMesh.visible,
+        };
+        uniforms.u_doppler.value = 1.0;
+        // Damp the warm K-corona post-passes so the blue/red map reads cleanly.
+        if (bloomAmbient)      { _dopSaved.bloom   = bloomAmbient.enabled;      bloomAmbient.enabled = false; }
+        if (bloomFlare)        { _dopSaved.bloomF  = bloomFlare.enabled;        bloomFlare.enabled   = false; }
+        if (radialDiffusePass) { _dopSaved.diffuse = radialDiffusePass.enabled; radialDiffusePass.enabled = false; }
+        if (_outerGlowMesh)    { _dopSaved.outer   = _outerGlowMesh.visible;    _outerGlowMesh.visible = false; }
+        sunLOD.visible = true;          _syncLayerUI('tog-photosphere', 'lr-photosphere', true);
+        chromoMesh.visible = false;     _syncLayerUI('tog-chrom', 'lr-chrom', false);
+        trMesh.visible = false;         _syncLayerUI('tog-tr', 'lr-tr', false);
+        coronaMesh.visible = false;     _syncLayerUI('tog-corona', 'lr-corona', false);
+        coreMesh.visible = false;       _syncLayerUI('tog-core', 'lr-core', false);
+        radiativeMesh.visible = false;  _syncLayerUI('tog-radiative', 'lr-radiative', false);
+        convectiveMesh.visible = false; _syncLayerUI('tog-convective', 'lr-convective', false);
+        // Hide warm overlays (solar wind, loops, prominences, nanoflares, field
+        // lines) so the velocity map isn't veiled by their additive glow.
+        _dopSaved.ov = {};
+        ['tog-wind', 'tog-loops', 'tog-nanoflares', 'tog-prom', 'tog-fieldlines'].forEach((id) => {
+            const e = document.getElementById(id);
+            if (e) { _dopSaved.ov[id] = e.checked; if (e.checked) { e.checked = false; e.dispatchEvent(new Event('change', { bubbles: true })); } }
+        });
+        if (legend) legend.style.display = 'block';
+    } else {
+        uniforms.u_doppler.value = 0.0;
+        if (_dopSaved) {
+            if (bloomAmbient)      bloomAmbient.enabled      = _dopSaved.bloom;
+            if (bloomFlare)        bloomFlare.enabled        = _dopSaved.bloomF;
+            if (radialDiffusePass) radialDiffusePass.enabled = _dopSaved.diffuse;
+            if (_outerGlowMesh)    _outerGlowMesh.visible    = _dopSaved.outer;
+            sunLOD.visible = _dopSaved.phot;               _syncLayerUI('tog-photosphere', 'lr-photosphere', _dopSaved.phot);
+            chromoMesh.visible = _dopSaved.chrom;          _syncLayerUI('tog-chrom', 'lr-chrom', _dopSaved.chrom);
+            trMesh.visible = _dopSaved.tr;                 _syncLayerUI('tog-tr', 'lr-tr', _dopSaved.tr);
+            coronaMesh.visible = _dopSaved.corona;         _syncLayerUI('tog-corona', 'lr-corona', _dopSaved.corona);
+            coreMesh.visible = _dopSaved.core;             _syncLayerUI('tog-core', 'lr-core', _dopSaved.core);
+            radiativeMesh.visible = _dopSaved.radiative;   _syncLayerUI('tog-radiative', 'lr-radiative', _dopSaved.radiative);
+            convectiveMesh.visible = _dopSaved.convective; _syncLayerUI('tog-convective', 'lr-convective', _dopSaved.convective);
+            if (_dopSaved.ov) Object.entries(_dopSaved.ov).forEach(([id, was]) => {
+                const e = document.getElementById(id);
+                if (e && e.checked !== was) { e.checked = was; e.dispatchEvent(new Event('change', { bubbles: true })); }
+            });
+            _dopSaved = null;
+        }
+        if (legend) legend.style.display = 'none';
+    }
+    _refreshLayerIsolation();
+}
+// In a channel view, hide the white-light off-limb layers (they'd clash, e.g.
+// an orange corona ring around a grey magnetogram); restore them from the
+// layer toggles on return to white light. Coronal loops stay for the corona
+// EUV channels (171/193/211).
+function _applyViewLayers(channel) {
+    const togOn = (id) => document.getElementById(id)?.checked !== false;
+    const coronaOn = channel ? false : togOn('tog-corona');
+    if (volumetricCorona) volumetricCorona.setVisible(coronaOn);
+    else if (coronaMesh)  coronaMesh.visible = coronaOn;
+    if (chromoMesh) chromoMesh.visible = channel ? false : togOn('tog-chrom');
+    if (trMesh)     trMesh.visible     = channel ? false : togOn('tog-tr');
+    if (promGroup)  promGroup.visible  = channel ? false : togOn('tog-prom');
+    if (loopGroup)  loopGroup.visible  = channel === 0 ? togOn('tog-loops') : (channel >= 2 && channel <= 4);
+}
+document.getElementById('view-mode')?.addEventListener('change', e => {
+    const m = parseFloat(e.target.value) || 0;
+    uniforms.u_viewMode.value = m;
+    // EUV/magnetogram and Doppler are mutually exclusive views.
+    if (m > 0) {
+        const dop = document.getElementById('tog-doppler');
+        if (dop?.checked) { dop.checked = false; dop.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+    _applyViewLayers(m);
+});
+document.getElementById('tog-doppler')?.addEventListener('change', e => {
+    _setLayerActive('lr-doppler', e.target.checked);
+    _setDoppler(e.target.checked);
+});
 document.getElementById('tog-fieldlines').addEventListener('change', e => { if (fieldLineGroup) fieldLineGroup.visible = e.target.checked; });
 document.getElementById('sl-bline-density').addEventListener('input', function() {
     document.getElementById('disp-bline-density').textContent = this.value + '%';
@@ -7405,6 +8134,13 @@ function animate() {
         uniforms.u_flare_intensity.value *= 0.950;
     } else {
         uniforms.u_flare_intensity.value = 0.0;
+    }
+
+    // Smart tour scheduler — advances every dwell, updates progress bar.
+    // `smartTour` is var-hoisted (undefined until its IIFE runs), so the
+    // explicit `&& smartTour.active` short-circuits cleanly on early frames.
+    if (smartTour && smartTour.active) {
+        smartTour.tick(performance.now());
     }
 
     // Phase 4.1 — keep the radial-corona-diffusion pass in sync with the
@@ -7683,7 +8419,7 @@ function animate() {
         const frac  = elapsed / duration;
         const scale = 0.4 + frac * 3.5;
         ring.scale.setScalar(scale * ring.userData.peak);
-        ring.material.opacity = Math.max(0, Math.pow(1 - frac, 1.6) * ring.userData.peak * 0.85);
+        ring.material.opacity = Math.max(0, Math.pow(1 - frac, 1.6) * ring.userData.peak * 0.5);
     });
 
     controls.update();
@@ -7697,8 +8433,8 @@ function animate() {
     //     pass even at threshold 1.10), spikes during M/X impulsive
     //     flash, decays with the same envelope as the photosphere flash.
     if (bloomAmbient) {
-        const target = 0.16 + uniforms.u_activity.value * 0.06
-                     + uniforms.u_kp_norm.value * 0.04;
+        const target = 0.035 + uniforms.u_activity.value * 0.025
+                     + uniforms.u_kp_norm.value * 0.02;
         bloomAmbient.strength = THREE.MathUtils.lerp(bloomAmbient.strength, target, 0.04);
     }
     if (bloomFlare) {
@@ -7707,6 +8443,10 @@ function animate() {
         // sharply so X-class events get the full punch.
         const target = flareI < 0.15 ? 0.0 : (flareI - 0.15) * 0.55;
         bloomFlare.strength = THREE.MathUtils.lerp(bloomFlare.strength, target, 0.20);
+    }
+    if (solarFluid && uniforms.u_fluidOn.value > 0.5) {
+        solarFluid.step(renderer);
+        uniforms.u_fluidTex.value = solarFluid.getTexture();
     }
     composer.render();
     fpsF++;
@@ -7730,6 +8470,13 @@ const CAMS = {
     wide:    [0, 3, 14],
 };
 function setCam(k) {
+    // If the smart tour is running, manual cam input cancels it.
+    // smartTour is var-hoisted; guard with `&&` to avoid TDZ on early calls.
+    if (smartTour && smartTour.active) {
+        const tog = document.getElementById('tog-smart-tour');
+        if (tog?.checked) tog.checked = false;
+        smartTour.stop();
+    }
     document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
     document.getElementById('cam-' + k)?.classList.add('active');
     camera.position.set(...CAMS[k]); controls.target.set(0,0,0); controls.update();
@@ -8137,11 +8884,22 @@ async function fetchLiveSolarData() {
             return { num, loc, area, z, mag, nspot };
         }).filter(r => r.num && parseLoc(r.loc));
 
-        if (parsed.length > 0) {
-            liveRegions = parsed;
+        // solar_regions.json lists every numbered region for the last several
+        // days AND repeats each region once per observation date, so the raw
+        // list balloons to dozens of near-duplicate markers smeared across the
+        // active-latitude bands. Collapse to the real picture: keep the latest
+        // entry per region number, drop spotless plage-only regions, sort by
+        // size, and cap to 8 (matches the u_arSpots[8] shader slots).
+        const _byNum = new Map();
+        for (const r of parsed) _byNum.set(r.num, r);   // later entry (newest date) wins
+        const deduped = [..._byNum.values()]
+            .filter(r => r.area > 0 || r.nspot > 0)      // real sunspot groups only
+            .sort((a, b) => (b.area - a.area) || (b.nspot - a.nspot))
+            .slice(0, 8);
+
+        if (deduped.length > 0) {
+            liveRegions = deduped;
         }
-        console.log('[Sun] Regions parsed:', parsed.length, 'from', rJ?.length ?? 0, 'rows',
-            parsed.length ? '→ ' + parsed.map(r => 'AR' + r.num + ' ' + r.loc).join(', ') : '');
 
         // ── Flares from edited_events.json ────────────────────────────────────
         // Format: array of objects with serial_number, event, begin_datetime,
@@ -8169,11 +8927,9 @@ async function fetchLiveSolarData() {
                 reg:  String(e.active_region ?? e.active_region_num ?? e.activeRegion ?? '—'),
             }));
         if (parsedFlares.length > 0) liveFlares = parsedFlares;
-        console.log('[Sun] Flares parsed:', parsedFlares.length, 'from', eJ?.length ?? 0, 'events');
 
         // ── X-ray flux — scan from end for valid non-null reading ──────────────
         // xrays-1-day.json: [{time_tag, flux, observed_flux, energy, ...}]
-        console.log('[Sun] X-ray data:', xJ?.length ?? 0, 'readings');
         if (Array.isArray(xJ) && xJ.length > 0) {
             for (let i = xJ.length - 1; i >= Math.max(0, xJ.length - 20); i--) {
                 const v = parseFloat(xJ[i].flux ?? xJ[i].observed_flux ?? xJ[i][1]);
@@ -8232,26 +8988,294 @@ async function fetchLiveSolarData() {
 }
 
 // ── Fly camera to a heliographic region position ──────────────────────────
-function flyToRegion(lat, lon) {
+// distR:  camera distance from sun centre along the AR's outward normal
+// frame:  0 = look at sun centre (AR sits at edge), 1 = look at AR (AR centered, close-up)
+// dur:    fly duration in ms
+function flyToRegion(lat, lon, distR = 3.0, frame = 0.0, dur = 900) {
     const lr  = lat * Math.PI / 180;
-    const lnr = lon * Math.PI / 180 + solarRotAngle;  // offset by current rotation
+    const lnr = lon * Math.PI / 180 + solarRotAngle;
     const dir = new THREE.Vector3(
         Math.cos(lr) * Math.sin(lnr),
         Math.sin(lr),
         Math.cos(lr) * Math.cos(lnr)
     ).normalize();
-    const dest  = dir.multiplyScalar(3.0);
+    const arPos = dir.clone();                      // unit-sphere AR position
+    const dest  = dir.clone().multiplyScalar(distR);
+    const tgtAt = arPos.clone().multiplyScalar(frame);   // lerp(centre, AR)
     const start = camera.position.clone();
+    const startTgt = controls.target.clone();
     const t0    = performance.now();
     (function step(now) {
-        const raw  = Math.min((now - t0) / 900, 1);
+        const raw  = Math.min((now - t0) / dur, 1);
         const ease = raw < 0.5 ? 2*raw*raw : -1 + (4-2*raw)*raw;
         camera.position.lerpVectors(start, dest, ease);
-        controls.target.set(0, 0, 0);
+        controls.target.lerpVectors(startTgt, tgtAt, ease);
         controls.update();
         if (raw < 1) requestAnimationFrame(step);
     })(performance.now());
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SMART TOUR — auto-cycle the camera through the most Earth-affecting
+//  active regions. Interrupts on live M/X flares. Geoeffectiveness score:
+//
+//    score = wMerid * (1 - |lon|/90)^1.4    (front-side meridian proximity)
+//          + wMag   * complexity / 3        (α=0, β=1, βγ=2, βγδ=3)
+//          + wArea  * sqrt(area / 600)      (umbral + penumbral coverage)
+//          + wFlare * recentFlareWeight     (24h flare history at this AR)
+//
+//  ARs with |lon| > 80° are filtered (back-side, can't affect Earth this
+//  rotation). Sub-Earth point is heliographic lon = 0° → ARs near 0° are
+//  Earth-firing if they erupt now.
+//
+//  NOTE: declared with `var` (not `const`) so the binding is hoisted —
+//  animate() references `smartTour` from frame 0, before this IIFE runs,
+//  and a TDZ on a `const` would throw inside the rAF loop and freeze the sim.
+// ══════════════════════════════════════════════════════════════════════════
+var smartTour = (() => {
+    const HOLD_MS_BASE   = 12000;    // dwell per AR
+    const HOLD_MS_FLARE  = 22000;    // dwell when interrupted by live flare
+    const FLY_MS         = 1400;     // fly-to duration
+    const DIST_R         = 2.05;     // camera distance from sun centre (R_sun units)
+    const FRAME          = 0.62;     // 0 = look at centre, 1 = look at AR
+    const FLARE_INTERRUPT_CLASSES = new Set(['M','X']);
+
+    let active        = false;
+    let paused        = false;
+    let interrupted   = false;       // currently locked on a live flare
+    let currentIdx    = 0;
+    let nextSwitchAt  = 0;
+    let dwellStart    = 0;
+    let dwellMs       = HOLD_MS_BASE;
+    let savedCamPos   = null;        // restore when tour off
+    let savedTarget   = null;
+    let lastRanked    = [];          // cached ranking, refreshed on advance
+    let lastTier      = '';
+
+    function magComplexityFromString(mag) { return magComplexity(mag); }
+
+    // Earth-line: heliographic lon = 0 is sub-Earth point (NOAA Stonyhurst W=+, E=-)
+    function meridianFactor(lonDeg) {
+        const a = Math.abs(lonDeg);
+        if (a > 80) return -1;        // off the Earth-facing disc
+        return Math.pow(1 - a / 90, 1.4);
+    }
+
+    // Find max-class flare for this AR within last 24h
+    function lastFlareForAR(regNum, withinMs = 24 * 3600e3) {
+        if (!liveFlares?.length) return null;
+        const cutoff = Date.now() - withinMs;
+        let best = null;
+        for (const f of liveFlares) {
+            if (String(f.reg) !== String(regNum)) continue;
+            const t = new Date(f.time).getTime();
+            if (!(t > cutoff)) continue;
+            const cls = String(f.cls ?? '');
+            const rank = cls[0] === 'X' ? 4 : cls[0] === 'M' ? 3 : cls[0] === 'C' ? 2 : cls[0] === 'B' ? 1 : 0;
+            const mag  = parseFloat(cls.slice(1)) || 0;
+            const w = rank * 10 + mag;
+            if (!best || w > best.w) best = { f, w, rank };
+        }
+        return best;
+    }
+
+    function score(reg) {
+        const c = parseLoc(reg.loc); if (!c) return -1;
+        const mf = meridianFactor(c.lon);
+        if (mf < 0) return -1;
+        const mc = magComplexityFromString(reg.mag);
+        const af = Math.sqrt(Math.min(reg.area || 0, 1200) / 600);
+        const bf = lastFlareForAR(reg.num);
+        const ff = bf ? Math.min(1.5, bf.rank * 0.35 + 0.05) : 0;
+        // Weights: meridian is dominant (Earth-line gates the entire chain)
+        return mf * 1.40 + (mc / 3) * 0.70 + af * 0.55 + ff * 0.85;
+    }
+
+    function ranked() {
+        if (!liveRegions?.length) return [];
+        return liveRegions
+            .map(r => ({ reg: r, s: score(r), loc: parseLoc(r.loc) }))
+            .filter(x => x.s > 0 && x.loc)
+            .sort((a, b) => b.s - a.s);
+    }
+
+    function tier(s) {
+        if (s >= 2.3) return { k:'severe', label:'SEVERE' };
+        if (s >= 1.7) return { k:'high',   label:'HIGH'   };
+        if (s >= 1.1) return { k:'mod',    label:'MOD'    };
+        return            { k:'low',    label:'LOW'    };
+    }
+
+    function whyText(reg, loc, lf) {
+        // Stonyhurst convention: lon > 0 = W (rotating away from Earth-line),
+        //                        lon < 0 = E (rotating toward Earth-line).
+        const bits = [];
+        const a   = Math.abs(loc.lon);
+        const dir = loc.lon < 0 ? 'E' : 'W';
+        if (a < 12)       bits.push('on Earth-firing meridian — CME from here points at Earth');
+        else if (a < 35)  bits.push(`${a.toFixed(0)}°${dir} of meridian — ${loc.lon < 0 ? 'rotating into Earth-firing zone' : 'rotating out of Earth view'}`);
+        else              bits.push(`${a.toFixed(0)}°${dir} — glancing CMEs only`);
+        const mc = magComplexityFromString(reg.mag);
+        if (mc >= 3) bits.push('β-γ-δ → high flare/CME risk');
+        else if (mc === 2) bits.push('β-γ complexity');
+        if (lf?.f?.cls) bits.push(`recent ${lf.f.cls}`);
+        return bits.join(' · ');
+    }
+
+    function showOverlay(entry) {
+        const reg = entry.reg, loc = entry.loc;
+        const lf  = lastFlareForAR(reg.num);
+        const t   = tier(entry.s);
+        lastTier  = t.k;
+        const ov  = document.getElementById('smart-tour-overlay');
+        const tch = document.getElementById('sto-tier');
+        document.getElementById('sto-mode').textContent  = interrupted ? '⚡ LIVE FLARE — LOCKED' : 'SMART TOUR';
+        document.getElementById('sto-title').textContent = 'AR ' + (reg.num || '?');
+        document.getElementById('sto-loc').textContent   = reg.loc;
+        document.getElementById('sto-mag').textContent   = reg.mag || '—';
+        document.getElementById('sto-merid').textContent = `${Math.abs(loc.lon).toFixed(0)}°`;
+        document.getElementById('sto-area').textContent  = (reg.area || 0) + ' μH';
+        document.getElementById('sto-lastflare').textContent = lf?.f?.cls ? `${lf.f.cls} (${_timeAgo(lf.f.time)})` : 'none (24h)';
+        document.getElementById('sto-why').textContent   = whyText(reg, loc, lf);
+        tch.className = 'tier-' + t.k;
+        tch.textContent = t.label;
+        ov.classList.toggle('interrupt', interrupted);
+        ov.classList.add('show');
+    }
+
+    function hideOverlay() {
+        document.getElementById('smart-tour-overlay')?.classList.remove('show', 'interrupt');
+    }
+
+    function gotoIdx(i) {
+        const list = lastRanked.length ? lastRanked : ranked();
+        if (!list.length) {
+            document.getElementById('sto-mode').textContent = 'SMART TOUR — no front-side ARs';
+            document.getElementById('sto-title').textContent = '—';
+            document.getElementById('sto-loc').textContent = 'Waiting for NOAA active-region data';
+            document.getElementById('sto-why').textContent = '';
+            document.getElementById('smart-tour-overlay')?.classList.add('show');
+            return;
+        }
+        lastRanked = list;
+        currentIdx = ((i % list.length) + list.length) % list.length;
+        const entry = list[currentIdx];
+        showOverlay(entry);
+        flyToRegion(entry.loc.lat, entry.loc.lon, DIST_R, FRAME, FLY_MS);
+        dwellStart   = performance.now();
+        dwellMs      = interrupted ? HOLD_MS_FLARE : HOLD_MS_BASE;
+        nextSwitchAt = dwellStart + dwellMs;
+    }
+
+    function advance() {
+        if (!active || paused) return;
+        // Refresh ranking each advance (data may have updated)
+        lastRanked = ranked();
+        // Loop only through top-5 to keep the tour focused
+        const topN = Math.min(5, lastRanked.length);
+        if (!topN) { gotoIdx(0); return; }
+        gotoIdx((currentIdx + 1) % topN);
+    }
+
+    function tick(now) {
+        if (!active || paused) return;
+        const elapsed = now - dwellStart;
+        const pct = Math.min(1, elapsed / dwellMs);
+        const bar = document.querySelector('#sto-progress .bar');
+        if (bar) bar.style.width = (pct * 100).toFixed(1) + '%';
+        if (now >= nextSwitchAt) {
+            if (interrupted) interrupted = false;   // release lock after dwell
+            advance();
+        }
+    }
+
+    function start() {
+        if (active) return;
+        active = true; paused = false; interrupted = false;
+        savedCamPos = camera.position.clone();
+        savedTarget = controls.target.clone();
+        document.getElementById('smart-tour-controls').style.display = 'flex';
+        document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
+        currentIdx = -1;
+        advance();
+    }
+
+    function stop() {
+        if (!active) return;
+        active = false; paused = false; interrupted = false;
+        document.getElementById('smart-tour-controls').style.display = 'none';
+        hideOverlay();
+        // Restore previous view
+        if (savedCamPos) {
+            const start = camera.position.clone();
+            const startTgt = controls.target.clone();
+            const t0 = performance.now();
+            (function step(now) {
+                const raw = Math.min((now - t0) / 800, 1);
+                const ease = raw < 0.5 ? 2*raw*raw : -1 + (4-2*raw)*raw;
+                camera.position.lerpVectors(start, savedCamPos, ease);
+                controls.target.lerpVectors(startTgt, savedTarget, ease);
+                controls.update();
+                if (raw < 1) requestAnimationFrame(step);
+            })(performance.now());
+        }
+    }
+
+    function setPaused(p) {
+        paused = p;
+        const btn = document.getElementById('tour-pause');
+        if (btn) btn.textContent = p ? '▶ Resume' : '⏸ Pause';
+        if (!p) {
+            // Resume progress from now
+            const remaining = Math.max(0, nextSwitchAt - performance.now());
+            dwellStart = performance.now() - (dwellMs - remaining);
+            nextSwitchAt = performance.now() + remaining;
+        }
+    }
+
+    // Called when a live M/X flare arrives — lock the tour to that AR
+    function interruptOnFlare(latDeg, lonDeg, cls, regNum) {
+        if (!active) return;
+        const clsCh = String(cls || '')[0]?.toUpperCase();
+        if (!FLARE_INTERRUPT_CLASSES.has(clsCh)) return;
+        // Find the closest known AR to the flare location (within 8°)
+        let best = null, bestD = 999;
+        liveRegions.forEach((r, i) => {
+            const c = parseLoc(r.loc); if (!c) return;
+            const d = Math.hypot(c.lat - latDeg, c.lon - lonDeg);
+            if (d < bestD) { bestD = d; best = { reg: r, loc: c, idx: i }; }
+        });
+        // If no matching AR is on the disc, fly to the raw flare location
+        interrupted = true;
+        if (best && bestD < 12) {
+            const entry = { reg: best.reg, loc: best.loc, s: score(best.reg) + 2.0 /* boost so tier reads severe */ };
+            // Ensure entry exists in lastRanked at front
+            lastRanked = [entry, ...lastRanked.filter(x => x.reg.num !== best.reg.num)];
+            currentIdx = 0;
+            gotoIdx(0);
+        } else {
+            // Synthetic entry for raw flare site
+            const synth = {
+                reg: { num: regNum || '?', loc: '—', mag: '—', area: 0, z: 'A' },
+                loc: { lat: latDeg, lon: lonDeg },
+                s:   2.5,
+            };
+            lastRanked = [synth, ...lastRanked];
+            currentIdx = 0;
+            gotoIdx(0);
+        }
+    }
+
+    return { start, stop, tick, setPaused, advance, interruptOnFlare,
+             get active() { return active; }, get paused() { return paused; } };
+})();
+
+// Wire smart-tour UI
+document.getElementById('tog-smart-tour')?.addEventListener('change', e => {
+    if (e.target.checked) smartTour.start(); else smartTour.stop();
+});
+document.getElementById('tour-next')?.addEventListener('click',  () => smartTour.advance());
+document.getElementById('tour-pause')?.addEventListener('click', () => smartTour.setPaused(!smartTour.paused));
 
 // ── Recent flare replay ────────────────────────────────────────────────────
 // After data load, replay flares from the past hour to pre-seed the
@@ -8281,7 +9305,6 @@ function replayRecentFlares() {
         uniforms.u_flare_lat.value = lat_r;
         uniforms.u_flare_lon.value = lon_r;
         uniforms.u_flare_t.value   = ageSimUnits;
-        console.log(`[Flare Replay] ${f.cls} at ${f.loc} — ${Math.round(ageMs / 60000)} min ago → sim-t ${ageSimUnits.toFixed(0)}`);
     });
 }
 
@@ -8295,7 +9318,8 @@ buildFieldLines();
 buildProminences();
 updateLivePanel(false);
 updateFlareActivityBar();
-replayRecentFlares();
+// Flares now fire only on real-time detection (see the swpc-update handler's
+// seed-on-first-update gate) -- we no longer replay historical flares at load.
 document.getElementById('live-status').textContent = 'Default data · fetching live…';
 
 document.getElementById('btn-live-refresh').addEventListener('click', () => {
@@ -8438,7 +9462,7 @@ let   _lastForecast = null;
 
 // Ingest every swpc-update event into history + re-forecast every 5 min
 let _lastForecastAt = 0;
-window.addEventListener('swpc-update', (ev) => {
+function _onSwpcUpdate_forecast(ev) {
     const sw = ev.detail?.solar_wind ?? {};
     const kp = ev.detail?.kp ?? 0;
     const coupling = {
@@ -8459,7 +9483,7 @@ window.addEventListener('swpc-update', (ev) => {
         // Persist LSTM weights every 5 minutes
         if (typeof _lstm !== 'undefined') _lstm.saveToStorage();
     }
-}, { passive: true });
+}
 
 // Update forecast display panel
 function _updateForecastPanel(fc) {
@@ -8536,6 +9560,7 @@ setInterval(() => {
 // Set of "cls|timestamp" keys for flares already given a 3D ring — prevents
 // duplicate rings when swpc-update fires repeatedly on the same flare data.
 const _shownFlareKeys = new Set();
+let _flaresSeeded = false;   // first swpc-update only seeds known flares (no firing)
 
 window.addEventListener('swpc-update', (ev) => {
     const sw  = ev.detail;
@@ -8543,9 +9568,6 @@ window.addEventListener('swpc-update', (ev) => {
     const kp  = sw.kp ?? 0;
     const bz  = sw.solar_wind?.bz  ?? 0;
     const spd = sw.solar_wind?.speed       ?? 400;
-
-    // ── Diagnostic: confirm event is firing + log key values ─────────────────
-    console.log(`[SWPC] ${sw.status} | wind ${spd} km/s | kp ${kp} | bz ${bz.toFixed(1)} nT | xray ${sw.xray_class ?? '?'}`);
 
     const dns = sw.solar_wind?.density     ?? 5;
     const bt  = sw.solar_wind?.bt          ?? 5;
@@ -8908,6 +9930,11 @@ window.addEventListener('swpc-update', (ev) => {
     // ── Position rings for ALL recent flares (< 3h old) ─────────────────────
     // The swpc-update event fires every 60 s. We track shown flare keys so we
     // only trigger a ring once per unique flare event, not on every poll.
+    // First swpc-update only SEEDS the already-known flares so the page doesn't
+    // replay historical flares at load -- only a real-time flare (one that
+    // arrives in a later poll) actually fires.
+    const _firstFlare = !_flaresSeeded;
+    _flaresSeeded = true;
     if (sw.recent_flares?.length) {
         const cutoff3h = Date.now() - 3 * 3600e3;
         sw.recent_flares.forEach(f => {
@@ -8917,6 +9944,7 @@ window.addEventListener('swpc-update', (ev) => {
             const key = `${f.cls}|${ft}`;
             if (_shownFlareKeys.has(key)) return;
             _shownFlareKeys.add(key);
+            if (_firstFlare) return;   // seed only: don't fire historical flares at load
             const loc = parseLoc(f.location);
             if (!loc) return;
             const clsCh = (f.cls ?? f.parsed?.letter ?? 'C')[0]?.toUpperCase() ?? 'C';
@@ -8933,16 +9961,14 @@ window.addEventListener('swpc-update', (ev) => {
                 uniforms.u_flare_lon.value = loc.lon * Math.PI / 180;
                 uniforms.u_flare_t.value   = simAge;
             }
-            console.log(`[Flare] ${f.cls} at ${f.location} — ${Math.round(ageMs/60000)}m ago → ring placed`);
         });
     }
 
     // ── Visual flare/CME burst ───────────────────────────────────────────────
     // Trigger a sun flash when a new major flare is detected via SpaceWeatherFeed
-    if (sw.new_major_flare) {
+    if (sw.new_major_flare && !_firstFlare) {
         const cls   = sw.flare_class ?? 'M';
         const clsCh = cls[0];
-        console.log(`[Sun] Real ${cls} flare detected — ribbon + prominence eruption`);
         _triggerSunFlashFromSWPC(sw.flare_direction);
 
         if (sw.flare_direction) {
@@ -8967,12 +9993,15 @@ window.addEventListener('swpc-update', (ev) => {
             spawnEruptingProminence(lat_r, lon_r, clsCh);
 
             // Brief bloom spike (already handled by flareBoost in animate loop)
+
+            // ── Smart tour: lock onto this flare (M/X only) ──────────────────
+            try { smartTour.interruptOnFlare(latDeg, lonDeg, sw.flare_class, sw.flare_region); }
+            catch (e) { /* tour not initialized yet */ }
         }
         // Show flare alert banner
         showFlareAlertBanner(sw.flare_class ?? 'M-class', sw.flare_location);
     }
     if (sw.new_cme_detected && sw.earth_directed_cme) {
-        console.log('[Sun] New Earth-directed CME from DONKI — flux rope + shock wave');
         const cmeSpeedNorm = Math.max(0, Math.min(1, ((sw.earth_directed_cme.speed ?? 800) - 300) / 2200));
         // Spawn the 3D flux rope (twisted magnetic field tube)
         const cmeLat = sw.earth_directed_cme.lat_rad ?? (sw.flare_direction?.lat_rad ?? 0);
@@ -9059,8 +10088,6 @@ window.addEventListener('swpc-update', (ev) => {
         buildFieldLines();
         buildProminences();
         updateLivePanel(false);
-        console.log('[SWPC→3D] Regions updated:', liveRegions.length, 'ARs →',
-            liveRegions.map(r => 'AR' + r.num).join(', '));
     }
 });
 
@@ -9309,7 +10336,6 @@ function showFlareAlertBanner(cls, loc) {
     _flareAlertTimer = setTimeout(() => { banner.style.display = 'none'; }, 12000);
 }
 
-console.log('%c[Sun · G2V Simulator]', 'color:#ffb830;font-weight:bold;font-size:13px');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // FLARE / REGION ANALYSIS POPUP
@@ -9575,7 +10601,7 @@ document.getElementById('flare-list').addEventListener('click', e => {
 // swpc-feed T3 (15 min) is less frequent than fetchLiveSolarData (5 min), so
 // we only fill in the flare list from swpc-update when the panel is still empty
 // (no live NOAA fetch has succeeded yet).
-window.addEventListener('swpc-update', (ev) => {
+function _onSwpcUpdate_flareListFallback(ev) {
     const rf = ev.detail?.recent_flares;
     if (!Array.isArray(rf) || rf.length === 0 || liveFlares.length > 0) return;
     // Convert swpc-feed format → panel format
@@ -9586,9 +10612,8 @@ window.addEventListener('swpc-update', (ev) => {
         reg:  f.region   != null ? String(f.region) : '—',
     }));
     updateLivePanel(false);
-});
+}
 
-console.log('%c[Sun] Analysis popup + 3-D marker raycasting active', 'color:#ffaa44');
 
 // ═══════════════════════════════════════════════════════════════
 //  SOLAR INTERIOR PANEL — live physics calculations
@@ -10190,8 +11215,8 @@ document.querySelectorAll('.atm-jump').forEach(btn => {
 });
 
 // Wire SWPC data to update coronal temperature estimate
-window.addEventListener('swpc-update', e => {
-    const sw = e.detail;
+function _onSwpcUpdate_atmosphere(ev) {
+    const sw = ev.detail;
     const xray = sw.xray_flux ?? 1e-7;
     _atmXrayFlux = xray;
     _atmF107 = sw.f107_flux ?? 150;
@@ -10213,6 +11238,55 @@ window.addEventListener('swpc-update', e => {
     }
 
     updateAtmospherePanel();
+}
+
+// ── Daily Solar Summary banner ──────────────────────────────────────────────
+function _onSwpcUpdate_dailySummary(ev) {
+    const sw = ev.detail;
+    const el = document.getElementById('sun-daily-summary');
+    if (!el) return;
+    el.style.display = '';
+
+    const flareClass = f => f >= 1e-4 ? 'X' : f >= 1e-5 ? 'M' : f >= 1e-6 ? 'C' : f >= 1e-7 ? 'B' : 'A';
+    const gScale     = kp => kp >= 9 ? 5 : kp >= 8 ? 4 : kp >= 7 ? 3 : kp >= 6 ? 2 : kp >= 5 ? 1 : 0;
+
+    const kp    = sw.kp ?? 0;
+    const g     = gScale(kp);
+    const xray  = sw.xray_flux ?? 1e-8;
+    const cls   = flareClass(xray);
+    const speed = Math.round(sw.solar_wind?.speed ?? 400);
+    const bz    = (sw.solar_wind?.bz ?? 0).toFixed(1);
+    const cycle = solarCyclePhase();
+    const cme   = sw.earth_directed_cme;
+
+    let level, color;
+    if (g >= 4)      { level = 'EXTREME';   color = '#ff2255'; }
+    else if (g >= 3) { level = 'SEVERE';    color = '#ff4444'; }
+    else if (g >= 2) { level = 'ACTIVE';    color = '#ff9900'; }
+    else if (kp >= 4){ level = 'UNSETTLED'; color = '#ffcc00'; }
+    else             { level = 'QUIET';     color = '#44cc88'; }
+
+    const badge = document.getElementById('sun-summary-level');
+    if (badge) {
+        badge.textContent = level;
+        badge.style.background = color + '20';
+        badge.style.color = color;
+    }
+
+    let text = `Kp ${kp.toFixed(1)} (G${g}) · ${cls}-class · Wind ${speed} km/s · Bz ${bz} nT`;
+    text += ` · SC25 ${cycle.phaseName} (SSN≈${cycle.smoothedSSN})`;
+    if (cme) text += ` · CME ${cme.speed} km/s`;
+    document.getElementById('sun-summary-text').textContent = text;
+}
+
+// Single dispatcher for the four non-capture, non-shader swpc-update consumers.
+// Capture-phase #_lastSwpcFireAt timestamp (line ~8885) stays separate by design.
+// The main shader-uniform writer (~30 fields, 12 DOM dots) also stays separate.
+window.addEventListener('swpc-update', (ev) => {
+    _onSwpcUpdate_forecast(ev);
+    _onSwpcUpdate_flareListFallback(ev);
+    _onSwpcUpdate_atmosphere(ev);
+    _onSwpcUpdate_dailySummary(ev);
 }, { passive: true });
 
 // Initial render
@@ -10226,6 +11300,48 @@ updateAtmospherePanel();
         hint.style.opacity = window.scrollY > 40 ? '0' : '1';
     }, { passive: true });
 })();
+
+// ── Test / debug handle (smoke tests, Phase-1 verification) ──────────────────
+// Mirrors window.__ua / window.__ssd. Exposes the renderer + the seven layer
+// meshes so tests can assert visibility toggles and sample frames without a
+// debug overlay. renderer.info.render.frame is a monotonic frame counter.
+window.__sun = {
+    ready: true,
+    THREE,
+    renderer,
+    scene,
+    camera,
+    controls,
+    uniforms,
+    get fluid() { return solarFluid; },
+    get composer() { return composer; },
+    setRegions: (r) => { liveRegions = r || []; },   // debug/test: inject active regions
+    rebuildMarkers: () => buildRegionMarkers(),       // debug/test: rebuild AR markers
+    get regionCount() { return liveRegions.length; },
+    testFlare: (cls, latDeg, lonDeg) => {            // debug/test: fire a flare now
+        const c = (cls || 'X')[0].toUpperCase();
+        const la = (latDeg ?? 14), lo = (lonDeg ?? 15);
+        const lat = la * Math.PI / 180, lon = lo * Math.PI / 180;
+        uniforms.u_flare_lat.value = lat;
+        uniforms.u_flare_lon.value = lon;
+        uniforms.u_flare_intensity.value = 1.0;
+        uniforms.u_flare_t.value = 0.0;
+        try { _refreshFlareRibbons(lat, lon); } catch (e) {}
+        try { triggerPositionFlare(la, lo, c); } catch (e) {}
+        try { eruptNearestProminence(lat, lon); } catch (e) {}
+        try { spawnEruptingProminence(lat, lon, c); } catch (e) {}
+    },
+    layers: {
+        core:         coreMesh,
+        radiative:    radiativeMesh,
+        convective:   convectiveMesh,
+        photosphere:  sunLOD,
+        chromosphere: chromoMesh,
+        transition:   trMesh,
+        corona:       coronaMesh,
+    },
+    get frames() { return renderer.info.render.frame; },
+};
 </script>
 
 <!-- ── Simulation description ──────────────────────────────────────────── -->
@@ -10317,47 +11433,5 @@ updateAtmospherePanel();
   </div>
 </section>
 
-<script type="module">
-// ── Daily Solar Summary for Sun page ─────────────────────────────────────────
-import { solarCyclePhase } from './js/solar-weather-forecast.js';
-
-function flareClass(f) { return f >= 1e-4 ? 'X' : f >= 1e-5 ? 'M' : f >= 1e-6 ? 'C' : f >= 1e-7 ? 'B' : 'A'; }
-function gScale(kp) { return kp >= 9 ? 5 : kp >= 8 ? 4 : kp >= 7 ? 3 : kp >= 6 ? 2 : kp >= 5 ? 1 : 0; }
-
-window.addEventListener('swpc-update', ev => {
-    const sw = ev.detail;
-    const el = document.getElementById('sun-daily-summary');
-    if (!el) return;
-    el.style.display = '';
-
-    const kp    = sw.kp ?? 0;
-    const g     = gScale(kp);
-    const xray  = sw.xray_flux ?? 1e-8;
-    const cls   = flareClass(xray);
-    const speed = Math.round(sw.solar_wind?.speed ?? 400);
-    const bz    = (sw.solar_wind?.bz ?? 0).toFixed(1);
-    const cycle = solarCyclePhase();
-    const cme   = sw.earth_directed_cme;
-
-    let level, color;
-    if (g >= 4) { level = 'EXTREME'; color = '#ff2255'; }
-    else if (g >= 3) { level = 'SEVERE'; color = '#ff4444'; }
-    else if (g >= 2) { level = 'ACTIVE'; color = '#ff9900'; }
-    else if (kp >= 4) { level = 'UNSETTLED'; color = '#ffcc00'; }
-    else { level = 'QUIET'; color = '#44cc88'; }
-
-    const badge = document.getElementById('sun-summary-level');
-    if (badge) {
-        badge.textContent = level;
-        badge.style.background = color + '20';
-        badge.style.color = color;
-    }
-
-    let text = `Kp ${kp.toFixed(1)} (G${g}) · ${cls}-class · Wind ${speed} km/s · Bz ${bz} nT`;
-    text += ` · SC25 ${cycle.phaseName} (SSN≈${cycle.smoothedSSN})`;
-    if (cme) text += ` · CME ${cme.speed} km/s`;
-    document.getElementById('sun-summary-text').textContent = text;
-});
-</script>
 </body>
 </html>

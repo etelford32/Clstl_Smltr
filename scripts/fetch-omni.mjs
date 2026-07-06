@@ -55,14 +55,28 @@ const COL = {
     DOY:   1,
     HOUR:  2,
     MIN:   3,
-    BX:    8,    // GSM nT
-    BY:    9,
-    BZ:    10,
-    VX:    21,   // GSM km/s
-    VY:    22,
-    VZ:    23,
-    NP:    24,   // n/cc
-    T:     25,   // K
+    // ⚠ WARNING — these B/V indices were authored against the 26-column
+    // synthetic fixture used by the smoke test and do NOT match real
+    // NASA SPDF OMNI HRO 1-min ASCII. The actual file has 46 columns
+    // with Bz_GSM at index 18 and Flow speed at index 21 (see
+    // api/omni/imf.js for the verified column map). DO NOT run this
+    // script against real SPDF data until the indices are corrected;
+    // the output JSON will read "Percent interp" / spacecraft IDs as
+    // if they were B and V components.
+    //
+    // Currently this script's network path is gated on the sandbox's
+    // SPDF block; the smoke test still passes because its synthetic
+    // input matches the (broken) indices. Plan: rewrite either against
+    // the live file format using api/omni/imf.js's COL map, or replace
+    // by calling the Edge endpoint /api/omni/imf from a Node fetcher.
+    BX:    8,    // ⚠ wrong (real spec → 14, GSE/GSM Bx)
+    BY:    9,    // ⚠ wrong (real spec → 17, By GSM)
+    BZ:    10,   // ⚠ wrong (real spec → 18, Bz GSM)
+    VX:    21,   // ⚠ wrong (real spec → 22, Vx GSE)
+    VY:    22,   // ⚠ wrong (real spec → 23, Vy GSE)
+    VZ:    23,   // ⚠ wrong (real spec → 24, Vz GSE)
+    NP:    24,   // ⚠ wrong (real spec → 25, proton density)
+    T:     25,   // ⚠ wrong (real spec → 26, temperature)
 };
 
 // Sentinel thresholds per the OMNI HRO documentation. Any field at or

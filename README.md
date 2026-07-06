@@ -1,167 +1,115 @@
-# Celestial Simulator
+# parkersphysics.com
 
-Create and explore beautiful cosmic objects! Features both a full 3D star simulation and an interactive creator studio.
+> **This repo is parkersphysics.com** — a physics-first space weather forecasting platform for satellite operators, government, and research users. The project began life as a celestial simulator (the repo was previously named `Clstl_Smltr`) and outgrew those origins. **Do not assume this is a small pygame demo — it is a ~100k-line production web application.**
 
-## 🎨 NEW: Celestial Object Creator Studio
-
-**Design your own stars, black holes, nebula, planets, and moons!**
-
-### 🌐 **[Try it Live in Your Browser!](https://etelford32.github.io/Clstl_Smltr/)** 🌐
-
-Or run locally:
-```bash
-python celestial_studio.py
-```
-
-Create custom celestial objects with:
-- ⭐ **Stars** with adjustable temperature, glow, and solar wind
-- 🕳️ **Black Holes** with accretion disks and gravitational effects
-- 🌌 **Nebula** with flowing particle clouds
-- 🌍 **Planets** with atmospheres and rings
-- 🌙 **Moons** and more!
-
-📖 **Full studio guide**: See [STUDIO_GUIDE.md](STUDIO_GUIDE.md)
+Live site: [parkersphysics.com](https://parkersphysics.com)
 
 ---
 
-## 🌟 3D Star Simulation
+## What this actually is
 
-A beautiful 3D star simulation built with Pygame and OpenGL, featuring shader effects and particle-based solar wind animations.
+A static-HTML + Vercel-serverless web app that delivers MHD-grounded space weather forecasts. The wedge is physics-first modeling (SWMF / BATS-R-US lineage) vs. the ML-black-box approach common in the category, with LEO drag forecasting as the lead use case.
 
-## 🚀 Quick Deploy
+**Stack:**
+- **Frontend:** Vanilla HTML / JS / CSS. ~55 top-level HTML pages, no framework. JS modules under `js/`.
+- **Backend:** Vercel serverless functions under `api/` (Node). Cron jobs in `vercel.json`.
+- **Database / Auth:** Supabase (Postgres 17, email+password + Google OAuth, JWT in localStorage with a `pp_auth` legacy mirror). See `AUTH_FLOW_REVIEW.md`.
+- **Heavy compute:** Rust + WebAssembly. Crates under `crates/`, `rust-*/`, built via `build-wasm.sh`. SGP4 propagation, stellar MHD, sunfield, sirius solver.
+- **Data sources:** NOAA SWPC, NASA DONKI/HEK, CelesTrak, NWS, plus the Gannon May-2024 G5 hindcast and INTERMAGNET (Step-1 GSA pipeline, validation-only).
+- **Payments:** Stripe (under `api/stripe/`).
 
-**Want to run it live right now?**
+**Deployed via:** Vercel. Cron schedules and build command live in `vercel.json`. The `build-wasm.sh` script compiles the Rust crates to wasm at deploy time.
 
-```bash
-# Option 1: Run in browser (web version)
-pip install pygbag
-pygbag main.py
-# Opens at http://localhost:8000
+---
 
-# Option 2: Run with Docker + VNC
-docker-compose up
-# Opens at http://localhost:8080
+## Read these before editing anything
 
-# Option 3: Run locally (full 3D)
-pip install -r requirements.txt
-python star_simulation.py
+Heavy `.md` documentation lives at the repo root — these are load-bearing context, not boilerplate.
+
+| File | What it covers |
+|------|----------------|
+| `AUTH_FLOW_REVIEW.md` | **Read first if touching auth.** Full inventory of signin/signup/OAuth/callback, what's shipped vs. gaps, the `auth_failures` telemetry surface. |
+| `OAUTH_SETUP.md` | Google OAuth operator runbook (Apple is staged behind a flag). |
+| `MAGIC_LINK_SETUP.md` | Passwordless flow. |
+| `OPERATIONS_STATUS.md` | What pipelines are live, what's degraded. |
+| `DEPLOYMENT.md`, `WEB_DEPLOYMENT.md`, `VERCEL_SETUP.md` | Deploy procedure. |
+| `MHD_DENSITY_PRODUCT_PLAN.md`, `MHD_DENSITY_PHASE0_RUNBOOK.md`, `MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md` | LEO drag / MHD density product spec and runbooks. |
+| `GANNON_SIMULATION_DESIGN.md` | Gannon May-2024 G5 hindcast page + pipeline. |
+| `WEATHER_FORECAST_PLAN.md`, `WEATHER_PREDICTIVE_ANALYTICS_PLAN.md` | Forecast surface roadmap. |
+| `EARTH_LOD_NASA_PRECIP_PLAN.md`, `EARTH_ML_FIRST_PRINCIPLES.md` | Earth viz LOD + ML approach. |
+| `ANALYTICS.md`, `TIER_EXPANSION_SPRINT.md`, `SCRUBBER.md` | Analytics, plan tiers, scrub-bar component. |
+| `DESIGN_TOKENS.md` | Design system. |
+| `SECURITY.md` | Disclosure policy. |
+| `SMOKE_TEST_EDUCATOR.md` | Manual smoke test for educator-tier flows. |
+
+---
+
+## Notes for AI coding agents
+
+If you are an AI agent (Claude Code, Copilot, Cursor, etc.) starting work in this repo, **read these first** to avoid the documented reversion pattern in this repo's history:
+
+1. **This is not a celestial simulator.** Ignore any pygame/OpenGL references in legacy files (`star_simulation.py`, `celestial_studio.py`, `main.py`, `simple_star_test.py`, `test_display.py`, the `rust/` toy crate). They are origin artifacts and not deployed. The deployed product is the HTML + `api/` + `js/` + WASM-emitting Rust crates surface.
+2. **Inline comments in `js/auth.js` are load-bearing.** They document past bugs (admin demotion on token refresh, dashboard auth gate stuck on RLS errors, signin_failed event drops). Do not "clean up" or remove them.
+3. **Some things that look like bugs are intentional:**
+    - `SECURITY DEFINER` functions exposed to the `anon` Postgres role — needed for telemetry RPCs called before sign-in.
+    - Permissive RLS (`WITH CHECK (true)`) on `analytics_events`, `user_sessions`, `feedback`, `beta_invite_uses` — required for anonymous instrumentation.
+    - `_persistToStorage()` called *before* `fetchProfile()` in auth init — prevents the dashboard auth gate from dead-ending on transient RLS errors.
+4. **Before opening a PR, search recent commits for the same title.** This repo has empty/duplicate PRs in its history (e.g. PRs #762, #763, #765, #766 all titled "3d satellite orbit" — only one had code). If you intended to ship a change and `git diff` shows nothing, your change was already merged. Do not re-open the PR.
+5. **The Supabase project is `aijsboodkivnhzfstvdq` (Parkers Physics, us-east-1).** RLS is enabled on every public table but three (`forecast_log`, `solar_wind_samples`, `weather_grid_cache`) have RLS enabled without policies — these are service-role-only by design.
+6. **Do not introduce a framework.** No Next.js, no React, no build step beyond `build-wasm.sh`. The whole point of the static-HTML architecture is fast cold starts and Vercel-edge cacheability.
+
+---
+
+## Repo layout
+
+```
+api/                Vercel serverless functions (Node). One subdir per data source / capability.
+  auth/             Auth-failure logging, magic-link helpers.
+  cron/             Scheduled refresh / digest / prewarm jobs (see vercel.json `crons`).
+  stripe/           Webhooks + checkout sessions.
+  noaa/  donki/  hek/  celestrak/  nws/  ...   External data integrations.
+js/                 Client modules (~100 files). Loaded directly by HTML pages, no bundler.
+  auth.js           Supabase auth wrapper. Single source of truth for session + plan + role.
+  config.js         SOCIAL_PROVIDERS flag and runtime config.
+  telemetry.js      Fire-and-forget error/web-vitals/auth-funnel capture.
+crates/             Rust libraries compiled to WASM (stellar-mhd-2d, disc-hydro).
+rust-sgp4/  rust-sirius/  rust-sstar/  rust-sunfield/  rust-forecast/   Per-page WASM modules.
+swmf/  dsmc/        Physics pipelines (Python). swmf/ wraps SWMF; dsmc/ wraps SPARTA.
+satellite-operator/ Operator-facing dashboard surface (early).
+pi/                 Edge / Pi deployment config.
+data/               Hindcast + heliochronicles data.
+scripts/            Training, heliochronicles generators.
+tests/              Smoke tests (Playwright-style and Node).
+*.html              Page surface. dashboard.html, signin.html, signup.html, admin.html, sun.html,
+                    earth.html, satellite-designer.html, account.html, etc.
 ```
 
-**Or use the deployment script:**
-```bash
-./deploy.sh
-```
+---
 
-📖 **Full deployment guide**: See [DEPLOYMENT.md](DEPLOYMENT.md) for all deployment options including GitHub Pages, cloud hosting, and more!
-
-## Features
-
-- **3D Rendered Star**: A fully 3D sphere representing a star with proper lighting and shading
-- **GLSL Shaders**: Custom vertex and fragment shaders for realistic star glow and rim lighting effects
-- **Solar Wind Particles**: Thousands of particles simulating solar wind emanating from the star's surface
-- **Interactive Camera**: Rotate and zoom to view the star from any angle
-- **Particle Color Gradients**: Particles change color based on distance from the star (yellow → white → blue)
-- **Real-time Rendering**: Smooth 60 FPS animation with optimized OpenGL rendering
-
-## Installation
-
-### Prerequisites
-
-- Python 3.7 or higher
-- pip package manager
-
-### Setup
-
-1. Clone or download this repository
-
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-## Running the Simulation
+## Local development
 
 ```bash
-python star_simulation.py
+# Install Node deps (for api/ functions and tests)
+npm install
+
+# Run locally with Vercel
+vercel dev
+
+# Build WASM (required before deploy; usually run by Vercel)
+bash build-wasm.sh
+
+# Run smoke tests
+node tests/weather-forecast-smoke.mjs
 ```
 
-Or make it executable:
-```bash
-chmod +x star_simulation.py
-./star_simulation.py
-```
+You'll need Supabase env vars in `.env.local` — see `VERCEL_SETUP.md`.
 
-## Controls
+---
 
-- **Arrow Keys**: Rotate the view around the star
-  - ← →: Rotate horizontally
-  - ↑ ↓: Rotate vertically
-- **W**: Zoom in (move camera closer)
-- **S**: Zoom out (move camera farther)
-- **R**: Reset view to default position
-- **ESC**: Exit the simulation
+## Historical origin
 
-## Technical Details
-
-### Shader Effects
-
-The simulation uses GLSL (OpenGL Shading Language) shaders to create realistic star effects:
-
-- **Vertex Shader**: Calculates surface normals and vertex positions for lighting
-- **Fragment Shader**: Implements Fresnel-like rim lighting for the star's corona effect
-- **Color Blending**: Dynamic color mixing from yellow core to orange-red glow
-
-### Particle System
-
-- Up to 2,000 simultaneous particles
-- Particles spawn at the star's surface and travel outward
-- Each particle has:
-  - Random initial position on sphere surface
-  - Outward velocity with slight randomization
-  - Lifetime of 80-150 frames
-  - Alpha blending based on remaining life
-  - Color that transitions based on distance from star
-
-### Performance Optimizations
-
-- Display lists for static geometry (star sphere)
-- Point sprite rendering for particles
-- Alpha blending for smooth particle effects
-- 60 FPS target with efficient OpenGL calls
-
-## System Requirements
-
-- Graphics card with OpenGL 2.1+ support
-- Display capable of 1200x800 resolution (adjustable in code)
-
-## Troubleshooting
-
-### Black screen or no shader effects
-- Your GPU may not support GLSL 1.20. The simulation will still run without shaders.
-- Update your graphics drivers
-
-### Poor performance
-- Reduce `max_particles` in `StarSimulation.__init__()` (line 120)
-- Lower the sphere resolution in `create_star_display_list()` (line 205)
-- Reduce window size in `main()` function
-
-### Module not found errors
-- Ensure all dependencies are installed: `pip install -r requirements.txt`
-- Try using a virtual environment
-
-## Customization
-
-You can customize various parameters in `star_simulation.py`:
-
-- `max_particles`: Maximum number of solar wind particles (line 120)
-- `star_radius`: Size of the star (line 118)
-- `camera_distance`: Initial camera zoom (line 122)
-- Particle colors in `draw_particles()` method (lines 284-295)
-- Star colors in shader code (lines 162-163)
-
-## License
-
-This project is open source and available for educational purposes.
+This repo started as a pygame/OpenGL star simulation (hence the name and the pygame files still in the tree). Those files remain for archaeological reasons but are not part of the deployed product. If you're looking for the original pygame demo, see `star_simulation.py` and `celestial_studio.py`; everything else has moved on.
 
 ## Author
-Elliot Telford
+
+Elliot Telford — [elliottelford.com](https://elliottelford.com)

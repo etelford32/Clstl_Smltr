@@ -118,6 +118,86 @@ export class PersistenceForecaster {
     }
 }
 
+// ── Open-Meteo NWP forecaster ──────────────────────────────────────────────
+
+/**
+ * Wraps the upstream NWP (Open-Meteo GFS-blend) already in the WeatherHistory
+ * forecast ring as a Forecaster. No prediction logic — the heavy lifting
+ * happens on NOAA / DWD's compute. We just expose what's in the ring as
+ * predictions so the validator can score them against the in-browser models
+ * (persistence, anomaly-AR, optical-flow, wind-advection) on the same
+ * pooled-MAE / Murphy-skill scale.
+ *
+ * Honesty model
+ *   At each weather-history-ingest event (T0), runAll() invokes us. We read
+ *   the forecast ring's frame at T0 + h·HOUR for each h ∈ FORECAST_HORIZONS_H
+ *   and register it as a pending prediction. WeatherHistory.purgeStaleForecasts
+ *   has already removed the ring entry at T0 by the time we run, so we cannot
+ *   accidentally use ground truth as a prediction. When the observation for
+ *   T0 + h arrives an hour later, the validator scores our pending row against
+ *   it just like every other forecaster's output.
+ *
+ * Caveat
+ *   The NWP frame for target T was issued by some GFS cycle (00/06/12/18 UTC)
+ *   before T0. The effective lead time at NWP-issue is therefore ≥ h hours,
+ *   not exactly h. Our headline "h-hour skill" characterises "what does the
+ *   latest GFS run available to a browser at T0 say about T0 + h" — which is
+ *   the right thing for ranking models in this registry, but slightly
+ *   pessimistic for GFS vs. its native ≥h-hour skill at issue time.
+ */
+const HOUR_MS = 3_600_000;
+
+export class OpenMeteoNWPForecaster {
+    static id = 'open-meteo-gfs-v1';
+
+    constructor() {
+        this.id = OpenMeteoNWPForecaster.id;
+    }
+
+    forecast({ history }) {
+        const past = history.all();
+        if (past.length === 0) return null;
+        const newest = past[past.length - 1];
+        const { t: issuedMs, gridW, gridH } = newest;
+
+        const futures = typeof history.allForecasts === 'function'
+            ? history.allForecasts()
+            : [];
+        if (futures.length === 0) return null;
+
+        // Index by hour-aligned t. WeatherHistory.ingestForecast already
+        // hour-floors `t`, so an exact === lookup suffices.
+        const byTarget = new Map();
+        for (const f of futures) byTarget.set(f.t, f);
+
+        const frames  = {};
+        const targets = {};
+        const matched = [];
+        for (const h of FORECAST_HORIZONS_H) {
+            const tt = Math.floor((issuedMs + h * HOUR_MS) / HOUR_MS) * HOUR_MS;
+            const f  = byTarget.get(tt);
+            if (!f || f.gridW !== gridW || f.gridH !== gridH) continue;
+            if (!(f.coarse instanceof Float32Array)) continue;
+            // Defensive copy. The forecast ring entry may be overwritten on
+            // the next batch fetch; the validator may hold this in IDB for
+            // up to MATCH_GRACE_MS waiting for ground truth.
+            frames[h]  = new Float32Array(f.coarse);
+            targets[h] = f.t;
+            matched.push(h);
+        }
+        if (matched.length === 0) return null;
+
+        return {
+            model_id:  this.id,
+            issued_ms: issuedMs,
+            horizons:  matched,
+            gridW, gridH,
+            frames,
+            target_ms: targets,
+        };
+    }
+}
+
 // ── Forecast registry ──────────────────────────────────────────────────────
 
 /**
@@ -130,7 +210,7 @@ export class PersistenceForecaster {
  * `info` so they're visible in DevTools without spamming the console.
  */
 export class ForecastRegistry {
-    constructor({ history } = {}) {
+    constructor({ history, ingestDebounceMs = 800, sliceBudgetMs = 12 } = {}) {
         if (!history) throw new Error('ForecastRegistry: history is required');
         this._history = history;
         /** @type {Map<string, Forecaster>} */
@@ -139,6 +219,14 @@ export class ForecastRegistry {
          *  validator and the future resolver hook. Plain object so
          *  iteration is predictable. */
         this._latest = {};
+        // Ingest-driven fan-out pacing (see _onIngest). The debounce
+        // coalesces the cold-start backfill's frame burst into one run;
+        // the slice budget bounds how long the chunked walk stays on the
+        // main thread between yields.
+        this._ingestDebounceMs = ingestDebounceMs;
+        this._sliceBudgetMs    = sliceBudgetMs;
+        this._runTimer = 0;
+        this._runGen   = 0;
         // Subscribed to weather-history-ingest dispatches from
         // WeatherHistory.ingest. Re-bound so we can remove on stop().
         this._onIngest = this._onIngest.bind(this);
@@ -158,12 +246,29 @@ export class ForecastRegistry {
     listModels() { return [...this._forecasters.keys()]; }
 
     /**
+     * Request a fan-out soon, without blocking the caller. Debounced onto
+     * the same chunked walk the ingest path uses, so callers that only
+     * want "results eventually" (post-registration kicks, bias updates)
+     * don't pay the heavy models' inline cost on the main thread the way
+     * a manual runAll() does. Multiple schedule()s coalesce.
+     */
+    schedule() {
+        clearTimeout(this._runTimer);
+        this._runTimer = setTimeout(() => { this._runAllChunked(); }, this._ingestDebounceMs);
+    }
+
+    /**
      * Run every registered forecaster against the current history and
      * emit the union as a single event. Safe to call manually (e.g. on
      * page load before the first ingest fires). Returns a map of
      * model_id → forecast result for the caller's convenience.
      */
     runAll() {
+        // A manual run supersedes any scheduled/in-flight chunked walk —
+        // both would compute from the same history, so letting the walk
+        // finish would only emit a duplicate event.
+        clearTimeout(this._runTimer);
+        this._runGen++;
         const out = {};
         for (const [id, fc] of this._forecasters) {
             try {
@@ -188,6 +293,8 @@ export class ForecastRegistry {
 
     stop() {
         document.removeEventListener('weather-history-ingest', this._onIngest);
+        clearTimeout(this._runTimer);
+        this._runGen++;                       // cancels an in-flight chunked walk
         this._forecasters.clear();
         this._latest = {};
     }
@@ -195,12 +302,344 @@ export class ForecastRegistry {
     // ── Internal ──────────────────────────────────────────────────────────
 
     _onIngest() {
-        // The history ring has just absorbed a new frame. That gives every
-        // forecaster a fresh tail to predict from. Run them all and emit.
-        // Cheap for persistence (~1 alloc per horizon), more expensive for
-        // future AR/reservoir models — but those are still O(grid) per
-        // call, well under one rAF.
-        this.runAll();
+        // The history ring absorbed a new frame — every forecaster has a
+        // fresh tail to predict from. This fan-out was originally a direct
+        // synchronous runAll(); two things outgrew that:
+        //   1. The registry now holds ~17 models, several of which are
+        //      O(grid × substeps) trajectory integrations (advection, rk2,
+        //      multilevel) — the summed loop was a multi-hundred-ms main-
+        //      thread task, competing with the render loop.
+        //   2. The cold-start backfill ingests up to 24 frames in a burst,
+        //      which used to trigger 24 FULL fan-outs at page load — only
+        //      the last one's output ever mattered.
+        // The trailing debounce collapses bursts to one run; the chunked
+        // walk yields between forecasters when the time-slice budget is
+        // spent, so the longest uninterrupted task is one model, not the
+        // sum. runAll() itself stays synchronous for manual callers.
+        this.schedule();
+    }
+
+    async _runAllChunked() {
+        const gen = ++this._runGen;
+        const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        const out = {};
+        let sliceStart = nowMs();
+        for (const [id, fc] of this._forecasters) {
+            try {
+                // Heavy models expose forecastAsync — same result computed
+                // off-thread (worker), inline-fallback inside. The await is
+                // also a natural yield point for the render loop.
+                const result = (typeof fc.forecastAsync === 'function')
+                    ? await fc.forecastAsync({ history: this._history })
+                    : fc.forecast({ history: this._history });
+                if (gen !== this._runGen) return;     // superseded mid-await
+                if (result) out[id] = result;
+            } catch (err) {
+                console.info(`[ForecastRegistry] ${id} threw:`, err?.message);
+                if (gen !== this._runGen) return;
+            }
+            if (nowMs() - sliceStart > this._sliceBudgetMs) {
+                await new Promise(r => setTimeout(r, 0));
+                if (gen !== this._runGen) return;     // superseded / stopped
+                sliceStart = nowMs();
+            }
+        }
+        if (gen !== this._runGen) return;
+        this._latest = out;
+        document.dispatchEvent(new CustomEvent('weather-forecast-update', {
+            detail: { results: out, issued_ms: Date.now() },
+        }));
+    }
+}
+
+// ── Forecast paint provider ─────────────────────────────────────────────────
+
+/**
+ * Bridges a single "pinned" forecaster to the WeatherFrameResolver so the
+ * future-scrub globe renders OUR forecast instead of the upstream NWP
+ * frames sitting in the history forecast ring. This is the "Phase 3
+ * resolver render" hook described in WEATHER_FORECAST_PLAN.md / the
+ * weather-forecast.js header.
+ *
+ * Lifecycle
+ *   On each `weather-history-ingest` (a fresh observation landed) it asks
+ *   the pinned forecaster for a DENSE hourly set (0..maxHorizonH), decodes
+ *   each coarse frame into a renderer trio once, and caches them keyed by
+ *   absolute target_ms. h=0 is the current observation, so the cache spans
+ *   [issued_ms, issued_ms + maxHorizonH·h] continuously and the
+ *   live→forecast handoff has no seam.
+ *
+ *   The resolver calls bracket(tEff) on every future tick; that's a cheap
+ *   binary-search + reference return (no decode), so dragging the slider
+ *   is allocation-light. Recompute/decode happens once per ingest (~hourly).
+ *
+ * Open-Meteo is intentionally NOT consulted here — it stays a scored
+ * leaderboard baseline (read from the history forecast ring by
+ * OpenMeteoNWPForecaster), never a paint source.
+ */
+export class ForecastPaintProvider {
+    /**
+     * @param {object} opts
+     * @param {{ forecastDense(ctx): object|null }} opts.forecaster  Pinned model.
+     * @param {import('./weather-history.js').WeatherHistory} opts.history
+     * @param {(coarse: Float32Array, gridW: number, gridH: number) => object} opts.decode
+     *   CHW-coarse → { weatherBuf, windBuf, cloudBuf }. Pass the feed's
+     *   _decodeCoarse so the forecast goes through the exact same
+     *   bilinear+blur+pack pipeline observations use.
+     * @param {number} [opts.maxHorizonH=24]
+     * @param {boolean} [opts.handoffBeyondHorizon=true]  When true, bracket()
+     *   returns null for timestamps past the pinned model's deepest horizon
+     *   instead of clamping to the last frame. That null is the resolver's
+     *   cue to fall through to WeatherHistory.bracket(), which lerps the
+     *   Open-Meteo NWP forecast ring hour-by-hour — so the globe keeps
+     *   evolving from +maxHorizonH out to the deepest loaded NWP batch
+     *   instead of freezing on the RK2 model's last (near-persistence)
+     *   frame for ~13 days. Set false to restore the old clamp behaviour.
+     */
+    constructor({ forecaster, history, decode, maxHorizonH = 24,
+                  handoffBeyondHorizon = true, worker = null } = {}) {
+        if (!forecaster || typeof forecaster.forecastDense !== 'function') {
+            throw new Error('ForecastPaintProvider: forecaster with forecastDense() required');
+        }
+        if (!history) throw new Error('ForecastPaintProvider: history required');
+        if (typeof decode !== 'function') throw new Error('ForecastPaintProvider: decode fn required');
+        this._forecaster  = forecaster;
+        this._history     = history;
+        this._decode      = decode;
+        this._maxHorizonH = maxHorizonH;
+        this._handoff     = handoffBeyondHorizon !== false;
+        // Optional off-thread compute (WeatherForecastWorkerBridge). When
+        // available, refresh() integrates the dense forecast in a worker and
+        // swaps the result in on reply; otherwise it computes inline (the
+        // synchronous back-compat path tests rely on). _refreshGen guards
+        // against a stale worker reply landing after a newer refresh.
+        this._worker     = worker;
+        this._refreshGen = 0;
+
+        this._issuedMs = null;
+        this._targets  = [];          // sorted ascending target_ms
+        this._coarse   = new Map();   // target_ms → coarse CHW Float32 (cheap to hold)
+        this._trios    = new Map();   // target_ms → decoded trio (LRU, filled lazily)
+        this._trioCap  = 8;           // decoded-trio cap (~8 × 3.1 MB ≈ 25 MB)
+        // Near-term horizons the worker pre-decodes off-thread (0..N h), so the
+        // most-scrubbed window is a cache hit instead of a ~15 ms on-thread
+        // decode. Only used on the worker path; the inline path decodes lazily.
+        this._prewarmH = 6;
+        this._gridW    = null;
+        this._gridH    = null;
+        this._modelId  = forecaster.id ?? 'forecast';
+
+        // Debounce ingest-driven rebuilds. forecastDense is ~350 ms on the
+        // main thread; a cold-start backfill fires ~24 ingests in a tight
+        // loop, which back-to-back would freeze the page for seconds. Coalesce
+        // them into one rebuild ~200 ms after the burst settles. Direct
+        // refresh() callers (construction warm-up, tests) are unaffected.
+        this._refreshTimer = 0;
+        this._onIngest = () => {
+            if (typeof setTimeout !== 'function') { this.refresh(); return; }
+            clearTimeout(this._refreshTimer);
+            this._refreshTimer = setTimeout(() => this.refresh(), 200);
+        };
+        document.addEventListener('weather-history-ingest', this._onIngest);
+    }
+
+    /**
+     * Rebuild the dense forecast from current history (decode stays lazy).
+     *
+     * Worker path (when a bridge is wired and available): prepare the
+     * serializable inputs on the main thread — cheap: gain/shear eval + the
+     * newest two frames — then integrate off-thread and swap the result in on
+     * reply. The previous forecast keeps painting until the swap, so there's
+     * no blank frame. A generation counter drops a stale reply if a newer
+     * refresh has since been issued. Worker error → inline fallback.
+     *
+     * Inline path (no worker, or worker unavailable): compute synchronously,
+     * exactly as before. Direct callers (construction warm-up, tests) get a
+     * forecast the instant refresh() returns.
+     */
+    refresh() {
+        if (!this._inlineRefreshOnly()) {
+            let inputs = null;
+            try {
+                inputs = this._forecaster.denseInputs({
+                    history: this._history, maxHorizonH: this._maxHorizonH,
+                });
+            } catch (err) {
+                console.info('[ForecastPaintProvider] denseInputs threw:', err?.message);
+            }
+            if (!inputs) return;                       // keep the prior forecast painting
+            inputs.prewarmH = this._prewarmH;          // pre-decode the near term off-thread
+            const gen = ++this._refreshGen;
+            this._worker.request(inputs)
+                .then((dense) => {
+                    if (gen !== this._refreshGen) return;   // superseded by a newer refresh
+                    this._applyDense(dense);
+                    this._announce();
+                })
+                .catch((err) => {
+                    if (gen !== this._refreshGen) return;
+                    console.info('[ForecastPaintProvider] worker failed, inline fallback:', err?.message);
+                    this._applyDense(this._computeInline());
+                    this._announce();
+                });
+            return;
+        }
+        // Inline (synchronous).
+        ++this._refreshGen;                            // invalidate any in-flight worker reply
+        this._applyDense(this._computeInline());
+    }
+
+    /** True when refresh() must compute on the main thread. */
+    _inlineRefreshOnly() {
+        return !(this._worker
+            && typeof this._worker.available === 'function' && this._worker.available()
+            && typeof this._forecaster.denseInputs === 'function');
+    }
+
+    _computeInline() {
+        try {
+            return this._forecaster.forecastDense({
+                history: this._history, maxHorizonH: this._maxHorizonH,
+            });
+        } catch (err) {
+            console.info('[ForecastPaintProvider] forecast threw:', err?.message);
+            return null;
+        }
+    }
+
+    /** Swap a freshly-computed dense forecast into the paint cache (lazy decode). */
+    _applyDense(dense) {
+        this._trios.clear();
+        this._coarse.clear();
+        this._targets = [];
+        if (!dense) { this._issuedMs = null; return; }
+
+        const targets = [];
+        for (const h of dense.horizons) {
+            const coarse = dense.frames[h];
+            const tt     = dense.target_ms[h];
+            if (!(coarse instanceof Float32Array) || !Number.isFinite(tt)) continue;
+            // Store the coarse frame; decode lazily in bracket() via _trioFor().
+            // Decoding all frames here would burn ~375 ms and pin ~78 MB of
+            // trios for frames the user may never scrub to.
+            this._coarse.set(tt, coarse);
+            targets.push(tt);
+            // Seed any worker-pre-decoded near-term trio so the first scrub
+            // into it is a cache hit, not a ~15 ms on-thread decode.
+            const trio = dense.trios && dense.trios[h];
+            if (trio && trio.weatherBuf instanceof Float32Array && this._trios.size < this._trioCap) {
+                this._trios.set(tt, trio);
+            }
+        }
+        targets.sort((a, b) => a - b);
+        this._targets  = targets;
+        this._issuedMs = dense.issued_ms;
+        this._gridW    = dense.gridW;
+        this._gridH    = dense.gridH;
+        this._modelId  = dense.model_id ?? this._modelId;
+    }
+
+    /**
+     * Tell the host a fresh (worker-computed) forecast landed asynchronously,
+     * so it can invalidate the resolver and repaint the current scrub
+     * position. No-op for the inline path (the caller already has the result).
+     */
+    _announce() {
+        if (typeof document === 'undefined' || typeof CustomEvent === 'undefined') return;
+        document.dispatchEvent(new CustomEvent('forecast-paint-update', {
+            detail: { model_id: this._modelId, issued_ms: this._issuedMs, horizons: this._targets.length },
+        }));
+    }
+
+    /**
+     * Decode + LRU-cache the trio for a target_ms. Misses pay one decode
+     * (~15 ms); hits are O(1). Capped at _trioCap so deep scrubs don't pin
+     * the whole 0..maxHorizonH set in memory.
+     */
+    _trioFor(tt) {
+        const hit = this._trios.get(tt);
+        if (hit) { this._trios.delete(tt); this._trios.set(tt, hit); return hit; }  // bump recency
+        const coarse = this._coarse.get(tt);
+        if (!coarse) return null;
+        const trio = this._decode(coarse, this._gridW, this._gridH);
+        if (this._trios.size >= this._trioCap) {
+            this._trios.delete(this._trios.keys().next().value);   // evict oldest
+        }
+        this._trios.set(tt, trio);
+        return trio;
+    }
+
+    /**
+     * Bracketing decoded trios for a future timestamp.
+     *   - null when tEff is at/before the issue time (the resolver's own
+     *     replay/clamp path owns the past) or no forecast is loaded.
+     *   - null past the deepest horizon when handoffBeyondHorizon (default):
+     *     the resolver then paints the NWP forecast ring instead, so the
+     *     globe keeps evolving rather than freezing on the last RK2 frame.
+     *   - otherwise clamps to the deepest horizon beyond the forecast range.
+     * @returns {null | { a, b, frac, meta }}
+     */
+    bracket(tEff) {
+        const targets = this._targets;
+        if (targets.length === 0) return null;
+        const first = targets[0];                       // == issued_ms (h=0 anchor)
+        const last  = targets[targets.length - 1];
+        if (tEff < first) return null;                  // past / live — not ours
+        if (tEff >= last) {
+            // Hand the deep future to the resolver's NWP-ring path. Returning
+            // null is the documented signal in WeatherFrameResolver._dispatchReplay
+            // to fall through to WeatherHistory.bracket(tEff). When the ring
+            // has no frame deeper than `last` yet (prefetch still walking
+            // forward), the ring clamps to its own newest forecast frame —
+            // identical to the old behaviour — and un-freezes progressively
+            // as deeper NWP batches land.
+            if (this._handoff) return null;
+            const trio = this._trioFor(last);
+            return trio ? { a: trio, b: trio, frac: 0, meta: this._meta(last) } : null;
+        }
+        // First target strictly greater than tEff.
+        let lo = 0, hi = targets.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (targets[mid] <= tEff) lo = mid + 1; else hi = mid;
+        }
+        const beforeT = targets[lo - 1];
+        const afterT  = targets[lo];
+        const a = this._trioFor(beforeT);
+        const b = this._trioFor(afterT);
+        if (!a || !b) return null;
+        const span = afterT - beforeT;
+        const frac = span > 0 ? (tEff - beforeT) / span : 0;
+        return { a, b, frac, meta: this._meta(beforeT) };
+    }
+
+    /**
+     * Absolute ms of the deepest forecast frame (== issued_ms + maxHorizonH·h),
+     * or null when no forecast is loaded. The resolver uses this to locate the
+     * model→NWP seam and crossfade across it. Read-only; cheap.
+     */
+    horizonEndMs() {
+        return this._targets.length ? this._targets[this._targets.length - 1] : null;
+    }
+
+    _meta(targetMs) {
+        return {
+            model_id:  this._modelId,
+            source:    this._modelId,
+            issued_ms: this._issuedMs,
+            target_ms: targetMs,
+            gridW:     this._gridW,
+            gridH:     this._gridH,
+            isForecast: true,
+        };
+    }
+
+    stop() {
+        if (typeof clearTimeout === 'function') clearTimeout(this._refreshTimer);
+        document.removeEventListener('weather-history-ingest', this._onIngest);
+        this._trios.clear();
+        this._coarse.clear();
+        this._targets = [];
     }
 }
 

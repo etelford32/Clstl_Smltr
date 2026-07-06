@@ -167,6 +167,23 @@ body.theme-light #storm-watch-panel .sw-scrub-row2 input[type=range]::-webkit-sl
     box-shadow: 0 0 4px rgba(217, 106, 26, .45), inset 0 1px 0 rgba(255, 255, 255, .80);
 }
 
+/* AurOracle cross-sell chip in the SW HUD — teal to match the AurOracle
+   brand and stand out from the blue HUD as a "go deeper" affordance. */
+.ip-auroracle-cta{display:flex;align-items:center;gap:7px;margin:7px 0 2px;padding:7px 9px;
+    border-radius:7px;text-decoration:none;cursor:pointer;
+    background:linear-gradient(100deg,rgba(95,255,208,.10),rgba(0,198,255,.07));
+    border:1px solid rgba(95,255,208,.30);transition:border-color .15s,background .15s,transform .1s}
+.ip-auroracle-cta:hover{border-color:rgba(95,255,208,.55);background:linear-gradient(100deg,rgba(95,255,208,.16),rgba(0,198,255,.11))}
+.ip-auroracle-cta:active{transform:scale(.985)}
+.ip-aur-ico{color:#5fffd0;font-size:12px;flex-shrink:0;filter:drop-shadow(0 0 4px rgba(95,255,208,.6))}
+.ip-aur-txt{flex:1;font-size:10px;line-height:1.3;color:#bfeede}
+.ip-aur-txt b{color:#eafff7;font-weight:700;letter-spacing:.01em}
+.ip-aur-go{color:#5fffd0;font-size:13px;font-weight:700;flex-shrink:0}
+html.theme-light .ip-auroracle-cta,body.theme-light .ip-auroracle-cta{
+    background:linear-gradient(100deg,rgba(0,150,120,.12),rgba(0,140,180,.08));border-color:rgba(0,150,120,.4)}
+html.theme-light .ip-aur-txt{color:#1a6b58}
+html.theme-light .ip-aur-txt b{color:#0a4a3a}
+
 /* Aurora-power "fc-chip" intensity backgrounds inside the SW HUD
    are tuned for a dark surface (low-alpha rgba over near-black).
    On light, increase saturation so the chip still reads. */
@@ -1225,6 +1242,26 @@ nav {
 .wx-skill-grid .skill-ch        { color: #99a; }
 .wx-skill-grid .skill-cell      { text-align: right; color: #aac; }
 
+/* ── Model skill leaderboard ─────────────────────────────────────
+   One row per registered forecaster, ranked by Murphy skill vs the
+   persistence baseline. The bar is centred at 0 skill: a green fill
+   grows right for models that beat persistence, a red fill grows left
+   for those that don't. This is the physics-first credibility surface. */
+.wx-leaderboard { font-family: monospace; font-size: 10px; color: #9ab;
+                  display: flex; flex-direction: column; gap: 3px; }
+.wx-lb-row  { display: grid; grid-template-columns: 82px 1fr 40px;
+              align-items: center; gap: 6px; }
+.wx-lb-name { color: #bcd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wx-lb-name.lead { color: #7fe0c0; font-weight: 600; }
+.wx-lb-bar  { position: relative; height: 8px; border-radius: 2px;
+              background: #161c2a; overflow: hidden; }
+.wx-lb-bar::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0;
+                     width: 1px; background: #3a4358; }
+.wx-lb-fill { position: absolute; top: 0; bottom: 0; transition: width .3s; }
+.wx-lb-pct  { text-align: right; color: #aac; }
+.wx-lb-row.warming .wx-lb-name { color: #667; }
+.wx-lb-row.warming .wx-lb-pct  { color: #556; }
+
 /* ── Wind-advection learner HUD ─────────────────────────────────
    Tiny bar chart showing α[h] per-horizon at a glance. Each bar is
    stacked: the filled portion = α value (0..1). Colour walks
@@ -1768,6 +1805,52 @@ nav {
 #tc-scrub:focus::-webkit-slider-thumb { box-shadow: 0 0 10px rgba(0,200,200,.7); }
 #tc-scrub:focus::-moz-range-thumb     { box-shadow: 0 0 10px rgba(0,200,200,.7); }
 
+/* Wind-forecast skill strip. Five cells stacked horizontally below the
+   scrubber, each a tiny bar coloured green→amber→red based on Murphy
+   skill of our best wind forecaster vs persistence at that horizon.
+   Painted from the WeatherForecastValidator summary on
+   'weather-forecast-validation-update' events. Always visible — gives
+   the user one-glance confidence as they consider scrubbing forward. */
+#tc-skill-strip {
+    display: flex; align-items: center; gap: 6px;
+    padding: 1px 4px 0; font-size: 9px; color: #557;
+    font-family: monospace; letter-spacing: .04em;
+}
+.tc-skill-label {
+    color: #446; text-transform: uppercase;
+    font-size: 8px; letter-spacing: .08em;
+    min-width: 60px;
+}
+.tc-skill-cell {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; gap: 1px; min-width: 24px;
+    height: 18px;
+}
+.tc-skill-bar {
+    display: block; width: 100%; height: 8px;
+    background: linear-gradient(to top,
+        rgba(0,200,200,.10) 0%, rgba(0,200,200,.10) 100%);
+    border-radius: 1px; border: 1px solid rgba(255,255,255,.05);
+    /* Bar fill is driven by --skill (0..1) via a CSS var, painted at
+       runtime. Default empty state is the faint cyan above. */
+    --skill: 0;
+    --skill-color: #557;
+    background-image:
+        linear-gradient(to top,
+            var(--skill-color) 0%,
+            var(--skill-color) calc(var(--skill) * 100%),
+            transparent calc(var(--skill) * 100%));
+    transition: --skill .3s, --skill-color .3s, background-image .3s;
+}
+.tc-skill-tag {
+    font-size: 8px; color: #667; line-height: 1;
+}
+.tc-skill-cell[data-state="warm"]  .tc-skill-tag { color: #99a; }
+.tc-skill-cell[data-state="cold"]  .tc-skill-tag { color: #445; }
+.tc-skill-cell[data-state="poor"]  .tc-skill-tag { color: #cc4; }
+.tc-skill-cell[data-state="good"]  .tc-skill-tag { color: #4c8; }
+.tc-skill-cell[data-state="best"]  .tc-skill-tag { color: #4cf; font-weight: 700; }
+
 /* Forecast-loading indicator. Sits as a third row inside #time-controls,
    only rendered while WeatherForecastFeed has a chunked triplet in
    flight. The amber palette matches the readout-toggle pill so the
@@ -2094,14 +2177,14 @@ nav {
 
 <script type="importmap">
 {"imports":{
-    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three":         "./js/vendor/three-0.160.0/three.module.js",
+    "three/addons/": "./js/vendor/three-0.160.0/jsm/"
 }}
 </script>
 <!-- perf-hints:start -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" crossorigin>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
 <!-- perf-hints:end --><!-- ═══ Theme activation hook ═══════════════════════════════════════════
      Runs before any panel paints so `body.theme-light` is in place when
      the first frame renders — otherwise the user briefly sees the dark
@@ -2186,6 +2269,9 @@ nav {
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260508"; initNav("earth");</script>
+<script type="module">
+import './js/telemetry.js';
+</script>
 
 <!-- ── Theme toggle button ─────────────────────────────────────────
      The 🌗 glyph swaps to ☀ / 🌙 in the inline script below based on
@@ -2476,11 +2562,13 @@ nav {
             <div class="lyr-section-hdr"><span>WEATHER</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
                 <div class="lyr"><input type="checkbox" id="lyr-weather"><span class="lyr-status" data-layer="weather-temp" title="waiting"></span><label for="lyr-weather">Weather (temp)</label><label class="lyr-rd" for="rd-temp" title="Show temperature (°C) on cursor hover"><input type="checkbox" id="rd-temp"><span class="lyr-rd-badge">#</span></label></div>
+                <div class="lyr" title="Ray-marched 3-D temperature volume: surface 2 m + real 850/500 hPa anchors (Open-Meteo pressure levels), lapse-extrapolated to the tropopause. The bright sheet is the 0 °C freezing level. Vertical scale exaggerated for visibility; temperatures are real. Scrub the timeline — the next 24 h evolve via the in-browser multi-level advection model (each level advected by its own steering wind), blending into NWP out to +72 h."><input type="checkbox" id="lyr-tempvol"><span class="lyr-status" data-layer="tempvol" title="waiting"></span><label for="lyr-tempvol">Temp Volume (3D)</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-wind"    checked><span class="lyr-status" data-layer="wind" title="waiting"></span><label for="lyr-wind">Wind Particles</label><label class="lyr-rd" for="rd-wind" title="Show surface wind (10 m, m/s + km/h + bearing) on cursor hover"><input type="checkbox" id="rd-wind"><span class="lyr-rd-badge">#</span></label></div>
                 <div class="lyr" title="Highlight wind &gt; 18 m/s (65 km/h) — surface-wind proxy for the polar/subtropical jet (Open-Meteo only delivers 10 m winds)">
                     <input type="checkbox" id="lyr-jet"><span class="lyr-status" data-layer="jet" title="waiting"></span><label for="lyr-jet">Jet Stream</label>
                 </div>
                 <div class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label><label class="lyr-rd" for="rd-pressure" title="Show surface pressure (hPa) on cursor hover"><input type="checkbox" id="rd-pressure"><span class="lyr-rd-badge">#</span></label></div>
+                <div class="lyr" title="Synoptic fronts detected from the temperature gradient and wind. Blue = cold front (cold air advancing into warm), red = warm front (warm air advancing into cold), grey = stationary. Mid-latitudes only (|lat| < 75°)."><input type="checkbox" id="lyr-fronts"><span class="lyr-status" data-layer="fronts" title="waiting"></span><label for="lyr-fronts">Fronts</label></div>
                 <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
                 <label class="lyr" title="5-day kinematic extrapolation cone for every active tropical cyclone. NOT NHC's official forecast — this is a great-circle projection of current motion with NHC's published average track-error radii applied for the cone width. Click a storm card to focus its cone."><input type="checkbox" id="lyr-storm-tracks"><span class="lyr-status" data-layer="storm-tracks" title="waiting"></span><label for="lyr-storm-tracks">Storm Tracks (5-day)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
@@ -2504,6 +2592,10 @@ nav {
                     <div class="lyr" title="Mist and fog: gated on RH ≥ 85% AND low-cloud fraction ≥ 0.3. Coastal valleys and tropical convergence zones glow soft white.">
                         <input type="checkbox" id="lyr-mist"><label for="lyr-mist">Mist &amp; Fog</label>
                         <label class="lyr-rd" for="rd-mist" title="Show RH (%) and low-cloud fraction on cursor hover"><input type="checkbox" id="rd-mist"><span class="lyr-rd-badge">#</span></label>
+                    </div>
+                    <div class="lyr" title="Wind convergence / uplift — the dynamical signal the forecast grows precipitation from. Indigo→cyan = converging air rising (storms building); amber = diverging air sinking (clearing). Scrub the timeline to watch storm-genesis lines develop.">
+                        <input type="checkbox" id="lyr-convergence"><label for="lyr-convergence">Convergence / Uplift</label>
+                        <label class="lyr-rd" for="rd-convergence" title="Show convergence/uplift (10⁻⁵ s⁻¹) on cursor hover"><input type="checkbox" id="rd-convergence"><span class="lyr-rd-badge">#</span></label>
                     </div>
                 </div>
             </div>
@@ -2699,6 +2791,13 @@ nav {
             <span id="ip-aurora-forecast" class="iv"
                   style="display:flex;flex-wrap:wrap;gap:3px;justify-content:flex-end;font-size:9.5px;line-height:1.3;"></span>
         </div>
+        <!-- AurOracle cross-sell: tease the premium predictive aurora analytics
+             (tonight's viewing window, 7-night + 30-day, model breakdown). -->
+        <a class="ip-auroracle-cta" href="auroracle.html" data-funnel-cta="earth_aurora_to_auroracle">
+            <span class="ip-aur-ico">✦</span>
+            <span class="ip-aur-txt"><b>AurOracle</b> — predict your sky: tonight's viewing window, 7-night &amp; 30-day odds</span>
+            <span class="ip-aur-go">→</span>
+        </a>
 
         <!-- (hidden legacy element for JS compat) -->
         <span id="ip-storm" style="display:none;">—</span>
@@ -2964,6 +3063,20 @@ nav {
         <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
             <span>0</span><span>30</span><span>60 m/s</span>
         </div>
+        <!-- Convergence / uplift legend. Hidden until the "Convergence / Uplift"
+             layer is toggled on (see the lyr-convergence listener). The canvas
+             mirrors the overlay shader's convergenceColor() exactly, so the
+             diverging swatch is a true key: amber = subsidence (sinking,
+             clearing), indigo→cyan = uplift (rising air, weather building).
+             Ends anchor at ±UPLIFT_FULL_SCALE (2.5×10⁻⁵ s⁻¹). -->
+        <div id="wx-convergence-legend-box" style="display:none;">
+            <div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Convergence / uplift</div>
+            <canvas id="wx-convergence-legend" width="200" height="8"
+                    style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+                <span>↓ subsidence</span><span>0</span><span>uplift ↑</span>
+            </div>
+        </div>
         <hr class="ir-sep">
         <!-- Isobar / pressure analysis -->
         <div class="wx-row" style="align-items:flex-start;margin-bottom:2px;">
@@ -2987,6 +3100,10 @@ nav {
             <span class="wx-v" id="wx-centers">—</span>
         </div>
         <div id="wx-centers-list" style="font-size:9px;color:#668;margin-top:2px;margin-bottom:4px;line-height:1.6;"></div>
+        <div class="wx-row" title="Synoptic-front count by type (cold/warm/stationary), updated every weather refresh. Toggle the 'Fronts' layer to see them on the globe.">
+            <span class="wx-k">Fronts</span>
+            <span class="wx-v" id="wx-fronts">—</span>
+        </div>
         <hr class="ir-sep">
         <!-- Forecaster skill table (Phase 1: persistence baseline only).
              Cells = pooled MAE per channel × horizon. Future ML models
@@ -3000,6 +3117,16 @@ nav {
             Forecast skill (MAE)
         </div>
         <div id="wx-skill-grid" class="wx-skill-grid">awaiting first forecast…</div>
+        <!-- Model leaderboard. Ranks every registered forecaster by Murphy
+             skill vs persistence (1 − MSE_model/MSE_persistence), averaged
+             over the channels × horizons each model actually scores. The
+             physics-first credibility surface: "our model beats 'tomorrow
+             looks like today' by N%". Rows warm up until ≥5 matched targets. -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin:8px 0 4px;"
+             title="Every registered forecaster ranked by Murphy skill vs the persistence baseline. Positive = beats 'tomorrow looks like today'; bar is centred at zero skill.">
+            Model skill vs persistence
+        </div>
+        <div id="wx-leaderboard" class="wx-leaderboard">awaiting first validation cycle…</div>
         <!-- Precipitation deep-dive coverage HUD.
              Two one-line readouts: climatology coverage (per-cell ×
              local-hour bins with ≥3 samples) and the bias-tracker pair
@@ -3031,6 +3158,17 @@ nav {
                 <span class="wx-flow-gain-label">α[h]</span>
                 <div class="wx-flow-gain-bars" id="wx-flow-gain-bars"></div>
             </div>
+        </div>
+        <!-- Non-conserved microphysics status. Unlike the learner HUD above
+             (which matures over time), these are fixed properties of the
+             in-browser RK2 forecast: convergence growth forms new cloud + rain
+             where the wind converges; cloud→precip keeps the rain consistent
+             with its deck over the horizon. Populated once from the live
+             forecaster config (see _initMicrophysicsHud). -->
+        <div id="wx-microphysics"
+             style="margin-top:6px;font-family:monospace;font-size:9.5px;color:#557;line-height:1.55;"
+             title="Non-conserved microphysics applied to the scrubbed forecast. Convergence growth = precip/cloud form where ∇·V<0 (rising air). Cloud→precip = rain relaxes toward its cloud deck so the two layers stay consistent.">
+            <div id="wx-microphysics-line">microphysics: …</div>
         </div>
         <hr class="ir-sep">
         <!-- NWS alert summary. The 🔔 Get Alerts CTA is intentionally
@@ -3109,6 +3247,20 @@ nav {
                    aria-label="Time scrub — drag left for up to 1 week of history, right for up to 14 days of forecast"
                    title="Drag left to replay (up to 1 week back) or right to preview (up to 14 days ahead)">
             <span class="tc-scrub-edge right">+2w</span>
+        </div>
+        <!-- Wind-forecast skill strip. Five cells aligned roughly under
+             the scrubber's forecast half (+1h, +3h, +6h, +12h, +24h).
+             Each cell is a tiny vertical bar coloured by Murphy skill of
+             our best wind forecaster vs persistence at that horizon:
+             green = beating persistence, red = losing. Dashes until the
+             validator has matched ≥5 forecasts at that horizon. -->
+        <div id="tc-skill-strip" title="Wind-forecast skill vs persistence at each lead time. Bars fill upward as confidence rises; an em-dash means not enough validated forecasts yet (≥5 needed).">
+            <span class="tc-skill-label">wind skill</span>
+            <span class="tc-skill-cell" data-h="1">  <span class="tc-skill-bar"></span><span class="tc-skill-tag">1h</span></span>
+            <span class="tc-skill-cell" data-h="3">  <span class="tc-skill-bar"></span><span class="tc-skill-tag">3h</span></span>
+            <span class="tc-skill-cell" data-h="6">  <span class="tc-skill-bar"></span><span class="tc-skill-tag">6h</span></span>
+            <span class="tc-skill-cell" data-h="12"> <span class="tc-skill-bar"></span><span class="tc-skill-tag">12h</span></span>
+            <span class="tc-skill-cell" data-h="24"> <span class="tc-skill-bar"></span><span class="tc-skill-tag">24h</span></span>
         </div>
         <div id="tc-buttons-row">
             <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
@@ -3244,11 +3396,13 @@ import {
     clearSavedLocations, formatLocalClock, dayNightBadge,
 } from './js/earth-saved-locations.js';
 import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
+import { computeUpliftField, UPLIFT_FULL_SCALE } from './js/weather-uplift.js';
 import { WeatherHistory }        from './js/weather-history.js';
 import { WeatherFrameResolver }  from './js/weather-frame-resolver.js';
 import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
-import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
-import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
+import { ForecastRegistry, PersistenceForecaster, OpenMeteoNWPForecaster, ForecastPaintProvider, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
+import { WeatherForecastWorkerBridge } from './js/weather-forecast-worker-bridge.js';
+import { WeatherForecastValidator, rankBySkill } from './js/weather-forecast-validation.js';
 import { mountModelsPanel } from './js/models-panel.js';
 import { ProbabilityPicker } from './js/probability-picker.js';
 import { mountRenewablesPanel } from './js/renewables-panel.js';
@@ -3264,7 +3418,12 @@ import {
 } from './js/precip-forecast.js';
 import { AtmosphereClimatology }    from './js/atmosphere-climatology.js';
 import { makeAtmosphereForecasters } from './js/atmosphere-forecast.js';
-import { makeWeatherFlowForecasters } from './js/weather-flow.js';
+import { makeWeatherFlowForecasters, WindAdvectionRK2Forecaster,
+         MultiLevelAdvectionForecaster, multilevelLevelsDense,
+         DEFAULT_HORIZONTAL_DIFFUSION } from './js/weather-flow.js';
+import { FocusFootprint }        from './js/focus-footprint.js';
+import { WeatherPatchFeed }      from './js/weather-patch.js';
+import { EarthDetailInset, stitchGlobalBase, GIBS_LAYERS } from './js/earth-detail-inset.js';
 import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
 import { WindShearProxy } from './js/wind-shear-proxy.js';
 import { AdvectionGainTracker } from './js/advection-gain-tracker.js';
@@ -3276,6 +3435,7 @@ import { makePanelDraggable, resetPanelPosition, makePanelResizable, resetPanelS
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
+import { FrontLayer }                            from './js/front-engine.js';
 import {
     MagnetosphereEngine,
     computeShue, computePlasmapause, computeIonoLayers,
@@ -3317,10 +3477,12 @@ import { nextPasses } from './js/pass-predictor.js';
 import { timeBus } from './js/operations/time-bus.js';
 import {
     EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
-    AURORA_VERT, AURORA_FRAG,
+    AURORA_VERT, AURORA_FRAG, TEMPVOL_VERT, TEMPVOL_FRAG,
     createEarthUniforms, createCloudUniforms, createAuroraUniforms,
+    createTempVolumeUniforms,
     loadEarthTextures,
 } from './js/earth-skin.js';
+import { TempVolumeFeed } from './js/temp-volume-feed.js';
 import { StormFeed } from './js/storm-feed.js';
 import { initDebugOverlay } from './js/debug-overlay.js';
 
@@ -3335,6 +3497,9 @@ const R_CLOUDS = 1.009;   // cloud shell just above surface
 const R_AURORA = 1.013;   // aurora oval shell (above clouds, below stratosphere)
 const R_STRAT  = 1.015;   // stratosphere haze (between clouds and outer atm)
 const R_ATM    = 1.026;   // atmosphere rim sphere
+const R_TEMPVOL = 1.06;   // temperature volume slab top — vertically
+                          // exaggerated troposphere (~11 km real ≈ 0.0017 R);
+                          // temperatures inside are NOT scaled, only geometry
 const TWO_PI   = Math.PI * 2;
 const DEG      = Math.PI / 180;
 
@@ -3450,6 +3615,76 @@ function onResize() {
 new ResizeObserver(onResize).observe(canvas);
 onResize();
 
+// ── Adaptive resolution governor ─────────────────────────────────────────────
+// Profiling (June 2026) showed this scene is fragment-/fill-rate-bound, not
+// geometry- or JS-bound: ~27 draw calls and ~112k triangles per frame (cheap),
+// but ~24 transparent overlay layers stacked over a multi-tap surface shader
+// (expensive per pixel). Cost therefore scales with rendered-pixel count =
+// cssPixels × pixelRatio². Measured: rendering at 2× device scale costs ~2.5×
+// the frame time of 1×. The static cap above pins everyone at up to 2×, which
+// is why weak/integrated GPUs drop to the 30–45 fps the autoRotate comment
+// notes — and worse on 4K/retina panels.
+//
+// Instead of pinning quality low for all, start at the device-appropriate cap
+// and let measured frame time pull the pixel ratio DOWN on GPUs that can't keep
+// up, then back UP when there's headroom. Capable hardware stays full-res;
+// struggling hardware trades crispness for a smooth frame rate instead of a
+// slideshow. Nothing here touches the scene graph, feeds, or feature defaults.
+const _prCap   = Math.min(devicePixelRatio || 1, /Mobi|Android/i.test(navigator.userAgent) ? 1.5 : 2);
+const _prFloor = Math.min(1, _prCap);   // never upscale past 1:1 CSS pixels
+let   _prNow   = _prCap;                 // matches the setPixelRatio() call above
+let   _prEmaMs = 1000 / 60;             // frame-interval EMA, seeded at 60 fps
+let   _prLastEvalMs = 0;
+// Stage 2 of the governor: cloud-shader ALU tiers (u_quality in CLOUD_FRAG).
+// Resolution scaling alone can't rescue a GPU whose bottleneck is per-
+// fragment FBM noise — fewer pixels just re-spend the savings on the same
+// ALU-heavy fragments once the ratio floor is hit. Order of operations:
+// coarsen pixels first (cheapest visually), then drop cloud octaves; on
+// recovery, restore cloud quality before re-sharpening pixels.
+const _CLOUD_Q_TIERS = [1, 0.66, 0.33];
+let   _cloudQIdx     = 0;
+let   _cloudQForced  = false;   // URL/console override pins the tier
+function _setCloudQuality(q) {
+    cloudU.u_quality.value = q;
+}
+function _governResolution(frameMs) {
+    // Ignore intervals that don't reflect GPU load: a backgrounded tab pauses
+    // rAF (huge gap on return), and an occasional GC pause / sync data decode
+    // can spike one frame. Skip those — but DON'T cap at a low frame time, or a
+    // genuinely overloaded GPU rendering at e.g. 300 ms/frame would have every
+    // frame ignored and never get the coarsening it most needs. Only the
+    // hidden-tab signal and an absurd one-off (>1.5 s, ~= alt-tab/devtools break)
+    // are excluded.
+    if (!(frameMs > 0) || frameMs > 1500 || document.hidden) return;
+    // EMA smooths transient spikes so one slow frame doesn't yank resolution.
+    _prEmaMs += (frameMs - _prEmaMs) * 0.1;
+    const now = performance.now();
+    if (now - _prLastEvalMs < 600) return;   // re-evaluate at most ~every 0.6 s
+    _prLastEvalMs = now;
+    let next = _prNow;
+    if (_prEmaMs > 22) {                                       // < ~45 fps → coarsen
+        if (_prNow > _prFloor) {
+            next = Math.max(_prFloor, +(_prNow - 0.25).toFixed(2));
+        } else if (!_cloudQForced && _cloudQIdx < _CLOUD_Q_TIERS.length - 1) {
+            _cloudQIdx++;
+            _setCloudQuality(_CLOUD_Q_TIERS[_cloudQIdx]);
+        }
+    } else if (_prEmaMs < 15) {                                // > ~66 fps → refine
+        if (!_cloudQForced && _cloudQIdx > 0) {
+            _cloudQIdx--;
+            _setCloudQuality(_CLOUD_Q_TIERS[_cloudQIdx]);
+        } else if (_prNow < _prCap) {
+            next = Math.min(_prCap, +(_prNow + 0.25).toFixed(2));
+        }
+    }
+    if (next !== _prNow) {
+        _prNow = next;
+        renderer.setPixelRatio(_prNow);
+        onResize();   // re-apply the drawing-buffer size at the new ratio
+    }
+}
+let _prLastFrameMs = 0;
+
 // ─── Starfield ────────────────────────────────────────────────
 {
     const pos = new Float32Array(5000 * 3);
@@ -3536,6 +3771,28 @@ const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
         return clamped;
     };
     window.getCloudDataStrength = () => cloudU.u_cloud_data_strength.value;
+
+    // Cloud ALU quality override (see u_quality in CLOUD_FRAG + the
+    // governor's stage 2 above). Forcing a value pins the tier so the
+    // governor won't fight a measurement session.
+    //   earth.html?cloud_quality=0.33   or   window.setCloudQuality(0.33)
+    const qParam = new URLSearchParams(location.search).get('cloud_quality');
+    if (qParam != null) {
+        const q = parseFloat(qParam);
+        if (Number.isFinite(q)) {
+            _cloudQForced = true;
+            _setCloudQuality(Math.max(0, Math.min(1, q)));
+            console.info(`[CloudDebug] u_quality = ${cloudU.u_quality.value} (from URL, governor pinned)`);
+        }
+    }
+    window.setCloudQuality = (v) => {
+        const clamped = Math.max(0, Math.min(1, Number(v)));
+        _cloudQForced = true;
+        _setCloudQuality(clamped);
+        console.info(`[CloudDebug] u_quality = ${clamped} (governor pinned)`);
+        return clamped;
+    };
+    window.getCloudQuality = () => cloudU.u_quality.value;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3593,6 +3850,27 @@ auroraMesh.renderOrder = 4;  // after clouds so it's not occluded by cloud alpha
 // the "oval at geographic lat X, lon Y" would drift relative to the ground as
 // the Earth rotates beneath a scene-anchored aurora sphere.
 earthMesh.add(auroraMesh);
+
+// ── Temperature volume shell ───────────────────────────────────────────
+// Ray-marched 3-D T(lat, lon, z) — see TEMPVOL_FRAG in js/earth-skin.js.
+// Surface anchor is the SAME u_weather DataTexture the surface tint samples
+// (assigned after weatherTex creation below); 850/500 hPa anchors arrive
+// lazily from TempVolumeFeed the first time the layer is enabled. Parented
+// to earthMesh so the shell's object space stays lockstep with the globe's
+// GMST rotation — the fragment shader marches in object space and derives
+// lat/lon via normalToUV, exactly like the surface shader.
+const tempVolU   = createTempVolumeUniforms();
+tempVolU.u_r_inner.value = R_EARTH;
+tempVolU.u_r_outer.value = R_TEMPVOL;
+const tempVolGeo = new THREE.IcosahedronGeometry(R_TEMPVOL, 3);   // shell hull only — detail lives in the ray march
+const tempVolMat = new THREE.ShaderMaterial({
+    vertexShader: TEMPVOL_VERT, fragmentShader: TEMPVOL_FRAG,
+    uniforms: tempVolU, transparent: true, depthWrite: false,
+});
+const tempVolMesh = new THREE.Mesh(tempVolGeo, tempVolMat);
+tempVolMesh.renderOrder = 5;    // over clouds + aurora; the march self-occludes against the ground
+tempVolMesh.visible = false;    // lyr-tempvol toggle owns this
+earthMesh.add(tempVolMesh);
 
 const stratGeo = new THREE.SphereGeometry(R_STRAT, 40, 40);
 const stratMat = new THREE.ShaderMaterial({
@@ -3734,7 +4012,43 @@ cloudU.u_cloud_layers.value.wrapT     = THREE.ClampToEdgeWrapping;
 cloudU.u_cloud_layers.value.flipY = true;
 cloudU.u_cloud_layers.value.needsUpdate = true;
 
-// ── Derived weather overlays — humidity / precip / mist ───────────────────
+// Convergence / uplift DataTexture (R=signed convergence [-1,1], A=|magnitude|).
+// Not consumed by the surface/cloud shaders — only the convergence overlay
+// samples it — so it lives as a standalone texture, recomputed from the wind
+// buffer on each weather-update (see updateWeatherTextures). Same south-first
+// row order + flipY as the other weather textures.
+const upliftTex = new THREE.DataTexture(
+    new Float32Array(TEX_W * TEX_H * 4), TEX_W, TEX_H,
+    THREE.RGBAFormat, THREE.FloatType
+);
+upliftTex.magFilter = THREE.LinearFilter;
+upliftTex.minFilter = THREE.LinearFilter;
+upliftTex.wrapS     = THREE.RepeatWrapping;
+upliftTex.wrapT     = THREE.ClampToEdgeWrapping;
+upliftTex.flipY     = true;
+upliftTex.needsUpdate = true;
+
+// ── Temperature-volume level anchors ────────────────────────────────────
+// 72×36 RGBA float (R=T850, G=T500, encoded (T+60)/110) — coarse-grid
+// resolution is right for upper-air fields (they're synoptically smooth)
+// and keeps the per-scrub re-upload at ~41 KB. The volume's surface anchor
+// shares the surface shader's u_weather texture so tint and volume can
+// never disagree.
+const volLevelsTex = new THREE.DataTexture(
+    new Float32Array(72 * 36 * 4), 72, 36,
+    THREE.RGBAFormat, THREE.FloatType
+);
+volLevelsTex.magFilter = THREE.LinearFilter;
+volLevelsTex.minFilter = THREE.LinearFilter;
+volLevelsTex.wrapS     = THREE.RepeatWrapping;
+volLevelsTex.wrapT     = THREE.ClampToEdgeWrapping;
+volLevelsTex.flipY     = true;   // same south-first row order as u_weather
+volLevelsTex.needsUpdate = true;
+tempVolU.u_vol_levels.value = volLevelsTex;
+tempVolU.u_weather.value    = earthU.u_weather.value;
+const tempVolFeed = new TempVolumeFeed();
+
+// ── Derived weather overlays — humidity / precip / mist / convergence ──────
 // Three thin shells parented to earthMesh, each reading the same
 // u_weather + u_cloud_layers DataTextures the surface/cloud shaders use.
 // No new fetches; the shader picks one of three colour ramps via mode
@@ -3749,16 +4063,28 @@ const _weatherOverlays = {
         THREE, radius: R_EARTH * 1.0035, icoLevel: ICO_LEVEL, mode: 'humidity',
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
+        upliftTexture:  upliftTex,
     }),
     'precip-rate': createWeatherOverlay({
         THREE, radius: R_EARTH * 1.0040, icoLevel: ICO_LEVEL, mode: 'precip-rate',
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
+        upliftTexture:  upliftTex,
     }),
     mist: createWeatherOverlay({
         THREE, radius: R_EARTH * 1.0028, icoLevel: ICO_LEVEL, mode: 'mist',
         weatherTexture: earthU.u_weather.value,
         cloudTexture:   cloudU.u_cloud_layers.value,
+        upliftTexture:  upliftTex,
+    }),
+    // Convergence / uplift — the dynamical source the forecast grows precip
+    // from. Sits just above the precip shell so storm-genesis lines read on
+    // top of the rain they're about to produce.
+    convergence: createWeatherOverlay({
+        THREE, radius: R_EARTH * 1.0045, icoLevel: ICO_LEVEL, mode: 'convergence',
+        weatherTexture: earthU.u_weather.value,
+        cloudTexture:   cloudU.u_cloud_layers.value,
+        upliftTexture:  upliftTex,
     }),
 };
 for (const ov of Object.values(_weatherOverlays)) earthMesh.add(ov.mesh);
@@ -3824,9 +4150,56 @@ earthMesh.add(tropicGroup); // child of earthMesh → rotates with globe
 // ═══════════════════════════════════════════════════════════════
 // Load textures via shared earth-skin.js loader
 // — version-pinned CDN, RepeatWrapping applied, safe 1×1 fallbacks on error
-loadEarthTextures(earthU, cloudU).then(() => {
+// Max anisotropy kills the smeary mid-zoom range where oblique mipmap
+// sampling used to blur the base textures; mipmaps stay at the loader
+// defaults (generateMipmaps + trilinear). ×16 is effectively free on
+// desktop GPUs; on mobile tile GPUs it costs real bandwidth on every
+// textured fragment, so phones clamp to ×4 (the visual win saturates
+// well before ×16 at typical phone viewing angles).
+const IS_MOBILE_UA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent ?? '');
+const EARTH_TEX_ANISO = IS_MOBILE_UA
+    ? Math.min(4, renderer.capabilities.getMaxAnisotropy())
+    : renderer.capabilities.getMaxAnisotropy();
+loadEarthTextures(earthU, cloudU, { anisotropy: EARTH_TEX_ANISO }).then(() => {
     document.getElementById('loading').classList.add('done');
+    _scheduleBaseUpgrade();
 });
+
+// ── 8K base-texture upgrade ─────────────────────────────────────────────────
+// The CDN Blue Marble is 4096×2048 (~0.09°/px) — visibly soft from half-globe
+// zoom inward. Once the page is idle, stitch BlueMarble_NextGeneration from
+// GIBS WMTS at level 3 (8192×4096, ~3–5 MB of edge-cached jpeg tiles) and
+// swap it over u_day. Strictly no-worse: any failure keeps the CDN texture.
+function _scheduleBaseUpgrade() {
+    if (renderer.capabilities.maxTextureSize < 8192) return;
+    if (navigator.connection?.saveData) return;
+    // GPU-memory gate: 8192×4096 RGBA8 + mips ≈ 180 MB resident (vs ~45 MB
+    // for the 4K texture). Fine on desktop; on phones it invites texture
+    // eviction jank, so mobile stays on 4K + anisotropy — which already
+    // fixes most of the mid-zoom smear. deviceMemory is Chrome-only, so
+    // only skip on the signal when it exists and reads low.
+    if (IS_MOBILE_UA) return;
+    if (Number.isFinite(navigator.deviceMemory) && navigator.deviceMemory < 8) return;
+    const kick = () => {
+        stitchGlobalBase().then((canvas) => {
+            if (!canvas) return;
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.colorSpace = THREE.SRGBColorSpace;
+            // Same conventions as loadEarthTextures: canvas row 0 is 90°N and
+            // the shader's normalToUV has v=0 at 90°N, so no flip on upload.
+            tex.flipY     = false;
+            tex.wrapS     = THREE.RepeatWrapping;
+            tex.wrapT     = THREE.ClampToEdgeWrapping;
+            tex.anisotropy = EARTH_TEX_ANISO;
+            const old = earthU.u_day.value;
+            earthU.u_day.value = tex;
+            old?.dispose?.();
+            console.info('[EarthSkin] base texture upgraded to 8K GIBS Blue Marble');
+        });
+    };
+    if ('requestIdleCallback' in window) requestIdleCallback(kick, { timeout: 15_000 });
+    else setTimeout(kick, 8_000);
+}
 
 // ── Storm-update: push active cyclone positions into cloud shader ─────────────
 new StormFeed().start();
@@ -3895,10 +4268,21 @@ const mouse     = new THREE.Vector2(-9, -9);
 const tipEl     = document.getElementById('coord-tip');
 let lastGeo = null;
 
+// Hover raycast gate. The coord raycast tests the level-6 icosphere
+// (~82k tris) with no BVH — meaningful per-frame JS cost when nothing
+// changed. The hit can only differ if the POINTER moved or the VIEW
+// (camera pose / globe rotation) moved, so animate() skips the raycast
+// until one of those flips this flag or the cached pose stops matching.
+let _pointerDirty  = true;
+const _rayCamPos   = new THREE.Vector3(Infinity, Infinity, Infinity);
+const _rayCamQuat  = new THREE.Quaternion(0, 0, 0, 0);
+let _rayEarthRotY  = Infinity;
+
 canvas.addEventListener('mousemove', e => {
     const r = canvas.getBoundingClientRect();
     mouse.x = ((e.clientX - r.left) / r.width)  *  2 - 1;
     mouse.y = ((e.clientY - r.top)  / r.height) * -2 + 1;
+    _pointerDirty = true;
     // Position tooltip near cursor
     tipEl.style.left = (e.clientX - r.left + 14) + 'px';
     tipEl.style.top  = (e.clientY - r.top  - 10) + 'px';
@@ -4038,6 +4422,24 @@ function _renderHoverReadouts(lat, lon) {
         rows.push(`<div class="ct-readout"><span class="ct-rd-icon">🌫</span>` +
             `<span class="ct-rd-val">${fog}</span> ` +
             `(RH ${wx.rhPct.toFixed(0)}% · low-cloud ${cl.clLow.toFixed(0)}%)</div>`);
+    }
+
+    // Convergence / uplift — the dynamical signal the forecast grows precip
+    // from. Reported in 10⁻⁵ s⁻¹ with the sign spelled out, so a hovered storm
+    // line reads as "↑ uplift" (air rising, weather building) vs "↓ subsidence"
+    // (air sinking, clearing). Threshold mirrors the overlay's alpha cutoff.
+    const wantConv = document.getElementById('rd-convergence')?.checked;
+    if (wantConv) {
+        const up = _sampleUpliftAt(lat, lon);
+        if (up) {
+            const v5 = up.convPerS / 1e-5;                 // → 10⁻⁵ s⁻¹
+            const label = v5 >=  0.15 ? '↑ uplift'
+                        : v5 <= -0.15 ? '↓ subsidence'
+                        : 'neutral';
+            rows.push(`<div class="ct-readout"><span class="ct-rd-icon">⇅</span>` +
+                `<span class="ct-rd-val">${label}</span> ` +
+                `(${v5 >= 0 ? '+' : ''}${v5.toFixed(1)}×10⁻⁵ s⁻¹)</div>`);
+        }
     }
 
     // ── Composite-index advisories ──
@@ -4422,6 +4824,43 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
     windParticles.setVisible(e.target.checked);
     windArrows.setVisible(e.target.checked);
 });
+// Temperature volume (3-D). Lazy by design: the pressure-level feed fetches
+// nothing until the first enable, so sessions that never open the layer add
+// zero Open-Meteo calls (the NWP prefetch already budgets the rate limit).
+// While the ring is loading (or if it fails), the shader's u_has_levels=0
+// path renders a standard-lapse volume off the live surface field, so the
+// toggle is never a no-op.
+let _volLastSimT = null;
+const _setVolPip = (state, title) => {
+    document.querySelectorAll('.lyr-status[data-layer="tempvol"]').forEach(pip => {
+        pip.classList.remove('st-idle', 'st-fetching', 'st-loaded', 'st-error');
+        pip.classList.add(`st-${state}`);
+        pip.title = title;
+    });
+};
+const _refreshVolLevels = () => {
+    if (tempVolFeed.sample(_volLastSimT ?? Date.now(), volLevelsTex.image.data)) {
+        volLevelsTex.needsUpdate = true;
+        tempVolU.u_has_levels.value = 1;
+    }
+};
+document.getElementById('lyr-tempvol')?.addEventListener('change', e => {
+    tempVolMesh.visible = e.target.checked;
+    if (e.target.checked) {
+        if (!tempVolFeed.hasData && !tempVolFeed.isFetching) {
+            _setVolPip('fetching', 'loading 850/500 hPa temperature…');
+        }
+        tempVolFeed.start();
+        _refreshVolLevels();
+    }
+});
+document.addEventListener('temp-volume-update', () => {
+    _setVolPip('loaded', '850/500 hPa anchors · Open-Meteo pressure levels · −24 h → +72 h');
+    if (tempVolMesh.visible) _refreshVolLevels();
+});
+document.addEventListener('temp-volume-error', () => {
+    _setVolPip('error', 'pressure-level fetch failed — rendering standard-lapse fallback');
+});
 // Derived weather overlays — share the existing weather DataTextures, no
 // new fetches. The shader's u_has_data uniform keeps them blank until a
 // real (non-procedural) frame arrives, so toggling them on before the
@@ -4438,6 +4877,20 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
     wireOverlay('lyr-humidity',   'humidity');
     wireOverlay('lyr-precip-rate', 'precip-rate');
     wireOverlay('lyr-mist',        'mist');
+    wireOverlay('lyr-convergence', 'convergence');
+    // Reveal the convergence/uplift colour key in the wx-panel only while its
+    // layer is on, so the swatch isn't dead chrome the rest of the time. The
+    // first-render synthetic dispatch fires this with checked=false → hidden.
+    document.getElementById('lyr-convergence')?.addEventListener('change', e => {
+        const box = document.getElementById('wx-convergence-legend-box');
+        if (box) box.style.display = e.target.checked ? '' : 'none';
+        // Uplift is computed lazily (see _refreshUpliftIfConsumed) — catch
+        // up now so the overlay's first frame shows the current field.
+        if (e.target.checked) _refreshUpliftIfConsumed();
+    });
+    document.getElementById('rd-convergence')?.addEventListener('change', e => {
+        if (e.target.checked) _refreshUpliftIfConsumed();
+    });
 }
 
 // Storm Tracks — 5-day kinematic forecast cones. The overlay rebuilds
@@ -5393,6 +5846,13 @@ const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
 // handler. null until the first feed lands; samplers must guard for that.
 let _lastWeatherBuf = null;   // R=T-norm, G=P-norm, B=RH-norm, A=speed-norm
 let _lastCloudBuf   = null;   // R=cl_low, G=cl_mid, B=cl_high, A=precip/10
+let _lastUpliftBuf  = null;   // R=signed convergence [-1,1], A=|magnitude|
+// Hidden-layer staleness flags. The weather-update handler skips the
+// isobar / jet-stream geometry rebuilds while their layers are hidden;
+// these mark that frames were missed so the layer toggles can catch up
+// from _lastWeatherBuf / the wind sampler on re-enable.
+let _isobarStale = false;
+let _jetStale    = false;
 
 // Bilinear-sample a 4-channel Float32 buffer at (lat,lon). Same row/col
 // convention as WindParticles._lookupWind: longitude wraps, row 0 = 90°S.
@@ -5445,6 +5905,12 @@ function _sampleCloudAt(lat, lon) {
         precipMmHr:  _wxSampleTmp[3] * 10,      //   0…10  mm/hr (capped)
     };
 }
+function _sampleUpliftAt(lat, lon) {
+    if (!_sampleRGBA4(_lastUpliftBuf, lat, lon, _wxSampleTmp)) return null;
+    // R is the signed convergence normalised by UPLIFT_FULL_SCALE; multiply
+    // back to recover s⁻¹. Positive = convergence/uplift, negative = subsidence.
+    return { convPerS: _wxSampleTmp[0] * UPLIFT_FULL_SCALE };
+}
 
 // ── Wind-scale legend ──────────────────────────────────────────────────
 // Paint the blue → white → magenta particle ramp into the wx-panel
@@ -5471,6 +5937,37 @@ function _sampleCloudAt(lat, lon) {
             r = 1.0;
             g = 1.0 - 0.72 * t;
             b = 1.0 - 0.05 * t;
+        }
+        ctx.fillStyle = `rgb(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0})`;
+        ctx.fillRect(x, 0, 1, H);
+    }
+})();
+
+// ── Convergence / uplift legend ─────────────────────────────────────────
+// Paint the diverging swatch pixel-by-pixel from the SAME convergenceColor()
+// math the overlay shader (js/weather-overlay.js) uses, so the key is exact.
+// x maps left→right to signed convergence −1→+1: amber (strong subsidence) →
+// neutral notch (the |mag|<0.06 transparent dead-zone) → indigo→cyan (strong
+// uplift). Painted once; the ramp is fixed.
+(function _paintConvergenceLegend() {
+    const cv = document.getElementById('wx-convergence-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    const mix = (a, b, t) => a + (b - a) * t;
+    const ss  = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+    for (let x = 0; x < W; x++) {
+        const signed = (x / (W - 1)) * 2 - 1;     // −1 … +1
+        const mag = Math.abs(signed);
+        let r, g, b;
+        if (mag < 0.06) {                          // shader's transparent dead-zone → neutral notch
+            r = 0.20; g = 0.22; b = 0.26;
+        } else if (signed >= 0) {                  // uplift: indigo → cyan
+            const t = ss(0, 1, signed);
+            r = mix(0.28, 0.30, t); g = mix(0.20, 0.85, t); b = mix(0.62, 0.95, t);
+        } else {                                   // subsidence: slate → amber
+            const t = ss(0, 1, -signed);
+            r = mix(0.42, 0.92, t); g = mix(0.40, 0.62, t); b = mix(0.34, 0.22, t);
         }
         ctx.fillStyle = `rgb(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0})`;
         ctx.fillRect(x, 0, 1, H);
@@ -5547,6 +6044,13 @@ jetstreamOverlay.setVisible(false);
 
 document.getElementById('lyr-jet')?.addEventListener('change', e => {
     jetstreamOverlay.setVisible(e.target.checked);
+    // Catch up on frames that arrived while hidden (weather-update skips
+    // the ribbon rebuild for invisible overlays).
+    if (e.target.checked && _jetStale) {
+        jetstreamOverlay.update();
+        _jetStale = false;
+        _updateJetReadout();
+    }
 });
 
 // ── Ocean surface currents ──────────────────────────────────────────
@@ -5643,6 +6147,7 @@ function _updateLayerTooltips() {
         'lyr-weather': `Weather (temp)\n${wxTip}`,
         'lyr-wind':    `Wind Particles\n${windTip}`,
         'lyr-isobars': `Isobars\n${isoTip}`,
+        'lyr-fronts':  `Synoptic Fronts (cold / warm / stationary)\n${isoTip}`,
         'lyr-alerts':  `Storm Alerts\n${alertTip}\n\nTropical storms: ${stormTip}`,
     };
     for (const [id, tip] of Object.entries(tips)) {
@@ -5702,6 +6207,142 @@ wxFeed.backfill(wxGridHistory, 24).then(n => {
     if (n > 0) wxResolver?.invalidate();
 });
 
+// ── High-res focus patch (nested focus window) ─────────────────────────────
+// The 5° global grid destroys all sub-synoptic structure; instead of a
+// quadratically-expensive global resolution bump, FocusFootprint tracks the
+// camera's ground footprint and WeatherPatchFeed fetches a ≤64×64 patch at
+// 0.25–1° (browser-direct Open-Meteo, keyless, per-visitor IP) whenever the
+// camera frames a region. The surface + cloud shaders blend the patch over
+// the global field inside the footprint with a soft edge (PATCH_GLSL in
+// js/earth-skin.js). The same FocusFootprint events will drive the Phase 2
+// GIBS imagery inset — one primitive, two features.
+const focusFootprint = new FocusFootprint({
+    camera, earthObject: earthMesh, radius: R_EARTH,
+});
+const wxPatchFeed = new WeatherPatchFeed();
+
+// "+ patch 64×48 · 0.5°" suffix for the wx-panel grid readout. Composed
+// with the base grid string by _refreshGridReadout so the patch status
+// survives the weather-update handler's own rewrites.
+let _baseGridStr  = '—';
+let _patchGridStr = '';
+function _refreshGridReadout() {
+    const el = document.getElementById('wx-grid');
+    if (el) el.textContent = _patchGridStr ? `${_baseGridStr} ${_patchGridStr}` : _baseGridStr;
+}
+
+{
+    const _mkPatchTex = (w, h) => {
+        const t = new THREE.DataTexture(
+            new Float32Array(w * h * 4), w, h, THREE.RGBAFormat, THREE.FloatType
+        );
+        t.magFilter = THREE.LinearFilter;   // GPU bilinear does the patch upsample
+        t.minFilter = THREE.LinearFilter;
+        t.wrapS     = THREE.ClampToEdgeWrapping;   // a patch is NOT lon-periodic
+        t.wrapT     = THREE.ClampToEdgeWrapping;
+        // Rows are south-first and sampled via the explicitly computed patch
+        // UV (v=0 ⇔ latMin), so unlike u_weather there is no flipY here.
+        t.flipY = false;
+        return t;
+    };
+    // Patch dims change with footprint shape, and DataTexture can't resize
+    // in place — recreate on mismatch, reuse otherwise.
+    const _setPatch = (uniform, data, w, h) => {
+        const cur = uniform.value;
+        if (!cur?.isDataTexture || cur.image.width !== w || cur.image.height !== h) {
+            cur?.dispose?.();
+            uniform.value = _mkPatchTex(w, h);
+        }
+        uniform.value.image.data.set(data);
+        uniform.value.needsUpdate = true;
+    };
+
+    document.addEventListener('weather-patch-update', (ev) => {
+        const { weatherRGBA, cloudRGBA, w, h, bounds, stepDeg } = ev.detail;
+        _setPatch(earthU.u_patch_weather, weatherRGBA, w, h);
+        // _setPatch may have recreated the texture — re-share the reference
+        // with the cloud shader (same pattern as u_weather above).
+        cloudU.u_patch_weather.value = earthU.u_patch_weather.value;
+        _setPatch(cloudU.u_patch_clouds, cloudRGBA, w, h);
+        earthU.u_patch_bounds.value.set(bounds.lonMin, bounds.latMin, bounds.lonSpan, bounds.latSpan);
+        cloudU.u_patch_bounds.value.copy(earthU.u_patch_bounds.value);
+        earthU.u_patch_on.value = 1;
+        cloudU.u_patch_on.value = 1;
+        const degStr = Number.isInteger(stepDeg) ? `${stepDeg}°` : `${stepDeg.toFixed(2)}°`;
+        _patchGridStr = `+ patch ${w}×${h} · ${degStr}`;
+        _refreshGridReadout();
+    });
+    document.addEventListener('weather-patch-clear', () => {
+        earthU.u_patch_on.value = 0;
+        cloudU.u_patch_on.value = 0;
+        _patchGridStr = '';
+        _refreshGridReadout();
+    });
+}
+
+// ── GIBS imagery detail inset (zoom LOD) ───────────────────────────────────
+// Second subscriber to the same FocusFootprint events: past the activation
+// threshold it stitches VIIRS true-colour WMTS tiles over the visible
+// footprint (down to ~150 m/px at full zoom) and the surface shader blends
+// them over the Blue Marble base with the shared inset-edge falloff.
+const earthDetailInset = new EarthDetailInset();
+
+document.addEventListener('earth-detail-inset', (ev) => {
+    const { canvas, bounds } = ev.detail;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    // Canvas row 0 is the inset's NORTH edge while the shared insetUV
+    // convention puts v=0 at latMin (south) — flipY=true reverses rows on
+    // upload so v=1 lands on the north edge. (CanvasTexture defaults to
+    // true; set explicitly because the relationship is load-bearing.)
+    tex.flipY      = true;
+    tex.wrapS      = THREE.ClampToEdgeWrapping;   // an inset is NOT lon-periodic
+    tex.wrapT      = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = EARTH_TEX_ANISO;
+    const old = earthU.u_detail.value;
+    earthU.u_detail.value = tex;
+    earthU.u_detail_bounds.value.set(bounds.lonMin, bounds.latMin, bounds.lonSpan, bounds.latSpan);
+    earthU.u_detail_on.value = 1;
+    old?.dispose?.();
+});
+document.addEventListener('earth-detail-clear', () => {
+    earthU.u_detail_on.value = 0;
+});
+
+// ── Topology detail inset (zoom LOD, bump pass) ─────────────────────────────
+// Third subscriber to the same footprint: a GIBS shaded-relief window that
+// drives the surface bump pass harder once the camera is close enough that
+// the global height map (0.176°/texel) has nothing left to give. Tighter
+// activation than the imagery inset — relief detail only reads at close
+// range, and every active inset is another fetch stream on pan.
+const topoDetailInset = new EarthDetailInset({
+    layer: GIBS_LAYERS.topology,
+    activateSpanDeg: 25,
+    eventPrefix: 'earth-topo-detail',
+});
+
+document.addEventListener('earth-topo-detail-inset', (ev) => {
+    const { canvas, bounds } = ev.detail;
+    const tex = new THREE.CanvasTexture(canvas);
+    // Height-ish data, sampled for gradients — keep the default linear
+    // (no-colour-space) decode, matching the global u_topology texture.
+    // flipY=true for the same reason as the imagery inset: canvas row 0 is
+    // the north edge, insetUV has v=0 at latMin.
+    tex.flipY      = true;
+    tex.wrapS      = THREE.ClampToEdgeWrapping;
+    tex.wrapT      = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = EARTH_TEX_ANISO;
+    const old = earthU.u_topo_detail.value;
+    earthU.u_topo_detail.value = tex;
+    earthU.u_topo_detail_bounds.value.set(bounds.lonMin, bounds.latMin, bounds.lonSpan, bounds.latSpan);
+    earthU.u_topo_detail_texel.value.set(1 / canvas.width, 1 / canvas.height);
+    earthU.u_topo_detail_on.value = 1;
+    old?.dispose?.();
+});
+document.addEventListener('earth-topo-detail-clear', () => {
+    earthU.u_topo_detail_on.value = 0;
+});
+
 // ── Forecast feed (progressive, lazy) ──────────────────────────────────────
 // Fetches hourly U/V/T/P/RH/cloud/precip from Open-Meteo's bulk forecast
 // endpoint in 24-hour batches and pushes each hour into wxGridHistory's
@@ -5712,17 +6353,101 @@ wxFeed.backfill(wxGridHistory, 24).then(n => {
 // forward, keeping page-load network budget tight.
 const wxForecastFeed = new WeatherForecastFeed({ history: wxGridHistory });
 
-// On every future-scrub tick, ensure the forecast ring covers the
-// scrub position plus a 6-hour prefetch buffer. The feed dedupes
-// against its `_loadedUntilMs` and only fires a chunked triplet for
-// the uncovered tail — first +6h scrub fetches +24h, next +20h scrub
-// fetches +24..+48h, etc. We hook the time-bus snapshot so the trigger
-// fires regardless of how simTime moved (slider drag, Operations
-// console, keyboard step).
-const PREFETCH_MS = 6 * 60 * 60_000;
-const _futureFetchUnsub = timeBus.subscribe((snap) => {
-    if (snap.simTimeMs > Date.now() + 30 * 60_000) {
-        wxForecastFeed.ensureLoadedUntil(snap.simTimeMs + PREFETCH_MS);
+// NOTE (custom-forecast pivot): the future-scrub globe now paints the
+// in-browser RK2 model via ForecastPaintProvider (wired below), NOT the
+// Open-Meteo NWP frames. So we no longer fan a chunked Open-Meteo triplet
+// out of the forecast ring on every slider tick — that per-scrub burst
+// (864 coords × 9 vars × 3 chunks, repeated each drag) blew past
+// Open-Meteo's 600-calls/min free-tier ceiling and surfaced as the
+// "NetworkError when attempting to fetch resource" rate-limit (the 429
+// error path arrives without CORS headers, so the browser reports a bare
+// NetworkError instead of a catchable 429). The per-scrub `timeBus`
+// subscription that drove ensureLoadedUntil(simTime + 6h) has been
+// removed. Open-Meteo is kept ONLY as a scored leaderboard baseline,
+// seeded by the single idle pre-warm below and read from the forecast
+// ring by OpenMeteoNWPForecaster.
+
+// Progressive background NWP prefetch — what makes forward-scrub EVOLVE.
+//
+// The future-scrub globe paints the in-browser RK2 model for 0..+24 h, then
+// hands off to these Open-Meteo NWP frames for the mid/far future (see
+// ForecastPaintProvider.bracket's handoff branch). Without a populated ring,
+// scrubbing past +24 h froze on the RK2 model's last frame for ~13 days.
+// This loop fills the ring so the resolver can lerp real, hour-by-hour
+// evolving forecast frames out to PREFETCH_EAGER_H (+7 d).
+//
+// HOW DEEP — and why +7 d eager, +14 d on demand:
+//   • Hard ceiling is +14 d (336 h): the forecast ring is FORECAST_CAPACITY
+//     = 14×24 frames and Open-Meteo caps at forecast_days=16. The on-scrub
+//     extender below reaches this ceiling on demand.
+//   • Memory is linear at ~93 KB/coarse-frame: +7 d ≈ 16 MB ring, +14 d ≈
+//     31 MB — both under the ~100 MB IDB budget, but +14 d is heavier than
+//     a session that never scrubs that far should pay up front.
+//   • Egress is the real limiter for an *eager* walk: ~2.5 MB/batch, so
+//     +7 d ≈ 18 MB vs +14 d ≈ 35 MB of background fetch.
+//   • Skill is the soft limit: NWP carries genuine skill through ~7 d; past
+//     that it decays to climatology (smooth but low-information). So +7 d is
+//     the natural eager depth — deeper is fetched lazily only if the user
+//     actually scrubs there.
+//
+// WHY THIS IS RATE-SAFE — and is NOT the reverted per-scrub fetch:
+// the bug that forced Open-Meteo off the paint path was a timeBus
+// subscription calling ensureLoadedUntil(simTime + 6h) on EVERY slider
+// 'input' event. A fast drag fired dozens of 3-chunk triplets per second
+// and tripped Open-Meteo's ~600-calls/min ceiling (surfacing as an
+// uncatchable, CORS-less NetworkError on the 429). This loader is the
+// opposite shape: it walks forward in 24 h batches on a slow BACKGROUND
+// timer, strictly serialized via .finally() so no two batches overlap.
+// Seven batches (out to +7 d) is 21 chunk calls spread over ~50 s — still
+// two orders of magnitude under the limit. ensureLoadedUntil() coalesces
+// and only fetches the uncovered tail, so nothing is re-fetched.
+//
+// Connection-aware: on a Save-Data or 2g link we keep the eager walk shallow
+// (+1 d) so a metered/slow connection isn't charged for days of forecast the
+// user may never look at. The on-scrub extender still deepens on demand.
+const _wxConn   = (typeof navigator !== 'undefined' && navigator.connection) || null;
+const _wxFrugal = !!(_wxConn && (_wxConn.saveData || /\b2g\b/.test(_wxConn.effectiveType || '')));
+const PREFETCH_EAGER_H  = _wxFrugal ? 24 : 7 * 24;  // +7 d normally, +1 d on metered/slow links
+const PREFETCH_MAX_H    = 14 * 24;// hard ceiling (matches the forecast ring + slider)
+const PREFETCH_BATCH_H  = 24;     // one progressive batch
+const PREFETCH_GAP_MS   = 4000;   // spacing between background batches
+let   _prefetchTimer    = 0;
+
+// Walk the forecast ring forward to `depthH`, one PREFETCH_BATCH_H batch at a
+// time, never deeper than `maxH`. Each step waits for its fetch to settle
+// before scheduling the next (serialized — no overlapping in-flight calls).
+function _prefetchForecastStep(depthH, maxH) {
+    if (typeof document === 'undefined' || document.visibilityState !== 'visible') {
+        return;   // paused while hidden; the visibilitychange handler resumes it
+    }
+    const target = Date.now() + depthH * 3_600_000;
+    const scheduleNext = () => {
+        if (depthH < maxH) {
+            clearTimeout(_prefetchTimer);
+            _prefetchTimer = setTimeout(
+                () => _prefetchForecastStep(Math.min(depthH + PREFETCH_BATCH_H, maxH), maxH),
+                PREFETCH_GAP_MS);
+        }
+    };
+    // Already covered (e.g. an earlier on-scrub deepen got here first) →
+    // skip the fetch, just continue the walk.
+    if (wxForecastFeed.loadedUntilMs >= target - 30 * 60_000) { scheduleNext(); return; }
+    wxForecastFeed.ensureLoadedUntil(target)
+        .catch(() => { /* surfaced via the fetch-end status event */ })
+        .finally(scheduleNext);
+}
+
+// Kick off ~8 s after load (first paint settled). Skipped when the tab
+// loaded hidden — don't pay bandwidth until the user is actually looking.
+setTimeout(() => _prefetchForecastStep(PREFETCH_BATCH_H, PREFETCH_EAGER_H), 8000);
+
+// Resume the eager walk if the tab was hidden mid-prefetch and comes back.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    const haveH = (wxForecastFeed.loadedUntilMs - Date.now()) / 3_600_000;
+    if (haveH < PREFETCH_EAGER_H - 1) {
+        _prefetchForecastStep(Math.max(PREFETCH_BATCH_H,
+            Math.round(haveH) + PREFETCH_BATCH_H), PREFETCH_EAGER_H);
     }
 });
 
@@ -5786,6 +6511,16 @@ document.addEventListener('weather-forecast-ingest', () => {
 // the validator's IDB store rather than the in-memory fallback.
 const wxForecastRegistry = new ForecastRegistry({ history: wxGridHistory });
 wxForecastRegistry.register(new PersistenceForecaster());
+// NWP benchmark: registers the Open-Meteo GFS-blend forecast already in the
+// forecast ring as a Forecaster. The validator scores it on the same pooled-
+// MAE / Murphy-skill scale as the in-browser models so the SW-panel skill
+// table can answer "do our anomaly-AR / optical-flow models actually add
+// anything over the upstream physical model?" — a precondition for any B2G
+// claim that the predictive layer is more than decoration. Requires the
+// wxForecastFeed pre-warm above to have populated the +24h forecast ring;
+// when it hasn't (cold cache + offline upstream) the forecaster returns
+// null and silently abstains.
+wxForecastRegistry.register(new OpenMeteoNWPForecaster());
 
 // ── Precipitation deep-dive: long-memory climatology + anomaly models ─────
 // PrecipClimatology survives reloads (IDB) and accumulates a per-cell ×
@@ -5836,8 +6571,10 @@ precipBiasTracker.open().then(() => {
                 // A new pair updates the bias → re-run the registry so
                 // the fusion forecaster's next emission reflects the
                 // freshly-corrected field, rather than waiting up to an
-                // hour for the next history ingest.
-                wxForecastRegistry.runAll();
+                // hour for the next history ingest. schedule() (not
+                // runAll()) so the heavy models go through the chunked
+                // worker walk instead of computing inline right here.
+                wxForecastRegistry.schedule();
                 _paintPrecipCoverage();
             }
         });
@@ -5903,6 +6640,167 @@ window._opticalFlowSkillTracker = opticalFlowSkillTracker;
 window._advectionGainTracker    = advectionGainTracker;
 window._windShearProxy          = windShearProxy;
 
+// ── RK2 advection (the "new model") + future-paint pin ───────────────────
+// wind-advection-rk2-v1: multi-substep RK2 semi-Lagrangian with a time-
+// evolving wind (saturating tendency extrapolation). Registered alongside
+// v1 so the validator scores them head-to-head, and pinned as the source
+// the globe paints when the slider scrubs into the future. Its own gain
+// learner (separate modelId) keeps its α[h] independent of v1's.
+const rk2GainTracker = new AdvectionGainTracker({
+    modelId:        'wind-advection-rk2-v1',
+    horizons:       FORECAST_HORIZONS_H,
+    referenceModel: 'persistence-v1',
+});
+const rk2Forecaster = new WindAdvectionRK2Forecaster({
+    gainTracker: rk2GainTracker,
+    shearProxy:  windShearProxy,
+});
+wxForecastRegistry.register(rk2Forecaster);
+window._rk2GainTracker = rk2GainTracker;
+window._rk2Forecaster  = rk2Forecaster;
+
+// ── RK2 + horizontal eddy diffusion (advection-diffusion) ─────────────────
+// Same integrator plus the lateral-mixing term (κ∇²F, flux form — see
+// DEFAULT_HORIZONTAL_DIFFUSION in js/weather-flow.js for the physics and
+// per-channel κ). Registered under its OWN model id so the validator
+// answers "does diffusion add skill?" empirically instead of by argument.
+// The paint pin below stays on wind-advection-rk2-v1 until this variant
+// earns its slot on the leaderboard — per the registry's ship rule, the
+// top model becomes the default, not the newest one.
+const adGainTracker = new AdvectionGainTracker({
+    modelId:        'advection-diffusion-rk2-v1',
+    horizons:       FORECAST_HORIZONS_H,
+    referenceModel: 'persistence-v1',
+});
+const adForecaster = new WindAdvectionRK2Forecaster({
+    modelId:     'advection-diffusion-rk2-v1',
+    gainTracker: adGainTracker,
+    shearProxy:  windShearProxy,
+    horizontalDiffusion: { ...DEFAULT_HORIZONTAL_DIFFUSION, enabled: true },
+});
+wxForecastRegistry.register(adForecaster);
+window._adForecaster = adForecaster;
+
+// ── Multi-level advection (per-level steering flows) ──────────────────────
+// Each channel rides its own physically-correct wind: low cloud the 850 hPa
+// flow, mid/high cloud the 500 hPa steering flow, precip the 850/500 mean —
+// the fix for "everything advects with the 10 m wind" that the optical-flow
+// model only approximates. Level winds come from the same pressure-level
+// feed the 3-D volume uses (warmed below); until it delivers, the model
+// reports null and the leaderboard shows it warming up. Diffusion on — this
+// is the full advection-diffusion configuration competing for the top slot.
+const mlGainTracker = new AdvectionGainTracker({
+    modelId:        'multilevel-advection-v1',
+    horizons:       FORECAST_HORIZONS_H,
+    referenceModel: 'persistence-v1',
+});
+const mlForecaster = new MultiLevelAdvectionForecaster({
+    levelWinds:  () => tempVolFeed.levelWindSnapshot(),
+    gainTracker: mlGainTracker,
+    shearProxy:  windShearProxy,
+    horizontalDiffusion: { ...DEFAULT_HORIZONTAL_DIFFUSION, enabled: true },
+});
+wxForecastRegistry.register(mlForecaster);
+window._mlForecaster = mlForecaster;
+
+// Microphysics status line in the forecast panel — reads the live forecaster
+// config so it tells the truth if either term is ever disabled. ON in green,
+// OFF in grey. Static (these are fixed model properties), painted once.
+(function _initMicrophysicsHud() {
+    const el = document.getElementById('wx-microphysics-line');
+    if (!el || typeof rk2Forecaster.microphysicsStatus !== 'function') return;
+    const s = rk2Forecaster.microphysicsStatus();
+    const chip = (on, label) =>
+        `${label}: <span style="color:${on ? '#5bd6a0' : '#667'};font-weight:600;">${on ? 'ON' : 'OFF'}</span>`;
+    el.innerHTML = `microphysics · ${chip(s.convergenceGrowth, 'convergence growth')} · ${chip(s.precipFeedback, 'cloud→precip')} · ${chip(s.horizontalDiffusion, 'diffusion')}`;
+})();
+
+// Pin the future-scrub globe to the RK2 model's dense hourly forecast.
+// The provider decodes through wxFeed's _decodeCoarse so the forecast
+// flows through the exact same bilinear+blur+pack pipeline observations
+// use, then the resolver lerps/clamps it like any replay frame. Open-Meteo
+// stays a scored leaderboard baseline (read from the forecast ring by
+// OpenMeteoNWPForecaster) and is no longer a paint source.
+//
+// The dense RK2 integration (~350 ms / hourly rebuild) runs OFF the render
+// thread via this worker bridge; the provider prepares the inputs on the
+// main thread (cheap) and swaps the result in when the worker replies. If
+// the worker can't spawn (old browser, CSP), the bridge reports
+// unavailable and the provider transparently computes inline — same output,
+// just on-thread. forecast-paint-update fires when an async reply lands so
+// the resolver repaints the current scrub position immediately.
+const wxForecastWorker = new WeatherForecastWorkerBridge();
+// The trajectory-integration models also run their SCORED forecasts through
+// this worker (forecastAsync, preferred by the registry's chunked fan-out) —
+// a single multilevel run is ~150 ms of integration that has no business on
+// the render thread. The bridge is shared: requests queue on one worker,
+// which is fine at the hourly cadence these fire.
+rk2Forecaster.setWorker(wxForecastWorker);
+adForecaster.setWorker(wxForecastWorker);
+mlForecaster.setWorker(wxForecastWorker);
+const wxPaintProvider = new ForecastPaintProvider({
+    forecaster:  rk2Forecaster,
+    history:     wxGridHistory,
+    decode:      (coarse, w, h) => wxFeed._decodeCoarse(coarse, w, h),
+    maxHorizonH: 24,
+    worker:      wxForecastWorker,
+});
+wxResolver?.setForecastProvider(wxPaintProvider);
+document.addEventListener('forecast-paint-update', () => wxResolver?.invalidate());
+if (wxGridHistory.size > 0) wxPaintProvider.refresh();
+window._wxPaintProvider  = wxPaintProvider;
+window._wxForecastWorker = wxForecastWorker;
+window._wxForecastRegistry = wxForecastRegistry;
+window._wxGridHistory      = wxGridHistory;
+
+// ── Multi-level model → 3-D temperature volume coupling ──────────────────
+// The volume's near term (0..+24 h) paints the multi-level model's advected
+// T850/T500 instead of raw NWP hourly frames — the same "our model owns the
+// near term, NWP carries the deep future" split the surface globe uses,
+// with the seam blend living in TempVolumeFeed.sample(). The dense level
+// integration reuses the RK2 worker (message type 'mlevels'); worker
+// failure falls back inline, same contract as the paint provider.
+let _mlLevelsGen   = 0;
+let _mlLevelsTimer = 0;
+function _recomputeModelLevelRing() {
+    // Keep the level feed fresh for the model even while the volume layer
+    // is hidden — start() no-ops until its 3 h refresh window reopens.
+    tempVolFeed.start();
+    let inputs = null;
+    try {
+        inputs = mlForecaster.levelsDenseInputs({ history: wxGridHistory, maxHorizonH: 24 });
+    } catch (_) { /* provider cold — NWP keeps painting the volume */ }
+    if (!inputs) return;
+    const gen = ++_mlLevelsGen;
+    const apply = (dense) => {
+        if (gen !== _mlLevelsGen || !dense) return;
+        tempVolFeed.setModelRing(dense);
+        // Tell the analyst which engine paints which span of the scrub.
+        _setVolPip('loaded',
+            'near term: in-browser multi-level advection (0–24 h) · beyond: Open-Meteo NWP → +72 h');
+        if (tempVolMesh.visible) _refreshVolLevels();
+    };
+    if (wxForecastWorker.available()) {
+        wxForecastWorker.request(inputs, 'mlevels').then(apply).catch(() => {
+            try { apply(multilevelLevelsDense(inputs)); } catch (_) { /* keep NWP */ }
+        });
+    } else {
+        try { apply(multilevelLevelsDense(inputs)); } catch (_) { /* keep NWP */ }
+    }
+}
+const _scheduleModelLevelRing = () => {
+    clearTimeout(_mlLevelsTimer);
+    _mlLevelsTimer = setTimeout(_recomputeModelLevelRing, 1500);
+};
+document.addEventListener('temp-volume-update',     _scheduleModelLevelRing);
+document.addEventListener('weather-history-ingest', _scheduleModelLevelRing);
+
+// Warm the pressure-level feed for the multilevel model even when the 3-D
+// layer stays off — but only AFTER the NWP prefetch's boot window so the
+// two never stack a parallel burst against Open-Meteo's rate limit (the
+// 429 scar tissue documented in weather-forecast-feed.js).
+setTimeout(() => { tempVolFeed.start(); }, 45_000);
+
 // ── Cloud + wind forecasters ─────────────────────────────────────────────
 // Same trio (Climatology / AnomalyPersistence / AnomalyAR) as precip,
 // generalised through the AtmosphereClimatology + makeAtmosphereForecasters
@@ -5946,7 +6844,9 @@ Promise.all([cloudClimatology.open(), windClimatology.open()])
         // Re-run the registry now that the new forecasters are
         // registered — without this kick the cloud/wind models would
         // miss the next ingest cycle (~1 hour) before producing output.
-        if (wxGridHistory.size > 0) wxForecastRegistry.runAll();
+        // Scheduled (chunked, worker-preferring) rather than inline: this
+        // fires during boot, exactly when the render thread is busiest.
+        if (wxGridHistory.size > 0) wxForecastRegistry.schedule();
     })
     .catch(err => {
         console.info('[earth] cloud/wind climatology open failed:', err?.message);
@@ -5972,10 +6872,11 @@ wxForecastValidator.start().catch(err => {
 });
 
 // If a frame is already in the ring at construction time (warmup from IDB
-// resolved earlier in this script), kick off the first forecast manually
-// so the SW-panel skill table doesn't sit empty until the next live
-// ingest 15 min later.
-if (wxGridHistory.size > 0) wxForecastRegistry.runAll();
+// resolved earlier in this script), kick off the first forecast so the
+// SW-panel skill table doesn't sit empty until the next live ingest
+// 15 min later. Scheduled — the debounce also coalesces this kick with
+// the cold-start backfill's ingest burst arriving moments later.
+if (wxGridHistory.size > 0) wxForecastRegistry.schedule();
 
 // ── SW-panel skill table painter ──────────────────────────────────────────
 // Listens for the validator's summary updates and re-renders the small
@@ -6050,6 +6951,44 @@ function _paintForecastSkill(summary) {
         }
     }
 
+    // NWP benchmark row. open-meteo-gfs-v1 is the upstream physical model
+    // exposed as a Forecaster (see js/weather-forecast.js). Same skill
+    // calculation as the flow models below: average MSE across T/U/V/RH,
+    // surface as Murphy % vs persistence. This is the headline number for
+    // "do our models beat the meteorologist?" — anything below 0 means the
+    // in-browser stack is outperformed by free upstream NWP at that horizon
+    // and would do better to fall back to it.
+    if (summary['open-meteo-gfs-v1']) {
+        html += '<div class="skill-row skill-head" style="margin-top:6px;"><span>nwp</span>';
+        for (const h of FORECAST_HORIZONS_H) html += `<span>${h}h</span>`;
+        html += '</div>';
+        html += '<div class="skill-row"><span class="skill-ch" title="open-meteo-gfs-v1 (GFS-blend, upstream)">gfs</span>';
+        for (const h of FORECAST_HORIZONS_H) {
+            let mseM = 0, mseR = 0, nMin = Infinity;
+            let valid = true;
+            for (const ch of VISIBLE_CHANNELS) {
+                const m = summary['open-meteo-gfs-v1']?.[ch]?.[h];
+                const r = summary['persistence-v1']?.[ch]?.[h];
+                if (!m || !r || !Number.isFinite(m.mse) || !Number.isFinite(r.mse) || r.mse <= 0) {
+                    valid = false; break;
+                }
+                mseM += m.mse; mseR += r.mse;
+                nMin = Math.min(nMin, m.n | 0, r.n | 0);
+            }
+            let cell = '—';
+            let title = `model=open-meteo-gfs-v1 h=${h}h`;
+            if (valid && nMin >= 5) {
+                const skill = 1 - (mseM / mseR);
+                cell = (skill * 100).toFixed(0) + '%';
+                title += ` n=${nMin} avg-skill=${skill.toFixed(2)} (T+U+V+RH)`;
+            } else {
+                title += ` n=${Number.isFinite(nMin) ? nMin : 0}`;
+            }
+            html += `<span class="skill-cell" title="${title}">${cell}</span>`;
+        }
+        html += '</div>';
+    }
+
     // Flow-based forecasters (advection-driven). These shine on
     // moving fields (T, U, V, RH advected by wind / cloud-feature
     // motion); we average their Murphy skill across those four
@@ -6105,6 +7044,151 @@ document.addEventListener('weather-forecast-validation-update', (ev) => {
 // Initial paint with whatever the validator already has on disk so the
 // table isn't blank on a fresh page load with prior history.
 _paintForecastSkill(wxForecastValidator.summary());
+
+// ── Model skill leaderboard ─────────────────────────────────────────────
+// Ranks every registered forecaster by Murphy skill vs persistence
+// (1 − MSE_model/MSE_persistence), averaged over the channel × horizon
+// buckets each model actually scores (both sides need ≥ MIN_N matched
+// targets). This is the differentiator made visible: physics-first models
+// that have to BEAT "tomorrow looks like today" on a published scoreboard,
+// not an opaque "AI-powered" claim. Friendly labels for the known model ids;
+// anything unregistered falls back to a de-suffixed id.
+const LB_LABELS = {
+    'wind-advection-rk2-v1':          'RK2 advect',
+    'wind-advection-v1':              'wind advect',
+    'optical-flow-v1':                'optical flow',
+    'open-meteo-gfs-v1':              'GFS (NWP)',
+    'precip-fusion-v1':               'precip fusion',
+    'precip-anomaly-ar3-v1':          'precip AR(3)',
+    'precip-anomaly-persistence-v1':  'precip anom',
+    'precip-climatology-v1':          'precip clim',
+};
+function _paintForecastLeaderboard(summary) {
+    const root = document.getElementById('wx-leaderboard');
+    if (!root) return;
+    if (!summary || !summary['persistence-v1']) {
+        root.textContent = 'awaiting first validation cycle…';
+        return;
+    }
+    // Ranking is the pure, unit-tested rankBySkill() from the validator module;
+    // here we only attach friendly labels and render.
+    const rows = rankBySkill(summary, { minN: 5 }).map(r => ({
+        ...r, label: LB_LABELS[r.model] || r.model.replace(/-v\d+$/, ''),
+    }));
+    if (rows.length === 0) { root.textContent = 'no models registered'; return; }
+
+    let leadAssigned = false, html = '';
+    for (const r of rows) {
+        if (r.skill === null) {
+            html += `<div class="wx-lb-row warming" title="needs ≥${MIN_N} matched targets on both sides">`
+                  + `<span class="wx-lb-name">${r.label}</span><span class="wx-lb-bar"></span>`
+                  + `<span class="wx-lb-pct">…</span></div>`;
+            continue;
+        }
+        const s      = Math.max(-1, Math.min(1, r.skill));   // clamp bar to ±1
+        const pctStr = (r.skill >= 0 ? '+' : '') + (r.skill * 100).toFixed(0) + '%';
+        const isLead = !leadAssigned && r.skill > 0;
+        if (isLead) leadAssigned = true;
+        const color  = r.skill >= 0 ? '#36c99a' : '#d9694f';
+        const fill   = r.skill >= 0
+            ? `left:50%;width:${(s * 50).toFixed(1)}%;background:${color};`
+            : `right:50%;width:${(-s * 50).toFixed(1)}%;background:${color};`;
+        html += `<div class="wx-lb-row" title="Murphy skill vs persistence over ${r.buckets} channel×horizon bucket(s), min n=${r.n}">`
+              + `<span class="wx-lb-name${isLead ? ' lead' : ''}">${isLead ? '▲ ' : ''}${r.label}</span>`
+              + `<span class="wx-lb-bar"><span class="wx-lb-fill" style="${fill}"></span></span>`
+              + `<span class="wx-lb-pct" style="color:${color}">${pctStr}</span></div>`;
+    }
+    root.innerHTML = html;
+}
+document.addEventListener('weather-forecast-validation-update', (ev) => {
+    _paintForecastLeaderboard(ev.detail?.summary ?? {});
+});
+_paintForecastLeaderboard(wxForecastValidator.summary());
+
+// ── Wind-skill strip (under the scrub bar) ──────────────────────────────
+// Companion to the wx-panel skill grid: surfaces a one-glance read of
+// "how well are we predicting wind right now?" at each of the five
+// horizons, immediately next to the slider so the user can correlate
+// their scrub position with model confidence.
+//
+// Scoring policy
+//   For each horizon h, pick the highest-skill registered wind model
+//   (averaged across the U and V channels) and convert its Murphy skill
+//   to a 0..1 bar fill. Negative skill (model worse than persistence)
+//   pegs to a faint red sliver; positive skill scales linearly to 1.0
+//   at +30 % skill so a "good" model fills the bar visibly. Cells where
+//   the validator has < 5 paired samples paint a dash and stay cold.
+const _SKILL_HORIZONS = [1, 3, 6, 12, 24];
+const _SKILL_CHANNELS = ['U', 'V'];
+function _paintWindSkillStrip(summary) {
+    const strip = document.getElementById('tc-skill-strip');
+    if (!strip) return;
+    const models = Object.keys(summary).filter(id => id !== 'persistence-v1');
+    const ref = summary['persistence-v1'];
+    for (const h of _SKILL_HORIZONS) {
+        const cell = strip.querySelector(`.tc-skill-cell[data-h="${h}"]`);
+        if (!cell) continue;
+        const bar = cell.querySelector('.tc-skill-bar');
+        let bestSkill = -Infinity;
+        let bestModel = null;
+        let bestN     = 0;
+        for (const id of models) {
+            // Average MSE across U + V for this horizon. Need ≥5 samples
+            // on both the model and the persistence reference for the
+            // Murphy denominator to be meaningful.
+            let mseM = 0, mseR = 0, nMin = Infinity, valid = true;
+            for (const ch of _SKILL_CHANNELS) {
+                const m = summary[id]?.[ch]?.[h];
+                const r = ref?.[ch]?.[h];
+                if (!m || !r || !Number.isFinite(m.mse) || !Number.isFinite(r.mse) || r.mse <= 0) {
+                    valid = false; break;
+                }
+                mseM += m.mse; mseR += r.mse;
+                nMin = Math.min(nMin, m.n | 0, r.n | 0);
+            }
+            if (!valid || nMin < 5) continue;
+            const skill = 1 - (mseM / mseR);
+            if (skill > bestSkill) { bestSkill = skill; bestModel = id; bestN = nMin; }
+        }
+        let fill = 0, color = '#557', state = 'cold', label;
+        if (bestModel === null) {
+            label = '—';
+            state = 'cold';
+        } else if (bestSkill < 0) {
+            // Losing to persistence: tiny red sliver so it's visible
+            // without being alarming. Scale so −30 % skill fills ~30 %.
+            fill = Math.max(0.05, Math.min(0.3, Math.abs(bestSkill)));
+            color = '#cc4';
+            state = 'poor';
+            label = `${(bestSkill * 100).toFixed(0)}%`;
+        } else {
+            // Beating persistence. Linear ramp: +30 % skill fills the
+            // bar; higher saturates at 1.0 (capped so a freak run doesn't
+            // visually dominate the strip).
+            fill = Math.min(1, bestSkill / 0.30);
+            // Color: cool cyan for any positive skill; brighter for ≥+10 %.
+            if (bestSkill >= 0.10) { color = '#4cf'; state = 'best'; }
+            else                    { color = '#4c8'; state = 'good'; }
+            label = `${(bestSkill * 100).toFixed(0)}%`;
+        }
+        bar.style.setProperty('--skill', fill.toString());
+        bar.style.setProperty('--skill-color', color);
+        // Force background-image recompute on browsers that don't yet
+        // animate CSS custom-property transitions.
+        bar.style.backgroundImage =
+            `linear-gradient(to top, ${color} 0%, ${color} ${fill * 100}%, transparent ${fill * 100}%)`;
+        cell.dataset.state = state;
+        cell.title = bestModel === null
+            ? `wind +${h}h — awaiting validation (${bestN} samples)`
+            : `wind +${h}h — ${bestModel}: ${label} skill vs persistence (n=${bestN})`;
+        const tag = cell.querySelector('.tc-skill-tag');
+        if (tag) tag.textContent = `${h}h`;
+    }
+}
+document.addEventListener('weather-forecast-validation-update', (ev) => {
+    _paintWindSkillStrip(ev.detail?.summary ?? {});
+});
+_paintWindSkillStrip(wxForecastValidator.summary());
 
 // ── Precipitation long-memory coverage HUD ────────────────────────────────
 // Two readouts under the skill grid: climatology coverage (per-cell ×
@@ -6726,11 +7810,58 @@ function updateWeatherTextures(weatherBuf, wBuf, cloudBuf) {
         cloudU.u_cloud_layers.value.image.data.set(cloudBuf);
         cloudU.u_cloud_layers.value.needsUpdate = true;
     }
+    // Recompute the convergence/uplift diagnostic from the same wind field the
+    // forecaster grows precip from. During time-scrub it tracks the FORECAST
+    // wind — the overlay shows where the predicted flow is spinning up new
+    // weather. Consumed ONLY by the convergence overlay + its hover readout
+    // (see the upliftTex comment at its creation), so when neither is active
+    // we just stash the wind buffer and let the toggle handlers catch up —
+    // during a scrub this skips a full-grid pass + ~1 MB texture upload per
+    // repaint that nothing would have sampled.
+    if (wBuf) {
+        _pendingUpliftWindBuf = wBuf;
+        _refreshUpliftIfConsumed();
+    }
+}
+
+// Uplift laziness: recompute from the stashed wind buffer only while
+// something can actually see the result. Toggle handlers call this on
+// enable so the first painted frame is current, not stale.
+let _pendingUpliftWindBuf = null;
+function _upliftConsumed() {
+    return (_weatherOverlays.convergence?.mesh.visible)
+        || document.getElementById('rd-convergence')?.checked;
+}
+function _refreshUpliftIfConsumed() {
+    if (!_pendingUpliftWindBuf || !_upliftConsumed()) return;
+    computeUpliftField(_pendingUpliftWindBuf, TEX_W, TEX_H, MAX_WIND_MS, upliftTex.image.data);
+    upliftTex.needsUpdate = true;
+    _lastUpliftBuf = upliftTex.image.data;
+    _pendingUpliftWindBuf = null;
 }
 
 document.addEventListener('weather-update', e => {
     const { weatherBuffer, windBuffer, cloudBuffer, meta } = e.detail;
     updateWeatherTextures(weatherBuffer, windBuffer, cloudBuffer);
+
+    // Couple the high-res patch to the time scrubber. A past instant
+    // re-paints the patch from its session ring (or hides it when the
+    // session hasn't lived through that hour); any future instant hides
+    // it — there is no high-res forecast behind the window, and painting
+    // "now" data over a forecast globe would be silently wrong.
+    const scrubT = (meta?.replayT != null && (meta.replay || meta.isForecast))
+        ? meta.replayT : null;
+    wxPatchFeed.setTimeContext(scrubT);
+
+    // Temperature volume follows the same instant: re-sample the 850/500 hPa
+    // ring at the scrub time (~41 KB upload, only while the layer is on).
+    // start() here is the periodic refresher — it no-ops until the ring is
+    // 3 h stale and never stacks concurrent fetches.
+    _volLastSimT = scrubT ?? Date.now();
+    if (tempVolMesh.visible) {
+        _refreshVolLevels();
+        tempVolFeed.start();
+    }
 
     // Stash references so the hover tooltip can bilinear-sample point
     // values (T/P/RH, cloud cover, precip rate) without rerouting through
@@ -6747,13 +7878,34 @@ document.addEventListener('weather-update', e => {
         for (const ov of Object.values(_weatherOverlays)) ov.setHasData(true);
     }
 
-    // Rebuild isobar contours from the fresh pressure field
-    isobarLayer.update(weatherBuffer);
+    // Rebuild isobar contours from the fresh pressure field — but only while
+    // the layer is visible. Marching squares + chain assembly over 360×180 is
+    // the most expensive consumer on this event, and during a scrub the event
+    // fires many times a second; when hidden we mark it stale and the
+    // lyr-isobars toggle catches up from _lastWeatherBuf on enable.
+    if (isobarLayer.visible) {
+        isobarLayer.update(weatherBuffer);
+        _isobarStale = false;
+    } else {
+        _isobarStale = true;
+    }
+    // Hand the new buffers to the front layer. When the toggle is off
+    // (default) this is a couple of assignments — the heavy detect+chain
+    // pipeline only runs when the layer is visible, so scrub-driven
+    // weather-update bursts don't pile up ~50 ms of compute each. See
+    // FrontLayer.update() docstring for the hot/cold path split.
+    frontLayer.update(weatherBuffer, windBuffer);
+    _refreshFrontsReadout();
 
     // Rebuild the jet-stream ribbons from the fresh wind field and refresh
-    // the wx-panel peak readout. Runs once per feed refresh (~15 min); the
-    // overlay itself sits hidden by default until the user toggles lyr-jet.
-    jetstreamOverlay.update();
+    // the wx-panel peak readout — same visibility gate + stale/catch-up
+    // pattern as the isobars (full-globe sweep + geometry rebuild per call).
+    if (jetstreamOverlay.visible) {
+        jetstreamOverlay.update();
+        _jetStale = false;
+    } else {
+        _jetStale = true;
+    }
     _updateJetReadout();
     updateIsobarPanel();
 
@@ -6776,10 +7928,11 @@ document.addEventListener('weather-update', e => {
     if (meta.gridW && meta.gridH) {
         const deg = (meta.gridDeg ?? 180 / meta.gridH);
         const degStr = Number.isInteger(deg) ? `${deg}°` : `${deg.toFixed(1)}°`;
-        document.getElementById('wx-grid').textContent = `${meta.gridW}×${meta.gridH} · ${degStr}`;
+        _baseGridStr = `${meta.gridW}×${meta.gridH} · ${degStr}`;
     } else {
-        document.getElementById('wx-grid').textContent = '—';
+        _baseGridStr = '—';
     }
+    _refreshGridReadout();
 
     // Data age — how old the cached row from Supabase is, NOT how long ago
     // the browser fetched. Surfaces pg_cron failures to visitors: fresh ≤ 90
@@ -8136,13 +9289,46 @@ document.addEventListener('click', (e) => {
 //  ISOBAR LAYER — marching-squares pressure contours
 // ═══════════════════════════════════════════════════════════════
 const isobarLayer = new IsobarLayer(earthMesh);
+// Frontal-line overlay. Sits between the isobar contours and the H/L sprites
+// in the visual stack (renderOrder 3 vs 2 vs sprite-default). Defaults to
+// hidden on first load — the colored polylines are loud relative to the
+// other weather layers and we want the user to opt in. See js/front-engine.js
+// for the detection algorithm and classification rules.
+const frontLayer  = new FrontLayer(earthMesh);
+frontLayer.setVisible(false);
 
 // IsobarLayer is populated on the first 'weather-update' event
 // (WeatherFeed fires this after async fetch + procedural fallback)
 
 document.getElementById('lyr-isobars').addEventListener('change', e => {
     isobarLayer.setVisible(e.target.checked);
+    // Weather-update skips the isobar rebuild while hidden; if frames
+    // landed in the meantime, rebuild from the newest buffer now so the
+    // layer doesn't reappear showing an old pressure field.
+    if (e.target.checked && _isobarStale && _lastWeatherBuf) {
+        isobarLayer.update(_lastWeatherBuf);
+        _isobarStale = false;
+        updateIsobarPanel();
+    }
 });
+document.getElementById('lyr-fronts')?.addEventListener('change', e => {
+    frontLayer.setVisible(e.target.checked);
+    _refreshFrontsReadout();
+});
+
+// Single-source readout updater. The wx-fronts row reads from frontLayer
+// directly so we don't have to synchronise two state mirrors — when the
+// layer is hidden the panel says "off", when it's on we show live counts.
+function _refreshFrontsReadout() {
+    const el = document.getElementById('wx-fronts');
+    if (!el) return;
+    const checked = document.getElementById('lyr-fronts')?.checked;
+    if (!checked) { el.textContent = '— (toggle layer to enable)'; return; }
+    const fs = frontLayer.stats;
+    el.textContent = fs.total === 0
+        ? '— (no detected fronts)'
+        : `${fs.cold} cold · ${fs.warm} warm · ${fs.stationary} stationary`;
+}
 
 function updateIsobarPanel() {
     const stats   = isobarLayer.stats;
@@ -8779,6 +9965,13 @@ let lastT = 0;
 // Scratch vector for per-frame sun-direction recompute — avoids allocating
 // a fresh THREE.Vector3 every frame on the hot path.
 const _sunDirScratch = new THREE.Vector3();
+const _Y_AXIS = new THREE.Vector3(0, 1, 0);   // GMST spin axis (shared, read-only)
+// Scratch Date for the same reason: julianDay() wants a Date, and `new
+// Date(...)` twice per frame is avoidable GC churn on the hot path.
+const _frameDateScratch = new Date(0);
+// Altitude HUD: element cached once, written only when the string changes.
+const _hAltEl = document.getElementById('h-alt');
+let _hAltLast = '';
 
 // ── Simulation-time state ──────────────────────────────────────────────
 // `simTimeMs` mirrors the shared time-bus on every animate frame — it's
@@ -8804,6 +9997,29 @@ let simTimeMs = timeBus.getState().simTimeMs;
 let simSpeed  = 1;                  // last user-selected speed for resume
 let simPaused = false;              // mirrors bus mode==='scrub'
 
+// ── Slider input wiring (hoisted) ──────────────────────────────────────
+// Attach the scrub-bar input listener as the FIRST thing after the bus
+// starts, ahead of all heavy module init below. If anything later in
+// this module throws (a feed constructor, a shader compile, a missing
+// DOM node) the slider still drives simTimeMs — the page stays usable
+// rather than locking the user out of time scrubbing entirely.
+// The element is read once into `_scrubEl`; the late writeback path in
+// animate() reads the same `const` binding.
+const _scrubEl = document.getElementById('tc-scrub');
+if (_scrubEl) {
+    _scrubEl.addEventListener('input', () => {
+        // value is "minutes from now" in [-10080, +20160] (-7d / +14d).
+        // Negative = past (replay observations); positive = future
+        // (forecast preview through the WeatherForecastFeed ring).
+        // setSimTime({ fromUser: true }) makes the bus auto-flip to
+        // 'scrub' mode if it was live/replay — no manual pause toggle
+        // needed. Local simPaused is mirrored back via the subscription.
+        const minutesFromNow = Number(_scrubEl.value);
+        timeBus.setSimTime(Date.now() + minutesFromNow * 60_000,
+                           { fromUser: true });
+    });
+}
+
 // Subscribe to bus state so external writes (Operations console, or
 // keyboard shortcuts on either page) propagate to Earth's UI. Throttled
 // to ≤10 Hz by the bus itself; cheap to re-evaluate.
@@ -8822,6 +10038,27 @@ timeBus.subscribe((snap) => {
     document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
         btn.classList.toggle('active', Number(btn.dataset.speed) === simSpeed);
     });
+});
+
+// On-demand deep prefetch. The eager background walk above fills the ring to
+// +72 h; if the user scrubs PAST that, walk the ring toward their position so
+// the deep future evolves too. Debounced (800 ms) so the drag settles before
+// we fetch — this never fires per-tick, which is the distinction that keeps
+// it clear of the reverted rate-limit bug. ensureLoadedUntil() coalesces and
+// _prefetchForecastStep serializes, so a settle that lands mid-eager-walk at
+// worst issues one redundant (already-covered) step that skips its fetch.
+let _scrubDeepenTimer = 0;
+timeBus.subscribe((snap) => {
+    const aheadH = (snap.simTimeMs - Date.now()) / 3_600_000;
+    if (aheadH <= PREFETCH_EAGER_H + 1) return;                       // eager walk owns this range
+    if (wxForecastFeed.loadedUntilMs >= snap.simTimeMs - 30 * 60_000) return; // already loaded
+    clearTimeout(_scrubDeepenTimer);
+    _scrubDeepenTimer = setTimeout(() => {
+        const wantH = Math.min(Math.ceil(aheadH / PREFETCH_BATCH_H) * PREFETCH_BATCH_H, PREFETCH_MAX_H);
+        const haveH = Math.max(PREFETCH_BATCH_H,
+            Math.round((wxForecastFeed.loadedUntilMs - Date.now()) / 3_600_000));
+        _prefetchForecastStep(Math.min(haveH + PREFETCH_BATCH_H, wantH), wantH);
+    }, 800);
 });
 
 // ── Planet-rotation state ──────────────────────────────────────────────
@@ -8969,27 +10206,13 @@ document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
 _setSimSpeed(1);
 _setSimPaused(false);
 
-// ── 24-h replay slider ──────────────────────────────────────────────────
-// Bidirectional binding to simTimeMs:
-//   • input event (drag / keyboard)   → write simTimeMs
-//   • animate() natural advance (1×, 60×, …) → write slider.value
-// The writeback is suppressed while the slider has focus so we don't
-// fight the user mid-drag (browsers fire `input` continuously during
-// drag; document.activeElement === slider lasts from pointerdown
-// through pointerup-or-tab-out).
-const _scrubEl = document.getElementById('tc-scrub');
+// ── 24-h replay slider — release-side wiring ────────────────────────────
+// The `input` listener (drag/keyboard → simTimeMs) is hoisted to right
+// after timeBus.start() so it survives any throw in the heavy init that
+// follows. Only the `change` resume-on-release behaviour lives here,
+// because it depends on `_setSimPaused`/`simPaused` declared above.
+// The animate() writeback (simTimeMs → slider.value) lives further down.
 if (_scrubEl) {
-    _scrubEl.addEventListener('input', () => {
-        const minutesFromNow = Number(_scrubEl.value);
-        // value is "minutes from now" in [-10080, +20160] (-7d / +14d).
-        // Negative = past (replay observations); positive = future
-        // (forecast preview through the WeatherForecastFeed ring).
-        // setSimTime({ fromUser: true }) makes the bus auto-flip to
-        // 'scrub' mode if it was live/replay — no manual pause toggle
-        // needed. Local simPaused is mirrored back via the subscription.
-        timeBus.setSimTime(Date.now() + minutesFromNow * 60_000,
-                           { fromUser: true });
-    });
     // Resume natural advance on release if the user dragged back to
     // "now" — otherwise leave them paused at the historical/forecast
     // instant they chose.
@@ -9015,6 +10238,13 @@ function animate() {
     const dt = Math.min(t - lastT, 0.1);  // cap dt at 100 ms (tab unfocus recovery)
     lastT = t;
 
+    // Adaptive resolution: feed the real (uncapped) frame interval to the
+    // governor so it can scale pixelRatio to hold a smooth frame rate on weak
+    // GPUs. Uses performance.now() rather than `dt` (which is clamped at 100 ms).
+    const _pnow = performance.now();
+    if (_prLastFrameMs) _governResolution(_pnow - _prLastFrameMs);
+    _prLastFrameMs = _pnow;
+
     // ── Read sim time from the shared bus.
     // Bus owns advance (live ticks at wall-clock, replay anchored at
     // setMode time × speed). Reading getState() inline is the documented
@@ -9029,6 +10259,12 @@ function animate() {
     // detection makes this a no-op (~10 µs) when the visible frame
     // hasn't moved appreciably, so we can call it every rAF.
     wxResolver?.tick(simTimeMs);
+
+    // Focus-footprint tracker for the high-res weather patch (and, later,
+    // the imagery detail inset). Internally throttled to one event per
+    // 1.5 s and only when the camera has actually moved — per-rAF cost is
+    // one worldToLocal plus a few trig ops.
+    focusFootprint.tick();
 
     // Slider writeback: while the user isn't actively scrubbing (slider
     // not focused), keep the slider position in sync with simTimeMs so
@@ -9059,8 +10295,8 @@ function animate() {
     // Either branch keeps simTimeMs out of the rotation calculation; the
     // slider can never drag the geometry around even when rotation is on.
     if (planetRotationEnabled) {
-        const wallJd = julianDay(new Date(Date.now()));
-        earthMesh.rotation.y = gmst(wallJd) * DEG;
+        _frameDateScratch.setTime(Date.now());
+        earthMesh.rotation.y = gmst(julianDay(_frameDateScratch)) * DEG;
     } else {
         earthMesh.rotation.y = _pageLoadEarthRot;
     }
@@ -9070,14 +10306,27 @@ function animate() {
     // Computed from simTimeMs's JD so the slider scrubs the day-night
     // terminator across the (rotation-decoupled) globe. This is the
     // primary visual cue that simTime is moving when rotation is off.
-    const simDate = new Date(simTimeMs);
-    const jd      = julianDay(simDate);
+    _frameDateScratch.setTime(simTimeMs);
+    const jd      = julianDay(_frameDateScratch);
     _sunDirScratch.copy(sunDirectionEquatorial(jd));
     earthU.u_sun_dir.value.copy(_sunDirScratch);
     cloudU.u_sun_dir.value.copy(_sunDirScratch);
     auroraU.u_sun_dir.value.copy(_sunDirScratch);
     atmU.u_sun_dir.value.copy(_sunDirScratch);
     stratU.u_sun_dir.value.copy(_sunDirScratch);
+
+    // Temperature volume marches in earthMesh object space — feed it the
+    // camera + sun transformed by the inverse of the globe's GMST spin.
+    // Two uniform copies, no allocation; skipped while the layer is off.
+    if (tempVolMesh.visible) {
+        // earthMesh sits at the origin with unit scale, so world → object
+        // is exactly the inverse GMST spin — cheaper and lag-free vs
+        // worldToLocal (whose matrixWorld is one frame stale here).
+        tempVolU.u_cam_obj.value.copy(camera.position)
+            .applyAxisAngle(_Y_AXIS, -earthMesh.rotation.y);
+        tempVolU.u_sun_dir_obj.value.copy(_sunDirScratch)
+            .applyAxisAngle(_Y_AXIS, -earthMesh.rotation.y);
+    }
 
     // ── Shader time — animation seconds, NOT astronomical time. Used by
     // noise phase, pulse envelopes, particle trails. Safe to keep on
@@ -9086,25 +10335,38 @@ function animate() {
     cloudU.u_time.value  = t;
     auroraU.u_time.value = t;
 
-    // ── Altitude display (camera distance → km equivalent)
+    // ── Altitude display (camera distance → km equivalent). Write-on-change
+    // only — a per-frame textContent write invalidates layout even when the
+    // string is identical.
     const dist = camera.position.length();  // in "Earth radii" units
     const altKm = Math.max(0, (dist - R_EARTH) * 6371);
-    document.getElementById('h-alt').textContent =
-        altKm > 1000
-            ? `${(altKm / 1000).toFixed(1)} Mm`
-            : `${Math.round(altKm)} km`;
+    const altStr = altKm > 1000
+        ? `${(altKm / 1000).toFixed(1)} Mm`
+        : `${Math.round(altKm)} km`;
+    if (altStr !== _hAltLast) { _hAltEl.textContent = altStr; _hAltLast = altStr; }
 
-    // ── Raycaster → coords
-    raycaster.setFromCamera(mouse, camera);
-    const hits = raycaster.intersectObject(earthMesh);
-    if (hits.length > 0 && hits[0].uv) {
-        // UV from intersection — correct for current mesh rotation
-        const uv = hits[0].uv.clone();
-        // The mesh rotates, so UV is in the mesh's local UV space (texture fixed to mesh).
-        // UV is already local to the sphere, so this gives the correct geographic location.
-        updateCoords(uv);
-    } else {
-        tipEl.classList.remove('show');
+    // ── Raycaster → coords. Skipped entirely while both the pointer and the
+    // view are at rest (see _pointerDirty above) — the 82k-tri intersect is
+    // pure waste when neither input to the hit has changed.
+    const _viewMoved = !_rayCamPos.equals(camera.position)
+        || !_rayCamQuat.equals(camera.quaternion)
+        || _rayEarthRotY !== earthMesh.rotation.y;
+    if (_pointerDirty || _viewMoved) {
+        _pointerDirty = false;
+        _rayCamPos.copy(camera.position);
+        _rayCamQuat.copy(camera.quaternion);
+        _rayEarthRotY = earthMesh.rotation.y;
+        raycaster.setFromCamera(mouse, camera);
+        const hits = raycaster.intersectObject(earthMesh);
+        if (hits.length > 0 && hits[0].uv) {
+            // UV from intersection — correct for current mesh rotation
+            const uv = hits[0].uv.clone();
+            // The mesh rotates, so UV is in the mesh's local UV space (texture fixed to mesh).
+            // UV is already local to the sphere, so this gives the correct geographic location.
+            updateCoords(uv);
+        } else {
+            tipEl.classList.remove('show');
+        }
     }
 
     // ── Wind particle advection (tropospheric weather). Camera + parent
@@ -9208,6 +10470,9 @@ function animate() {
     // this gate avoids thrashing textContent 60 times a second.
     if (t - lastHudUpdate > 1) {
         lastHudUpdate = t;
+        // 1 Hz block — a fresh Date here is fine; the per-frame path above
+        // reuses _frameDateScratch instead.
+        const simDate = new Date(simTimeMs);
         updateAstroHUD(simDate);
         // Sim-time readout in the scrub bar.  Cheap; runs at the same
         // cadence as the other HUD strings.
@@ -9939,13 +11204,13 @@ _backdrop.addEventListener('click', _closeMobilePanel);
 [
     'lyr-clouds', 'lyr-atm', 'lyr-aurora', 'lyr-lights', 'lyr-grid',
     'lyr-tropic', 'lyr-subsolar', 'lyr-weather', 'lyr-wind', 'lyr-jet',
-    'lyr-isobars', 'lyr-alerts', 'lyr-earthquakes', 'lyr-iss',
+    'lyr-isobars', 'lyr-fronts', 'lyr-alerts', 'lyr-earthquakes', 'lyr-iss',
     'lyr-rotate',
     // Derived weather overlays (humidity / precip-rate / mist) — share
     // the existing weather DataTextures, so they need the same synthetic
     // change-event dispatch on first render to align mesh visibility
     // with their default-unchecked state.
-    'lyr-humidity', 'lyr-precip-rate', 'lyr-mist',
+    'lyr-humidity', 'lyr-precip-rate', 'lyr-mist', 'lyr-convergence',
     // Storm-tracks layer (5-day kinematic forecast cones). Default off
     // — the cones can clutter the globe at small zoom levels.
     'lyr-storm-tracks',
@@ -10367,5 +11632,28 @@ initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
     </div>
   </div>
 </section>
+
+<!-- ── AURORA ALERT CAPTURE ──────────────────────────────────────────────────
+     Anonymous, zero-friction email capture for burst aurora/storm traffic.
+     Styles are injected by js/aurora-capture.js. See AURORA_ALERT_CAPTURE_SPEC.md. -->
+<section class="aurora-capture-band" aria-label="Aurora alerts signup">
+  <div class="aurora-capture-copy">
+    <span class="aurora-kicker">Aurora Alerts · Free</span>
+    <h2>Don't miss the next storm.</h2>
+    <p>We'll email you the moment Kp spikes and the aurora comes within reach — with a live link to watch it hit Earth's magnetosphere.</p>
+  </div>
+  <form data-aurora-capture data-source="earth" novalidate>
+    <input type="email" inputmode="email" autocomplete="email" placeholder="you@email.com" aria-label="Email" required>
+    <!-- honeypot: keep visually hidden, not display:none (some bots skip those) -->
+    <input type="text" name="company" tabindex="-1" autocomplete="off"
+           aria-hidden="true" style="position:absolute;left:-9999px;opacity:0;height:0;width:0">
+    <button type="submit">Alert me →</button>
+    <span data-aurora-status class="aurora-status" role="status" aria-live="polite"></span>
+  </form>
+</section>
+<script type="module">
+  import { initAuroraCapture } from './js/aurora-capture.js';
+  initAuroraCapture();
+</script>
 </body>
 </html>

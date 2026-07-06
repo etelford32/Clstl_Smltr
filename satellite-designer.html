@@ -157,6 +157,18 @@ select option{background:#0a1024}
 #sd-cam .cam-act:hover{border-color:var(--c-accent-border-hi);color:var(--c-accent)}
 #sd-cam .cam-act kbd{font-size:.55rem;color:var(--c-text-3);font-family:monospace;
   border:1px solid rgba(255,255,255,.15);border-radius:3px;padding:0 3px;margin-left:5px}
+#sd-subject{position:absolute;top:12px;left:50%;transform:translateX(-50%);
+  display:flex;gap:2px;align-items:center;background:rgba(4,8,18,.82);
+  border:1px solid rgba(255,255,255,.16);padding:3px 3px 3px 9px;
+  border-radius:999px;backdrop-filter:blur(6px);pointer-events:auto}
+#sd-subject .subj-lbl{font-size:.55rem;letter-spacing:.1em;font-weight:800;
+  color:var(--c-text-3);text-transform:uppercase;margin-right:4px}
+#sd-subject .subj-btn{font-size:.7rem;font-weight:700;padding:4px 12px;
+  border-radius:999px;cursor:pointer;color:var(--c-text-2);user-select:none;
+  border:1px solid transparent;letter-spacing:.02em;line-height:1}
+#sd-subject .subj-btn:hover{color:var(--c-text);background:rgba(255,255,255,.04)}
+#sd-subject .subj-btn.active{background:rgba(var(--c-accent-rgb),.28);
+  color:#fff;border-color:var(--c-accent-border-hi)}
 #sd-banner{position:absolute;left:50%;bottom:60px;transform:translateX(-50%);
   max-width:80%;padding:6px 14px;border-radius:999px;font-size:.74rem;
   font-weight:700;background:rgba(4,8,18,.78);
@@ -167,6 +179,81 @@ select option{background:#0a1024}
 #sd-banner.good{border-color:rgba(95,227,154,.55);color:var(--c-good)}
 #sd-banner.warn{border-color:rgba(var(--c-warn-rgb),.55);color:var(--c-warn)}
 #sd-banner.bad{border-color:rgba(255,107,125,.55);color:var(--c-bad)}
+
+/* ── BURN button — bottom-of-canvas mobile-first control.
+   touch-action:manipulation kills the iOS 300ms tap delay; user-select:none
+   stops a long-press from triggering native text-selection or context menus
+   on Android. The button sits inside #sd-stage so it overlays the canvas
+   and stays in view when the page is scrolled to a sub-section below. */
+#sd-thrust-btn{
+  position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  min-width:min(360px,72%);height:54px;padding:0 22px;
+  background:linear-gradient(180deg,#ff8d3a,#ff5e1f);
+  border:1px solid rgba(255,160,90,.7);border-radius:14px;
+  color:#160a04;font-family:inherit;font-weight:900;font-size:.95rem;
+  letter-spacing:.08em;text-transform:uppercase;cursor:pointer;
+  box-shadow:0 6px 18px rgba(255,107,33,.32),inset 0 1px 0 rgba(255,255,255,.35);
+  touch-action:manipulation;user-select:none;-webkit-user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  transition:transform .08s ease, box-shadow .15s ease, filter .15s ease;
+  z-index:6;
+}
+#sd-thrust-btn .tb-icon{font-size:1.1rem;line-height:1;filter:drop-shadow(0 1px 0 rgba(0,0,0,.25))}
+#sd-thrust-btn .tb-text{line-height:1;white-space:nowrap}
+#sd-thrust-btn .tb-key{display:inline-flex;align-items:center}
+#sd-thrust-btn .tb-key kbd{
+  font-size:.55rem;font-family:monospace;font-weight:700;
+  background:rgba(0,0,0,.22);color:#fff;border:1px solid rgba(0,0,0,.35);
+  border-radius:4px;padding:1px 5px;letter-spacing:.04em;
+}
+#sd-thrust-btn:hover{filter:brightness(1.07)}
+#sd-thrust-btn:active,
+#sd-thrust-btn.firing{
+  transform:translateX(-50%) translateY(1px) scale(.985);
+  box-shadow:0 2px 8px rgba(255,107,33,.55),
+             inset 0 0 0 1px rgba(255,255,255,.45),
+             inset 0 -3px 12px rgba(255,80,0,.55);
+  filter:brightness(1.12) saturate(1.1);
+}
+#sd-thrust-btn.firing{
+  animation:sd-thrust-pulse .4s ease-in-out infinite alternate;
+}
+#sd-thrust-btn[disabled]{
+  background:linear-gradient(180deg,#3b3d44,#2a2c33);color:#7a7d85;
+  border-color:rgba(255,255,255,.08);box-shadow:none;cursor:not-allowed;
+  pointer-events:none;
+}
+@keyframes sd-thrust-pulse {
+  from { box-shadow:0 2px 8px rgba(255,107,33,.55),
+                    inset 0 0 0 1px rgba(255,255,255,.45),
+                    inset 0 -3px 12px rgba(255,80,0,.55); }
+  to   { box-shadow:0 2px 14px rgba(255,160,80,.85),
+                    inset 0 0 0 1px rgba(255,255,255,.65),
+                    inset 0 -3px 18px rgba(255,140,40,.75); }
+}
+/* On phones the button stretches edge-to-edge so it's reachable with the
+   thumb on the bottom rail. */
+@media (max-width:560px){
+  #sd-thrust-btn{min-width:0;left:10px;right:10px;width:auto;transform:none;
+    height:58px;font-size:1rem}
+  #sd-thrust-btn:active,
+  #sd-thrust-btn.firing{transform:translateY(1px) scale(.99)}
+}
+/* Floor-status banner state — orange "DEORBIT WARNING" and red "BREACH"
+   already share the existing banner colours; we just want the BURN button
+   to nudge the player visually when they need to act. */
+#sd-thrust-btn.urgent{
+  animation:sd-thrust-urgent 1s ease-in-out infinite;
+}
+@keyframes sd-thrust-urgent {
+  0%, 100% { box-shadow:0 6px 18px rgba(255,107,33,.32),
+                       inset 0 1px 0 rgba(255,255,255,.35),
+                       0 0 0 0 rgba(255,176,102,.45); }
+  50%      { box-shadow:0 6px 18px rgba(255,107,33,.55),
+                       inset 0 1px 0 rgba(255,255,255,.45),
+                       0 0 0 6px rgba(255,176,102,.08); }
+}
 #sd-hint{position:absolute;top:50px;right:12px;font-size:.6rem;
   color:var(--c-text-3);pointer-events:none;text-align:right;line-height:1.5;
   background:rgba(4,8,18,.55);padding:5px 9px;border-radius:6px;backdrop-filter:blur(4px)}
@@ -188,6 +275,10 @@ select option{background:#0a1024}
 
 .metrics{display:grid;grid-template-columns:1fr 1fr;gap:1px;
   background:rgba(255,255,255,.06);border-radius:var(--r-md);overflow:hidden}
+.metrics-quad{grid-template-columns:repeat(4,1fr)}
+.metrics-quad .metric{padding:5px 6px}
+.metrics-quad .metric .v{font-size:.74rem}
+.metrics-quad .metric .k{font-size:.55rem}
 .metric{background:var(--c-surface-2);padding:6px 8px}
 .metric .k{font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;
   color:var(--c-text-3);font-weight:700}
@@ -228,11 +319,25 @@ select option{background:#0a1024}
   color:var(--c-text-3);font-size:.85rem}
 .ctl-label{font-size:.62rem;color:var(--c-text-3);font-weight:800;
   letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px}
+/* Compact slider row — label · slider · value all on one line so we can
+   stack twice as many controls in the same vertical space. */
+.cslide{display:grid;grid-template-columns:88px 1fr 58px;gap:8px;
+  align-items:center;font-size:.72rem;color:var(--c-text-2);margin:0 0 6px}
+.cslide input[type=range]{margin:0;width:100%}
+.cslide b{font-size:.72rem;color:var(--c-text);text-align:right;
+  font-variant-numeric:tabular-nums;font-weight:700}
+.cslide small{font-size:.6rem;color:var(--c-text-3);margin-left:2px;font-weight:600}
+.panel{padding:9px 10px}
+.panel h2{margin-bottom:6px}
 .toggle.locked{opacity:.35;cursor:not-allowed;position:relative}
 .toggle.locked::after{content:"🔒";position:absolute;top:1px;right:4px;font-size:.5rem;opacity:.7}
 .toggle.locked:hover{color:var(--c-text-2);background:rgba(255,255,255,.03);
   border-color:rgba(255,255,255,.14)}
 .pilot-hd{display:flex;align-items:center;gap:11px}
+.score-side{display:flex;gap:1px;background:rgba(255,255,255,.06);
+  border-radius:var(--r-md);overflow:hidden;margin-left:auto}
+.score-side .metric{padding:5px 9px;background:var(--c-surface-2);min-width:54px;text-align:center}
+.score-side .metric .v{font-size:.86rem;margin-top:1px}
 .rank-badge{font-size:1.6rem;line-height:1;
   filter:drop-shadow(0 2px 8px rgba(0,200,255,.4))}
 .rank-meta{flex:1;min-width:0}
@@ -282,11 +387,402 @@ select option{background:#0a1024}
   border-color:var(--c-accent-border-hi);color:#fff}
 .opt small{display:block;font-weight:600;color:var(--c-text-3);
   font-size:.56rem;margin-top:2px}
+/* Bigger chip variant for the front-line Parts panel. Each chip is a
+   readable tile with an icon, label, and the headline trade-off metric. */
+.opt-row.big{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));
+  gap:6px;margin-bottom:0}
+.opt-row.big .opt{padding:9px 7px;font-size:.72rem;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;min-height:54px;line-height:1.15}
+.opt-row.big .opt small{font-size:.58rem;margin-top:3px;letter-spacing:.02em}
+.opt-row.big .opt .ico{font-size:1.1rem;line-height:1;margin-bottom:3px;
+  filter:drop-shadow(0 1px 4px rgba(0,200,255,.35))}
+.opt-row.big .opt.active{box-shadow:inset 0 0 0 1px rgba(0,200,255,.35),
+  0 2px 8px rgba(0,200,255,.18)}
+.opt-row.big .opt{position:relative}
+.tier{position:absolute;top:2px;right:3px;font-size:.5rem;font-weight:800;
+  padding:1px 4px;border-radius:3px;letter-spacing:.04em;line-height:1.2;
+  background:rgba(255,210,90,.16);color:#ffd166;border:1px solid rgba(255,210,90,.4);
+  cursor:pointer;z-index:2}
+.tier:hover{background:rgba(255,210,90,.34);color:#fff;border-color:#ffd166}
+.tier-3{background:rgba(0,230,180,.18);color:#7fffd4;border-color:rgba(0,230,180,.5)}
+.tier-3:hover{background:rgba(0,230,180,.38);color:#fff;border-color:#7fffd4}
+.hint-tiny{font-size:.6rem;color:var(--c-text-3);font-weight:600;letter-spacing:.02em}
+/* Primary stick controls — beefy throttle + gravity sliders sitting
+   directly below the stage. The native range stays clickable but the
+   coloured fill overlay gives a fuel-gauge-like feel. */
+.primary-controls{display:grid;grid-template-columns:auto 1fr;gap:9px;padding:9px 11px;align-items:stretch}
+@media (max-width:980px){ .primary-controls{grid-template-columns:1fr} }
+
+/* ─── Throttle dial — rotational pilot control, mobile-first.
+   The whole control is one SVG (track + fill arc + tick marks) with the
+   digital readout overlaid in the centre via flex. Pointer events handle
+   drag-around-perimeter; wheel/keyboard provide desktop-grade
+   accessibility. The fill arc uses stroke-dasharray on a path-length-
+   normalised circle so % maps trivially to dash-array; rotate(-90) puts
+   "zero" at 12 o'clock. */
+.throttle-dial-wrap{padding:8px 12px;display:flex;flex-direction:column;align-items:center;gap:6px}
+.throttle-dial-wrap .bs-row{width:100%;display:flex;justify-content:space-between;
+  align-items:baseline;font-size:.66rem;letter-spacing:.05em;text-transform:uppercase;
+  font-weight:800;color:var(--c-text-2)}
+.throttle-dial-wrap .bs-row b{font-size:.95rem;color:#fff;text-transform:none;
+  font-variant-numeric:tabular-nums;font-weight:800}
+.throttle-dial{
+  position:relative;width:148px;height:148px;
+  user-select:none;-webkit-user-select:none;
+  touch-action:none;-webkit-tap-highlight-color:transparent;
+  cursor:pointer;outline:none;
+}
+.throttle-dial:focus-visible{filter:drop-shadow(0 0 4px var(--c-accent))}
+.throttle-dial svg{width:100%;height:100%;overflow:visible;transform:rotate(-90deg)}
+.throttle-dial .td-track{fill:none;stroke:rgba(255,255,255,.07);stroke-width:14}
+.throttle-dial .td-fill{
+  fill:none;stroke-width:14;stroke-linecap:round;
+  stroke:url(#td-grad);
+  transition:stroke-dasharray .12s ease, filter .18s ease;
+}
+.throttle-dial.firing .td-fill{filter:drop-shadow(0 0 6px rgba(255,160,80,.85))}
+.throttle-dial .td-tick{stroke:rgba(255,255,255,.18);stroke-width:1.5}
+.throttle-dial .td-tick.major{stroke:rgba(255,255,255,.36);stroke-width:2}
+.throttle-dial .td-hub{fill:rgba(4,8,18,.85);stroke:rgba(255,255,255,.12);stroke-width:1}
+.throttle-dial .td-readout{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;pointer-events:none;
+}
+.throttle-dial .td-pct{font-size:1.85rem;font-weight:900;color:#fff;
+  font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-.02em}
+.throttle-dial .td-pct small{font-size:.95rem;color:var(--c-text-3);font-weight:700;
+  margin-left:1px;vertical-align:top}
+.throttle-dial .td-hint{font-size:.5rem;color:var(--c-text-3);
+  letter-spacing:.12em;text-transform:uppercase;font-weight:700;
+  margin-top:2px;text-align:center}
+.throttle-dial.firing .td-pct{color:#ffd49a;text-shadow:0 0 12px rgba(255,140,40,.6)}
+@media (max-width:560px){
+  .throttle-dial{width:128px;height:128px}
+  .throttle-dial .td-pct{font-size:1.6rem}
+}
+
+/* ─── Δv flash readout — pops up when the player releases a burn,
+   showing the Tsiolkovsky-actual Δv they just spent. Floats up + fades
+   out so it doesn't add clutter once the lesson has landed. */
+.dv-flash{
+  position:absolute;left:50%;bottom:78px;transform:translateX(-50%) translateY(0);
+  font-family:monospace;font-weight:800;font-size:1.05rem;
+  color:#ffd49a;text-shadow:0 0 12px rgba(255,140,40,.6);
+  background:rgba(4,8,18,.78);border:1px solid rgba(255,180,90,.45);
+  padding:4px 12px;border-radius:999px;
+  opacity:0;pointer-events:none;z-index:7;
+  transition:opacity .25s ease, transform .9s ease;
+  letter-spacing:.04em;font-variant-numeric:tabular-nums;
+}
+.dv-flash.show{opacity:1;transform:translateX(-50%) translateY(-28px)}
+.dv-flash small{font-size:.65rem;color:var(--c-text-2);margin-left:6px;
+  font-weight:600;letter-spacing:0}
+
+/* Brief screen pulse on burn-start to give the press tactile bite even
+   without sound. Single keyframe, no continuous animation. */
+#sd-stage.burn-pulse::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  box-shadow:inset 0 0 0 2px rgba(255,140,60,.55);
+  border-radius:var(--r-lg);
+  animation:sd-burn-pulse .42s ease-out 1;
+  z-index:5;
+}
+@keyframes sd-burn-pulse {
+  from { box-shadow:inset 0 0 0 14px rgba(255,140,60,.35); opacity:1 }
+  to   { box-shadow:inset 0 0 0  2px rgba(255,140,60,0);    opacity:0 }
+}
+
+/* ─── Plan-burn popover — flexible scheduler for advanced pilots.
+   Sits anchored under the Plan button, dismissed by click-outside or
+   Esc. Keep narrow so it fits inside the right column on mobile. */
+.plan-pop{
+  position:absolute;z-index:30;min-width:240px;max-width:300px;
+  background:rgba(8,12,24,.96);border:1px solid var(--c-accent-border-hi);
+  border-radius:var(--r-md);padding:10px 12px;
+  box-shadow:0 12px 32px rgba(0,0,0,.55);
+  backdrop-filter:blur(8px);
+}
+.plan-pop[hidden]{display:none}
+.plan-pop .pp-hd{font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;
+  font-weight:800;color:var(--c-text-2);margin-bottom:6px}
+.plan-pop .pp-row{display:flex;align-items:center;justify-content:space-between;
+  gap:8px;font-size:.72rem;font-weight:700;color:var(--c-text-2);margin-bottom:6px}
+.plan-pop .pp-row b{color:#fff;font-variant-numeric:tabular-nums}
+.plan-pop select, .plan-pop input[type=range]{width:55%}
+.plan-pop select{background:rgba(255,255,255,.05);color:var(--c-text);
+  border:1px solid rgba(255,255,255,.14);border-radius:6px;padding:3px 6px;
+  font-size:.72rem;font-weight:700}
+.plan-pop .pp-actions{display:flex;gap:6px;margin-top:8px}
+.plan-pop .pp-actions .btn{flex:1;font-size:.72rem;padding:6px 10px}
+
+/* Status pill showing an armed scheduled burn — lives inside #sd-status
+   alongside phase/warp so the player always knows something is queued. */
+.status-pill.sched{color:#ffd49a;border-color:rgba(255,180,90,.55);
+  background:rgba(40,18,4,.78);cursor:pointer}
+.status-pill.sched .x{margin-left:6px;color:var(--c-text-3);font-weight:900}
+.status-pill.sched:hover .x{color:var(--c-bad)}
+
+/* ─── STORM RADAR HUD ─────────────────────────────────────────────────
+   A horizontal strip docked above the camera buttons. Three cells:
+   (1) live F10.7 / Ap nowcast, (2) forecast trace with peak-window
+   shading, (3) perigee floor margin + Δv budget gauge. Updated by
+   updateStormRadar() once per frame while sim is running. Click on the
+   forecast cell opens the plan-burn popover pre-set to forecast-peak. */
+#sd-radar{
+  position:absolute;left:12px;right:12px;bottom:54px;height:74px;
+  display:grid;grid-template-columns:auto 1fr auto;gap:0;
+  background:rgba(4,8,18,.82);border:1px solid rgba(127,220,255,.22);
+  border-radius:var(--r-md);backdrop-filter:blur(8px);
+  font-family:monospace;color:var(--c-text);pointer-events:auto;
+  overflow:hidden;z-index:4;
+  box-shadow:0 6px 20px rgba(0,0,0,.4);
+}
+#sd-radar[hidden]{display:none}
+#sd-radar .sr-cell{padding:7px 11px;display:flex;flex-direction:column;
+  justify-content:center;border-right:1px solid rgba(255,255,255,.08);
+  min-width:0}
+#sd-radar .sr-cell:last-child{border-right:none}
+#sd-radar .sr-hd{font-size:.52rem;letter-spacing:.14em;text-transform:uppercase;
+  font-weight:800;color:var(--c-text-3);margin-bottom:3px;display:flex;
+  justify-content:space-between;align-items:baseline;gap:8px}
+#sd-radar .sr-hd .sr-skill{font-size:.5rem;color:var(--c-text-3);font-weight:700;
+  letter-spacing:.04em;text-transform:none}
+#sd-radar .sr-vals{display:flex;gap:10px;font-variant-numeric:tabular-nums}
+#sd-radar .sr-val{display:flex;flex-direction:column;line-height:1}
+#sd-radar .sr-val b{font-size:1.05rem;font-weight:900;color:#fff}
+#sd-radar .sr-val small{font-size:.5rem;color:var(--c-text-3);
+  letter-spacing:.1em;text-transform:uppercase;margin-top:2px;font-weight:700}
+#sd-radar .sr-now b{color:#ffd166}
+#sd-radar .sr-now.storm b{color:#ff6b7d;text-shadow:0 0 8px rgba(255,80,100,.45)}
+
+/* Forecast cell — SVG trace + click-target to schedule on the peak. */
+#sd-radar .sr-fc{position:relative;cursor:pointer;min-width:140px}
+#sd-radar .sr-fc:hover{background:rgba(127,220,255,.04)}
+#sd-radar .sr-fc:hover .sr-fc-cta{opacity:1}
+#sd-radar .sr-fc-cta{position:absolute;bottom:3px;right:7px;
+  font-size:.5rem;letter-spacing:.08em;color:var(--c-accent);
+  opacity:.6;transition:opacity .15s;font-weight:700;text-transform:uppercase}
+#sd-radar .sr-fc svg{width:100%;height:40px;display:block;margin-top:2px}
+#sd-radar .sr-fc-band{fill:rgba(127,220,255,.10);stroke:none}
+#sd-radar .sr-fc-line{fill:none;stroke:#ffd166;stroke-width:1.8;
+  stroke-linejoin:round;stroke-linecap:round}
+#sd-radar .sr-fc-now{fill:#fff;stroke:#ffd166;stroke-width:1.5}
+#sd-radar .sr-fc-peak{fill:#ff8a3a;stroke:#ffd49a;stroke-width:1.4}
+#sd-radar .sr-fc-peak-glow{fill:rgba(255,140,60,.18);stroke:rgba(255,140,60,.45);
+  stroke-width:1;stroke-dasharray:2 3}
+#sd-radar .sr-fc.bonus-active{background:rgba(127,220,255,.10);
+  box-shadow:inset 0 0 0 1px rgba(255,140,60,.45)}
+#sd-radar .sr-fc.bonus-active::after{
+  content:'⚡ +2×';position:absolute;top:5px;right:7px;
+  font-size:.55rem;font-weight:900;color:#ffd49a;letter-spacing:.06em;
+  text-shadow:0 0 6px rgba(255,140,40,.7)}
+
+/* Right cell — perigee margin + Δv budget bars. */
+#sd-radar .sr-budget{min-width:118px}
+#sd-radar .sr-bar{display:flex;align-items:center;gap:6px;font-size:.6rem;
+  color:var(--c-text-2);margin-top:3px;line-height:1}
+#sd-radar .sr-bar .sr-bar-lbl{width:18px;font-weight:800;color:var(--c-text-3)}
+#sd-radar .sr-bar .sr-bar-track{flex:1;height:6px;border-radius:3px;
+  background:rgba(255,255,255,.06);overflow:hidden;position:relative}
+#sd-radar .sr-bar .sr-bar-fill{position:absolute;left:0;top:0;bottom:0;
+  border-radius:3px;transition:width .15s ease, background .2s ease}
+#sd-radar .sr-bar .sr-bar-val{width:42px;text-align:right;font-weight:800;
+  color:#fff;font-variant-numeric:tabular-nums}
+#sd-radar .sr-bar.peri .sr-bar-fill{background:linear-gradient(90deg,#5fe39a,#7fdcff)}
+#sd-radar .sr-bar.peri.warn .sr-bar-fill{background:linear-gradient(90deg,#ffb066,#ff6b7d)}
+#sd-radar .sr-bar.peri.crit .sr-bar-fill{background:linear-gradient(90deg,#ff6b7d,#ff3d5a)}
+#sd-radar .sr-bar.dv .sr-bar-fill{background:linear-gradient(90deg,#ffd166,#ff8a3a)}
+#sd-radar .sr-bar.dv.low .sr-bar-fill{background:linear-gradient(90deg,#ff6b7d,#ff3d5a)}
+
+/* Collapse the cam-group's space on narrow viewports so the radar fits. */
+@media (max-width:560px){
+  #sd-radar{height:68px;bottom:48px;left:8px;right:8px}
+  #sd-radar .sr-cell{padding:6px 8px}
+  #sd-radar .sr-val b{font-size:.95rem}
+  #sd-radar .sr-fc svg{height:34px}
+  #sd-radar .sr-budget{min-width:100px}
+}
+
+/* Toggle button in #sd-status — collapses the HUD when the player wants
+   a cleaner stage. Defaults to expanded. */
+.status-pill.radar-toggle{cursor:pointer;color:#7fdcff;
+  border-color:rgba(127,220,255,.35);pointer-events:auto}
+.status-pill.radar-toggle.off{color:var(--c-text-3);
+  border-color:rgba(255,255,255,.12)}
+
+/* ─── End-of-mission scorecard ───────────────────────────────────────
+   Modal overlay rendered on mission complete, re-entry, or out-of-fuel.
+   Shows burn-timing grade, Δv-efficiency, and forecast-bonus capture %
+   on top of the mission's own final-score line. Card breakdown is
+   composed in JS so missions can append custom rows via the optional
+   `scorecard(stats, ctx)` hook (see satellite-missions.js). */
+.scorecard-overlay{
+  position:fixed;inset:0;z-index:100;display:flex;align-items:center;
+  justify-content:center;padding:18px;background:rgba(2,4,12,.72);
+  backdrop-filter:blur(6px);
+  animation:scorecard-in .22s ease-out 1;
+}
+.scorecard-overlay[hidden]{display:none}
+@keyframes scorecard-in {
+  from { opacity:0; transform:scale(.96) }
+  to   { opacity:1; transform:scale(1) }
+}
+.scorecard{
+  width:min(520px,100%);background:linear-gradient(180deg,#0c1326,#070a16);
+  border:1px solid var(--c-accent-border-hi);border-radius:var(--r-lg);
+  box-shadow:0 30px 60px rgba(0,0,0,.6);overflow:hidden;
+  font-family:var(--font-body,system-ui);color:var(--c-text);
+  max-height:90vh;display:flex;flex-direction:column;
+}
+.scorecard .sc-hd{padding:16px 20px 10px;
+  border-bottom:1px solid rgba(255,255,255,.08);
+  display:flex;align-items:center;gap:12px}
+.scorecard .sc-rank{font-size:2.2rem;line-height:1;
+  filter:drop-shadow(0 2px 10px rgba(127,220,255,.5))}
+.scorecard .sc-title{flex:1;min-width:0}
+.scorecard .sc-mission{font-size:.62rem;letter-spacing:.14em;
+  text-transform:uppercase;font-weight:800;color:var(--c-text-3)}
+.scorecard .sc-outcome{font-size:1.1rem;font-weight:900;color:#fff;
+  background:linear-gradient(100deg,#fff,#7fdcff);-webkit-background-clip:text;
+  background-clip:text;-webkit-text-fill-color:transparent;margin-top:2px}
+.scorecard .sc-outcome.bad{background:linear-gradient(100deg,#fff,#ff8a9c);
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent}
+.scorecard .sc-score{font-size:1.6rem;font-weight:900;
+  font-variant-numeric:tabular-nums;color:#ffd166}
+.scorecard .sc-body{padding:14px 20px;overflow-y:auto;flex:1}
+.scorecard .sc-grade-grid{display:grid;
+  grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.scorecard .sc-grade{background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.1);border-radius:var(--r-md);
+  padding:10px 11px;text-align:center;position:relative}
+.scorecard .sc-grade-letter{font-size:1.8rem;font-weight:900;
+  line-height:1;font-family:monospace}
+.scorecard .sc-grade-letter.A{color:#5fe39a;text-shadow:0 0 12px rgba(95,227,154,.5)}
+.scorecard .sc-grade-letter.B{color:#7fdcff}
+.scorecard .sc-grade-letter.C{color:#ffd166}
+.scorecard .sc-grade-letter.D{color:#ffb066}
+.scorecard .sc-grade-letter.F{color:#ff6b7d}
+.scorecard .sc-grade-name{font-size:.55rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--c-text-3);margin-top:5px;font-weight:800}
+.scorecard .sc-grade-val{font-size:.7rem;color:var(--c-text-2);
+  margin-top:3px;font-variant-numeric:tabular-nums;font-weight:700}
+.scorecard .sc-rows{display:flex;flex-direction:column;gap:1px;
+  background:rgba(255,255,255,.06);border-radius:var(--r-md);
+  overflow:hidden;border:1px solid rgba(255,255,255,.06)}
+.scorecard .sc-row{display:flex;justify-content:space-between;
+  align-items:baseline;padding:6px 11px;background:rgba(4,8,18,.5);
+  font-size:.72rem;gap:10px}
+.scorecard .sc-row .sc-lbl{color:var(--c-text-2);font-weight:700}
+.scorecard .sc-row .sc-val{font-variant-numeric:tabular-nums;
+  color:#fff;font-weight:800}
+.scorecard .sc-row.bonus .sc-val{color:#ffd49a}
+.scorecard .sc-row.warn .sc-val{color:var(--c-warn)}
+.scorecard .sc-row.bad  .sc-val{color:var(--c-bad)}
+.scorecard .sc-tip{font-size:.7rem;color:var(--c-text-3);
+  margin-top:10px;line-height:1.45;padding:8px 10px;
+  background:rgba(127,220,255,.05);border-left:2px solid var(--c-accent-border);
+  border-radius:4px}
+.scorecard .sc-actions{padding:12px 20px 16px;
+  border-top:1px solid rgba(255,255,255,.08);display:flex;gap:8px;
+  flex-wrap:wrap;justify-content:flex-end}
+.scorecard .sc-actions .btn{font-size:.78rem;padding:7px 14px}
+@media (max-width:560px){
+  .scorecard .sc-grade-grid{grid-template-columns:1fr 1fr 1fr;gap:6px}
+  .scorecard .sc-grade{padding:8px 6px}
+  .scorecard .sc-grade-letter{font-size:1.5rem}
+}
+.big-slider{position:relative;display:block;background:rgba(255,255,255,.025);
+  border:1px solid rgba(255,255,255,.1);border-radius:var(--r-md);padding:8px 10px}
+.big-slider .bs-row{display:flex;justify-content:space-between;align-items:baseline;
+  margin-bottom:5px;font-size:.66rem;letter-spacing:.05em;text-transform:uppercase;
+  font-weight:800;color:var(--c-text-2)}
+.big-slider .bs-row b{font-size:.95rem;color:#fff;text-transform:none;letter-spacing:0;
+  font-variant-numeric:tabular-nums;font-weight:800}
+.big-slider .bs-row b small{color:var(--c-text-3);font-weight:600;font-size:.65rem;margin-left:4px}
+.big-slider input[type=range]{width:100%;margin:0;position:relative;z-index:2;
+  background:transparent;height:18px}
+.big-slider .bs-fill{position:absolute;left:10px;right:10px;bottom:14px;height:6px;
+  border-radius:3px;background:rgba(255,255,255,.06);overflow:hidden;pointer-events:none;z-index:1}
+.big-slider .bs-fill::after{content:'';display:block;height:100%;
+  background:linear-gradient(90deg,#ffb066,#ff6b7d);border-radius:3px;
+  width:var(--fill,60%);transition:width .12s}
+.big-slider.grv .bs-fill::after{background:linear-gradient(90deg,#5fe39a,#7fdcff,#c084fc)}
+.big-slider .bs-presets{display:flex;gap:4px;margin-top:5px;justify-content:space-between}
+.big-slider .bs-preset{font-size:.6rem;padding:2px 6px;border-radius:6px;cursor:pointer;
+  color:var(--c-text-3);background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  font-weight:700;user-select:none;letter-spacing:.02em}
+.big-slider .bs-preset:hover{color:var(--c-text);border-color:var(--c-accent-border-hi);
+  background:rgba(var(--c-accent-rgb),.12)}
+.part-row{margin-bottom:11px}
+.part-row:last-child{margin-bottom:0}
+.part-row-hd{display:flex;justify-content:space-between;align-items:baseline;
+  margin-bottom:5px;font-size:.66rem;color:var(--c-text-2);font-weight:700;
+  letter-spacing:.04em}
+.part-row-hd b{color:var(--c-text);font-variant-numeric:tabular-nums}
+.part-row-hd small{font-size:.58rem;color:var(--c-text-3);font-weight:600;margin-left:2px}
+.row-slider{width:100%;accent-color:var(--c-accent);margin-top:6px}
+.parts-panel{padding:11px 11px}
 .bay-grp{font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;
   color:var(--c-text-3);font-weight:800;margin:2px 0 6px}
 .bay-loading{position:absolute;inset:0;display:flex;align-items:center;
   justify-content:center;color:var(--c-text-3);font-size:.78rem;text-align:center;
   padding:16px}
+
+/* ─── RCS translation pad — multidirectional thruster d-pad ─────────────── */
+.rcs-group .rcs-tag{float:right;font-size:.58rem;font-weight:700;color:var(--c-accent);
+  background:rgba(255,170,80,.10);border:1px solid var(--c-accent-border);
+  border-radius:6px;padding:1px 6px;letter-spacing:0;text-transform:none}
+.rcs-dpad{margin-top:8px;display:grid;grid-template-columns:repeat(3,40px);
+  grid-template-rows:repeat(3,40px);gap:5px;justify-content:center}
+.rcs-dpad .up{grid-area:1/2} .rcs-dpad .left{grid-area:2/1}
+.rcs-dpad .rcs-core{grid-area:2/2} .rcs-dpad .right{grid-area:2/3} .rcs-dpad .down{grid-area:3/2}
+.rcs-btn{display:flex;align-items:center;justify-content:center;font-size:1.05rem;
+  border-radius:9px;cursor:pointer;user-select:none;color:var(--c-text-2);
+  background:rgba(255,255,255,.04);border:1px solid var(--c-border);
+  transition:background .08s,border-color .08s,transform .06s}
+.rcs-btn:hover{color:#fff;border-color:var(--c-accent-border-hi)}
+.rcs-btn.firing{background:rgba(255,150,60,.28);border-color:var(--c-accent);
+  color:#ffd8a8;transform:scale(.92);box-shadow:0 0 10px rgba(255,140,40,.45)}
+.rcs-dpad .rcs-core{display:flex;align-items:center;justify-content:center;
+  font-size:.56rem;font-weight:800;letter-spacing:.08em;color:var(--c-text-3);
+  border:1px dashed var(--c-border);border-radius:9px}
+.rcs-dpad .rcs-core.live{color:var(--c-accent);border-color:var(--c-accent-border)}
+
+/* ─── Real-world blueprint gallery ─────────────────────────────────────── */
+.blueprints-panel h2 .sub{font-size:.6rem;color:var(--c-text-3);font-weight:600;
+  text-transform:none;letter-spacing:0;margin-left:8px}
+.bp-gallery{display:flex;gap:9px;overflow-x:auto;padding:6px 2px 9px;scroll-snap-type:x proximity}
+.bp-gallery::-webkit-scrollbar{height:7px}
+.bp-gallery::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:4px}
+.bp-card{flex:0 0 150px;scroll-snap-align:start;text-align:left;cursor:pointer;
+  background:linear-gradient(160deg,rgba(255,255,255,.045),rgba(255,255,255,.015));
+  border:1px solid var(--c-border);border-radius:12px;padding:11px 11px 10px;
+  color:var(--c-text-2);transition:border-color .1s,transform .1s,box-shadow .1s}
+.bp-card:hover{border-color:var(--c-accent-border-hi);transform:translateY(-2px);
+  box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.bp-card.active{border-color:var(--c-accent);box-shadow:0 0 0 1px var(--c-accent) inset,
+  0 6px 18px rgba(255,140,40,.18)}
+.bp-card .bp-ico{font-size:1.5rem;line-height:1}
+.bp-card .bp-name{font-weight:800;color:#fff;font-size:.84rem;margin-top:6px;line-height:1.15}
+.bp-card .bp-op{font-size:.6rem;color:var(--c-text-3);margin-top:2px}
+.bp-card .bp-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px}
+.bp-card .bp-klass{font-size:.55rem;font-weight:700;color:var(--c-text-2);
+  background:rgba(255,255,255,.05);border-radius:5px;padding:1px 5px}
+.bp-card .bp-multi{font-size:.55rem;font-weight:800;color:#ffd8a8;
+  background:rgba(255,150,60,.16);border:1px solid var(--c-accent-border);
+  border-radius:5px;padding:1px 5px}
+.bp-detail{margin-top:4px;padding:11px;border-radius:11px;
+  background:rgba(10,16,30,.55);border:1px solid var(--c-border);font-size:.72rem;line-height:1.5}
+.bp-detail .bp-blurb{color:var(--c-text);font-style:italic}
+.bp-detail .bp-real{display:flex;flex-direction:column;gap:3px;margin-top:8px;color:var(--c-text-2);font-size:.66rem}
+.bp-detail .bp-real b{color:var(--c-text)}
+.bp-detail .bp-notes{color:var(--c-text-3)}
+.bp-detail .bp-ingame{margin-top:8px;font-size:.66rem;color:var(--c-accent);
+  font-weight:600;font-variant-numeric:tabular-nums}
+.bp-detail .bp-src{display:inline-block;margin-top:7px;font-size:.62rem;
+  color:var(--c-text-3);text-decoration:none;border-bottom:1px dotted var(--c-text-3)}
+.bp-detail .bp-src:hover{color:var(--c-accent)}
 </style>
 </head>
 <body>
@@ -313,6 +809,12 @@ select option{background:#0a1024}
   <section class="area" id="sd-design">
     <div class="area-hd"><b>🛠 Satellite Design</b><span>build the spacecraft — parts drive the flight physics</span></div>
 
+    <div class="panel blueprints-panel">
+      <h2>🛰 Real-world blueprints <span class="sub">load a state-of-the-art satellite — then fork it in the bay</span></h2>
+      <div class="bp-gallery" id="bp-gallery"></div>
+      <div class="bp-detail" id="bp-detail" hidden></div>
+    </div>
+
     <div class="panel" style="padding:9px">
       <div class="bay-view">
         <canvas id="bay-canvas"></canvas>
@@ -325,45 +827,48 @@ select option{background:#0a1024}
           <div class="metric"><div class="k">Thrust</div><div class="v" id="bs-thr">—</div></div>
           <div class="metric"><div class="k">Array power</div><div class="v" id="bs-pwr">—</div></div>
           <div class="metric" id="bs-margin-m"><div class="k">Pwr margin</div><div class="v" id="bs-margin">—</div></div>
+          <div class="metric" id="bs-rcs-m"><div class="k">RCS</div><div class="v" id="bs-rcs">—</div></div>
         </div>
       </div>
     </div>
 
-    <div class="panel">
-      <h2>🔩 Parts <span class="sub">auto-applied to the ship</span></h2>
-      <div class="bay-grp">Bus / chassis</div>
-      <div class="opt-row" id="bay-body"></div>
-      <div class="bay-grp">Thrusters</div>
-      <div class="opt-row" id="bay-thruster"></div>
-      <label class="field" style="margin-bottom:9px">
-        <div class="row"><span>Thruster count</span><b><span id="bay-tc-v">2</span>×</b></div>
-        <input type="range" id="bay-tc" min="1" max="8" step="1" value="2">
-      </label>
-      <div class="bay-grp">Solar array</div>
-      <div class="opt-row" id="bay-panel"></div>
-      <label class="field" style="margin:0">
-        <div class="row"><span>Wing span</span><b><span id="bay-span-v">2.2</span> m</b></div>
-        <input type="range" id="bay-span" min="0.5" max="6" step="0.1" value="2.2">
-      </label>
+    <div class="panel parts-panel">
+      <h2>🔩 Parts <span class="sub">auto-applied · live preview above</span></h2>
+      <div class="part-row">
+        <div class="part-row-hd"><span>🚀 Bus / chassis</span></div>
+        <div class="opt-row big" id="bay-body"></div>
+      </div>
+      <div class="part-row">
+        <div class="part-row-hd"><span>🔥 Thrusters</span><span><b id="bay-tc-v">2</b><small>× count</small></span></div>
+        <div class="opt-row big" id="bay-thruster"></div>
+        <input type="range" id="bay-tc" min="1" max="8" step="1" value="2" class="row-slider">
+      </div>
+      <div class="part-row">
+        <div class="part-row-hd"><span>☀ Solar arrays</span><span><b id="bay-span-v">2.2</b><small>m wing</small></span></div>
+        <div class="opt-row big" id="bay-panel"></div>
+        <input type="range" id="bay-span" min="0.5" max="6" step="0.1" value="2.2" class="row-slider">
+      </div>
+      <div class="part-row">
+        <div class="part-row-hd"><span>📦 Payload</span><span class="hint-tiny" id="payload-tip">—</span></div>
+        <div class="opt-row big" id="bay-payload"></div>
+      </div>
+      <div class="part-row">
+        <div class="part-row-hd"><span>⛽ Propellant</span><span><b id="v-fuel">60</b><small>kg</small></span></div>
+        <input type="range" id="f-fuel" min="0" max="1000" step="5" value="60" class="row-slider">
+      </div>
     </div>
 
     <div class="panel">
       <h2>🔧 Spacecraft</h2>
-      <div class="grid2">
-        <label class="field" style="grid-column:1/-1;margin:0">
-          <div class="row"><span>Ship name</span></div>
-          <input type="text" id="f-name" value="Scout-1" maxlength="60">
-        </label>
-        <label class="field" style="grid-column:1/-1;margin:0">
-          <div class="row"><span>Propellant</span><b><span id="v-fuel">60</span> kg</b></div>
-          <input type="range" id="f-fuel" min="0" max="1000" step="5" value="60">
-        </label>
-      </div>
-      <div class="metrics" style="margin-top:9px">
-        <div class="metric"><div class="k">Wet mass</div><div class="v" id="d-wet">—</div></div>
-        <div class="metric"><div class="k">Δv budget</div><div class="v" id="d-dv">—</div></div>
-        <div class="metric"><div class="k">Ballistic coeff</div><div class="v" id="d-bc">—</div></div>
-        <div class="metric"><div class="k">Mass ratio</div><div class="v" id="d-mr">—</div></div>
+      <label class="field" style="margin:0 0 7px">
+        <div class="row"><span>Ship name</span></div>
+        <input type="text" id="f-name" value="Scout-1" maxlength="60">
+      </label>
+      <div class="metrics metrics-quad">
+        <div class="metric"><div class="k">Wet</div><div class="v" id="d-wet">—</div></div>
+        <div class="metric"><div class="k">Δv</div><div class="v" id="d-dv">—</div></div>
+        <div class="metric"><div class="k">Ballistic</div><div class="v" id="d-bc">—</div></div>
+        <div class="metric"><div class="k">Mass r.</div><div class="v" id="d-mr">—</div></div>
       </div>
       <details class="advanced" style="margin-top:9px">
         <summary>Manual fine-tune · advanced</summary>
@@ -416,24 +921,130 @@ select option{background:#0a1024}
       <div id="sd-status">
         <span class="status-pill" id="st-phase">Pre-flight</span>
         <span class="status-pill" id="st-warp">▶ ×1</span>
+        <span class="status-pill sched" id="st-sched" hidden
+              title="Scheduled burn — click to cancel">⏰ —<span class="x">✕</span></span>
+        <span class="status-pill radar-toggle" id="st-radar"
+              title="Toggle STORM RADAR HUD">📡 RADAR</span>
+      </div>
+
+      <!-- ── STORM RADAR HUD strip — three cells: nowcast | forecast trace |
+           perigee & Δv budget. Hidden until launch; click the forecast
+           cell to schedule a burn at the projected peak. -->
+      <div id="sd-radar" hidden>
+        <div class="sr-cell sr-now" id="sr-now">
+          <div class="sr-hd"><span>SPACE WX</span><span class="sr-skill" id="sr-skill">—</span></div>
+          <div class="sr-vals">
+            <div class="sr-val"><b id="sr-f107">—</b><small>F10.7 SFU</small></div>
+            <div class="sr-val"><b id="sr-ap">—</b><small>Ap</small></div>
+          </div>
+        </div>
+        <div class="sr-cell sr-fc" id="sr-fc"
+             title="Click to schedule a burn at the forecasted peak">
+          <div class="sr-hd"><span>F10.7 FORECAST · 0–12h</span><span id="sr-peak-lbl">peak —</span></div>
+          <svg id="sr-fc-svg" viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true">
+            <path id="sr-fc-band-path" class="sr-fc-band"/>
+            <rect id="sr-fc-peak-glow" class="sr-fc-peak-glow" x="0" y="0" width="0" height="40" rx="2" hidden/>
+            <path id="sr-fc-line-path" class="sr-fc-line"/>
+            <circle id="sr-fc-now-dot" class="sr-fc-now" cx="0" cy="20" r="3"/>
+            <circle id="sr-fc-peak-dot" class="sr-fc-peak" cx="0" cy="20" r="3" hidden/>
+          </svg>
+          <span class="sr-fc-cta">⏰ schedule</span>
+        </div>
+        <div class="sr-cell sr-budget">
+          <div class="sr-hd"><span>FLIGHT BUDGET</span></div>
+          <div class="sr-bar peri" id="sr-bar-peri">
+            <span class="sr-bar-lbl">PE</span>
+            <div class="sr-bar-track"><div class="sr-bar-fill" style="width:0%"></div></div>
+            <span class="sr-bar-val">—</span>
+          </div>
+          <div class="sr-bar dv" id="sr-bar-dv">
+            <span class="sr-bar-lbl">Δv</span>
+            <div class="sr-bar-track"><div class="sr-bar-fill" style="width:0%"></div></div>
+            <span class="sr-bar-val">—</span>
+          </div>
+        </div>
       </div>
       <div id="sd-hint">
+        <kbd>click</kbd> select<br>
         <kbd>drag</kbd> orbit<br>
         <kbd>right-drag</kbd> pan<br>
         <kbd>scroll</kbd> zoom
+      </div>
+      <div id="sd-subject">
+        <span class="subj-lbl">Focus</span>
+        <div class="subj-btn active" data-subj="earth" title="Lock camera focus on Earth">🌍 Earth</div>
+        <div class="subj-btn" data-subj="satellite" title="Lock camera focus on the satellite">🛰 Satellite</div>
       </div>
       <div id="sd-cam">
         <div class="cam-group">
           <div class="cam-btn" data-cam="wide">WIDE</div>
           <div class="cam-btn" data-cam="follow">FOLLOW</div>
           <div class="cam-btn active" data-cam="free">FREE</div>
+          <div class="cam-btn" data-cam="chase" title="3rd-person chase camera — trails the bird's heading">CHASE</div>
+          <div class="cam-btn" data-cam="nose" title="First-person nose camera — rides down the ram axis">NOSE</div>
         </div>
-        <div class="cam-act" id="cam-focus" title="Center camera on the satellite">📍 Focus<kbd>F</kbd></div>
         <div class="cam-act" id="cam-reset" title="Reset to the wide system view">↺ Reset<kbd>R</kbd></div>
       </div>
       <div id="sd-view">view —</div>
       <div id="sd-banner"></div>
       <div class="warmup" id="sd-warmup">Loading atmosphere model…</div>
+      <!-- ── Big "burn-on-hold" button — mobile-friendly, also fires when
+           SPACE is held on desktop. The slider above sets *how hard*, this
+           button sets *when*. Designed to be the most-touched control in
+           the cockpit. -->
+      <button id="sd-thrust-btn" type="button" aria-label="Hold to fire engines">
+        <span class="tb-icon">🚀</span>
+        <span class="tb-text">HOLD&nbsp;TO&nbsp;BURN</span>
+        <span class="tb-key"><kbd>SPACE</kbd></span>
+      </button>
+      <!-- Δv flash readout — populated on burn release. Floats up and fades. -->
+      <div class="dv-flash" id="dv-flash"></div>
+    </div>
+
+    <!-- ── Primary stick controls — sit directly under the stage so the
+         pilot's two most-direct inputs (engine throttle, world gravity)
+         are always at hand. Same f-throttle ID drives sim.control. -->
+    <div class="panel primary-controls">
+      <div class="big-slider thr throttle-dial-wrap">
+        <div class="bs-row"><span class="bs-lbl">🚀 Throttle</span><b><span id="v-thr">60</span>%</b></div>
+        <div class="throttle-dial" id="throttle-dial" role="slider"
+             aria-label="Engine throttle" aria-valuemin="0" aria-valuemax="100"
+             aria-valuenow="60" tabindex="0">
+          <svg viewBox="-100 -100 200 200" aria-hidden="true">
+            <defs>
+              <linearGradient id="td-grad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%"   stop-color="#ffb066"/>
+                <stop offset="55%"  stop-color="#ff8a3a"/>
+                <stop offset="100%" stop-color="#ff5e1f"/>
+              </linearGradient>
+            </defs>
+            <circle class="td-track" cx="0" cy="0" r="78" pathLength="100"/>
+            <circle class="td-fill"  cx="0" cy="0" r="78" pathLength="100"
+                    id="td-fill" stroke-dasharray="60 100"/>
+            <g id="td-ticks"></g>
+            <circle class="td-hub" cx="0" cy="0" r="56"/>
+          </svg>
+          <div class="td-readout">
+            <div class="td-pct"><span id="td-pct">60</span><small>%</small></div>
+            <div class="td-hint">drag · scroll · keys</div>
+          </div>
+        </div>
+        <!-- Hidden compat input — every legacy call site reads f-throttle.
+             We sync this from the dial and dispatch 'input' so existing
+             listeners keep firing without modification. -->
+        <input type="range" id="f-throttle" min="0" max="100" step="1" value="60" hidden>
+      </div>
+      <label class="big-slider grv">
+        <div class="bs-row"><span class="bs-lbl">🌍 Gravity</span><b><span id="v-grav">1.0</span>× <small id="v-grav-g">9.8 m/s²</small></b></div>
+        <input type="range" id="f-gravity" min="0.05" max="3" step="0.05" value="1">
+        <div class="bs-fill grv" id="grv-fill"></div>
+        <div class="bs-presets">
+          <span class="bs-preset" data-g="0.165" title="Lunar gravity">🌑 Moon</span>
+          <span class="bs-preset" data-g="0.38" title="Mars gravity">🔴 Mars</span>
+          <span class="bs-preset" data-g="1" title="Earth">🌍 Earth</span>
+          <span class="bs-preset" data-g="2.5" title="Super-Earth">🪐 2.5×</span>
+        </div>
+      </label>
     </div>
 
     <div class="panel">
@@ -453,36 +1064,60 @@ select option{background:#0a1024}
     </div>
 
     <div class="panel">
-      <h2>🎮 Flight controls</h2>
-      <div class="grid2" style="margin-bottom:8px">
-        <label class="field" style="margin:0">
-          <div class="row"><span>Starting altitude</span><b><span id="v-peri">300</span> km</b></div>
-          <input type="range" id="f-peri" min="100" max="1200" step="5" value="300">
-        </label>
-        <label class="field" style="margin:0">
-          <div class="row"><span>Target altitude</span><b><span id="v-tgt">300</span> km</b></div>
-          <input type="range" id="f-tgt" min="100" max="1200" step="5" value="300">
-        </label>
-        <label class="field" style="margin:0;grid-column:1/-1">
-          <div class="row"><span>Throttle</span><b><span id="v-thr">60</span>%</b></div>
-          <input type="range" id="f-throttle" min="0" max="100" step="1" value="60">
-        </label>
-      </div>
-      <!-- Hidden apogee slider keeps the engine API circular by default;
-           the elliptical disclosure reveals it for power users. -->
+      <h2>🎮 Flight controls <small style="color:var(--c-text-3);font-weight:600;letter-spacing:0;text-transform:none;margin-left:8px">throttle is above ⬆</small></h2>
+      <label class="cslide"><span>Start alt</span>
+        <input type="range" id="f-peri" min="100" max="1200" step="5" value="300">
+        <b><span id="v-peri">300</span><small>km</small></b></label>
+      <label class="cslide" style="margin-bottom:8px"><span>Target alt</span>
+        <input type="range" id="f-tgt" min="100" max="1200" step="5" value="300">
+        <b><span id="v-tgt">300</span><small>km</small></b></label>
       <details class="advanced" style="margin-bottom:8px">
         <summary>Elliptical orbit · advanced</summary>
-        <label class="field" style="margin:8px 0 0">
-          <div class="row"><span>Apogee altitude</span><b><span id="v-apo">300</span> km</b></div>
+        <label class="cslide" style="margin-top:6px"><span>Apogee alt</span>
           <input type="range" id="f-apo" min="100" max="1200" step="5" value="300">
-        </label>
+          <b><span id="v-apo">300</span><small>km</small></b></label>
       </details>
 
-      <div class="btn-row" style="margin-bottom:10px">
+      <div class="btn-row" style="margin-bottom:10px;position:relative">
         <button class="btn primary" id="b-launch">▶ Launch</button>
         <button class="btn" id="b-pause" disabled>⏸ Pause</button>
         <button class="btn warn" id="b-reset">↺ Reset</button>
-        <label class="toggle warn" id="b-auto" title="Auto-fire prograde to defend the target altitude">⟳ Auto-keep</label>
+        <button class="btn" id="b-plan" title="Schedule a future burn at apogee, perigee, or a forecast peak">⏰ Plan</button>
+        <label class="toggle warn" id="b-auto"
+               title="Autopilot (reactive): only fires when perigee breaches the mission floor. Eats efficiency score while engaged.">🤖 Autopilot</label>
+        <!-- Plan-burn popover — anchored under the Plan button via JS. -->
+        <div class="plan-pop" id="plan-pop" hidden>
+          <div class="pp-hd">Schedule burn</div>
+          <div class="pp-row">
+            <span>Trigger</span>
+            <select id="pp-trigger">
+              <option value="apogee">Next apogee</option>
+              <option value="perigee">Next perigee</option>
+              <option value="forecast-peak">Forecast peak</option>
+            </select>
+          </div>
+          <div class="pp-row">
+            <span>Direction</span>
+            <select id="pp-mode">
+              <option value="prograde">⏩ Prograde (raise)</option>
+              <option value="retrograde">⏪ Retrograde (lower)</option>
+            </select>
+          </div>
+          <div class="pp-row">
+            <span>Throttle</span>
+            <input type="range" id="pp-throttle" min="10" max="100" step="5" value="80">
+            <b><span id="pp-throttle-v">80</span>%</b>
+          </div>
+          <div class="pp-row">
+            <span>Duration</span>
+            <input type="range" id="pp-duration" min="1" max="30" step="1" value="5">
+            <b><span id="pp-duration-v">5</span>s</b>
+          </div>
+          <div class="pp-actions">
+            <button class="btn primary" id="pp-commit">Schedule</button>
+            <button class="btn" id="pp-close">Cancel</button>
+          </div>
+        </div>
       </div>
 
       <div class="ctl-group">
@@ -496,8 +1131,47 @@ select option{background:#0a1024}
           <div class="toggle" data-mode="manual" data-unlock="manual_steer">🎯 Manual</div>
         </div>
         <p class="hint" id="manual-hint" style="margin-top:6px;display:none">
-          🕹 <b>A/D</b> rotate heading · <b>Q/E</b> fine · <b>W/S</b> fire fwd/rev (hold).
+          🕹 <b>W</b>/<b>↑</b> gas · <b>S</b>/<b>↓</b> ease · <b>A</b>/<b>←</b> · <b>D</b>/<b>→</b> steer · <b>Q/E</b> fine.
         </p>
+        <p class="hint" id="steer-hud" style="margin-top:5px;display:none">↻ slew —</p>
+      </div>
+
+      <!-- ── RCS translation pad — only revealed when the launched bus carries
+           a reaction-control suite (BODIES[].rcs). Multidirectional: hold two
+           pads at once to strafe on the diagonal. Decoupled from the throttle
+           and the main burn vector. -->
+      <div class="ctl-group rcs-group" id="rcs-pad" style="margin-top:10px;display:none">
+        <div class="ctl-label">RCS translation
+          <small style="color:var(--c-text-3);font-weight:600;text-transform:none;letter-spacing:0;margin-left:8px">⌨ I/K · J/L · hold</small>
+          <span class="rcs-tag" id="rcs-tag" title="Per-axis RCS authority">—</span>
+        </div>
+        <div class="rcs-dpad">
+          <button class="rcs-btn up"    data-rcs="out"  title="Radial-out (push away from Earth)">⬆</button>
+          <button class="rcs-btn left"  data-rcs="back" title="Retrograde nudge (lower)">⏪</button>
+          <div class="rcs-core" id="rcs-core">RCS</div>
+          <button class="rcs-btn right" data-rcs="fwd"  title="Prograde nudge (raise)">⏩</button>
+          <button class="rcs-btn down"  data-rcs="in"   title="Radial-in (push toward Earth)">⬇</button>
+        </div>
+        <p class="hint" style="margin-top:6px">Lateral nudges, no rotation needed — hold two for a diagonal.</p>
+      </div>
+
+      <!-- ── RCS translation pad — only revealed when the launched bus carries
+           a reaction-control suite (BODIES[].rcs). Multidirectional: hold two
+           pads at once to strafe on the diagonal. Decoupled from the throttle
+           and the main burn vector. -->
+      <div class="ctl-group rcs-group" id="rcs-pad" style="margin-top:10px;display:none">
+        <div class="ctl-label">RCS translation
+          <small style="color:var(--c-text-3);font-weight:600;text-transform:none;letter-spacing:0;margin-left:8px">⌨ I/K · J/L · hold</small>
+          <span class="rcs-tag" id="rcs-tag" title="Per-axis RCS authority">—</span>
+        </div>
+        <div class="rcs-dpad">
+          <button class="rcs-btn up"    data-rcs="out"  title="Radial-out (push away from Earth)">⬆</button>
+          <button class="rcs-btn left"  data-rcs="back" title="Retrograde nudge (lower)">⏪</button>
+          <div class="rcs-core" id="rcs-core">RCS</div>
+          <button class="rcs-btn right" data-rcs="fwd"  title="Prograde nudge (raise)">⏩</button>
+          <button class="rcs-btn down"  data-rcs="in"   title="Radial-in (push toward Earth)">⬇</button>
+        </div>
+        <p class="hint" style="margin-top:6px">Lateral nudges, no rotation needed — hold two for a diagonal.</p>
       </div>
 
       <div class="ctl-group" style="margin-top:10px">
@@ -512,102 +1186,149 @@ select option{background:#0a1024}
     </div>
 
     <div class="panel" id="pilot-panel">
-      <h2>🎖 Pilot profile <span class="sub">progression &amp; unlocks</span></h2>
       <div class="pilot-hd">
         <span class="rank-badge" id="rank-badge">🟢</span>
         <div class="rank-meta">
           <div class="rank-name" id="rank-name">Cadet</div>
           <div class="rank-xp" id="rank-xp">0 XP</div>
         </div>
+        <div class="score-side">
+          <div class="metric"><div class="k">Score</div><div class="v" id="o-score">0</div></div>
+          <div class="metric"><div class="k">Best</div><div class="v" id="o-best">0</div></div>
+        </div>
       </div>
-      <div class="bar" style="margin:7px 0 9px"><i id="rank-bar" style="width:0%"></i></div>
-      <div id="rank-next" class="hint" style="margin-bottom:8px">—</div>
-      <div class="ctl-label" style="margin-top:4px">Unlocked</div>
-      <div class="unlock-grid" id="unlocks-owned"></div>
-      <div class="ctl-label" style="margin-top:10px">Locked</div>
-      <div class="unlock-grid" id="unlocks-locked"></div>
+      <div class="bar" style="margin:7px 0 4px"><i id="rank-bar" style="width:0%"></i></div>
+      <div id="rank-next" class="hint" style="font-size:.62rem;margin-bottom:4px">—</div>
+      <details class="advanced">
+        <summary>Unlocks ladder</summary>
+        <div class="ctl-label" style="margin-top:8px">Unlocked</div>
+        <div class="unlock-grid" id="unlocks-owned"></div>
+        <div class="ctl-label" style="margin-top:10px">Locked</div>
+        <div class="unlock-grid" id="unlocks-locked"></div>
+      </details>
     </div>
 
     <div class="panel">
       <h2>🌪 Drag conditions</h2>
-
       <div class="ctl-label">Space weather</div>
       <div class="toggle-row" id="sw-presets"></div>
-
-      <div class="ctl-label" style="margin-top:11px">Drag attitude</div>
+      <div class="ctl-label" style="margin-top:9px">Drag attitude</div>
       <div class="toggle-row" id="att-modes"></div>
-
-      <div class="metrics" style="margin-top:11px">
+      <div class="metrics metrics-quad" style="margin-top:9px">
         <div class="metric"><div class="k">ρ @ 400 km</div><div class="v" id="d-rho400">—</div></div>
         <div class="metric"><div class="k">vs. nominal</div><div class="v" id="d-rhox">—</div></div>
-        <div class="metric"><div class="k">Eff. drag area</div><div class="v" id="d-effarea">—</div></div>
-        <div class="metric"><div class="k">Ballistic coeff</div><div class="v" id="d-bc2">—</div></div>
+        <div class="metric"><div class="k">Eff. area</div><div class="v" id="d-effarea">—</div></div>
+        <div class="metric"><div class="k">Ballistic</div><div class="v" id="d-bc2">—</div></div>
       </div>
-
-      <details class="advanced" style="margin-top:9px">
+      <details class="advanced" style="margin-top:7px">
         <summary>Custom F10.7 / Ap · advanced</summary>
-        <div class="grid2" style="margin-top:6px">
-          <label class="field" style="margin:0">
-            <div class="row"><span>F10.7 flux</span><b><span id="v-f107">150</span> sfu</b></div>
-            <input type="range" id="f-f107" min="65" max="300" step="1" value="150">
-          </label>
-          <label class="field" style="margin:0">
-            <div class="row"><span>Ap (geomag.)</span><b><span id="v-ap">12</span></b></div>
-            <input type="range" id="f-ap" min="0" max="400" step="1" value="12">
-          </label>
-        </div>
+        <label class="cslide" style="margin-top:6px"><span>F10.7</span>
+          <input type="range" id="f-f107" min="65" max="300" step="1" value="150">
+          <b><span id="v-f107">150</span><small>sfu</small></b></label>
+        <label class="cslide"><span>Ap index</span>
+          <input type="range" id="f-ap" min="0" max="400" step="1" value="12">
+          <b><span id="v-ap">12</span></b></label>
       </details>
     </div>
 
     <!-- ── telemetry + objective ── -->
     <div class="panel">
       <h2>📡 Telemetry</h2>
-      <div class="metrics">
-        <div class="metric" id="m-alt"><div class="k">Altitude</div><div class="v">—</div></div>
+      <!-- Primary 4 are always visible — the cockpit gauges a pilot
+           actually scans during a burn. Rest are behind a disclosure. -->
+      <div class="metrics metrics-quad">
+        <div class="metric" id="m-alt"><div class="k">Alt</div><div class="v">—</div></div>
         <div class="metric" id="m-spd"><div class="k">Speed</div><div class="v">—</div></div>
         <div class="metric" id="m-peri"><div class="k">Perigee</div><div class="v">—</div></div>
         <div class="metric" id="m-apo"><div class="k">Apogee</div><div class="v">—</div></div>
-        <div class="metric" id="m-period"><div class="k">Period</div><div class="v">—</div></div>
-        <div class="metric" id="m-ecc"><div class="k">Eccentricity</div><div class="v">—</div></div>
-        <div class="metric" id="m-rho"><div class="k">Air density</div><div class="v">—</div></div>
-        <div class="metric" id="m-q"><div class="k">Dyn. pressure</div><div class="v">—</div></div>
-        <div class="metric" id="m-drag"><div class="k">Drag decel</div><div class="v">—</div></div>
-        <div class="metric" id="m-decay"><div class="k">Decay rate</div><div class="v">—</div></div>
       </div>
-
-      <div style="margin-top:11px">
-        <div style="display:flex;justify-content:space-between;font-size:.66rem;color:var(--c-text-3);font-weight:700">
+      <div style="margin-top:8px">
+        <div style="display:flex;justify-content:space-between;font-size:.62rem;color:var(--c-text-3);font-weight:700">
           <span>PROPELLANT</span><span id="fuel-lbl">—</span>
         </div>
         <div class="bar fuel"><i id="fuel-bar" style="width:100%"></i></div>
-        <div style="display:flex;justify-content:space-between;font-size:.66rem;color:var(--c-text-3);font-weight:700;margin-top:8px">
+        <div style="display:flex;justify-content:space-between;font-size:.62rem;color:var(--c-text-3);font-weight:700;margin-top:7px">
           <span>Δv REMAINING</span><span id="dv-lbl">—</span>
         </div>
         <div class="bar"><i id="dv-bar" style="width:100%"></i></div>
       </div>
-
       <canvas id="sd-spark"></canvas>
-      <div style="font-size:.62rem;color:var(--c-text-3);text-align:center;margin-top:3px">
-        altitude vs. mission time
+      <!-- Realism gauges — always visible because they drive pilot decisions. -->
+      <div class="metrics metrics-quad" style="margin-top:6px">
+        <div class="metric" id="m-turb"><div class="k">Turbulence</div><div class="v">—</div></div>
+        <div class="metric" id="m-tumble"><div class="k">Tumble</div><div class="v">—</div></div>
+        <div class="metric" id="m-erosion"><div class="k">Throat life</div><div class="v">—</div></div>
+        <div class="metric" id="m-ispEff"><div class="k">Eff. Iₛₚ</div><div class="v">—</div></div>
       </div>
+      <details class="advanced" style="margin-top:4px">
+        <summary>Extended telemetry</summary>
+        <div class="metrics metrics-quad" style="margin-top:6px">
+          <div class="metric" id="m-period"><div class="k">Period</div><div class="v">—</div></div>
+          <div class="metric" id="m-ecc"><div class="k">Ecc</div><div class="v">—</div></div>
+          <div class="metric" id="m-rho"><div class="k">ρ air</div><div class="v">—</div></div>
+          <div class="metric" id="m-q"><div class="k">q dyn</div><div class="v">—</div></div>
+          <div class="metric" id="m-drag" style="grid-column:1/3"><div class="k">Drag decel</div><div class="v">—</div></div>
+          <div class="metric" id="m-decay" style="grid-column:3/5"><div class="k">Decay rate</div><div class="v">—</div></div>
+        </div>
+      </details>
     </div>
 
-    <div class="panel">
-      <h2>🏆 Score</h2>
-      <div class="metrics">
-        <div class="metric flag-good"><div class="k">Score</div><div class="v" id="o-score">0</div></div>
-        <div class="metric"><div class="k">Mission clock</div><div class="v" id="o-clock">0<small>s</small></div></div>
-        <div class="metric" style="grid-column:1/-1"><div class="k">Best run (this ship)</div><div class="v" id="o-best">0</div></div>
-      </div>
-      <!-- Hidden legacy cards — engine code still writes to these IDs.
-           Kept off-screen so we don't have to refactor the writers. -->
-      <span id="o-station" hidden></span><span id="o-orbits" hidden></span>
-    </div>
+    <!-- Mission clock + legacy mission-state counters live with the
+         telemetry strip; the score/best cards moved into the pilot panel
+         header so the player sees their current run + lifetime best at a
+         glance. These hidden spans keep the engine writers happy. -->
+    <span id="o-clock" hidden></span>
+    <span id="o-station" hidden></span><span id="o-orbits" hidden></span>
   </section>
 
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- ── End-of-mission scorecard overlay. Hidden by default; populated and
+     revealed by showScorecard() on mission complete, re-entry, or
+     out-of-fuel terminations. -->
+<div class="scorecard-overlay" id="scorecard-overlay" hidden role="dialog"
+     aria-labelledby="sc-outcome" aria-modal="true">
+  <div class="scorecard">
+    <div class="sc-hd">
+      <div class="sc-rank" id="sc-rank">🏁</div>
+      <div class="sc-title">
+        <div class="sc-mission" id="sc-mission">Mission</div>
+        <div class="sc-outcome" id="sc-outcome">—</div>
+      </div>
+      <div class="sc-score" id="sc-score">0</div>
+    </div>
+    <div class="sc-body">
+      <!-- Three signature grades populated by showScorecard(). -->
+      <div class="sc-grade-grid">
+        <div class="sc-grade">
+          <div class="sc-grade-letter" id="sc-g-timing">—</div>
+          <div class="sc-grade-name">Burn Timing</div>
+          <div class="sc-grade-val" id="sc-g-timing-v">—</div>
+        </div>
+        <div class="sc-grade">
+          <div class="sc-grade-letter" id="sc-g-dv">—</div>
+          <div class="sc-grade-name">Δv Efficiency</div>
+          <div class="sc-grade-val" id="sc-g-dv-v">—</div>
+        </div>
+        <div class="sc-grade">
+          <div class="sc-grade-letter" id="sc-g-bonus">—</div>
+          <div class="sc-grade-name">Forecast Bonus</div>
+          <div class="sc-grade-val" id="sc-g-bonus-v">—</div>
+        </div>
+      </div>
+      <!-- Detailed breakdown — mission-specific rows appended via the
+           mission.scorecard(stats, ctx) hook (optional). -->
+      <div class="sc-rows" id="sc-rows"></div>
+      <div class="sc-tip" id="sc-tip" hidden></div>
+    </div>
+    <div class="sc-actions">
+      <button class="btn" id="sc-close">Close</button>
+      <button class="btn primary" id="sc-replay">↺ Try Again</button>
+    </div>
+  </div>
+</div>
 
 <script type="module">
 import { auth } from './js/auth.js';
@@ -615,8 +1336,10 @@ import { getSupabase, isConfigured } from './js/supabase-config.js';
 import * as ENG from './js/satellite-designer-engine.js';
 import * as BUILDER from './js/satellite-builder.js';
 import * as SCENE3D from './js/satellite-designer-3d.js';
-import { MISSIONS, MISSION_ORDER } from './js/satellite-missions.js';
+import { MISSIONS, MISSION_ORDER, assessFloorStatus, BREACH_SCORE_PENALTY_PER_SEC } from './js/satellite-missions.js';
+import * as FORECAST from './js/satellite-designer-forecast.js';
 import * as PROG from './js/satellite-progression.js';
+import * as BP from './js/satellite-blueprints.js';
 
 // ── DOM helpers ─────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -651,12 +1374,28 @@ const sim = {
   targetSatM: null,    // { x, y } when a target exists (rendezvous)
   debrisM: null,       // { x, y } when debris exists (avoidance)
   // Pilot input — set by keyboard while a key is held; consumed in frame().
-  inputs: { rotL: false, rotR: false, fwd: false, rev: false, fine: false },
+  // `burn` is the momentary thrust trigger (SPACE key, the big BURN button,
+  // or touch-and-hold). It overrides mode → 'prograde' while held and
+  // restores the prior mode on release.
+  inputs: { rotL: false, rotR: false, fwd: false, rev: false, fine: false,
+            burn: false,
+            // RCS translation pad (hold) — multidirectional nudges, only live
+            // on buses with a reaction-control suite. Consumed in frame().
+            rcsOut: false, rcsIn: false, rcsFwd: false, rcsBack: false },
+  // Restored when `inputs.burn` flips back to false.
+  _burnPriorMode: null,
   prevMissionComplete: null,
 };
 let sdBuild = BUILDER.defaultBuild();
 // Persistent pilot profile (XP, rank, unlocks) — see js/satellite-progression.js
 let profile = PROG.loadProfile();
+
+// Arcade slew gain — multiplies the design's real (deg/s-scale) slew rate up
+// to a *playable* turn rate. Real spacecraft re-point far too slowly for an
+// arcade cockpit, so we scale uniformly: relative agility between buses is
+// preserved (CMG > wheels), and the HUD shows this same gamified number so
+// what you read matches what you feel.
+const SLEW_GAIN = 12;
 
 // ── Design from the form ────────────────────────────────────────────────────
 function readDesign() {
@@ -790,7 +1529,132 @@ $('f-peri').addEventListener('input', () => {
 $('f-apo').addEventListener('input', () => {
   if (+$('f-apo').value < +$('f-peri').value) { $('f-peri').value = $('f-apo').value; $('v-peri').textContent = $('f-peri').value; }
 });
-$('f-throttle').addEventListener('input', () => { sim.control.throttle = (+$('f-throttle').value) / 100; });
+// Throttle — drives both the control and its fuel-gauge-style fill bar.
+// Throttle dial — drives the hidden f-throttle input and the dial's SVG
+// fill arc + digital readout. Single funnel through setThrottlePct keeps
+// the legacy slider listeners, the dial render, and ARIA in sync.
+function syncThrottleFill() {
+  const v = +$('f-throttle').value;
+  // SVG fill arc — pathLength is normalised to 100 so the dash is just %.
+  const fill = $('td-fill'); if (fill) fill.setAttribute('stroke-dasharray', `${v} 100`);
+  const pct = $('td-pct');  if (pct)  pct.textContent = v;
+  const dial = $('throttle-dial');
+  if (dial) dial.setAttribute('aria-valuenow', String(v));
+}
+function setThrottlePct(pct, opts = {}) {
+  const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+  const inp = $('f-throttle');
+  if (+inp.value === clamped) return;
+  inp.value = String(clamped);
+  // Dispatch input so the existing slider listener + bindSlider readout fire.
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+}
+$('f-throttle').addEventListener('input', () => {
+  sim.control.throttle = (+$('f-throttle').value) / 100;
+  syncThrottleFill();
+});
+
+// Render the tick-mark ring once. 20 ticks (every 5%), majors every 25%.
+{
+  const ticks = $('td-ticks');
+  if (ticks) {
+    const N = 20;
+    let svg = '';
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      const major = i % 5 === 0;
+      const r1 = major ? 85 : 87, r2 = 92;
+      const x1 = r1 * Math.cos(a), y1 = r1 * Math.sin(a);
+      const x2 = r2 * Math.cos(a), y2 = r2 * Math.sin(a);
+      svg += `<line class="td-tick${major ? ' major' : ''}" x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`;
+    }
+    ticks.innerHTML = svg;
+  }
+}
+
+// Pointer interaction — drag-around-perimeter or tap-to-set. Angle is
+// computed in dial-local coordinates with 0° at 12 o'clock (the dial's
+// SVG is rotated -90°, so we add π/2 to the raw atan2 angle).
+{
+  const dial = $('throttle-dial');
+  if (dial) {
+    const angleToPct = (clientX, clientY) => {
+      const rect = dial.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top  + rect.height / 2;
+      let a = Math.atan2(clientY - cy, clientX - cx) + Math.PI / 2;
+      if (a < 0) a += Math.PI * 2;
+      return (a / (Math.PI * 2)) * 100;
+    };
+    let dragging = false;
+    const press = (ev) => {
+      ev.preventDefault();
+      dragging = true;
+      try { dial.setPointerCapture?.(ev.pointerId); } catch (_) {}
+      setThrottlePct(angleToPct(ev.clientX, ev.clientY));
+    };
+    const move = (ev) => {
+      if (!dragging) return;
+      setThrottlePct(angleToPct(ev.clientX, ev.clientY));
+    };
+    const release = (ev) => {
+      if (!dragging) return;
+      dragging = false;
+      try { dial.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    };
+    dial.addEventListener('pointerdown',   press);
+    dial.addEventListener('pointermove',   move);
+    dial.addEventListener('pointerup',     release);
+    dial.addEventListener('pointercancel', release);
+    dial.addEventListener('pointerleave',  release);
+    // Scroll-to-adjust on desktop. Inverted (wheel-up = throttle-up) feels
+    // natural with a vertical pilot mindset.
+    dial.addEventListener('wheel', (ev) => {
+      ev.preventDefault();
+      const step = ev.shiftKey ? 1 : 5;
+      setThrottlePct(+$('f-throttle').value + (ev.deltaY < 0 ? step : -step));
+    }, { passive: false });
+    // Keyboard nudge — Arrow keys ±5, Shift+Arrow ±1, Home/End hard stops.
+    dial.addEventListener('keydown', (ev) => {
+      const cur = +$('f-throttle').value;
+      const step = ev.shiftKey ? 1 : 5;
+      if (ev.key === 'ArrowUp'   || ev.key === 'ArrowRight') { ev.preventDefault(); setThrottlePct(cur + step); }
+      else if (ev.key === 'ArrowDown' || ev.key === 'ArrowLeft')  { ev.preventDefault(); setThrottlePct(cur - step); }
+      else if (ev.key === 'Home') { ev.preventDefault(); setThrottlePct(0); }
+      else if (ev.key === 'End')  { ev.preventDefault(); setThrottlePct(100); }
+    });
+  }
+}
+syncThrottleFill();
+
+// Gravity slider — scales env.gravityMul in real time. Pre-flight changes
+// modify the upcoming initial orbit; in-flight changes warp the trajectory
+// immediately (great way to *see* how μ shapes the orbit).
+function syncGravityFill() {
+  const v = +$('f-gravity').value;
+  // Range 0.05..3 → 0..100% of fill bar
+  const pct = ((v - 0.05) / (3 - 0.05)) * 100;
+  $('grv-fill').style.setProperty('--fill', pct.toFixed(1) + '%');
+  $('v-grav').textContent = v.toFixed(2).replace(/\.?0+$/, '') || v.toFixed(2);
+  // Surface g for context. Real Earth surface ≈ 9.82 m/s² at the
+  // engine's R_EARTH (slight variation from 9.80665 standard).
+  const g = ENG.gravityAt(0, env);
+  $('v-grav-g').textContent = g.toFixed(2) + ' m/s²';
+}
+$('f-gravity').addEventListener('input', () => {
+  env.gravityMul = +$('f-gravity').value;
+  syncGravityFill();
+});
+$('.bs-presets')?.addEventListener; // no-op; the next line attaches the handler properly
+document.querySelectorAll('.bs-preset').forEach(el => {
+  el.addEventListener('click', () => {
+    const g = +el.dataset.g;
+    $('f-gravity').value = g;
+    env.gravityMul = g;
+    syncGravityFill();
+    toast(`Gravity → ${g}× Earth`);
+  });
+});
 
 // Thrust mode buttons — refuses to activate locked modes (gated by rank).
 $('thrust-modes').addEventListener('click', (e) => {
@@ -810,8 +1674,9 @@ function setBurnMode(mode) {
   const chipMode = mode === 'manual-retro' ? 'manual' : mode;
   $('thrust-modes').querySelectorAll('.toggle').forEach(x =>
     x.classList.toggle('active', x.dataset.mode === chipMode));
-  $('manual-hint').style.display =
-    (mode === 'manual' || mode === 'manual-retro') ? 'block' : 'none';
+  // The Pilot/steering hint is owned by syncSteerHud (it's persistent in
+  // flight now that arcade control is core) — don't flicker it on burn-mode
+  // changes, which the gas pedal toggles constantly.
 }
 // Time warp — same gating
 $('warp-modes').addEventListener('click', (e) => {
@@ -827,17 +1692,742 @@ $('warp-modes').addEventListener('click', (e) => {
     x.classList.toggle('active', x === t));
   $('st-warp').textContent = (sim.paused ? '⏸ ' : '▶ ') + '×' + sim.warp;
 });
-// Auto station-keep
+// Autopilot (reactive) — only meaningful while the sim is running. The
+// frame loop checks sim.auto + the mission floor; this toggle just owns
+// the on/off state. Renamed from "auto-keep" and rebalanced in the loop
+// (no preemptive firing; efficiency penalty applied while engaged).
 $('b-auto').addEventListener('click', () => {
   sim.auto = !sim.auto;
   $('b-auto').classList.toggle('active', sim.auto);
+  if (sim.auto) toast('🤖 Autopilot armed — reactive only (fires when floor is breached).');
 });
+
+// ── Plan-burn popover ───────────────────────────────────────────────────────
+// A small scheduler that queues one prograde or retrograde burn to fire
+// at the next apogee, perigee, or forecast peak. The frame loop watches
+// for the trigger condition; once met, the burn fires for the configured
+// duration and self-disarms. Educational: forces the player to think in
+// terms of orbit phase rather than "burn now".
+{
+  const pop = $('plan-pop');
+  const planBtn = $('b-plan');
+  // Live readouts inside the popover.
+  $('pp-throttle').addEventListener('input', () => {
+    $('pp-throttle-v').textContent = $('pp-throttle').value;
+  });
+  $('pp-duration').addEventListener('input', () => {
+    $('pp-duration-v').textContent = $('pp-duration').value;
+  });
+  const openPopover = () => {
+    // Anchor under the Plan button. Inline positioning so the popover
+    // works even if the surrounding panel doesn't itself relative-position.
+    const r = planBtn.getBoundingClientRect();
+    const host = planBtn.offsetParent || document.body;
+    const hr = host.getBoundingClientRect();
+    pop.style.top  = (planBtn.offsetTop + planBtn.offsetHeight + 6) + 'px';
+    pop.style.left = (planBtn.offsetLeft) + 'px';
+    pop.hidden = false;
+    // Seed the throttle slider with the current dial value so 'commit'
+    // matches the player's intuition unless they tweak it.
+    $('pp-throttle').value = $('f-throttle').value;
+    $('pp-throttle-v').textContent = $('pp-throttle').value;
+  };
+  const closePopover = () => { pop.hidden = true; };
+  planBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (pop.hidden) openPopover(); else closePopover();
+  });
+  $('pp-close').addEventListener('click', closePopover);
+  // Click-outside / Esc to dismiss. Keep listeners attached at document
+  // level — they're cheap and self-no-op when the popover is hidden.
+  document.addEventListener('click', (e) => {
+    if (pop.hidden) return;
+    if (pop.contains(e.target) || planBtn.contains(e.target)) return;
+    closePopover();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !pop.hidden) closePopover();
+  });
+  $('pp-commit').addEventListener('click', () => {
+    if (!sim.running) {
+      toast('Launch first — schedules a burn during flight.', true);
+      return;
+    }
+    sim.scheduledBurn = {
+      trigger:  $('pp-trigger').value,        // apogee | perigee | forecast-peak
+      mode:     $('pp-mode').value,           // prograde | retrograde
+      throttle: (+$('pp-throttle').value) / 100,
+      durationS: +$('pp-duration').value,
+      armedAt:  sim.state ? sim.state.t : 0,
+      firingUntilT: null,                     // set when trigger fires
+      _peakSimSec: null,
+    };
+    // Snapshot the forecast peak at commit-time so the trigger fires at a
+    // deterministic sim-time even if the projection updates mid-flight.
+    if (sim.scheduledBurn.trigger === 'forecast-peak') {
+      if (sim._forecastPeakSimSec != null) {
+        sim.scheduledBurn._peakSimSec = sim._forecastPeakSimSec;
+      } else {
+        sim.scheduledBurn = null;
+        toast('No forecast peak available — fetch is still warming up.', true);
+        return;
+      }
+    }
+    closePopover();
+    updateSchedPill();
+    toast(`⏰ Burn queued — ${sim.scheduledBurn.mode} ${$('pp-duration').value}s @ ${$('pp-throttle').value}% on next ${$('pp-trigger').value}.`);
+  });
+  // Status pill: click to cancel an armed scheduled burn.
+  $('st-sched').addEventListener('click', () => {
+    if (!sim.scheduledBurn) return;
+    if (sim.scheduledBurn.firingUntilT) return;  // can't cancel mid-fire
+    sim.scheduledBurn = null;
+    updateSchedPill();
+    toast('Scheduled burn cancelled.');
+  });
+}
+
+// Refresh the scheduled-burn status pill from sim state. Called whenever
+// the schedule changes and once per second during flight.
+function updateSchedPill() {
+  const pill = $('st-sched');
+  if (!pill) return;
+  const sb = sim.scheduledBurn;
+  if (!sb) { pill.hidden = true; return; }
+  pill.hidden = false;
+  if (sb.firingUntilT != null) {
+    const remaining = Math.max(0, sb.firingUntilT - (sim.state?.t || 0));
+    pill.firstChild.nodeValue = `🔥 ${sb.mode.toUpperCase()} ${remaining.toFixed(1)}s `;
+  } else {
+    pill.firstChild.nodeValue = `⏰ ${sb.trigger} · ${sb.mode} ${sb.durationS}s `;
+  }
+}
+
+// ── STORM RADAR HUD ─────────────────────────────────────────────────────────
+// One source of truth for the strip above the cam controls. Reads
+// sim.state / sim.design / FORECAST and updates DOM in place. The hot
+// path is the SVG path-build for the F10.7 trace — kept O(N) over a
+// fixed 6-point series so a per-frame call is fine even at high warp.
+const STORM_RADAR = (() => {
+  const HORIZONS = [0, 1, 2, 3, 4, 6];               // hours
+  const PERI_FLOOR_DEFAULT = 250;                    // km, fallback when mission has no floor
+  const PERI_CEIL          = 800;                    // km, scale top for the bar
+  let _hidden = false;
+  let _lastFcSig = '';                               // memoised serialisation of last drawn series
+  let _periHist  = [];                               // ring of [t, periKm] samples for trend nicety
+  let _lastSampleT = -Infinity;
+
+  function setVisible(on) {
+    _hidden = !on;
+    const el = $('sd-radar');
+    if (el) el.hidden = !on;
+    const tog = $('st-radar');
+    if (tog) tog.classList.toggle('off', !on);
+  }
+  function recordPeri(simT, periKm) {
+    // 8 sim-second decimation — keeps the buffer compact at any warp.
+    if (simT - _lastSampleT < 8 && _periHist.length > 0) return;
+    _lastSampleT = simT;
+    _periHist.push([simT, periKm]);
+    if (_periHist.length > 120) _periHist.shift();
+  }
+  function resetHistory() {
+    _periHist = [];
+    _lastSampleT = -Infinity;
+    _lastFcSig = '';
+  }
+
+  // Nowcast cell — current F10.7 / Ap from the forecast module's nowcast.
+  function paintNowcast() {
+    const nc = (typeof FORECAST !== 'undefined') ? FORECAST.getNowcast?.() : null;
+    const status = (typeof FORECAST !== 'undefined') ? FORECAST.getStatus?.() : null;
+    const f107El = $('sr-f107'), apEl = $('sr-ap'), skEl = $('sr-skill'), nowEl = $('sr-now');
+    if (!f107El) return;
+    const f = nc?.f107, a = nc?.ap;
+    f107El.textContent = Number.isFinite(f) ? f.toFixed(0) : '—';
+    apEl.textContent   = Number.isFinite(a) ? a.toFixed(0) : '—';
+    // Storm classification — Ap ≥ 50 is moderate-storm threshold; Ap ≥ 100 severe.
+    nowEl.classList.toggle('storm', Number.isFinite(a) && a >= 50);
+    if (skEl) {
+      const src = status?.source || (nc ? 'nowcast' : 'pending');
+      skEl.textContent = src;
+    }
+  }
+
+  // Forecast trace — 6 horizon samples drawn as a polyline + envelope band.
+  function paintForecast() {
+    if (typeof FORECAST === 'undefined') return;
+    let series;
+    try { series = FORECAST.getForecastSeries({ horizons: HORIZONS }); }
+    catch (_) { series = null; }
+    if (!series || !series.length) return;
+
+    // Cheap memoisation — skip the path rebuild when the values haven't
+    // moved (forecast updates every ~5 min, sim ticks at 60 fps).
+    const sig = series.map(s => `${(s.f107|0)}:${(s.ap|0)}`).join('|');
+    if (sig === _lastFcSig) return;
+    _lastFcSig = sig;
+
+    // Plot space: viewBox is 200 × 40. Pad 4px on each side, top 2 / bot 4.
+    const W = 200, H = 40, padX = 6, padTop = 4, padBot = 6;
+    const innerW = W - padX * 2, innerH = H - padTop - padBot;
+    const xs = HORIZONS.map((_, i) => padX + (i / (HORIZONS.length - 1)) * innerW);
+
+    // Y-scale: cover [60, 320] SFU so the trace stays visible across
+    // quiet (~70) and storm (~250+) regimes without re-scaling per tick.
+    const F_MIN = 60, F_MAX = 320;
+    const yOf = (f) => {
+      const v = Math.max(F_MIN, Math.min(F_MAX, Number.isFinite(f) ? f : F_MIN));
+      return padTop + innerH * (1 - (v - F_MIN) / (F_MAX - F_MIN));
+    };
+
+    // Line through nominal F10.7
+    const linePts = series.map((s, i) => `${xs[i].toFixed(1)},${yOf(s.f107).toFixed(1)}`);
+    $('sr-fc-line-path').setAttribute('d', 'M ' + linePts.join(' L '));
+
+    // Envelope band — adverse upper, benign lower. Skip if forcing absent.
+    const hasBand = series.every(s => s.forcing?.adverse && s.forcing?.benign);
+    if (hasBand) {
+      const upper = series.map((s, i) => `${xs[i].toFixed(1)},${yOf(s.forcing.adverse.f107).toFixed(1)}`);
+      const lower = series.map((s, i) => `${xs[i].toFixed(1)},${yOf(s.forcing.benign.f107).toFixed(1)}`).reverse();
+      $('sr-fc-band-path').setAttribute('d', 'M ' + upper.join(' L ') + ' L ' + lower.join(' L ') + ' Z');
+    } else {
+      $('sr-fc-band-path').setAttribute('d', '');
+    }
+
+    // Peak detection — same logic the plan-burn scheduler + score
+    // multiplier use. Skip "peak is now" (horizon 0) since it's not
+    // anticipatable. The peak window pill below the trace previews
+    // the 2× bonus zone. We also stash the live peak as sim seconds
+    // from launch so the 2× bonus check in the frame loop reads the
+    // SAME peak the player can see on the HUD.
+    let peakIdx = -1, peakF = -Infinity;
+    for (let i = 1; i < series.length; i++) {
+      if (series[i].f107 > peakF) { peakF = series[i].f107; peakIdx = i; }
+    }
+    if (sim.running && peakIdx > 0) {
+      // Convert horizon hours → sim seconds. The radar's clock anchor is
+      // the sim's launch wallclock; the forecast horizon is from "now"
+      // (real wallclock), so we add the elapsed real-time since launch
+      // to keep the peak anchored to its actual wallclock-future moment.
+      const elapsedSimSec = sim.state ? sim.state.t : 0;
+      sim._forecastPeakSimSec = elapsedSimSec + HORIZONS[peakIdx] * 3600;
+    } else if (peakIdx < 0) {
+      sim._forecastPeakSimSec = null;
+    }
+    const peakDot = $('sr-fc-peak-dot');
+    const peakGlow = $('sr-fc-peak-glow');
+    const peakLbl  = $('sr-peak-lbl');
+    if (peakIdx > 0 && Number.isFinite(peakF)) {
+      const px = xs[peakIdx], py = yOf(peakF);
+      peakDot.setAttribute('cx', px.toFixed(1));
+      peakDot.setAttribute('cy', py.toFixed(1));
+      peakDot.removeAttribute('hidden');
+      // ±30-min bonus window around the peak, mapped onto the X axis.
+      // Each horizon-step represents (HORIZONS[1] - HORIZONS[0]) hours;
+      // 30 minutes = 0.5 h. We shade a band of width 1h ÷ stepHr × pxPerStep.
+      const stepHr = HORIZONS[1] - HORIZONS[0];
+      const pxPerHr = (xs[1] - xs[0]) / stepHr;
+      const halfPx  = Math.max(4, 0.5 * pxPerHr);
+      peakGlow.setAttribute('x', (px - halfPx).toFixed(1));
+      peakGlow.setAttribute('width', (2 * halfPx).toFixed(1));
+      peakGlow.removeAttribute('hidden');
+      peakLbl.textContent = `peak ${peakF.toFixed(0)} SFU @ +${HORIZONS[peakIdx]}h`;
+    } else {
+      peakDot.setAttribute('hidden', '');
+      peakGlow.setAttribute('hidden', '');
+      peakLbl.textContent = 'no peak';
+    }
+
+    // Nowcast dot — sample 0 (horizon = 0) anchors the trace at "now".
+    $('sr-fc-now-dot').setAttribute('cx', xs[0].toFixed(1));
+    $('sr-fc-now-dot').setAttribute('cy', yOf(series[0].f107).toFixed(1));
+  }
+
+  // Right cell — perigee margin bar + Δv-budget bar. Both live; bar
+  // colour reflects threat level so peripheral vision catches trouble.
+  function paintBudget() {
+    const sf = sim.state, sd = sim.design;
+    const mission = MISSIONS[sim.missionId];
+    const floor   = mission?.altitudeFloorKm ?? PERI_FLOOR_DEFAULT;
+
+    // Perigee bar — show altitude above floor as % of (ceil - floor).
+    let periPct = 0, periTxt = '—', periCls = '';
+    if (sf && sd) {
+      const tel = ENG.telemetry(sf, sd, sim.env, sim.control.attitudeMult);
+      const peri = tel.periAltKm;
+      recordPeri(sf.t, peri);
+      periTxt = peri.toFixed(0) + ' km';
+      const range = PERI_CEIL - floor;
+      periPct = Math.max(0, Math.min(100, ((peri - floor) / range) * 100));
+      // Margin-based threat: < floor → critical, within 30 km → warn.
+      if (peri < floor)         periCls = 'crit';
+      else if (peri < floor+30) periCls = 'warn';
+    }
+    const periBar = $('sr-bar-peri');
+    if (periBar) {
+      periBar.classList.remove('warn', 'crit');
+      if (periCls) periBar.classList.add(periCls);
+      periBar.querySelector('.sr-bar-fill').style.width = periPct.toFixed(1) + '%';
+      periBar.querySelector('.sr-bar-val').textContent  = periTxt;
+    }
+
+    // Δv-budget bar — current vs initial Tsiolkovsky budget. The Isp
+    // erosion factor matches setBurnInput's flash-readout formula so
+    // the gauge reads honestly throughout a burn.
+    let dvPct = 0, dvTxt = '—', dvCls = '';
+    if (sf && sd && sd.fuelMass > 0) {
+      const ispEff = sd.isp * (1 - 0.25 * (sf.burnSeconds
+                     ? Math.min(1, sf.burnSeconds / (sd.throatLifeS ?? 6000)) : 0));
+      const dvNow  = ispEff * ENG.G0 * Math.log((sd.dryMass + sf.fuel) / Math.max(sd.dryMass, 1e-9));
+      const dvMax  = sd.isp   * ENG.G0 * Math.log((sd.dryMass + sd.fuelMass) / sd.dryMass);
+      dvPct = Math.max(0, Math.min(100, (dvNow / Math.max(dvMax, 1e-9)) * 100));
+      dvTxt = dvNow.toFixed(0) + ' m/s';
+      if (dvPct < 20) dvCls = 'low';
+    }
+    const dvBar = $('sr-bar-dv');
+    if (dvBar) {
+      dvBar.classList.remove('low');
+      if (dvCls) dvBar.classList.add(dvCls);
+      dvBar.querySelector('.sr-bar-fill').style.width = dvPct.toFixed(1) + '%';
+      dvBar.querySelector('.sr-bar-val').textContent  = dvTxt;
+    }
+  }
+
+  // Bonus-active indicator on the forecast cell — lights up while the
+  // player is holding BURN inside the ±30-min peak window. The scoring
+  // logic already lives in the frame loop; here we just mirror its
+  // multiplier into the HUD so the cell-glow tracks the actual bonus.
+  function paintBonus() {
+    const fc = $('sr-fc');
+    if (!fc) return;
+    fc.classList.toggle('bonus-active', (sim._forecastBurnMultiplier ?? 1) >= 2);
+  }
+
+  function update() {
+    if (_hidden) return;
+    paintNowcast();
+    paintForecast();
+    paintBudget();
+    paintBonus();
+  }
+
+  return { setVisible, update, resetHistory };
+})();
+
+// Wire the radar-toggle pill + forecast-cell click. The cell click opens
+// the plan-burn popover and seeds the trigger dropdown to forecast-peak
+// so a single tap arms the bonus-window burn.
+{
+  const tog = $('st-radar');
+  if (tog) {
+    tog.addEventListener('click', () => {
+      const next = $('sd-radar').hidden;       // currently hidden? we'll show.
+      STORM_RADAR.setVisible(next);
+    });
+  }
+  const fc = $('sr-fc');
+  if (fc) {
+    fc.addEventListener('click', () => {
+      if (!sim.running) { toast('Launch first — schedule needs a live orbit.', true); return; }
+      if (sim._forecastPeakSimSec == null) {
+        toast('No forecast peak yet — try again once the forecast warms up.', true);
+        return;
+      }
+      $('pp-trigger').value = 'forecast-peak';
+      // Trigger the Plan popover's open path by clicking the button —
+      // re-uses its anchoring + state-seeding logic without duplication.
+      $('b-plan').click();
+    });
+  }
+}
+
+// ── Flight stats / scorecard ────────────────────────────────────────────────
+// We log every burn the player executes plus a few aggregate counters
+// during flight. On mission end (success, re-entry, or out-of-fuel) the
+// scorecard renders three signature grades:
+//
+//   • Burn timing — fraction of prograde burns fired near perigee (or
+//     retrograde burns near apogee). Oberth: same Δv → bigger Δenergy
+//     when fired deep in the gravity well.
+//   • Δv efficiency — Δv-delivered relative to Δv-budgeted, penalised
+//     by mid-orbit drift burns that didn't change the apsides much.
+//   • Forecast bonus — what fraction of total Δv was spent during a
+//     2× forecast-peak window. Caps the value of pre-burning before
+//     storms instead of grinding through them.
+//
+// Mission scenarios can append custom rows via the optional
+// `mission.scorecard(stats, ctx)` hook — see js/satellite-missions.js
+// header docs for the schema.
+function makeFlightStats() {
+  return {
+    burns: [],                          // { startT, endT, mode, fuelStart, fuelEnd, dvEng, phaseFracStart, bonusActive }
+    totalDvDelivered: 0,                // m/s — sum of Tsiolkovsky-delivered Δv across burns
+    bonusDvDelivered: 0,                // m/s — Δv delivered during 2× bonus windows
+    bonusBurnCount:   0,                // burns that hit any part of the bonus window
+    peakWindowsSeen:  0,                // distinct ±30-min peak windows the flight passed through
+    peakWindowsCaptured: 0,             // of those, how many had ≥1 player burn during
+    floorBreachSec:   0,                // total sim-seconds spent below mission floor
+    dvBudgetInitial:  0,                // Tsiolkovsky max at launch
+    initialPeriKm: 0, initialApoKm: 0,  // for outcome summary
+    finalPeriKm: 0,   finalApoKm: 0,
+    _wasInBonus: false,                 // edge-detector for peakWindowsSeen
+    _bonusUsedThisWindow: false,
+  };
+}
+
+// Compute the "phase fraction" for a position: 0 means at perigee, 1
+// means at apogee. We use cos((r - peri) / (apo - peri) → arccos-ish)
+// — but cheaper: linear in (r - peri)/(apo - peri). Good enough as a
+// timing proxy.
+function _phaseFracAt(state, tel) {
+  if (!state || !tel) return 0.5;
+  const r  = Math.hypot(state.x, state.y);
+  const rp = (tel.periAltKm + 6371) * 1000;
+  const ra = (tel.apoAltKm  + 6371) * 1000;
+  const span = ra - rp;
+  if (span <= 1e-3) return 0;          // circular orbit — every spot is "perigee"
+  return Math.max(0, Math.min(1, (r - rp) / span));
+}
+
+// Letter grade from a 0-1 score. Wide A-band rewards strong play; F is
+// reserved for clear failure modes (no burns, or all burns at apogee).
+function _gradeFromScore(s) {
+  if (s >= 0.85) return 'A';
+  if (s >= 0.7)  return 'B';
+  if (s >= 0.5)  return 'C';
+  if (s >= 0.3)  return 'D';
+  return 'F';
+}
+
+function computeScorecardGrades(stats) {
+  // Burn-timing: average across all burns. For prograde the "ideal"
+  // phase is 0 (perigee), for retrograde it's 1 (apogee). Manual burns
+  // count both ways depending on direction.
+  let timingScore = 0.5, timingDetail = 'no burns';
+  if (stats.burns.length > 0) {
+    let acc = 0;
+    for (const b of stats.burns) {
+      const isRetro = b.mode === 'retrograde' || b.mode === 'manual-retro';
+      // Higher score for being closer to the ideal phase for the burn direction.
+      const dist = isRetro ? (1 - b.phaseFracStart) : b.phaseFracStart;
+      acc += 1 - dist;                  // dist=0 → score 1, dist=1 → score 0
+    }
+    timingScore = acc / stats.burns.length;
+    const meanPhase = stats.burns.reduce((a, b) => a + b.phaseFracStart, 0) / stats.burns.length;
+    timingDetail = `${stats.burns.length} burns · avg φ=${(meanPhase * 100).toFixed(0)}%`;
+  }
+
+  // Δv-efficiency: ratio of Δv-delivered to Δv-budgeted, then graded
+  // *against* the orbit work actually accomplished. We use a simple
+  // model: efficiency = (apsides changed in km) / (Δv spent in m/s),
+  // normalised against a known-good ratio of ~0.5 km/m·s for LEO.
+  // For station-keeping (no apsides change goal), we instead grade by
+  // "Δv conserved" — less is better.
+  let dvScore = 0.5, dvDetail = '0 m/s';
+  const dvUsed = stats.totalDvDelivered;
+  if (stats.dvBudgetInitial > 0 && dvUsed > 0.01) {
+    const dvBudgetPct = dvUsed / stats.dvBudgetInitial;
+    const apsidesShift = Math.abs((stats.finalPeriKm + stats.finalApoKm)
+                                - (stats.initialPeriKm + stats.initialApoKm));
+    // The "useful Δv" benchmark — for a circular Hohmann at LEO, ~0.55
+    // km/m·s of apsides-shift is a strong score. Below 0.2 is wasteful.
+    const effRatio = apsidesShift / dvUsed;
+    // Station-keep / endurance: low Δv used is good (regardless of shift).
+    const conserveScore = 1 - Math.min(1, dvBudgetPct);
+    const shiftScore    = Math.min(1, effRatio / 0.55);
+    dvScore = Math.max(conserveScore, shiftScore);
+    dvDetail = `${dvUsed.toFixed(0)} m/s · ${(dvBudgetPct*100).toFixed(0)}% of budget`;
+  } else if (stats.dvBudgetInitial > 0) {
+    // No burns at all — full conservation for endurance, but flagged.
+    dvScore = 0.8;
+    dvDetail = `0 m/s · 0% of budget`;
+  }
+
+  // Forecast-bonus capture: peakWindowsCaptured / peakWindowsSeen. If
+  // no peaks happened during the flight, treat as neutral 0.5 (can't
+  // grade what wasn't there).
+  let bonusScore = 0.5, bonusDetail = 'no peaks';
+  if (stats.peakWindowsSeen > 0) {
+    bonusScore = stats.peakWindowsCaptured / stats.peakWindowsSeen;
+    const pct = (stats.bonusDvDelivered / Math.max(stats.totalDvDelivered, 1e-6)) * 100;
+    bonusDetail = `${stats.peakWindowsCaptured}/${stats.peakWindowsSeen} peaks · ${pct.toFixed(0)}% of Δv`;
+  } else if (dvUsed > 0.01) {
+    bonusDetail = 'no forecast peaks';
+  }
+
+  return {
+    timing: { score: timingScore, grade: _gradeFromScore(timingScore), detail: timingDetail },
+    dv:     { score: dvScore,     grade: _gradeFromScore(dvScore),     detail: dvDetail },
+    bonus:  { score: bonusScore,  grade: _gradeFromScore(bonusScore),  detail: bonusDetail },
+  };
+}
+
+// Per-frame stats update — called from the main loop after the advance
+// step. Tracks bonus-window edges (so we count distinct windows), and
+// accumulates floor-breach time.
+function tickFlightStats(simSecs, tel) {
+  const fs = sim.flightStats;
+  if (!fs || !sim.state) return;
+
+  // Peak-window edge detection — we count a "window seen" each time we
+  // first enter a bonus zone, and "captured" if the player burned at
+  // any point during it.
+  const inBonus = (sim._forecastBurnMultiplier ?? 1) >= 2;
+  // The multiplier only flips ≥2 when sim.inputs.burn is true. The
+  // window itself is broader — we detect it by the peak-distance
+  // condition matching the frame-loop logic.
+  const peakSec = sim._forecastPeakSimSec;
+  const inWindow = (peakSec != null) && Math.abs(sim.state.t - peakSec) < 1800;
+  if (inWindow && !fs._wasInBonus) {
+    fs.peakWindowsSeen++;
+    fs._bonusUsedThisWindow = false;
+  } else if (!inWindow && fs._wasInBonus && fs._bonusUsedThisWindow) {
+    fs.peakWindowsCaptured++;
+  }
+  if (inBonus) fs._bonusUsedThisWindow = true;
+  fs._wasInBonus = inWindow;
+
+  // Floor breach accumulator — sim.state.alive + below floor → seconds.
+  const mission = MISSIONS[sim.missionId];
+  if (mission?.altitudeFloorKm != null && tel.periAltKm < mission.altitudeFloorKm) {
+    fs.floorBreachSec += simSecs;
+  }
+
+  fs.finalPeriKm = tel.periAltKm;
+  fs.finalApoKm  = tel.apoAltKm;
+}
+
+// Burn-event recorders — called from setBurnInput so we capture both
+// player-held and scheduled burns uniformly.
+function recordBurnStart() {
+  const fs = sim.flightStats;
+  if (!fs || !sim.state || !sim.design) return;
+  const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
+  fs._currentBurn = {
+    startT:     sim.state.t,
+    mode:       sim.control.mode,
+    fuelStart:  sim.state.fuel,
+    phaseFracStart: _phaseFracAt(sim.state, tel),
+    bonusActive: false,                 // promoted to true if any frame fires in the 2× zone
+  };
+}
+function recordBurnEnd() {
+  const fs = sim.flightStats;
+  if (!fs || !fs._currentBurn || !sim.state || !sim.design) return;
+  const b = fs._currentBurn; fs._currentBurn = null;
+  b.endT = sim.state.t;
+  b.fuelEnd = sim.state.fuel;
+  b.durationS = b.endT - b.startT;
+  // Tsiolkovsky on actual fuel consumed — mirrors the Δv-flash readout.
+  const m0 = sim.design.dryMass + b.fuelStart;
+  const mf = sim.design.dryMass + b.fuelEnd;
+  if (mf > 0 && m0 > mf) {
+    const ispEff = sim.design.isp * (1 - 0.25 * (sim.state.burnSeconds
+                   ? Math.min(1, sim.state.burnSeconds / (sim.design.throatLifeS ?? 6000)) : 0));
+    b.dvEng = ispEff * ENG.G0 * Math.log(m0 / Math.max(mf, 1e-9));
+  } else {
+    b.dvEng = 0;
+  }
+  fs.totalDvDelivered += b.dvEng;
+  if (b.bonusActive) {
+    fs.bonusBurnCount++;
+    fs.bonusDvDelivered += b.dvEng;
+  }
+  fs.burns.push(b);
+}
+// Called each frame while a burn is live so we can mark whether the
+// bonus window was active at any point during it (a single tick is
+// enough to count — the player saw the ⚡ +2× indicator).
+function noteBurnFrameBonus() {
+  const fs = sim.flightStats;
+  if (fs?._currentBurn && (sim._forecastBurnMultiplier ?? 1) >= 2) {
+    fs._currentBurn.bonusActive = true;
+  }
+}
+
+// Render the scorecard. Outcome string + bad-flag set by the caller so
+// re-entry vs success vs ran-out-of-fuel can share the same layout.
+function showScorecard({ outcome, ok, rank }) {
+  const fs = sim.flightStats || makeFlightStats();
+  // Finalise any in-flight burn — re-entry can fire while burn was held.
+  if (fs._currentBurn) recordBurnEnd();
+
+  const grades = computeScorecardGrades(fs);
+  const mission = MISSIONS[sim.missionId];
+
+  $('sc-mission').textContent = (mission?.name ?? sim.missionId ?? 'Mission') + ' · final report';
+  const outEl = $('sc-outcome');
+  outEl.textContent = outcome;
+  outEl.classList.toggle('bad', !ok);
+  $('sc-rank').textContent = rank ?? (ok ? '🏁' : '💥');
+  $('sc-score').textContent = Math.floor(sim.score || 0);
+
+  for (const [key, ids] of Object.entries({
+    timing: ['sc-g-timing', 'sc-g-timing-v'],
+    dv:     ['sc-g-dv',     'sc-g-dv-v'],
+    bonus:  ['sc-g-bonus',  'sc-g-bonus-v'],
+  })) {
+    const g = grades[key];
+    const letter = $(ids[0]), val = $(ids[1]);
+    letter.textContent = g.grade;
+    letter.classList.remove('A','B','C','D','F');
+    letter.classList.add(g.grade);
+    val.textContent = g.detail;
+  }
+
+  // Default rows everyone gets. Mission-specific rows append after.
+  const rows = [
+    { lbl: 'Final orbit',  val: `${fs.finalPeriKm.toFixed(0)} × ${fs.finalApoKm.toFixed(0)} km` },
+    { lbl: 'Δv delivered', val: `${fs.totalDvDelivered.toFixed(1)} m/s` },
+    { lbl: 'Burns fired',  val: String(fs.burns.length) },
+    { lbl: '2× bonus Δv',  val: `${fs.bonusDvDelivered.toFixed(1)} m/s`,
+      cls: fs.bonusDvDelivered > 0 ? 'bonus' : '' },
+  ];
+  if (mission?.altitudeFloorKm != null && fs.floorBreachSec > 0.5) {
+    rows.push({
+      lbl: 'Floor breach', val: `${fs.floorBreachSec.toFixed(0)} s below ${mission.altitudeFloorKm} km`,
+      cls: 'warn',
+    });
+  }
+  // Mission-specific scorecard hook — append rows + optional tip.
+  let tipText = null;
+  try {
+    const extra = mission?.scorecard?.(fs, sim.missionCtx) || {};
+    if (Array.isArray(extra.rows)) for (const r of extra.rows) rows.push(r);
+    if (typeof extra.tip === 'string') tipText = extra.tip;
+  } catch (err) {
+    if (typeof console !== 'undefined') console.warn('[scorecard] mission hook threw:', err);
+  }
+
+  const rowsEl = $('sc-rows');
+  rowsEl.innerHTML = rows.map(r =>
+    `<div class="sc-row ${r.cls || ''}"><span class="sc-lbl">${r.lbl}</span>` +
+    `<span class="sc-val">${r.val}</span></div>`).join('');
+
+  const tipEl = $('sc-tip');
+  if (tipText) { tipEl.textContent = tipText; tipEl.hidden = false; }
+  else         { tipEl.hidden = true; }
+
+  $('scorecard-overlay').hidden = false;
+}
+function hideScorecard() { $('scorecard-overlay').hidden = true; }
+// Re-arm "Try Again" — close the card and re-launch with the same
+// mission selected. Close just dismisses the card; players can still
+// hit Launch to retry manually.
+$('sc-close')?.addEventListener('click', hideScorecard);
+$('sc-replay')?.addEventListener('click', () => {
+  hideScorecard();
+  // Reset cleans the trail/state; launch boots a new mission instance.
+  resetSim();
+  setTimeout(() => launch(), 60);   // give resetSim a tick to settle
+});
+
+// ── Plan-burn popover ───────────────────────────────────────────────────────
+// A small scheduler that queues one prograde or retrograde burn to fire
+// at the next apogee, perigee, or forecast peak. The frame loop watches
+// for the trigger condition; once met, the burn fires for the configured
+// duration and self-disarms. Educational: forces the player to think in
+// terms of orbit phase rather than "burn now".
+{
+  const pop = $('plan-pop');
+  const planBtn = $('b-plan');
+  // Live readouts inside the popover.
+  $('pp-throttle').addEventListener('input', () => {
+    $('pp-throttle-v').textContent = $('pp-throttle').value;
+  });
+  $('pp-duration').addEventListener('input', () => {
+    $('pp-duration-v').textContent = $('pp-duration').value;
+  });
+  const openPopover = () => {
+    // Anchor under the Plan button. Inline positioning so the popover
+    // works even if the surrounding panel doesn't itself relative-position.
+    const r = planBtn.getBoundingClientRect();
+    const host = planBtn.offsetParent || document.body;
+    const hr = host.getBoundingClientRect();
+    pop.style.top  = (planBtn.offsetTop + planBtn.offsetHeight + 6) + 'px';
+    pop.style.left = (planBtn.offsetLeft) + 'px';
+    pop.hidden = false;
+    // Seed the throttle slider with the current dial value so 'commit'
+    // matches the player's intuition unless they tweak it.
+    $('pp-throttle').value = $('f-throttle').value;
+    $('pp-throttle-v').textContent = $('pp-throttle').value;
+  };
+  const closePopover = () => { pop.hidden = true; };
+  planBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (pop.hidden) openPopover(); else closePopover();
+  });
+  $('pp-close').addEventListener('click', closePopover);
+  // Click-outside / Esc to dismiss. Keep listeners attached at document
+  // level — they're cheap and self-no-op when the popover is hidden.
+  document.addEventListener('click', (e) => {
+    if (pop.hidden) return;
+    if (pop.contains(e.target) || planBtn.contains(e.target)) return;
+    closePopover();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !pop.hidden) closePopover();
+  });
+  $('pp-commit').addEventListener('click', () => {
+    if (!sim.running) {
+      toast('Launch first — schedules a burn during flight.', true);
+      return;
+    }
+    sim.scheduledBurn = {
+      trigger:  $('pp-trigger').value,        // apogee | perigee | forecast-peak
+      mode:     $('pp-mode').value,           // prograde | retrograde
+      throttle: (+$('pp-throttle').value) / 100,
+      durationS: +$('pp-duration').value,
+      armedAt:  sim.state ? sim.state.t : 0,
+      firingUntilT: null,                     // set when trigger fires
+      _peakSimSec: null,
+    };
+    // Snapshot the forecast peak at commit-time so the trigger fires at a
+    // deterministic sim-time even if the projection updates mid-flight.
+    if (sim.scheduledBurn.trigger === 'forecast-peak') {
+      if (sim._forecastPeakSimSec != null) {
+        sim.scheduledBurn._peakSimSec = sim._forecastPeakSimSec;
+      } else {
+        sim.scheduledBurn = null;
+        toast('No forecast peak available — fetch is still warming up.', true);
+        return;
+      }
+    }
+    closePopover();
+    updateSchedPill();
+    toast(`⏰ Burn queued — ${sim.scheduledBurn.mode} ${$('pp-duration').value}s @ ${$('pp-throttle').value}% on next ${$('pp-trigger').value}.`);
+  });
+  // Status pill: click to cancel an armed scheduled burn.
+  $('st-sched').addEventListener('click', () => {
+    if (!sim.scheduledBurn) return;
+    if (sim.scheduledBurn.firingUntilT) return;  // can't cancel mid-fire
+    sim.scheduledBurn = null;
+    updateSchedPill();
+    toast('Scheduled burn cancelled.');
+  });
+}
 
 // ── Mission control ─────────────────────────────────────────────────────────
 function launch() {
   sim.design = readDesign();
+  // The editable ship form carries the basic physics (mass, area, thrust…),
+  // but the RCS suite is a body capability with no form field — merge it in
+  // from the current parts build so multidirectional-thrust craft actually
+  // strafe in flight. Inert for buses without RCS hardware.
+  try {
+    const bd = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS, activeTierMods());
+    sim.design.rcs       = !!bd.rcs;
+    sim.design.rcsThrust = bd.rcsThrust || 0;
+    sim.design.rcsIsp    = bd.rcsIsp || 0;
+    // Attitude / steering authority — drives A/D slew rate + the HUD readout.
+    sim.design.slewRate  = bd.slewRate || (1.0 * Math.PI / 180);
+    sim.design.slewDeg   = bd.slewDeg  || 1.0;
+    sim.design.attSys    = bd.attSys   || 'Reaction wheels';
+  } catch (_) { sim.design.rcs = false; sim.design.slewRate = 1.0 * Math.PI / 180; }
+  syncSteerHud();
   const peri = +$('f-peri').value, apo = Math.max(+$('f-apo').value, peri);
-  sim.state = ENG.initState(sim.design, { periKm: peri, apoKm: apo });
+  sim.state = ENG.initState(sim.design, { periKm: peri, apoKm: apo, env });
   sim.trail = []; sim.altHist = [];
   sim.score = 0;
   sim.targetSatM = null; sim.debrisM = null;
@@ -845,19 +2435,64 @@ function launch() {
   sim.prevMissionComplete = null;
   // Heading starts aligned to velocity so manual-fire = prograde by default.
   sim.control.heading = Math.atan2(sim.state.vy, sim.state.vx);
-  sim.inputs = { rotL: false, rotR: false, fwd: false, rev: false, fine: false };
+  sim.inputs = { rotL: false, rotR: false, fwd: false, rev: false, fine: false, burn: false,
+                 rcsOut: false, rcsIn: false, rcsFwd: false, rcsBack: false };
+  sim.control.rcs = null; sim._steer = 0;
+  // Reveal the RCS pad + steering readout now that sim.running is set.
+  syncRcsPad(); syncSteerHud();
+  sim._burnPriorMode = null; sim._lastFloorStatus = null;
+  sim._prevRdot = null; sim.scheduledBurn = null; sim._burnAnchor = null;
+  sim._forecastBurnMultiplier = 1.0;
+  updateSchedPill();
+  // STORM RADAR HUD — show on launch, clear any leftover history.
+  STORM_RADAR.resetHistory();
+  STORM_RADAR.setVisible(true);
+  // Flight stats — fresh slate per mission. Captured for the scorecard.
+  sim.flightStats = makeFlightStats();
+  sim.flightStats.dvBudgetInitial = sim.design.fuelMass > 0
+    ? sim.design.isp * ENG.G0 * Math.log((sim.design.dryMass + sim.design.fuelMass) / sim.design.dryMass)
+    : 0;
+  sim.flightStats.initialPeriKm = peri;
+  sim.flightStats.initialApoKm  = apo;
+  sim.flightStats.finalPeriKm   = peri;
+  sim.flightStats.finalApoKm    = apo;
+  // Anchor sim time = 0 to wallclock now so forecast-peak triggers can map
+  // real-world AR(1) horizons onto sim seconds.
+  sim._launchedWallMs = Date.now();
+  // Refresh forecast and pre-compute the next peak F10.7 horizon in sim
+  // seconds. Silent on failure — forecast-peak trigger simply won't fire.
+  FORECAST.ensureForecastReady().then(() => {
+    try {
+      const series = FORECAST.getForecastSeries({ horizons: [0, 1, 2, 3, 4, 6] });
+      if (!series?.length) return;
+      let peakHr = 0, peakF = -Infinity;
+      for (const s of series) {
+        if (s.f107 > peakF) { peakF = s.f107; peakHr = s.horizonHours; }
+      }
+      sim._forecastPeakSimSec = peakHr > 0 ? peakHr * 3600 : null;
+    } catch (_) { sim._forecastPeakSimSec = null; }
+  }).catch(() => {});
   $('b-launch').disabled = true;
   $('b-pause').disabled = false; $('b-pause').textContent = '⏸ Pause';
   $('b-reset').disabled = false;
   $('st-warp').textContent = '▶ ×' + sim.warp;
   setPhase('In flight', 'good');
+  // Auto-snap the camera to the bird so the pilot actually sees what they
+  // just launched. They can switch back to Earth or WIDE any time.
+  if (SCENE) {
+    SCENE.setCameraMode('follow', { snap: true });
+    SCENE.setSubject('satellite');
+    setCamModeButton('follow');
+    setSubjectButton('satellite');
+  }
   // Spin up the active mission.
   startMission();
 }
 // Blank every live readout so each test run starts from a clean board.
 function clearReadouts() {
   for (const id of ['m-alt','m-spd','m-peri','m-apo','m-period','m-ecc',
-                     'm-rho','m-q','m-drag','m-decay'])
+                     'm-rho','m-q','m-drag','m-decay',
+                     'm-turb','m-tumble','m-erosion','m-ispEff'])
     setMetric(id, '—', null);
   $('fuel-lbl').textContent = '—';
   $('dv-lbl').textContent = '—';
@@ -875,6 +2510,7 @@ function resetSim() {
   sim.running = false; sim.paused = false; sim.state = null;
   sim.trail = []; sim.altHist = [];
   sim.score = 0;
+  sim.control.rcs = null; sim._steer = 0; syncRcsPad(); syncSteerHud();
   sim.targetSatM = null; sim.debrisM = null;
   $('b-launch').disabled = false;
   $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
@@ -883,6 +2519,27 @@ function resetSim() {
   setPhase('Pre-flight', '');
   clearReadouts();
   setBanner('', '');
+  // Drop any lingering momentary-thrust state from the previous mission.
+  sim.inputs.burn = false; sim._burnPriorMode = null;
+  sim._lastFloorStatus = null;
+  sim._prevRdot = null; sim.scheduledBurn = null; sim._burnAnchor = null;
+  $('sd-thrust-btn')?.classList.remove('urgent','firing');
+  $('throttle-dial')?.classList.remove('firing');
+  updateSchedPill();
+  $('sd-thrust-btn')?.classList.remove('urgent','firing');
+  $('throttle-dial')?.classList.remove('firing');
+  updateSchedPill();
+  // Hide the STORM RADAR HUD back into pre-flight stealth.
+  STORM_RADAR.setVisible(false);
+  STORM_RADAR.resetHistory();
+  // Drop flight stats — fresh report on next launch.
+  sim.flightStats = null;
+  hideScorecard();
+  // Tear down the mission (clears any forecast override it installed)
+  // and drop the context so the next launch builds a fresh one.
+  try { MISSIONS[sim.missionId]?.teardown?.(sim.missionCtx); } catch (_) {}
+  FORECAST.setMissionOverride(null);
+  sim.missionCtx = null;
   // Refresh the inline objective text so the panel doesn't show stale data.
   refreshObjectivePanel();
 }
@@ -900,10 +2557,189 @@ $('b-pause').addEventListener('click', () => {
   $('st-warp').textContent = (sim.paused ? '⏸ ' : '▶ ') + '×' + sim.warp;
   setPhase(sim.paused ? '⏸ Paused' : 'In flight', sim.paused ? 'warn' : 'good');
 });
+// SPACE = hold-to-burn. While flying, SPACE forces a prograde tangential
+// fire at the slider throttle and releases back to whatever mode was active
+// before. While *not* flying, SPACE still launches (muscle memory). Pause
+// has moved to the dedicated button + 'P' key — losing SPACE-pause is the
+// price of having a real hold-to-thrust control.
 addEventListener('keydown', (e) => {
   if (e.target.matches('input,select,textarea')) return;
-  if (e.code === 'Space') { e.preventDefault(); if (sim.running) $('b-pause').click(); else launch(); }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (!sim.running) { launch(); return; }
+    if (e.repeat) return;                 // ignore auto-repeat ticks
+    setBurnInput(true);
+  } else if (e.code === 'KeyP' && sim.running) {
+    e.preventDefault();
+    $('b-pause').click();
+  }
 });
+addEventListener('keyup', (e) => {
+  if (e.code === 'Space') setBurnInput(false);
+});
+
+// The BURN button: pointer events cover mouse + touch + stylus uniformly.
+// `pointerdown` fires, `pointerup` / `pointercancel` / `pointerleave`
+// releases. Calling setPointerCapture means a finger that slides off the
+// button still releases properly when lifted.
+{
+  const btn = $('sd-thrust-btn');
+  const press = (ev) => {
+    if (btn.disabled) return;
+    ev.preventDefault();
+    if (!sim.running) { launch(); return; }
+    try { btn.setPointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(true);
+  };
+  const release = (ev) => {
+    if (!sim.running && !sim.inputs.burn) return;
+    try { btn.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(false);
+  };
+  btn.addEventListener('pointerdown',   press);
+  btn.addEventListener('pointerup',     release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave',  release);
+  // Belt-and-braces — fired when the page is hidden mid-press (tab switch,
+  // alt-tab, browser scroll-jacking). Without this the engine keeps thrusting.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') setBurnInput(false);
+  });
+}
+
+// The BURN button: pointer events cover mouse + touch + stylus uniformly.
+// `pointerdown` fires, `pointerup` / `pointercancel` / `pointerleave`
+// releases. Calling setPointerCapture means a finger that slides off the
+// button still releases properly when lifted.
+{
+  const btn = $('sd-thrust-btn');
+  const press = (ev) => {
+    if (btn.disabled) return;
+    ev.preventDefault();
+    if (!sim.running) { launch(); return; }
+    try { btn.setPointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(true);
+  };
+  const release = (ev) => {
+    if (!sim.running && !sim.inputs.burn) return;
+    try { btn.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(false);
+  };
+  btn.addEventListener('pointerdown',   press);
+  btn.addEventListener('pointerup',     release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave',  release);
+  // Belt-and-braces — fired when the page is hidden mid-press (tab switch,
+  // alt-tab, browser scroll-jacking). Without this the engine keeps thrusting.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') setBurnInput(false);
+  });
+}
+
+// setBurnInput is the single funnel for momentary thrust. Saves the prior
+// burn mode on press, forces 'prograde' (the tangential orbit-raising vector
+// the player almost always wants), restores on release. Skips the override
+// while the player is hand-flying in manual mode — W/S already handle that.
+function setBurnInput(on) {
+  if (on === sim.inputs.burn) return;
+  sim.inputs.burn = !!on;
+  const btn  = $('sd-thrust-btn');
+  const dial = $('throttle-dial');
+  if (btn)  btn.classList.toggle('firing', sim.inputs.burn);
+  if (dial) dial.classList.toggle('firing', sim.inputs.burn);
+  if (sim.inputs.burn) {
+    // Don't override manual modes — those have their own W/S hold semantics.
+    if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') return;
+    sim._burnPriorMode = sim.control.mode;
+    setBurnMode('prograde');
+    // Record an anchor so we can compute Δv-delivered on release. We use
+    // fuel actually consumed × eff. Isp · g₀ (Tsiolkovsky) — that's the
+    // honest figure, not just |Δv_inertial| which would include drag.
+    if (sim.state) {
+      sim._burnAnchor = {
+        fuel: sim.state.fuel,
+        t:    sim.state.t,
+        speed:  Math.hypot(sim.state.vx, sim.state.vy),
+        scoreBonus: 0,
+      };
+    }
+    // Open a stats burn record so the scorecard's burn-timing grade
+    // can score this fire-event regardless of why it started (manual,
+    // scheduled, or the BURN button held down).
+    recordBurnStart();
+    // Haptic + visual bite. vibrate() is a no-op (returns false) when the
+    // device doesn't support it or the user has muted vibrations.
+    try { navigator.vibrate?.(18); } catch (_) {}
+    const stage = $('sd-stage');
+    if (stage) {
+      stage.classList.remove('burn-pulse');
+      // Force reflow so the animation re-runs on rapid taps.
+      void stage.offsetWidth;
+      stage.classList.add('burn-pulse');
+    }
+  } else if (sim._burnPriorMode != null) {
+    setBurnMode(sim._burnPriorMode);
+    sim._burnPriorMode = null;
+    // Δv-delivered flash. Use the eroded effective Isp at burn-end; over a
+    // short burn it's a close-enough constant. Skip the popup for
+    // sub-millisecond burns (touch noise) or zero-fuel cases.
+    if (sim._burnAnchor && sim.state) {
+      const fuelUsed = Math.max(0, sim._burnAnchor.fuel - sim.state.fuel);
+      const burnT    = Math.max(0, sim.state.t - sim._burnAnchor.t);
+      if (fuelUsed > 1e-4 && burnT > 0.05) {
+        const m0 = sim.design.dryMass + sim._burnAnchor.fuel;
+        const mf = sim.design.dryMass + sim.state.fuel;
+        const ispEff = sim.design.isp * (1 - 0.25 * (sim.state.burnSeconds
+                       ? Math.min(1, sim.state.burnSeconds / (sim.design.throatLifeS ?? 6000)) : 0));
+        const dv = ispEff * ENG.G0 * Math.log(m0 / Math.max(mf, 1e-9));
+        const bonus = sim._burnAnchor.scoreBonus || 0;
+        const flash = $('dv-flash');
+        if (flash) {
+          flash.innerHTML = `+${dv.toFixed(2)} m/s<small>${fuelUsed.toFixed(2)} kg · ${burnT.toFixed(1)}s</small>`
+                          + (bonus > 0 ? ` <small style="color:#7fdcff">⚡ +2× FORECAST</small>` : '');
+          flash.classList.remove('show');
+          void flash.offsetWidth;
+          flash.classList.add('show');
+          clearTimeout(setBurnInput._flashT);
+          setBurnInput._flashT = setTimeout(() => flash.classList.remove('show'), 1100);
+        }
+      }
+      sim._burnAnchor = null;
+    }
+    // Close the stats burn record — feeds Δv-efficiency + bonus-Δv totals.
+    recordBurnEnd();
+    try { navigator.vibrate?.(8); } catch (_) {}
+  }
+}
+
+// The BURN button: pointer events cover mouse + touch + stylus uniformly.
+// `pointerdown` fires, `pointerup` / `pointercancel` / `pointerleave`
+// releases. Calling setPointerCapture means a finger that slides off the
+// button still releases properly when lifted.
+{
+  const btn = $('sd-thrust-btn');
+  const press = (ev) => {
+    if (btn.disabled) return;
+    ev.preventDefault();
+    if (!sim.running) { launch(); return; }
+    try { btn.setPointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(true);
+  };
+  const release = (ev) => {
+    if (!sim.running && !sim.inputs.burn) return;
+    try { btn.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    setBurnInput(false);
+  };
+  btn.addEventListener('pointerdown',   press);
+  btn.addEventListener('pointerup',     release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave',  release);
+  // Belt-and-braces — fired when the page is hidden mid-press (tab switch,
+  // alt-tab, browser scroll-jacking). Without this the engine keeps thrusting.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') setBurnInput(false);
+  });
+}
 
 // ── Simulation loop ─────────────────────────────────────────────────────────
 let lastT = performance.now();
@@ -913,29 +2749,135 @@ function frame(now) {
 
   if (sim.running && !sim.paused && sim.state?.alive) {
     let simSecs = Math.min(realDt * sim.warp, 240);
-
-    // Pilot stick input — A/D rotate heading, W/S fire manual fwd/rev.
-    // Rotation rate is independent of warp so it's predictable at any speed.
-    if (PROG.hasUnlock(profile, 'manual_steer')) {
-      const rate = (sim.inputs.fine ? 0.7 : 2.0) * realDt;
-      if (sim.inputs.rotL) sim.control.heading += rate;
-      if (sim.inputs.rotR) sim.control.heading -= rate;
-      // W/S engage manual fire while held; release returns to Off.
-      if (sim.inputs.fwd) { if (sim.control.mode !== 'manual')       setBurnMode('manual'); }
-      else if (sim.inputs.rev) { if (sim.control.mode !== 'manual-retro') setBurnMode('manual-retro'); }
-      else if (sim.control.mode === 'manual' || sim.control.mode === 'manual-retro') setBurnMode('off');
+    // When an apogee/perigee-triggered burn is armed, cap the per-frame
+    // step so the rdot sign-change detector can't skip across an extremum
+    // in a single tick at high time-warp. 30 s is well under any LEO
+    // half-period; the cost is the sim runs slower while a schedule is
+    // queued — a fair trade for reliable triggers.
+    if (sim.scheduledBurn
+        && sim.scheduledBurn.firingUntilT == null
+        && (sim.scheduledBurn.trigger === 'apogee'
+            || sim.scheduledBurn.trigger === 'perigee')) {
+      simSecs = Math.min(simSecs, 30);
     }
 
-    // Auto station-keeping: defend the target perigee with prograde burns.
+    // ── Pilot flight model (arcade) ──────────────────────────────────────
+    // W/↑ = gas (throttle up + thrust along heading) · S/↓ = ease off · A/←,
+    // D/→ = steer (re-point the bus). Steering speed is the design's real slew
+    // rate — set by its attitude hardware (reaction wheels / CMG / RCS). In
+    // "Pilot" mode the engine fires forward along the heading whenever the
+    // throttle is open, so the gas pedal *is* the thrust; lift to coast.
+    // Rotation is warp-independent so it's predictable at any time-warp.
+    if (PROG.hasUnlock(profile, 'manual_steer')) {
+      const slew = sim.design?.slewRate || (1.0 * Math.PI / 180);
+      const rate = (sim.inputs.fine ? slew * 0.4 : slew) * realDt * SLEW_GAIN;
+      if (sim.inputs.rotL) sim.control.heading += rate;
+      if (sim.inputs.rotR) sim.control.heading -= rate;
+      // Gas / ease — adjust the throttle "pedal" (full sweep ≈ 1.1 s).
+      const GAS = 90;   // %/s
+      if (sim.inputs.fwd)  setThrottlePct(+$('f-throttle').value + GAS * realDt);
+      if (sim.inputs.rev)  setThrottlePct(+$('f-throttle').value - GAS * realDt);
+      // Engage Pilot mode the moment the player touches the stick; fire along
+      // heading while the throttle is open, coast when it's at zero.
+      const pilotActive = sim.inputs.fwd || sim.inputs.rev
+                       || sim.inputs.rotL || sim.inputs.rotR
+                       || sim.control.mode === 'manual';
+      if (pilotActive) {
+        if ((sim.control.throttle || 0) > 0.005) {
+          if (sim.control.mode !== 'manual') setBurnMode('manual');
+        } else if (sim.control.mode === 'manual') {
+          setBurnMode('off');
+        }
+      }
+    }
+    // Steering direction for the 3-D bank cue (left positive).
+    sim._steer = (sim.inputs.rotL ? 1 : 0) - (sim.inputs.rotR ? 1 : 0);
+
+    // RCS translation — multidirectional nudges, decoupled from the main
+    // engine's throttle and burn vector. Only the buses that carry a
+    // reaction-control suite respond; the command is a 2-D orbit-frame vector
+    // and holding two pads at once strafes on the diagonal.
+    if (sim.design?.rcs) {
+      const along  = (sim.inputs.rcsFwd ? 1 : 0) + (sim.inputs.rcsBack ? -1 : 0);
+      const radial = (sim.inputs.rcsOut ? 1 : 0) + (sim.inputs.rcsIn   ? -1 : 0);
+      sim.control.rcs = (along || radial) ? { along, radial } : null;
+      const core = $('rcs-core');
+      if (core) core.classList.toggle('live', !!sim.control.rcs && sim.state?.fuel > 0);
+    } else {
+      sim.control.rcs = null;
+    }
+
+    // RCS translation — multidirectional nudges, decoupled from the main
+    // engine's throttle and burn vector. Only the buses that carry a
+    // reaction-control suite respond; the command is a 2-D orbit-frame vector
+    // and holding two pads at once strafes on the diagonal.
+    if (sim.design?.rcs) {
+      const along  = (sim.inputs.rcsFwd ? 1 : 0) + (sim.inputs.rcsBack ? -1 : 0);
+      const radial = (sim.inputs.rcsOut ? 1 : 0) + (sim.inputs.rcsIn   ? -1 : 0);
+      sim.control.rcs = (along || radial) ? { along, radial } : null;
+      const core = $('rcs-core');
+      if (core) core.classList.toggle('live', !!sim.control.rcs && sim.state?.fuel > 0);
+    } else {
+      sim.control.rcs = null;
+    }
+
+    // Autopilot (reactive). Only engages when perigee has *already* dipped
+    // below the mission's altitude floor — pre-emptive station-keeping is
+    // the player's job, not the autopilot's. This removes the "one toggle
+    // and the game plays itself" failure mode while keeping a safety net
+    // that catches mid-burn distractions.
     if (sim.auto) {
-      const tgt = +$('f-tgt').value;
-      const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
-      if (tel.periAltKm < tgt && sim.state.fuel > 0) {
-        sim.control.mode = 'prograde';
-        syncModeUI('prograde');
-      } else if (tel.periAltKm > tgt + 8 && sim.control.mode === 'prograde') {
+      const mission0 = MISSIONS[sim.missionId];
+      const floor = mission0?.altitudeFloorKm
+                  ?? Math.max(150, +$('f-tgt').value - 50);
+      const tel0 = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
+      if (tel0.periAltKm < floor && sim.state.fuel > 0) {
+        if (sim.control.mode !== 'prograde') { sim.control.mode = 'prograde'; syncModeUI('prograde'); }
+      } else if (tel0.periAltKm > floor + 12 && sim.control.mode === 'prograde') {
         sim.control.mode = 'off';
         syncModeUI('off');
+      }
+    }
+
+    // Scheduled-burn trigger. Detect apogee/perigee via the sign of r·v
+    // (radial velocity component): positive = climbing, negative = falling.
+    // Sign-change positive→negative ≡ apogee passage; negative→positive ≡
+    // perigee. Forecast-peak fires at a precomputed sim-time anchored to
+    // launch. While firing, override throttle + mode; restore on completion.
+    if (sim.scheduledBurn) {
+      const sb = sim.scheduledBurn;
+      // Compute r·v *before* the advance — caught at the right phase.
+      const rdot = (sim.state.x * sim.state.vx + sim.state.y * sim.state.vy)
+                 / Math.hypot(sim.state.x, sim.state.y);
+      const prev = sim._prevRdot;
+      sim._prevRdot = rdot;
+
+      // Fire trigger detection — only if not already firing.
+      if (sb.firingUntilT == null && prev != null) {
+        let fire = false;
+        if (sb.trigger === 'apogee'  && prev > 0 && rdot <= 0) fire = true;
+        if (sb.trigger === 'perigee' && prev < 0 && rdot >= 0) fire = true;
+        if (sb.trigger === 'forecast-peak' && sb._peakSimSec != null
+            && sim.state.t >= sb._peakSimSec) fire = true;
+        if (fire) {
+          sb.firingUntilT = sim.state.t + sb.durationS;
+          sb._priorMode    = sim.control.mode;
+          sb._priorThrPct  = +$('f-throttle').value;
+          setBurnMode(sb.mode);
+          setThrottlePct(sb.throttle * 100);
+          try { navigator.vibrate?.(25); } catch (_) {}
+          toast(`🔥 Scheduled burn firing — ${sb.mode} ${sb.durationS}s @ ${(sb.throttle*100|0)}%`);
+        }
+      }
+
+      // Firing-completion check.
+      if (sb.firingUntilT != null && sim.state.t >= sb.firingUntilT) {
+        // Restore prior mode + throttle, clear the schedule.
+        if (sb._priorMode  != null) setBurnMode(sb._priorMode);
+        if (sb._priorThrPct != null) setThrottlePct(sb._priorThrPct);
+        sim.scheduledBurn = null;
+        updateSchedPill();
+        toast('✅ Scheduled burn complete.');
       }
     }
 
@@ -945,6 +2887,28 @@ function frame(now) {
 
     const tel = ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult);
 
+    // Forecast-aligned 2× scoring multiplier. The player is rewarded for
+    // burning *during a forecast-peak window* (manual, sim.inputs.burn).
+    // We surface the multiplier via sim._forecastBurnMultiplier and apply
+    // it below to any mission-emitted scoreDelta. Autopilot-driven burns
+    // get a 0.6× efficiency penalty — the price of letting the computer
+    // fly. The penalty multiplies onto the same scoreDelta channel.
+    let _scoreMult = 1.0;
+    if (sim.inputs.burn) {
+      const peakSec = sim._forecastPeakSimSec;
+      if (peakSec != null && Math.abs(sim.state.t - peakSec) < 1800) {
+        _scoreMult = 2.0;
+      }
+    }
+    if (sim.auto && sim.control.mode === 'prograde' && !sim.inputs.burn) {
+      _scoreMult *= 0.6;
+    }
+    sim._forecastBurnMultiplier = _scoreMult;
+    if (sim._burnAnchor) sim._burnAnchor.scoreBonus = _scoreMult >= 2 ? 1 : 0;
+    // Flight-stats book-keeping (peak windows, breach time, burn-frame bonus).
+    tickFlightStats(simSecs, tel);
+    if (sim.inputs.burn) noteBurnFrameBonus();
+
     // Mission tick — let the active scenario advance its state machine and
     // contribute to the score. `missionCtx` was prepped in startMission().
     if (sim.missionCtx) {
@@ -952,7 +2916,7 @@ function frame(now) {
       sim.missionCtx.lastPeriKm = tel.periAltKm;
       const mission = MISSIONS[sim.missionId];
       const out = mission.tick?.(sim.missionCtx, simSecs, tel) || {};
-      if (out.scoreDelta) sim.score += out.scoreDelta;
+      if (out.scoreDelta) sim.score += out.scoreDelta * _scoreMult;
       if (out.done) {
         sim.running = false;
         setPhase('🏁 Mission complete', 'good');
@@ -960,6 +2924,7 @@ function frame(now) {
         $('b-launch').disabled = false;
         maybePersistBest();
         grantMissionXp(true);
+        showScorecard({ outcome: 'Mission complete', ok: true, rank: '🏆' });
       }
     }
     // Final score from the mission's accumulator (overrides delta sum when
@@ -976,11 +2941,44 @@ function frame(now) {
     sim.altHist.push([sim.state.t, tel.altKm]);
     if (sim.altHist.length > 600) sim.altHist.shift();
 
+    // ── Floor / decay warning state ────────────────────────────────────────
+    // Mission floors are *above* the engine's hard re-entry floor (80 km).
+    // We escalate "ok → warn → breach" so the player has time to read the
+    // forecast, choose a thrust schedule, and execute. Actual failure still
+    // happens only when the engine reports reentry.
+    const mission_ = MISSIONS[sim.missionId];
+    if (mission_ && mission_.altitudeFloorKm != null && sim.state.alive) {
+      const fs = assessFloorStatus(mission_, tel,
+        (n) => ENG.projectPerigee(tel, n, { playerDvPerOrbit: 0 }));
+      if (fs.status !== sim._lastFloorStatus) {
+        sim._lastFloorStatus = fs.status;
+        if (fs.status === 'warn') {
+          setBanner(`⚠ DEORBIT WARNING — perigee will dip below ${fs.floorKm} km`, 'warn');
+          $('sd-thrust-btn')?.classList.add('urgent');
+        } else if (fs.status === 'breach') {
+          setBanner(`🔴 FLOOR BREACHED — perigee ${fs.periKm.toFixed(0)} km < ${fs.floorKm} km. Burn now.`, 'bad');
+          $('sd-thrust-btn')?.classList.add('urgent');
+        } else if (fs.status === 'ok') {
+          $('sd-thrust-btn')?.classList.remove('urgent');
+          // Don't clear a banner the mission itself set — only our own.
+          if ($('sd-banner').dataset.owner === 'floor') setBanner('', '');
+        }
+        $('sd-banner').dataset.owner = fs.status === 'ok' ? '' : 'floor';
+      }
+      // Passive score erosion while breached — pushes the player to fix it
+      // instead of grinding through the warning band.
+      if (fs.status === 'breach') {
+        sim.score = Math.max(0, sim.score - BREACH_SCORE_PENALTY_PER_SEC * simSecs);
+      }
+    }
+
     if (!sim.state.alive) {
       sim.running = false; sim.paused = false;
       setPhase(sim.state.reason === 'reentry' ? '🔥 Re-entry — vehicle destroyed' : 'Mission ended', 'bad');
       $('b-pause').disabled = true; $('b-pause').textContent = '⏸ Pause';
       $('b-launch').disabled = false;
+      $('sd-thrust-btn')?.classList.remove('urgent','firing');
+      setBurnInput(false);
       // For Deorbit, hitting the atmosphere with perigee in the window is success.
       const deorbitSuccess = sim.missionId === 'deorbit'
         && (sim.missionCtx?.lastPeriKm ?? 999) >= 60
@@ -993,14 +2991,37 @@ function frame(now) {
       }
       maybePersistBest();
       grantMissionXp(deorbitSuccess);
+      // Scorecard on re-entry. For the deorbit mission, the outcome
+      // depends on the safe-window check; for everyone else, re-entry
+      // is failure.
+      if (sim.missionId === 'deorbit') {
+        showScorecard({
+          outcome: deorbitSuccess ? 'Re-entry inside safe window' : 'Re-entry outside window',
+          ok: deorbitSuccess,
+          rank: deorbitSuccess ? '🎯' : '💥',
+        });
+      } else {
+        showScorecard({
+          outcome: sim.state.reason === 'reentry' ? 'Re-entry — vehicle destroyed' : 'Mission ended',
+          ok: false,
+          rank: '💥',
+        });
+      }
     } else if (tel.fuel <= 0 && sim.control.mode === 'prograde') {
       setPhase('⚠ Out of propellant — decaying', 'warn');
     }
     updateTelemetry(tel);
     refreshObjectivePanel(tel);
+    // Scheduled-burn pill ticks the countdown when armed/firing. Cheap so
+    // we run it every frame; visual delta only when text actually changes.
+    if (sim.scheduledBurn) updateSchedPill();
+    // STORM RADAR HUD — same per-frame cadence. Internal memoisation keeps
+    // the forecast path-rebuild from running when the values haven't moved.
+    STORM_RADAR.update();
   } else if (sim.state) {
     // Live telemetry tick even when paused so the objective bar reflects truth.
     refreshObjectivePanel(ENG.telemetry(sim.state, sim.design, sim.env, sim.control.attitudeMult));
+    STORM_RADAR.update();
   }
 
   draw();
@@ -1038,6 +3059,30 @@ function updateTelemetry(t) {
       ? fmt(t.decayPerOrbitKm, 3) + ' <small>km/orbit</small>'
       : 'stable',
     t.decayPerOrbitKm < -1 ? 'bad' : t.decayPerOrbitKm < -0.05 ? 'warn' : null);
+
+  // ── Realism gauges ────────────────────────────────────────────────────
+  // Turbulence is the multiplier on the mean atmosphere model — ±5% quiet,
+  // up to ±23% in a storm. Warn when it's moving the needle.
+  const turbPct = ((t.turbulence ?? 1) - 1) * 100;
+  setMetric('m-turb',
+    (turbPct >= 0 ? '+' : '') + fmt(turbPct, 1) + '<small>%</small>',
+    Math.abs(turbPct) > 15 ? 'warn' : null);
+  // Tumble = angular rate of the bus (rad/s) — high when drag torque
+  // overpowers reaction wheels; the engine bloats effective area when this
+  // grows. Visualised in °/s for legibility.
+  const tumbleDegS = (t.tumbleRate ?? 0) * 180 / Math.PI;
+  setMetric('m-tumble',
+    fmt(Math.abs(tumbleDegS), 1) + '<small>°/s</small>',
+    Math.abs(tumbleDegS) > 30 ? 'bad' : Math.abs(tumbleDegS) > 10 ? 'warn' : null);
+  // Throat life remaining (0 % = factory new; 100 % = 25 % perf loss capped).
+  const lifeUsed = (t.erosion ?? 0) * 100;
+  setMetric('m-erosion',
+    fmt(100 - lifeUsed, 0) + '<small>%</small>',
+    lifeUsed > 60 ? 'bad' : lifeUsed > 25 ? 'warn' : null);
+  // Effective Isp (degraded by erosion).
+  setMetric('m-ispEff',
+    isFinite(t.ispEff) ? fmt(t.ispEff, 0) + '<small>s</small>' : '—',
+    t.ispEff < (sim.design?.isp ?? Infinity) * 0.85 ? 'warn' : null);
 
   $('fuel-lbl').textContent = fmt(t.fuel, 1) + ' kg';
   $('fuel-bar').style.width = (t.fuelFrac * 100).toFixed(1) + '%';
@@ -1116,16 +3161,41 @@ function draw() {
   // Heading reticle: always shown once Manual Steering is unlocked, so the
   // pilot can pre-aim before committing to a burn. Goes hot when firing.
   update.headingRad = sim.control.heading;
+  update.steer = sim._steer || 0;          // A/D bank cue for the 3-D model
   update.headingVisible = PROG.hasUnlock(profile, 'manual_steer') && !!sim.state;
   update.headingFiring = manual && sim.state?.fuel > 0 && sim.control.throttle > 0;
   if (sim.targetSatM) update.targetSat = [sim.targetSatM.x, sim.targetSatM.y];
   if (sim.debrisM)    update.debris    = [sim.debrisM.x,    sim.debrisM.y];
 
+  // Thrust plume — compute the burn direction so the 3-D scene can paint
+  // a flame trailing in the opposite direction. Visible whenever the
+  // throttle is open, the engine is in a burn mode, and fuel remains.
+  if (sim.state) {
+    const mode = sim.control.mode;
+    const thr = sim.control.throttle || 0;
+    const fuelOk = (sim.state.fuel ?? 0) > 0;
+    if (thr > 0 && mode && mode !== 'off' && fuelOk) {
+      const vmag = Math.hypot(sim.state.vx, sim.state.vy) || 1;
+      const rmag = Math.hypot(sim.state.x, sim.state.y) || 1;
+      const h = sim.control.heading;
+      let dx = 0, dy = 0;
+      if      (mode === 'prograde')      { dx =  sim.state.vx / vmag; dy =  sim.state.vy / vmag; }
+      else if (mode === 'retrograde')    { dx = -sim.state.vx / vmag; dy = -sim.state.vy / vmag; }
+      else if (mode === 'radial-out')    { dx =  sim.state.x / rmag;  dy =  sim.state.y / rmag;  }
+      else if (mode === 'radial-in')     { dx = -sim.state.x / rmag;  dy = -sim.state.y / rmag;  }
+      else if (mode === 'manual')        { dx =  Math.cos(h);         dy =  Math.sin(h);         }
+      else if (mode === 'manual-retro')  { dx = -Math.cos(h);         dy = -Math.sin(h);         }
+      const electric = !!(sim.design && ENG.ENGINE_PRESETS[sim.design.engine || ''] && ENG.ENGINE_PRESETS[sim.design.engine].isp > 1000);
+      update.thrust = { throttle: thr, dirX: dx, dirY: dy, electric, fuelOk: true };
+    }
+  }
+
   SCENE.update(update);
 
   // Auto-fit only matters in wide mode; render passes the current apogee km.
+  // Pass env so the elements() call honours the current gravity-slider μ.
   const apoKm = sim.state
-    ? Math.max(ENG.elements(sim.state).ra, ENG.elements(sim.state).r) / 1000 - ENG.R_EARTH / 1000
+    ? Math.max(ENG.elements(sim.state, env).ra, ENG.elements(sim.state, env).r) / 1000 - ENG.R_EARTH / 1000
     : Math.max(+$('f-apo').value, +$('f-peri').value);
   SCENE.render(apoKm);
 
@@ -1322,34 +3392,90 @@ $('b-save').addEventListener('click', saveShip);
 const BAY = { ready: false, three: null, raf: 0,
   scene: null, camera: null, renderer: null, controls: null, group: null };
 
-function chip(label, sub, active) {
-  return `<div class="opt${active ? ' active' : ''}" data-v="${label.key}">
-    ${label.name}<small>${sub}</small></div>`;
+// Iconography for the parts chips. Picked to read at a glance: cube
+// shapes for buses, a flame/leaf for chemical-vs-electric thrusters, sun
+// motifs for arrays. Keep these in sync with BUILDER's keys.
+const PART_ICONS = {
+  body: { cubesat_3u: '🧊', cubesat_12u: '📦', cubesat_grid: '🧱',
+          smallsat: '🛰', bus_med: '🚛', tank_cyl: '🛢',
+          tug: '🚚', telescope: '🔭' },
+  thruster: { cold_gas: '💨', monoprop: '🔥', biprop: '🚀',
+              hall_ion: '⚡', gridded_ion: '⚛', hall_shielded: '🛡',
+              iodine_ion: '🟣', electrospray: '💧', water_resisto: '💦' },
+  panel: { none: '⬛', dual: '☀', quad: '🔆', large: '🌞', rosa: '📜', thinfilm: '🪶' },
+  payload: { none: '➖', optical_cam: '📷', wide_imager: '🎥',
+             commsat_dish: '📡', sar_radar: '🛰', mass_driver: '🧨' },
+};
+// Render a single part chip. The tier badge is appended for non-Mk-I parts
+// to advertise upgraded gear. The whole chip is clickable to select; the
+// tier badge is independently clickable to attempt an upgrade.
+function chip(slot, label, sub, active, icon, tier) {
+  const ic = icon ? `<span class="ico">${icon}</span>` : '';
+  const badge = tier > 1
+    ? `<span class="tier tier-${tier}" data-slot="${slot}" data-key="${label.key}" title="Tier ${tier}">${PROG.PART_TIER_NAMES[tier-1]}</span>`
+    : '';
+  return `<div class="opt${active ? ' active' : ''}" data-v="${label.key}" title="${label.full || label.name}">
+    ${badge}${ic}${label.name}<small>${sub}</small></div>`;
 }
 function renderOptChips() {
+  const tT = (slot, k) => PROG.partTier(profile, slot, k);
   $('bay-body').innerHTML = Object.entries(BUILDER.BODIES).map(([k, v]) =>
-    chip({ key: k, name: v.label }, `${v.mass} kg`, k === sdBuild.body)).join('');
+    chip('body',
+      { key: k, name: v.label.replace(' CubeSat', '').replace('SmallSat ', ''),
+        full: `${v.label} · ${v.mass} kg` },
+      `${v.mass} kg`, k === sdBuild.body, PART_ICONS.body[k], tT('body', k))).join('');
   $('bay-thruster').innerHTML = Object.entries(BUILDER.THRUSTER_UNITS).map(([k, v]) => {
     const p = ENG.ENGINE_PRESETS[k];
-    return chip({ key: k, name: v.label.split(' ')[0] },
-      p ? `${p.thrust} N · ${p.isp}s` : '', k === sdBuild.thruster);
+    const short = v.label.split(/[\s\/(]/)[0];
+    return chip('thruster', { key: k, name: short, full: v.label },
+      p ? `${p.thrust < 1 ? p.thrust : Math.round(p.thrust)} N · ${p.isp}s` : '',
+      k === sdBuild.thruster, PART_ICONS.thruster[k], tT('thruster', k));
   }).join('');
-  $('bay-panel').innerHTML = Object.entries(BUILDER.PANELS).map(([k, v]) =>
-    chip({ key: k, name: v.label }, v.wings ? `${v.wings} wing${v.wings > 1 ? 's' : ''}` : 'fixed',
-      k === sdBuild.panel)).join('');
+  $('bay-panel').innerHTML = Object.entries(BUILDER.PANELS).map(([k, v]) => {
+    const short = v.label.replace(' deployable', '').replace(' array', '')
+                          .replace(' (ROSA)', '').replace(' flex', '');
+    return chip('panel', { key: k, name: short, full: v.label },
+      v.wings ? `${v.wings} wing${v.wings > 1 ? 's' : ''}` : 'fixed',
+      k === sdBuild.panel, PART_ICONS.panel[k], tT('panel', k));
+  }).join('');
+  $('bay-payload').innerHTML = Object.entries(BUILDER.PAYLOADS).map(([k, v]) => {
+    const short = v.label.replace(' camera', '').replace(' (exp.)', '')
+                          .replace('Comms HG ', '').replace(' phased array', '');
+    return chip('payload', { key: k, name: short, full: v.label },
+      v.mass > 0 ? `${v.mass}kg · ${v.powerW}W` : 'none',
+      k === sdBuild.payload, PART_ICONS.payload[k], tT('payload', k));
+  }).join('');
+  // Live caption under the row header showing what's selected.
+  const plKey = sdBuild.payload || 'none';
+  const pl = BUILDER.PAYLOADS[plKey];
+  $('payload-tip').textContent = pl
+    ? `${pl.label} — ${pl.mass}kg · ${pl.area}m² · ${pl.powerW}W`
+    : '';
 }
 function syncBayUI() {
   const tc = $('bay-tc'), sp = $('bay-span');
   if (tc) { tc.value = sdBuild.thrusterCount; $('bay-tc-v').textContent = sdBuild.thrusterCount; }
   if (sp) { sp.value = sdBuild.panelSpan; $('bay-span-v').textContent = (+sdBuild.panelSpan).toFixed(1); }
-  for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'], ['bay-panel', 'panel']]) {
+  for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'],
+                            ['bay-panel', 'panel'], ['bay-payload', 'payload']]) {
     const box = $(grp); if (!box) continue;
     box.querySelectorAll('.opt').forEach(o =>
       o.classList.toggle('active', o.dataset.v === sdBuild[key]));
   }
 }
+// Build the per-slot tierMods object the builder expects, from the active
+// profile's persistent partTiers map. Each chip's modifiers are computed
+// at use-time so a tier upgrade is reflected immediately.
+function activeTierMods() {
+  return {
+    body:     PROG.tierMods('body',     PROG.partTier(profile, 'body',     sdBuild.body)),
+    thruster: PROG.tierMods('thruster', PROG.partTier(profile, 'thruster', sdBuild.thruster)),
+    panel:    PROG.tierMods('panel',    PROG.partTier(profile, 'panel',    sdBuild.panel)),
+    payload:  PROG.tierMods('payload',  PROG.partTier(profile, 'payload',  sdBuild.payload || 'none')),
+  };
+}
 function refreshBaySpec() {
-  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS);
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS, activeTierMods());
   $('bs-mass').innerHTML = fmt(d.dryMass, 1) + ' <small>kg</small>';
   $('bs-area').innerHTML = fmt(d.area, 2) + ' <small>m²</small>';
   $('bs-cd').textContent = d.cd.toFixed(2);
@@ -1362,6 +3488,13 @@ function refreshBaySpec() {
   const mm = $('bs-margin-m');
   mm.classList.remove('flag-good', 'flag-warn', 'flag-bad');
   mm.classList.add(d.powerMargin < 0 ? 'flag-bad' : d.powerMargin < 50 ? 'flag-warn' : 'flag-good');
+  // Multidirectional RCS suite — green when present, dim when the bus has none.
+  const rcsEl = $('bs-rcs'), rcsM = $('bs-rcs-m');
+  if (rcsEl) rcsEl.innerHTML = d.rcs
+    ? fmt(d.rcsThrust, d.rcsThrust < 10 ? 1 : 0) + ' <small>N · multi-axis</small>'
+    : '<small>none</small>';
+  if (rcsM) { rcsM.classList.remove('flag-good', 'flag-warn', 'flag-bad');
+    if (d.rcs) rcsM.classList.add('flag-good'); }
   return d;
 }
 function disposeGroup(grp) {
@@ -1431,14 +3564,76 @@ function bayLoop() {
 // The build view is now permanently inline — initialise once at boot and
 // keep rendering. No modal to open/close.
 async function initBay() {
-  renderOptChips(); syncBayUI(); refreshBaySpec();
+  renderOptChips(); syncBayUI(); refreshBaySpec(); renderBlueprints();
   const ok = await ensureThree();
   if (ok) { resizeBay(); rebuildMesh(); }
   cancelAnimationFrame(BAY.raf); bayLoop();
 }
+
+// ── Real-world blueprint gallery ─────────────────────────────────────────────
+// Renders the state-of-the-art catalogue as cards; clicking one drops its
+// parts into the bay, sets the orbit + space-weather, and shows the reference
+// card. The build is editable from there — load, then fork.
+function renderBlueprints() {
+  const gal = $('bp-gallery'); if (!gal) return;
+  gal.innerHTML = BP.BLUEPRINTS.map(b => `
+    <button class="bp-card" data-id="${b.id}" title="${b.operator} · ${b.era}">
+      <div class="bp-ico">${b.icon || '🛰'}</div>
+      <div class="bp-name">${b.name}</div>
+      <div class="bp-op">${b.operator}</div>
+      <div class="bp-tags">
+        <span class="bp-klass">${b.klass}</span>
+        ${b.multidirectional ? '<span class="bp-multi" title="Carries reaction-control clusters — multidirectional thrust">⊕ multi-axis</span>' : ''}
+      </div>
+    </button>`).join('');
+}
+function showBlueprintDetail(b) {
+  const el = $('bp-detail'); if (!el) return;
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS, activeTierMods());
+  const r = b.real || {};
+  const realBits = [
+    r.massKg ? `${fmt(r.massKg, 0)} kg` : '',
+    r.powerW ? `${fmt(r.powerW, 0)} W` : '',
+    r.altKm  ? `${fmt(r.altKm, 0)} km` : '',
+  ].filter(Boolean).join(' · ');
+  el.hidden = false;
+  el.innerHTML = `
+    <div class="bp-blurb">${b.blurb}</div>
+    <div class="bp-real">
+      <span><b>Real bird:</b> ${realBits || '—'}</span>
+      <span><b>Propulsion:</b> ${r.propellant || '—'}${b.multidirectional ? ' · <b style="color:var(--c-accent)">⊕ multidirectional RCS</b>' : ''}</span>
+      ${r.notes ? `<span class="bp-notes">${r.notes}</span>` : ''}
+      ${b.orbit.note ? `<span class="bp-notes">⚠ ${b.orbit.note}</span>` : ''}
+    </div>
+    <div class="bp-ingame"><b>In-game build:</b> ${BUILDER.BODIES[sdBuild.body].label} · ${ENG.ENGINE_PRESETS[sdBuild.thruster]?.label || sdBuild.thruster} ×${sdBuild.thrusterCount} · ${fmt(d.dryMass, 0)} kg · ${fmt(d.thrust, d.thrust < 10 ? 2 : 0)} N${d.rcs ? ` · RCS ${fmt(d.rcsThrust, 0)} N` : ''}</div>
+    <a class="bp-src" href="${b.source}" target="_blank" rel="noopener">reference ↗</a>`;
+}
+function loadBlueprint(id) {
+  const b = BP.findBlueprint(id); if (!b) return;
+  sdBuild = { ...BUILDER.defaultBuild(), ...b.build };
+  // Propellant load (the one physics field not in the parts build).
+  if (b.fuelKg != null) { $('f-fuel').value = b.fuelKg; $('v-fuel').textContent = b.fuelKg; }
+  // Starting orbit — start alt, target alt (= start), apogee.
+  const peri = b.orbit.periKm, apo = b.orbit.apoKm;
+  $('f-peri').value = peri; $('v-peri').textContent = peri;
+  $('f-tgt').value  = peri; $('v-tgt').textContent  = peri;
+  $('f-apo').value  = apo;  $('v-apo').textContent  = apo;
+  $('f-name').value = b.name;
+  if (b.sw) setSWPreset(b.sw);
+  renderOptChips(); syncBayUI(); syncBuild(); refreshDesignReadouts();
+  showBlueprintDetail(b);
+  document.querySelectorAll('#bp-gallery .bp-card')
+    .forEach(c => c.classList.toggle('active', c.dataset.id === id));
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS, activeTierMods());
+  toast(`🛰 Loaded ${b.name} — ${BUILDER.BODIES[sdBuild.body].label} · ${fmt(d.dryMass, 0)} kg${d.rcs ? ' · multi-axis RCS' : ''}`);
+}
+$('bp-gallery')?.addEventListener('click', (e) => {
+  const card = e.target.closest('.bp-card'); if (!card) return;
+  loadBlueprint(card.dataset.id);
+});
 // Push the parametric build's derived physics into the editable ship form.
 function pushBuildToForm() {
-  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS);
+  const d = BUILDER.deriveDesign(sdBuild, ENG.ENGINE_PRESETS, activeTierMods());
   $('f-engine').value = d.engine;
   $('f-thrust').value = d.thrust;
   $('f-isp').value = d.isp;
@@ -1457,14 +3652,48 @@ function applyBuild() {
   toast(`Applied ${BUILDER.BODIES[sdBuild.body].label}: ${fmt(d.dryMass, 0)} kg · ${fmt(d.area, 2)} m²`);
 }
 
-for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'], ['bay-panel', 'panel']]) {
+for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'],
+                          ['bay-panel', 'panel'], ['bay-payload', 'payload']]) {
   $(grp).addEventListener('click', (e) => {
+    // Tier-badge click — try to upgrade that specific part, don't select it.
+    const tierBadge = e.target.closest('.tier');
+    if (tierBadge) { e.stopPropagation(); tryUpgradePart(tierBadge.dataset.slot, tierBadge.dataset.key); return; }
     const o = e.target.closest('.opt'); if (!o) return;
+    // Right-click (or alt-click) on a chip opens its upgrade flow instead.
+    if (e.altKey) { tryUpgradePart(key, o.dataset.v); return; }
     sdBuild[key] = o.dataset.v;
     $(grp).querySelectorAll('.opt').forEach(x => x.classList.toggle('active', x === o));
     syncBuild();
   });
+  // Right-click anywhere in a chip row triggers the upgrade flow.
+  $(grp).addEventListener('contextmenu', (e) => {
+    const o = e.target.closest('.opt'); if (!o) return;
+    e.preventDefault();
+    tryUpgradePart(key, o.dataset.v);
+  });
 }
+// Upgrade flow — spends XP from the available pool. Shows a toast either way.
+function tryUpgradePart(slot, key) {
+  const curTier = PROG.partTier(profile, slot, key);
+  if (curTier >= 3) { toast(`${BUILDER[slotsToConst[slot]]?.[key]?.label || key}: already Mk III (max).`); return; }
+  const cost = PROG.PART_TIER_COST[curTier];
+  const avail = PROG.availableXp(profile);
+  const partName = BUILDER[slotsToConst[slot]]?.[key]?.label || key;
+  if (avail < cost) {
+    toast(`🔒 Mk ${PROG.PART_TIER_NAMES[curTier].split(' ')[1]} ${partName} costs ${cost} XP — you have ${avail}.`, true);
+    return;
+  }
+  if (!confirm(`Upgrade ${partName} to ${PROG.PART_TIER_NAMES[curTier]} for ${cost} XP?\n\nAvailable XP: ${avail}`)) return;
+  const r = PROG.upgradePart(profile, slot, key);
+  if (r.ok) {
+    toast(`✨ ${partName} → ${PROG.PART_TIER_NAMES[r.newTier - 1]} (–${r.cost} XP)`);
+    renderOptChips(); syncBayUI(); refreshBaySpec();
+    refreshDesignReadouts(); renderPilotPanel();
+  } else {
+    toast(`Upgrade failed: ${r.reason}`, true);
+  }
+}
+const slotsToConst = { body: 'BODIES', thruster: 'THRUSTER_UNITS', panel: 'PANELS', payload: 'PAYLOADS' };
 $('bay-tc').addEventListener('input', (e) => {
   sdBuild.thrusterCount = +e.target.value;
   $('bay-tc-v').textContent = e.target.value; syncBuild();
@@ -1496,21 +3725,60 @@ $('sd-cam').addEventListener('click', (e) => {
       x.classList.toggle('active', x === b));
     return;
   }
-  if (e.target.closest('#cam-focus') && SCENE) SCENE.focusSatellite();
-  if (e.target.closest('#cam-reset') && SCENE) { SCENE.resetView(); setCamModeButton('wide'); }
+  if (e.target.closest('#cam-reset') && SCENE) { SCENE.resetView(); setCamModeButton('wide'); setSubjectButton('earth'); }
 });
 function setCamModeButton(mode) {
   $('sd-cam').querySelectorAll('.cam-btn').forEach(x =>
     x.classList.toggle('active', x.dataset.cam === mode));
 }
+function setSubjectButton(s) {
+  $('sd-subject').querySelectorAll('.subj-btn').forEach(x =>
+    x.classList.toggle('active', x.dataset.subj === s));
+}
+// Subject toggle — Earth vs Satellite focal lock. Works in any camera mode.
+$('sd-subject').addEventListener('click', (e) => {
+  const b = e.target.closest('.subj-btn'); if (!b || !SCENE) return;
+  SCENE.setSubject(b.dataset.subj);
+  setSubjectButton(b.dataset.subj);
+});
+// Click-to-focus on the canvas — pick Earth or the satellite halo and lock
+// the focal subject. We distinguish click from drag by tracking the down-up
+// pixel delta; OrbitControls owns drags.
+let _downX = 0, _downY = 0, _downT = 0;
+$('sd-canvas').addEventListener('pointerdown', (e) => {
+  _downX = e.clientX; _downY = e.clientY; _downT = performance.now();
+});
+$('sd-canvas').addEventListener('pointerup', (e) => {
+  if (!SCENE) return;
+  const dx = e.clientX - _downX, dy = e.clientY - _downY;
+  if (dx * dx + dy * dy > 16 || performance.now() - _downT > 350) return;   // drag, not click
+  const r = $('sd-canvas').getBoundingClientRect();
+  const ndcX = ((e.clientX - r.left) / r.width) * 2 - 1;
+  const ndcY = -((e.clientY - r.top) / r.height) * 2 + 1;
+  const hit = SCENE.pickAt(ndcX, ndcY);
+  if (!hit) return;
+  SCENE.setSubject(hit);
+  setSubjectButton(hit);
+  // Earth subject in WIDE feels natural; satellite click also snaps the
+  // camera mode to FOLLOW so the user actually sees the bird up close.
+  if (hit === 'satellite') {
+    SCENE.setCameraMode('follow', { snap: true });
+    setCamModeButton('follow');
+  }
+});
 // Keyboard shortcuts — F focus, R reset, C cycle. Avoid stealing form input.
 addEventListener('keydown', (e) => {
   if (e.target.matches('input,select,textarea')) return;
   if (!SCENE) return;
-  if (e.key === 'f' || e.key === 'F') { SCENE.focusSatellite(); }
-  else if (e.key === 'r' || e.key === 'R') { SCENE.resetView(); setCamModeButton('wide'); }
-  else if (e.key === 'c' || e.key === 'C') {
-    const order = ['wide', 'follow', 'free'];
+  if (e.key === 'f' || e.key === 'F') {
+    SCENE.setSubject('satellite');
+    SCENE.focusSatellite();
+    setSubjectButton('satellite');
+  } else if (e.key === 'r' || e.key === 'R') {
+    SCENE.resetView(); SCENE.setSubject('earth');
+    setCamModeButton('wide'); setSubjectButton('earth');
+  } else if (e.key === 'c' || e.key === 'C') {
+    const order = ['wide', 'follow', 'free', 'chase', 'nose'];
     const next = order[(order.indexOf(SCENE.getMode()) + 1) % order.length];
     SCENE.setCameraMode(next, { snap: true }); setCamModeButton(next);
   }
@@ -1523,9 +3791,13 @@ function updateViewReadout() {
   if (now - viewLastT < 200) return;
   viewLastT = now;
   const v = SCENE.viewInfo();
-  const a = v.altKm > 9999 ? (v.altKm / 1000).toFixed(1) + ' Mm'
-          : v.altKm.toFixed(0) + ' km';
-  $('sd-view').textContent = `view ${a} · ${v.mode}`;
+  // In FOLLOW we report distance to the satellite (more useful than alt);
+  // otherwise the camera's altitude above Earth's surface.
+  const isFollow = v.mode === 'follow' || v.subject === 'satellite';
+  const d = isFollow ? v.distSatKm : v.altKm;
+  const a = d > 9999 ? (d / 1000).toFixed(1) + ' Mm' : d.toFixed(0) + ' km';
+  const subjBadge = v.subject === 'satellite' ? '🛰' : '🌍';
+  $('sd-view').textContent = `${subjBadge} ${isFollow ? 'sat' : 'view'} ${a} · ${v.mode}`;
 }
 
 // ── Mission picker ──────────────────────────────────────────────────────────
@@ -1541,6 +3813,13 @@ $('mission-select').addEventListener('click', (e) => {
 });
 function setMission(id) {
   if (!MISSIONS[id]) return;
+  // Tear down the outgoing mission so any installed forecast override
+  // (e.g. starlink2022's scripted G2) doesn't leak across mission picks.
+  const prev = MISSIONS[sim.missionId];
+  if (prev && prev !== MISSIONS[id]) {
+    try { prev.teardown?.(sim.missionCtx); } catch (_) {}
+    FORECAST.setMissionOverride(null);
+  }
   sim.missionId = id;
   const m = MISSIONS[id];
   $('mission-select').querySelectorAll('.toggle').forEach(t =>
@@ -1557,6 +3836,15 @@ function setMission(id) {
     if (d.throttle != null) { $('f-throttle').value = d.throttle; $('v-thr').textContent = d.throttle;
                               sim.control.throttle = d.throttle / 100; }
     if (d.fuelMass != null) { $('f-fuel').value = d.fuelMass; $('v-fuel').textContent = d.fuelMass; refreshDesignReadouts(); }
+    // Hardware overrides — hindcast missions ship a fixed spacecraft
+    // config (Starlink-broom area, ISS-class dryMass) so the player can
+    // recreate the real scenario. Optional; missions that don't set
+    // these leave the bay panel as the player configured it.
+    if (d.area     != null) { const el = $('f-area');     if (el) { el.value = d.area;     refreshDesignReadouts(); } }
+    if (d.dryMass  != null) { const el = $('f-dry');      if (el) { el.value = d.dryMass;  refreshDesignReadouts(); } }
+    if (d.cd       != null) { const el = $('f-cd');       if (el) { el.value = d.cd;       refreshDesignReadouts(); } }
+    if (d.thrust   != null) { const el = $('f-thrust');   if (el) { el.value = d.thrust;   refreshDesignReadouts(); } }
+    if (d.isp      != null) { const el = $('f-isp');      if (el) { el.value = d.isp;      refreshDesignReadouts(); } }
     if (d.swPreset) setSWPreset(d.swPreset);
     if (d.attitude) setAttitude(d.attitude);
     SCENE?.setTargetAlt(+$('f-tgt').value);
@@ -1565,6 +3853,9 @@ function setMission(id) {
 }
 function startMission() {
   const m = MISSIONS[sim.missionId]; if (!m) return;
+  // Clear any prior mission's forecast override so live data is the
+  // baseline. Hindcast missions reinstall their script in setup().
+  FORECAST.setMissionOverride(null);
   // Mission context — read/write surface the scenario uses to mutate the world.
   sim.missionCtx = {
     sim, env, design: sim.design, control: sim.control,
@@ -1578,6 +3869,9 @@ function startMission() {
     getDebris: () => sim.debrisM,
     event: (type) => { /* hook point for analytics / sounds */ },
     setBanner,
+    // Hindcast missions use this to install a scripted F10.7/Ap profile
+    // that the STORM RADAR reads. Passing null clears it.
+    setForecastOverride: (fn) => FORECAST.setMissionOverride(fn),
   };
   m.setup?.(sim.missionCtx);
   refreshObjectivePanel();
@@ -1607,13 +3901,20 @@ function refreshObjectivePanel(tel) {
 // ── Pilot progression (roguelike-style unlocks) ─────────────────────────────
 function renderPilotPanel() {
   const xp = PROG.xpFor(profile);
+  const avail = PROG.availableXp(profile);
   $('rank-badge').textContent = xp.rank.badge;
   $('rank-name').textContent = xp.rank.name;
-  $('rank-xp').textContent = `${xp.total} XP · ${profile.totalMissions || 0} missions flown`;
+  // Two-line summary: total earned, available-to-spend (xp not yet sunk
+  // into part-tier upgrades). The available number is what tier-upgrade
+  // clicks draw down.
+  $('rank-xp').innerHTML =
+    `${xp.total} XP <small style="color:var(--c-text-3)">earned</small> · ` +
+    `<b style="color:var(--c-good)">${avail}</b> <small style="color:var(--c-text-3)">to spend</small> · ` +
+    `${profile.totalMissions || 0} <small style="color:var(--c-text-3)">flown</small>`;
   $('rank-bar').style.width = Math.min(100, xp.pct * 100).toFixed(1) + '%';
   $('rank-next').textContent = xp.atMax
-    ? '🏅 Max rank — top of the operator ladder.'
-    : `Next: ${xp.nextRankName} · ${xp.span - xp.intoRank} XP to go`;
+    ? '🏅 Max rank — top of the operator ladder. Alt-click any chip to spend XP on Mk II/III.'
+    : `Next: ${xp.nextRankName} · ${xp.span - xp.intoRank} XP to go · Alt-click chips to upgrade`;
   const owned = PROG.unlocksOwned(profile);
   const locked = PROG.unlocksLocked(profile);
   $('unlocks-owned').innerHTML = owned.length
@@ -1636,6 +3937,7 @@ function applyUnlockLocks() {
       el.title = '';
     }
   });
+  syncSteerHud();   // a fresh unlock may reveal the steering readout mid-flight
 }
 // Called when a mission ends (success or — for deorbit — useful failure).
 // Awards XP, persists the profile, and notifies the pilot of any rank-up
@@ -1662,7 +3964,7 @@ function grantMissionXp(success) {
 }
 
 // ── Pilot keyboard steering ────────────────────────────────────────────────
-// A/D rotate heading; Q/E fine; W/S fire fwd/rev along heading (hold).
+// W/↑ gas · S/↓ ease · A/← · D/→ steer (arcade flight); Q/E fine-steer.
 // 1–5 quick-select burn vector chips. Camera shortcuts (F/R/C) live higher
 // up in the file. We swallow keys only when the sim is running so we don't
 // fight the parts UI.
@@ -1675,6 +3977,17 @@ addEventListener('keydown', (e) => {
   else if (k === 'e') { sim.inputs.rotR = true; sim.inputs.fine = true; }
   else if (k === 'w') sim.inputs.fwd = true;
   else if (k === 's') sim.inputs.rev = true;
+  // Arrow keys mirror W/A/S/D for the arcade flight model (↑ gas · ↓ ease ·
+  // ←/→ steer). preventDefault so they don't scroll the page mid-flight.
+  else if (k === 'arrowup')    { e.preventDefault(); sim.inputs.fwd  = true; }
+  else if (k === 'arrowdown')  { e.preventDefault(); sim.inputs.rev  = true; }
+  else if (k === 'arrowleft')  { e.preventDefault(); sim.inputs.rotL = true; }
+  else if (k === 'arrowright') { e.preventDefault(); sim.inputs.rotR = true; }
+  // RCS translation pad — I/K radial, J/L along. Inert without an RCS bus.
+  else if (k === 'i') { sim.inputs.rcsOut = true; setRcsBtnFiring('out', true); }
+  else if (k === 'k') { sim.inputs.rcsIn = true; setRcsBtnFiring('in', true); }
+  else if (k === 'l') { sim.inputs.rcsFwd = true; setRcsBtnFiring('fwd', true); }
+  else if (k === 'j') { sim.inputs.rcsBack = true; setRcsBtnFiring('back', true); }
   else if (k >= '1' && k <= '5') {
     const map = { '1': 'off', '2': 'prograde', '3': 'retrograde',
                   '4': 'radial-out', '5': 'radial-in' };
@@ -1696,10 +4009,68 @@ addEventListener('keyup', (e) => {
   else if (k === 'e') { sim.inputs.rotR = false; sim.inputs.fine = false; }
   else if (k === 'w') sim.inputs.fwd = false;
   else if (k === 's') sim.inputs.rev = false;
+  else if (k === 'arrowup')    sim.inputs.fwd  = false;
+  else if (k === 'arrowdown')  sim.inputs.rev  = false;
+  else if (k === 'arrowleft')  sim.inputs.rotL = false;
+  else if (k === 'arrowright') sim.inputs.rotR = false;
+  else if (k === 'i') { sim.inputs.rcsOut = false; setRcsBtnFiring('out', false); }
+  else if (k === 'k') { sim.inputs.rcsIn = false; setRcsBtnFiring('in', false); }
+  else if (k === 'l') { sim.inputs.rcsFwd = false; setRcsBtnFiring('fwd', false); }
+  else if (k === 'j') { sim.inputs.rcsBack = false; setRcsBtnFiring('back', false); }
 });
+
+// ── RCS translation pad wiring ───────────────────────────────────────────────
+// Maps a pad direction to its held-input flag. Hold (pointer or key) fires;
+// release stops. Holding two strafes on the diagonal — the multidirectional
+// capability that only RCS-equipped buses get.
+const RCS_FLAG = { out: 'rcsOut', in: 'rcsIn', fwd: 'rcsFwd', back: 'rcsBack' };
+function setRcsBtnFiring(dir, on) {
+  document.querySelector(`#rcs-pad .rcs-btn[data-rcs="${dir}"]`)?.classList.toggle('firing', on);
+}
+// Steering HUD — surfaces the design's slew rate + attitude-control hardware
+// so the pilot can see *how* (and how fast) this bus re-points.
+function syncSteerHud() {
+  const el = $('steer-hud'); if (!el) return;
+  const show = !!sim.running && PROG.hasUnlock(profile, 'manual_steer') && sim.design?.slewDeg;
+  el.style.display = show ? '' : 'none';
+  // Pair the controls hint with the readout so both appear (and hide) together.
+  const hint = $('manual-hint'); if (hint) hint.style.display = show ? '' : 'none';
+  if (show) el.innerHTML = `↻ slew <b>${(sim.design.slewDeg * SLEW_GAIN).toFixed(0)}°/s</b> · ${sim.design.attSys}`;
+}
+// Reveal/hide the pad for the launched craft and label its authority.
+function syncRcsPad() {
+  const pad = $('rcs-pad'); if (!pad) return;
+  const has = !!sim.design?.rcs && sim.running;
+  pad.style.display = has ? '' : 'none';
+  if (has) $('rcs-tag').textContent = `${fmt(sim.design.rcsThrust, sim.design.rcsThrust < 10 ? 1 : 0)} N · ${sim.design.rcsIsp}s`;
+}
+{
+  const pad = $('rcs-pad');
+  if (pad) {
+    const press = (e, on) => {
+      const btn = e.target.closest('.rcs-btn'); if (!btn) return;
+      e.preventDefault();
+      const dir = btn.dataset.rcs;
+      sim.inputs[RCS_FLAG[dir]] = on;
+      btn.classList.toggle('firing', on);
+    };
+    pad.addEventListener('pointerdown', (e) => press(e, true));
+    // Release anywhere clears all pads — pointerup can land off the button.
+    const clearAll = () => {
+      for (const [dir, flag] of Object.entries(RCS_FLAG)) {
+        sim.inputs[flag] = false; setRcsBtnFiring(dir, false);
+      }
+    };
+    pad.addEventListener('pointerup', clearAll);
+    pad.addEventListener('pointercancel', clearAll);
+    pad.addEventListener('pointerleave', clearAll);
+  }
+}
 
 // ── Boot ────────────────────────────────────────────────────────────────────
 window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
+  blueprints: { list: BP.BLUEPRINTS, load: loadBlueprint,
+                find: BP.findBlueprint, selfTest: BP.selfTest },
   ui: { readDesign, currentDesignData },
   bay: { apply: applyBuild, sync: syncBuild,
          getBuild: () => ({ ...sdBuild }) },
@@ -1716,7 +4087,16 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
               setMission },
   progression: { getProfile: () => ({ ...profile }),
                  reset: () => { profile = PROG.resetProfile(); applyUnlockLocks(); renderPilotPanel(); toast('Pilot profile reset.'); },
-                 award: (xp) => { profile.xp += +xp; PROG.saveProfile(profile); applyUnlockLocks(); renderPilotPanel(); } } };
+                 award: (xp) => { profile.xp += +xp; PROG.saveProfile(profile); applyUnlockLocks(); renderPilotPanel(); } },
+  forecast: { ensureReady: FORECAST.ensureForecastReady,
+              get: FORECAST.getForecast,
+              series: FORECAST.getForecastSeries,
+              nowcast: FORECAST.getNowcast,
+              status: FORECAST.getStatus,
+              setOverride: FORECAST.setMissionOverride },
+  thrust: { pressBurn: () => setBurnInput(true),
+            releaseBurn: () => setBurnInput(false),
+            isFiring: () => !!sim.inputs.burn } };
 
 (async function boot() {
   renderMissionPicker();
@@ -1724,9 +4104,15 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
   applyUnlockLocks();
   loadDraft();
   refreshDesignReadouts();
+  syncThrottleFill();
+  syncGravityFill();
   // Warm the thermosphere model with one sample, then drop the overlay.
   try { ENG.airDensity(400_000, env); } catch (e) { console.warn(e); }
   $('sd-warmup').style.display = 'none';
+  // Kick off the NOAA forecast fetch in the background — the HUD will start
+  // surfacing real F10.7/Ap projections as soon as it returns. Failure is
+  // silent; the module falls back to a single-point persistence forecast.
+  FORECAST.ensureForecastReady().catch(() => {});
   resetSim();
   setMission('station');             // Default scenario
   await ensureScene();               // Build the 3-D stage

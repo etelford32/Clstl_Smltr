@@ -14,6 +14,12 @@
  *   - Keyboard support (Escape, Tab focus management)
  */
 
+// Side-effect import: OAuth/OTP misland sentinel. Runs first so a token that
+// landed on the wrong page (Supabase Site-URL fallback) is detected + forwarded
+// to /auth-callback.html before anything else can consume or clear the hash.
+// See js/oauth-sentinel.js.
+import './oauth-sentinel.js';
+
 // Side-effect import: cross-page guided tour controller. Hooks the hero CTA
 // on the home page and renders a progress banner on each tour stop.
 import './explore-tour.js';
@@ -43,6 +49,7 @@ const NAV_DROPDOWNS = [
             { href: 'launch-planner.html',    label: 'Launch Planner',      sub: 'SpaceX/Blue Origin launches + weather', tier: 'public', icon: '🚀', id: 'launch-planner' },
             { href: 'upper-atmosphere.html',  label: 'Upper Atmosphere',    sub: 'Thermosphere + exosphere simulator',    tier: 'public', icon: '🌡️', id: 'upper-atmosphere' },
             { href: 'satellite-designer.html', label: 'Satellite Designer', sub: 'Build a craft · fly drag vs thrust',     tier: 'public', icon: '🛰️', badge: 'NEW', id: 'satellite-designer' },
+            { href: 'spaceship-designer.html', label: 'Space Ship Designer', sub: 'Build a rocket · fly it to orbit in 3D', tier: 'public', icon: '🚀', badge: 'NEW', id: 'spaceship-designer' },
         ],
     },
     {
@@ -50,8 +57,14 @@ const NAV_DROPDOWNS = [
         id: 'space-weather',
         items: [
             { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',   tier: 'public', icon: '🌤️', id: 'weather' },
+            { href: 'auroracle.html', label: 'AurOracle', sub: 'Predict the aurora · 7-night + 30-day outlook', tier: 'public', icon: '🌌', badge: 'NEW', id: 'auroracle' },
+            { href: 'far-side-watch.html', label: 'Far-Side Watch', sub: 'Regions rotating in · days-to-weeks horizon', tier: 'public', icon: '🌗', badge: 'NEW', id: 'far-side-watch' },
             { href: 'gannon-superstorm.html', label: 'Gannon Superstorm', sub: 'May 2024 G5 hindcast · MHD-corrected density', tier: 'public', icon: '⚡', badge: 'NEW', id: 'gannon-superstorm' },
-            { href: 'threejs.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: '🪐', id: 'solar' },
+            { href: 'solar-system.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: '🪐', id: 'solar' },
+            { href: 'jupiter-system.html', label: 'Jupiter System', sub: 'Galilean moons · 4:2:1 Laplace resonance', tier: 'public', icon: '🪐', id: 'jupiter-system' },
+            { href: 'saturn-system.html', label: 'Saturn System', sub: 'Moon-sculpted rings · Cassini Division · live density waves', tier: 'public', icon: '🪐', badge: 'NEW', id: 'saturn-system' },
+            { href: 'uranus-system.html', label: 'Uranus System', sub: 'Tipped 98° · ε-ring shepherds · crowded moons', tier: 'public', icon: '🔷', badge: 'NEW', id: 'uranus-system' },
+            { href: 'neptune-system.html', label: 'Neptune System', sub: 'Retrograde Triton · rings & arcs · J₂ N-body', tier: 'public', icon: '🔵', badge: 'NEW', id: 'neptune-system' },
             { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
             { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: '🛸', id: 'missions' },
             { href: 'mission-planner.html', label: 'Mission Planner', sub: 'Launch rockets · plan Moon & Mars trips', tier: 'public', icon: '🎯', badge: 'NEW', id: 'mission-planner' },
@@ -67,7 +80,7 @@ const NAV_DROPDOWNS = [
             { href: 'vega.html',       label: 'Vega',             sub: 'Rapid rotator · A0V',          tier: 'public', icon: '💫' },
             { href: 'achernar.html',   label: 'Achernar',         sub: 'Oblate Be star · B6Vep',       tier: 'public', icon: '🌀' },
             { href: 'wr102.html',      label: 'WR-102',           sub: 'Wolf-Rayet · hottest known',   tier: 'free',   icon: '🌟' },
-            { href: 'star3d.html',     label: 'Sirius Planetary', sub: '3D stellar system simulator',  tier: 'free',   icon: '🪐' },
+            { href: 'sirius-planetary.html',     label: 'Sirius Planetary', sub: '3D stellar system simulator',  tier: 'free',   icon: '🪐' },
         ],
     },
     {
@@ -89,8 +102,6 @@ const NAV_DROPDOWNS = [
             { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
             { href: 'gravity-lab.html',       label: 'Gravity Lab',          sub: 'Live N-body · moons & resonances', tier: 'public', icon: '🪐', badge: 'NEW', id: 'gravity-lab' },
             { href: 'accretion-disc.html',    label: 'Accretion Disc',       sub: 'α-disc + pebble accretion + Theia → Moon', tier: 'public', icon: '🌀', badge: 'NEW', id: 'accretion-disc' },
-            // Jovian System merged into the live Solar System orrery (threejs.html).
-            // Galilean moons now run inside the main scene via Yoshida-4 N-body.
             { href: 'time-machine.html',      label: 'Orbital Time Machine', sub: 'N-body propagation · ±10 kyr to ±1 Myr', tier: 'public', icon: '⏳', badge: 'IN DEV', id: 'time-machine' },
             { href: 'rust.html',              label: 'Rust/WASM Engine',     sub: 'WebAssembly compute module',      tier: 'free',   icon: '⚙️' },
         ],

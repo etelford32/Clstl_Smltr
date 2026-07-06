@@ -37,19 +37,18 @@ const COLORS = {
 };
 
 const PHASE_FILL = {
+    preroll:  "rgba(160,160,200,0.04)",   // dim violet — "CMEs in transit"
     ramp:     "rgba(255,200,80,0.05)",
     peak:     "rgba(255,80,80,0.07)",
     recovery: "rgba(120,200,255,0.04)",
 };
 
-// Storm-phase boundaries in hours from window start. Matches the
-// engine module's PHASE_BOUNDARIES — kept duplicated here so the
-// chart's annotations don't fall out of sync if either side edits
-// the other. Pin in a follow-up.
+// Storm-phase boundaries are anchor-relative (h=0 = 2024-05-10T12:00:00Z).
+// PREROLL is [hoursMin, 0], then RAMP / PEAK / RECOVERY as before.
 const PHASE_BOUNDARIES = { rampEndH: 8, peakEndH: 30 };
 
-// SSC arrival, hours from 2024-05-10T12:00:00Z (per NOAA SWPC the
-// sheath shock hit DSCOVR at ~17:05 UT on May 10).
+// SSC arrival, anchor-relative hours (h=0 = 2024-05-10T12:00:00Z).
+// NOAA SWPC: the sheath shock hit DSCOVR at ~17:05 UT on May 10.
 const SSC_HOURS = 5 + 5 / 60;
 
 // ── tiny SVG helper ─────────────────────────────────────────────────
@@ -90,15 +89,24 @@ function _buildPlotFrame(container, replay, opts) {
     const win      = replay.window;
     const t0Ms     = Date.parse(win.start);
     const t1Ms     = Date.parse(win.end);
-    const dur_h    = (t1Ms - t0Ms) / 3600_000;
+    const anchorMs = Date.parse(win.anchor_iso || win.start);
+    // Anchor-relative hours. hoursMin is negative for any bundle whose
+    // start precedes the anchor (i.e. has CME-in-transit preroll).
+    const hoursMin = (t0Ms - anchorMs) / 3600_000;
+    const hoursMax = (t1Ms - anchorMs) / 3600_000;
+    const dur_h    = hoursMax - hoursMin;
     const stepMin  = win.step_minutes || 60;
     const n        = (replay.drivers_compact?.ap_real || []).length;
     const isPlaceholder = !!(opts?.placeholder ?? replay._is_placeholder);
 
     const plotW = PLOT_W - MARGIN.left - MARGIN.right;
     const plotH = PLOT_H - MARGIN.top  - MARGIN.bottom;
-    const xScale = h => MARGIN.left + (h / dur_h) * plotW;
-    const idxAt  = h => Math.max(0, Math.min(n - 1, Math.round(h * 60 / stepMin)));
+    // xScale maps anchor-relative h to plot pixels.
+    const xScale = h => MARGIN.left + ((h - hoursMin) / dur_h) * plotW;
+    // idxAt maps anchor-relative h to the corresponding sample index in the
+    // (window-start-aligned) data arrays.
+    const idxAt  = h => Math.max(0, Math.min(n - 1,
+        Math.round((h - hoursMin) * 60 / stepMin)));
 
     container.innerHTML = "";
     container.classList.remove("gn-pulse");
@@ -114,31 +122,44 @@ function _buildPlotFrame(container, replay, opts) {
     });
 
     // ── phase shading + labels ──────────────────────────────────────
+    // Preroll shading only renders if the window includes negative h
+    // (i.e. CME-launch coverage). For pre-extension bundles where the
+    // window starts at h=0, the preroll band has zero width and is a no-op.
     const phases = [
-        { name: "ramp",     start: 0,                          end: PHASE_BOUNDARIES.rampEndH, fill: PHASE_FILL.ramp     },
-        { name: "peak",     start: PHASE_BOUNDARIES.rampEndH,  end: PHASE_BOUNDARIES.peakEndH, fill: PHASE_FILL.peak     },
-        { name: "recovery", start: PHASE_BOUNDARIES.peakEndH,  end: dur_h,                     fill: PHASE_FILL.recovery },
+        { name: "preroll",  start: hoursMin,                   end: 0,                          fill: PHASE_FILL.preroll  },
+        { name: "ramp",     start: 0,                          end: PHASE_BOUNDARIES.rampEndH,  fill: PHASE_FILL.ramp     },
+        { name: "peak",     start: PHASE_BOUNDARIES.rampEndH,  end: PHASE_BOUNDARIES.peakEndH,  fill: PHASE_FILL.peak     },
+        { name: "recovery", start: PHASE_BOUNDARIES.peakEndH,  end: hoursMax,                   fill: PHASE_FILL.recovery },
     ];
     for (const p of phases) {
         const x0 = xScale(p.start);
         const x1 = xScale(p.end);
+        if (x1 - x0 < 1) continue;   // skip zero-width bands (no preroll case)
         root.appendChild(svg("rect", {
             x: x0, y: MARGIN.top, width: x1 - x0, height: plotH, fill: p.fill,
         }));
-        root.appendChild(svg("text", {
-            x: (x0 + x1) / 2, y: MARGIN.top + 11,
-            "text-anchor": "middle",
-            fill: COLORS.textSubtle,
-            "font-size": 9,
-            "font-family": "ui-monospace, monospace",
-            "letter-spacing": "0.12em",
-            opacity: 0.65,
-        }, [p.name.toUpperCase()]));
+        // Don't draw the label if the band is narrower than the label
+        // would need (~7 chars * 5px). Keeps short bands tidy.
+        if (x1 - x0 >= 36) {
+            root.appendChild(svg("text", {
+                x: (x0 + x1) / 2, y: MARGIN.top + 11,
+                "text-anchor": "middle",
+                fill: COLORS.textSubtle,
+                "font-size": 9,
+                "font-family": "ui-monospace, monospace",
+                "letter-spacing": "0.12em",
+                opacity: 0.65,
+            }, [p.name.toUpperCase()]));
+        }
     }
 
     // ── X axis ──────────────────────────────────────────────────────
-    const xTickEveryH = dur_h >= 60 ? 12 : 6;
-    for (let h = 0; h <= dur_h; h += xTickEveryH) {
+    // Ticks span [hoursMin, hoursMax]; tick step adapts to total range.
+    const xTickEveryH = dur_h >= 96 ? 24 : (dur_h >= 60 ? 12 : 6);
+    // Start at the smallest multiple of xTickEveryH that's ≥ hoursMin
+    // (works correctly for negative hoursMin).
+    const tickStart = Math.ceil(hoursMin / xTickEveryH) * xTickEveryH;
+    for (let h = tickStart; h <= hoursMax; h += xTickEveryH) {
         const x = xScale(h);
         root.appendChild(svg("line", {
             x1: x, x2: x, y1: MARGIN.top, y2: PLOT_H - MARGIN.bottom,
@@ -150,7 +171,18 @@ function _buildPlotFrame(container, replay, opts) {
             fill: COLORS.text,
             "font-size": 10,
             "font-family": "ui-monospace, monospace",
-        }, [_fmtClock(t0Ms, h)]));
+        }, [_fmtClock(anchorMs, h)]));
+    }
+    // Highlight the anchor (h=0 = storm onset / window-open) when the
+    // window includes preroll — gives the eye a visual reference for
+    // "this is where Earth-side ground truth starts".
+    if (hoursMin < 0) {
+        const x = xScale(0);
+        root.appendChild(svg("line", {
+            x1: x, x2: x, y1: MARGIN.top, y2: PLOT_H - MARGIN.bottom,
+            stroke: "rgba(255,255,255,0.18)",
+            "stroke-width": 1.2,
+        }));
     }
     root.appendChild(svg("text", {
         x: PLOT_W - MARGIN.right, y: PLOT_H - 4,
@@ -273,10 +305,12 @@ function _buildPlotFrame(container, replay, opts) {
         style: "cursor:crosshair;",
     });
     function mouseHours(evt) {
+        // Returns anchor-relative h (negative for preroll). Matches the
+        // domain xScale and setCursor expect.
         const rect = root.getBoundingClientRect();
         const px = ((evt.clientX - rect.left) / rect.width) * PLOT_W;
         const hFrac = Math.max(0, Math.min(1, (px - MARGIN.left) / plotW));
-        return hFrac * dur_h;
+        return hoursMin + hFrac * dur_h;
     }
     capture.addEventListener("mousemove", evt => paintTooltip(mouseHours(evt)));
     capture.addEventListener("mouseleave", clearTooltip);
@@ -322,7 +356,7 @@ function _buildPlotFrame(container, replay, opts) {
 
     return {
         root, traceLayer,
-        t0Ms, dur_h, stepMin, n, plotW, plotH,
+        t0Ms, anchorMs, hoursMin, hoursMax, dur_h, stepMin, n, plotW, plotH,
         xScale, idxAt,
         addCursorDot,
         setCursor,
@@ -332,21 +366,23 @@ function _buildPlotFrame(container, replay, opts) {
 
 // ── small helpers used by trace rendering ───────────────────────────
 
-function _pathSmooth(arr, xScale, yScale, stepMin) {
+function _pathSmooth(arr, xScale, yScale, stepMin, hoursMin = 0) {
+    // arr[i] is at window-relative offset i*stepMin/60, which equals
+    // anchor-relative hoursMin + i*stepMin/60. xScale takes anchor-relative h.
     let d = "";
     for (let i = 0; i < arr.length; i++) {
-        const x = xScale(i * stepMin / 60).toFixed(2);
+        const x = xScale(hoursMin + i * stepMin / 60).toFixed(2);
         const y = yScale(arr[i]).toFixed(2);
         d += (i ? "L" : "M") + x + " " + y + " ";
     }
     return d;
 }
 
-function _pathStep(arr, xScale, yScale, stepMin) {
+function _pathStep(arr, xScale, yScale, stepMin, hoursMin = 0) {
     // step-after: constant from xs(i) to xs(i+1) at arr[i].
     let d = "";
     for (let i = 0; i < arr.length; i++) {
-        const x = xScale(i * stepMin / 60).toFixed(2);
+        const x = xScale(hoursMin + i * stepMin / 60).toFixed(2);
         const y = yScale(arr[i]).toFixed(2);
         if (i === 0) {
             d += `M${x} ${y} `;
@@ -418,7 +454,7 @@ export function createApSaturationChart(container, replay, _player, opts = {}) {
             "derived surrogates climbing past it.",
     });
     const drivers = replay.drivers_compact;
-    const { traceLayer, root, xScale, plotH, stepMin } = frame;
+    const { traceLayer, root, xScale, plotH, stepMin, hoursMin } = frame;
 
     const yMaxData = Math.max(
         ...drivers.ap_real, ...drivers.ap_mhd, ...drivers.ap_gnd
@@ -431,15 +467,15 @@ export function createApSaturationChart(container, replay, _player, opts = {}) {
 
     // Traces — order matters: real underneath, surrogates above.
     traceLayer.appendChild(svg("path", {
-        d: _pathStep(drivers.ap_real, xScale, yScale, stepMin),
+        d: _pathStep(drivers.ap_real, xScale, yScale, stepMin, hoursMin),
         stroke: COLORS.real, fill: "none", "stroke-width": 1.6, opacity: 0.85,
     }));
     traceLayer.appendChild(svg("path", {
-        d: _pathSmooth(drivers.ap_mhd, xScale, yScale, stepMin),
+        d: _pathSmooth(drivers.ap_mhd, xScale, yScale, stepMin, hoursMin),
         stroke: COLORS.mhd, fill: "none", "stroke-width": 2.4,
     }));
     traceLayer.appendChild(svg("path", {
-        d: _pathSmooth(drivers.ap_gnd, xScale, yScale, stepMin),
+        d: _pathSmooth(drivers.ap_gnd, xScale, yScale, stepMin, hoursMin),
         stroke: COLORS.gnd, fill: "none", "stroke-width": 2.4,
     }));
 
@@ -448,7 +484,7 @@ export function createApSaturationChart(container, replay, _player, opts = {}) {
     const dotG = frame.addCursorDot(COLORS.gnd);
 
     frame.setHoverFormatter((idx, hours) => [
-        { text: `${_fmtClock(frame.t0Ms, hours)} UT` },
+        { text: `${_fmtClock(frame.anchorMs, hours)} UT` },
         { text: `Ap real  ${String(Math.round(drivers.ap_real[idx])).padStart(4)}`, color: COLORS.real },
         { text: `Ap* MHD  ${String(Math.round(drivers.ap_mhd[idx])).padStart(4)}`,  color: COLORS.mhd  },
         { text: `Ap* mag  ${String(Math.round(drivers.ap_gnd[idx])).padStart(4)}`,  color: COLORS.gnd  },
@@ -480,7 +516,7 @@ export function createDensityChart(container, replay, _player, opts = {}) {
 
     const dens = replay.density_400km;
     const truth = replay.truth_400km || { grace_fo: [], swarm_c: [] };
-    const { traceLayer, root, xScale, plotH, stepMin } = frame;
+    const { traceLayer, root, xScale, plotH, stepMin, hoursMin } = frame;
 
     // Y axis: ρ × 10¹² (so ticks read "10, 20, ..., 80" instead of e-notation).
     const SCALE = 1e12;
@@ -501,45 +537,52 @@ export function createDensityChart(container, replay, _player, opts = {}) {
 
     // Three model traces, smooth.
     traceLayer.appendChild(svg("path", {
-        d: _pathSmooth(dens.msis_apreal, xScale, yScale, stepMin),
+        d: _pathSmooth(dens.msis_apreal, xScale, yScale, stepMin, hoursMin),
         stroke: COLORS.real, fill: "none", "stroke-width": 1.8, opacity: 0.9,
     }));
     traceLayer.appendChild(svg("path", {
-        d: _pathSmooth(dens.msis_apmhd, xScale, yScale, stepMin),
+        d: _pathSmooth(dens.msis_apmhd, xScale, yScale, stepMin, hoursMin),
         stroke: COLORS.mhd, fill: "none", "stroke-width": 2.4,
     }));
     traceLayer.appendChild(svg("path", {
-        d: _pathSmooth(dens.msis_apgnd, xScale, yScale, stepMin),
+        d: _pathSmooth(dens.msis_apgnd, xScale, yScale, stepMin, hoursMin),
         stroke: COLORS.gnd, fill: "none", "stroke-width": 2.4,
     }));
 
     // Truth scatter on top — GRACE-FO as filled circles, Swarm-C as crosses
     // so the two sources stay distinguishable in print and at small sizes.
+    // Re-buildable so /api/density/tudelft can swap real observations in at
+    // runtime — updateTruth(grace_fo, swarm_c) calls _drawTruth again.
     const truthLayer = svg("g", { class: "gn-truth" });
-    for (const p of truth.grace_fo || []) {
-        truthLayer.appendChild(svg("circle", {
-            cx: xScale(p.h), cy: yScale(p.rho),
-            r: 4,
-            fill: COLORS.truth,
-            stroke: "rgba(0,0,0,0.55)",
-            "stroke-width": 1,
-        }));
-    }
-    for (const p of truth.swarm_c || []) {
-        const cx = xScale(p.h);
-        const cy = yScale(p.rho);
-        const s  = 4.2;
-        // Cross/X glyph rendered as a small group of two lines.
-        truthLayer.appendChild(svg("line", {
-            x1: cx - s, y1: cy - s, x2: cx + s, y2: cy + s,
-            stroke: COLORS.truthAlt, "stroke-width": 1.6, "stroke-linecap": "round",
-        }));
-        truthLayer.appendChild(svg("line", {
-            x1: cx - s, y1: cy + s, x2: cx + s, y2: cy - s,
-            stroke: COLORS.truthAlt, "stroke-width": 1.6, "stroke-linecap": "round",
-        }));
-    }
     traceLayer.appendChild(truthLayer);
+
+    function _drawTruth(grace_fo, swarm_c) {
+        while (truthLayer.firstChild) truthLayer.removeChild(truthLayer.firstChild);
+        for (const p of grace_fo || []) {
+            truthLayer.appendChild(svg("circle", {
+                cx: xScale(p.h), cy: yScale(p.rho),
+                r: 4,
+                fill: COLORS.truth,
+                stroke: "rgba(0,0,0,0.55)",
+                "stroke-width": 1,
+            }));
+        }
+        for (const p of swarm_c || []) {
+            const cx = xScale(p.h);
+            const cy = yScale(p.rho);
+            const s  = 4.2;
+            // Cross/X glyph rendered as a small group of two lines.
+            truthLayer.appendChild(svg("line", {
+                x1: cx - s, y1: cy - s, x2: cx + s, y2: cy + s,
+                stroke: COLORS.truthAlt, "stroke-width": 1.6, "stroke-linecap": "round",
+            }));
+            truthLayer.appendChild(svg("line", {
+                x1: cx - s, y1: cy + s, x2: cx + s, y2: cy - s,
+                stroke: COLORS.truthAlt, "stroke-width": 1.6, "stroke-linecap": "round",
+            }));
+        }
+    }
+    _drawTruth(truth.grace_fo, truth.swarm_c);
 
     // Inline source legend for the truth markers — the page legend
     // already calls out the model colors, but the GRACE/Swarm shape
@@ -578,7 +621,7 @@ export function createDensityChart(container, replay, _player, opts = {}) {
     }
 
     frame.setHoverFormatter((idx, hours) => [
-        { text: `${_fmtClock(frame.t0Ms, hours)} UT  (×10⁻¹² kg/m³)` },
+        { text: `${_fmtClock(frame.anchorMs, hours)} UT  (×10⁻¹² kg/m³)` },
         { text: `MSIS+Ap   ${fmtRho(dens.msis_apreal[idx])}`, color: COLORS.real },
         { text: `MSIS+MHD  ${fmtRho(dens.msis_apmhd[idx])}`,  color: COLORS.mhd  },
         { text: `MSIS+mag  ${fmtRho(dens.msis_apgnd[idx])}`,  color: COLORS.gnd  },
@@ -592,8 +635,13 @@ export function createDensityChart(container, replay, _player, opts = {}) {
             yScale(dens.msis_apgnd[idx]),
         ]);
     }
+    // Swap truth scatter at runtime — used by the page bootstrap when
+    // /api/density/tudelft returns real TU Delft observations.
+    function updateTruth(grace_fo, swarm_c) {
+        _drawTruth(grace_fo, swarm_c);
+    }
     setCursor(0);
-    return { setCursor };
+    return { setCursor, updateTruth };
 }
 
 // ── Chart 3: per-observation residuals ─────────────────────────────
@@ -781,7 +829,7 @@ export function createResidualsChart(container, replay, _player, opts = {}) {
     frame.setHoverFormatter((_idx, hours) => {
         const r = nearestObs(hours);
         return [
-            { text: `${_fmtClock(frame.t0Ms, r.h)} UT  (${r.src})` },
+            { text: `${_fmtClock(frame.anchorMs, r.h)} UT  (${r.src})` },
             { text: `Δρ real  ${fmtRes(r.real)}`, color: COLORS.real },
             { text: `Δρ MHD   ${fmtRes(r.mhd)}`,  color: COLORS.mhd  },
             { text: `Δρ mag   ${fmtRes(r.gnd)}`,  color: COLORS.gnd  },

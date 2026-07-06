@@ -89,6 +89,16 @@ body {
 .gn-pill--placeholder { color:#fc6; border-color: rgba(255,200,80,.55); background: rgba(255,200,80,.06); }
 .gn-pill--validated   { color:#6f8; border-color: rgba(100,240,150,.5); }
 
+/* ── Live data-source status row ──────────────────────────── */
+.gn-sources { display:flex; flex-wrap:wrap; gap:6px 10px; margin-top:8px; }
+.gn-src {
+    font-size:.6rem; letter-spacing:.03em; color:#789;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    border:1px solid rgba(255,255,255,.10); border-radius:999px;
+    padding:2px 8px; transition: color .2s, border-color .2s;
+}
+.gn-src--live { color:#6f8; border-color: rgba(100,240,150,.45); }
+
 /* ── Chart skeletons (filled by gannon-superstorm-ui.js) ──── */
 .gn-chart {
     width: 100%; height: 240px;
@@ -149,6 +159,8 @@ body {
 .gn-kpi-label { font-size:.64rem; color:#8ab; text-transform:uppercase; letter-spacing:.08em; margin-bottom:4px; }
 .gn-kpi-value { font-size:1.05rem; font-weight:700; color:#fff; font-family: ui-monospace, monospace; }
 .gn-kpi-sub   { font-size:.68rem; color:#8ab; margin-top:2px; }
+.gn-gate-pass { color:#6f8 !important; }
+.gn-gate-fail { color:#f88 !important; }
 
 /* ── Methodology ──────────────────────────────────────────── */
 #gn-methodology p { font-size:.78rem; line-height:1.55; color:#bcd; margin-bottom:8px; }
@@ -220,6 +232,8 @@ body {
 }
 
 /* Phase-tinted ticks/dots. */
+.gn-narration-moment--preroll  .gn-narration-tick { background: #b8b0e0; }
+.gn-narration-moment--preroll  .gn-narration-dot  { background: rgba(180,170,230,.32); border-color: #b8b0e0; }
 .gn-narration-moment--ramp     .gn-narration-tick { background: #fc6; }
 .gn-narration-moment--ramp     .gn-narration-dot  { background: rgba(255,200,80,.35); border-color: #fc6; }
 .gn-narration-moment--peak     .gn-narration-tick { background: #f88; }
@@ -233,7 +247,8 @@ body {
     transform: scale(1.32);
     box-shadow: 0 0 12px 2px rgba(255,200,120,.45);
 }
-.gn-narration-moment--peak.is-active .gn-narration-dot     { box-shadow: 0 0 12px 2px rgba(255,90,90,.55); }
+.gn-narration-moment--preroll.is-active  .gn-narration-dot { box-shadow: 0 0 12px 2px rgba(180,170,230,.55); }
+.gn-narration-moment--peak.is-active     .gn-narration-dot { box-shadow: 0 0 12px 2px rgba(255,90,90,.55); }
 .gn-narration-moment--recovery.is-active .gn-narration-dot { box-shadow: 0 0 12px 2px rgba(120,200,255,.45); }
 
 .gn-narration-caption { padding: 14px 4px 4px; min-height: 60px; }
@@ -257,6 +272,36 @@ body {
     margin-top: 4px;
     max-width: 64ch;
 }
+
+/* ── Receipt · operator case study ──────────────────────── */
+#gn-receipt h2 { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+.gn-receipt-tag {
+    font-size:.54rem; font-weight:800; letter-spacing:.1em;
+    color:#fc6; border:1px solid rgba(255,200,80,.4);
+    background:rgba(255,200,80,.06); border-radius:4px; padding:2px 6px;
+}
+.gn-case {
+    border-left:2px solid rgba(255,255,255,.14);
+    padding:1px 0 1px 11px; margin-bottom:12px;
+}
+.gn-case--proof { border-left-color:#f96; }
+.gn-case-id {
+    font-family: ui-monospace, monospace; font-size:.6rem;
+    letter-spacing:.08em; text-transform:uppercase; color:#8ab; margin-bottom:4px;
+}
+.gn-case-line { font-size:.78rem; line-height:1.5; color:#bcd; }
+.gn-case-line strong { color:#f88; font-weight:800; }
+.gn-case--proof .gn-case-line strong { color:#fc9; }
+.gn-case-line em { color:#fff; font-style:normal; font-weight:600; }
+.gn-receipt-label {
+    font-size:.62rem; text-transform:uppercase; letter-spacing:.1em;
+    color:#8ab; margin:6px 0 8px;
+}
+.gn-receipt-note {
+    font-size:.74rem; line-height:1.5; color:#8ab; margin-top:12px;
+    padding-top:10px; border-top:1px solid rgba(255,255,255,.08);
+}
+.gn-receipt-note strong { color:#bcd; font-weight:700; }
 </style>
 </head>
 <body>
@@ -273,7 +318,13 @@ body {
     <div id="gn-hero-row">
       <h1>May 2024 Gannon Superstorm — MHD-corrected density hindcast</h1>
       <span class="gn-badge">G5 · Dst −412</span>
-      <span id="gn-source-pill" class="gn-pill gn-pill--placeholder">⚠ PLACEHOLDER DATA</span>
+      <span id="gn-source-pill" class="gn-pill gn-pill--validated">● BATS-R-US HINDCAST</span>
+    </div>
+    <div id="gn-sources" class="gn-sources" aria-label="Live data-source status">
+      <span class="gn-src" data-src="cme">○ CME — NASA DONKI</span>
+      <span class="gn-src" data-src="imf">○ IMF/indices — NASA OMNI</span>
+      <span class="gn-src" data-src="density_truth">○ density truth — TU Delft</span>
+      <span class="gn-src" data-src="model">○ MHD model — BATS-R-US</span>
     </div>
     <p>
       A 72-hour replay (10 May 12:00 UTC → 13 May 12:00 UTC) of the first G5
@@ -292,15 +343,17 @@ body {
 
     <section class="gn-panel">
       <h2>Time scrubber</h2>
-      <input id="gn-scrubber" type="range" min="0" max="72" step="0.25" value="0">
+      <input id="gn-scrubber" type="range" min="-60" max="72" step="0.25" value="0">
       <div class="gn-scrubber-row">
         <span id="gn-time" class="gn-time">2024-05-10T12:00:00Z</span>
         <span id="gn-phase" class="gn-phase gn-phase--ramp">ramp</span>
       </div>
       <div class="gn-controls" style="display:flex; gap:8px; margin-top:10px;">
-        <button data-seek-h="0">SSC</button>
+        <button data-seek-h="-54.85">CME 1</button>
+        <button data-seek-h="-18.62">CME 3</button>
+        <button data-seek-h="0">window</button>
+        <button data-seek-h="5.08">SSC</button>
         <button data-seek-h="14">peak</button>
-        <button data-seek-h="36">+24 h</button>
         <button data-seek-h="60">+48 h</button>
         <button id="gn-play">▶ play 60×</button>
       </div>
@@ -327,6 +380,12 @@ body {
         <div class="gn-kpi"><div class="gn-kpi-label">Φ<sub>PC</sub></div>
           <div class="gn-kpi-value" id="gn-kpi-phi">—</div>
           <div class="gn-kpi-sub">kV · BATS-R-US</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">Dst (SYM-H)</div>
+          <div class="gn-kpi-value" id="gn-kpi-dst">—</div>
+          <div class="gn-kpi-sub">OMNI · ring current</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">P<sub>dyn</sub></div>
+          <div class="gn-kpi-value" id="gn-kpi-pdyn">—</div>
+          <div class="gn-kpi-sub">OMNI · nPa</div></div>
       </div>
     </section>
 
@@ -341,6 +400,17 @@ body {
     </section>
 
     <section class="gn-panel" style="margin-top:14px;">
+      <h2>Sun → Earth — CMEs in transit</h2>
+      <div id="gn-sun-earth" class="gn-chart gn-pulse" style="height:280px;">Sun-Earth scene renders here</div>
+      <div class="gn-legend" style="margin-top:8px;">
+        <div class="gn-legend-row"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffb347;"></span> Sun (AR 13664 pip)</div>
+        <div class="gn-legend-row"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f96;border:1px solid rgba(0,0,0,.4);"></span> X-class CME (size ∝ X-class magnitude)</div>
+        <div class="gn-legend-row"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3e6ab0;"></span> Earth (magnetosphere bowshock compresses on impact)</div>
+        <div class="gn-legend-row"><span style="display:inline-block;width:14px;height:0;border-top:1px dashed rgba(255,255,255,.22);"></span> L1 (DSCOVR · ACE)</div>
+      </div>
+    </section>
+
+    <section class="gn-panel" style="margin-top:14px;">
       <h2>Ap saturation — three tracks overlaid</h2>
       <div id="gn-chart-ap" class="gn-chart gn-pulse">Ap timeseries renders here</div>
       <div class="gn-legend">
@@ -352,7 +422,10 @@ body {
 
     <section class="gn-panel" style="margin-top:14px;">
       <h2>Thermospheric density @ 400 km — model vs. truth</h2>
-      <div id="gn-chart-rho" class="gn-chart gn-pulse">ρ(400 km) trace + GRACE-FO / Swarm-C scatter renders here</div>
+      <div id="gn-chart-rho" class="gn-chart gn-pulse">ρ(400 km) trace + GRACE-FO truth scatter renders here</div>
+      <p style="font-size:.72rem; color:#8ab; margin:6px 0 0;">
+        Truth: GRACE-FO accelerometer density (TU Delft Doornbos v02c, real), normalized from the ~490&nbsp;km orbit to the 400&nbsp;km reference via NRLMSISE-00. Swarm-C pending.
+      </p>
       <div class="gn-legend">
         <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--real"></span> MSIS + Ap-real (baseline)</div>
         <div class="gn-legend-row"><span class="gn-legend-swatch gn-swatch--mhd"></span>  MSIS + Ap* MHD</div>
@@ -376,22 +449,52 @@ body {
   <!-- ── Right: skill + methodology + fleet ──────────── -->
   <aside id="gn-right">
 
-    <section class="gn-panel">
-      <h2>Skill vs. MSIS baseline</h2>
+    <section id="gn-receipt" class="gn-panel">
+      <h2>The receipt <span class="gn-receipt-tag">OPERATOR CASE STUDY</span></h2>
+
+      <div class="gn-case">
+        <div class="gn-case-id">Case 01 · Starlink G4-7 · Feb 2022</div>
+        <p class="gn-case-line">
+          A <em>moderate</em> storm lifted thermospheric density days after launch and
+          empirical drag ran low — wrong in the one direction that de-orbits hardware.
+          <strong>38 of 49</strong> satellites never reached operational orbit and reentered.
+        </p>
+      </div>
+
+      <div class="gn-case gn-case--proof">
+        <div class="gn-case-id">Case 02 · Gannon G5 · May 2024</div>
+        <p class="gn-case-line">
+          The first G5 since 2003 — <em>Dst −412</em>, with Ap pegged at its 400 ceiling
+          for ~24 h. We replay it driver-for-driver and score MHD- and magnetometer-corrected
+          density against GRACE-FO / Swarm-C accelerometer truth.
+        </p>
+      </div>
+
+      <div class="gn-receipt-label">Density skill — MHD-energy model vs. the Ap operators run today · Gannon G5 (single event)</div>
       <div class="gn-kpi-grid">
-        <div class="gn-kpi"><div class="gn-kpi-label">RMSE base</div>
+        <div class="gn-kpi"><div class="gn-kpi-label">MHD model</div>
           <div class="gn-kpi-value" id="gn-skill-base">—</div>
-          <div class="gn-kpi-sub">MSIS + saturated Ap</div></div>
-        <div class="gn-kpi"><div class="gn-kpi-label">RMSE MHD</div>
+          <div class="gn-kpi-sub">storm RMSE vs real-time Ap</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">Real-time edge</div>
           <div class="gn-kpi-value" id="gn-skill-mhd">—</div>
-          <div class="gn-kpi-sub" id="gn-skill-mhd-pct">skill —</div></div>
-        <div class="gn-kpi"><div class="gn-kpi-label">RMSE mag</div>
+          <div class="gn-kpi-sub" id="gn-skill-mhd-pct">MHD vs lagged-Ap, same dynamics</div></div>
+        <div class="gn-kpi"><div class="gn-kpi-label">Pseudo-Ap (prior)</div>
           <div class="gn-kpi-value" id="gn-skill-gnd">—</div>
-          <div class="gn-kpi-sub" id="gn-skill-gnd-pct">skill —</div></div>
+          <div class="gn-kpi-sub" id="gn-skill-gnd-pct">MSIS + MHD-Ap surrogate</div></div>
         <div class="gn-kpi"><div class="gn-kpi-label">Gate</div>
           <div class="gn-kpi-value" id="gn-skill-gate">PENDING</div>
           <div class="gn-kpi-sub">≥ 25 % storm-time</div></div>
       </div>
+
+      <p class="gn-receipt-note">
+        <strong>What this buys you:</strong> on the May 2024 Gannon G5, the MHD-energy
+        density model cuts storm-time RMSE in half versus the real-time (3 h-lagged) Ap
+        that empirical models run on — scored against real GRACE-FO truth. The
+        <em>+16 % real-time edge</em> is the MHD-specific part: Φ_PC / HPI from L1 don't
+        saturate at Ap = 400 or arrive 3 h late, so they catch the storm the index can't.
+        Single-event result — multi-event validation (Phase 0) is in progress; reproduce
+        with <code>scripts/validate_mhd_density_gannon.py</code>.
+      </p>
     </section>
 
     <section class="gn-panel" style="margin-top:14px;">
@@ -438,11 +541,35 @@ body {
 
 </div>
 
+<!-- ── AURORA ALERT CAPTURE ──────────────────────────────────────────────────
+     Anonymous, zero-friction email capture for burst aurora/storm traffic.
+     Styles are injected by js/aurora-capture.js. See AURORA_ALERT_CAPTURE_SPEC.md. -->
+<section class="aurora-capture-band" aria-label="Aurora alerts signup">
+  <div class="aurora-capture-copy">
+    <span class="aurora-kicker">Aurora Alerts · Free</span>
+    <h2>Don't miss the next storm.</h2>
+    <p>We'll email you the moment Kp spikes and the aurora comes within reach — with a live link to watch it hit Earth's magnetosphere.</p>
+  </div>
+  <form data-aurora-capture data-source="gannon" novalidate>
+    <input type="email" inputmode="email" autocomplete="email" placeholder="you@email.com" aria-label="Email" required>
+    <!-- honeypot: keep visually hidden, not display:none (some bots skip those) -->
+    <input type="text" name="company" tabindex="-1" autocomplete="off"
+           aria-hidden="true" style="position:absolute;left:-9999px;opacity:0;height:0;width:0">
+    <button type="submit">Alert me →</button>
+    <span data-aurora-status class="aurora-status" role="status" aria-live="polite"></span>
+  </form>
+</section>
+<script type="module">
+  import { initAuroraCapture } from './js/aurora-capture.js';
+  initAuroraCapture();
+</script>
+
 <!-- ── Engine bootstrap ───────────────────────────────── -->
 <script type="module">
-import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=1';
-import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=3';
-import { createNarrationBand } from './js/gannon-superstorm-narration.js?v=1';
+import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=3';
+import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=5';
+import { createNarrationBand } from './js/gannon-superstorm-narration.js?v=2';
+import { createSunEarthScene } from './js/gannon-superstorm-sun-earth.js?v=3';
 
 const els = {
     scrub:    document.getElementById('gn-scrubber'),
@@ -456,17 +583,43 @@ const els = {
     bz:       document.getElementById('gn-kpi-bz'),
     vsw:      document.getElementById('gn-kpi-vsw'),
     phi:      document.getElementById('gn-kpi-phi'),
+    dst:      document.getElementById('gn-kpi-dst'),
+    pdyn:     document.getElementById('gn-kpi-pdyn'),
     skill: {
         base: document.getElementById('gn-skill-base'),
         mhd:  document.getElementById('gn-skill-mhd'),
         gnd:  document.getElementById('gn-skill-gnd'),
         gate: document.getElementById('gn-skill-gate'),
-        mhdPct: document.getElementById('gn-skill-mhd-pct'),
-        gndPct: document.getElementById('gn-skill-gnd-pct'),
     },
 };
 
 function fmt(x, d = 1) { return (x === null || x === undefined) ? '—' : Number(x).toFixed(d); }
+
+// Paint the density-skill scoreboard from a (possibly null) skill block. Single
+// source of truth for both the boot render and the live-upgrade repaint, so the
+// two can't drift (e.g. one omitting the gn-gate-fail toggle). The sign is
+// explicit so a negative skill renders "-9 %", not "+-9 %".
+function paintSkill(sk) {
+    if (sk == null || sk.skill_mhd == null) return;
+    const pct = v => (v == null ? '—' : `${v >= 0 ? '+' : ''}${Math.round(v * 100)} %`);
+    els.skill.base.textContent = pct(sk.skill_mhd);        // MHD model vs real-time Ap
+    els.skill.mhd.textContent  = pct(sk.skill_wedge);      // isolated real-time MHD edge
+    els.skill.gnd.textContent  = pct(sk.skill_pseudo_ap);  // prior pseudo-Ap method
+    const pass = sk.gate_pass != null ? sk.gate_pass : (sk.skill_mhd >= 0.25);
+    els.skill.gate.textContent = pass ? 'PASS' : 'FAIL';
+    els.skill.gate.classList.toggle('gn-gate-pass', !!pass);
+    els.skill.gate.classList.toggle('gn-gate-fail', !pass);
+}
+
+// Flip a data-source badge from placeholder (○) to live (●) when a
+// background lift resolves. Makes the silent-fail lifts observable.
+function markSourceLive(key, label) {
+    const el = document.querySelector(`.gn-src[data-src="${key}"]`);
+    if (!el) return;
+    el.classList.add('gn-src--live');
+    el.textContent = '● ' + el.textContent.replace(/^[○●]\s*/, '');
+    if (label) el.title = String(label);
+}
 
 function paint(sample) {
     els.time.textContent = sample.t;
@@ -478,6 +631,9 @@ function paint(sample) {
     els.bz.textContent     = fmt(sample.drivers.bz_nt,   1) + ' nT';
     els.vsw.textContent    = fmt(sample.drivers.v_kms,   0) + ' km/s';
     els.phi.textContent    = fmt(sample.drivers.phi_pc_kv, 0) + ' kV';
+    // Real OMNI indices — '—' until the IMF lift supplies them.
+    els.dst.textContent    = sample.drivers.sym_h_nt != null ? fmt(sample.drivers.sym_h_nt, 0) + ' nT'  : '—';
+    els.pdyn.textContent   = sample.drivers.pdyn_npa != null ? fmt(sample.drivers.pdyn_npa, 1) + ' nPa' : '—';
 }
 
 (async function boot() {
@@ -491,51 +647,59 @@ function paint(sample) {
         return;
     }
 
-    // Reflect placeholder/validated state.
-    if (replay._is_placeholder) {
+    // Reflect data-source state. The hero pill keys off the MHD track:
+    // once provenance.mhd is real BATS-R-US (not a placeholder) the page is
+    // showing real physics — even if a secondary input (the ground-mag
+    // track) is still synthetic — so we drop the PLACEHOLDER stamp. We say
+    // "BATS-R-US HINDCAST", not "VALIDATED", until validate_density fills in
+    // the skill numbers.
+    const prov = replay.provenance || {};
+    const mhdReal = !!prov.mhd && !/placeholder/i.test(prov.mhd);
+    if (replay._is_placeholder && !mhdReal) {
         els.pill.textContent = '⚠ PLACEHOLDER DATA';
         els.pill.classList.add('gn-pill--placeholder');
     } else {
-        els.pill.textContent = '✓ VALIDATED HINDCAST';
+        els.pill.textContent = mhdReal ? '● BATS-R-US HINDCAST' : '✓ VALIDATED HINDCAST';
         els.pill.classList.remove('gn-pill--placeholder');
         els.pill.classList.add('gn-pill--validated');
+        if (mhdReal) markSourceLive('model', prov.mhd);
     }
+    // Real GRACE-FO truth is baked into the bundle (the live TU Delft proxy is
+    // FTP-only / mirror-pending), so flip its source badge live at boot.
+    const graceReal = !!prov.grace_fo && !/placeholder|unavailable/i.test(prov.grace_fo);
+    if (graceReal) markSourceLive('density_truth', prov.grace_fo);
 
-    const skill = skillSummary(replay);
-    els.skill.base.textContent = fmt(skill.rmse_base, 2);
-    els.skill.mhd.textContent  = fmt(skill.rmse_mhd,  2);
-    els.skill.gnd.textContent  = fmt(skill.rmse_gnd,  2);
-    if (skill.skill_mhd !== null && skill.skill_mhd !== undefined) {
-        els.skill.mhdPct.textContent = `skill ${(skill.skill_mhd*100).toFixed(0)} %`;
-        els.skill.gndPct.textContent = `skill ${(skill.skill_gnd*100).toFixed(0)} %`;
-        const best = Math.max(skill.skill_mhd, skill.skill_gnd);
-        els.skill.gate.textContent = best >= 0.25 ? 'PASS' : 'FAIL';
-    }
+    paintSkill(skillSummary(replay));
 
-    // Wire scrubber + buttons.
-    els.scrub.min = 0;
-    els.scrub.max = player.durationHours;
+    // Wire scrubber + buttons. Range covers preroll (Sun-side CME launches)
+    // through end of the Earth-side ground-truth window. h=0 is anchored at
+    // 2024-05-10T12:00 UT (original window opening).
+    els.scrub.min = player.hoursMin;
+    els.scrub.max = player.hoursMax;
     els.scrub.step = 0.25;
 
     // Render the Ap-saturation + density charts. Click-to-seek on either
     // wires back to the scrubber so users can jump to a moment they
     // hover over on either panel.
     const sharedOpts = {
-        placeholder: !!replay._is_placeholder,
+        placeholder: !!replay._is_placeholder && !mhdReal,
         onClickSeekHours(h) {
             els.scrub.value = h;
             onScrub();
         },
     };
-    const apChart = createApSaturationChart(
+    // `let` (not const) so the model-artifact lift can re-mount them in
+    // place once real BATS-R-US tracks land (the static model traces are
+    // drawn at construction, so a fresh build is the clean redraw path).
+    let apChart = createApSaturationChart(
         document.getElementById('gn-chart-ap'),
         replay, player, sharedOpts,
     );
-    const rhoChart = createDensityChart(
+    let rhoChart = createDensityChart(
         document.getElementById('gn-chart-rho'),
         replay, player, sharedOpts,
     );
-    const resChart = createResidualsChart(
+    let resChart = createResidualsChart(
         document.getElementById('gn-chart-residuals'),
         replay, player, sharedOpts,
     );
@@ -549,11 +713,233 @@ function paint(sample) {
             },
         },
     );
+    const sunEarth = createSunEarthScene(
+        document.getElementById('gn-sun-earth'),
+        replay, player, sharedOpts,
+    );
+
+    // Lift the CME catalog from real NASA DONKI in the background. The
+    // Vercel Edge endpoint /api/hindcast/gannon fetches DONKI CMEAnalysis +
+    // FLR for May 8-13 2024 and returns a real cme_events array. If it
+    // resolves, swap the static (hand-vetted) catalog for the live one,
+    // re-paint the Sun-Earth scene, and update the provenance pill.
+    // Failure is silent — the page keeps the static catalog (which is
+    // already hand-matched to the canonical NOAA SWPC record).
+    (async () => {
+        try {
+            const r = await fetch('/api/hindcast/gannon', { cache: 'force-cache' });
+            if (!r.ok) return;
+            const j = await r.json();
+            const real = j?.data?.cme_events;
+            if (!Array.isArray(real) || real.length === 0) return;
+            // Sanity: each real event must have launch_iso + a valid date.
+            const valid = real.filter(c =>
+                c.launch_iso && !isNaN(Date.parse(c.launch_iso)));
+            if (valid.length === 0) return;
+            sunEarth.setCmeEvents(valid);
+            sunEarth.setCursor(parseFloat(els.scrub.value));
+            // Mark provenance — the page-side replay copy gets the new catalog
+            // for any future consumer.
+            replay.cme_events = valid;
+            replay.provenance = replay.provenance || {};
+            replay.provenance.cme_catalog = j.source ?? 'NASA DONKI (live)';
+            markSourceLive('cme', `${valid.length} events · ${j.source ?? 'NASA DONKI'}`);
+            console.log(`[gannon] CME catalog upgraded to real NASA DONKI (${valid.length} events)`);
+        } catch (_) { /* offline / blocked / sandbox — keep the static catalog */ }
+    })();
+
+    // Lift the IMF + solar-wind series from real NASA SPDF OMNI in the
+    // background. The Edge endpoint /api/omni/imf parses the OMNI HRO
+    // 1-min monthly ASCII for the Gannon window and returns Bz_GSM + V
+    // + Np + Pdyn at 60-min cadence aligned with the bundle's grid. If
+    // it resolves, swap bz_nt + v_kms in place; the next setCursor()
+    // repaints the KPI cards. Failure is silent (sandbox / offline keeps
+    // the placeholder series).
+    (async () => {
+        try {
+            const r = await fetch(
+                '/api/omni/imf?start=2024-05-08&end=2024-05-13&step_min=60&fields=t,bz_gsm,v,np,pdyn,ae,sym_h',
+                { cache: 'force-cache' });
+            if (!r.ok) return;
+            const j  = await r.json();
+            const t  = j?.data?.t;
+            const bz = j?.data?.bz_gsm;
+            const v  = j?.data?.v;
+            if (!Array.isArray(t) || !Array.isArray(bz) || !Array.isArray(v)) return;
+            if (t.length === 0) return;
+            const ae    = j?.data?.ae;     // auroral electrojet index, nT
+            const pdyn  = j?.data?.pdyn;   // dynamic pressure, nPa
+            const symh  = j?.data?.sym_h;  // ring-current index (≈ Dst), nT
+            // Build an index { hourFloorISO → omniIdx } so we can splice OMNI
+            // values into the bundle's grid even if SPDF has minute-scale gaps.
+            const omniByHour = new Map();
+            for (let i = 0; i < t.length; i++) {
+                const hourISO = t[i].slice(0, 13);  // "YYYY-MM-DDTHH"
+                if (!omniByHour.has(hourISO)) omniByHour.set(hourISO, i);
+            }
+            const dc = replay.drivers_compact;
+            const n  = dc.bz_nt.length;
+            // The static bundle has no AE / Pdyn / SYM-H tracks — create them
+            // so the engine + Sun-Earth scene can read real geomagnetic
+            // indices (AE→aurora, Pdyn→magnetopause standoff, SYM-H→Dst).
+            if (Array.isArray(ae)   && !dc.ae_nt)    dc.ae_nt    = new Array(n).fill(null);
+            if (Array.isArray(pdyn) && !dc.pdyn_npa) dc.pdyn_npa = new Array(n).fill(null);
+            if (Array.isArray(symh) && !dc.sym_h_nt) dc.sym_h_nt = new Array(n).fill(null);
+            const bundleStartMs = Date.parse(replay.window.start);
+            const stepMs = (replay.window.step_minutes || 60) * 60_000;
+            let bzSwap = 0, vSwap = 0, aeSwap = 0, pdSwap = 0, dstSwap = 0;
+            for (let i = 0; i < n; i++) {
+                const tMs = bundleStartMs + i * stepMs;
+                const hourISO = new Date(tMs).toISOString().slice(0, 13);
+                const oi = omniByHour.get(hourISO);
+                if (oi == null) continue;
+                if (typeof bz[oi] === 'number')   { dc.bz_nt[i]    = bz[oi];   bzSwap++; }
+                if (typeof v[oi]  === 'number')   { dc.v_kms[i]    = v[oi];    vSwap++; }
+                if (dc.ae_nt    && typeof ae[oi]   === 'number') { dc.ae_nt[i]    = ae[oi];   aeSwap++; }
+                if (dc.pdyn_npa && typeof pdyn[oi] === 'number') { dc.pdyn_npa[i] = pdyn[oi]; pdSwap++; }
+                if (dc.sym_h_nt && typeof symh[oi] === 'number') { dc.sym_h_nt[i] = symh[oi]; dstSwap++; }
+            }
+            replay.provenance = replay.provenance || {};
+            replay.provenance.imf =
+                `${j.source ?? 'NASA SPDF OMNI HRO 1-min'} (${bzSwap}/${n} Bz, ${vSwap}/${n} V`
+                + (aeSwap ? `, ${aeSwap} AE` : '') + (pdSwap ? `, ${pdSwap} Pdyn` : '')
+                + (dstSwap ? `, ${dstSwap} SYM-H` : '') + ')';
+            if (typeof markSourceLive === 'function') markSourceLive('imf', 'OMNI 1-min');
+            // Re-render — paint() reads the (now mutated) drivers_compact for
+            // the KPI cards on the next scrubber tick. Drive it manually here
+            // so the user doesn't have to move the scrubber to see the swap.
+            onScrub();
+            console.log(`[gannon] IMF + solar wind upgraded to real NASA SPDF OMNI `
+                + `(${bzSwap} Bz, ${vSwap} V, ${aeSwap} AE, ${pdSwap} Pdyn, ${dstSwap} SYM-H samples)`);
+        } catch (_) { /* offline / blocked / sandbox — keep placeholder series */ }
+    })();
+
+    // Lift the GRACE-FO + Swarm-C accelerometer-density truth scatter from
+    // real TU Delft v02 in the background. The Edge endpoint /api/density/
+    // tudelft fetches the daily Doornbos v02 ASCII files for each
+    // satellite, parses them, subsamples to orbit-scale cadence, and
+    // returns the per-observation altitude + density. The page maps each
+    // observation's UT into the bundle's anchor-relative h coordinate,
+    // splices it into replay.truth_400km, and calls rhoChart.updateTruth
+    // to re-render the scatter in place.
+    //
+    // The residuals chart is NOT updated because residuals against still-
+    // placeholder model traces (msis_apreal/mhd/gnd) would be misleading.
+    // It refreshes when the BATS-R-US workstation pipeline lands.
+    (async () => {
+        const anchorMs = Date.parse(replay.window.anchor_iso || replay.window.start);
+        async function fetchMission(mission) {
+            try {
+                const r = await fetch(
+                    `/api/density/tudelft?mission=${mission}&start=2024-05-08&end=2024-05-13&subsample=60`,
+                    { cache: 'force-cache' });
+                if (!r.ok) return null;
+                const j = await r.json();
+                const samples = j?.data?.samples;
+                if (!Array.isArray(samples) || samples.length === 0) return null;
+                return { mission, samples, source: j.source };
+            } catch (_) { return null; }
+        }
+
+        const [grace, swarm] = await Promise.all([
+            fetchMission('grace_fo'),
+            fetchMission('swarm_c'),
+        ]);
+        if (!grace && !swarm) return;
+
+        function toTruthPoint(s) {
+            return {
+                h:   (Date.parse(s.t) - anchorMs) / 3600_000,
+                rho: s.rho_kg_m3,
+                alt: s.alt_km,
+            };
+        }
+        replay.truth_400km = replay.truth_400km || { grace_fo: [], swarm_c: [] };
+        if (grace) replay.truth_400km.grace_fo = grace.samples.map(toTruthPoint);
+        if (swarm) replay.truth_400km.swarm_c  = swarm.samples.map(toTruthPoint);
+
+        rhoChart.updateTruth(replay.truth_400km.grace_fo, replay.truth_400km.swarm_c);
+        replay.provenance = replay.provenance || {};
+        replay.provenance.density_truth =
+            (grace ? `GRACE-FO: ${grace.samples.length} obs · ${grace.source}` : 'GRACE-FO: unavailable') +
+            ' | ' +
+            (swarm ? `Swarm-C: ${swarm.samples.length} obs · ${swarm.source}`  : 'Swarm-C: unavailable');
+        markSourceLive('density_truth',
+            `${(grace?grace.samples.length:0)} GRACE-FO · ${(swarm?swarm.samples.length:0)} Swarm-C`);
+        console.log('[gannon] truth scatter upgraded to real TU Delft v02 (' +
+            (grace ? grace.samples.length : 0) + ' GRACE-FO, ' +
+            (swarm ? swarm.samples.length : 0) + ' Swarm-C). Residuals chart still on ' +
+            'placeholder model traces — wait for BATS-R-US for honest deltas.');
+    })();
+
+    // Lift the MHD-MODEL tracks (the last placeholder piece) from the
+    // BATS-R-US / SWMF pipeline artifact. The Edge endpoint
+    // /api/hindcast/gannon-model relays an object-storage artifact the
+    // workstation pipeline uploads after a run; until that exists it
+    // returns { available:false } and this is a clean no-op. When it
+    // lands, we splice the real ap_mhd/ap_gnd + msis_apmhd/apgnd tracks,
+    // re-mount the charts (their model traces are drawn at construction),
+    // recompute the skill scores, and lift the PLACEHOLDER stamp.
+    // See GANNON_LIVE_DATA.md + MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md.
+    (async () => {
+        try {
+            const r = await fetch('/api/hindcast/gannon-model', { cache: 'no-cache' });
+            if (!r.ok) return;
+            const j = await r.json();
+            if (!j?.available || !j?.data) return;
+            const m  = j.data;
+            const dc = replay.drivers_compact;
+            const d4 = replay.density_400km;
+            const mdc = m.drivers_compact || {};
+            const md4 = m.density_400km || {};
+            // Splice each model track in place when present + length-aligned.
+            const fits = arr => Array.isArray(arr) && arr.length === dc.ap_real.length;
+            let lifted = [];
+            for (const k of ['ap_mhd', 'ap_gnd', 'phi_pc_kv', 'hpi_gw', 'sme_nt']) {
+                if (fits(mdc[k])) { dc[k] = mdc[k].slice(); lifted.push(k); }
+            }
+            for (const k of ['msis_apmhd', 'msis_apgnd']) {
+                if (fits(md4[k])) { d4[k] = md4[k].slice(); lifted.push(k); }
+            }
+            if (lifted.length === 0) return;
+
+            // No longer placeholder: real model tracks are in.
+            replay._is_placeholder = false;
+            replay.provenance = replay.provenance || {};
+            replay.provenance.model = j.source ?? 'BATS-R-US / SWMF';
+            if (m.run_id) replay.provenance.model_run_id = m.run_id;
+
+            // Re-mount the three model-trace charts so the static MHD/mag
+            // curves redraw against real data; the Sun-Earth scene + KPI
+            // cards refresh on the next onScrub().
+            const liveOpts = { ...sharedOpts, placeholder: false };
+            apChart  = createApSaturationChart(document.getElementById('gn-chart-ap'),       replay, player, liveOpts);
+            rhoChart = createDensityChart(     document.getElementById('gn-chart-rho'),      replay, player, liveOpts);
+            resChart = createResidualsChart(   document.getElementById('gn-chart-residuals'),replay, player, liveOpts);
+            if (rhoChart.updateTruth && replay.truth_400km) {
+                rhoChart.updateTruth(replay.truth_400km.grace_fo || [], replay.truth_400km.swarm_c || []);
+            }
+
+            // Recompute + repaint the skill scoreboard against real tracks.
+            try {
+                paintSkill(skillSummary(replay));
+            } catch (_) { /* skill recompute is best-effort */ }
+
+            // Flip the headline pill to validated.
+            els.pill.textContent = '✓ VALIDATED HINDCAST';
+            els.pill.classList.remove('gn-pill--placeholder');
+            els.pill.classList.add('gn-pill--validated');
+            markSourceLive('model', replay.provenance.model);
+            onScrub();
+            console.log(`[gannon] MHD model tracks lifted from pipeline artifact (${lifted.join(', ')})`);
+        } catch (_) { /* offline / blocked / no artifact — keep placeholder model */ }
+    })();
 
     function onScrub() {
         const h = parseFloat(els.scrub.value);
         const s = player.seekHours(h);
         paint(s);
+        sunEarth.setCursor(h);
         apChart.setCursor(h);
         rhoChart.setCursor(h);
         resChart.setCursor(h);
@@ -573,10 +959,10 @@ function paint(sample) {
         if (!lastT) lastT = now;
         const dt = (now - lastT) / 1000;
         lastT = now;
-        const h = Math.min(player.durationHours, player.cursorHours + dt * 60 / 60 * 60); // 60× wall clock
+        const h = Math.min(player.hoursMax, player.cursorHours + dt * 60); // 60× wall-clock (1 wall-second = 1 storm-minute)
         els.scrub.value = h;
         onScrub();
-        if (h >= player.durationHours) { playing = false; els.play.textContent = '▶ play 60×'; return; }
+        if (h >= player.hoursMax) { playing = false; els.play.textContent = '▶ play 60×'; return; }
         raf = requestAnimationFrame(tick);
     }
     els.play.addEventListener('click', () => {

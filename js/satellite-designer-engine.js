@@ -73,6 +73,18 @@ export function makeDesign(raw = {}) {
         thrust:   clampNum(raw.thrust,   0,    50_000,  22),     // N
         isp:      clampNum(raw.isp,      10,   5_000,   225),    // s
     };
+    // Optional multi-axis RCS hardware — reaction-control thruster clusters
+    // that some buses carry (see js/satellite-builder.js BODIES[].rcs). When
+    // present they give the vehicle *multidirectional* translation authority:
+    // it can push along AND across the velocity vector at once, decoupled from
+    // the main engine and its pointing. Passed through untouched so the flight
+    // model reads design.rcs* directly — the builder merges these in. Absent
+    // by default, so legacy single-engine craft are unaffected.
+    if (raw.rcs) {
+        d.rcs       = true;
+        d.rcsThrust = clampNum(raw.rcsThrust, 0,  10_000, 0);    // N, per-axis authority
+        d.rcsIsp    = clampNum(raw.rcsIsp,    10, 5_000,  65);   // s (cold-gas/monoprop class)
+    }
     return d;
 }
 
@@ -80,7 +92,17 @@ export function makeDesign(raw = {}) {
 export function defaultEnv() {
     // F10.7 ≈ 150 sfu / Ap ≈ 12 ≈ a moderately active Sun — the regime
     // where solar-cycle thermosphere swelling is clearly felt in LEO.
-    return { f107Sfu: 150, ap: 12 };
+    // gravityMul scales the planet's GM in real time — 1.0 = Earth,
+    // 0.16 ≈ Moon, 2.0 ≈ super-Earth — for "what if" gameplay.
+    return { f107Sfu: 150, ap: 12, gravityMul: 1.0 };
+}
+
+/** Effective GM for the current env. Centralised so every consumer
+ *  (gravity force, orbital elements, surface g, circular speed) reads
+ *  the same scaled value when the pilot moves the gravity slider. */
+export function effectiveMU(env) {
+    const m = +(env?.gravityMul ?? 1);
+    return MU * (isFinite(m) && m > 0 ? m : 1);
 }
 
 // ── Space-weather presets ───────────────────────────────────────────────────
@@ -121,12 +143,14 @@ export function attitudeMult(control) {
  * Place the vehicle on an orbit defined by perigee/apogee altitude (km).
  * Starts at perigee on the +x axis, moving prograde (+y).
  */
-export function initState(design, { periKm = 400, apoKm = null } = {}) {
+export function initState(design, { periKm = 400, apoKm = null, env = null } = {}) {
     const rp = R_EARTH + Math.max(periKm, 5) * 1000;
     const ra = R_EARTH + Math.max(apoKm ?? periKm, periKm) * 1000;
     const a  = 0.5 * (rp + ra);
-    // vis-viva at perigee
-    const vp = Math.sqrt(MU * (2 / rp - 1 / a));
+    // vis-viva at perigee — uses the *effective* GM so the chosen perigee
+    // really is the orbit's perigee under the current gravity slider.
+    const mu = effectiveMU(env);
+    const vp = Math.sqrt(mu * (2 / rp - 1 / a));
     return {
         x: rp, y: 0,
         vx: 0, vy: vp,
@@ -134,7 +158,25 @@ export function initState(design, { periKm = 400, apoKm = null } = {}) {
         t: 0,             // mission elapsed sim-seconds
         alive: true,
         reason: '',       // why the mission ended, if it did
+        // Realism extras the new flight model writes to:
+        burnSeconds: 0,   // accumulated full-throttle-equivalent burn time
+        tumbleRate:  0,   // body angular rate (rad/s) about the orbit normal
+        attitudeErr: 0,   // angle off the commanded heading (rad)
     };
+}
+
+// ── Atmospheric turbulence ─────────────────────────────────────────────────
+// Low-frequency density fluctuation driven by gravity waves & solar
+// activity. Two octaves of sinusoid + a slow random walk give a credible
+// ±15 % wobble around the model mean that the pilot can feel: drag
+// throbs, the spacecraft tumbles more under high q. Amplitude scales
+// with Ap (storm-time mesoscale variability is much higher).
+function turbulenceFactor(t, env) {
+    const apFrac = Math.min(1, (env.ap ?? 12) / 250);
+    const baseAmp = 0.05 + 0.18 * apFrac;       // ±5 % quiet, ±23 % storm
+    const a = Math.sin(t * 0.011) * 0.6;
+    const b = Math.sin(t * 0.043 + 1.7) * 0.4;
+    return 1 + baseAmp * (a + b);
 }
 
 // ── Atmosphere ──────────────────────────────────────────────────────────────
@@ -147,20 +189,26 @@ export function initState(design, { periKm = 400, apoKm = null } = {}) {
  */
 export function airDensity(altM, env) {
     const hKm = altM / 1000;
+    // densityMul: optional multiplier hindcast missions use to model the
+    // observation that real storms run noticeably above the NRLMSIS climate
+    // mean (Feb 2022 Starlink: ~1.5×; Gannon May 2024: 2–3× over baseline
+    // at LEO altitudes). Default 1.0 — live forecasts leave it alone.
+    const mul = +(env?.densityMul ?? 1);
     if (hKm >= 80) {
         const r = thermosphereDensity({ altitudeKm: hKm, f107Sfu: env.f107Sfu, ap: env.ap });
-        return r.rho;
+        return r.rho * mul;
     }
     // Continuation below the model floor: anchor on ρ(80 km) and grow with a
     // ~7 km scale height down toward sea level.
     const rho80 = thermosphereDensity({ altitudeKm: 80, f107Sfu: env.f107Sfu, ap: env.ap }).rho;
-    return rho80 * Math.exp((80 - hKm) / 7.0);
+    return rho80 * mul * Math.exp((80 - hKm) / 7.0);
 }
 
-/** Local gravitational acceleration magnitude [m/s²]. */
-export function gravityAt(altM) {
+/** Local gravitational acceleration magnitude [m/s²]. Pass env to honour
+ *  the user's gravity-slider override; without env you get base Earth. */
+export function gravityAt(altM, env = null) {
     const r = R_EARTH + altM;
-    return MU / (r * r);
+    return effectiveMU(env) / (r * r);
 }
 
 // ── Equations of motion ─────────────────────────────────────────────────────
@@ -174,8 +222,11 @@ function derivatives(s, design, env, control) {
     const r = Math.hypot(s.x, s.y);
     const alt = r - R_EARTH;
 
-    // Gravity (inverse-square, central).
-    const gOverR = -MU / (r * r * r);
+    // Gravity (inverse-square, central). MU scales with env.gravityMul so
+    // the pilot's gravity slider reshapes orbits in real time without
+    // requiring a sim reset.
+    const mu = effectiveMU(env);
+    const gOverR = -mu / (r * r * r);
     let ax = gOverR * s.x;
     let ay = gOverR * s.y;
 
@@ -187,12 +238,20 @@ function derivatives(s, design, env, control) {
     const wx = s.vx - vAtmX;
     const wy = s.vy - vAtmY;
     const vrel = Math.hypot(wx, wy);
-    const rho = airDensity(alt, env);
+    // Mean-density model multiplied by a turbulence factor — gravity-wave +
+    // storm-time mesoscale variability. Pilots feel a throb in drag during
+    // storms; the value is also fed into a stochastic tumble term below.
+    const rhoMean = airDensity(alt, env);
+    const turb = turbulenceFactor(s.t, env);
+    const rho = rhoMean * turb;
     // a_drag = −½ ρ |v_rel| (Cd A · attitude / m) v_rel. The attitude
     // multiplier scales the effective frontal area: feathering shrinks it,
-    // flying broadside (aerobrake) inflates it.
+    // flying broadside (aerobrake) inflates it. Lost attitude (tumble)
+    // bloats effective area toward broadside — costs you energy when the
+    // bus is spinning into the wind.
     const aMult = attitudeMult(control);
-    const k = 0.5 * rho * vrel * design.cd * design.area * aMult / mass;
+    const tumblePenalty = 1 + 0.7 * Math.min(1.5, Math.abs(s.tumbleRate || 0));
+    const k = 0.5 * rho * vrel * design.cd * design.area * aMult * tumblePenalty / mass;
     const aDragX = -k * wx;
     const aDragY = -k * wy;
     ax += aDragX;
@@ -201,9 +260,20 @@ function derivatives(s, design, env, control) {
     const qdyn = 0.5 * rho * vrel * vrel;
 
     // Thrust. Direction is defined relative to the *inertial* velocity /
-    // radius, the way real burns are planned.
+    // radius, the way real burns are planned. Three realism layers are
+    // bolted on:
+    //   • throat erosion → Isp & thrust decay with accumulated burn time
+    //   • gimbal vectoring → control.gimbal (rad) rotates the thrust
+    //     vector by up to ±design.gimbalRad off the burn axis
+    //   • turbulence-driven attitude noise → small misalignment penalty
     let dfuel = 0;
-    const thr = (control?.throttle ?? 0) * design.thrust;
+    const baseThr = (control?.throttle ?? 0) * design.thrust;
+    // Erosion factor: 0 burn → 1.0; ≥ throatLifeS at full power → 0.75
+    // (capped 25 % loss; players still get a craft they can fly home).
+    const life = Math.max(1, design.throatLifeS ?? 6_000);
+    const erosionFrac = Math.min(1, (s.burnSeconds || 0) / life);
+    const erosionFactor = 1 - 0.25 * erosionFrac;
+    const thr = baseThr * erosionFactor;
     if (thr > 0 && s.fuel > 0 && control.mode && control.mode !== 'off') {
         let dirX = 0, dirY = 0;
         const vmag = Math.hypot(s.vx, s.vy) || 1;
@@ -216,13 +286,58 @@ function derivatives(s, design, env, control) {
         else if (control.mode === 'radial-in') { dirX = -s.x / r;     dirY = -s.y / r;     }
         else if (control.mode === 'manual')      { dirX =  Math.cos(h); dirY =  Math.sin(h); }
         else if (control.mode === 'manual-retro'){ dirX = -Math.cos(h); dirY = -Math.sin(h); }
+        // Gimbal: rotate (dirX, dirY) by the commanded vector angle, clamped
+        // to the engine's mechanical authority. Default zero so legacy
+        // callers see no change.
+        const gMax = design.gimbalRad ?? 0;
+        const gCmd = Math.max(-gMax, Math.min(gMax, control.gimbal ?? 0));
+        if (gCmd !== 0) {
+            const c = Math.cos(gCmd), si = Math.sin(gCmd);
+            const rx = dirX * c - dirY * si;
+            const ry = dirX * si + dirY * c;
+            dirX = rx; dirY = ry;
+        }
         const aThr = thr / mass;
         ax += aThr * dirX;
         ay += aThr * dirY;
-        dfuel = -thr / (design.isp * G0);   // Tsiolkovsky mass flow
+        // Isp loses the same fraction as thrust under erosion — both depend
+        // on the throat keeping its geometry.
+        const effIsp = design.isp * erosionFactor;
+        dfuel = -thr / (effIsp * G0);       // Tsiolkovsky mass flow
     }
 
-    return { ax, ay, dfuel, diag: { rho, vrel, qdyn, aDrag: aDragMag, alt } };
+    // ── RCS / multidirectional translation thrust ────────────────────────
+    // Reaction-control clusters fire independently of the main engine. The
+    // command is a 2-D vector in the orbit frame:
+    //   control.rcs = { along, radial }   each ∈ [−1, 1]
+    //     along  > 0 → +prograde (raise)      along  < 0 → retro (lower)
+    //     radial > 0 → +radial-out (push up)  radial < 0 → radial-in (push down)
+    // Because the along- and cross-track clusters are separate hardware, a
+    // diagonal command lights both at once: the achievable magnitude on the
+    // diagonal reaches √2 · rcsThrust. That simultaneous multi-axis push —
+    // translating sideways without first rotating the bus — is the whole point
+    // of "multidirectional thrust." Propellant is drawn from the same tank at
+    // the (usually lower) rcsIsp.
+    if (design.rcs && (design.rcsThrust ?? 0) > 0 && s.fuel > 0 && control.rcs) {
+        const along  = Math.max(-1, Math.min(1, +control.rcs.along  || 0));
+        const radial = Math.max(-1, Math.min(1, +control.rcs.radial || 0));
+        if (along !== 0 || radial !== 0) {
+            const vmag = Math.hypot(s.vx, s.vy) || 1;
+            const px = s.vx / vmag, py = s.vy / vmag;   // prograde unit vector
+            const rx = s.x / r,     ry = s.y / r;       // radial-out unit vector
+            const fx = (along * px + radial * rx) * design.rcsThrust;
+            const fy = (along * py + radial * ry) * design.rcsThrust;
+            ax += fx / mass;
+            ay += fy / mass;
+            const rcsMag = Math.hypot(fx, fy);
+            const rcsIsp = Math.max(1, design.rcsIsp ?? 65);
+            dfuel -= rcsMag / (rcsIsp * G0);            // Tsiolkovsky mass flow
+        }
+    }
+
+    return { ax, ay, dfuel,
+             diag: { rho, rhoMean, turb, vrel, qdyn,
+                     aDrag: aDragMag, alt, erosion: erosionFrac } };
 }
 
 /**
@@ -237,6 +352,13 @@ export function step(s, design, env, control, dt) {
         vx: st.vx + k.dvx * h,
         vy: st.vy + k.dvy * h,
         fuel: Math.max(0, st.fuel + k.df * h),
+        // Advance the clock so time-dependent derivatives (turbulence) sample
+        // the right phase at each RK4 stage. Preserve the slow-moving state
+        // fields too — derivatives reads `tumbleRate` for the drag penalty.
+        t:  st.t + h,
+        burnSeconds: st.burnSeconds ?? 0,
+        tumbleRate:  st.tumbleRate  ?? 0,
+        attitudeErr: st.attitudeErr ?? 0,
     });
     const deriv = (st) => {
         const d = derivatives(st, design, env, control);
@@ -257,7 +379,48 @@ export function step(s, design, env, control, dt) {
         t: s.t + dt,
         alive: true,
         reason: '',
+        // Carry through realism extras.
+        burnSeconds: s.burnSeconds ?? 0,
+        tumbleRate:  s.tumbleRate  ?? 0,
+        attitudeErr: s.attitudeErr ?? 0,
     };
+
+    // ── Burn-time accounting (throat erosion clock) ──────────────────────
+    // Equivalent full-throttle seconds — half throttle for 2 s ≈ 1 sec of
+    // erosion. Only counts when an active burn mode is selected and fuel
+    // remained throughout the step. This is the clock deriveDesign+turn
+    // erosionFactor against.
+    const burning = control?.mode && control.mode !== 'off'
+                 && (control.throttle ?? 0) > 0 && out.fuel > 0;
+    if (burning) out.burnSeconds += (control.throttle ?? 0) * dt;
+
+    // ── Disturbance torque & tumble ──────────────────────────────────────
+    // The atmospheric drag acts at the centre of pressure (offset from the
+    // centre of mass by design.copOffset). That creates a torque whose
+    // sign flips with the local turbulence direction. Damping = a constant
+    // restoring term proportional to body inertia (mocked as a single τ).
+    // Result: high-q + long lever arms (telescope, tug-with-tall-payload)
+    // makes the bird wander off heading, bloats drag, costs you altitude.
+    const d1 = k1.diag;
+    if (d1) {
+        const cop = design.copOffset ?? 0.05;
+        // Torque ∝ aero force × lever × turbulence sign. Inertia proxy:
+        // mass × maxSide² (gives reasonable rad/s² magnitudes).
+        const inertia = (design.dryMass + Math.max(out.fuel, 0))
+                      * Math.max(0.5, (design.maxSide ?? 1)) ** 2;
+        const torque = d1.aDrag * (design.dryMass + Math.max(out.fuel, 0)) * cop
+                     * (d1.turb - 1) * 0.6;
+        // Reaction wheels & control authority gently damp tumble; chemical
+        // bus has weaker authority than an actively-pointed payload bus. A bus
+        // with RCS clusters can null disturbance torques actively, so it holds
+        // attitude noticeably better than one relying on wheels alone.
+        const damp = 0.18 * (design.rcs ? 1.6 : 1);
+        out.tumbleRate += (torque / inertia - out.tumbleRate * damp) * dt;
+        out.attitudeErr += out.tumbleRate * dt;
+        // Hard clamp so the sim doesn't go to spinning-numerically-unstable.
+        if (out.tumbleRate >  3) out.tumbleRate =  3;
+        if (out.tumbleRate < -3) out.tumbleRate = -3;
+    }
 
     const alt = Math.hypot(out.x, out.y) - R_EARTH;
     if (alt <= REENTRY_ALT_M) {
@@ -292,23 +455,26 @@ export function advance(s, design, env, control, seconds) {
 }
 
 // ── Orbital elements & telemetry ────────────────────────────────────────────
-/** Classical 2-D elements from the state vector. */
-export function elements(s) {
+/** Classical 2-D elements from the state vector. Accepts an optional env
+ *  so a non-default gravity slider feeds through to apo/peri/period; if
+ *  omitted, defaults to Earth μ. */
+export function elements(s, env = null) {
+    const mu = effectiveMU(env);
     const r = Math.hypot(s.x, s.y);
     const v2 = s.vx * s.vx + s.vy * s.vy;
-    const energy = v2 / 2 - MU / r;            // specific orbital energy
-    const a = -MU / (2 * energy);              // semi-major axis (∞ if parabolic)
+    const energy = v2 / 2 - mu / r;            // specific orbital energy
+    const a = -mu / (2 * energy);              // semi-major axis (∞ if parabolic)
     const hz = s.x * s.vy - s.y * s.vx;        // specific angular momentum (z)
     const rDotV = s.x * s.vx + s.y * s.vy;
     // Eccentricity vector e = ((v²−μ/r) r − (r·v) v) / μ
-    const c = v2 - MU / r;
-    const ex = (c * s.x - rDotV * s.vx) / MU;
-    const ey = (c * s.y - rDotV * s.vy) / MU;
+    const c = v2 - mu / r;
+    const ex = (c * s.x - rDotV * s.vx) / mu;
+    const ey = (c * s.y - rDotV * s.vy) / mu;
     const ecc = Math.hypot(ex, ey);
     const bound = energy < 0 && isFinite(a);
     const rp = bound ? a * (1 - ecc) : r;
     const ra = bound ? a * (1 + ecc) : Infinity;
-    const period = bound ? 2 * Math.PI * Math.sqrt((a * a * a) / MU) : Infinity;
+    const period = bound ? 2 * Math.PI * Math.sqrt((a * a * a) / mu) : Infinity;
     return {
         r, speed: Math.sqrt(v2), a, ecc, hz, energy, bound,
         rp, ra,
@@ -323,7 +489,7 @@ export function elements(s) {
  * Live mission telemetry — everything the cockpit gauges show.
  */
 export function telemetry(s, design, env, attMult = 1) {
-    const el = elements(s);
+    const el = elements(s, env);
     const mass = design.dryMass + Math.max(s.fuel, 0);
     const d = derivatives(s, design, { ...env }, { throttle: 0, mode: 'off', attitudeMult: attMult });
 
@@ -335,10 +501,11 @@ export function telemetry(s, design, env, attMult = 1) {
 
     // Specific-energy loss rate from drag → semi-major-axis decay rate.
     // ε̇ = a_nongrav · v ;  ȧ = (2 a² / μ) ε̇
+    const muEff = effectiveMU(env);
     const dragPower = -(d.diag.aDrag) * el.speed;              // ≤ 0 (J/kg/s)
     let aDot = 0, decayPerOrbitKm = 0, daysToReentry = Infinity;
     if (el.bound) {
-        aDot = (2 * el.a * el.a / MU) * dragPower;             // m/s, ≤ 0
+        aDot = (2 * el.a * el.a / muEff) * dragPower;          // m/s, ≤ 0
         decayPerOrbitKm = (aDot * el.period) / 1000;
         if (aDot < -1e-9) {
             const aReentry = R_EARTH + 100_000;
@@ -346,10 +513,23 @@ export function telemetry(s, design, env, attMult = 1) {
         }
     }
 
+    // Burn-budget pair: what drag is pulling out per orbit (as an equivalent
+    // prograde Δv impulse) and what the throttle would supply if held at its
+    // current setting through one full period. Identity used:
+    //   a_drag · P  =  ∫ a_drag dt  =  Δv_lost_per_orbit
+    // The thrust pair uses the eroded thrust + current mass + the burn mode's
+    // tangential-component fraction (1.0 prograde, −1.0 retro, ~0 radial).
+    const reqDvPerOrbit = (el.bound && Number.isFinite(el.period))
+        ? d.diag.aDrag * el.period
+        : 0;
+    const ispEff    = design.isp    * (1 - 0.25 * (d.diag.erosion ?? 0));
+    const thrustEff = design.thrust * (1 - 0.25 * (d.diag.erosion ?? 0));
+
     return {
         altKm: el.altKm,
         periAltKm: el.periAltKm,
         apoAltKm: el.apoAltKm,
+        a: el.a,
         speed: el.speed,
         vrel: d.diag.vrel,
         period: el.period,
@@ -369,7 +549,149 @@ export function telemetry(s, design, env, attMult = 1) {
         missionTime: s.t,
         alive: s.alive,
         reason: s.reason,
+        // ── Realism extras (new gauges) ──
+        turbulence:  d.diag.turb ?? 1,
+        rhoMean:     d.diag.rhoMean ?? d.diag.rho,
+        erosion:     d.diag.erosion ?? 0,
+        burnSeconds: s.burnSeconds ?? 0,
+        tumbleRate:  s.tumbleRate ?? 0,
+        attitudeErr: s.attitudeErr ?? 0,
+        ispEff,
+        thrustEff,
+        // ── Burn-budget gauge (the new thrust-vs-drag loop) ──
+        requiredDvPerOrbit: reqDvPerOrbit,
     };
+}
+
+// ── Burn-budget helpers (forecast-aware) ────────────────────────────────────
+/**
+ * Per-orbit prograde Δv the player must add to *net out drag* at the current
+ * state. Derived directly from the energy identity
+ *
+ *   ε̇_drag = −a_drag · v   →   Δa_drag/orbit = −2 a²/μ · a_drag · v · P
+ *   To cancel:  Δa_player = 2 a²·v / μ · Δv_player  ⇒  Δv_player = a_drag · P
+ *
+ * So `required Δv per orbit  =  a_drag · period`. Clean, cheap, exact within
+ * the linearization. Returns 0 for unbound trajectories.
+ *
+ * @param {object} tel  — telemetry record (must include dragAccel & period)
+ */
+export function requiredDvPerOrbit(tel) {
+    if (!tel || !tel.bound) return 0;
+    const aD = +tel.dragAccel, p = +tel.period;
+    if (!Number.isFinite(aD) || !Number.isFinite(p) || p <= 0) return 0;
+    return aD * p;
+}
+
+/**
+ * Equivalent prograde Δv per orbit the player *would* deliver if the current
+ * throttle + burn-mode were held for one full period. The mode determines how
+ * much of the thrust vector is tangential (= contributes to orbit-raising):
+ *
+ *   prograde / manual            →  +1.0
+ *   retrograde / manual-retro    →  −1.0
+ *   radial-in / radial-out / off →   0   (no secular Δa contribution)
+ *
+ * This is the player-side counterpart to requiredDvPerOrbit — the HUD pairs
+ * the two as a "supply vs demand" gauge.
+ *
+ * @param {object} tel
+ * @param {object} design
+ * @param {object} control   — { throttle, mode }
+ */
+export function providedDvPerOrbit(tel, design, control) {
+    if (!tel || !tel.bound || !control) return 0;
+    const thr = +control.throttle;
+    if (!Number.isFinite(thr) || thr <= 0) return 0;
+    const mode = control.mode || 'off';
+    const sign = (mode === 'prograde' || mode === 'manual')          ?  1
+              : (mode === 'retrograde' || mode === 'manual-retro')    ? -1
+              : 0;
+    if (sign === 0) return 0;
+    const mass = +tel.mass, p = +tel.period;
+    const thrustEff = Number.isFinite(tel.thrustEff) ? tel.thrustEff : design.thrust;
+    if (!Number.isFinite(mass) || mass <= 0 || !Number.isFinite(p) || p <= 0) return 0;
+    return sign * thr * thrustEff / mass * p;
+}
+
+/**
+ * Recompute requiredDvPerOrbit at a forecast horizon. Builds a synthetic env
+ * with the projected F10.7/Ap, recomputes drag at the *current* altitude,
+ * attitude and mass, and returns the resulting per-orbit Δv requirement.
+ * Lets the HUD answer "in 6 h, how hard will I have to be burning?" without
+ * running the full integrator forward.
+ *
+ * @param {object} s
+ * @param {object} design
+ * @param {object} env       — current env (gravityMul preserved)
+ * @param {object} control   — current control (attitudeMult honored)
+ * @param {object} forecast  — { f107, ap } from satellite-designer-forecast.js
+ * @returns {number}  Δv [m/s/orbit] required to hold orbit under the forecast
+ */
+export function forecastRequiredDvPerOrbit(s, design, env, control, forecast) {
+    if (!forecast || !Number.isFinite(forecast.f107) || !Number.isFinite(forecast.ap)) return 0;
+    const projEnv = { ...env, f107Sfu: forecast.f107, ap: forecast.ap };
+    const tel = telemetry(s, design, projEnv, attitudeMult(control));
+    return requiredDvPerOrbit(tel);
+}
+
+/**
+ * Linearised perigee projection N orbits ahead. Uses the current per-orbit
+ * decay rate as a constant secular drift; adds the player's per-orbit
+ * tangential Δv contribution via Δa = 2va²·Δv/μ. Eccentricity is assumed
+ * conserved (true for small Δv applied near perigee) so perigee shifts by
+ * the same Δa as the semi-major axis.
+ *
+ * Honest within ~5% over 1–30 orbits at LEO altitudes; not a substitute for
+ * the integrator. Designed for the STORM RADAR's "where will perigee be
+ * in 10 orbits" readout, where order-of-magnitude is what matters.
+ *
+ * @param {object} tel
+ * @param {number} orbits
+ * @param {object} [opts]
+ * @param {number} [opts.playerDvPerOrbit=0]  m/s; signed (prograde +)
+ * @param {object} [opts.env]                  ignored — for symmetry
+ * @returns {{
+ *   periAltKmAfter:number, deltaPeriKm:number,
+ *   orbitsToFloor:number, hoursToFloor:number
+ * }}
+ *   `orbitsToFloor` is for an 80-km re-entry floor; -Infinity if the orbit
+ *   is rising. Callers can scale against any specific mission floor.
+ */
+export function projectPerigee(tel, orbits, opts = {}) {
+    if (!tel || !tel.bound || !Number.isFinite(tel.period)) {
+        return { periAltKmAfter: tel?.periAltKm ?? NaN, deltaPeriKm: 0,
+                 orbitsToFloor: Infinity, hoursToFloor: Infinity };
+    }
+    const N = Math.max(0, +orbits || 0);
+    const playerDv = Number.isFinite(opts.playerDvPerOrbit) ? opts.playerDvPerOrbit : 0;
+
+    // Δa contributions per orbit, in metres.
+    const dragDeltaA_m_per_orbit = (tel.decayPerOrbitKm || 0) * 1000;   // ≤ 0
+    // Tangential Δv → Δa via the vis-viva differential. v ≈ tel.speed.
+    const playerDeltaA_m_per_orbit = (tel.a && tel.speed)
+        ? 2 * tel.speed * tel.a * tel.a * playerDv / MU
+        : 0;
+    const netDeltaA_m_per_orbit = playerDeltaA_m_per_orbit + dragDeltaA_m_per_orbit;
+
+    const deltaPeriKm = (netDeltaA_m_per_orbit * N) / 1000;
+    const periAltKmAfter = tel.periAltKm + deltaPeriKm;
+
+    let orbitsToFloor = Infinity, hoursToFloor = Infinity;
+    if (netDeltaA_m_per_orbit < -1e-3) {
+        // Solve currentPeri + n · netΔa = 80 km
+        const reentryKm = 80;
+        const required_n_orbits = (reentryKm - tel.periAltKm) / (netDeltaA_m_per_orbit / 1000);
+        if (required_n_orbits > 0) {
+            orbitsToFloor = required_n_orbits;
+            hoursToFloor = required_n_orbits * tel.period / 3600;
+        }
+    } else if (netDeltaA_m_per_orbit > 1e-3) {
+        orbitsToFloor = -Infinity;    // orbit rising
+        hoursToFloor  = -Infinity;
+    }
+
+    return { periAltKmAfter, deltaPeriKm, orbitsToFloor, hoursToFloor };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -464,6 +786,69 @@ export function selfTest() {
         { throttle: 0, mode: 'off', attitudeMult: ATTITUDE_MODES.broadside.mult }, 12 * 3600);
     T(elements(broad.state).a < elements(feath.state).a,
         `broadside decays faster than feathered (a ${(elements(feath.state).a/1000).toFixed(0)} vs ${(elements(broad.state).a/1000).toFixed(0)} km)`);
+
+    // 10. Burn-budget identity: requiredDvPerOrbit + decayPerOrbitKm should
+    //     close the loop. Δv_req = a_drag · period, and over one orbit that
+    //     translates back to Δa_drag = decayPerOrbitKm · 1000. Verify by
+    //     substituting requiredDvPerOrbit into projectPerigee with
+    //     playerDvPerOrbit = +Δv_req and confirming perigee holds.
+    const bb = makeDesign({ dryMass: 80, fuelMass: 20, area: 3, cd: 2.2 });
+    let sbb = initState(bb, { periKm: 320, apoKm: 320 });
+    const telBb = telemetry(sbb, bb, env);
+    const reqDv = requiredDvPerOrbit(telBb);
+    T(reqDv > 0,
+        `Δv-req > 0 at 320 km (got ${reqDv.toExponential(2)} m/s/orbit)`);
+    const proj0 = projectPerigee(telBb, 10);                              // no thrust → decay
+    const projOk = projectPerigee(telBb, 10, { playerDvPerOrbit: reqDv }); // exactly cancels
+    T(proj0.periAltKmAfter < telBb.periAltKm,
+        `no-thrust projection decays (Δ = ${(proj0.periAltKmAfter - telBb.periAltKm).toFixed(2)} km)`);
+    T(Math.abs(projOk.periAltKmAfter - telBb.periAltKm) < 0.05,
+        `Δv-req cancels decay (Δ = ${(projOk.periAltKmAfter - telBb.periAltKm).toExponential(2)} km)`);
+
+    // 11. providedDvPerOrbit pairs with mode: prograde + → throttle, retro →
+    //     negative, radial → 0.
+    const provProg = providedDvPerOrbit(telBb, bb,
+        { throttle: 1, mode: 'prograde' });
+    const provRetro = providedDvPerOrbit(telBb, bb,
+        { throttle: 1, mode: 'retrograde' });
+    const provRad = providedDvPerOrbit(telBb, bb,
+        { throttle: 1, mode: 'radial-out' });
+    T(provProg > 0 && provRetro < 0 && Math.abs(provRad) < 1e-9,
+        `providedDv signs: prog +${provProg.toFixed(2)} retro ${provRetro.toFixed(2)} radial ${provRad.toFixed(2)}`);
+
+    // 12. RCS translation: an RCS-equipped craft responds to control.rcs and
+    //     burns propellant doing it; a craft with no RCS hardware ignores the
+    //     same command entirely.
+    const rcsShip = makeDesign({ dryMass: 200, fuelMass: 40, area: 0, cd: 2.2,
+        thrust: 0, isp: 200, rcs: true, rcsThrust: 50, rcsIsp: 120 });
+    const sr0 = initState(rcsShip, { periKm: 500, apoKm: 500 });
+    let srBurn = sr0;
+    for (let i = 0; i < 200; i++)
+        srBurn = step(srBurn, rcsShip, env, { throttle: 0, mode: 'off', rcs: { along: 0, radial: 1 } }, 0.5);
+    let srIdle = sr0;
+    for (let i = 0; i < 200; i++)
+        srIdle = step(srIdle, rcsShip, env, { throttle: 0, mode: 'off' }, 0.5);
+    T(srBurn.fuel < sr0.fuel, `RCS burn consumes propellant (${sr0.fuel}→${srBurn.fuel.toFixed(2)} kg)`);
+    T(elements(srBurn).ecc > elements(srIdle).ecc + 1e-4,
+        `radial RCS reshapes the orbit (ecc ${elements(srIdle).ecc.toExponential(1)}→${elements(srBurn).ecc.toExponential(1)})`);
+
+    const noRcs = makeDesign({ dryMass: 200, fuelMass: 40, area: 0, cd: 2.2, thrust: 0, isp: 200 });
+    const snr0 = initState(noRcs, { periKm: 500, apoKm: 500 });
+    let snrBurn = snr0;
+    for (let i = 0; i < 50; i++)
+        snrBurn = step(snrBurn, noRcs, env, { throttle: 0, mode: 'off', rcs: { along: 1, radial: 1 } }, 0.5);
+    T(Math.abs(snrBurn.fuel - snr0.fuel) < 1e-9, `craft without RCS hardware ignores RCS command`);
+
+    // 13. Multidirectional: a diagonal RCS command (along + radial) delivers
+    //     more translation in one step than either single axis — two clusters
+    //     firing at once, magnitude ≈ √2 × single-axis.
+    const base = step(sr0, rcsShip, env, { throttle: 0, mode: 'off' }, 0.1);
+    const axis = step(sr0, rcsShip, env, { throttle: 0, mode: 'off', rcs: { along: 1, radial: 0 } }, 0.1);
+    const diag = step(sr0, rcsShip, env, { throttle: 0, mode: 'off', rcs: { along: 1, radial: 1 } }, 0.1);
+    const dvAxis = Math.hypot(axis.vx - base.vx, axis.vy - base.vy);
+    const dvDiag = Math.hypot(diag.vx - base.vx, diag.vy - base.vy);
+    T(dvDiag > dvAxis * 1.3,
+        `diagonal RCS > single-axis (multidirectional): ${dvDiag.toExponential(2)} vs ${dvAxis.toExponential(2)} m/s`);
 
     return out;
 }
