@@ -33,7 +33,11 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE = process.env.NAVLINT_BASELINE || join(ROOT, 'scripts', 'nav-lint-baseline.json');
 
 // Directories that never contain canonical site pages.
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'rust/target', 'rust/www']);
+// The swmf/dsmc entries are gitignored workstation artifacts (simulation run
+// dirs, venvs, raw data pulls) — they can contain dangling container-path
+// symlinks that crash statSync, and never hold site pages.
+const SKIP_DIRS = new Set(['.git', 'node_modules', 'rust/target', 'rust/www',
+    'swmf/runs', 'swmf/runs_docker', 'swmf/raw', 'swmf/.venv', 'dsmc/raw']);
 // Individual non-site pages (dev/test/engine) — intentionally chromeless.
 const EXCLUDE_FILES = new Set(['js/geo/selftest.html']);
 

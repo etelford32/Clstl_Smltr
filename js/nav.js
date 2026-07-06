@@ -60,6 +60,7 @@ const NAV_DROPDOWNS = [
             { href: 'auroracle.html', label: 'AurOracle', sub: 'Predict the aurora · 7-night + 30-day outlook', tier: 'public', icon: '🌌', badge: 'NEW', id: 'auroracle' },
             { href: 'far-side-watch.html', label: 'Far-Side Watch', sub: 'Regions rotating in · days-to-weeks horizon', tier: 'public', icon: '🌗', badge: 'NEW', id: 'far-side-watch' },
             { href: 'gannon-superstorm.html', label: 'Gannon Superstorm', sub: 'May 2024 G5 hindcast · MHD-corrected density', tier: 'public', icon: '⚡', badge: 'NEW', id: 'gannon-superstorm' },
+            { href: 'blog-gannon-hindcast.html', label: 'The Index That Lied', sub: 'Gannon hindcast write-up · EN/ES/FR', tier: 'public', icon: '📝', badge: 'NEW', id: 'blog-gannon-hindcast' },
             { href: 'solar-system.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: '🪐', id: 'solar' },
             { href: 'jupiter-system.html', label: 'Jupiter System', sub: 'Galilean moons · 4:2:1 Laplace resonance', tier: 'public', icon: '🪐', id: 'jupiter-system' },
             { href: 'saturn-system.html', label: 'Saturn System', sub: 'Moon-sculpted rings · Cassini Division · live density waves', tier: 'public', icon: '🪐', badge: 'NEW', id: 'saturn-system' },
