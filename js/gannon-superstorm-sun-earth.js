@@ -493,6 +493,14 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
         "text-anchor": "middle", fill: COLORS.textSubtle, "font-size": 8,
         "font-family": "ui-monospace, monospace", "pointer-events": "none",
     }, ["magnetotail"]));
+    // Thermal halo — a warm filled disc that swells with the modelled
+    // 400 km density. Invisible at quiet; at storm peak it reads as the
+    // whole upper atmosphere glowing outward (the puff-up, at a glance).
+    const atmHalo = svg("circle", {
+        cx: EARTH_X, cy: TRACK_Y, r: EARTH_R + 6,
+        fill: "#ff9a4d", opacity: 0, "pointer-events": "none",
+    });
+    root.appendChild(atmHalo);
     // Atmosphere glow
     root.appendChild(svg("circle", {
         cx: EARTH_X, cy: TRACK_Y, r: EARTH_R + 4,
@@ -814,13 +822,23 @@ export function createSunEarthScene(container, replay, player, opts = {}) {
             }
         }
 
-        // ── Thermospheric drag band: swell + brighten on puff-up ───
+        // ── Thermospheric puff-up: the atmosphere visibly thickens ─
         if (samp && densArr.length && densMax > densMin) {
             const dn = Math.max(0, Math.min(1,
                 (samp.density400.msis_apreal - densMin) / (densMax - densMin)));
             atmDrag.setAttribute("opacity", 0.45 + 0.5 * dn);
             atmDrag.setAttribute("stroke-width", 1.5 + 2.5 * dn);
             atmDrag.setAttribute("r", (EARTH_R + 4.5) + 2.0 * dn);
+            // Not just the drag band — the thermosphere + exosphere shells
+            // breathe with density, and the warm halo glows in from nothing
+            // as Joule heating peaks.
+            atmThermo.setAttribute("r", (EARTH_R + 7) + 3.5 * dn);
+            atmThermo.setAttribute("opacity", 0.30 + 0.45 * dn);
+            atmThermo.setAttribute("stroke-width", 3.0 + 2.5 * dn);
+            atmExo.setAttribute("r", (EARTH_R + 13) + 5.5 * dn);
+            atmExo.setAttribute("opacity", 0.16 + 0.30 * dn);
+            atmHalo.setAttribute("r", (EARTH_R + 6) + 10 * dn);
+            atmHalo.setAttribute("opacity", 0.30 * dn);
         }
 
         // ── Live driver readouts ───────────────────────────────────
