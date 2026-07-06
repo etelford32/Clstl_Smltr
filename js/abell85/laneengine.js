@@ -11,6 +11,7 @@
 
 import { makeScenario, buildHistory, sampleAt } from './physics.js';
 import { StarCluster } from './nbody.js';
+import { WasmCluster } from './wasmcluster.js';
 import { PNBinary } from './pn.js';
 import { orbitalBasis, bodiesAt } from './geometry.js';
 import { surfaceDensity, cuspRadius } from './observables.js';
@@ -28,7 +29,10 @@ export class LaneEngine {
         this.overrides = opts.overrides ?? {};
         this.sc = makeScenario(id, this.overrides);
         this.history = buildHistory(this.sc);
-        this.cluster = new StarCluster(this.sc, opts.nStars ?? 3072, opts.seed ?? 85);
+        this.wasm = opts.wasm ?? null;      // instantiated abell85_nbody module
+        this.cluster = this.wasm
+            ? new WasmCluster(this.sc, opts.nStars ?? 32768, opts.seed ?? 85, this.wasm)
+            : new StarCluster(this.sc, opts.nStars ?? 3072, opts.seed ?? 85);
         this.incl = opts.incl ?? 0.45;
         this.node = opts.node ?? 0.5;
         this.basis = orbitalBasis(this.incl, this.node);
@@ -50,7 +54,11 @@ export class LaneEngine {
         this.overrides = { ...this.overrides, ...overrides };
         this.sc = makeScenario(this.id, this.overrides);
         this.history = buildHistory(this.sc);
-        this.cluster = new StarCluster(this.sc, keep.nStars, keep.seed);
+        if (this.wasm) {
+            this.cluster.rebind(this.sc);   // reuse WASM buffers (bump allocator)
+        } else {
+            this.cluster = new StarCluster(this.sc, keep.nStars, keep.seed);
+        }
         this.livePN = null; this.rosette = [];
         this.tNow = NaN; this.clusterT = NaN;
     }

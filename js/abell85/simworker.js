@@ -16,25 +16,41 @@
 // the next frame message, so steady-state allocates nothing.
 
 import { LaneEngine } from './laneengine.js';
+import { loadNbodyWasm } from './wasmcluster.js';
 
 const engines = new Map();
+let wasmModulePromise = null;
 
 self.onmessage = (ev) => {
     const msg = ev.data;
 
     if (msg.type === 'init') {
         engines.clear();
-        const meta = [];
-        for (const l of msg.lanes) {
-            const eng = new LaneEngine(l.id, l.opts);
-            engines.set(l.id, eng);
-            meta.push({
-                id: l.id, n: eng.cluster.n,
-                sc: publicScenario(eng.sc),
-                events: publicEvents(eng.history.events),
+        wasmModulePromise = wasmModulePromise ?? loadNbodyWasm();
+        wasmModulePromise.then((wasm) => {
+            const meta = [];
+            for (const l of msg.lanes) {
+                const eng = new LaneEngine(l.id, { ...l.opts, wasm });
+                engines.set(l.id, eng);
+                meta.push({
+                    id: l.id, n: eng.cluster.n,
+                    sc: publicScenario(eng.sc),
+                    events: publicEvents(eng.history.events),
+                });
+            }
+            self.postMessage({ type: 'ready', lanes: meta, engine: wasm ? 'wasm' : 'js' });
+        });
+        return;
+    }
+
+    if (msg.type === 'inspect') {
+        const eng = engines.get(msg.id);
+        if (eng && msg.index >= 0 && msg.index < eng.cluster.n) {
+            self.postMessage({
+                type: 'inspect', id: msg.id, index: msg.index,
+                star: eng.cluster.starState(msg.index, msg.mBh ?? 0),
             });
         }
-        self.postMessage({ type: 'ready', lanes: meta });
         return;
     }
 

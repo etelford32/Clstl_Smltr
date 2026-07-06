@@ -27,6 +27,7 @@ import { makeScenario, buildHistory, sampleAt } from './physics.js';
 import { LaneEngine } from './laneengine.js';
 import { orbitalBasis } from './geometry.js';
 import { MergerChoreo } from './merger.js';
+import { GwAudio } from './gwaudio.js';
 import { ptaSensitivity } from './observables.js';
 import { Renderer, Trail } from './render.js';
 import { GodCamera } from './camera.js';
@@ -126,11 +127,13 @@ export function boot(els) {
     world.system(new PhysicsSystem());
     world.system(new ChoreoSystem());
     world.system(new TrailSystem());
+    world.system(new InspectSystem());
     world.system(new CameraSystem());
     world.system(new RenderSystem());
     world.system(new HudSystem());
     world.system(new AnalyticsSystem());
     world.system(new UISystem());
+    world.system(new AudioSystem());
 
     let last = performance.now();
     function frame(wall) {
@@ -142,11 +145,17 @@ export function boot(els) {
             ready: true,
             tau: res.tau,
             workerActive: !!res.workerActive,
+            engine: res.engineType ?? null,
+            nStars: res.lanes()[0]?.n || res.laneN || 0,
+            sel: res.sel
+                ? { lane: res.sel.laneId, index: res.sel.index, hasState: !!res.sel.star }
+                : null,
             stages: res.lanes().map(l => l.state?.now?.stage ?? '—'),
         };
         requestAnimationFrame(frame);
     }
     requestAnimationFrame((w) => { last = w; requestAnimationFrame(frame); });
+    window.__obsWorld = world;          // debug/probe handle
     return world;
 }
 
@@ -230,39 +239,92 @@ class PhysicsSystem {
         this.pending = false;
         this.pools = {};
         this.tick = 0;
+        res.nStars = null;      // null → engine default (WASM 32768 / JS 3072)
         res.reconfigureLane = (id, overrides) => this.reconfigure(world, id, overrides);
+        res.setStarCount = (n) => this.setStarCount(world, n);
+        res.requestInspect = (id, index, mBh) => this.requestInspect(world, id, index, mBh);
+        this.startWorker(world);
+    }
+
+    startWorker(world) {
         try {
             this.worker = new Worker(new URL('./simworker.js', import.meta.url), { type: 'module' });
             this.worker.onerror = () => this.fallback(world);
             this.worker.onmessage = (ev) => this.onmsg(world, ev.data);
-            this.worker.postMessage({
-                type: 'init',
-                lanes: res.lanes().map(l => ({
-                    id: l.id,
-                    opts: {
-                        overrides: l.overrides, nStars: 3072, seed: 85,
-                        incl: l.def.orient.incl, node: l.def.orient.node,
-                    },
-                })),
-            });
+            this.postInit(world);
         } catch {
             this.fallback(world);
         }
+    }
+
+    /** (Re)build every worker-side engine at the current star count. */
+    postInit(world) {
+        const res = world.res;
+        res.physicsReady = false;
+        this.pending = false;
+        this.pools = {};
+        this.worker.postMessage({
+            type: 'init',
+            lanes: res.lanes().map(l => ({
+                id: l.id,
+                opts: {
+                    overrides: l.overrides, seed: 85,
+                    ...(res.nStars ? { nStars: res.nStars } : {}),
+                    incl: l.def.orient.incl, node: l.def.orient.node,
+                },
+            })),
+        });
     }
 
     fallback(world) {
         if (this.local) return;
         this.worker?.terminate?.();
         this.worker = null;
+        this.buildLocal(world);
+        world.res.workerActive = false;
+        world.res.engineType = 'js';
+        world.res.physicsReady = true;
+    }
+
+    buildLocal(world) {
+        const res = world.res;
         this.local = new Map();
-        for (const l of world.res.lanes()) {
+        for (const l of res.lanes()) {
             this.local.set(l.id, new LaneEngine(l.id, {
-                overrides: l.overrides, nStars: 2048, seed: 85,
+                overrides: l.overrides, nStars: res.nStars ?? 2048, seed: 85,
                 incl: l.def.orient.incl, node: l.def.orient.node,
             }));
         }
-        world.res.workerActive = false;
-        world.res.physicsReady = true;
+    }
+
+    /** Star-count changes tear the worker down and start fresh: the WASM
+     *  kernel's bump allocator never frees, so a new worker (new linear
+     *  memory) is the leak-free path for a different allocation size. */
+    setStarCount(world, n) {
+        const res = world.res;
+        res.nStars = n;
+        res.clearSel?.();
+        for (const l of res.lanes()) { l.trails.forEach(t => t.clear()); l.rosette = []; }
+        if (this.worker) {
+            this.worker.terminate();
+            this.startWorker(world);
+        } else if (this.local) {
+            this.buildLocal(world);
+        }
+    }
+
+    requestInspect(world, id, index, mBh) {
+        const sel = world.res.sel;
+        if (this.worker) {
+            if (this._inspectPending || !world.res.physicsReady) return;
+            this._inspectPending = true;
+            this.worker.postMessage({ type: 'inspect', id, index, mBh });
+        } else if (this.local) {
+            const eng = this.local.get(id);
+            if (eng && sel && index < eng.cluster.n) {
+                sel.star = eng.cluster.starState(index, mBh);
+            }
+        }
     }
 
     onmsg(world, msg) {
@@ -270,6 +332,14 @@ class PhysicsSystem {
         if (msg.type === 'ready') {
             res.workerActive = true;
             res.physicsReady = true;
+            res.engineType = msg.engine ?? 'js';
+            res.laneN = msg.lanes?.[0]?.n ?? 0;
+            return;
+        }
+        if (msg.type === 'inspect') {
+            this._inspectPending = false;
+            const sel = res.sel;
+            if (sel && sel.laneId === msg.id && sel.index === msg.index) sel.star = msg.star;
             return;
         }
         if (msg.type === 'state') {
@@ -279,8 +349,17 @@ class PhysicsSystem {
                 if (!l) continue;
                 l.state = st;
                 l.n = st.n;
-                l.starPos = new Float32Array(st.pos, 0, st.n * 3);
-                l.starFlags = new Uint8Array(st.flags, 0, st.n);
+                // COPY into lane-owned arrays rather than viewing the
+                // transferable: the transferred buffer detaches the moment it
+                // is ping-ponged back, and at high star counts the worker
+                // holds it for several main-thread frames — render/pick/trail
+                // reads on a detached view are silently NaN/empty.
+                if (!l.starPos || l.starPos.length !== st.n * 3) {
+                    l.starPos = new Float32Array(st.n * 3);
+                    l.starFlags = new Uint8Array(st.n);
+                }
+                l.starPos.set(new Float32Array(st.pos, 0, st.n * 3));
+                l.starFlags.set(new Uint8Array(st.flags, 0, st.n));
                 l.rosette = (st.rosette ?? []).map(r => ({
                     buf: Float32Array.from(r.pts), count: r.count,
                 }));
@@ -302,6 +381,7 @@ class PhysicsSystem {
         l.history = buildHistory(l.sc);
         l.choreo = null; l.shells = []; l.rosette = [];
         l.trails.forEach(t => t.clear());
+        if (res.sel?.laneId === id) res.clearSel?.();   // star identities resample
         res.rebuildTauAxis();
         if (this.worker) {
             this.worker.postMessage({ type: 'reconfigure', id, overrides: l.overrides });
@@ -383,6 +463,108 @@ class TrailSystem {
     }
 }
 
+// ═══ InspectSystem — tap a star, get its live physics from the engine ════════
+// Tap detection rides alongside CameraSystem's pointer handling (a clean tap
+// never trips the >5 px drag threshold). The marker and trail are read straight
+// off the transferred position buffers every frame; the derived quantities
+// (r, |v|, L/L_lc, specific energy) come from the worker's engine at ~4 Hz via
+// the 'inspect' round-trip — the fallback engine answers synchronously.
+class InspectSystem {
+    init(world) {
+        const res = world.res;
+        res.sel = null;
+        this.trail = new Trail(240);
+        res.clearSel = () => { res.sel = null; this.trail.clear(); this.render(res); };
+        const canvas = res.els.canvas;
+        let tap = null;
+        canvas.addEventListener('pointerdown', (e) => {
+            tap = e.isPrimary ? { x: e.clientX, y: e.clientY, t: performance.now() } : null;
+        });
+        canvas.addEventListener('pointermove', (e) => {
+            if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 5) tap = null;
+        });
+        canvas.addEventListener('pointerup', (e) => {
+            if (tap && e.isPrimary && performance.now() - tap.t < 500) this.pick(world, e);
+            tap = null;
+        });
+        canvas.addEventListener('pointercancel', () => { tap = null; });
+    }
+
+    /** Nearest pickable star within ~16 px of the tap, across visible lanes. */
+    pick(world, e) {
+        const res = world.res;
+        const rect = res.els.canvas.getBoundingClientRect();
+        const dpr = (res.renderer._fboSize?.[0] || 1) / Math.max(rect.width, 1);
+        const px = (e.clientX - rect.left) * dpr, py = (e.clientY - rect.top) * dpr;
+        let best = null, bestD = 16 * dpr;
+        for (const l of res.lanes()) {
+            if (!l.visible || !l.starPos) continue;
+            for (let i = 0; i < l.n; i++) {
+                const f = l.starFlags[i];
+                if (f === 1 || f === 2) continue;    // ejected/frozen: not studyable
+                const j = i * 3;
+                const s = res.renderer.worldToScreen(
+                    [l.starPos[j], l.starPos[j + 1], l.starPos[j + 2]]);
+                if (!s) continue;
+                const d = Math.hypot(s[0] - px, s[1] - py);
+                if (d < bestD) { bestD = d; best = { laneId: l.id, index: i }; }
+            }
+        }
+        this.trail.clear();
+        res.sel = best ? { ...best, star: null, marker: null, trailBuf: null } : null;
+        this._lastReq = 0;
+        this.render(res);
+    }
+
+    update(world, dt, wall) {
+        const res = world.res;
+        const sel = res.sel;
+        if (!sel) return;
+        const l = res.laneOf(sel.laneId);
+        if (!l?.starPos || sel.index >= l.n || !l.visible) { res.clearSel(); return; }
+        const j = sel.index * 3;
+        sel.marker = [l.starPos[j], l.starPos[j + 1], l.starPos[j + 2]];
+        if (res.playing) this.trail.push(sel.marker[0], sel.marker[1], sel.marker[2]);
+        sel.trailBuf = this.trail.count > 1
+            ? { buf: this.trail.ordered(), count: this.trail.count } : null;
+        if (wall - (this._lastReq ?? 0) > 250) {
+            this._lastReq = wall;
+            const n = l.state?.now;
+            const mBh = n && n.a > 0 ? l.sc.mTot : (l.history.events.remnant?.mass ?? 0);
+            res.requestInspect(sel.laneId, sel.index, mBh);
+            this.render(res);
+        }
+    }
+
+    render(res) {
+        const el = res.els.inspector; if (!el) return;
+        const sel = res.sel;
+        if (!sel) { el.hidden = true; el.innerHTML = ''; this._key = null; return; }
+        const l = res.laneOf(sel.laneId);
+        // head + close button are built once per selection (a stable DOM node,
+        // not rewritten on the refresh tick); only the value rows update
+        const key = sel.laneId + '#' + sel.index;
+        if (this._key !== key) {
+            this._key = key;
+            el.innerHTML =
+                `<div class="head" style="color:${l.def.css}">★ star #${sel.index} · ${l.def.name}` +
+                `<button type="button" aria-label="close inspector">✕</button></div>` +
+                `<div class="rows"></div>`;
+            el.querySelector('button').addEventListener('click', () => res.clearSel());
+        }
+        const st = sel.star;
+        const rows = [
+            ['status', st ? (['bound', 'EJECTED', 'escaped (frozen)', 'LOSS CONE'][st.flag] ?? '?') : '…'],
+            ['r · |v|', st ? `${fmtLen(st.r)} · ${st.v.toFixed(0)} km/s` : '—'],
+            ['L / L_lc', st && Number.isFinite(st.lRatio) ? st.lRatio.toFixed(2) : '—'],
+            ['E specific', st ? `${st.eSpec > 0 ? '+' : ''}${st.eSpec.toExponential(2)} (km/s)²` : '—'],
+        ];
+        el.querySelector('.rows').innerHTML =
+            rows.map(([k, v]) => `<div class="row"><span>${k}</span><b>${v}</b></div>`).join('');
+        el.hidden = false;
+    }
+}
+
 // ═══ CameraSystem ════════════════════════════════════════════════════════════
 class CameraSystem {
     init(world) {
@@ -460,15 +642,22 @@ class RenderSystem {
         const lanes = [];
         for (const l of res.lanes()) {
             if (!l.visible || !l.state) continue;
+            const extraLines = l.rosette.map((r, i) => ({
+                buf: r.buf, count: r.count,
+                color: [l.def.tint[0], l.def.tint[1], l.def.tint[2], 0.05 + 0.06 * (i + 1)],
+            }));
+            if (res.sel?.laneId === l.id && res.sel.trailBuf) {
+                extraLines.push({
+                    buf: res.sel.trailBuf.buf, count: res.sel.trailBuf.count,
+                    color: [0.45, 1.0, 0.9, 0.55],
+                });
+            }
             lanes.push({
                 pos: l.starPos, flags: l.starFlags, n: l.n,
                 bhs: l.renderBhs ?? l.state.bhs,
                 trails: l.trails,
                 tint: l.def.tint,
-                extraLines: l.rosette.map((r, i) => ({
-                    buf: r.buf, count: r.count,
-                    color: [l.def.tint[0], l.def.tint[1], l.def.tint[2], 0.05 + 0.06 * (i + 1)],
-                })),
+                extraLines,
                 shells: l.shells.map(sh => {
                     const age = (wall - sh.born) / 2800;
                     return {
@@ -484,7 +673,9 @@ class RenderSystem {
         for (const R of [0.1, 1, 10, 100, 1000, 10000]) {
             if (R > d * 0.02 && R < d * 2.5) rings.push(R);
         }
-        res.renderer.renderComposite({ lanes, rings, lensOn: true });
+        res.renderer.renderComposite({
+            lanes, rings, lensOn: true, marker: res.sel?.marker ?? null,
+        });
     }
 }
 
@@ -521,6 +712,16 @@ class HudSystem {
             const nice = (mant >= 5 ? 5 : mant >= 2 ? 2 : 1) * pow;
             res.els.scaleBar.style.width = Math.max(nice / wpp, 8) + 'px';
             res.els.scaleLabel.textContent = fmtLen(nice);
+        }
+        // engine chip: which physics backend, where, at what scale
+        if (res.els.engineChip) {
+            const eng = !res.physicsReady ? 'starting…'
+                : res.workerActive
+                    ? (res.engineType === 'wasm' ? 'Rust→WASM · worker thread' : 'JS · worker thread')
+                    : 'JS · main thread fallback';
+            const n = res.lanes()[0]?.n || res.laneN || 0;
+            const txt = n ? `${eng} · ${n.toLocaleString('en-US')} ★ / lane` : eng;
+            if (txt !== this._engine) { res.els.engineChip.textContent = txt; this._engine = txt; }
         }
         // event caption (latest, fading)
         if (res.els.eventCap) {
@@ -728,6 +929,7 @@ class UISystem {
     init(world) {
         const res = world.res;
         this.selected = 'a402';
+        res.audioLane = this.selected;
         this.renderLaneToggles(world);
         this.renderConstraints(world);
 
@@ -735,6 +937,18 @@ class UISystem {
             res.els.methods?.classList.add('open'));
         res.els.methodsClose?.addEventListener('click', () =>
             res.els.methods?.classList.remove('open'));
+
+        // stars-per-lane dial (engine rebuild; 'auto' → WASM 32768 / JS 3072)
+        res.els.nStars?.addEventListener('change', () => {
+            const v = res.els.nStars.value;
+            res.setStarCount(v === 'auto' ? null : parseInt(v, 10));
+        });
+
+        // mobile drawer for the rail
+        res.els.railToggle?.addEventListener('click', () =>
+            res.els.rail?.classList.toggle('open'));
+        res.els.railClose?.addEventListener('click', () =>
+            res.els.rail?.classList.remove('open'));
     }
 
     renderLaneToggles(world) {
@@ -755,6 +969,8 @@ class UISystem {
             div.querySelector('.sel').addEventListener('click', (e) => {
                 e.preventDefault();
                 this.selected = l.id;
+                res.audioLane = l.id;           // sonification follows the selection
+                res.onAudioLaneChange?.();
                 this.renderConstraints(world);
             });
             box.appendChild(div);
@@ -825,4 +1041,27 @@ class UISystem {
     }
 
     update() { }
+}
+
+// ═══ AudioSystem — GW chirp sonification following the selected system ═══════
+class AudioSystem {
+    init(world) {
+        const res = world.res;
+        this.audio = new GwAudio();
+        res.els.audioBtn?.addEventListener('click', () => this.sync(res, this.audio.toggle()));
+        res.onAudioLaneChange = () => this.sync(res, this.audio.on);
+    }
+
+    sync(res, on) {
+        const btn = res.els.audioBtn; if (!btn) return;
+        const l = res.laneOf(res.audioLane ?? 'a402');
+        btn.textContent = on ? `🔊 GW · ${l.def.name.split(' ')[0]} · f ×3·10¹⁰` : '🔇 GW audio';
+        btn.style.borderColor = on ? l.def.css : '';
+    }
+
+    update(world) {
+        const res = world.res;
+        const n = res.laneOf(res.audioLane ?? 'a402')?.state?.now;
+        this.audio.update(n?.fgw ?? 0, n?.h ?? 0);
+    }
 }

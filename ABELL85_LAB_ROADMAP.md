@@ -1,6 +1,6 @@
 # Abell 85 Pair Timeline Lab — Enhancement Roadmap to Research Grade
 
-**Pages:** `abell85.html` (lab) · `holm15a.html` (cinematic) · `merger-twins.html` (parallel observatory) · **Status:** Phases 1–3 + Twins shipped; Phase 4 next
+**Pages:** `blackhole-observatory.html` (unified) · `abell85.html` (lab) · `holm15a.html` (cinematic) · `merger-twins.html` (parallel observatory) · **Status:** Phases 1–3, Twins, Observatory + Phase 4 core (Rust→WASM engine) shipped
 **Goal:** the highest-grade *studyable* environment for ultramassive black hole binary
 evolution on the open web — every number inspectable, every approximation labeled,
 every claim traceable to `ABELL85_PAIR_SOURCE_CATALOG.md`.
@@ -143,13 +143,32 @@ OPENED: every dial tagged measured/inferred/assumed/free with its source, drivin
 history rebuilds (raise B2's refill and the stuck pair acquires a coalescence on the shared
 axis). Nav consolidated to this single entry; the three source pages remain reachable.
 
-## Phase 4 — Scale & performance
+Folded in from the lab (second pass): **star inspector** — tap any bound star in any lane
+for a pinned marker + trail and its live state (r, |v|, L/L_lc, specific energy) streamed
+from the engine over a worker `inspect` round-trip; **GW sonification** (`gwaudio.js`,
+shared with the lab) following whichever system's constraints are selected; **mobile rail**
+as a slide-in drawer (⚙ in the dock) with touch-sized targets.
 
-- **N-body in Rust → WASM** (fits the existing `build-wasm.sh` pipeline): 10⁵+ stars at
-  60 fps, per-particle adaptive substeps for close encounters, optional Barnes–Hut for
-  star–star self-gravity inside the core.
-- **WebGPU compute path** with WebGL2 fallback, mirroring the ton618 backend split.
-- Deterministic replay preserved (fixed-seed, fixed-step reproducibility contract).
+## Phase 4 — Scale & performance  ✅ CORE SHIPPED
+
+- ✅ **N-body in Rust → WASM**: `rust-abell85/` → `js/abell85-wasm/abell85_nbody.wasm`
+  (raw wasm, no bindgen; built by `build-wasm.sh`, committed binary as deploy fallback),
+  loaded inside the same sim worker. The kernel is a **bit-exact** port of the JS engine —
+  it mirrors the JS typed arrays' float32 store/reload sequence — so identical seeds give
+  identical clusters on either backend (asserted in `tests/abell85-physics.mjs`, check 22,
+  including the allocation-reusing `rebind()` reconfigure path). The engine chip in the
+  observatory rail shows which backend is live; JS takes over transparently when WASM or
+  the Worker is unavailable.
+- ✅ **Per-particle adaptive substeps** (both engines, identical rule so parity holds):
+  full 0.05 Myr resolution only for stars near the holes / the cusp (tier radii scale with
+  r_infl, chosen from frame-start geometry); the outer halo takes one KDK per frame.
+  Measured: 3 lanes × 32,768 stars ≈ 26 ms/physics-frame (~9× over uniform substeps);
+  131,072/lane ≈ 100 ms — the "stars / lane" dial in the observatory goes to 131,072.
+- ✅ Deterministic replay preserved (fixed-seed reproducibility contract intact across
+  engines; ICs sampled by the same JS code writing into WASM memory).
+- Remaining: **WebGPU compute path** with WebGL2 fallback (ton618 backend split);
+  Barnes–Hut star–star self-gravity inside the core; Mikkola–Merritt auxiliary-velocity
+  leapfrog for the PN endgame.
 
 ## Phase 5 — Study tooling
 

@@ -485,4 +485,96 @@ const { qnm220, MergerChoreo } = await import('../js/abell85/merger.js');
         `${sb.now.a.toFixed(1)} pc and un-stuck by refill=0.9`);
 }
 
+// ── 22. WASM kernel parity (skips with a warning if artifact not built) ─────
+{
+    const { readFile } = await import('node:fs/promises');
+    let wasmBytes = null;
+    try {
+        wasmBytes = await readFile(new URL('../js/abell85-wasm/abell85_nbody.wasm', import.meta.url));
+    } catch { /* not built */ }
+    if (!wasmBytes) {
+        console.log('  ⚠ wasm parity SKIPPED — run build-wasm.sh (or cargo build in rust-abell85/)');
+    } else {
+        const { WasmCluster } = await import('../js/abell85/wasmcluster.js');
+        const { instance } = await WebAssembly.instantiate(wasmBytes, {});
+        const sc = makeScenario('holm15a');
+        const js = new StarCluster(sc, 2048, 42);
+        const wa = new WasmCluster(sc, 2048, 42, instance);
+        // identical deterministic ICs (same sampler)
+        let icMax = 0;
+        for (let i = 0; i < js.pos.length; i++) {
+            icMax = Math.max(icMax, Math.abs(js.pos[i] - wa.pos[i]));
+        }
+        assert.ok(icMax === 0, `ICs bit-identical (max Δ ${icMax})`);
+        // (1) SMOOTH-regime trajectory parity: host potential only (no holes)
+        //     — non-chaotic, so the engines must track each other tightly
+        for (let k = 0; k < 30; k++) {
+            js.step(0.5, [0, 0, 0], 0, [0, 0, 0], 0);
+            wa.step(0.5, [0, 0, 0], 0, [0, 0, 0], 0);
+        }
+        let worst = 0;
+        for (let i = 0; i < js.pos.length; i++) {
+            worst = Math.max(worst,
+                Math.abs(js.pos[i] - wa.pos[i]) / Math.max(Math.abs(js.pos[i]), 1));
+        }
+        assert.ok(worst < 1e-4, `smooth-regime parity ${worst}`);
+        // (2) STATISTICAL parity with the binary active: slingshots are chaotic
+        //     (float32 rounding-point differences amplify exponentially per
+        //     star), so the honest contract is ensemble statistics, not
+        //     per-star microstates.
+        js.reset(0); wa.reset(0);
+        for (let k = 0; k < 60; k++) {
+            const ang = k * 0.3;
+            const b1 = [40 * Math.cos(ang), 0, 40 * Math.sin(ang)];
+            const b2 = [-40 * Math.cos(ang), 0, -40 * Math.sin(ang)];
+            js.step(0.5, b1, sc.m1, b2, sc.m2);
+            wa.step(0.5, b1, sc.m1, b2, sc.m2);
+        }
+        const meanR = (c) => {
+            let s = 0, m = 0;
+            for (let i = 0; i < c.n; i++) {
+                if (c.flags[i] === 1 || c.flags[i] === 2) continue;
+                const j = i * 3;
+                s += Math.hypot(c.pos[j], c.pos[j + 1], c.pos[j + 2]); m++;
+            }
+            return s / m;
+        };
+        const rj = meanR(js), rw = meanR(wa);
+        assert.ok(Math.abs(rj - rw) / rj < 0.02, `bound mean radius ${rj} vs ${rw}`);
+        assert.ok(Math.abs(wa.ejectedCount - js.ejectedCount) <=
+            Math.max(4, 0.25 * js.ejectedCount + 2),
+            `ejections statistically consistent (${wa.ejectedCount} vs ${js.ejectedCount})`);
+        const cj = js.classify(sc.mTot, 100), cw = wa.classify(sc.mTot, 100);
+        assert.ok(Math.abs(cw.nCone - cj.nCone) <= Math.max(6, 0.15 * cj.nCone),
+            `cone counts consistent (${cw.nCone} vs ${cj.nCone})`);
+        assert.ok(Math.abs(cw.lLc - cj.lLc) < 1e-9);
+        const ejJ = js.ejectedCount, ejW = wa.ejectedCount;   // rebind resets them
+        // (3) reconfigure path: rebind() must REUSE the WASM allocations (the
+        //     kernel's bump allocator never frees) and resample bit-identically
+        //     to a fresh JS cluster of the new scenario
+        const sc2 = makeScenario('holm15a', { eccH: 0.5 });
+        const js2 = new StarCluster(sc2, 2048, 42);
+        const posPtr = wa._pPos;
+        wa.rebind(sc2);
+        assert.ok(wa._pPos === posPtr, 'rebind reuses the same WASM allocation');
+        let icMax2 = 0;
+        for (let i = 0; i < js2.pos.length; i++) {
+            icMax2 = Math.max(icMax2, Math.abs(wa.pos[i] - js2.pos[i]));
+        }
+        assert.ok(icMax2 === 0, `rebind ICs bit-identical (max Δ ${icMax2})`);
+        assert.ok(Math.abs(wa.mParticle - js2.mParticle) < 1e-9, 'rebind mParticle refreshed');
+        // capacity smoke: 65k stars step in bounded time
+        const big = new WasmCluster(sc, 65536, 7, instance);
+        const t0 = performance.now();
+        big.step(0.5, [40, 0, 0], sc.m1, [-40, 0, 0], sc.m2);
+        const ms = performance.now() - t0;
+        assert.ok(ms < 400, `65k-star frame took ${ms.toFixed(0)} ms`);
+        ok(`WASM kernel parity: ICs bit-identical, smooth-regime Δ ` +
+            `${worst.toExponential(1)}, ensemble stats consistent (⟨r⟩ ` +
+            `${rj.toFixed(0)}≈${rw.toFixed(0)} pc, ej ${ejJ}/${ejW}, ` +
+            `cone ${cj.nCone}/${cw.nCone}), rebind reuses buffers; ` +
+            `65,536-star frame in ${ms.toFixed(0)} ms`);
+    }
+}
+
 console.log(`\nabell85-physics: all ${n} checks passed`);

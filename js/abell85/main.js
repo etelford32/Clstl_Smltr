@@ -21,6 +21,7 @@ import {
 } from './observables.js';
 import { orbitalBasis, bodiesAt } from './geometry.js';
 import { MergerChoreo } from './merger.js';
+import { GwAudio } from './gwaudio.js';
 import { Renderer, Trail } from './render.js';
 import { GodCamera } from './camera.js';
 import { Diagnostics } from './diagnostics.js';
@@ -32,47 +33,6 @@ const OBS_REFS = {
     a402: { rGammaPc: 2200, rGammaSrc: 'McDonald+26 core', sigma: null },
     b20402: {},
 };
-
-const GW_AUDIO_SHIFT = 3e10;    // audio Hz per physical Hz — displayed in the UI
-
-/** WebAudio sonification of the GW chirp (frequency-shifted, factor shown). */
-class GwAudio {
-    constructor() { this.on = false; this.ctx = null; }
-    toggle() {
-        if (!this.on) {
-            if (!this.ctx) {
-                const AC = window.AudioContext || window.webkitAudioContext;
-                if (!AC) return false;
-                this.ctx = new AC();
-                this.osc = this.ctx.createOscillator();
-                this.osc.type = 'sine';
-                this.gain = this.ctx.createGain();
-                this.gain.gain.value = 0;
-                this.osc.connect(this.gain).connect(this.ctx.destination);
-                this.osc.start();
-            }
-            this.ctx.resume();
-            this.on = true;
-        } else {
-            this.gain?.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
-            this.on = false;
-            setTimeout(() => { if (!this.on) this.ctx?.suspend(); }, 250);
-        }
-        return this.on;
-    }
-    update(fgw, strain) {
-        if (!this.on || !this.ctx) return;
-        const t = this.ctx.currentTime;
-        if (fgw > 0 && strain > 0) {
-            const f = Math.min(Math.max(fgw * GW_AUDIO_SHIFT, 25), 2600);
-            this.osc.frequency.setTargetAtTime(f, t, 0.08);
-            const g = 0.2 * Math.min(Math.max((Math.log10(strain) + 17.5) / 4, 0), 1);
-            this.gain.gain.setTargetAtTime(g, t, 0.1);
-        } else {
-            this.gain.gain.setTargetAtTime(0, t, 0.1);
-        }
-    }
-}
 
 const DT_LIVE_MAX = 0.6;        // Myr of cluster time we can honestly integrate per frame
 const RESYNC_GAP = 150;         // Myr of cluster-vs-timeline lag before statistical resync

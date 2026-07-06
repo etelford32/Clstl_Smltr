@@ -69,6 +69,11 @@ body { font-family:'Courier New',monospace; background:#000; color:#c8cbe0; over
 .tag-assumed  { background:rgba(255,150,90,.15); color:#ffab70; }
 .tag-free     { background:rgba(138,123,255,.15); color:#b0a5ff; }
 
+.obs-rail-close { display:none; }
+.obs-engine { font-size:10px; color:#9fb4d8; padding:2px 0 4px; }
+.obs-nstars { display:flex; align-items:center; gap:6px; font-size:10.5px; color:#aab; }
+.obs-nstars select { flex:1; background:#111426; color:#dde; border:1px solid var(--pp-accent-border); font-family:inherit; font-size:10.5px; padding:2px; }
+
 .obs-presets { margin-top:10px; }
 .obs-presets button {
     font-family:inherit; font-size:10px; background:var(--pp-accent-soft); color:#cfd0ff;
@@ -101,6 +106,21 @@ body { font-family:'Courier New',monospace; background:#000; color:#c8cbe0; over
 .obs-scalebar { position:absolute; bottom:12px; left:12px; display:flex; align-items:center; gap:7px; pointer-events:none; }
 .obs-scalebar .bar { height:0; border-top:2px solid #cfd0ff; border-left:2px solid #cfd0ff; border-right:2px solid #cfd0ff; padding-top:3px; }
 .obs-scalebar span { font-size:10.5px; color:#dfe1ff; text-shadow:0 0 4px #000; }
+.obs-inspector {
+    position:absolute; right:10px; bottom:12px; width:236px; font-size:10.5px;
+    background:var(--pp-surface-1); border:1px solid var(--pp-accent-border);
+    border-radius:6px; padding:7px 9px;
+}
+.obs-inspector .head { display:flex; align-items:center; gap:6px; font-weight:700; margin-bottom:4px; }
+.obs-inspector .head button {
+    margin-left:auto; font-family:inherit; font-size:10px; background:transparent; color:#9aa;
+    border:1px solid var(--pp-accent-border); border-radius:4px; padding:1px 6px; cursor:pointer;
+}
+.obs-inspector .row { display:flex; justify-content:space-between; gap:8px; padding:1.5px 0; border-bottom:1px dotted rgba(138,123,255,.12); }
+.obs-inspector .row span { color:#889; }
+.obs-inspector .row b { color:#dfe1ff; text-align:right; }
+
+.obs-rail-toggle { display:none; }
 .obs-views { position:absolute; top:10px; right:10px; display:flex; gap:6px; }
 .obs-views button, .obs-timerow button, .obs-timerow select {
     font-family:inherit; font-size:11px; background:var(--pp-surface-2); color:#cfd0ff;
@@ -143,12 +163,37 @@ canvas.obs-chart { height:100%; border:1px solid rgba(138,123,255,.18); border-r
 @media (max-width: 900px) {
     body { overflow:auto; }
     .obs-app { position:static; height:auto; flex-direction:column; }
-    .obs-rail { width:100%; border-right:none; border-bottom:1px solid var(--pp-accent-border); max-height:40vh; }
-    .obs-stage { height:50vh; }
+    /* rail becomes a slide-in drawer so the canvas keeps the full viewport */
+    .obs-rail {
+        position:fixed; z-index:55; top:56px; bottom:0; left:0;
+        width:min(85vw, 340px); background:rgb(8,7,18);
+        transform:translateX(-105%); transition:transform .22s ease;
+        box-shadow:6px 0 24px rgba(0,0,0,.55);
+        -webkit-overflow-scrolling:touch; overscroll-behavior:contain;
+    }
+    .obs-rail.open { transform:none; }
+    .obs-rail-close {
+        display:block; font-family:inherit; font-size:11px; align-self:flex-end;
+        background:var(--pp-surface-2); color:#cfd0ff; cursor:pointer;
+        border:1px solid var(--pp-accent-border); border-radius:4px; padding:7px 12px;
+    }
+    .obs-rail-toggle { display:inline-block; }
+    .obs-stage { height:52vh; }
     .obs-analytics { flex-direction:column; height:auto; }
     canvas.obs-chart { height:110px; width:100%; }
-    .obs-timerow { flex-wrap:wrap; }
-    .obs-timerow .tau { min-width:0; }
+    .obs-timerow { flex-wrap:wrap; row-gap:6px; }
+    .obs-timerow .tau { min-width:0; font-size:10.5px; text-align:left; flex-basis:100%; order:9; }
+    .obs-timerow input[type=range] { flex-basis:100%; order:8; height:28px; }
+    /* comfortable touch targets */
+    .obs-timerow button, .obs-timerow select { padding:8px 12px; font-size:12px; }
+    .obs-views button { padding:7px 11px; font-size:12px; }
+    .obs-lane { padding:10px 8px; }
+    .obs-lane .sel { padding:6px 10px; }
+    .obs-presets button { padding:7px 10px; margin:3px 4px 3px 0; }
+    .obs-ctl input[type=range] { height:28px; }
+    .obs-nstars select { padding:6px; }
+    .obs-inspector { width:200px; right:8px; bottom:8px; }
+    .obs-chips { max-width:78%; }
 }
 </style>
 <script type="application/ld+json">
@@ -171,10 +216,24 @@ canvas.obs-chart { height:100%; border:1px solid rgba(138,123,255,.18); border-r
 <script type="module">import { initNav } from "./js/nav.js?v=20260706"; initNav("blackhole-observatory");</script>
 
 <div class="obs-app">
-    <aside class="obs-rail">
+    <aside id="rail" class="obs-rail">
+        <button id="railClose" type="button" class="obs-rail-close">✕ close panel</button>
         <div>
             <h2>Systems · stacked on one canvas</h2>
             <div id="laneToggles"></div>
+        </div>
+        <div>
+            <h2>Engine</h2>
+            <div id="engineChip" class="obs-engine">starting…</div>
+            <label class="obs-nstars">stars / lane
+                <select id="nStars" title="test particles per system — WASM kernel makes 10⁵+ affordable">
+                    <option value="auto" selected>auto</option>
+                    <option value="8192">8,192</option>
+                    <option value="32768">32,768</option>
+                    <option value="65536">65,536</option>
+                    <option value="131072">131,072</option>
+                </select>
+            </label>
         </div>
         <div id="constraints"></div>
     </aside>
@@ -185,6 +244,7 @@ canvas.obs-chart { height:100%; border:1px solid rgba(138,123,255,.18); border-r
             <div id="chips" class="obs-chips"></div>
             <div id="eventCap" class="obs-event"></div>
             <div class="obs-scalebar"><div id="scaleBar" class="bar"></div><span id="scaleLabel">—</span></div>
+            <div id="inspector" class="obs-inspector" hidden></div>
             <div class="obs-views">
                 <button id="viewCore" type="button">core</button>
                 <button id="viewInfl" type="button">influence</button>
@@ -193,6 +253,7 @@ canvas.obs-chart { height:100%; border:1px solid rgba(138,123,255,.18); border-r
         </div>
         <div class="obs-dock">
             <div class="obs-timerow">
+                <button id="railToggle" type="button" class="obs-rail-toggle" title="systems &amp; constraints">⚙</button>
                 <button id="playBtn" type="button">⏸</button>
                 <select id="speed" title="playback speed">
                     <option value="0.25">¼×</option>
@@ -203,6 +264,7 @@ canvas.obs-chart { height:100%; border:1px solid rgba(138,123,255,.18); border-r
                        title="shared timeline in τ = time to coalescence">
                 <span id="tauLabel" class="tau">—</span>
                 <label>follow binaries <input id="follow" type="checkbox"></label>
+                <button id="audioBtn" type="button" title="sonified GW chirp of the selected system (frequency ×3·10¹⁰)">🔇 GW audio</button>
             </div>
             <div class="obs-analytics">
                 <canvas id="chartTau" class="obs-chart" title="click to scrub"></canvas>
@@ -239,6 +301,25 @@ canvas.obs-chart { height:100%; border:1px solid rgba(138,123,255,.18); border-r
                 as transferables and are ping-ponged, so the steady state allocates nothing. A
                 synchronous fallback runs the identical engine on the main thread if workers are
                 unavailable.</li>
+            <li><b>Rust→WASM N-body kernel</b>: inside that worker the star-cluster KDK
+                integrator and loss-cone classifier run as a Rust kernel compiled to
+                WebAssembly (<code>rust-abell85</code> → <code>abell85_nbody.wasm</code>),
+                making 10⁵+ test particles per lane affordable — the "stars / lane" dial in
+                the left rail goes to 131,072. Substeps are per-star adaptive: full 0.05 Myr
+                resolution goes to stars near the holes and the cusp, while the slow outer halo
+                takes one kick–drift–kick per frame. The kernel is a <em>bit-exact</em> port of
+                the JavaScript engine (same substep rule, same float32 store/reload sequence),
+                asserted in the test suite: identical seeds give identical clusters on either
+                backend.
+                The engine chip shows which backend is live; if WASM or the worker is
+                unavailable the JS engine takes over transparently.</li>
+            <li><b>Star inspector</b>: tap any bound star in any lane to pin a marker and
+                trail on it and stream its live state — radius, speed, angular momentum
+                relative to the loss-cone boundary L/L_lc = L/√(2GM_bin·a), and specific
+                orbital energy — from the physics engine.</li>
+            <li><b>GW sonification</b>: the dock's audio button plays the selected system's
+                chirp, frequency-shifted by the honest factor ×3·10¹⁰ (these binaries emit at
+                nanohertz); pitch tracks f_GW, loudness tracks log-strain.</li>
             <li><b>ECS</b>: an explicit entity-component-system (<code>ecs.js</code>) wires
                 Timeline → Physics → Choreography → Trails → Camera → Render → HUD → Analytics →
                 UI, one system per concern, all state inspectable.</li>
@@ -285,6 +366,9 @@ try {
         chips: $('chips'), eventCap: $('eventCap'),
         scaleBar: $('scaleBar'), scaleLabel: $('scaleLabel'),
         laneToggles: $('laneToggles'), constraints: $('constraints'),
+        rail: $('rail'), railToggle: $('railToggle'), railClose: $('railClose'),
+        engineChip: $('engineChip'), nStars: $('nStars'),
+        inspector: $('inspector'), audioBtn: $('audioBtn'),
         playBtn: $('playBtn'), speed: $('speed'),
         timeline: $('timeline'), tauLabel: $('tauLabel'), follow: $('follow'),
         viewCore: $('viewCore'), viewInfl: $('viewInfl'),

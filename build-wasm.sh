@@ -62,6 +62,21 @@ else
 fi
 cd ..
 
+# ── Build Black Hole Observatory N-body kernel ───────────────
+# Pure extern-C exports (no wasm-bindgen dependency): the raw .wasm IS the
+# artifact, loaded with WebAssembly.instantiate in js/abell85/simworker.js.
+# The compiled binary is also committed at js/abell85-wasm/abell85_nbody.wasm
+# (rust/www precedent) so deploys and tests survive toolchain hiccups; this
+# step refreshes it when the toolchain is available.
+echo "Building abell85 N-body kernel WASM..."
+if (cd rust-abell85 && cargo build --release --target wasm32-unknown-unknown); then
+    mkdir -p js/abell85-wasm
+    cp rust-abell85/target/wasm32-unknown-unknown/release/abell85_nbody.wasm \
+       js/abell85-wasm/abell85_nbody.wasm
+else
+    echo "WARN: rust-abell85 build failed — serving committed js/abell85-wasm binary."
+fi
+
 # ── Build star renderer (solar flare sim) ─────────────────────
 # NOT built on Vercel. The Bevy dep graph (~479 crates) is too fragile for
 # Vercel's older rustc — a transitive `constant_time_eq 0.4.3` release broke
