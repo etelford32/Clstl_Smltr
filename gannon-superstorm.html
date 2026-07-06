@@ -411,6 +411,22 @@ body {
     </section>
 
     <section class="gn-panel" style="margin-top:14px;">
+      <h2>Atmosphere thickening — the storm puffs up the thermosphere</h2>
+      <div id="gn-atmosphere" class="gn-chart gn-pulse" style="height:300px;">Thermosphere cross-section renders here</div>
+      <div class="gn-legend" style="margin-top:8px;">
+        <div class="gn-legend-row"><span style="display:inline-block;width:14px;height:8px;background:linear-gradient(90deg,#3fa8d8,#ff9a3d);border-radius:2px;"></span> Density profile now (colour = local temperature)</div>
+        <div class="gn-legend-row"><span style="display:inline-block;width:14px;height:0;border-top:1.5px dashed rgba(255,255,255,.45);"></span> Quiet-day profile (Ap 15) — the "before"</div>
+        <div class="gn-legend-row"><span style="display:inline-block;width:14px;height:0;border-top:1.5px dashed #ffd24d;"></span> Altitude where the air is as dense as quiet-day 400 km — watch it climb</div>
+        <div class="gn-legend-row"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#cfd8ff;"></span> Satellite at the 400 km reference — drag streak grows with ρ</div>
+      </div>
+      <p style="font-size:.72rem; color:#8ab; margin:6px 0 0;">
+        Joule heating raises the exospheric temperature, and the thermosphere expands upward
+        into the constellation's path — same MSIS-class surrogate as the density chart,
+        driven by the Ap* MHD track at the cursor.
+      </p>
+    </section>
+
+    <section class="gn-panel" style="margin-top:14px;">
       <h2>Ap saturation — three tracks overlaid</h2>
       <div id="gn-chart-ap" class="gn-chart gn-pulse">Ap timeseries renders here</div>
       <div class="gn-legend">
@@ -569,7 +585,8 @@ body {
 import { loadReplay, createPlayer, skillSummary } from './js/gannon-superstorm-engine.js?v=3';
 import { createApSaturationChart, createDensityChart, createResidualsChart } from './js/gannon-superstorm-charts.js?v=5';
 import { createNarrationBand } from './js/gannon-superstorm-narration.js?v=2';
-import { createSunEarthScene } from './js/gannon-superstorm-sun-earth.js?v=3';
+import { createSunEarthScene } from './js/gannon-superstorm-sun-earth.js?v=4';
+import { createAtmospherePanel } from './js/gannon-superstorm-atmosphere.js?v=1';
 
 const els = {
     scrub:    document.getElementById('gn-scrubber'),
@@ -715,6 +732,10 @@ function paint(sample) {
     );
     const sunEarth = createSunEarthScene(
         document.getElementById('gn-sun-earth'),
+        replay, player, sharedOpts,
+    );
+    const atmoPanel = createAtmospherePanel(
+        document.getElementById('gn-atmosphere'),
         replay, player, sharedOpts,
     );
 
@@ -940,6 +961,7 @@ function paint(sample) {
         const s = player.seekHours(h);
         paint(s);
         sunEarth.setCursor(h);
+        atmoPanel.setCursor(h);
         apChart.setCursor(h);
         rhoChart.setCursor(h);
         resChart.setCursor(h);
