@@ -84,3 +84,5 @@ swmf/runs_docker/
 swmf/raw/
 swmf/.venv/
 dsmc/raw/
+.vercel
+.env*
