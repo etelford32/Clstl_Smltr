@@ -38,20 +38,38 @@ body {
 
 .bp-wrap { max-width:760px; margin:0 auto; padding:88px 20px 80px; }
 
-/* ── language switcher ── */
-.bp-langs {
-    display:flex; gap:8px; justify-content:flex-end; margin-bottom:28px;
+/* ── language dropdown (flag) ── */
+.bp-langdd {
+    position:relative; display:flex; justify-content:flex-end; margin-bottom:28px;
 }
-.bp-langs button {
+.bp-langdd summary {
+    list-style:none; cursor:pointer; user-select:none;
+    display:inline-flex; align-items:center; gap:8px;
     background:rgba(160,128,255,.08); border:1px solid rgba(160,128,255,.25);
-    color:#b9aef0; font:inherit; font-size:.78rem; font-weight:600;
-    padding:5px 14px; border-radius:999px; cursor:pointer;
-    transition:background .15s, color .15s;
+    color:#b9aef0; font-size:.8rem; font-weight:600;
+    padding:6px 14px; border-radius:999px;
+    transition:background .15s;
 }
-.bp-langs button:hover { background:rgba(160,128,255,.18); }
-.bp-langs button[aria-pressed="true"] {
-    background:linear-gradient(45deg,#7b5cff,#4fc3f7); color:#040210; border-color:transparent;
+.bp-langdd summary::-webkit-details-marker { display:none; }
+.bp-langdd summary:hover { background:rgba(160,128,255,.18); }
+.bp-langdd summary .flag { font-size:1.05rem; line-height:1; }
+.bp-langdd summary .chev { font-size:.6rem; color:#8d85b8; transition:transform .15s; }
+.bp-langdd[open] summary .chev { transform:rotate(180deg); }
+.bp-langdd .menu {
+    position:absolute; top:calc(100% + 6px); right:0; z-index:60;
+    min-width:170px; padding:6px;
+    background:#0c0824; border:1px solid rgba(123,92,255,.35);
+    border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.55);
 }
+.bp-langdd .menu button {
+    display:flex; align-items:center; gap:10px; width:100%;
+    background:none; border:0; color:#d0cce8; font:inherit; font-size:.82rem;
+    padding:8px 10px; border-radius:7px; cursor:pointer; text-align:left;
+}
+.bp-langdd .menu button:hover { background:rgba(160,128,255,.14); }
+.bp-langdd .menu button[aria-pressed="true"] { color:#f0edff; background:rgba(123,92,255,.20); }
+.bp-langdd .menu .flag { font-size:1.05rem; line-height:1; }
+.bp-langdd .menu .check { margin-left:auto; color:#4fc3f7; font-size:.75rem; }
 
 /* ── article ── */
 article[data-lang] { display:none; }
@@ -120,11 +138,18 @@ em { color:#cfc6f2; }
 
 <main class="bp-wrap">
 
-  <div class="bp-langs" role="group" aria-label="Article language">
-    <button data-setlang="en" aria-pressed="true">English</button>
-    <button data-setlang="es" aria-pressed="false">Español</button>
-    <button data-setlang="fr" aria-pressed="false">Français</button>
-  </div>
+  <details class="bp-langdd" id="bp-langdd">
+    <summary aria-label="Article language">
+      <span class="flag" id="bp-lang-flag">🇺🇸</span>
+      <span id="bp-lang-name">English</span>
+      <span class="chev">▼</span>
+    </summary>
+    <div class="menu" role="menu" aria-label="Choose language">
+      <button role="menuitem" data-setlang="en" aria-pressed="true"><span class="flag">🇺🇸</span> English <span class="check">✓</span></button>
+      <button role="menuitem" data-setlang="es" aria-pressed="false"><span class="flag">🇪🇸</span> Español <span class="check" hidden>✓</span></button>
+      <button role="menuitem" data-setlang="fr" aria-pressed="false"><span class="flag">🇫🇷</span> Français <span class="check" hidden>✓</span></button>
+    </div>
+  </details>
 
   <!-- ═══════════════════════ ENGLISH ═══════════════════════ -->
   <article data-lang="en" class="bp-active">
@@ -269,20 +294,42 @@ em { color:#cfc6f2; }
 <script>
 (() => {
     const KEY = 'pp-blog-lang';
-    const supported = ['en', 'es', 'fr'];
-    const buttons = document.querySelectorAll('.bp-langs button');
+    const META = {
+        en: { flag: '🇺🇸', name: 'English'  },
+        es: { flag: '🇪🇸', name: 'Español'  },
+        fr: { flag: '🇫🇷', name: 'Français' },
+    };
+    const dd      = document.getElementById('bp-langdd');
+    const flagEl  = document.getElementById('bp-lang-flag');
+    const nameEl  = document.getElementById('bp-lang-name');
+    const buttons = dd.querySelectorAll('.menu button');
 
     function setLang(lang) {
-        if (!supported.includes(lang)) lang = 'en';
+        if (!META[lang]) lang = 'en';
         document.querySelectorAll('article[data-lang]').forEach(a =>
             a.classList.toggle('bp-active', a.dataset.lang === lang));
-        buttons.forEach(b =>
-            b.setAttribute('aria-pressed', String(b.dataset.setlang === lang)));
+        buttons.forEach(b => {
+            const active = b.dataset.setlang === lang;
+            b.setAttribute('aria-pressed', String(active));
+            b.querySelector('.check').hidden = !active;
+        });
+        flagEl.textContent = META[lang].flag;
+        nameEl.textContent = META[lang].name;
         document.documentElement.lang = lang;
         try { localStorage.setItem(KEY, lang); } catch (_) { /* private mode */ }
     }
 
-    buttons.forEach(b => b.addEventListener('click', () => setLang(b.dataset.setlang)));
+    buttons.forEach(b => b.addEventListener('click', () => {
+        setLang(b.dataset.setlang);
+        dd.removeAttribute('open');
+    }));
+    // Close on outside click / Escape.
+    document.addEventListener('click', e => {
+        if (dd.hasAttribute('open') && !dd.contains(e.target)) dd.removeAttribute('open');
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') dd.removeAttribute('open');
+    });
 
     let initial = null;
     try { initial = localStorage.getItem(KEY); } catch (_) { /* private mode */ }
