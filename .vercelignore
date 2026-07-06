@@ -45,3 +45,12 @@ test_*.py
 # *.md
 # DEPLOYMENT.md
 # QUICK_START.md
+
+# SWMF/DSMC workstation artifacts — simulation run dirs, raw data pulls,
+# and host venvs are gigabytes and never served (fixtures ARE deployed)
+swmf/runs/
+swmf/runs_docker/
+swmf/raw/
+swmf/.venv/
+dsmc/raw/
+rust-abell85/target/
