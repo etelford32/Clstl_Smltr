@@ -332,10 +332,138 @@ function drawUpperAtmosphere(ctx, w, h, t) {
   ctx.beginPath(); ctx.arc(cx, cy, rEarth * 1.1, 0, Math.PI * 2); ctx.fill();
 }
 
+// ── Poster-only scenes (no SIM_URLS entry — used by the home depth ladder,
+//    which stays canvas-only so the live-iframe budget belongs to the grid) ──
+
+function drawAurora(ctx, w, h, t) {
+  ctx.clearRect(0, 0, w, h);
+  // night sky + stars
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 40; i++) {
+    const sx = noise(i, 30) * w, sy = noise(i, 31) * h * 0.7;
+    ctx.globalAlpha = 0.2 + noise(i, 32) * 0.4;
+    ctx.beginPath(); ctx.arc(sx, sy, 0.4 * DPR, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // aurora curtains — vertical green columns waving above the horizon
+  ctx.globalCompositeOperation = 'lighter';
+  const horizon = h * 0.78;
+  for (let i = 0; i < 22; i++) {
+    const x = (i / 22) * w + Math.sin(t * 0.6 + i * 0.8) * w * 0.015;
+    const len = h * (0.28 + 0.22 * noise(i, 33) + 0.10 * Math.sin(t * 1.4 + i * 1.7));
+    const a = 0.10 + 0.10 * Math.sin(t * 2.2 + i * 1.3);
+    const g = ctx.createLinearGradient(0, horizon - len, 0, horizon);
+    g.addColorStop(0, 'rgba(46,255,158,0)');
+    g.addColorStop(0.55, `rgba(46,255,158,${a})`);
+    g.addColorStop(0.9, `rgba(157,58,255,${a * 0.55})`);
+    g.addColorStop(1, 'rgba(157,58,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, horizon - len, w * 0.05, len);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  // dark ground silhouette
+  ctx.fillStyle = '#02030a';
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  for (let x = 0; x <= w; x += w / 12) {
+    ctx.lineTo(x, horizon + noise(x, 34) * h * 0.06);
+  }
+  ctx.lineTo(w, h);
+  ctx.closePath(); ctx.fill();
+}
+
+function drawAurOracle(ctx, w, h, t) {
+  ctx.clearRect(0, 0, w, h);
+  // 7-night outlook glyph: probability bars in the AurOracle gold/orange brand
+  const n = 7;
+  const pad = w * 0.10, gap = w * 0.025;
+  const bw = (w - pad * 2 - gap * (n - 1)) / n;
+  const base = h * 0.82;
+  for (let i = 0; i < n; i++) {
+    const p = 0.25 + 0.6 * noise(i, 40) + 0.08 * Math.sin(t * 1.1 + i * 1.2);
+    const bh = (h * 0.6) * Math.min(1, p);
+    const x = pad + i * (bw + gap);
+    const g = ctx.createLinearGradient(0, base - bh, 0, base);
+    g.addColorStop(0, 'rgba(255,215,0,0.85)');
+    g.addColorStop(1, 'rgba(255,140,0,0.30)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, base - bh, bw, bh);
+    // glow cap on the strongest nights
+    if (p > 0.65) {
+      ctx.fillStyle = 'rgba(255,215,0,0.5)';
+      ctx.fillRect(x, base - bh - 2 * DPR, bw, 2 * DPR);
+    }
+  }
+  // baseline
+  ctx.fillStyle = 'rgba(255,176,102,0.35)';
+  ctx.fillRect(pad, base, w - pad * 2, 1 * DPR);
+  // moon disc, top-right
+  const mx = w * 0.86, my = h * 0.18, mr = Math.min(w, h) * 0.06;
+  ctx.fillStyle = radGrad(ctx, mx - mr * 0.2, my - mr * 0.2, 0, mr, [
+    [0, '#fff8e0'], [1, '#c9b47a'],
+  ]);
+  ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawGannon(ctx, w, h, t) {
+  ctx.clearRect(0, 0, w, h);
+  const ex = w * 0.68, ey = h * 0.42, er = Math.min(w, h) * 0.13;
+  // storm-compressed dayside magnetopause — red/pink arc pushed in close
+  ctx.globalCompositeOperation = 'lighter';
+  const squeeze = 1.6 + 0.12 * Math.sin(t * 1.8);
+  ctx.strokeStyle = 'rgba(255,48,80,0.55)';
+  ctx.lineWidth = 2 * DPR;
+  ctx.beginPath();
+  for (let i = -16; i <= 16; i++) {
+    const a = (i / 16) * Math.PI * 0.62;
+    const rr = er * squeeze / Math.pow(Math.max(0.25, Math.cos(a / 2)), 0.8);
+    ctx.lineTo(ex - rr * Math.cos(a), ey + rr * Math.sin(a));
+  }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,31,156,0.30)';
+  ctx.lineWidth = 1.2 * DPR;
+  ctx.beginPath();
+  for (let i = -16; i <= 16; i++) {
+    const a = (i / 16) * Math.PI * 0.66;
+    const rr = er * squeeze * 1.45 / Math.pow(Math.max(0.25, Math.cos(a / 2)), 0.8);
+    ctx.lineTo(ex - rr * Math.cos(a), ey + rr * Math.sin(a));
+  }
+  ctx.stroke();
+  // incoming solar-wind streaks from the left
+  for (let i = 0; i < 14; i++) {
+    const sy = (noise(i, 50) - 0.5) * h * 0.8 + ey;
+    const sx = ((noise(i, 51) * w + t * 60 * (1 + noise(i, 52))) % (w * 0.5));
+    ctx.fillStyle = `rgba(255,120,80,${0.15 + noise(i, 53) * 0.25})`;
+    ctx.fillRect(sx, sy, 8 * DPR, 1 * DPR);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  // Earth
+  ctx.fillStyle = radGrad(ctx, ex - er * 0.25, ey - er * 0.25, 0, er, [
+    [0, '#2266aa'], [1, '#0a2040'],
+  ]);
+  ctx.beginPath(); ctx.arc(ex, ey, er, 0, Math.PI * 2); ctx.fill();
+  // Dst trace along the bottom — the storm's signature deep dip
+  ctx.strokeStyle = 'rgba(255,48,80,0.85)';
+  ctx.lineWidth = 1.5 * DPR;
+  ctx.beginPath();
+  const y0 = h * 0.82, dip = h * 0.14;
+  for (let x = 0; x <= w; x += 3) {
+    const u = x / w;
+    const well = Math.exp(-Math.pow((u - 0.45) * 4.2, 2));
+    const wig = Math.sin(u * 40 + t) * 0.6 * DPR;
+    ctx.lineTo(x, y0 + well * dip + wig);
+  }
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,240,245,0.5)';
+  ctx.font = `${9 * DPR}px ui-monospace,monospace`;
+  ctx.fillText('Dst', 6 * DPR, y0 - 4 * DPR);
+}
+
 const SCENES = {
   earth: drawEarth, sun: drawSun, 'space-weather': drawSpaceWeather,
   'upper-atmosphere': drawUpperAtmosphere,
   stars: drawStars, galaxy: drawGalaxy,
+  aurora: drawAurora, auroracle: drawAurOracle, gannon: drawGannon,
 };
 
 // ── Live iframe orchestration ────────────────────────────────────────────────
@@ -452,8 +580,11 @@ export function initCardPreviews() {
   if (!shouldUseLiveIframes()) return;
 
   // Cap concurrent live iframes — five heavy WebGL sims would melt the page.
+  // Poster-only scenes (no SIM_URLS entry) never enter the queue: mountIframe
+  // would no-op on them AFTER mounted++ and never call onReady, silently
+  // burning a live slot.
   const MAX_LIVE = 3;
-  const pending = [...entries];
+  const pending = entries.filter(e => SIM_URLS[e.key]);
   const idle = window.requestIdleCallback || ((cb) => setTimeout(cb, 200));
   let mounted = 0;
 
@@ -474,7 +605,7 @@ export function initCardPreviews() {
   // even if the queue hasn't reached it yet.
   for (const e of entries) {
     e.thumb.addEventListener('pointerenter', () => {
-      if (e.iframe || mounted >= MAX_LIVE + 2) return;
+      if (!SIM_URLS[e.key] || e.iframe || mounted >= MAX_LIVE + 2) return;
       const i = pending.indexOf(e);
       if (i >= 0) pending.splice(i, 1);
       mounted++;
