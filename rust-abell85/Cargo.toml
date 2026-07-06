@@ -1,0 +1,17 @@
+[package]
+name = "abell85_nbody"
+version = "0.1.0"
+edition = "2021"
+description = "Hot N-body kernel for the Black Hole Observatory: KDK leapfrog star-cluster step (analytic Dehnen host + two softened moving black holes, ejection bookkeeping) and loss-cone classification, over caller-owned linear-memory arrays. Pure extern-C exports - no wasm-bindgen, the raw .wasm is the artifact. Algorithmically identical to js/abell85/nbody.js; parity is enforced by tests/abell85-physics.mjs."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

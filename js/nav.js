@@ -88,6 +88,7 @@ const NAV_DROPDOWNS = [
         id: 'black-holes',
         items: [
             { href: 'ton618.html',           label: 'TON 618',             sub: 'Research observatory · 6.6×10¹⁰ M☉', tier: 'public', icon: '🕳️', id: 'ton618' },
+            { href: 'blackhole-observatory.html', label: 'Black Hole Observatory', sub: 'Three UMBH systems · one canvas · τ-synced', tier: 'public', icon: '🕳️', badge: 'NEW', id: 'blackhole-observatory' },
             { href: 'sagittarius.html',      label: 'Sagittarius A*',      sub: 'Galactic center · live',              tier: 'public', icon: '🕳️', id: 'sagittarius' },
             { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',          tier: 'public', icon: '🕳️' },
         ],

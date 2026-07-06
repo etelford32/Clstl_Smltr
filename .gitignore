@@ -77,6 +77,7 @@ playwright-report/
 dsmc/sparta/tables/*.csv
 scripts/train_weather_lstm/.cache/
 scripts/train_weather_lstm/__pycache__/
+rust-abell85/target/
 
 # SWMF workstation run dirs + raw data pulls + host venv (fixtures are tracked; raw/runs are not)
 swmf/runs/

@@ -22,6 +22,7 @@
 import * as THREE from 'three';
 import { geo } from './geo/coords.js';
 import { GEO_GLSL } from './geo/coords.glsl.js';
+import { buildTempLUTPixels, TEMP_RAMP_STOPS, TEMP_LUT_SIZE } from './temp-ramp.js';
 
 // ── Version-pinned CDN — avoids broken URLs from three-globe package updates ──
 const _CDN = 'https://unpkg.com/three-globe@2.31.0/example/img/';
@@ -47,34 +48,12 @@ function _grayTex() {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  TEMPERATURE COLOUR LUT
 // ═══════════════════════════════════════════════════════════════════════════════
-// Diverging meteorological ramp over the texture-encoded domain −60…+50 °C
-// (value = (T°C + 60)/110, lockstep with js/weather-decode.js). The pivot is
-// 0 °C: the cold arm darkens violet→blue away from freezing, the warm arm
-// darkens yellow→red the other way, so equal lightness ≈ equal |T − 0 °C| and
-// the freezing line is the perceptual midpoint — the boundary an analyst
-// actually cares about (rain/snow phase, icing, frost). Lightness is
-// monotonic within each arm and every adjacent stop pair clears CVD ΔE ≥ 20
-// (checked with the dataviz palette validator), unlike the legacy 4-stop
-// blue→green→orange ramp this replaces, which parked its green anchor at an
-// arbitrary −24 °C and gave 0 °C no cue at all.
-//
-// Sampled in-shader via a 256×1 LUT texture — one texture2D tap replaces the
-// old per-fragment branch chain, and keeps the surface tint, the 3-D volume,
-// and any HUD legend canvas pixel-identical to one another.
-const TEMP_RAMP_STOPS = Object.freeze([
-    // [°C, r, g, b]  (sRGB 0-255)
-    [-60, 0x2a, 0x0c, 0x5e],   // deep violet — polar night
-    [-40, 0x3b, 0x2b, 0xa6],   // indigo
-    [-25, 0x2f, 0x6a, 0xc4],   // blue
-    [-10, 0x5d, 0xb3, 0xdc],   // ice blue
-    [  0, 0xbf, 0xe8, 0xee],   // pale cyan — freezing pivot
-    [ 10, 0xf5, 0xe2, 0x9a],   // pale warm yellow
-    [ 22, 0xf0, 0xa3, 0x43],   // amber
-    [ 36, 0xd4, 0x50, 0x2a],   // hot orange-red
-    [ 50, 0x8c, 0x15, 0x26],   // deep red — extreme heat
-]);
-const TEMP_LUT_SIZE = 256;
-const TEMP_ENCODE_MIN_C = -60, TEMP_ENCODE_SPAN_C = 110;
+// Ramp stops, rationale, and the pixel builder live in js/temp-ramp.js (a
+// THREE-free module, so the wx-panel legend and node tests share the exact
+// bytes the shaders sample). Sampled in-shader via a 256×1 LUT texture — one
+// texture2D tap replaces the legacy 4-stop per-fragment branch chain, and
+// keeps the surface tint, the 3-D volume, and the °C legend pixel-identical
+// to one another.
 
 /**
  * Build the 256×1 RGBA LUT texture for the temperature ramp. Each consumer
@@ -82,20 +61,7 @@ const TEMP_ENCODE_MIN_C = -60, TEMP_ENCODE_SPAN_C = 110;
  * renderers), but the pixels are deterministic from TEMP_RAMP_STOPS.
  */
 export function createTempLUTTexture() {
-    const data = new Uint8Array(TEMP_LUT_SIZE * 4);
-    for (let i = 0; i < TEMP_LUT_SIZE; i++) {
-        const tC = TEMP_ENCODE_MIN_C + (i / (TEMP_LUT_SIZE - 1)) * TEMP_ENCODE_SPAN_C;
-        let s = 0;
-        while (s < TEMP_RAMP_STOPS.length - 2 && tC > TEMP_RAMP_STOPS[s + 1][0]) s++;
-        const [c0, r0, g0, b0] = TEMP_RAMP_STOPS[s];
-        const [c1, r1, g1, b1] = TEMP_RAMP_STOPS[s + 1];
-        const f = Math.max(0, Math.min(1, (tC - c0) / (c1 - c0)));
-        data[i * 4]     = Math.round(r0 + (r1 - r0) * f);
-        data[i * 4 + 1] = Math.round(g0 + (g1 - g0) * f);
-        data[i * 4 + 2] = Math.round(b0 + (b1 - b0) * f);
-        data[i * 4 + 3] = 255;
-    }
-    const t = new THREE.DataTexture(data, TEMP_LUT_SIZE, 1, THREE.RGBAFormat);
+    const t = new THREE.DataTexture(buildTempLUTPixels(), TEMP_LUT_SIZE, 1, THREE.RGBAFormat);
     t.magFilter = THREE.LinearFilter;
     t.minFilter = THREE.LinearFilter;
     t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
