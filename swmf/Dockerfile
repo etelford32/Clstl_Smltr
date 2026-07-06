@@ -82,11 +82,12 @@ RUN update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-1
 #
 # Pin a SWMF release tag below (TODO: replace master with whatever tag you
 # validate against). Tracking master is unstable for an ops pipeline.
-ARG SWMF_REF=master
+ARG SWMF_REF=5f7194214
 WORKDIR /opt
 RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
- && git clone --branch ${SWMF_REF} https://github.com/SWMFsoftware/SWMF.git swmf \
+ && git clone https://github.com/SWMFsoftware/SWMF.git swmf \
  && cd swmf \
+ && git checkout ${SWMF_REF} \
  && echo "=== .gitmodules (if present) ===" \
  && (cat .gitmodules 2>/dev/null || echo "(no .gitmodules at top level)") \
  && git submodule update --init --recursive \
@@ -110,7 +111,7 @@ RUN perl Config.pl -install -compiler=gfortran -mpi=openmpi \
 # bug. If submodule paths drift in a future SWMF release, run
 # `git submodule status` in /opt/swmf and update the COPY lines in stage 2
 # plus the -v= arg here.
-RUN perl Config.pl -v=SC/BATSRUS,IH/BATSRUS,GM/BATSRUS,IE/Ridley_serial \
+RUN perl Config.pl -v=SC/BATSRUS,IH/BATSRUS,GM/BATSRUS,IE/Ridley_serial,IM/RCM2 \
  && perl Config.pl -show
 
 # Compile — use all available cores; coupled SWMF build typically takes
@@ -122,6 +123,9 @@ RUN perl Config.pl -v=SC/BATSRUS,IH/BATSRUS,GM/BATSRUS,IE/Ridley_serial \
 # invokes for coupled hindcasts and forecasts.
 RUN make -j$(nproc) SWMF \
  && make -j$(nproc) PIDL
+
+# Run-directory template: correct per-component skeleton incl. IM/ + RCM data files
+RUN make rundir && mv run /opt/swmf/run_template
 
 # NOTE: standalone BATSRUS.exe builds (IH-only / GM-only smoke tests) used
 # to live here but were removed — `make BATSRUS` is not a target in current
@@ -141,9 +145,6 @@ WORKDIR /opt/swmf
 RUN ls -la /opt/swmf/bin/ \
  && test -x /opt/swmf/bin/SWMF.exe \
  && echo "SWMF coupled-build OK — $(stat -c '%s bytes' /opt/swmf/bin/SWMF.exe)"
-RUN ls -la /opt/swmf/bin/ \
- && ls -la /opt/swmf/SWMF.exe \
- && echo "SWMF coupled-build OK"
 
 # ── Stage 2: runtime image ─────────────────────────────────────────────────────
 FROM ubuntu:22.04 AS runtime
@@ -174,12 +175,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # separate `COPY /opt/swmf/SWMF.exe` line that older docs reference is
 # gone — that path doesn't exist in 2024+ SWMF layouts.
 COPY --from=builder /opt/swmf/bin/  /opt/swmf/bin/
-# SWMF.exe is the coupled binary that runs SC + IH + GM + IE together —
-# that's the production binary. The per-component standalone
-# BATSRUS.exe files used to be copied here too; the standalone builds
-# were removed (see note in stage 1) so the COPY lines are gone too.
-COPY --from=builder /opt/swmf/bin/      /opt/swmf/bin/
-COPY --from=builder /opt/swmf/SWMF.exe  /opt/swmf/SWMF.exe
 
 # IE/Ridley_serial is a serial Fortran component — its compiled object
 # files live alongside the SWMF binary and are linked into SWMF.exe.
@@ -187,6 +182,8 @@ COPY --from=builder /opt/swmf/SWMF.exe  /opt/swmf/SWMF.exe
 
 # Copy SWMF Scripts and utilities
 COPY --from=builder /opt/swmf/share/Scripts /opt/swmf/share/Scripts
+COPY --from=builder /opt/swmf/run_template   /opt/swmf/run_template
+COPY --from=builder /opt/swmf/PARAM.XML     /opt/swmf/PARAM.XML
 
 # Install Python pipeline dependencies.
 #
@@ -216,43 +213,9 @@ RUN chmod +x ./run-gannon-hindcast.sh
 RUN mkdir -p /data/runs /data/imf /data/results /data/logs
 
 # Supervisor config — runs ingestion daemon + API server concurrently
-COPY <<'EOF' /etc/supervisor/conf.d/swmf-pipeline.conf
-[supervisord]
-nodaemon=true
-user=root
-logfile=/data/logs/supervisord.log
-
-# ingest / forecast invoke via `python -m pipeline.MODULE` so the
-# `pipeline` package is importable. Running `python /app/pipeline/X.py`
-# instead puts sys.path[0] at /app/pipeline (not /app), which breaks
-# the `from pipeline import db` imports at module load.
-[program:ingest]
-command=python3 -m pipeline.ingest_l1 --daemon
-directory=/app
-environment=PYTHONPATH="/app"
-stdout_logfile=/data/logs/ingest.log
-stderr_logfile=/data/logs/ingest_err.log
-autorestart=true
-startretries=10
-
-[program:api]
-command=python3 -m uvicorn pipeline.serve_results:app --host 0.0.0.0 --port 8000
-directory=/app
-environment=PYTHONPATH="/app"
-stdout_logfile=/data/logs/api.log
-stderr_logfile=/data/logs/api_err.log
-autorestart=true
-startretries=5
-
-[program:forecast]
-command=python3 -m pipeline.run_forecast --daemon
-directory=/app
-environment=PYTHONPATH="/app"
-stdout_logfile=/data/logs/forecast.log
-stderr_logfile=/data/logs/forecast_err.log
-autorestart=true
-startretries=5
-EOF
+# Supervisor config lives in config/ as a plain file so the COPY works on
+# both BuildKit and the classic builder (heredoc COPY is BuildKit-only).
+COPY config/supervisor-swmf-pipeline.conf /etc/supervisor/conf.d/swmf-pipeline.conf
 
 EXPOSE 8000
 

@@ -365,6 +365,7 @@ def _write_fit(
     n_samples: int,
     window_utc: list[str] | None,
     is_placeholder_input: bool | None = None,
+    max_ap: float | None = None,
 ) -> None:
     coefficients = {"intercept": intercept}
     for name, k in zip(feature_names, feat_coeffs):
@@ -382,6 +383,8 @@ def _write_fit(
         "formula":          _format_formula(intercept, feat_coeffs, feature_names),
         "fit_window_utc":   window_utc,
     }
+    if max_ap is not None:
+        payload["max_ap_filter"] = max_ap
     # Backwards-compatible shortcut keys for the MHD 2-feature case.
     # `hindcast_runner.PseudoApFit.from_json` requires numeric a/b/c.
     # We deliberately OMIT them when the input was flagged as a placeholder
@@ -422,6 +425,14 @@ def main(argv: Optional[list[str]] = None) -> int:
                    help="Permit fitting against a features CSV that carries the "
                         "_is_placeholder sentinel column. The output JSON is "
                         "flagged so downstream consumers can refuse to score it.")
+    p.add_argument("--max-ap", type=float, default=None,
+                   help="Exclude pairs whose observed Ap is >= this value before "
+                        "fitting. Use 400 on ceiling-saturated events (e.g. the "
+                        "May 2024 Gannon storm, where Ap sat pinned at 400 for "
+                        "~24 h): OLS against pinned bins under-fits the peak by "
+                        "construction, so fit the ramp/recovery and extrapolate "
+                        "through the saturated segment instead. The filter value "
+                        "is recorded as `max_ap_filter` in the output JSON.")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
     logging.basicConfig(
@@ -485,6 +496,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         log.info("Paired %d feature-rows ↔ Ap samples for %s%s",
                  len(pairs), event_id, tag)
 
+    if args.max_ap is not None:
+        n_before = len(pairs)
+        pairs = [pr for pr in pairs if pr[-1] < args.max_ap]
+        log.info("--max-ap %.0f: fitting on %d of %d pairs (%d saturated excluded)",
+                 args.max_ap, len(pairs), n_before, n_before - len(pairs))
+
     try:
         intercept, feat_coeffs, rmse, r2 = _ols_fit_general(pairs, len(feature_names))
     except ValueError as exc:
@@ -503,6 +520,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         n_samples=len(pairs),
         window_utc=window_utc,
         is_placeholder_input=is_placeholder,
+        max_ap=args.max_ap,
     )
 
     formula = _format_formula(intercept, feat_coeffs, feature_names)
