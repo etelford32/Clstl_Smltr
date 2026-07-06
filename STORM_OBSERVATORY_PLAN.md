@@ -164,18 +164,37 @@ loop, mostly table lookups + Kepler iteration; abell85 measured basis supports t
 
 ---
 
-## 8. Open decisions (ask before building)
+## 8. Decisions (resolved 2026-07-06)
 
-1. **Nav home**: Space Weather dropdown (next to Gannon Superstorm) or Satellites dropdown
-   (next to Operations)? Plan assumes Space Weather.
-2. **Tier**: public (like Gannon) or PRO-preview badge (like Operations)? Plan assumes public
-   — it's a story/credibility page, not a fleet tool.
-3. **Catalog scope v1**: LEO subset ~15–20 k objects as a committed ~1–2 MB asset, or curated
-   ~5 k (Starlink shells + stations + major debris bands)? Plan assumes the LEO subset.
-4. **Third lane**: quiet counterfactual (recommended, zero new data) vs a third real storm
-   (Halloween 2003 — thinner data, no GRACE-FO-class truth).
-5. **Audio**: sonify ρ(400 km) through the shared `gwaudio.js` oscillator? Cheap, possibly
-   gimmicky — default off in plan.
+1. **Nav home**: Black Holes dropdown, next to its sibling `blackhole-observatory.html` —
+   the two observatories present as a family. (Easy to move later; nav lint gate applies.)
+2. **Tier**: **intro-gated** — the page opens on a briefing overlay (the Feb-2022 story);
+   signed-out visitors get the intro + sign-in CTA, signed-in (`tier: 'free'`+) enter the
+   full instrument. Lead-capture without hiding the science.
+3. **Catalog**: LEO subset at **20 k objects, detailed** — named cohorts (Starlink shells,
+   G4-7 injection batch, stations, sun-sync band, Cosmos-2251 / Iridium-33 / Fengyun-1C
+   debris clouds), per-class ballistic coefficients, committed packed asset with a
+   real-GP-data swap-in path (network was unavailable at build time → synthetic population
+   is `_is_placeholder`-watermarked until re-baked from CelesTrak).
+4. **Third lane = Scenario lane (hybrid)**: defaults to the quiet counterfactual
+   (solar-min Dec 2019 fixture) so every Δ readout works, but its drivers are swappable and
+   dialable — **Halloween 2003** preset (real GFZ ap fixture), **Carrington-class** preset
+   (existing `synth_carrington_class_from_halloween` fixture), intensity / onset / duration
+   dials. The counterfactual and the what-if machine are one lane — the same "interactive
+   lane" role B2 0402 plays in the black-hole observatory.
+5. **Audio**: off by default; revisit in S4.
+
+**Bonus discovery**: `dsmc/fixtures/hindcast/` already carries real driver fixtures for
+`feb_2022_starlink` (GFZ ap + **GRACE-FO density truth**), `halloween_oct_2003`,
+`solar_min_dec_2019`, and the Carrington synthesis — Phase S0 composes bundles from these
+rather than fetching anything.
+
+**Physics note (contract revision)**: the 49-satellite cohort decays passively in BOTH the
+storm and quiet lanes — 210 km is unsurvivable without orbit-raising. The real Feb-2022
+story is a *race between thrust and drag* that the storm tipped. So the validation contract
+tests the density-enhancement ratio and the decay acceleration (storm vs quiet), and S3
+gains a **"raise rate (m/s per day)" dial** so the user can replay the race itself —
+at quiet drag the raise wins, at storm drag it loses. That dial IS the Starlink story.
 
 ## 9. Effort estimate
 
