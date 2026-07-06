@@ -48,9 +48,13 @@ export class DensityGrid {
         return row(i0) * (1 - wt) + row(i1) * wt;
     }
 
-    /** Mass density (kg/m³). */
+    /** Mass density (kg/m³). The result is quantized to float32: pow10 is
+     *  the one transcendental in the drag hot path, and JS/Rust libm may
+     *  disagree in the last f64 ULP — f32 rounding removes that divergence,
+     *  which is what lets the WASM kernel stay BIT-EXACT with this engine
+     *  (same trick as the black-hole observatory's f32 store/reload). */
     sample(hKm, tHours) {
-        return Math.pow(10, this._logAt(Math.max(hKm, 80), tHours));
+        return Math.fround(Math.pow(10, this._logAt(Math.max(hKm, 80), tHours)));
     }
 }
 
@@ -122,12 +126,28 @@ export class ScenarioGrid {
         this.nT = base.nT;
     }
 
-    sample(hKm, tHours) {
+    /** log10 ρ of the composed scenario (used by the baker + sample). */
+    logAt(hKm, tHours) {
         // stretch about the base peak, then shift
         const tBase = this.tPeakBase + (tHours - this.onset - this.tPeakBase) / this.durScale;
         const lq = this.quiet._logAt(Math.max(hKm, 80), tHours);
         const lb = this.base._logAt(Math.max(hKm, 80), tBase);
-        return Math.pow(10, lq + this.alpha * (lb - lq));
+        return lq + this.alpha * (lb - lq);
+    }
+
+    sample(hKm, tHours) {
+        return Math.fround(Math.pow(10, this.logAt(hKm, tHours)));
+    }
+
+    /** Bake to a flat DensityGrid over nT steps — the engines (JS reference
+     *  and the WASM kernel) both consume BAKED tables, so a scenario dial
+     *  change is a rebake + re-upload, and parity holds for every lane. */
+    bake(nT) {
+        const rows = [];
+        for (let i = 0; i < nT; i++) {
+            rows.push(this.altKm.map(h => this.logAt(h, i * this.stepHours)));
+        }
+        return new DensityGrid(this.altKm, rows, this.stepHours);
     }
 }
 

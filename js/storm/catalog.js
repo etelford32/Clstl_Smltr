@@ -72,7 +72,10 @@ function put(els, i, aKm, e, incl, raan, argp, m0, bc, cls) {
 }
 
 function circ(els, i, rand, hKm, inclRad, e, bc, cls) {
-    put(els, i, R_EARTH_KM + hKm, e, inclRad,
+    // clamp e so the initial perigee stays ≥ 190 km — an eccentric draw on a
+    // low semi-major axis must not put objects underground at t=0
+    const eMax = Math.max((hKm - 190) / (R_EARTH_KM + hKm), 0);
+    put(els, i, R_EARTH_KM + hKm, Math.min(e, eMax), inclRad,
         rand() * TAU, rand() * TAU, rand() * TAU, bc, cls);
 }
 
@@ -121,15 +124,15 @@ function blocks(rand) {
         // ── fragmentation clouds (the three canonical ones) ─────────────────
         ['Cosmos-2251 debris · ~780 km × 74°', 1000, (els, i) =>
             circ(els, i, rand, 620 + Math.abs(gauss(rand)) * 160,
-                (74.0 + gauss(rand) * 0.4) * D2R, 0.002 + rand() * 0.05,
+                (74.0 + gauss(rand) * 0.4) * D2R, 0.002 + rand() * 0.03,
                 logn(rand, 0.07, 0.35, 0.01, 0.5), CLS.DEBRIS)],
         ['Iridium-33 debris · ~780 km × 86.4°', 450, (els, i) =>
             circ(els, i, rand, 650 + Math.abs(gauss(rand)) * 140,
-                (86.4 + gauss(rand) * 0.3) * D2R, 0.002 + rand() * 0.04,
+                (86.4 + gauss(rand) * 0.3) * D2R, 0.002 + rand() * 0.03,
                 logn(rand, 0.07, 0.35, 0.01, 0.5), CLS.DEBRIS)],
         ['Fengyun-1C debris · ~850 km × 98.8°', 2400, (els, i) =>
             circ(els, i, rand, 550 + Math.abs(gauss(rand)) * 250,
-                (98.8 + gauss(rand) * 0.6) * D2R, 0.002 + rand() * 0.08,
+                (98.8 + gauss(rand) * 0.6) * D2R, 0.002 + rand() * 0.03,
                 logn(rand, 0.07, 0.35, 0.01, 0.5), CLS.DEBRIS)],
 
         // ── general population (inclination clusters of real launch history) ─
@@ -138,14 +141,14 @@ function blocks(rand) {
             const h = 400 + Math.pow(rand(), 0.7) * 580;
             circ(els, i, rand, h,
                 (incs[(rand() * incs.length) | 0] + gauss(rand) * 0.8) * D2R,
-                0.001 + rand() * 0.02, logn(rand, 0.015, 0.3, 0.004, 0.08), CLS.PAYLOAD);
+                0.001 + rand() * 0.01, logn(rand, 0.015, 0.3, 0.004, 0.08), CLS.PAYLOAD);
         }],
         ['rocket bodies', 1200, (els, i) => {
             const incs = [51.6, 63.4, 74, 82.5, 97.8, 28.5];
             const h = 450 + Math.pow(rand(), 0.8) * 540;
             circ(els, i, rand, h,
                 (incs[(rand() * incs.length) | 0] + gauss(rand) * 1.0) * D2R,
-                0.005 + rand() * 0.05, logn(rand, 0.006, 0.2, 0.003, 0.02),
+                0.005 + rand() * 0.035, logn(rand, 0.006, 0.2, 0.003, 0.02),
                 CLS.ROCKET_BODY);
         }],
         ['debris · background', 4339, (els, i) => {
@@ -153,7 +156,7 @@ function blocks(rand) {
             const h = 350 + Math.pow(rand(), 0.75) * 640;
             circ(els, i, rand, h,
                 (incs[(rand() * incs.length) | 0] + gauss(rand) * 1.5) * D2R,
-                0.002 + rand() * 0.09, logn(rand, 0.07, 0.4, 0.008, 0.5), CLS.DEBRIS);
+                0.002 + rand() * 0.02, logn(rand, 0.07, 0.4, 0.008, 0.5), CLS.DEBRIS);
         }],
     ];
 }

@@ -107,17 +107,22 @@ for (const [id, l] of [['feb2022', feb], ['gannon', gannon]]) {
 
 // ── 5 · scenario lane: α=0 IS quiet; α=1 IS the base; α>1 extrapolates ──────
 {
+    // tolerance 1e-6: sample() f32-quantizes its pow10 (the WASM-parity
+    // quarantine), which can move log-ratios by up to ~3e-8
     const s0 = makeScenario(quiet, halloween, { alpha: 0 });
     const s1 = makeScenario(quiet, halloween, { alpha: 1 });
     const s15 = makeScenario(quiet, halloween, { alpha: 1.5 });
     const t = halloween.tPeakHours;
-    assert.ok(Math.abs(Math.log10(s0.grid.sample(400, t) / quiet.grid.sample(400, t))) < 1e-9);
-    assert.ok(Math.abs(Math.log10(s1.grid.sample(400, t) / halloween.grid.sample(400, t))) < 1e-9);
+    assert.ok(Math.abs(Math.log10(s0.grid.sample(400, t) / quiet.grid.sample(400, t))) < 1e-6);
+    assert.ok(Math.abs(Math.log10(s1.grid.sample(400, t) / halloween.grid.sample(400, t))) < 1e-6);
     assert.ok(s15.grid.sample(400, t) > 1.2 * s1.grid.sample(400, t));
     const sShift = makeScenario(quiet, halloween, { alpha: 1, onsetShiftHours: 24 });
     assert.ok(Math.abs(Math.log10(
-        sShift.grid.sample(400, t + 24) / halloween.grid.sample(400, t))) < 1e-9);
-    ok('scenario lane: α=0 ≡ quiet, α=1 ≡ base, α=1.5 extrapolates up, onset shift exact');
+        sShift.grid.sample(400, t + 24) / halloween.grid.sample(400, t))) < 1e-6);
+    // baked table ≡ continuous scenario at grid nodes
+    const baked = s1.grid.bake(halloween.grid.nT);
+    assert.ok(Math.abs(baked.sample(400, t) / s1.grid.sample(400, t) - 1) < 1e-6);
+    ok('scenario lane: α=0 ≡ quiet, α=1 ≡ base, α=1.5 extrapolates up, onset shift exact, bake ≡ live');
 }
 
 // ── 6 · catalog: deterministic, structured, cohort intact ───────────────────
@@ -266,6 +271,62 @@ const meta = synthCatalogInto(els, CATALOG_N_DEFAULT, 2022);
         `ISS lifetime estimate ${st.lifeDays.toFixed(0)} d`);
     ok(`inspector: ISS @${st.hpKm.toFixed(0)} km, q ${st.qPa.toExponential(1)} Pa, ` +
         `ȧ ${(st.adotKmDay * 1000).toFixed(0)} m/day, τ_life ~${(st.lifeDays / 365).toFixed(1)} yr`);
+}
+
+// ── 16 · WASM kernel parity: decay state BIT-EXACT, positions ≤ 1 m ─────────
+// The rust-storm kernel mirrors orbits.js op-for-op; pow10 and cos i/sin i
+// are f32-quantized on both sides (the transcendental quarantine), so the
+// f64 decay state must match to the LAST BIT. Positions go through live
+// sin/cos (libm may differ in the final ULP), so they get a 1 m bound.
+{
+    let wasmBytes = null;
+    try {
+        wasmBytes = await readFile(resolve(ROOT, 'js/storm-wasm/storm_drag.wasm'));
+    } catch { /* not built */ }
+    if (!wasmBytes) {
+        console.log('  ⚠ wasm parity SKIPPED — run build-wasm.sh (or cargo build in rust-storm/)');
+    } else {
+        const { WasmSwarm } = await import('../js/storm/wasmswarm.js');
+        const { instance } = await WebAssembly.instantiate(wasmBytes, {});
+        const js = new SatSwarm(els, meta);
+        const wa = new WasmSwarm(els, meta, instance);
+        js.setRaiseRate(CLS.COHORT, 2.0);
+        wa.setRaiseRate(CLS.COHORT, 2.0);
+        for (let t = 18; t < 18 + 72; t += 1) {
+            js.step(feb.grid, t, 1);
+            wa.step(feb.grid, t, 1);
+        }
+        js.classify(feb.grid, 90);
+        wa.classify(feb.grid, 90);
+        const bitEq = (x, y, label) => {
+            for (let i = 0; i < js.n; i++) {
+                if (!Object.is(x[i], y[i])) {
+                    assert.fail(`${label}[${i}]: ${x[i]} ≠ ${y[i]} after 72 steps`);
+                }
+            }
+        };
+        bitEq(js.a, wa.a, 'a'); bitEq(js.e, wa.e, 'e');
+        bitEq(js.raan, wa.raan, 'raan'); bitEq(js.argp, wa.argp, 'argp');
+        bitEq(js.M, wa.M, 'M');
+        bitEq(js.flags, wa.flags, 'flags'); bitEq(js.tReentry, wa.tReentry, 'tReentry');
+        const pj = new Float32Array(js.n * 3), pw = new Float32Array(js.n * 3);
+        js.positionsInto(pj); wa.positionsInto(pw);
+        let worst = 0;
+        for (let i = 0; i < pj.length; i++) worst = Math.max(worst, Math.abs(pj[i] - pw[i]));
+        assert.ok(worst <= 1e-3, `positions within 1 m (worst ${(worst * 1e3).toFixed(3)} m)`);
+        const cj = js.counts(), cw = wa.counts();
+        assert.deepEqual(cw, cj, 'aggregate counts identical');
+        // capacity: one full-population frame (step + classify + positions)
+        const t0 = performance.now();
+        wa.step(feb.grid, 90, 1);
+        wa.classify(feb.grid, 91);
+        wa.positionsInto(pw);
+        const ms = performance.now() - t0;
+        assert.ok(ms < 100, `20k-object frame in ${ms.toFixed(1)} ms`);
+        ok(`WASM kernel parity: decay state (a,e,Ω,ω,M,flags,t_re) BIT-EXACT over 72 h ` +
+            `(${cj.reentered} reentries agree), positions ≤ ${(worst * 1e3).toFixed(3)} m; ` +
+            `20k-object frame in ${ms.toFixed(1)} ms`);
+    }
 }
 
 console.log(`\nstorm-physics: all ${n} checks passed`);

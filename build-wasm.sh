@@ -77,6 +77,19 @@ else
     echo "WARN: rust-abell85 build failed — serving committed js/abell85-wasm binary."
 fi
 
+# ── Build Storm Observatory decay kernel ──────────────────────
+# Raw no-bindgen wasm (same pattern as rust-abell85). The committed binary
+# at js/storm-wasm/storm_drag.wasm is the deploy fallback; this step
+# refreshes it when the toolchain is available.
+echo "Building storm drag kernel WASM..."
+if (cd rust-storm && cargo build --release --target wasm32-unknown-unknown); then
+    mkdir -p js/storm-wasm
+    cp rust-storm/target/wasm32-unknown-unknown/release/storm_drag.wasm \
+       js/storm-wasm/storm_drag.wasm
+else
+    echo "WARN: rust-storm build failed — serving committed js/storm-wasm binary."
+fi
+
 # ── Build star renderer (solar flare sim) ─────────────────────
 # NOT built on Vercel. The Bevy dep graph (~479 crates) is too fragile for
 # Vercel's older rustc — a transitive `constant_time_eq 0.4.3` release broke

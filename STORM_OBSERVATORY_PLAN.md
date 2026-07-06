@@ -1,7 +1,9 @@
 # Storm Observatory — Design & Build Plan
 
 **Page:** `storm-observatory.html` (new, flat at root) · **Modules:** `js/storm/` (new family) + `rust-storm/` (new WASM kernel)
-**Status:** PLAN — drafted 2026-07-06. Nothing built yet; open decisions in §8.
+**Status:** S0 (data spine) + S1 (JS physics core) + S2 (Rust→WASM kernel, decay state
+bit-exact, 20 k-object frame ~13 ms) SHIPPED with a 16-check contract
+(`tests/storm-physics.mjs`). Next: S3 — the page. Decisions in §8.
 **Goal:** a superposed-epoch comparison instrument for thermospheric storms — multiple storm
 epochs τ-aligned on one canvas, the LEO catalog flown through each storm's density history
 as test particles, every driver dial carrying its observational provenance. The satellite-drag

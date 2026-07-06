@@ -78,3 +78,4 @@ dsmc/sparta/tables/*.csv
 scripts/train_weather_lstm/.cache/
 scripts/train_weather_lstm/__pycache__/
 rust-abell85/target/
+rust-storm/target/

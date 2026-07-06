@@ -17,7 +17,8 @@ resolver = "2"
 #   rust-sunfield/ solar surface field renderer       (build-wasm.sh)
 #   rust-sirius/   Sirius A+B binary physics engine   (build-sirius.sh)
 #   rust-abell85/  Black Hole Observatory N-body kernel (build-wasm.sh)
-exclude  = ["rust", "rust-sstar", "rust-forecast", "rust-sgp4", "rust-sunfield", "rust-sirius", "rust-abell85"]
+#   rust-storm/    Storm Observatory orbital-decay kernel (build-wasm.sh)
+exclude  = ["rust", "rust-sstar", "rust-forecast", "rust-sgp4", "rust-sunfield", "rust-sirius", "rust-abell85", "rust-storm"]
 
 [profile.release]
 opt-level        = 3

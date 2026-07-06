@@ -1,0 +1,16 @@
+# rust-storm — Storm Observatory orbital-decay kernel → WASM.
+# Standalone crate (workspace-excluded, like rust-abell85): no deps, raw
+# extern "C" exports, built by build-wasm.sh into js/storm-wasm/.
+[package]
+name = "storm_drag"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+codegen-units = 1
