@@ -504,16 +504,22 @@ export class Renderer {
     }
 
     /**
-     * Composite path: any number of lanes STACKED into one scene — each lane
-     * carries its own star buffers, bodies, trails, overlays, and identity
-     * tint; the lens pass gathers every lane's holes (up to 6 lenses).
+     * Composite path: any number of lanes rendered into one scene — each lane
+     * carries its own star buffers, bodies, trails, overlays, identity tint,
+     * and an optional world `offset` (depth-separated layout; [0,0,0] keeps
+     * the classic stacked-at-origin composite). The lens pass gathers every
+     * lane's holes (up to 6 lenses). `worldLines` draws un-offset world-space
+     * polylines (the shared-τ ruler). `ringCenter` recenters the scale rings
+     * (defaults to the origin — classic behavior).
      *
      * Floating origin: the eye sits at (0,0,0) in the GL frame — the view
      * matrix is rotation-only, and every vertex is uploaded camera-relative
      * after a double-precision subtract on the CPU, so float32 never sees
-     * large world coordinates at horizon zoom inside a 30 kpc scene.
+     * large world coordinates at horizon zoom inside a 30 kpc scene. Lane
+     * offsets fold into that same subtract (eye − offset), so the precision
+     * guarantee is unchanged.
      */
-    renderComposite({ lanes, rings, lensOn, marker }) {
+    renderComposite({ lanes, rings, ringCenter, worldLines, lensOn, marker }) {
         this.resize();
         const { gl } = this;
         const [w, h] = this._fboSize;
@@ -540,7 +546,32 @@ export class Renderer {
             gl.uniformMatrix4fv(gl.getUniformLocation(this.progLines, 'uMvp'), false, mvp);
             gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'),
                 ...this._lc(0.4, 0.55, 0.9, 0.12));
-            for (const R of rings) this._drawRing(R, eye);
+            const rc = ringCenter ?? [0, 0, 0];
+            for (const R of rings) this._drawRing(R, eye, rc);
+        }
+
+        // world-space overlay polylines (shared-τ ruler through the volumes)
+        if (worldLines?.length) {
+            gl.useProgram(this.progLines);
+            gl.uniformMatrix4fv(gl.getUniformLocation(this.progLines, 'uMvp'), false, mvp);
+            for (const ln of worldLines) {
+                if (!ln.buf || ln.count < 2) continue;
+                const len = ln.count * 3;
+                const rel = this._extraRel && this._extraRel.length >= len
+                    ? this._extraRel : (this._extraRel = new Float32Array(Math.max(len, 1024)));
+                for (let k = 0; k < len; k += 3) {
+                    rel[k] = ln.buf[k] - eye[0];
+                    rel[k + 1] = ln.buf[k + 1] - eye[1];
+                    rel[k + 2] = ln.buf[k + 2] - eye[2];
+                }
+                gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'),
+                    ...this._lc(...ln.color));
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.bufLine);
+                gl.bufferData(gl.ARRAY_BUFFER, rel.subarray(0, len), gl.DYNAMIC_DRAW);
+                gl.enableVertexAttribArray(0);
+                gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+                gl.drawArrays(gl.LINE_STRIP, 0, ln.count);
+            }
         }
 
         for (const lane of lanes) {
@@ -570,9 +601,12 @@ export class Renderer {
         let nLens = 0;
         if (lensOn !== false) {
             for (const lane of lanes) {
+                const off = lane.offset ?? [0, 0, 0];
                 for (const bh of (lane.bhs || [])) {
                     if (!bh.m || nLens >= 6) continue;
-                    const relP = [bh.p[0] - eye[0], bh.p[1] - eye[1], bh.p[2] - eye[2]];
+                    const relP = [bh.p[0] + off[0] - eye[0],
+                                  bh.p[1] + off[1] - eye[1],
+                                  bh.p[2] + off[2] - eye[2]];
                     const ndc = project(mvp, relP);
                     if (!ndc) continue;
                     const cx = (ndc[0] * 0.5 + 0.5) * w, cy = (ndc[1] * 0.5 + 0.5) * h;
@@ -677,9 +711,14 @@ export class Renderer {
         this._quad();
     }
 
-    /** One lane's geometry: trails, stars (tinted), overlays, shells. */
-    _drawLane(lane, mvp, eye, h) {
+    /** One lane's geometry: trails, stars (tinted), overlays, shells.
+     *  Lane content is lane-local; the lane's world offset folds into the
+     *  floating-origin subtract (eyeL = eye − offset), one subtract per
+     *  vertex either way. */
+    _drawLane(lane, mvp, eyeW, h) {
         const { gl } = this;
+        const off = lane.offset ?? [0, 0, 0];
+        const eye = [eyeW[0] - off[0], eyeW[1] - off[1], eyeW[2] - off[2]];
 
         if (lane.trails) {
             gl.useProgram(this.progLines);
@@ -821,15 +860,15 @@ export class Renderer {
         }
     }
 
-    _drawRing(R, eye) {
+    _drawRing(R, eye, center = [0, 0, 0]) {
         const { gl } = this;
         const N = 96;
         const v = this._ringBuf || (this._ringBuf = new Float32Array((N + 1) * 3));
         for (let i = 0; i <= N; i++) {
             const a = (i / N) * 2 * Math.PI;
-            v[i * 3] = R * Math.cos(a) - eye[0];
-            v[i * 3 + 1] = -eye[1];
-            v[i * 3 + 2] = R * Math.sin(a) - eye[2];
+            v[i * 3] = center[0] + R * Math.cos(a) - eye[0];
+            v[i * 3 + 1] = center[1] - eye[1];
+            v[i * 3 + 2] = center[2] + R * Math.sin(a) - eye[2];
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, this.bufLine);
         gl.bufferData(gl.ARRAY_BUFFER, v, gl.DYNAMIC_DRAW);

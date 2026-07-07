@@ -122,10 +122,12 @@ export class GodCamera {
         return this.mode;
     }
 
-    /** Smooth cinematic move (orbit mode) to a given radius. */
-    transitionTo(dist) {
+    /** Smooth cinematic move (orbit mode) to a given radius, optionally
+     *  re-targeting the rig (fly-between for depth-separated systems). */
+    transitionTo(dist, target = null) {
         if (this.mode === 'fly') this.toggleMode();
         this.goalDist = Math.min(Math.max(dist, this.distClamp[0]), this.distClamp[1]);
+        if (target) this.goalTarget = [target[0], target[1], target[2]];
     }
 
     /**
@@ -140,6 +142,21 @@ export class GodCamera {
                 this.dist += (this.goalDist - this.dist) * k;
                 if (Math.abs(this.dist - this.goalDist) / this.goalDist < 0.005) {
                     this.dist = this.goalDist; this.goalDist = null;
+                }
+            }
+            if (this.goalTarget) {
+                const k = 1 - Math.exp(-EASE_RATE * dt);
+                const g = this.goalTarget, t = this.target;
+                let d2 = 0;
+                for (let i = 0; i < 3; i++) {
+                    t[i] += (g[i] - t[i]) * k;
+                    d2 += (g[i] - t[i]) ** 2;
+                }
+                // finish threshold scales with the rig radius, not absolutes —
+                // the same rig spans kpc scenes and sub-pc horizon zooms
+                if (d2 < (this.dist * 0.002) ** 2) {
+                    this.target = [g[0], g[1], g[2]];
+                    this.goalTarget = null;
                 }
             }
             // drag inertia — ONLY for callers using the onDragStart/onDragEnd
