@@ -18,8 +18,8 @@
  *     (Kp = 0..9 → Ap = 0, 3, 7, 15, 27, 48, 80, 140, 240, 400). Anchored to
  *     the same `kpToAp` interpolation js/upper-atmosphere-engine.js uses, so
  *     a single source of truth for the conversion.
- *   - Predicted: `text/45-day-ap-forecast.txt` 3-hourly portion of the AP
- *     block (different from f107-history.js which reads the F10.7 block).
+ *   - Predicted: SWPC 45-day forecast (JSON/text via _lib/ap45.js), AP series
+ *     (different from f107-history.js which reads the F10.7 series).
  *
  * Response (~10 kB for ~240 observed + ~360 predicted 3-h ticks):
  *   {
@@ -45,11 +45,11 @@
  * "current" Ap fresh.
  */
 import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+import { fetch45DayForecast, parseForecastText } from '../_lib/ap45.js';
 
 export const config = { runtime: 'edge' };
 
 const NOAA_PLANETARY_K = 'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json';
-const NOAA_45DAY       = 'https://services.swpc.noaa.gov/text/45-day-ap-forecast.txt';
 const CACHE_TTL   = 3600;
 const CACHE_SWR   = 1800;
 const STALE_HOURS = 12;       // Ap freshness — tighter than F10.7 because
@@ -114,12 +114,11 @@ async function fetchObserved() {
     return out;
 }
 
-// ── Predicted Ap parser (45-day text forecast) ──────────────────────────────
+// ── Predicted Ap (45-day forecast via _lib/ap45.js) ─────────────────────────
 //
-// The 45-day file has two sections. We already parse the F10.7 section in
-// f107-history.js. Here we parse the AP section. Format is the same: lines
-// of "DD MMM NNN" triplets after a section header. The AP section is the
-// FIRST one; F10.7 is below.
+// NOAA retired the USAF 45-day-ap-forecast.txt on 2026-03-01 (SCN 26-10);
+// the source chain (new JSON → new text → legacy text) lives in _lib/ap45.js
+// so this file, f107-history.js, and the AurOracle outlook stay in lockstep.
 //
 // SWPC's predicted Ap is DAILY (one row per day, not per 3-hour tick). The
 // 7-element ap_array's daily field can use this value directly; for the
@@ -128,41 +127,11 @@ async function fetchObserved() {
 // give us 3-hour resolution anyway, and for the +12h horizon we care about
 // it's an honest representation of the operator's foresight.
 
-const MONTHS = { JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11 };
-
+/** Text-product Ap parser, kept for the smoke-test contract: [{ t, ap }]. */
 function _parseDailyApForecast(text, nowMs) {
-    if (!text) return [];
-    const lines = text.split(/\r?\n/);
-    const headerIdx = lines.findIndex(l => /45-DAY\s+AP\s+FORECAST/i.test(l));
-    if (headerIdx < 0) return [];
-
-    let baseYear = new Date(nowMs).getUTCFullYear();
-    const issued = lines.find(l => /^:Issued:/i.test(l));
-    if (issued) { const m = issued.match(/(\d{4})/); if (m) baseYear = +m[1]; }
-
-    const tripletRe = /(\d{1,2})\s+([A-Z]{3})\s+(\d{1,3})/g;
-    const days = [];
-    let seenData = false;
-    for (let i = headerIdx + 1; i < lines.length; i++) {
-        const line = lines[i];
-        if (!line || /^\s*$/.test(line)) { if (seenData) break; continue; }
-        // Section break: next all-caps header (e.g. F10.7 section).
-        if (/^[A-Z][A-Z\s.-]+$/.test(line.trim()) && !/^\d/.test(line.trim())) {
-            if (seenData) break; continue;
-        }
-        let m;
-        tripletRe.lastIndex = 0;
-        while ((m = tripletRe.exec(line)) != null) {
-            const day = +m[1], mon = MONTHS[m[2]], ap = +m[3];
-            if (mon === undefined || !Number.isFinite(ap)) continue;
-            let year = baseYear;
-            let ts = Date.UTC(year, mon, day);
-            if (ts < nowMs - 60 * 86400000) { year++; ts = Date.UTC(year, mon, day); }
-            days.push({ t: ts, ap });
-            seenData = true;
-        }
-    }
-    return days;
+    return parseForecastText(text, nowMs)
+        .filter(d => d.ap != null)
+        .map(d => ({ t: d.t, ap: d.ap }));
 }
 
 /** Expand daily Ap to 3-hourly ticks (constant across each day). */
@@ -177,12 +146,8 @@ function _expandDailyTo3h(daily) {
 }
 
 async function fetchPredicted(nowMs) {
-    const res = await fetchWithTimeout(NOAA_45DAY, {
-        headers: { Accept: 'text/plain' },
-    });
-    if (!res.ok) throw new Error(`predicted HTTP ${res.status}`);
-    const text = await res.text();
-    return _expandDailyTo3h(_parseDailyApForecast(text, nowMs));
+    const { rows } = await fetch45DayForecast(nowMs);
+    return _expandDailyTo3h(rows.filter(d => d.ap != null));
 }
 
 // ── NRLMSISE-00 ap_array assembler ──────────────────────────────────────────
@@ -271,7 +236,7 @@ export default async function handler() {
     const apArray = _apArrayFor(observed, nowMs);
 
     return jsonOk({
-        source: 'NOAA SWPC noaa-planetary-k-index + 45-day-ap-forecast via Vercel Edge',
+        source: 'NOAA SWPC noaa-planetary-k-index + 45-day forecast via Vercel Edge',
         age_seconds: Math.round(ageMs / 1000),
         age_hours:   Math.round(ageHours * 10) / 10,
         freshness:   stale ? 'expired' : ageHours < 4 ? 'fresh' : 'stale',

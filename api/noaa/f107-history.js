@@ -3,7 +3,7 @@
  *
  * Source: NOAA SWPC daily 10.7-cm solar radio flux (F10.7)
  *   - Observed: json/f107_cm_flux.json                   (~50 days)
- *   - Predicted: products/45-day-ap-forecast.txt          (~45 days forward)
+ *   - Predicted: SWPC 45-day forecast via _lib/ap45.js    (~45 days forward)
  *
  * Merges the two into a chronological daily series with `kind` tagging
  * (observed vs predicted) so the client can compute a **centred 81-day
@@ -36,11 +36,11 @@
  * 45-day forecast updates daily too. Aligned with /api/noaa/radio-flux.
  */
 import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+import { fetch45DayForecast } from '../_lib/ap45.js';
 
 export const config = { runtime: 'edge' };
 
 const NOAA_F107_OBSERVED   = 'https://services.swpc.noaa.gov/json/f107_cm_flux.json';
-const NOAA_45DAY_FORECAST  = 'https://services.swpc.noaa.gov/text/45-day-ap-forecast.txt';
 
 const CACHE_TTL    = 3600;     // 1 h — daily-cadence upstream
 const CACHE_SWR    = 1800;
@@ -107,93 +107,17 @@ async function fetchObserved() {
         .filter(r => r.flux_sfu != null);
 }
 
-// ── Predicted parser ─────────────────────────────────────────────────────────
+// ── Predicted (45-day forecast via _lib/ap45.js) ─────────────────────────────
 //
-// The 45-day forecast comes as a fixed-column text file. Layout (truncated):
-//
-//   :Product: 45 Day AP Forecast  45DF.txt
-//   :Issued:   YYYY MMM DD HHMM UTC
-//   ...
-//   45-DAY AP FORECAST
-//   DD MMM NNN  DD MMM NNN  DD MMM NNN  ...
-//   ...
-//   45-DAY F10.7 CM FLUX FORECAST
-//   DD MMM NNN  DD MMM NNN  DD MMM NNN  ...
-//   ...
-//
-// The F10.7 section is what we want. We locate the section header, then
-// scan lines for `DD MMM NNN` triplets where MMM is a three-letter month
-// abbreviation and NNN is the predicted flux (integer SFU).
-
-const MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
-                 JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
-
-function _parse45DayForecast(text, nowMs = Date.now()) {
-    if (!text || typeof text !== 'string') return [];
-    const lines = text.split(/\r?\n/);
-    const headerIdx = lines.findIndex(l => /45-DAY\s+F10\.?7/i.test(l));
-    if (headerIdx < 0) return [];
-
-    const out = [];
-    // The "Issued" line carries the year — pick it up so DD MMM rows can
-    // be anchored to the correct year (the file straddles Dec/Jan in early
-    // January). Pattern: ":Issued:   2025 Apr 18 0030 UTC"
-    let baseYear = new Date(nowMs).getUTCFullYear();
-    const issued = lines.find(l => /^:Issued:/i.test(l));
-    if (issued) {
-        const m = issued.match(/(\d{4})/);
-        if (m) baseYear = parseInt(m[1], 10);
-    }
-
-    // Walk lines below the F10.7 header. The next section begins with a
-    // blank/separator line followed by another all-caps header, so we
-    // stop when we hit a non-data line after we've started consuming data.
-    const tripletRe = /(\d{1,2})\s+([A-Z]{3})\s+(\d{2,4})/g;
-    let seenData = false;
-    for (let i = headerIdx + 1; i < lines.length; i++) {
-        const line = lines[i];
-        if (!line || /^\s*$/.test(line)) {
-            if (seenData) break;
-            continue;
-        }
-        // Section break — another all-caps title with no leading digit.
-        if (/^[A-Z][A-Z\s.-]+$/.test(line.trim()) && !/^\d/.test(line.trim())) {
-            if (seenData) break;
-            continue;
-        }
-        let m;
-        tripletRe.lastIndex = 0;
-        while ((m = tripletRe.exec(line)) != null) {
-            const day = parseInt(m[1], 10);
-            const mon = MONTHS[m[2]];
-            const flux = parseInt(m[3], 10);
-            if (!Number.isInteger(day) || mon === undefined || !Number.isInteger(flux)) continue;
-            // Year wrap: if the parsed date is in the past by more than
-            // 60 days, it's next year (file straddles Dec 31).
-            let year = baseYear;
-            let ts = Date.UTC(year, mon, day);
-            if (ts < nowMs - 60 * 86400000) {
-                year += 1;
-                ts = Date.UTC(year, mon, day);
-            }
-            out.push({
-                date:     _ymd(ts),
-                flux_sfu: flux,
-                kind:     'predicted',
-            });
-            seenData = true;
-        }
-    }
-    return out;
-}
+// NOAA retired the USAF 45-day-ap-forecast.txt on 2026-03-01 (SCN 26-10);
+// _lib/ap45.js owns the replacement source chain (new JSON → new text →
+// legacy text) and both section parsers. We take the F10.7 series here.
 
 async function fetchPredicted(nowMs = Date.now()) {
-    const res = await fetchWithTimeout(NOAA_45DAY_FORECAST, {
-        headers: { Accept: 'text/plain' },
-    });
-    if (!res.ok) throw new Error(`predicted HTTP ${res.status}`);
-    const text = await res.text();
-    return _parse45DayForecast(text, nowMs);
+    const { rows } = await fetch45DayForecast(nowMs);
+    return rows
+        .filter(d => d.f107 != null)
+        .map(d => ({ date: _ymd(d.t), flux_sfu: d.f107, kind: 'predicted' }));
 }
 
 // ── Centred 81-day F10.7 average ─────────────────────────────────────────────
@@ -273,7 +197,7 @@ export default async function handler() {
     const trailing27 = _trailingAvg(rows, nowMs, 27);
 
     return jsonOk({
-        source: 'NOAA SWPC f107_cm_flux + 45-day-ap-forecast via Vercel Edge',
+        source: 'NOAA SWPC f107_cm_flux + 45-day forecast via Vercel Edge',
         age_seconds: Math.round(ageHours * 3600),
         age_hours:   Math.round(ageHours * 10) / 10,
         freshness:   stale ? 'expired' : ageHours < 26 ? 'fresh' : 'stale',
