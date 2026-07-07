@@ -1,18 +1,19 @@
 // ks-tracer.frag.js — per-pixel null-geodesic ray tracer in Kerr-Schild
-// form (a = 0: Schwarzschild, horizon-penetrating). GLSL port of the JS
-// reference implementation in geodesic.js — SAME Hamiltonian right-hand
-// side, SAME RK4, SAME radius-proportional step rule, SAME termination.
-// The JS side is validated against analytic references in
-// tests/observatory-geodesic.mjs; the shader is validated against the JS
-// side by the overlay circles in docs/observatory-3d/schwarzschild-proto.html
-// (predicted shadow edge + Einstein ring must land on the rendered ones).
-// Change one implementation, change both.
+// form: full Kerr (uSpin = a/M ∈ [0, 0.998]), horizon-penetrating. GLSL
+// port of the JS reference implementation in geodesic.js — SAME quartic
+// radial coordinate, SAME k-field, SAME analytic gradients, SAME RK4 and
+// step rule, SAME termination. The JS side is validated against analytic
+// references (Boyer-Lindquist radial-potential capture boundaries, PPN
+// deflection series, conservation laws) in tests/observatory-geodesic.mjs;
+// the shader is validated against the JS side by the overlay predictions
+// in docs/observatory-3d/schwarzschild-proto.html. Change one
+// implementation, change both.
 //
-// Units: geometrized, lengths in M (uM = 1 in the prototype). The camera
-// is a coordinate pinhole: spatial ray direction from the screen basis,
-// p_t solved from the null condition — matching geodesic.js nullMomentum,
-// which is what makes the overlay prediction exact rather than
-// approximately-a-static-observer.
+// Units: geometrized, lengths in M (uM = 1 in the prototype). Spin axis
+// is world +z. The camera is a coordinate pinhole: spatial ray direction
+// from the screen basis, p_t solved from the null condition — matching
+// geodesic.js nullMomentum, which is what makes the overlay predictions
+// exact rather than approximately-a-static-observer.
 
 export const KS_TRACER_VERT = /* glsl */ `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -30,6 +31,7 @@ uniform float uTanHalfFov;   // tan(fov_y / 2)
 uniform vec3  uCamPos;       // world, in M
 uniform mat3  uCamBasis;     // columns: right, up, forward
 uniform float uM;            // hole mass (1 in the prototype)
+uniform float uSpin;         // a/M, spin along +z
 uniform int   uMaxSteps;
 uniform float uFar;          // escape radius, in M
 uniform int   uShowGrid;     // celestial lat/lon grid on the background
@@ -39,26 +41,52 @@ const float H_K   = 0.045;   // step = H_K * r  (curvature ~ M/r^3)
 const float H_MIN = 0.03;
 const float H_MAX = 8.0;
 
-// ── geodesic RHS: identical algebra to geodesic.js geodesicRHS ───────────
-void rhs(vec3 x, vec3 p, out vec3 dx, out vec3 dp) {
-    float r  = length(x);
-    float iv = 1.0 / r;
-    float f  = 2.0 * uM * iv;
-    float s  = dot(x, p) * iv;
-    float kp = 1.0 + s;
-    float fk = f * kp;
-    dx = p - fk * x * iv;
-    float cx = -0.5 * f * kp * kp * iv * iv - fk * s * iv * iv;
-    float cp = fk * iv;
-    dp = cx * x + cp * p;
+// Kerr radial coordinate, f, and k-field (geodesic.js fkOf)
+void kerrFK(vec3 x, out float r, out float f, out vec3 k) {
+    float a  = uSpin, a2 = a * a;
+    float q  = dot(x, x) - a2;
+    float r2 = 0.5 * (q + sqrt(q * q + 4.0 * a2 * x.z * x.z));
+    r = sqrt(r2);
+    f = 2.0 * uM * r2 * r / (r2 * r2 + a2 * x.z * x.z);
+    float iD = 1.0 / (r2 + a2);
+    k = vec3((r * x.x + a * x.y) * iD, (r * x.y - a * x.x) * iD, x.z / r);
 }
 
-// null momentum in the p_t = -1 gauge (geodesic.js nullMomentum)
+// ── geodesic RHS: identical algebra to geodesic.js accum() ───────────────
+void rhs(vec3 x, vec3 p, out vec3 dx, out vec3 dp) {
+    float a  = uSpin, a2 = a * a;
+    float q  = dot(x, x) - a2;
+    float r2 = 0.5 * (q + sqrt(q * q + 4.0 * a2 * x.z * x.z));
+    float r  = sqrt(r2);
+    float rho2  = r2 * r2 + a2 * x.z * x.z;
+    float iRho2 = 1.0 / rho2;
+    float f  = 2.0 * uM * r2 * r * iRho2;
+    vec3  g  = vec3(r2 * r * x.x, r2 * r * x.y, r * (r2 + a2) * x.z) * iRho2;
+    float cf = 2.0 * uM * r2 * iRho2 * iRho2;
+    float t  = 3.0 * a2 * x.z * x.z - r2 * r2;
+    vec3  df = cf * (t * g - vec3(0.0, 0.0, 2.0 * a2 * x.z * r));
+    float iD = 1.0 / (r2 + a2);
+    float ir = 1.0 / r;
+    vec3  k  = vec3((r * x.x + a * x.y) * iD, (r * x.y - a * x.x) * iD, x.z * ir);
+
+    float s  = dot(k, p);
+    float kp = 1.0 + s;
+    float fk = f * kp;
+    dx = p - fk * k;
+
+    float twoRD = 2.0 * r * iD;
+    vec3 dkx = vec3(x.x * g.x + r, x.x * g.y + a, x.x * g.z) * iD - twoRD * k.x * g;
+    vec3 dky = vec3(x.y * g.x - a, x.y * g.y + r, x.y * g.z) * iD - twoRD * k.y * g;
+    vec3 dkz = vec3(-x.z * g.x, -x.z * g.y, r - x.z * g.z) * ir * ir;
+    dp = 0.5 * kp * kp * df + fk * (dkx * p.x + dky * p.y + dkz * p.z);
+}
+
+// null momentum in the p_t = -1 gauge (geodesic.js nullMomentumKS)
 vec3 nullMomentum(vec3 x, vec3 dir) {
-    float r  = length(x);
-    float f  = 2.0 * uM / r;
+    float r, f; vec3 k;
+    kerrFK(x, r, f, k);
     float P2 = dot(dir, dir);
-    float s  = dot(x, dir) / r;
+    float s  = dot(k, dir);
     float disc = sqrt(f * f * s * s + (1.0 + f) * (P2 - f * s * s));
     float pt = (f * s - disc) / (1.0 + f);
     return dir / (-pt);
@@ -75,7 +103,7 @@ vec3 background(vec3 d) {
     vec3 col = vec3(0.004, 0.005, 0.010);
 
     // faint inclined galactic band
-    vec3 gN = normalize(vec3(0.25, 1.0, 0.2));
+    vec3 gN = normalize(vec3(0.25, 0.2, 1.0));
     float band = exp(-pow(dot(d, gN) * 4.5, 2.0));
     col += band * vec3(0.030, 0.036, 0.060);
 
@@ -94,11 +122,11 @@ vec3 background(vec3 d) {
         }
     }
 
-    // lat/lon grid every 15 deg — hemispheres tinted so image inversion
-    // (the secondary image inside the Einstein ring) is instantly legible
+    // lat/lon grid every 15 deg about the spin axis (+z) — hemispheres
+    // tinted so image inversion is instantly legible
     if (uShowGrid == 1) {
-        float lat = degrees(asin(clamp(d.y, -1.0, 1.0)));
-        float lon = degrees(atan(d.z, d.x));
+        float lat = degrees(asin(clamp(d.z, -1.0, 1.0)));
+        float lon = degrees(atan(d.y, d.x));
         float gLat = smoothstep(0.5, 0.1, abs(fract(lat / 15.0 + 0.5) - 0.5) * 15.0);
         float gLon = smoothstep(0.5, 0.1, abs(fract(lon / 15.0 + 0.5) - 0.5) * 15.0);
         vec3 gc = d.x > 0.0 ? vec3(0.10, 0.16, 0.10) : vec3(0.16, 0.10, 0.10);
@@ -125,14 +153,16 @@ void main() {
 
     vec3 x = uCamPos;
     vec3 p = nullMomentum(x, rd);
+    float rPlus = uM * (1.0 + sqrt(max(1.0 - uSpin * uSpin, 0.0)));
     int status = 0;                       // 0 budget, 1 captured, 2 escaped
 
     vec3 k1x, k1p, k2x, k2p, k3x, k3p, k4x, k4p;
+    float r; float f; vec3 kv;
     for (int i = 0; i < 4096; i++) {
         if (i >= uMaxSteps) break;
-        float r = length(x);
-        if (r < 2.0 * uM) { status = 1; break; }
-        if (r > uFar && dot(x, p) > 0.0) { status = 2; break; }
+        kerrFK(x, r, f, kv);
+        if (r < rPlus) { status = 1; break; }
+        if (length(x) > uFar && dot(x, p) > 0.0) { status = 2; break; }
         float h = clamp(H_K * r, H_MIN, H_MAX);
         rhs(x, p, k1x, k1p);
         rhs(x + 0.5 * h * k1x, p + 0.5 * h * k1p, k2x, k2p);
