@@ -110,10 +110,13 @@ export class LaneEngine {
             if (now.a <= 0) this.rosette = [];
         }
         if (!bhs) {
-            if (now.a > 0 && now.fgw > 0 && dtSim > 0) {
-                const pMyr = 2 / now.fgw / 3.15576e13;
-                this.livePhase = (this.livePhase + 2 * Math.PI * dtSim / pMyr) % (2 * Math.PI);
-            }
+            // Outside the PN window the orbital phase comes STRAIGHT from the
+            // history (sampleAt extends the build-time accumulation within a
+            // segment): a pure function of t. The old per-frame accumulation
+            // from dtSim aliased at fast playback into a wall-clock-dependent
+            // spirograph — same τ no longer means same configuration. Inside
+            // the PN window the live integration owns the phase instead.
+            if (now.a > 0) this.livePhase = now.phase;
             bhs = bodiesAt(this.sc, this.history, now, this.livePhase, this.basis);
         }
 

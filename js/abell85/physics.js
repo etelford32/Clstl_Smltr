@@ -283,6 +283,11 @@ export function buildHistory(sc) {
             stage !== STAGE.RECOIL && stage !== STAGE.QUIESCENT;
         samples.push({
             t, a, e, stage, phase, peri, mej,
+            // orbital period at this sample: lets sampleAt() extend the
+            // accumulated phase WITHIN a segment, so the rendered orbital
+            // phase is a pure deterministic function of t (no per-frame
+            // accumulation → no wall-clock cadence dependence)
+            p: a > 0 ? keplerPeriodMyr(a, sc.mTot) : 0,
             fgw: live ? fGwHz(a, sc.mTot) : 0,
             h: live ? strainCircular(sc.m1, sc.m2, a, sc.dMpc) : 0,
             ...extra,
@@ -292,6 +297,7 @@ export function buildHistory(sc) {
     // — Stage 1: dynamical friction —
     {
         const nDf = 160;
+        let tPrev = t;
         for (let i = 0; i <= nDf; i++) {
             const f = i / nDf;
             // r(t) = r0 √(1 − t/tDf), stop where r = aBound
@@ -299,6 +305,12 @@ export function buildHistory(sc) {
             const tf = f * fEnd * tDf;
             t = sc.firstEncounterMyr + tf;
             a = r0 * Math.sqrt(Math.max(1 - tf / tDf, Math.pow(aBound / r0, 2)));
+            // the sinking nuclei orbit as they spiral: accumulate their
+            // circling deterministically at build time (same rule as the
+            // hardening loop) instead of per rendered frame
+            phase = (phase + 2 * Math.PI * (t - tPrev) /
+                keplerPeriodMyr(Math.max(a, 1e-6), sc.mTot)) % (2 * Math.PI);
+            tPrev = t;
             push();
         }
         events.binaryForms = t;
@@ -436,7 +448,14 @@ export function sampleAt(history, t) {
         mej: lerp(A.mej, B.mej),
         fgw: lerp(A.fgw, B.fgw),
         h: lerp(A.h, B.h),
-        phase: B.phase, peri: B.peri,
+        // phase: extend the build-time accumulation within the segment at
+        // the segment's Kepler period — a pure function of t, so scrubbing
+        // or replaying to the same epoch always shows the same orbital
+        // configuration regardless of frame cadence or playback speed
+        phase: A.p > 0
+            ? (A.phase + 2 * Math.PI * (t - A.t) / A.p) % (2 * Math.PI)
+            : B.phase,
+        peri: B.peri,
         stage: f < 0.5 ? A.stage : B.stage,
         remnantOffset: lerp(A.remnantOffset ?? 0, B.remnantOffset ?? 0),
     };
