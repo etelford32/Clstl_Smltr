@@ -580,6 +580,7 @@ class CameraSystem {
         canvas.addEventListener('pointerdown', (e) => {
             pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
             canvas.setPointerCapture(e.pointerId);
+            if (pointers.size === 1) cam.onDragStart();
         });
         canvas.addEventListener('pointermove', (e) => {
             const prev = pointers.get(e.pointerId);
@@ -596,7 +597,10 @@ class CameraSystem {
             }
             this.userUntil = performance.now() / 1000 + 14;
         });
-        const clear = (e) => pointers.delete(e.pointerId);
+        const clear = (e) => {
+            pointers.delete(e.pointerId);
+            if (pointers.size === 0) cam.onDragEnd();
+        };
         canvas.addEventListener('pointerup', clear);
         canvas.addEventListener('pointercancel', clear);
         canvas.addEventListener('wheel', (e) => {
@@ -610,6 +614,22 @@ class CameraSystem {
         res.els.viewCore?.addEventListener('click', () => { res.follow = false; cam.transitionTo(14000); });
         res.els.viewInfl?.addEventListener('click', () => { res.follow = false; cam.transitionTo(2600); });
         cam.distClamp = [1e-3, 6e4];
+
+        // focus mode: smooth dolly to one system's current scale — its binary
+        // separation while a pair exists, its horizon scale once merged
+        res.focusLane = (id) => {
+            const l = res.laneOf(id);
+            if (!l) return;
+            const a = l.state?.now?.a;
+            const dist = a > 0
+                ? Math.min(Math.max(a * 7, 0.02), 30000)
+                : Math.min(Math.max(
+                    rSchw(l.history.events.remnant?.mass ?? l.sc.mTot) * 30, 0.02), 30000);
+            res.follow = false;
+            res.els.follow && (res.els.follow.checked = false);
+            cam.transitionTo(dist);
+            this.userUntil = performance.now() / 1000 + 20;
+        };
     }
 
     update(world, dt, wall) {
@@ -965,9 +985,14 @@ class UISystem {
             div.innerHTML = `<input type="checkbox" ${l.visible ? 'checked' : ''}>` +
                 `<i style="background:${l.def.css}"></i>` +
                 `<span><b>${l.def.name}</b><br>${l.def.tag}</span>` +
+                `<button type="button" class="foc" title="dolly the camera to this system's scale">focus</button>` +
                 `<button type="button" class="sel">constraints</button>`;
             div.querySelector('input').addEventListener('change', (e) => {
                 l.visible = e.target.checked;
+            });
+            div.querySelector('.foc').addEventListener('click', (e) => {
+                e.preventDefault();
+                res.focusLane(l.id);
             });
             div.querySelector('.sel').addEventListener('click', (e) => {
                 e.preventDefault();
