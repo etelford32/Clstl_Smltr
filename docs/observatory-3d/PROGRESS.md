@@ -76,3 +76,69 @@ knee 0.6 / clamp 2.5, IMF luminosity scale 0.18 in `VS_POINTS_HDR`.
    standalone page/harness per plan (do NOT integrate before it validates
    against the Einstein-ring/photon-ring references). Binary case: switch
    to superposed Kerr-Schild (ton618 is single-hole BL — see baseline §2).
+
+---
+
+## Session 2 — 2026-07-07 (Phase 1 task 4 + Phase 3 prototype)
+
+Elliot approved both items by name: depth separation and the
+Schwarzschild prototype.
+
+### Done, with acceptance status
+
+**Phase 1 task 4 — depth-separated volumes: done, behind `?renderer=3d`.**
+- Layout: WAS (Holm 15A, z = −24 kpc) → IS (A402, z = 0) → STUCK
+  (B2 0402+379, z = +24 kpc); `LANE_SEP` in observatory.js. Shared-τ
+  ruler drawn as a faint physical spine through the volume centers with
+  identity-tinted tick crosses (`res.ruler`, `worldLines` render param).
+- Lane offsets fold into the floating-origin subtract (eyeL = eye −
+  offset) — physics stays lane-local, kernel untouched. Lens gather,
+  star picking, selection marker, follow, and fly-mode adaptive speed
+  are offset-aware; scale rings recenter on the camera target.
+- Fly-between: `GodCamera` gained a `goalTarget` ease; focus buttons now
+  fly the rig between volumes (verified headless: target eased to B2 at
+  z = 24000, dolly landed at its 7 pc binary; establishing shot at
+  34 kpc shows all three volumes distinctly).
+- Classic layout is byte-identical with the flag off (offsets [0,0,0],
+  target pinned at origin) — screenshot-verified.
+- **Default-on is deliberately NOT flipped** — awaiting Elliot's visual
+  sign-off on the whole `?renderer=3d` experience per plan ground rule 2.
+
+**Phase 3 task 1 — Schwarzschild prototype: done, standalone, validated.**
+- `js/observatory3d/geodesic.js` — Kerr-Schild (a = 0) Hamiltonian
+  null-geodesic RK4, p_t = −1 gauge, radius-proportional steps. KS, not
+  ton618's Boyer-Lindquist: Cartesian, horizon-penetrating, and the form
+  the binary superposed-KS mode needs.
+- `tests/observatory-geodesic.mjs` — validation against INDEPENDENT
+  analytic references, all passing: capture boundary b_c = √27 M to
+  0.000%; Keeton-Petters deflection series through 4th order at b = 50
+  and 100 M (Δ < 2.5e-6 rad); |H| < 2e-7 and |ΔL/L| < 5e-8 along a
+  near-critical ray; regular horizon crossing; screen-mapping
+  self-consistency.
+- `js/observatory3d/ks-tracer.frag.js` — GLSL port (same algebra —
+  "change one, change both" contract in the header) + procedural
+  celestial sphere + antipodal source for the Einstein-ring test.
+- `docs/observatory-3d/schwarzschild-proto.html` — chromeless dev
+  harness (registered in lint-nav EXCLUDE_FILES). Overlay circles are
+  JS-integrator predictions; the page measures the rendered result:
+  **shadow edge Δ ≤ 0.4 px, Einstein ring Δ ≤ 0.1 px at D = 30 M and
+  60 M** (half-res, headless SwiftShader). Plan acceptance met.
+
+### Verification record (session 2)
+- `tests/abell85-physics.mjs` 22/22 · `tests/observatory-geodesic.mjs`
+  7/7 · `nav-lint` clean.
+- Headless screenshots: `sep-wide` (three volumes + ruler), `sep-focus-b2`
+  (fly-between landed on the stalled binary's rosette with A402 glowing
+  24 kpc behind), `proto-d30/d60` (shadow + ring on the overlay circles).
+
+### Exact resume state for Session 3
+1. Sign-off pass on `?renderer=3d` (HDR + separation together), then
+   consider flipping the default and retiring the classic path per plan.
+2. Phase 3 task 2: add spin — Kerr-Schild with a ≠ 0 in geodesic.js +
+   shader (k_μ and H generalize; keep the same validation harness, add
+   an asymmetric-shadow check and a spin slider on the proto page).
+3. Phase 3 tasks 3–4: superposed-KS binary driven by live worker
+   positions; near-field half-res masks composited over the far-field
+   thin lens (design in plan; masks per hole, blend at boundary).
+4. Phase 1 task 5 (trail ribbons) and the screenshot smoke test remain
+   open from session 1.
