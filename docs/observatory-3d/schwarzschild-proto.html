@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>Kerr ray-tracer prototype — observatory 3D upgrade (dev harness)</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Courier New',monospace; background:#05060c; color:#c8cbe0; padding:18px; }
+h1 { font-size:15px; color:#8a7bff; margin-bottom:4px; }
+.banner { font-size:11px; color:#d8b25a; margin-bottom:12px; }
+.stage { position:relative; width:720px; height:540px; }
+canvas { position:absolute; inset:0; width:720px; height:540px; display:block; }
+#gl { background:#000; }
+#ov { pointer-events:none; }
+.stage { cursor:grab; }
+.row { display:flex; gap:18px; align-items:center; margin:10px 0; font-size:11.5px; flex-wrap:wrap; }
+.row label { display:flex; align-items:center; gap:6px; }
+input[type=range] { width:180px; accent-color:#8a7bff; }
+select { background:#111426; color:#dde; border:1px solid rgba(138,123,255,.28); font-family:inherit; }
+table { border-collapse:collapse; font-size:11.5px; margin-top:8px; }
+td, th { border:1px solid rgba(138,123,255,.22); padding:3px 10px; text-align:right; }
+th { color:#9fb4d8; font-weight:400; }
+td.ok { color:#8fe0a0; } td.bad { color:#ff8a7a; }
+.note { font-size:11px; color:#889; max-width:720px; line-height:1.5; margin-top:10px; }
+</style>
+</head>
+<body>
+<h1>Kerr ray tracer — Kerr-Schild RK4 prototype</h1>
+<div class="banner">⚠ dev harness for the observatory 3D upgrade (docs/observatory-3d/) — not a site page.
+Validates the fragment shader against the Node-tested JS integrator: the dashed overlays are
+<b>predictions</b> from js/observatory3d/geodesic.js; the image behind them is the shader.
+Spin axis is screen-up; at a &gt; 0 the shadow shifts and flattens toward the prograde
+(right) side — frame dragging.</div>
+
+<div class="stage" id="stage">
+    <canvas id="gl" width="720" height="540"></canvas>
+    <canvas id="ov" width="720" height="540"></canvas>
+</div>
+
+<div class="row">
+    <label>camera D <input id="dist" type="range" min="10" max="120" step="1" value="30"> <b id="distVal">30 M</b></label>
+    <label>spin a <input id="spin" type="range" min="0" max="0.998" step="0.002" value="0"> <b id="spinVal">0.000</b></label>
+    <label>steps <select id="steps"><option>192</option><option selected>384</option><option>768</option></select></label>
+    <label>res <select id="res"><option>0.25</option><option selected>0.5</option><option>1</option></select></label>
+    <label><input id="grid" type="checkbox" checked> background grid</label>
+    <label><input id="source" type="checkbox" checked> source behind hole</label>
+    <label><input id="overlay" type="checkbox" checked> analytic overlay</label>
+    <span id="hint">drag to orbit · overlay valid at the head-on view</span>
+</div>
+
+<table id="report"><tbody>
+<tr><th></th><th>predicted (JS integrator)</th><th>measured (shader pixels)</th><th>Δ</th></tr>
+</tbody></table>
+
+<div class="note">
+Shadow edge: screen angle where the ray's invariant impact parameter equals b<sub>c</sub> = √27 M
+(photon capture). Einstein ring: primary image of a compact source at the antipodal background
+direction, found by bisecting the traced escape direction — no weak-field approximation. Both
+predictions run in-page on the same integrator that is validated against the capture boundary,
+the Keeton-Petters deflection series, and conservation laws in <code>tests/observatory-geodesic.mjs</code>.
+</div>
+
+<script type="module">
+import { shadowScreenAngle, einsteinRingAngle, equatorialShadowEdges } from '../../js/observatory3d/geodesic.js';
+import { KS_TRACER_VERT, KS_TRACER_FRAG } from '../../js/observatory3d/ks-tracer.frag.js';
+
+const FOV = 60 * Math.PI / 180;
+const FAR = 400;                       // escape radius (M) — shader & JS must match
+const cv = document.getElementById('gl');
+const ov = document.getElementById('ov');
+const gl = cv.getContext('webgl2', { antialias: false });
+if (!gl) document.body.innerHTML = 'WebGL2 required';
+
+const prog = (() => {
+    const mk = (t, s) => {
+        const sh = gl.createShader(t);
+        gl.shaderSource(sh, s); gl.compileShader(sh);
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+            throw new Error(gl.getShaderInfoLog(sh));
+        }
+        return sh;
+    };
+    const p = gl.createProgram();
+    gl.attachShader(p, mk(gl.VERTEX_SHADER, KS_TRACER_VERT));
+    gl.attachShader(p, mk(gl.FRAGMENT_SHADER, KS_TRACER_FRAG));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+})();
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+
+const state = { D: 30, a: 0, yaw: 0, pitch: 0, steps: 384, res: 0.5, grid: true, source: true, overlay: true };
+const $ = (id) => document.getElementById(id);
+
+// Spin axis is world +z and the camera's up-reference is +z, so the spin
+// axis reads as screen-up and the equatorial plane (where the prograde/
+// retrograde shadow asymmetry lives) is the horizontal centerline.
+function camera() {
+    const { D, yaw, pitch } = state;
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const pos = [D * cp * Math.cos(yaw), D * cp * Math.sin(yaw), D * sp];
+    const fl = Math.hypot(...pos);
+    const fwd = [-pos[0] / fl, -pos[1] / fl, -pos[2] / fl];
+    // right = fwd × ẑ, renormalized (pitch is clamped away from the poles)
+    let rx = fwd[1], ry = -fwd[0];
+    const rl = Math.hypot(rx, ry) || 1; rx /= rl; ry /= rl;
+    const right = [rx, ry, 0];
+    const up = [
+        right[1] * fwd[2] - right[2] * fwd[1],
+        right[2] * fwd[0] - right[0] * fwd[2],
+        right[0] * fwd[1] - right[1] * fwd[0],
+    ];
+    return { pos, right, up, fwd };
+}
+
+function render() {
+    const w = Math.round(720 * state.res), h = Math.round(540 * state.res);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    const { pos, right, up, fwd } = camera();
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(prog);
+    const u = (n) => gl.getUniformLocation(prog, n);
+    gl.uniform1f(u('uAspect'), w / h);
+    gl.uniform1f(u('uTanHalfFov'), Math.tan(FOV / 2));
+    gl.uniform3f(u('uCamPos'), ...pos);
+    gl.uniformMatrix3fv(u('uCamBasis'), false, [...right, ...up, ...fwd]);
+    gl.uniform1f(u('uM'), 1);
+    gl.uniform1f(u('uSpin'), state.a);
+    gl.uniform1i(u('uMaxSteps'), state.steps);
+    gl.uniform1f(u('uFar'), FAR);
+    gl.uniform1i(u('uShowGrid'), state.grid ? 1 : 0);
+    gl.uniform1i(u('uShowSource'), state.source ? 1 : 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    measure();                          // readPixels in the same task
+    drawOverlay();
+}
+
+// screen-angle → pixel radius for the pinhole mapping (in a given height)
+const angPx = (th, hPx) => (hPx / 2) * Math.tan(th) / Math.tan(FOV / 2);
+
+let pred = { thSh: NaN, thE: NaN, thPro: NaN, thRetro: NaN };
+function predict() {
+    if (state.a === 0) {
+        pred.thSh = shadowScreenAngle(state.D, 1);
+        pred.thE = state.source ? einsteinRingAngle(state.D, 1, { rFar: FAR }) : NaN;
+        pred.thPro = NaN; pred.thRetro = NaN;
+    } else {
+        // numeric traced boundaries in the equatorial plane; the JS
+        // integrator behind them is validated against the BL potential
+        const e = equatorialShadowEdges(state.D, 1, state.a);
+        pred.thPro = e.pro; pred.thRetro = e.retro;
+        pred.thSh = NaN; pred.thE = NaN;
+    }
+}
+
+let meas = { shadowPx: NaN, ringPx: NaN, proPx: NaN, retroPx: NaN };
+function measure() {
+    const headOn = Math.abs(state.yaw) + Math.abs(state.pitch) < 1e-3;
+    meas = { shadowPx: NaN, ringPx: NaN, proPx: NaN, retroPx: NaN };
+    if (!headOn) { report(); return; }
+    const w = cv.width, h = cv.height;
+    const row = new Uint8Array(w * 4);
+    gl.readPixels(0, h >> 1, w, 1, gl.RGBA, gl.UNSIGNED_BYTE, row);
+    const lum = (i) => 0.30 * row[i * 4] + 0.59 * row[i * 4 + 1] + 0.11 * row[i * 4 + 2];
+    const cx = w / 2;
+    // shadow edge: first pixel brighter than the void, scanning outward both
+    // ways along the equatorial centerline. Screen-right (+) is prograde.
+    const edge = (dir) => {
+        for (let k = 2; k < w / 2 - 2; k++) {
+            if (lum(Math.round(cx + dir * k)) > 6) return k;
+        }
+        return NaN;
+    };
+    const eL = edge(-1), eR = edge(1);
+    if (state.a === 0) {
+        meas.shadowPx = (eL + eR) / 2;
+    } else {
+        meas.proPx = eR; meas.retroPx = eL;
+    }
+    // Einstein ring: brightest pixel beyond the shadow edge (source is the
+    // dominant HDR feature when enabled; a = 0 only — the spinning ring is
+    // asymmetric and has no single radius to report)
+    if (state.source && state.a === 0) {
+        let best = 0, bestK = NaN;
+        for (let k = Math.ceil(meas.shadowPx) + 3; k < w / 2 - 2; k++) {
+            const v = lum(Math.round(cx + k)) + lum(Math.round(cx - k));
+            if (v > best) { best = v; bestK = k; }
+        }
+        if (best > 60) meas.ringPx = bestK;
+    }
+    report();
+}
+
+function report() {
+    const h = cv.height;
+    const rows = [];
+    const mk = (name, thPred, mPx) => {
+        const pPx = angPx(thPred, h);
+        const d = Math.abs(mPx - pPx);
+        const ok = d <= Math.max(2, pPx * 0.02);
+        rows.push(`<tr><th>${name}</th><td>${(thPred * 180 / Math.PI).toFixed(2)}° · ${pPx.toFixed(1)} px</td>` +
+            `<td>${Number.isFinite(mPx) ? mPx.toFixed(1) + ' px' : '—'}</td>` +
+            `<td class="${Number.isFinite(mPx) ? (ok ? 'ok' : 'bad') : ''}">` +
+            `${Number.isFinite(mPx) ? d.toFixed(1) + ' px' : 'rotate to head-on'}</td></tr>`);
+        return Number.isFinite(mPx) ? ok : null;
+    };
+    let okSh = null, okE = null, okPro = null, okRetro = null;
+    if (state.a === 0) {
+        okSh = mk('shadow edge (b = √27 M)', pred.thSh, meas.shadowPx);
+        if (Number.isFinite(pred.thE)) okE = mk('Einstein ring (primary)', pred.thE, meas.ringPx);
+    } else {
+        okPro = mk('shadow edge, prograde (right)', pred.thPro, meas.proPx);
+        okRetro = mk('shadow edge, retrograde (left)', pred.thRetro, meas.retroPx);
+        if (Number.isFinite(meas.proPx) && Number.isFinite(meas.retroPx)) {
+            rows.push(`<tr><th>frame-dragging asymmetry</th>` +
+                `<td>${(angPx(pred.thRetro, h) - angPx(pred.thPro, h)).toFixed(1)} px</td>` +
+                `<td>${(meas.retroPx - meas.proPx).toFixed(1)} px</td><td></td></tr>`);
+        }
+    }
+    document.querySelector('#report tbody').innerHTML =
+        '<tr><th></th><th>predicted (JS integrator)</th><th>measured (shader pixels)</th><th>Δ</th></tr>' +
+        rows.join('');
+    window.__proto = {
+        ready: true, D: state.D, res: state.res, a: state.a,
+        thShDeg: pred.thSh * 180 / Math.PI, thEDeg: pred.thE * 180 / Math.PI,
+        predShadowPx: angPx(pred.thSh, cv.height), measShadowPx: meas.shadowPx,
+        predRingPx: Number.isFinite(pred.thE) ? angPx(pred.thE, cv.height) : NaN,
+        measRingPx: meas.ringPx, shadowOk: okSh, ringOk: okE,
+        predProPx: Number.isFinite(pred.thPro) ? angPx(pred.thPro, cv.height) : NaN,
+        predRetroPx: Number.isFinite(pred.thRetro) ? angPx(pred.thRetro, cv.height) : NaN,
+        measProPx: meas.proPx, measRetroPx: meas.retroPx,
+        proOk: okPro, retroOk: okRetro,
+    };
+}
+
+function drawOverlay() {
+    const ctx = ov.getContext('2d');
+    ctx.clearRect(0, 0, ov.width, ov.height);
+    if (!state.overlay) return;
+    const headOn = Math.abs(state.yaw) + Math.abs(state.pitch) < 1e-3;
+    const circle = (th, color, label) => {
+        if (!Number.isFinite(th)) return;
+        const r = angPx(th, ov.height);
+        ctx.strokeStyle = color;
+        ctx.setLineDash([6, 5]);
+        ctx.lineWidth = 1.2;
+        ctx.globalAlpha = headOn ? 0.9 : 0.25;
+        ctx.beginPath();
+        ctx.arc(ov.width / 2, ov.height / 2, r, 0, 7);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = color;
+        ctx.font = '11px "Courier New",monospace';
+        ctx.fillText(label, ov.width / 2 + r * 0.72, ov.height / 2 - r * 0.72);
+        ctx.globalAlpha = 1;
+    };
+    circle(pred.thSh, '#57e0ff', `shadow ${(pred.thSh * 180 / Math.PI).toFixed(2)}°`);
+    if (state.source) circle(pred.thE, '#ffb454', `ring ${(pred.thE * 180 / Math.PI).toFixed(2)}°`);
+    // spinning case: predicted equatorial edges as vertical ticks crossing
+    // the (horizontal) equator — prograde right, retrograde left
+    const tick = (thSigned, color, label) => {
+        if (!Number.isFinite(thSigned)) return;
+        const x = ov.width / 2 + Math.sign(thSigned) * angPx(Math.abs(thSigned), ov.height);
+        ctx.strokeStyle = color;
+        ctx.setLineDash([5, 4]);
+        ctx.lineWidth = 1.2;
+        ctx.globalAlpha = headOn ? 0.9 : 0.25;
+        ctx.beginPath();
+        ctx.moveTo(x, ov.height / 2 - 46);
+        ctx.lineTo(x, ov.height / 2 + 46);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = color;
+        ctx.font = '11px "Courier New",monospace';
+        ctx.fillText(label, x - 24, ov.height / 2 - 52);
+        ctx.globalAlpha = 1;
+    };
+    tick(pred.thPro, '#8fe0a0', 'prograde');
+    tick(-pred.thRetro, '#ff9a7a', 'retrograde');
+}
+
+// ── controls ──────────────────────────────────────────────────────────────
+$('dist').addEventListener('input', () => {
+    state.D = parseFloat($('dist').value);
+    $('distVal').textContent = state.D + ' M';
+    predict(); render();
+});
+$('spin').addEventListener('change', () => {
+    state.a = parseFloat($('spin').value);
+    $('spinVal').textContent = state.a.toFixed(3);
+    predict(); render();
+});
+$('spin').addEventListener('input', () => {
+    $('spinVal').textContent = parseFloat($('spin').value).toFixed(3);
+});
+$('steps').addEventListener('change', () => { state.steps = parseInt($('steps').value, 10); render(); });
+$('res').addEventListener('change', () => { state.res = parseFloat($('res').value); render(); });
+$('grid').addEventListener('change', () => { state.grid = $('grid').checked; render(); });
+$('source').addEventListener('change', () => { state.source = $('source').checked; predict(); render(); });
+$('overlay').addEventListener('change', () => { state.overlay = $('overlay').checked; drawOverlay(); });
+
+const stage = $('stage');
+let drag = null;
+stage.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; stage.setPointerCapture(e.pointerId); });
+stage.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    state.yaw += (e.clientX - drag.x) * 0.005;
+    state.pitch = Math.min(Math.max(state.pitch + (e.clientY - drag.y) * 0.005, -1.4), 1.4);
+    drag = { x: e.clientX, y: e.clientY };
+    render();
+});
+stage.addEventListener('pointerup', () => { drag = null; });
+stage.addEventListener('dblclick', () => { state.yaw = 0; state.pitch = 0; render(); });
+
+// expose for the headless harness
+window.__setParams = (p) => {
+    Object.assign(state, p);
+    $('dist').value = state.D; $('distVal').textContent = state.D + ' M';
+    $('spin').value = state.a; $('spinVal').textContent = state.a.toFixed(3);
+    predict(); render();
+};
+
+predict();
+render();
+</script>
+</body>
+</html>

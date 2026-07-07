@@ -39,7 +39,10 @@ const BASELINE = process.env.NAVLINT_BASELINE || join(ROOT, 'scripts', 'nav-lint
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'rust/target', 'rust/www',
     'swmf/runs', 'swmf/runs_docker', 'swmf/raw', 'swmf/.venv', 'dsmc/raw']);
 // Individual non-site pages (dev/test/engine) — intentionally chromeless.
-const EXCLUDE_FILES = new Set(['js/geo/selftest.html']);
+const EXCLUDE_FILES = new Set([
+    'js/geo/selftest.html',
+    'docs/observatory-3d/schwarzschild-proto.html',   // ray-tracer dev harness
+]);
 
 function walk(dir, acc = []) {
   for (const name of readdirSync(dir)) {

@@ -33,26 +33,36 @@ import { Renderer, Trail } from './render.js';
 import { GodCamera } from './camera.js';
 import { tAt, buildTauAxis, eventsTau, indexOfTau } from './twinsync.js';
 import { fmtLen, fmtTime, fmtMass, fmtFreq, rSchw, rGrav } from './units.js';
+import { RENDER_3D, PERF_HUD } from './flags.js';
+import { PerfHudSystem } from './perfhud.js';
 
 const LOOP_SECONDS = 260;
 
+// zOrder places each system along the shared axis in the depth-separated
+// layout (?renderer=3d): past → present → forever-stuck reads back-to-front
+// as WAS → IS → STUCK. Multiplied by LANE_SEP; classic layout ignores it.
 export const LANE_DEFS = {
     a402: {
         name: 'Abell 402-BCG', tag: 'the pair that IS', css: '#a99bff',
         tint: [0.80, 0.75, 1.0], orient: { incl: 0.42, node: -0.5 },
-        obsRGamma: 2200,
+        obsRGamma: 2200, zOrder: 0,
     },
     holm15a: {
         name: 'Holm 15A · Abell 85', tag: 'the pair that WAS', css: '#f0bd55',
         tint: [1.0, 0.86, 0.55], orient: { incl: 0.50, node: 0.7 },
-        obsRGamma: 4110,
+        obsRGamma: 4110, zOrder: -1,
     },
     b20402: {
         name: 'B2 0402+379', tag: 'the pair that is STUCK', css: '#4fd1b8',
         tint: [0.55, 1.0, 0.88], orient: { incl: 0.36, node: 1.6 },
-        obsRGamma: NaN,
+        obsRGamma: NaN, zOrder: 1,
     },
 };
+
+// Separation between system centers along the shared axis (pc). Bound stars
+// live within ~3 r_infl ≈ 18 kpc of each center; 24 kpc keeps the three
+// volumes legible as distinct clusters while their ejecta halos may mingle.
+const LANE_SEP = 24000;
 
 // ── constraint catalogue: every dial carries its provenance ─────────────────
 const CONSTRAINTS = {
@@ -89,10 +99,12 @@ export function boot(els) {
     const world = new World();
     const res = world.res;
     res.els = els;
-    res.renderer = new Renderer(els.canvas);
+    res.renderer = new Renderer(els.canvas, { hdr: RENDER_3D });
     res.cam = new GodCamera();
     res.renderer.camera = res.cam;
-    res.cam.dist = 14000;
+    // depth-separated layout opens on an establishing shot of all three
+    // volumes; classic keeps the original core-scale framing
+    res.cam.dist = RENDER_3D ? 34000 : 14000;
     res.wall = performance.now();
 
     // ── lane entities ────────────────────────────────────────────────────────
@@ -103,6 +115,7 @@ export function boot(els) {
         world.add(e, 'lane', {
             id, def, overrides: {},
             sc, history: buildHistory(sc),
+            offset: RENDER_3D ? [0, 0, def.zOrder * LANE_SEP] : [0, 0, 0],
             visible: true,
             state: null,                 // latest physics state from the worker
             starPos: null, starFlags: null, n: 0,
@@ -134,6 +147,7 @@ export function boot(els) {
     world.system(new AnalyticsSystem());
     world.system(new UISystem());
     world.system(new AudioSystem());
+    if (PERF_HUD) world.system(new PerfHudSystem());
 
     let last = performance.now();
     function frame(wall) {
@@ -357,14 +371,16 @@ class PhysicsSystem {
                 if (!l.starPos || l.starPos.length !== st.n * 3) {
                     l.starPos = new Float32Array(st.n * 3);
                     l.starFlags = new Uint8Array(st.n);
+                    l.starVel = new Float32Array(st.n * 3);
                 }
                 l.starPos.set(new Float32Array(st.pos, 0, st.n * 3));
                 l.starFlags.set(new Uint8Array(st.flags, 0, st.n));
+                if (st.vel) l.starVel.set(new Float32Array(st.vel, 0, st.n * 3));
                 l.rosette = (st.rosette ?? []).map(r => ({
                     buf: Float32Array.from(r.pts), count: r.count,
                 }));
                 // hand buffers back next frame (ping-pong)
-                this.pools[st.id] = { pos: st.pos, flags: st.flags };
+                this.pools[st.id] = { pos: st.pos, flags: st.flags, vel: st.vel };
             }
             return;
         }
@@ -406,6 +422,7 @@ class PhysicsSystem {
             const transfer = [];
             for (const k of Object.keys(pools)) {
                 transfer.push(pools[k].pos, pools[k].flags);
+                if (pools[k].vel) transfer.push(pools[k].vel);
             }
             this.worker.postMessage(
                 { type: 'frame', seq: this.tick, ts, tick: this.tick, pools }, transfer);
@@ -418,6 +435,7 @@ class PhysicsSystem {
                 l.n = eng.cluster.n;
                 l.starPos = eng.cluster.pos;
                 l.starFlags = eng.cluster.flags;
+                l.starVel = eng.cluster.vel;
                 l.rosette = eng.rosette;
             }
         }
@@ -499,12 +517,13 @@ class InspectSystem {
         let best = null, bestD = 16 * dpr;
         for (const l of res.lanes()) {
             if (!l.visible || !l.starPos) continue;
+            const off = l.offset ?? [0, 0, 0];
             for (let i = 0; i < l.n; i++) {
                 const f = l.starFlags[i];
                 if (f === 1 || f === 2) continue;    // ejected/frozen: not studyable
                 const j = i * 3;
                 const s = res.renderer.worldToScreen(
-                    [l.starPos[j], l.starPos[j + 1], l.starPos[j + 2]]);
+                    [l.starPos[j] + off[0], l.starPos[j + 1] + off[1], l.starPos[j + 2] + off[2]]);
                 if (!s) continue;
                 const d = Math.hypot(s[0] - px, s[1] - py);
                 if (d < bestD) { bestD = d; best = { laneId: l.id, index: i }; }
@@ -577,6 +596,7 @@ class CameraSystem {
         canvas.addEventListener('pointerdown', (e) => {
             pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
             canvas.setPointerCapture(e.pointerId);
+            if (pointers.size === 1) cam.onDragStart();
         });
         canvas.addEventListener('pointermove', (e) => {
             const prev = pointers.get(e.pointerId);
@@ -593,7 +613,10 @@ class CameraSystem {
             }
             this.userUntil = performance.now() / 1000 + 14;
         });
-        const clear = (e) => pointers.delete(e.pointerId);
+        const clear = (e) => {
+            pointers.delete(e.pointerId);
+            if (pointers.size === 0) cam.onDragEnd();
+        };
         canvas.addEventListener('pointerup', clear);
         canvas.addEventListener('pointercancel', clear);
         canvas.addEventListener('wheel', (e) => {
@@ -607,6 +630,26 @@ class CameraSystem {
         res.els.viewCore?.addEventListener('click', () => { res.follow = false; cam.transitionTo(14000); });
         res.els.viewInfl?.addEventListener('click', () => { res.follow = false; cam.transitionTo(2600); });
         cam.distClamp = [1e-3, 6e4];
+
+        // focus mode: smooth dolly to one system's current scale — its binary
+        // separation while a pair exists, its horizon scale once merged. In
+        // the depth-separated layout this is the fly-between: the orbit rig's
+        // target eases to that system's volume center.
+        res.focusedLane = 'a402';
+        res.focusLane = (id) => {
+            const l = res.laneOf(id);
+            if (!l) return;
+            res.focusedLane = id;
+            const a = l.state?.now?.a;
+            const dist = a > 0
+                ? Math.min(Math.max(a * 7, 0.02), 30000)
+                : Math.min(Math.max(
+                    rSchw(l.history.events.remnant?.mass ?? l.sc.mTot) * 30, 0.02), 30000);
+            res.follow = false;
+            res.els.follow && (res.els.follow.checked = false);
+            cam.transitionTo(dist, RENDER_3D ? l.offset : null);
+            this.userUntil = performance.now() / 1000 + 20;
+        };
     }
 
     update(world, dt, wall) {
@@ -614,8 +657,12 @@ class CameraSystem {
         const cam = res.cam;
         if (wall / 1000 > this.userUntil) cam.yaw += 0.02 * dt;
         if (res.follow) {
+            // separated layout: chase the focused system only (following the
+            // global-min separation would yank the rig between volumes)
+            const followed = RENDER_3D
+                ? [res.laneOf(res.focusedLane)].filter(Boolean) : res.lanes();
             let aMin = Infinity;
-            for (const l of res.lanes()) {
+            for (const l of followed) {
                 if (l.visible && l.state?.now?.a > 0) aMin = Math.min(aMin, l.state.now.a);
             }
             if (Number.isFinite(aMin)) {
@@ -626,17 +673,39 @@ class CameraSystem {
         let dNear = cam.dist;
         const eye = cam.eye();
         for (const l of res.lanes()) {
+            const off = l.offset ?? [0, 0, 0];
             for (const b of (l.renderBhs ?? [])) {
                 dNear = Math.min(dNear, Math.hypot(
-                    b.p[0] - eye[0], b.p[1] - eye[1], b.p[2] - eye[2]));
+                    b.p[0] + off[0] - eye[0],
+                    b.p[1] + off[1] - eye[1],
+                    b.p[2] + off[2] - eye[2]));
             }
         }
         cam.update(dt, dNear);
     }
 }
 
-// ═══ RenderSystem — the stacked composite ════════════════════════════════════
+// ═══ RenderSystem — the composite (stacked, or depth-separated in 3d) ════════
 class RenderSystem {
+    init(world) {
+        const res = world.res;
+        if (!RENDER_3D) return;
+        // the shared-τ axis as a physical ruler through the three volumes:
+        // one faint spine + an identity-tinted tick cross at each system
+        const S = LANE_SEP, T = S * 0.035;
+        const line = (pts, color) => ({ buf: Float32Array.from(pts), count: pts.length / 3, color });
+        res.ruler = [
+            line([0, 0, -1.3 * S, 0, 0, 1.3 * S], [0.55, 0.6, 0.95, 0.10]),
+        ];
+        for (const l of res.lanes()) {
+            const [t0, t1, t2] = l.def.tint;
+            const z = l.offset[2];
+            res.ruler.push(
+                line([-T, 0, z, T, 0, z], [t0, t1, t2, 0.30]),
+                line([0, -T, z, 0, T, z], [t0, t1, t2, 0.30]));
+        }
+    }
+
     update(world, dt, wall) {
         const res = world.res;
         const lanes = [];
@@ -653,7 +722,8 @@ class RenderSystem {
                 });
             }
             lanes.push({
-                pos: l.starPos, flags: l.starFlags, n: l.n,
+                pos: l.starPos, flags: l.starFlags, vel: l.starVel, n: l.n,
+                offset: l.offset,
                 bhs: l.renderBhs ?? l.state.bhs,
                 trails: l.trails,
                 tint: l.def.tint,
@@ -673,8 +743,16 @@ class RenderSystem {
         for (const R of [0.1, 1, 10, 100, 1000, 10000]) {
             if (R > d * 0.02 && R < d * 2.5) rings.push(R);
         }
+        // the selection marker is lane-local; lift it to world space
+        let marker = res.sel?.marker ?? null;
+        if (marker && RENDER_3D) {
+            const off = res.laneOf(res.sel.laneId)?.offset ?? [0, 0, 0];
+            marker = [marker[0] + off[0], marker[1] + off[1], marker[2] + off[2]];
+        }
         res.renderer.renderComposite({
-            lanes, rings, lensOn: true, marker: res.sel?.marker ?? null,
+            lanes, rings, lensOn: true, marker,
+            ringCenter: res.cam.target,
+            worldLines: res.ruler,
         });
     }
 }
@@ -962,9 +1040,14 @@ class UISystem {
             div.innerHTML = `<input type="checkbox" ${l.visible ? 'checked' : ''}>` +
                 `<i style="background:${l.def.css}"></i>` +
                 `<span><b>${l.def.name}</b><br>${l.def.tag}</span>` +
+                `<button type="button" class="foc" title="dolly the camera to this system's scale">focus</button>` +
                 `<button type="button" class="sel">constraints</button>`;
             div.querySelector('input').addEventListener('change', (e) => {
                 l.visible = e.target.checked;
+            });
+            div.querySelector('.foc').addEventListener('click', (e) => {
+                e.preventDefault();
+                res.focusLane(l.id);
             });
             div.querySelector('.sel').addEventListener('click', (e) => {
                 e.preventDefault();
