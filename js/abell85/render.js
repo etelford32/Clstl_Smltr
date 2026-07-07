@@ -210,7 +210,9 @@ void main() {
     vFlag = aFlag;
     gl_Position = uMvp * vec4(aPos, 1.0);
     float w = max(gl_Position.w, 1e-3);
-    if (aFlag > 8.0) { gl_PointSize = 22.0; vCol = vec3(1.0); return; }
+    if (aFlag > 10.5) { gl_PointSize = 17.0; vCol = vec3(60.0, 46.0, 28.0); return; } // merger flare
+    if (aFlag > 9.5)  { gl_PointSize = 13.0; vCol = vec3(5.0, 4.2, 3.2); return; }    // AGN core beacon
+    if (aFlag > 8.0)  { gl_PointSize = 22.0; vCol = vec3(1.0); return; }              // selection marker
 
     // fake-IMF draw: mostly cool dwarfs, ~10% overluminous giant branch,
     // a sparse hot blue tail — an old-population cluster, not a starburst
@@ -240,6 +242,11 @@ out vec4 o;
 void main() {
     vec2 d = gl_PointCoord - 0.5;
     float r = length(d);
+    if (vFlag > 9.5) {                       // AGN core / merger flare: soft glow
+        float g = smoothstep(0.5, 0.0, r);
+        o = vec4(vCol * uTint, g * g * 0.95);
+        return;
+    }
     if (vFlag > 8.0) {                       // selection marker: hollow ring
         float ring = smoothstep(0.50, 0.44, r) * smoothstep(0.30, 0.36, r);
         o = vec4(0.55, 1.0, 0.95, ring * 0.95);
@@ -1054,6 +1061,39 @@ export class Renderer {
             gl.enableVertexAttribArray(1);
             gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
             gl.drawArrays(gl.POINTS, 0, lane.n);
+        }
+
+        // AGN core beacons (hdr only — the classic hatch stays untouched):
+        // the holes themselves as bloom-catching glow sprites, so the
+        // binaries read at ANY zoom — at cluster scale the whole story is
+        // sub-pixel without them. Flag 11 is the ~2 s merger flare.
+        if (this.hdr && lane.bhs?.length) {
+            const nB = Math.min(lane.bhs.length, 2);
+            const core = this._coreBuf || (this._coreBuf = new Float32Array(6));
+            const coreF = this._coreFlagBuf || (this._coreFlagBuf = new Float32Array(2));
+            for (let i = 0; i < nB; i++) {
+                const b = lane.bhs[i];
+                core[i * 3] = b.p[0] - eye[0];
+                core[i * 3 + 1] = b.p[1] - eye[1];
+                core[i * 3 + 2] = b.p[2] - eye[2];
+                coreF[i] = lane.coreFlash ? 11 : 10;
+            }
+            gl.useProgram(this.progPointsHdr);
+            gl.uniformMatrix4fv(gl.getUniformLocation(this.progPointsHdr, 'uMvp'), false, mvp);
+            gl.uniform1f(gl.getUniformLocation(this.progPointsHdr, 'uPxScale'), h * 0.9);
+            const ct = lane.tint ?? [1, 1, 1];
+            gl.uniform3f(gl.getUniformLocation(this.progPointsHdr, 'uTint'), ct[0], ct[1], ct[2]);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.bufPos);
+            gl.bufferData(gl.ARRAY_BUFFER, core.subarray(0, nB * 3), gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.bufFlag);
+            gl.bufferData(gl.ARRAY_BUFFER, coreF.subarray(0, nB), gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(1);
+            gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
+            gl.disableVertexAttribArray(2);
+            gl.vertexAttrib3f(2, 0, 0, 0);
+            gl.drawArrays(gl.POINTS, 0, nB);
         }
 
         if (lane.extraLines?.length) {

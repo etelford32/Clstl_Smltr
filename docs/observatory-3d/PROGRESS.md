@@ -260,3 +260,35 @@ orbital-phase aliasing spirograph at hardening zoom, and directed:
    matters more since 3D is default (HUD gives the measurement; wire a
    quality step-down if sustained frame time exceeds budget).
 3. Trail ribbons + repo screenshot smoke test still open.
+
+---
+
+## Session 4b — 2026-07-07 (the unattended page tells the story)
+
+Elliot's feedback on the deployed default ("it just looks like this
+after a while"): at the establishing shot the ENTIRE story is
+sub-pixel — no sprite marks the holes, lensing is invisible at 10 kpc,
+trails are (correctly) suppressed — so an unattended page showed three
+static fuzzballs through the most dramatic minutes of the timeline.
+
+### Done
+- **AGN core beacons** (hdr only; classic hatch untouched): each hole
+  renders as a bloom-catching glow sprite (flag 10; flag 11 is a ~2 s
+  merger flare triggered by ChoreoSystem). The binaries now read at any
+  zoom, and at mid-zoom the thin lens bends each beacon into an
+  Einstein ring around its hole — free physics, no extra code.
+- **Idle cinema** (dock checkbox, default on, hidden in classic): when
+  playing + idle + orbit mode + not following, the rig eases to the
+  focused system as its coalescence approaches (window 400 Myr), rides
+  dist = 9·a down through the Einstein-ring regime into the geodesic
+  near-field finale, holds through ringdown (flare + burst shells),
+  then pulls back to the establishing shot. Any interaction suspends it
+  20 s (drag/wheel/focus/core/influence/follow all bump the idle timer).
+  If the focused lane never merges, the next-merging visible lane is
+  chosen.
+
+### Verification record (session 4b)
+- Headless hands-free run: from the establishing shot, the camera rode
+  34,000 pc → 3 pc tracking a: 1.86 → 0.31 pc with zero input; the
+  screenshot at τ −92 kyr shows both holes as Einstein-ringed beacons.
+- 22/22 physics · 6/6 determinism · nav-lint clean.

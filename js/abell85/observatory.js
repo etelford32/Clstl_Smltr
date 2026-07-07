@@ -452,6 +452,7 @@ class ChoreoSystem {
                 l.choreo = l.choreo ?? new MergerChoreo(l.sc, l.history);
                 l.choreo.trigger(wall);
                 l.shells.push({ born: wall });
+                l.flashUntil = wall + 2200;      // core beacon flares through ringdown
                 l.events.unshift({ label: 'coalescence — ' + (l.choreo.bookkeeping()), wall });
                 l.events.length = Math.min(l.events.length, 3);
             }
@@ -641,10 +642,20 @@ class CameraSystem {
             this.userUntil = performance.now() / 1000 + 14;
         }, { passive: false });
 
-        res.els.follow?.addEventListener('change', () => { res.follow = res.els.follow.checked; });
-        res.els.viewCore?.addEventListener('click', () => { res.follow = false; cam.transitionTo(14000); });
-        res.els.viewInfl?.addEventListener('click', () => { res.follow = false; cam.transitionTo(2600); });
+        const userSteer = () => { this.userUntil = performance.now() / 1000 + 20; };
+        res.els.follow?.addEventListener('change', () => { res.follow = res.els.follow.checked; userSteer(); });
+        res.els.viewCore?.addEventListener('click', () => { res.follow = false; cam.transitionTo(14000); userSteer(); });
+        res.els.viewInfl?.addEventListener('click', () => { res.follow = false; cam.transitionTo(2600); userSteer(); });
         cam.distClamp = [1e-3, 6e4];
+
+        // idle cinematography (3D layout only): when nobody is steering,
+        // ride the focused system's inspiral down to its coalescence and
+        // pull back out afterwards. Any interaction suspends it (userUntil).
+        res.cinema = RENDER_3D && (res.els.cinema?.checked ?? true);
+        res.els.cinema?.addEventListener('change', () => { res.cinema = res.els.cinema.checked; });
+        if (!RENDER_3D && res.els.cinema) {
+            res.els.cinema.parentElement.style.display = 'none';
+        }
 
         // focus mode: smooth dolly to one system's current scale — its binary
         // separation while a pair exists, its horizon scale once merged. In
@@ -671,6 +682,42 @@ class CameraSystem {
         const res = world.res;
         const cam = res.cam;
         if (wall / 1000 > this.userUntil) cam.yaw += 0.02 * dt;
+
+        // idle cinema: approach → ride the shrinking separation into the
+        // near-field finale → hold through ringdown → ease back out. The
+        // whole story is sub-pixel from the establishing shot, so an
+        // unattended page would otherwise show three static fuzzballs.
+        if (res.cinema && res.playing && !res.follow && cam.mode === 'orbit'
+            && res.laneT && wall / 1000 > this.userUntil) {
+            const CIN_IN = 400;      // Myr before coalescence: begin the ride
+            const CIN_OUT = 60;      // Myr after: pull back to the wide shot
+            let lane = res.laneOf(res.focusedLane ?? 'a402');
+            if (lane?.history.events.merger === undefined) {
+                let best = Infinity;    // focused lane never merges: next story
+                for (const l of res.lanes()) {
+                    const m = l.history.events.merger;
+                    if (m === undefined || !l.visible) continue;
+                    const d = m - res.laneT.get(l.id);
+                    if (d > 0 && d < best) { best = d; lane = l; }
+                }
+            }
+            const merger = lane?.history.events.merger;
+            if (merger !== undefined) {
+                const dtM = merger - res.laneT.get(lane.id);
+                const a = lane.state?.now?.a;
+                if (dtM > 0 && dtM < CIN_IN && a > 0) {
+                    cam.goalTarget = [...lane.offset];
+                    cam.goalDist = Math.min(Math.max(a * 9, 0.05), 34000);
+                    this._cinActive = true;
+                } else if (this._cinActive && dtM <= -CIN_OUT) {
+                    cam.goalTarget = [0, 0, 0];
+                    cam.goalDist = 34000;
+                    this._cinActive = false;
+                }
+                // between 0 and −CIN_OUT: hold on the remnant (flare + shells)
+            }
+        }
+
         if (res.follow) {
             // separated layout: chase the focused system only (following the
             // global-min separation would yank the rig between volumes)
@@ -740,6 +787,7 @@ class RenderSystem {
                 pos: l.starPos, flags: l.starFlags, vel: l.starVel, n: l.n,
                 offset: l.offset,
                 bhs: l.renderBhs ?? l.state.bhs,
+                coreFlash: l.flashUntil > wall,
                 trails: l.trails,
                 tint: l.def.tint,
                 extraLines,
