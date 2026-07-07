@@ -13,7 +13,8 @@
 // Run: node tests/observatory-geodesic.mjs
 
 import {
-    traceRay, nullMomentum, impactParam, shadowScreenAngle, B_CRIT,
+    traceRay, traceRayKS, hole, nullMomentum, impactParam,
+    shadowScreenAngle, B_CRIT,
 } from '../js/observatory3d/geodesic.js';
 
 let failed = 0;
@@ -91,6 +92,93 @@ for (const bGoal of [50, 100]) {
     check('shadow edge on screen: traced capture boundary matches b=√27 M mapping',
         err < 2e-3,
         `θ = ${(thTraced * 180 / Math.PI).toFixed(3)}° traced vs ${(thPred * 180 / Math.PI).toFixed(3)}° predicted`);
+}
+
+// ── 6. Kerr: equatorial capture boundaries vs the BL radial potential ────────
+// Independent reference: in Boyer-Lindquist, an equatorial photon from
+// infinity with ξ = L_z/E is captured iff the radial potential
+//   R(r; ξ) = (r² + a² − aξ)² − Δ (ξ − a)²,  Δ = r² − 2r + a²   [M = 1]
+// stays positive for all r > r₊. The critical ξ (each rotation sense) is
+// where min R crosses zero. ξ is coordinate-invariant (E, L_z), so the
+// Kerr-Schild trace must reproduce it exactly.
+function criticalXiBL(a, sign) {
+    const rPlus = 1 + Math.sqrt(1 - a * a);
+    const minR = (xi) => {
+        let m = Infinity;
+        for (let r = rPlus + 1e-4; r < 30; r += 1e-3) {
+            const D = r * r - 2 * r + a * a;
+            const v = (r * r + a * a - a * xi) ** 2 - D * (xi - a) ** 2;
+            m = Math.min(m, v);
+        }
+        return m;
+    };
+    let lo = 0.1 * sign, hi = 9 * sign;    // capture at small |ξ|, escape large
+    for (let i = 0; i < 45; i++) {
+        const mid = 0.5 * (lo + hi);
+        if (minR(mid) > 0) lo = mid; else hi = mid;
+    }
+    return 0.5 * (lo + hi);
+}
+
+for (const a of [0.7, 0.9]) {
+    const R0 = 1000;
+    // traced boundary per rotation sense: y-offset −y0 gives L_z = +y0·p_x
+    // (prograde for spin +z), +y0 gives retrograde
+    const tracedXi = (sense) => {
+        const captured = (y0) =>
+            traceRay([-R0, -sense * y0, 0], [1, 0, 0], 1, { a }).status === 'captured';
+        let lo = 1, hi = 9;
+        for (let i = 0; i < 45; i++) {
+            const mid = 0.5 * (lo + hi);
+            if (captured(mid)) lo = mid; else hi = mid;
+        }
+        const y0 = 0.5 * (lo + hi);
+        const p = nullMomentum([-R0, -sense * y0, 0], [1, 0, 0], 1, a);
+        return (-R0) * p[1] - (-sense * y0) * p[0];     // exact L_z/E of the ray
+    };
+    for (const [sense, name] of [[1, 'prograde'], [-1, 'retrograde']]) {
+        const xiT = tracedXi(sense);
+        const xiRef = criticalXiBL(a, sense);
+        const err = Math.abs(xiT - xiRef) / Math.abs(xiRef);
+        check(`Kerr a=${a}: ${name} capture boundary matches BL potential`,
+            err < 1.5e-3,
+            `ξ = ${xiT.toFixed(4)} traced vs ${xiRef.toFixed(4)} BL (err ${(err * 100).toFixed(3)}%)`);
+    }
+    // frame dragging: retrograde photons are captured from farther out
+    const pro = Math.abs(criticalXiBL(a, 1)), ret = Math.abs(criticalXiBL(a, -1));
+    check(`Kerr a=${a}: frame dragging asymmetry (|ξ_retro| > |ξ_pro|)`,
+        ret > pro + 0.5, `${ret.toFixed(2)} vs ${pro.toFixed(2)}`);
+}
+
+// ── 7. Kerr conservation (H, L_z) along a near-critical ray ──────────────────
+// The a=0.9 prograde photon orbit sits at r_ph ≈ 1.56 M where curvature
+// gradients are ~5× Schwarzschild's photon sphere; hK = 0.01 here asserts
+// the integrator CONVERGES at the tight tolerance (RK4: 3× finer step →
+// ~80× smaller drift), rather than loosening the bar to the default step.
+{
+    const res = traceRay([-1000, -3, 0], [1, 0, 0], 1, { a: 0.9, hK: 0.01 });
+    check('Kerr a=0.9: Hamiltonian stays null along near-critical ray',
+        res.maxH < 1e-6, `max |H| = ${res.maxH.toExponential(1)}`);
+    check('Kerr a=0.9: L_z conserved (axisymmetry)',
+        res.maxLzDrift < 1e-6, `max |ΔL_z/L_z| = ${res.maxLzDrift.toExponential(1)}`);
+}
+
+// ── 8. superposed two-hole metric: weak-field additivity ─────────────────────
+{
+    // two 0.5 M holes 10 M apart ⊥ to the ray plane offset; a distant ray
+    // must deflect like a single 1 M hole at their barycenter to O((d/b)²)
+    const holes = [hole([0, 0, 5], 0.5), hole([0, 0, -5], 0.5)];
+    const b = 200, R0 = 1e4;
+    const res = traceRayKS([-R0, b, 0], [1, 0, 0], holes, { rFar: 4e4 });
+    const alpha = Math.atan2(Math.abs(res.dir[1]), res.dir[0]);
+    const single = 4 / b + (15 * Math.PI / 4) / (b * b);
+    const err = Math.abs(alpha - single) / single;
+    check('superposed binary: far-field deflection = combined point mass',
+        res.status === 'escaped' && err < 2e-3,
+        `α = ${alpha.toExponential(4)} vs ${single.toExponential(4)} (err ${(err * 100).toFixed(3)}%)`);
+    // and the superposed Hamiltonian stays null through the encounter
+    check('superposed binary: Hamiltonian drift bounded',
+        res.maxH < 1e-6, `max |H| = ${res.maxH.toExponential(1)}`);
 }
 
 console.log(failed

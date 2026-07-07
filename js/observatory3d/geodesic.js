@@ -1,70 +1,279 @@
-// geodesic.js — null-geodesic integration in Kerr-Schild form (a = 0 for
-// now: Schwarzschild in horizon-penetrating Cartesian coordinates). This is
-// the JS REFERENCE implementation of the math the observatory's ray-tracing
-// fragment shader (ks-tracer.frag.js) runs per pixel — one algorithm, two
+// geodesic.js — null-geodesic integration in Kerr-Schild form: Kerr with
+// arbitrary spin a ∈ [0, 1), and SUPERPOSED multi-hole metrics for the
+// observatory's binary near-field lensing. This is the JS REFERENCE
+// implementation of the math the ray-tracing fragment shaders run per
+// pixel (ks-tracer.frag.js, render.js FS_NEARFIELD) — one algorithm, N
 // backends, kept in lockstep exactly like nbody.js ↔ rust-abell85.
 //
 // Why Kerr-Schild and not Boyer-Lindquist (which js/ton618/ uses):
-//   · Cartesian components — no coordinate singularity at the poles and no
-//     Δ = 0 blowup at the horizon, so rays can be terminated *inside* r = 2M
-//     instead of being pre-clipped outside it (shader-friendly: no guard
-//     bands in an RK stage);
-//   · the metric is η_μν + f k_μ k_ν with an EXACT closed-form inverse
-//     η^μν − f k^μ k^ν, so the Hamiltonian right-hand side is ~20 flops;
-//   · two holes superpose as η + f₁k₁k₁ + f₂k₂k₂ (approximate, standard for
-//     visualization) — the binary case of the upgrade plan needs this form.
+//   · Cartesian components — no polar coordinate singularity and no Δ = 0
+//     blowup at the horizon, so rays terminate *inside* r₊ instead of
+//     being pre-clipped outside it (shader-friendly);
+//   · the metric is η_μν + Σᵢ fᵢ kᵢ_μ kᵢ_ν with an EXACT closed-form
+//     inverse η^μν − Σᵢ fᵢ kᵢ^μ kᵢ^ν, so the Hamiltonian right-hand side
+//     stays a handful of flops per hole;
+//   · two holes superpose by adding their f k k terms — approximate (not
+//     an exact Einstein solution), standard practice for binary
+//     visualization, and exact in each hole's near zone and in the far
+//     field. Documented on-page wherever it renders.
 //
-// Formulation: Hamiltonian on the covariant momentum, H = ½ g^{μν}p_μ p_ν,
-// signature (−+++), geometrized units G = c = 1, mass M in the same length
-// unit as x (so r_s = 2M). Staticity ⇒ p_t is exactly conserved; we fix the
-// null-cone scale to E = −p_t = 1. State is y = (x⃗, p⃗) ∈ ℝ⁶ with
+// Kerr in Kerr-Schild form (spin a along +z, geometrized units, mass M):
+//   r is the Kerr radial coordinate:  r⁴ − (R²−a²) r² − a²z² = 0,
+//     r² = ½[(R²−a²) + √((R²−a²)² + 4a²z²)],  R² = x²+y²+z²
+//   f  = 2 M r³ / (r⁴ + a²z²)
+//   k⃗  = ( (r x + a y)/(r²+a²), (r y − a x)/(r²+a²), z/r ),  k_μ = (1, k⃗)
+//   k is null w.r.t. both η and g, and |k⃗| = 1. a = 0 reduces exactly to
+//   the Schwarzschild form (r = R, k⃗ = x̂).
 //
-//   f = 2M/r,  x̂ = x⃗/r,  s = x̂·p⃗,  κ ≡ k^μp_μ = 1 + s
-//   ẋ_i = p_i − f κ x̂_i
-//   ṗ_i = −(f/2r²) κ² x_i + (f/r) κ p_i − (f/r²) κ s x_i
+// Formulation: Hamiltonian on the covariant momentum, H = ½ g^{μν}p_μp_ν,
+// signature (−+++). Staticity ⇒ p_t exactly conserved; the null-cone
+// scale is fixed to E = −p_t = 1. State y = (x⃗, p⃗) ∈ ℝ⁶, κᵢ = 1 + k⃗ᵢ·p⃗:
+//   ẋ  = p⃗ − Σᵢ fᵢ κᵢ k⃗ᵢ
+//   ṗ  = Σᵢ [ ½ κᵢ² ∇fᵢ + fᵢ κᵢ (∇k⃗ᵢ)ᵀ p⃗ ]
+// with analytic gradients (∂r derived from the defining quartic).
+// Axisymmetry ⇒ L_z = x p_y − y p_x exactly conserved for a single hole;
+// both drifts (H, L_z) are asserted in tests/observatory-geodesic.mjs
+// against RK4 tolerances, and the capture boundaries against the
+// Boyer-Lindquist radial-potential reference.
 //
-// Integrator: classical RK4, step h = clamp(K_H·r, hMin, hMax) — curvature
-// scales as M/r³, so a radius-proportional step keeps local error roughly
-// uniform (same reasoning as the shader). Conserved-quantity drift (H ≈ 0,
-// L⃗ = x⃗×p⃗) is asserted in tests/observatory-geodesic.mjs.
-//
-// DOM-free; unit-tested in Node.
+// Integrator: classical RK4, step h = clamp(K_H·r_min, hMin, hMax) where
+// r_min is the distance to the nearest hole. DOM-free; Node-tested.
 
-/** Right-hand side of the 6-D system. y = [x,y,z,px,py,pz], out likewise. */
-export function geodesicRHS(y, M, out) {
-    const x0 = y[0], x1 = y[1], x2 = y[2];
-    const p0 = y[3], p1 = y[4], p2 = y[5];
-    const r = Math.hypot(x0, x1, x2);
-    const inv = 1 / r;
-    const f = 2 * M * inv;
-    const s = (x0 * p0 + x1 * p1 + x2 * p2) * inv;
-    const kp = 1 + s;
+/** One lensing body: position c (same length unit as M), mass M, spin a. */
+export function hole(c, M, a = 0) { return { c, M, a }; }
+
+/**
+ * Accumulate one hole's contribution to (dx, dp) at phase point (x, p).
+ * Also returns f and κ for the Hamiltonian bookkeeping.
+ */
+function accum(x, p, h, dx, dp) {
+    const xi0 = x[0] - h.c[0], xi1 = x[1] - h.c[1], xi2 = x[2] - h.c[2];
+    const a = h.a, M = h.M;
+    let r, g0, g1, g2, k0, k1, k2, f, df0, df1, df2;
+
+    if (a === 0) {
+        r = Math.hypot(xi0, xi1, xi2);
+        const iv = 1 / r;
+        f = 2 * M * iv;
+        k0 = xi0 * iv; k1 = xi1 * iv; k2 = xi2 * iv;
+        g0 = k0; g1 = k1; g2 = k2;                       // ∇r = x̂
+        const c = -f * iv * iv;                          // ∂f = −(f/r²) x⃗
+        df0 = c * xi0; df1 = c * xi1; df2 = c * xi2;
+    } else {
+        const R2 = xi0 * xi0 + xi1 * xi1 + xi2 * xi2;
+        const a2 = a * a;
+        const q = R2 - a2;
+        const r2 = 0.5 * (q + Math.sqrt(q * q + 4 * a2 * xi2 * xi2));
+        r = Math.sqrt(r2);
+        const rho2 = r2 * r2 + a2 * xi2 * xi2;           // r⁴ + a²z²
+        const iRho2 = 1 / rho2;
+        f = 2 * M * r2 * r * iRho2;
+        // ∇r from the defining quartic
+        g0 = r2 * r * xi0 * iRho2;
+        g1 = r2 * r * xi1 * iRho2;
+        g2 = r * (r2 + a2) * xi2 * iRho2;
+        // ∇f = (2Mr²/ρ⁴)[(3a²z² − r⁴)∇r − 2a²z r ẑ]
+        const cf = 2 * M * r2 * iRho2 * iRho2;
+        const t = 3 * a2 * xi2 * xi2 - r2 * r2;
+        df0 = cf * t * g0;
+        df1 = cf * t * g1;
+        df2 = cf * (t * g2 - 2 * a2 * xi2 * r);
+        const iD = 1 / (r2 + a2);
+        k0 = (r * xi0 + a * xi1) * iD;
+        k1 = (r * xi1 - a * xi0) * iD;
+        k2 = xi2 / r;
+    }
+
+    const s = k0 * p[0] + k1 * p[1] + k2 * p[2];
+    const kp = 1 + s;                                    // κ, p_t = −1 gauge
     const fk = f * kp;
-    out[0] = p0 - fk * x0 * inv;
-    out[1] = p1 - fk * x1 * inv;
-    out[2] = p2 - fk * x2 * inv;
-    const cx = -0.5 * f * kp * kp * inv * inv - fk * s * inv * inv;
-    const cp = fk * inv;
-    out[3] = cx * x0 + cp * p0;
-    out[4] = cx * x1 + cp * p1;
-    out[5] = cx * x2 + cp * p2;
+
+    dx[0] -= fk * k0; dx[1] -= fk * k1; dx[2] -= fk * k2;
+
+    const half = 0.5 * kp * kp;
+    if (a === 0) {
+        // fκ (∇k⃗)ᵀp with ∇x̂ = (I − x̂x̂ᵀ)/r  →  fκ(p − s x̂)/r
+        const iv = 1 / r;
+        dp[0] += half * df0 + fk * iv * (p[0] - s * k0);
+        dp[1] += half * df1 + fk * iv * (p[1] - s * k1);
+        dp[2] += half * df2 + fk * iv * (p[2] - s * k2);
+    } else {
+        const a2 = a * a, r2 = r * r;
+        const iD = 1 / (r2 + a2), ir = 1 / r;
+        const twoRD = 2 * r * iD;
+        // ∂_j kx = [ξx g_j + r δ_jx + a δ_jy]/D − 2r kx g_j/D, etc.
+        const dkx = [
+            (xi0 * g0 + r) * iD - twoRD * k0 * g0,
+            (xi0 * g1 + a) * iD - twoRD * k0 * g1,
+            (xi0 * g2) * iD - twoRD * k0 * g2,
+        ];
+        const dky = [
+            (xi1 * g0 - a) * iD - twoRD * k1 * g0,
+            (xi1 * g1 + r) * iD - twoRD * k1 * g1,
+            (xi1 * g2) * iD - twoRD * k1 * g2,
+        ];
+        const dkz = [
+            -xi2 * g0 * ir * ir,
+            -xi2 * g1 * ir * ir,
+            ir - xi2 * g2 * ir * ir,
+        ];
+        dp[0] += half * df0 + fk * (dkx[0] * p[0] + dky[0] * p[1] + dkz[0] * p[2]);
+        dp[1] += half * df1 + fk * (dkx[1] * p[0] + dky[1] * p[1] + dkz[1] * p[2]);
+        dp[2] += half * df2 + fk * (dkx[2] * p[0] + dky[2] * p[1] + dkz[2] * p[2]);
+    }
+    return { f, s, r };
+}
+
+/** RHS of the 6-D system for a set of superposed holes. */
+export function ksRHS(y, holes, out) {
+    const x = [y[0], y[1], y[2]], p = [y[3], y[4], y[5]];
+    const dx = [p[0], p[1], p[2]];
+    const dp = [0, 0, 0];
+    for (const h of holes) accum(x, p, h, dx, dp);
+    out[0] = dx[0]; out[1] = dx[1]; out[2] = dx[2];
+    out[3] = dp[0]; out[4] = dp[1]; out[5] = dp[2];
+}
+
+/** f and s = k⃗·p⃗ of one hole without gradient work (for H and init). */
+function fkOf(x, p, h) {
+    const xi0 = x[0] - h.c[0], xi1 = x[1] - h.c[1], xi2 = x[2] - h.c[2];
+    const a = h.a;
+    if (a === 0) {
+        const r = Math.hypot(xi0, xi1, xi2);
+        const iv = 1 / r;
+        return {
+            f: 2 * h.M * iv, r,
+            s: (xi0 * p[0] + xi1 * p[1] + xi2 * p[2]) * iv,
+        };
+    }
+    const R2 = xi0 * xi0 + xi1 * xi1 + xi2 * xi2;
+    const a2 = a * a, q = R2 - a2;
+    const r2 = 0.5 * (q + Math.sqrt(q * q + 4 * a2 * xi2 * xi2));
+    const r = Math.sqrt(r2);
+    const iD = 1 / (r2 + a2);
+    const k0 = (r * xi0 + a * xi1) * iD;
+    const k1 = (r * xi1 - a * xi0) * iD;
+    const k2 = xi2 / r;
+    return {
+        f: 2 * h.M * r2 * r / (r2 * r2 + a2 * xi2 * xi2), r,
+        s: k0 * p[0] + k1 * p[1] + k2 * p[2],
+    };
 }
 
 /**
- * Null momentum for a photon at position x with spatial direction dir
- * (need not be unit). Solves H = 0 for p_t given p⃗ ∝ dir, then rescales
- * to the E = −p_t = 1 gauge. Returns the spatial covariant momentum p⃗.
+ * Null momentum in the p_t = −1 gauge for a photon at x with spatial
+ * direction dir, in the superposed metric. Same quadratic as the single-
+ * hole case with Σfᵢ, Σfᵢsᵢ, Σfᵢsᵢ².
  */
-export function nullMomentum(x, dir, M) {
-    const r = Math.hypot(x[0], x[1], x[2]);
-    const f = 2 * M / r;
+export function nullMomentumKS(x, dir, holes) {
+    let F = 0, Fs = 0, Fss = 0;
+    for (const h of holes) {
+        const { f, s } = fkOf(x, dir, h);
+        F += f; Fs += f * s; Fss += f * s * s;
+    }
     const P2 = dir[0] ** 2 + dir[1] ** 2 + dir[2] ** 2;
-    const s = (x[0] * dir[0] + x[1] * dir[1] + x[2] * dir[2]) / r;
-    // (1+f)p_t² − 2fs·p_t − (P² − fs²) = 0, future-directed root p_t < 0
-    const disc = Math.sqrt(f * f * s * s + (1 + f) * (P2 - f * s * s));
-    const pt = (f * s - disc) / (1 + f);
-    const inv = 1 / (-pt);                       // rescale to p_t = −1
+    const disc = Math.sqrt(Fs * Fs + (1 + F) * (P2 - Fss));
+    const pt = (Fs - disc) / (1 + F);
+    const inv = 1 / (-pt);
     return [dir[0] * inv, dir[1] * inv, dir[2] * inv];
+}
+
+/** Hamiltonian ½ g^{μν}p_μp_ν in the p_t = −1 gauge (0 on a null ray). */
+export function hamiltonianKS(x, p, holes) {
+    let acc = 0;
+    for (const h of holes) {
+        const { f, s } = fkOf(x, p, h);
+        const kp = 1 + s;
+        acc += f * kp * kp;
+    }
+    return 0.5 * (-1 + p[0] ** 2 + p[1] ** 2 + p[2] ** 2 - acc);
+}
+
+/** Outer horizon radius r₊ = M + √(M² − a²) (Kerr radial coordinate). */
+export const horizonR = (h) => h.M + Math.sqrt(Math.max(h.M * h.M - h.a * h.a, 0));
+
+/**
+ * Trace one photon through a set of superposed Kerr-Schild holes.
+ * Terminates on capture (Kerr r < r₊ of any hole — KS is horizon-
+ * penetrating so the crossing is regular), escape (|x| > rFar moving
+ * outward), or step budget.
+ *
+ * @returns { status: 'captured'|'escaped'|'maxsteps', x, p, dir, steps,
+ *            maxH, maxLzDrift } — dir is the asymptotic coordinate
+ *            direction ẋ̂; maxH / maxLzDrift are conserved-quantity
+ *            drifts (L_z about the first hole; exact only for one hole).
+ */
+export function traceRayKS(x0, dir0, holes, opts = {}) {
+    const M0 = holes[0].M;
+    const hK = opts.hK ?? 0.03;
+    const hMin = opts.hMin ?? 0.02 * M0;
+    const hMax = opts.hMax ?? 25 * M0;
+    const rFar = opts.rFar ?? 2e4 * M0;
+    const maxSteps = opts.maxSteps ?? 200000;
+    const rPlus = holes.map(horizonR);
+
+    const p0 = nullMomentumKS(x0, dir0, holes);
+    const y = [x0[0], x0[1], x0[2], p0[0], p0[1], p0[2]];
+    const lz = (yy) => (yy[0] - holes[0].c[0]) * yy[4] - (yy[1] - holes[0].c[1]) * yy[3];
+    const Lz0 = lz(y);
+    const k1 = new Float64Array(6), k2 = new Float64Array(6),
+        k3 = new Float64Array(6), k4 = new Float64Array(6),
+        yt = new Float64Array(6);
+    let maxH = 0, maxLzDrift = 0, steps = 0, status = 'maxsteps';
+
+    for (; steps < maxSteps; steps++) {
+        let rMin = Infinity, captured = false;
+        for (let i = 0; i < holes.length; i++) {
+            const { r } = fkOf([y[0], y[1], y[2]], [0, 0, 0], holes[i]);
+            if (r < rPlus[i]) captured = true;
+            rMin = Math.min(rMin, r);
+        }
+        if (captured) { status = 'captured'; break; }
+        const R = Math.hypot(y[0], y[1], y[2]);
+        const out = (y[0] * y[3] + y[1] * y[4] + y[2] * y[5]) > 0;
+        if (R > rFar && out) { status = 'escaped'; break; }
+
+        const h = Math.min(Math.max(hK * rMin, hMin), hMax);
+        ksRHS(y, holes, k1);
+        for (let i = 0; i < 6; i++) yt[i] = y[i] + 0.5 * h * k1[i];
+        ksRHS(yt, holes, k2);
+        for (let i = 0; i < 6; i++) yt[i] = y[i] + 0.5 * h * k2[i];
+        ksRHS(yt, holes, k3);
+        for (let i = 0; i < 6; i++) yt[i] = y[i] + h * k3[i];
+        ksRHS(yt, holes, k4);
+        for (let i = 0; i < 6; i++) {
+            y[i] += (h / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
+        }
+
+        maxH = Math.max(maxH, Math.abs(
+            hamiltonianKS([y[0], y[1], y[2]], [y[3], y[4], y[5]], holes)));
+        maxLzDrift = Math.max(maxLzDrift, Math.abs(lz(y) - Lz0) / (Math.abs(Lz0) || 1));
+    }
+
+    const x = [y[0], y[1], y[2]], p = [y[3], y[4], y[5]];
+    ksRHS(y, holes, k1);
+    const dl = Math.hypot(k1[0], k1[1], k1[2]) || 1;
+    return {
+        status, x, p, dir: [k1[0] / dl, k1[1] / dl, k1[2] / dl],
+        steps, maxH, maxLzDrift,
+    };
+}
+
+// ═══ single-hole wrappers (back-compat with session-2 API and tests) ═════════
+
+export function geodesicRHS(y, M, out) { ksRHS(y, [hole([0, 0, 0], M)], out); }
+
+export function nullMomentum(x, dir, M, a = 0) {
+    return nullMomentumKS(x, dir, [hole([0, 0, 0], M, a)]);
+}
+
+export function hamiltonian(x, p, M, a = 0) {
+    return hamiltonianKS(x, p, [hole([0, 0, 0], M, a)]);
+}
+
+export function traceRay(x0, dir0, M, opts = {}) {
+    const res = traceRayKS(x0, dir0, [hole([0, 0, 0], M, opts.a ?? 0)], opts);
+    return { ...res, maxLdrift: res.maxLzDrift };   // legacy field name
 }
 
 /** Invariant impact parameter b = |x⃗ × p⃗| / E (E = 1 gauge). */
@@ -75,81 +284,12 @@ export function impactParam(x, p) {
     return Math.hypot(lx, ly, lz);
 }
 
-/** Hamiltonian ½ g^{μν}p_μp_ν in the p_t = −1 gauge (0 on a null ray). */
-export function hamiltonian(x, p, M) {
-    const r = Math.hypot(x[0], x[1], x[2]);
-    const f = 2 * M / r;
-    const P2 = p[0] ** 2 + p[1] ** 2 + p[2] ** 2;
-    const s = (x[0] * p[0] + x[1] * p[1] + x[2] * p[2]) / r;
-    const kp = 1 + s;
-    return 0.5 * (-1 + P2 - f * kp * kp);
-}
+export const B_CRIT = Math.sqrt(27);     // Schwarzschild critical b, / M
 
 /**
- * Trace one photon. Terminates on horizon capture (r < 2M — Kerr-Schild is
- * horizon-penetrating, so crossing is regular and 2M is a safe one-way
- * surface), escape (r > rFar moving outward), or step budget.
- *
- * @returns { status: 'captured'|'escaped'|'maxsteps', x, p, dir, steps,
- *            maxH, maxLdrift }  — dir is the asymptotic coordinate
- *            direction ẋ̂ at termination; maxH / maxLdrift are conserved-
- *            quantity drifts for the test contract.
- */
-export function traceRay(x0, dir0, M, opts = {}) {
-    const hK = opts.hK ?? 0.03;          // step = hK · r
-    const hMin = opts.hMin ?? 0.02 * M;
-    const hMax = opts.hMax ?? 25 * M;
-    const rFar = opts.rFar ?? 2e4 * M;
-    const maxSteps = opts.maxSteps ?? 200000;
-
-    const p0 = nullMomentum(x0, dir0, M);
-    const y = [x0[0], x0[1], x0[2], p0[0], p0[1], p0[2]];
-    const L0 = impactParam(x0, p0);
-    const k1 = new Float64Array(6), k2 = new Float64Array(6),
-        k3 = new Float64Array(6), k4 = new Float64Array(6),
-        yt = new Float64Array(6);
-    let maxH = 0, maxLdrift = 0, steps = 0, status = 'maxsteps';
-
-    for (; steps < maxSteps; steps++) {
-        const r = Math.hypot(y[0], y[1], y[2]);
-        if (r < 2 * M) { status = 'captured'; break; }
-        const out = (y[0] * y[3] + y[1] * y[4] + y[2] * y[5]) > 0;
-        if (r > rFar && out) { status = 'escaped'; break; }
-
-        const h = Math.min(Math.max(hK * r, hMin), hMax);
-        geodesicRHS(y, M, k1);
-        for (let i = 0; i < 6; i++) yt[i] = y[i] + 0.5 * h * k1[i];
-        geodesicRHS(yt, M, k2);
-        for (let i = 0; i < 6; i++) yt[i] = y[i] + 0.5 * h * k2[i];
-        geodesicRHS(yt, M, k3);
-        for (let i = 0; i < 6; i++) yt[i] = y[i] + h * k3[i];
-        geodesicRHS(yt, M, k4);
-        for (let i = 0; i < 6; i++) {
-            y[i] += (h / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
-        }
-
-        const xs = [y[0], y[1], y[2]], ps = [y[3], y[4], y[5]];
-        maxH = Math.max(maxH, Math.abs(hamiltonian(xs, ps, M)));
-        maxLdrift = Math.max(maxLdrift, Math.abs(impactParam(xs, ps) - L0) / (L0 || 1));
-    }
-
-    const x = [y[0], y[1], y[2]], p = [y[3], y[4], y[5]];
-    // asymptotic direction: ẋ = p − fκx̂ → p as f → 0
-    const d = new Float64Array(3);
-    geodesicRHS(y, M, k1);
-    const dl = Math.hypot(k1[0], k1[1], k1[2]) || 1;
-    d[0] = k1[0] / dl; d[1] = k1[1] / dl; d[2] = k1[2] / dl;
-    return { status, x, p, dir: [d[0], d[1], d[2]], steps, maxH, maxLdrift };
-}
-
-export const B_CRIT = Math.sqrt(27);     // critical impact parameter, / M
-
-/**
- * Screen angle (from the view axis) of the shadow edge for a coordinate-
- * pinhole camera at distance D looking at the hole: the θ whose ray carries
- * the critical impact parameter b = √27·M. Both the prototype overlay and
- * the numeric test use this mapping, so the shader is validated against the
- * same camera model it renders with.
+ * Screen angle (from the view axis) of the a = 0 shadow edge for a
+ * coordinate-pinhole camera at distance D: the θ whose ray carries the
+ * critical impact parameter b = √27 M.
  */
 export function shadowScreenAngle(D, M) {
     const bOf = (th) => {
@@ -166,20 +306,39 @@ export function shadowScreenAngle(D, M) {
 }
 
 /**
- * Screen angle of the primary (n = 0) Einstein ring for a source at the
- * antipodal background direction (−x̂ at infinity), found by tracing rays
- * outward from the shadow edge until the escape direction crosses −x̂.
- * Fully numeric — inherits the integrator's validation.
+ * Signed equatorial shadow edges for a spinning hole seen from the
+ * equatorial plane (camera at (D,0,0), spin along +z): screen angles of
+ * the capture boundary on each side of the view axis, found by bisecting
+ * traced rays IN the equatorial plane. Positive θ is toward +y — the
+ * prograde side (L_z = D·p_y > 0). Fully numeric.
+ * @returns { pro, retro }  (both positive magnitudes, radians)
+ */
+export function equatorialShadowEdges(D, M, a, opts = {}) {
+    const holes = [hole([0, 0, 0], M, a)];
+    const captured = (th) =>
+        traceRayKS([D, 0, 0], [-Math.cos(th), Math.sin(th), 0], holes, opts)
+            .status === 'captured';
+    const edge = (sign) => {
+        let lo = 1e-4, hi = 1.0;
+        for (let i = 0; i < 42; i++) {
+            const mid = 0.5 * (lo + hi);
+            if (captured(sign * mid)) lo = mid; else hi = mid;
+        }
+        return 0.5 * (lo + hi);
+    };
+    return { pro: edge(1), retro: edge(-1) };
+}
+
+/**
+ * Screen angle of the primary (n = 0) Einstein ring (a = 0) for a source
+ * at the antipodal background direction, by tracing.
  */
 export function einsteinRingAngle(D, M, opts = {}) {
     const miss = (th) => {
         const res = traceRay([D, 0, 0], [-Math.cos(th), Math.sin(th), 0], M, opts);
         if (res.status !== 'escaped') return NaN;
-        // signed in-plane angle of escape dir relative to −x̂
         return Math.atan2(res.dir[1], -res.dir[0]);
     };
-    // walk outward from just past the shadow edge to bracket the n=0 root
-    // (skipping the wrapped n≥1 images that hug the critical curve)
     let prev = null, lo = null, hi = null;
     const start = shadowScreenAngle(D, M) + 5e-3;
     for (let th = Math.PI / 3; th >= start; th -= 5e-3) {
