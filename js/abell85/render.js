@@ -24,7 +24,7 @@
 //             it. Overlay lines are pre-divided by the exposure so only the
 //             star field gets the HDR lift (see _lc()).
 
-import { rSchw } from './units.js';
+import { rSchw, rGrav } from './units.js';
 
 // ── tiny mat4 helpers (column-major, WebGL layout) ───────────────────────────
 function perspective(fovY, aspect, near, far) {
@@ -260,6 +260,8 @@ const FS_BRIGHT = `#version 300 es
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uScene;
+uniform sampler2D uNear;      // near-field ray-traced patch (half res)
+uniform int uNearOn;
 uniform vec2 uTexel;          // 1 / full resolution
 uniform float uThresh;
 uniform float uKnee;
@@ -271,11 +273,21 @@ vec3 bright(vec3 c) {
     // clamp keeps a single hot star from smearing into a saturated slab
     return min(c * (max(soft, br - uThresh) / max(br, 1.0e-4)), vec3(2.5));
 }
+// scene with the near-field patch composited in, so lensed features
+// (photon rings, bent star images) bloom like everything else
+vec3 sceneAt(vec2 uv) {
+    vec3 c = texture(uScene, uv).rgb;
+    if (uNearOn == 1) {
+        vec4 nf = texture(uNear, uv);
+        c = mix(c, nf.rgb, nf.a);
+    }
+    return c;
+}
 void main() {
-    vec3 c = bright(texture(uScene, vUv + vec2(-0.5, -0.5) * uTexel).rgb)
-           + bright(texture(uScene, vUv + vec2( 0.5, -0.5) * uTexel).rgb)
-           + bright(texture(uScene, vUv + vec2(-0.5,  0.5) * uTexel).rgb)
-           + bright(texture(uScene, vUv + vec2( 0.5,  0.5) * uTexel).rgb);
+    vec3 c = bright(sceneAt(vUv + vec2(-0.5, -0.5) * uTexel))
+           + bright(sceneAt(vUv + vec2( 0.5, -0.5) * uTexel))
+           + bright(sceneAt(vUv + vec2(-0.5,  0.5) * uTexel))
+           + bright(sceneAt(vUv + vec2( 0.5,  0.5) * uTexel));
     o = vec4(c * 0.25, 1.0);
 }`;
 
@@ -306,6 +318,8 @@ precision highp float;
 in vec2 vUv;
 uniform sampler2D uScene;
 uniform sampler2D uBloom;
+uniform sampler2D uNear;      // near-field ray-traced patch (half res)
+uniform int uNearOn;
 uniform vec2 uRes;
 uniform vec4 uLens[6];
 uniform int uNLens;
@@ -340,8 +354,176 @@ void main() {
     vec3 col = texture(uScene, uv).rgb + uBloomStr * texture(uBloom, uv).rgb;
     col += ring * vec3(1.0, 0.75, 0.35) * 0.35;       // photon-ring glow (linear)
     col *= (1.0 - shadow);
+    // near-field masks: the ray-traced patch REPLACES the thin-lens result
+    // (shadow disc, cosmetic ring and all) where its weight is 1, and blends
+    // out at the mask edge where the two regimes agree by construction
+    if (uNearOn == 1) {
+        vec4 nf = texture(uNear, vUv);
+        vec3 nearCol = nf.rgb + uBloomStr * texture(uBloom, vUv).rgb;
+        col = mix(col, nearCol, nf.a);
+    }
     col = aces(col * uExposure);
     o = vec4(pow(col, vec3(1.0 / 2.2)), 1.0);
+}`;
+
+// Near-field pass: per-pixel backward null-geodesic ray tracing in the
+// SUPERPOSED Kerr-Schild metric of up to two holes (η + Σ fᵢkᵢkᵢ — an
+// approximation, not an exact binary solution; standard for visualization
+// and exact in each near zone and the far field). Same algebra as
+// js/observatory3d/geodesic.js accum()/ksRHS(), which is validated against
+// analytic references in tests/observatory-geodesic.mjs — change one,
+// change both. Runs at half resolution ONLY inside per-hole screen masks;
+// escaped rays sample the HDR scene texture along their deflected
+// direction, so the two regimes agree at the mask boundary where the
+// thin-lens far field takes over.
+//
+// Units: lengths scaled by uRgRef (the gravitational radius of the most
+// massive on-screen hole) so float32 sees O(1–10³) values; the camera is
+// the origin (floating origin — the scene is already camera-relative).
+const FS_NEARFIELD = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uScene;
+uniform vec2 uFullRes;
+uniform vec3 uCamR;
+uniform vec3 uCamU;
+uniform vec3 uCamF;
+uniform float uTanHalf;
+uniform float uAspect;
+uniform int uNHoles;
+uniform vec3 uHolePos[2];    // camera-relative, / rgRef
+uniform float uHoleM[2];     // gravitational radius / rgRef
+uniform float uHoleA[2];     // spin a/M (0 for the observatory holes today)
+uniform vec4 uMaskPx[2];     // (cx, cy, radiusPx, unused) in full-res px
+uniform float uEscR;
+uniform int uMaxSteps;
+uniform vec3 uBg;            // linear background for off-frustum rays
+out vec4 o;
+
+void holeAccum(vec3 xw, float M, float a, vec3 p, inout vec3 dx, inout vec3 dp) {
+    vec3 x = xw;             // already hole-relative
+    float a2 = a * a;
+    float q  = dot(x, x) - a2;
+    float r2 = 0.5 * (q + sqrt(q * q + 4.0 * a2 * x.z * x.z));
+    float r  = sqrt(r2);
+    float rho2  = r2 * r2 + a2 * x.z * x.z;
+    float iRho2 = 1.0 / rho2;
+    float f  = 2.0 * M * r2 * r * iRho2;
+    vec3  g  = vec3(r2 * r * x.x, r2 * r * x.y, r * (r2 + a2) * x.z) * iRho2;
+    float cf = 2.0 * M * r2 * iRho2 * iRho2;
+    float t  = 3.0 * a2 * x.z * x.z - r2 * r2;
+    vec3  df = cf * (t * g - vec3(0.0, 0.0, 2.0 * a2 * x.z * r));
+    float iD = 1.0 / (r2 + a2);
+    float ir = 1.0 / r;
+    vec3  k  = vec3((r * x.x + a * x.y) * iD, (r * x.y - a * x.x) * iD, x.z * ir);
+    float s  = dot(k, p);
+    float kp = 1.0 + s;
+    float fk = f * kp;
+    dx -= fk * k;
+    float twoRD = 2.0 * r * iD;
+    vec3 dkx = vec3(x.x * g.x + r, x.x * g.y + a, x.x * g.z) * iD - twoRD * k.x * g;
+    vec3 dky = vec3(x.y * g.x - a, x.y * g.y + r, x.y * g.z) * iD - twoRD * k.y * g;
+    vec3 dkz = vec3(-x.z * g.x, -x.z * g.y, r - x.z * g.z) * ir * ir;
+    dp += 0.5 * kp * kp * df + fk * (dkx * p.x + dky * p.y + dkz * p.z);
+}
+
+void rhs(vec3 x, vec3 p, out vec3 dx, out vec3 dp) {
+    dx = p; dp = vec3(0.0);
+    holeAccum(x - uHolePos[0], uHoleM[0], uHoleA[0], p, dx, dp);
+    if (uNHoles > 1) holeAccum(x - uHolePos[1], uHoleM[1], uHoleA[1], p, dx, dp);
+}
+
+float kerrR(vec3 x, float a) {
+    float q = dot(x, x) - a * a;
+    return sqrt(0.5 * (q + sqrt(q * q + 4.0 * a * a * x.z * x.z)));
+}
+
+float fsOf(vec3 x, vec3 p, float M, float a, out float s) {
+    float a2 = a * a;
+    float q  = dot(x, x) - a2;
+    float r2 = 0.5 * (q + sqrt(q * q + 4.0 * a2 * x.z * x.z));
+    float r  = sqrt(r2);
+    float iD = 1.0 / (r2 + a2);
+    vec3 k = vec3((r * x.x + a * x.y) * iD, (r * x.y - a * x.x) * iD, x.z / r);
+    s = dot(k, p);
+    return 2.0 * M * r2 * r / (r2 * r2 + a2 * x.z * x.z);
+}
+
+vec3 nullMomentum(vec3 x, vec3 dir) {
+    float F = 0.0, Fs = 0.0, Fss = 0.0, s;
+    float f = fsOf(x - uHolePos[0], dir, uHoleM[0], uHoleA[0], s);
+    F += f; Fs += f * s; Fss += f * s * s;
+    if (uNHoles > 1) {
+        f = fsOf(x - uHolePos[1], dir, uHoleM[1], uHoleA[1], s);
+        F += f; Fs += f * s; Fss += f * s * s;
+    }
+    float P2 = dot(dir, dir);
+    float disc = sqrt(Fs * Fs + (1.0 + F) * (P2 - Fss));
+    float pt = (Fs - disc) / (1.0 + F);
+    return dir / (-pt);
+}
+
+vec3 sceneAlong(vec3 d) {
+    float fz = dot(d, uCamF);
+    if (fz < 0.05) return uBg;           // behind / grazing the camera
+    vec2 uv = 0.5 + 0.5 * vec2(dot(d, uCamR) / (fz * uTanHalf * uAspect),
+                               dot(d, uCamU) / (fz * uTanHalf));
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return uBg;
+    return texture(uScene, uv).rgb;
+}
+
+void main() {
+    // mask weight: full inside 72% of the radius, feathered to 0 at the edge
+    vec2 px = vUv * uFullRes;
+    float w = 0.0;
+    for (int i = 0; i < 2; i++) {
+        if (i >= uNHoles) break;
+        float d = distance(px, uMaskPx[i].xy);
+        w = max(w, smoothstep(uMaskPx[i].z, uMaskPx[i].z * 0.72, d));
+    }
+    if (w < 0.004) { o = vec4(0.0); return; }
+
+    vec2 ndc = vUv * 2.0 - 1.0;
+    vec3 rd = normalize(uCamF + uTanHalf * (ndc.x * uAspect * uCamR + ndc.y * uCamU));
+    vec3 x = vec3(0.0);                  // camera IS the floating origin
+    vec3 p = nullMomentum(x, rd);
+
+    float rp0 = uHoleM[0] * (1.0 + sqrt(max(1.0 - uHoleA[0] * uHoleA[0], 0.0)));
+    float rp1 = uHoleM[1] * (1.0 + sqrt(max(1.0 - uHoleA[1] * uHoleA[1], 0.0)));
+    int status = 0;
+    vec3 k1x, k1p, k2x, k2p, k3x, k3p, k4x, k4p;
+    for (int i = 0; i < 4096; i++) {
+        if (i >= uMaxSteps) break;
+        float r0 = kerrR(x - uHolePos[0], uHoleA[0]);
+        float rMin = r0;
+        if (r0 < rp0) { status = 1; break; }
+        if (uNHoles > 1) {
+            float r1 = kerrR(x - uHolePos[1], uHoleA[1]);
+            if (r1 < rp1) { status = 1; break; }
+            rMin = min(rMin, r1);
+        }
+        if (length(x) > uEscR && dot(x, p) > 0.0) { status = 2; break; }
+        float h = clamp(0.045 * rMin, 0.05, 60.0);
+        rhs(x, p, k1x, k1p);
+        rhs(x + 0.5 * h * k1x, p + 0.5 * h * k1p, k2x, k2p);
+        rhs(x + 0.5 * h * k2x, p + 0.5 * h * k2p, k3x, k3p);
+        rhs(x + h * k3x, p + h * k3p, k4x, k4p);
+        x += (h / 6.0) * (k1x + 2.0 * k2x + 2.0 * k3x + k4x);
+        p += (h / 6.0) * (k1p + 2.0 * k2p + 2.0 * k3p + k4p);
+    }
+
+    vec3 col;
+    if (status == 2) {
+        vec3 dx, dp;
+        rhs(x, p, dx, dp);
+        col = sceneAlong(normalize(dx)); // deflected sample of the scene
+    } else {
+        // captured — or step-starved, which only happens within ~1e-3 of
+        // the critical curve where the true image is the n≥3 photon-ring
+        // pileup: black is the faithful fallback, never a noisy sample
+        col = vec3(0.0);
+    }
+    o = vec4(col, w);
 }`;
 
 /** Tanner-Helland blackbody approximation → sRGB in [0,1]. */
@@ -397,13 +579,18 @@ export class Renderer {
             this.progBright = compile(gl, VS_QUAD, FS_BRIGHT);
             this.progBlur = compile(gl, VS_QUAD, FS_BLUR);
             this.progLensHdr = compile(gl, VS_QUAD, FS_LENS_HDR);
+            this.progNear = compile(gl, VS_QUAD, FS_NEARFIELD);
             this.bufVel = gl.createBuffer();
             this.texBB = this._makeBBLut(gl);
             this.fboBloomA = gl.createFramebuffer();
             this.fboBloomB = gl.createFramebuffer();
+            this.fboNear = gl.createFramebuffer();
             this.texBloomA = gl.createTexture();
             this.texBloomB = gl.createTexture();
+            this.texNear = gl.createTexture();
             this._bloomSize = [0, 0];
+            this.nearCount = 0;           // masks active this frame (HUD)
+            this.nearSteps = 448;         // geodesic step budget per ray
         }
 
         this.camera = null;    // GodCamera, assigned by main before first render
@@ -475,7 +662,8 @@ export class Renderer {
             if (this.hdr) {
                 const bw = Math.max(w >> 1, 16), bh = Math.max(h >> 1, 16);
                 for (const [tex, fbo] of [[this.texBloomA, this.fboBloomA],
-                                          [this.texBloomB, this.fboBloomB]]) {
+                                          [this.texBloomB, this.fboBloomB],
+                                          [this.texNear, this.fboNear]]) {
                     gl.bindTexture(gl.TEXTURE_2D, tex);
                     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, bw, bh, 0, gl.RGBA, gl.HALF_FLOAT, null);
                     setup(tex);
@@ -596,9 +784,12 @@ export class Renderer {
             gl.drawArrays(gl.POINTS, 0, 1);
         }
 
-        // gather every lane's holes for the lens/composite pass
+        // gather every lane's holes for the lens/composite pass; the same
+        // sweep collects near-field candidates (hdr path): holes whose
+        // photon-capture shadow is big enough on screen to ray-trace
         const lens = new Float32Array(24);
         let nLens = 0;
+        const nearCand = [];
         if (lensOn !== false) {
             for (const lane of lanes) {
                 const off = lane.offset ?? [0, 0, 0];
@@ -621,11 +812,15 @@ export class Renderer {
                     lens[nLens * 4] = cx; lens[nLens * 4 + 1] = cy;
                     lens[nLens * 4 + 2] = tE; lens[nLens * 4 + 3] = rShadow;
                     nLens++;
+                    if (this.hdr && rShadow >= 3) {
+                        nearCand.push({ cx, cy, relP, m: bh.m, rShadow, tE });
+                    }
                 }
             }
         }
         if (this.hdr) {
-            this._postHdr(lens, nLens, w, h);
+            this._postHdr(lens, nLens, w, h,
+                nearCand.sort((A, B) => B.rShadow - A.rShadow).slice(0, 2));
             return;
         }
 
@@ -652,22 +847,88 @@ export class Renderer {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
-    /** HDR post: bright pass → separable blur ×2 widths → lens composite
-     *  (warp + bloom add + exposure + ACES + sRGB) to the screen. */
-    _postHdr(lens, nLens, w, h) {
+    /** Near-field geodesic pass: ray-trace the superposed Kerr-Schild
+     *  metric of ≤2 holes at half res, inside their screen masks only.
+     *  Escaped rays sample the HDR scene along their deflected direction. */
+    _renderNearField(holes, w, h) {
+        const { gl } = this;
+        const [bw, bh] = this._bloomSize;
+        const cam = this.camera;
+        const { fwd, right, up } = cam.basis();
+        // scale by the heaviest hole's gravitational radius so the shader
+        // sees O(1–10³) numbers (float32-safe at horizon zoom)
+        const rgRef = rGrav(Math.max(...holes.map(c => c.m)));
+        // escape radius: beyond 1.35× the camera–hole distance the residual
+        // bend is ≈ 2Mb/R² — sub-pixel for every ray that can reach it
+        const escR = Math.max(1.35 * Math.max(...holes.map(c =>
+            Math.hypot(...c.relP))) / rgRef, 300);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboNear);
+        gl.viewport(0, 0, bw, bh);
+        gl.useProgram(this.progNear);
+        const u = (n) => gl.getUniformLocation(this.progNear, n);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.tex);
+        gl.uniform1i(u('uScene'), 0);
+        gl.uniform2f(u('uFullRes'), w, h);
+        gl.uniform3f(u('uCamR'), ...right);
+        gl.uniform3f(u('uCamU'), ...up);
+        gl.uniform3f(u('uCamF'), ...fwd);
+        gl.uniform1f(u('uTanHalf'), Math.tan(cam.fov / 2));
+        gl.uniform1f(u('uAspect'), w / h);
+        gl.uniform1i(u('uNHoles'), holes.length);
+        const pos = new Float32Array(6), Ms = new Float32Array(2),
+            As = new Float32Array(2), masks = new Float32Array(8);
+        holes.forEach((c, i) => {
+            pos[i * 3] = c.relP[0] / rgRef;
+            pos[i * 3 + 1] = c.relP[1] / rgRef;
+            pos[i * 3 + 2] = c.relP[2] / rgRef;
+            Ms[i] = rGrav(c.m) / rgRef;
+            As[i] = 0;                    // per-hole spin plumbed, unused yet
+            masks[i * 4] = c.cx; masks[i * 4 + 1] = c.cy;
+            // cap at the screen diagonal, NOT a fraction of it: at horizon-
+            // parking zoom the shadow outgrows any partial mask and the
+            // thin-lens rim would show through the seam
+            masks[i * 4 + 2] = Math.min(
+                Math.max(c.rShadow * 7, c.tE * 2.2, 48), Math.hypot(w, h));
+        });
+        gl.uniform3fv(u('uHolePos'), pos);
+        gl.uniform1fv(u('uHoleM'), Ms);
+        gl.uniform1fv(u('uHoleA'), As);
+        gl.uniform4fv(u('uMaskPx'), masks);
+        gl.uniform1f(u('uEscR'), escR);
+        gl.uniform1i(u('uMaxSteps'), this.nearSteps);
+        const bg = this._lc(0.008, 0.006, 0.016, 1);
+        gl.uniform3f(u('uBg'), bg[0], bg[1], bg[2]);
+        this._quad();
+    }
+
+    /** HDR post: near-field geodesic masks → bright pass → separable blur
+     *  ×2 widths → lens composite (warp + near mix + bloom + exposure +
+     *  ACES + sRGB) to the screen. */
+    _postHdr(lens, nLens, w, h, nearHoles = []) {
         const { gl } = this;
         const [bw, bh] = this._bloomSize;
         gl.disable(gl.BLEND);
         gl.disableVertexAttribArray(1);
         if (this.hdr) gl.disableVertexAttribArray(2);
 
-        // bright-pass downsample: scene → bloomA (half res)
+        const nearOn = nearHoles.length > 0 ? 1 : 0;
+        this.nearCount = nearHoles.length;
+        if (nearOn) this._renderNearField(nearHoles, w, h);
+
+        // bright-pass downsample: scene (+ near patch) → bloomA (half res)
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboBloomA);
         gl.viewport(0, 0, bw, bh);
         gl.useProgram(this.progBright);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this.tex);
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, this.texNear);
+        gl.activeTexture(gl.TEXTURE0);
         gl.uniform1i(gl.getUniformLocation(this.progBright, 'uScene'), 0);
+        gl.uniform1i(gl.getUniformLocation(this.progBright, 'uNear'), 2);
+        gl.uniform1i(gl.getUniformLocation(this.progBright, 'uNearOn'), nearOn);
         gl.uniform2f(gl.getUniformLocation(this.progBright, 'uTexel'), 1 / w, 1 / h);
         gl.uniform1f(gl.getUniformLocation(this.progBright, 'uThresh'), 1.0);
         gl.uniform1f(gl.getUniformLocation(this.progBright, 'uKnee'), 0.6);
@@ -699,9 +960,13 @@ export class Renderer {
         gl.bindTexture(gl.TEXTURE_2D, this.tex);
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, this.texBloomA);
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, this.texNear);
         gl.activeTexture(gl.TEXTURE0);
         gl.uniform1i(gl.getUniformLocation(this.progLensHdr, 'uScene'), 0);
         gl.uniform1i(gl.getUniformLocation(this.progLensHdr, 'uBloom'), 1);
+        gl.uniform1i(gl.getUniformLocation(this.progLensHdr, 'uNear'), 2);
+        gl.uniform1i(gl.getUniformLocation(this.progLensHdr, 'uNearOn'), nearOn);
         gl.uniform2f(gl.getUniformLocation(this.progLensHdr, 'uRes'), w, h);
         gl.uniform4fv(gl.getUniformLocation(this.progLensHdr, 'uLens'), lens);
         gl.uniform1i(gl.getUniformLocation(this.progLensHdr, 'uNLens'), nLens);

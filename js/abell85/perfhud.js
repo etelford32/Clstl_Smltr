@@ -35,11 +35,13 @@ export class PerfHudSystem {
         const eng = res.workerActive
             ? (res.engineType === 'wasm' ? 'wasm·worker' : 'js·worker')
             : (res.physicsReady ? 'js·main' : 'starting');
+        const near = res.renderer.nearCount
+            ? ` +geodesic×${res.renderer.nearCount}` : '';
         this.el.textContent =
             `${(1000 / this.ema).toFixed(0).padStart(3)} fps · ${this.ema.toFixed(1)} ms` +
             ` (worst ${worst.toFixed(0)})\n` +
             `stars ${nStars.toLocaleString('en-US')} · ${eng}\n` +
-            `pipeline ${res.renderer.pipeline ?? 'classic'} · cam ${res.cam.mode} ` +
+            `pipeline ${res.renderer.pipeline ?? 'classic'}${near} · cam ${res.cam.mode} ` +
             `d=${res.cam.dist.toPrecision(3)} pc`;
     }
 }
