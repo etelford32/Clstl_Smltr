@@ -323,10 +323,33 @@ canvas.obs-chart { height:100%; border:1px solid rgba(138,123,255,.18); border-r
             <li><b>ECS</b>: an explicit entity-component-system (<code>ecs.js</code>) wires
                 Timeline → Physics → Choreography → Trails → Camera → Render → HUD → Analytics →
                 UI, one system per concern, all state inspectable.</li>
-            <li><b>Stacked rendering</b>: one WebGL2 pass per lane into a shared scene with
-                identity tinting, then a single lens composite handling up to six event-horizon
-                shadows/Einstein rings at once. Floating-origin (camera-relative) uploads keep
-                horizon zoom jitter-free.</li>
+            <li><b>Depth-separated scene</b>: the three systems sit as distinct volumes along a
+                shared axis — the pair that <em>was</em>, <em>is</em>, and is <em>stuck</em>,
+                back to front — with the shared-τ timeline drawn as a faint physical ruler
+                through their centers. Each lane renders into one scene with identity tinting;
+                <code>focus</code> flies the camera between volumes. Floating-origin
+                (camera-relative) uploads keep horizon zoom jitter-free.
+                (<code>?renderer=classic</code> restores the original stacked composite.)</li>
+            <li><b>HDR star rendering</b>: per-star blackbody color and luminosity drawn from a
+                deterministic fake-IMF (cool dwarfs, a giant branch, a sparse hot tail), with
+                special-relativistic Doppler beaming (I ∝ δ⁴) and color shift computed from each
+                star's live velocity; bright-pass bloom and an ACES filmic tonemap.</li>
+            <li><b>Two-regime gravitational lensing</b>: far from the holes, a thin-lens
+                point-mass deflection with the Einstein radius computed physically from the
+                camera distance; near the holes (when a shadow exceeds a few pixels), per-pixel
+                <em>null-geodesic ray tracing</em> in the superposed Kerr-Schild metric of the
+                two live holes, at half resolution inside screen masks that blend into the
+                thin-lens far field where the regimes converge. The superposition
+                η + f₁k₁k₁ + f₂k₂k₂ is an approximation, not an exact binary solution — it is
+                exact in each hole's near zone and in the far field, and is standard practice
+                for binary visualization. The integrator is validated against the photon
+                capture boundary b = √27 GM/c², the Keeton–Petters deflection series, and
+                Boyer–Lindquist capture criticals at spin (see
+                <code>tests/observatory-geodesic.mjs</code>).</li>
+            <li><b>Deterministic playback</b>: the binary's orbital phase is a pure function of
+                the timeline epoch (validated in <code>tests/observatory-determinism.mjs</code>),
+                and orbit trails draw only when playback temporally resolves the orbital
+                period — faster playback shows the configuration without aliasing artifacts.</li>
         </ul>
         <h3>Open constraints, with provenance</h3>
         <p>Every dial in the left rail is labeled

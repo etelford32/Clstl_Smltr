@@ -32,7 +32,7 @@ import { ptaSensitivity } from './observables.js';
 import { Renderer, Trail } from './render.js';
 import { GodCamera } from './camera.js';
 import { tAt, buildTauAxis, eventsTau, indexOfTau } from './twinsync.js';
-import { fmtLen, fmtTime, fmtMass, fmtFreq, rSchw, rGrav } from './units.js';
+import { fmtLen, fmtTime, fmtMass, fmtFreq, rSchw, rGrav, keplerPeriodMyr } from './units.js';
 import { RENDER_3D, PERF_HUD } from './flags.js';
 import { PerfHudSystem } from './perfhud.js';
 
@@ -469,12 +469,27 @@ class ChoreoSystem {
 }
 
 // ═══ TrailSystem ═════════════════════════════════════════════════════════════
+// Trails are drawn ONLY when the orbit is temporally resolved: if the
+// simulation time advanced per frame exceeds ~1/6 of the orbital period,
+// consecutive samples land at effectively unrelated phases and the
+// polyline aliases into a spirograph web (the "speed looks wrong" bug).
+// Unresolved regimes clear the trail instead — the binary dots still show
+// the (deterministic) sampled configuration.
 class TrailSystem {
     update(world) {
         const res = world.res;
         if (!res.playing) return;
+        this._t = this._t ?? new Map();
         for (const l of res.lanes()) {
             if (!l.visible || !l.renderBhs?.length) continue;
+            const t = res.laneT.get(l.id);
+            const dt = t - (this._t.get(l.id) ?? t);
+            this._t.set(l.id, t);
+            const a = l.state?.now?.a;
+            if (a > 0 && dt > keplerPeriodMyr(a, l.sc.mTot) / 6) {
+                if (l.trails[0].count) l.trails.forEach(tr => tr.clear());
+                continue;
+            }
             l.trails[0].push(...l.renderBhs[0].p);
             if (l.renderBhs[1]) l.trails[1].push(...l.renderBhs[1].p);
         }
