@@ -142,3 +142,70 @@ Schwarzschild prototype.
    thin lens (design in plan; masks per hole, blend at boundary).
 4. Phase 1 task 5 (trail ribbons) and the screenshot smoke test remain
    open from session 1.
+
+---
+
+## Session 3 — 2026-07-07 (Phase 3 tasks 2–4: Kerr spin + binary near-field)
+
+### Done, with acceptance status
+
+**Phase 3 task 2 — Kerr spin: done, validated.**
+- `geodesic.js` generalized to full Kerr in KS form (quartic radial
+  coordinate, Kerr k-field, analytic ∇f/∇k from the defining quartic)
+  AND to N superposed holes (`hole()`, `traceRayKS`, `nullMomentumKS`,
+  `hamiltonianKS`); session-2 API kept as single-hole wrappers.
+- Independent validation (18 checks total, all passing): equatorial
+  capture boundaries at a = 0.7/0.9 prograde AND retrograde match the
+  Boyer-Lindquist radial-potential criticals to **0.000%** (ξ = L_z/E is
+  coordinate-invariant); H and L_z drift ~1e-8 on a wrapped a=0.9 ray at
+  hK=0.01 (convergence asserted, tolerances NOT loosened); two-hole
+  superposition reproduces combined-point-mass deflection to 0.04%.
+- Shader (`ks-tracer.frag.js`) ported to Kerr via `uSpin`; proto page
+  gained a spin slider, a camera re-based so the spin axis is screen-up,
+  and numeric prograde/retrograde edge-tick overlays + per-side pixel
+  measurement. Headless: a=0 reproduces session-2 numbers exactly;
+  a=0.9 measures prograde 22.0 px vs 22.3 predicted, retrograde 56.0 vs
+  54.7 — the D-shaped shadow, 2.5× frame-dragging asymmetry. **Plan
+  acceptance (frame dragging visible, spin as debug slider) met.**
+
+**Phase 3 tasks 3–4 — binary near-field in the observatory: done,
+behind `?renderer=3d`.**
+- `render.js` FS_NEARFIELD: superposed two-hole Kerr-Schild march (same
+  algebra as geodesic.js — lockstep contract), driven per frame by the
+  live worker hole positions/masses (the same data the thin lens uses).
+  Coordinates scaled by the heaviest hole's r_g (float32-safe). Escaped
+  rays sample the HDR scene along the deflected direction; captured and
+  step-starved (≈ critical-curve) rays paint black.
+- Half res, inside per-hole masks only (7× shadow radius, capped at the
+  screen diagonal — full-screen when parked at the horizon). Activation:
+  shadow ≥ 3 px; **zero cost when inactive** (verified nearCount=0 at
+  wide view). Bloom bright-pass mixes the near patch (photon rings
+  glow); composite blends regimes at the mask edge. HUD: `+geodesic×N`.
+- Verified at the a402 endgame: τ = −564 yr → both shadows with the
+  precessing trail rosette warped around them + tangential star arcs at
+  θ_E; τ = +0 → the merged remnant's full-screen horizon rim.
+- Known simplifications (documented in-code): superposed KS is
+  approximate (standard for visualization; exact in each near zone and
+  far field); upscale is bilinear, not bilateral; per-hole spin is
+  plumbed but 0; the plan's on-page methods note about the superposition
+  still needs adding to the methods panel at sign-off time.
+
+### Verification record (session 3)
+- `tests/observatory-geodesic.mjs` 18/18 · `tests/abell85-physics.mjs`
+  22/22 · nav-lint clean · classic path boots clean with nearCount 0.
+- Screenshots: `proto-kerr09` (D-shadow with prediction ticks),
+  `near-binary3` (binary shadows + warped rosette), `near-binary`
+  (remnant horizon at τ=+0).
+
+### Exact resume state for Session 4
+1. Elliot sign-off on the whole `?renderer=3d` experience; add the
+   methods-panel note on the superposed-KS approximation; consider
+   default flip.
+2. Phase 4 (volumetric accretion disk) is next per plan: the geodesic
+   march already exists — add the equatorial disk intersection +
+   Novikov-Thorne T(r) + Doppler/redshift g-factor inside FS_NEARFIELD
+   and the proto tracer; tie luminosity to lane state (B2 dim, endgame
+   brightening).
+3. Then Phase 6 (GW strain ripples) or Phase 5 (WebGPU N-body) — both
+   independent. Phase 1 task 5 (trail ribbons) + screenshot smoke test
+   still open.
