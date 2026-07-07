@@ -193,6 +193,7 @@ layout(location=1) in float aFlag;
 layout(location=2) in vec3 aVel;     // km/s
 uniform mat4 uMvp;
 uniform float uPxScale;
+uniform float uDistRef;              // camera orbit radius: flux exposure anchor
 uniform sampler2D uBB;               // blackbody sRGB LUT, log-T 2000→45000 K
 out float vFlag;
 out vec3 vCol;
@@ -229,7 +230,12 @@ void main() {
     T *= dopp;                                // relativistic color shift
     float lut = (log(clamp(T, 2000.0, 45000.0)) - LGT0) / (LGT1 - LGT0);
     vec3 bb = pow(texture(uBB, vec2(lut, 0.5)).rgb, vec3(2.2));   // → linear
-    vCol = bb * L * pow(dopp, 4.0);           // beaming: I ∝ δ⁴
+    // physical point-source flux, I ∝ 1/d², exposure-anchored at the
+    // camera's orbit radius: the framed subject holds its brightness while
+    // foreground stars pop and background stars recede — the depth cue a
+    // clamped-size point cloud otherwise lacks entirely
+    float att = clamp((uDistRef / w) * (uDistRef / w), 0.03, 30.0);
+    vCol = bb * L * pow(dopp, 4.0) * att;     // beaming: I ∝ δ⁴
     gl_PointSize = clamp(uPxScale / w * (0.8 + 0.30 * log2(1.0 + L)), 1.2, 7.0);
 }`;
 
@@ -725,6 +731,10 @@ export class Renderer {
         const mvp = mul4(perspective(cam.fov, w / h, near, far),
             lookAt([0, 0, 0], fwd, up));
         this._lastMvp = mvp; this._lastEye = eye;   // for click-picking
+        // flux exposure anchor for the HDR stars: distance from the eye to
+        // whatever the rig is framing (works in both orbit and fly modes)
+        this._distRef = Math.max(Math.hypot(
+            eye[0] - cam.target[0], eye[1] - cam.target[1], eye[2] - cam.target[2]), 1e-3);
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
         gl.viewport(0, 0, w, h);
@@ -1031,6 +1041,7 @@ export class Renderer {
                 gl.activeTexture(gl.TEXTURE0);
                 gl.bindTexture(gl.TEXTURE_2D, this.texBB);
                 gl.uniform1i(gl.getUniformLocation(prog, 'uBB'), 0);
+                gl.uniform1f(gl.getUniformLocation(prog, 'uDistRef'), this._distRef);
                 if (lane.vel && lane.vel.length >= lane.n * 3) {
                     gl.bindBuffer(gl.ARRAY_BUFFER, this.bufVel);
                     gl.bufferData(gl.ARRAY_BUFFER, lane.vel.subarray(0, lane.n * 3), gl.DYNAMIC_DRAW);

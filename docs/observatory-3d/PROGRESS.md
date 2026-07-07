@@ -292,3 +292,33 @@ static fuzzballs through the most dramatic minutes of the timeline.
   34,000 pc → 3 pc tracking a: 1.86 → 0.31 pc with zero input; the
   screenshot at τ −92 kyr shows both holes as Einstein-ringed beacons.
 - 22/22 physics · 6/6 determinism · nav-lint clean.
+
+---
+
+## Session 4c — 2026-07-07 ("still 2D" at mid-zoom: the missing regime)
+
+Elliot's feedback parked at ~200 pc inside A402: the sim "reads 2D and
+fragmented". Diagnosis: every 3D visual owns one zoom regime — trails
+(resolved playback only), rosette (PN window only), lensing (deep zoom
+only) — and at mid-zoom NONE of them draw, so the tilted orbital planes
+that exist in the physics were simply never shown there. Stars also had
+no distance-dependent flux, flattening the point cloud.
+
+### Done
+- **Osculating orbit guides** (3D layout only): whenever playback cannot
+  resolve the orbital period (`l.orbitResolved`, shared with the trail
+  gate), each lane draws its two bodies' actual 3D ellipses around the
+  barycenter from (a, e, ϖ) in the lane's tilted plane — beacons ride
+  exactly on them (same elements, same basis). Inclination, node, and
+  slow periapsis drift are now visible at EVERY scale; the PN rosette
+  takes over inside the relativistic window, trails when resolved.
+- **Physical 1/d² star flux** (HDR): point-source attenuation anchored
+  at the camera-to-target distance (auto-exposure: the framed subject
+  holds, foreground pops, background recedes). Clamped [0.03, 30].
+- τ ruler slightly brightened (spine 0.16, ticks 0.40).
+
+### Verification record (session 4c)
+- Screenshot at the reported regime (a402 at 75 pc, camera 350 pc,
+  1× playing): beacons on visibly tilted foreshortened ellipse pair.
+- 22/22 physics · 6/6 determinism · nav-lint · classic hatch boots
+  clean and draws no guides (gated on RENDER_3D).
