@@ -360,14 +360,16 @@ class PhysicsSystem {
                 if (!l.starPos || l.starPos.length !== st.n * 3) {
                     l.starPos = new Float32Array(st.n * 3);
                     l.starFlags = new Uint8Array(st.n);
+                    l.starVel = new Float32Array(st.n * 3);
                 }
                 l.starPos.set(new Float32Array(st.pos, 0, st.n * 3));
                 l.starFlags.set(new Uint8Array(st.flags, 0, st.n));
+                if (st.vel) l.starVel.set(new Float32Array(st.vel, 0, st.n * 3));
                 l.rosette = (st.rosette ?? []).map(r => ({
                     buf: Float32Array.from(r.pts), count: r.count,
                 }));
                 // hand buffers back next frame (ping-pong)
-                this.pools[st.id] = { pos: st.pos, flags: st.flags };
+                this.pools[st.id] = { pos: st.pos, flags: st.flags, vel: st.vel };
             }
             return;
         }
@@ -409,6 +411,7 @@ class PhysicsSystem {
             const transfer = [];
             for (const k of Object.keys(pools)) {
                 transfer.push(pools[k].pos, pools[k].flags);
+                if (pools[k].vel) transfer.push(pools[k].vel);
             }
             this.worker.postMessage(
                 { type: 'frame', seq: this.tick, ts, tick: this.tick, pools }, transfer);
@@ -421,6 +424,7 @@ class PhysicsSystem {
                 l.n = eng.cluster.n;
                 l.starPos = eng.cluster.pos;
                 l.starFlags = eng.cluster.flags;
+                l.starVel = eng.cluster.vel;
                 l.rosette = eng.rosette;
             }
         }
@@ -676,7 +680,7 @@ class RenderSystem {
                 });
             }
             lanes.push({
-                pos: l.starPos, flags: l.starFlags, n: l.n,
+                pos: l.starPos, flags: l.starFlags, vel: l.starVel, n: l.n,
                 bhs: l.renderBhs ?? l.state.bhs,
                 trails: l.trails,
                 tint: l.def.tint,

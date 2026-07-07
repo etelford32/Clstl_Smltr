@@ -10,6 +10,19 @@
 // The shadow disc uses the √27 GM/c² photon-capture radius (EHT 2019 M87*:
 // shadow diameter ≈ 10 GM/c², spin-insensitive to ≲4%, which is what makes
 // a non-rotating treatment quantitatively defensible at this fidelity).
+//
+// Two pipelines share the geometry path (docs/observatory-3d/):
+//   classic — RGBA8 scene, flat per-flag star colors, lens pass to screen.
+//             The shipping default; byte-identical to the pre-upgrade page.
+//   hdr     — opt-in via new Renderer(canvas, {hdr:true}) (?renderer=3d).
+//             RGBA16F scene, per-star blackbody color + luminosity from a
+//             deterministic fake-IMF draw (gl_VertexID hash), special-
+//             relativistic Doppler beaming/tinting from live velocities,
+//             Karis bright-pass + separable Gaussian bloom, and an ACES
+//             filmic tonemap folded into the lens composite. Requires
+//             EXT_color_buffer_float; silently degrades to classic without
+//             it. Overlay lines are pre-divided by the exposure so only the
+//             star field gets the HDR lift (see _lc()).
 
 import { rSchw } from './units.js';
 
@@ -167,12 +180,202 @@ void main() {
     o = vec4(col, 1.0);
 }`;
 
+// ═══ HDR pipeline shaders (?renderer=3d) ═════════════════════════════════════
+
+// Per-star temperature/luminosity from a deterministic gl_VertexID hash:
+// same star index → same color forever, across scrubs, engines and frames
+// (star identity is index-stable in both cluster engines). Doppler beaming
+// uses the live velocity: aPos is camera-relative (floating origin), so
+// normalize(aPos) IS the line of sight; positive v·n̂ = receding.
+const VS_POINTS_HDR = `#version 300 es
+layout(location=0) in vec3 aPos;
+layout(location=1) in float aFlag;
+layout(location=2) in vec3 aVel;     // km/s
+uniform mat4 uMvp;
+uniform float uPxScale;
+uniform sampler2D uBB;               // blackbody sRGB LUT, log-T 2000→45000 K
+out float vFlag;
+out vec3 vCol;
+const float C_KMS = 299792.458;
+const float LGT0 = 7.6009025;        // ln 2000
+const float LGT1 = 10.714418;        // ln 45000
+
+float hash1(int i) {
+    uint h = uint(i) * 747796405u + 2891336453u;
+    h = ((h >> ((h >> 28) + 4u)) ^ h) * 277803737u;
+    return float((h >> 22) ^ h) / 4294967295.0;
+}
+
+void main() {
+    vFlag = aFlag;
+    gl_Position = uMvp * vec4(aPos, 1.0);
+    float w = max(gl_Position.w, 1e-3);
+    if (aFlag > 8.0) { gl_PointSize = 22.0; vCol = vec3(1.0); return; }
+
+    // fake-IMF draw: mostly cool dwarfs, ~10% overluminous giant branch,
+    // a sparse hot blue tail — an old-population cluster, not a starburst
+    float u = hash1(gl_VertexID);
+    float T = 3000.0 + 33000.0 * pow(u, 6.0);
+    float giant = step(0.9, hash1(gl_VertexID + 7919));
+    // 0.18 scale puts the median dwarf at ~0.35 display after exposure+ACES,
+    // leaving ~2 decades of headroom for the giant branch and hot tail
+    float L = clamp(pow(T / 5800.0, 3.0), 0.05, 60.0) * 0.18 * (1.0 + giant * 14.0);
+    T = mix(T, 4600.0, giant * 0.7);
+
+    float blos = clamp(dot(aVel, normalize(aPos)) / C_KMS, -0.6, 0.6);
+    float dopp = 1.0 / (1.0 + blos);         // >1 approaching (blueshift)
+    T *= dopp;                                // relativistic color shift
+    float lut = (log(clamp(T, 2000.0, 45000.0)) - LGT0) / (LGT1 - LGT0);
+    vec3 bb = pow(texture(uBB, vec2(lut, 0.5)).rgb, vec3(2.2));   // → linear
+    vCol = bb * L * pow(dopp, 4.0);           // beaming: I ∝ δ⁴
+    gl_PointSize = clamp(uPxScale / w * (0.8 + 0.30 * log2(1.0 + L)), 1.2, 7.0);
+}`;
+
+const FS_POINTS_HDR = `#version 300 es
+precision mediump float;
+in float vFlag;
+in vec3 vCol;
+uniform vec3 uTint;
+out vec4 o;
+void main() {
+    vec2 d = gl_PointCoord - 0.5;
+    float r = length(d);
+    if (vFlag > 8.0) {                       // selection marker: hollow ring
+        float ring = smoothstep(0.50, 0.44, r) * smoothstep(0.30, 0.36, r);
+        o = vec4(0.55, 1.0, 0.95, ring * 0.95);
+        return;
+    }
+    float a = smoothstep(0.5, 0.05, r);
+    vec3 m;                                   // population modifier on top of blackbody
+    if      (vFlag < 0.5) m = vec3(1.0);                  // bound
+    else if (vFlag < 1.5) m = vec3(1.50, 0.60, 0.35);     // slingshot ejecta
+    else if (vFlag < 2.5) m = vec3(0.45, 0.25, 0.20);     // frozen far ejecta
+    else                  m = vec3(0.75, 1.05, 1.45);     // loss-cone star
+    o = vec4(vCol * m * uTint, a * (vFlag < 0.5 ? 0.75 : 0.95));
+}`;
+
+// Karis-knee bright pass with 4-tap box downsample to half resolution
+// (pattern shared with js/ton618/shaders/bloom.frag.js).
+const FS_BRIGHT = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uScene;
+uniform vec2 uTexel;          // 1 / full resolution
+uniform float uThresh;
+uniform float uKnee;
+out vec4 o;
+vec3 bright(vec3 c) {
+    float br = max(c.r, max(c.g, c.b));
+    float soft = clamp(br - uThresh + uKnee, 0.0, 2.0 * uKnee);
+    soft = soft * soft / (4.0 * uKnee + 1.0e-4);
+    // clamp keeps a single hot star from smearing into a saturated slab
+    return min(c * (max(soft, br - uThresh) / max(br, 1.0e-4)), vec3(2.5));
+}
+void main() {
+    vec3 c = bright(texture(uScene, vUv + vec2(-0.5, -0.5) * uTexel).rgb)
+           + bright(texture(uScene, vUv + vec2( 0.5, -0.5) * uTexel).rgb)
+           + bright(texture(uScene, vUv + vec2(-0.5,  0.5) * uTexel).rgb)
+           + bright(texture(uScene, vUv + vec2( 0.5,  0.5) * uTexel).rgb);
+    o = vec4(c * 0.25, 1.0);
+}`;
+
+const FS_BLUR = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uInput;
+uniform vec2 uTexel;          // 1 / input resolution, pre-scaled per pass
+uniform vec2 uAxis;
+out vec4 o;
+void main() {
+    vec3 c = 0.172 * texture(uInput, vUv).rgb;
+    c += 0.155 * texture(uInput, vUv + uAxis * uTexel).rgb;
+    c += 0.155 * texture(uInput, vUv - uAxis * uTexel).rgb;
+    c += 0.129 * texture(uInput, vUv + uAxis * uTexel * 2.0).rgb;
+    c += 0.129 * texture(uInput, vUv - uAxis * uTexel * 2.0).rgb;
+    c += 0.086 * texture(uInput, vUv + uAxis * uTexel * 3.0).rgb;
+    c += 0.086 * texture(uInput, vUv - uAxis * uTexel * 3.0).rgb;
+    c += 0.043 * texture(uInput, vUv + uAxis * uTexel * 4.0).rgb;
+    c += 0.043 * texture(uInput, vUv - uAxis * uTexel * 4.0).rgb;
+    o = vec4(c, 1.0);
+}`;
+
+// HDR composite: lens warp (same mapping as FS_LENS, applied to scene AND
+// bloom so halos bend with their sources) → exposure → ACES → sRGB.
+const FS_LENS_HDR = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform vec2 uRes;
+uniform vec4 uLens[6];
+uniform int uNLens;
+uniform float uBloomStr;
+uniform float uExposure;      // 2^stops, premultiplied on CPU
+out vec4 o;
+vec3 aces(vec3 x) {           // Narkowicz 2015 fit
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+void main() {
+    vec2 px = vUv * uRes;
+    vec2 samplePx = px;
+    float shadow = 0.0;
+    float ring = 0.0;
+    for (int i = 0; i < 6; i++) {
+        if (i >= uNLens) break;
+        vec2 c = uLens[i].xy;
+        float tE = uLens[i].z;
+        float rSh = uLens[i].w;
+        vec2 d = px - c;
+        float r = max(length(d), 1e-3);
+        if (tE > 0.5) {
+            float f = 1.0 - (tE * tE) / (r * r);
+            samplePx = c + (samplePx - c) * f;
+        }
+        if (rSh > 0.25) {
+            shadow = max(shadow, smoothstep(rSh * 1.08, rSh * 0.92, r));
+            ring += smoothstep(rSh * 1.45, rSh * 1.02, r) * smoothstep(rSh * 0.88, rSh * 1.02, r);
+        }
+    }
+    vec2 uv = clamp(samplePx / uRes, vec2(0.0), vec2(1.0));
+    vec3 col = texture(uScene, uv).rgb + uBloomStr * texture(uBloom, uv).rgb;
+    col += ring * vec3(1.0, 0.75, 0.35) * 0.35;       // photon-ring glow (linear)
+    col *= (1.0 - shadow);
+    col = aces(col * uExposure);
+    o = vec4(pow(col, vec3(1.0 / 2.2)), 1.0);
+}`;
+
+/** Tanner-Helland blackbody approximation → sRGB in [0,1]. */
+function blackbodyRGB(T) {
+    const t = T / 100;
+    const r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
+    const g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661
+        : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+    const b = t >= 66 ? 255 : (t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307);
+    const c = (x) => Math.min(Math.max(x, 0), 255) / 255;
+    return [c(r), c(g), c(b)];
+}
+
 export class Renderer {
-    constructor(canvas) {
+    constructor(canvas, opts = {}) {
         this.canvas = canvas;
         const gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
         if (!gl) throw new Error('WebGL2 unavailable');
         this.gl = gl;
+
+        // HDR is opt-in AND capability-gated: rendering to RGBA16F needs
+        // EXT_color_buffer_float; without it we stay on the classic path.
+        this.hdr = false;
+        this.pipeline = 'classic';
+        if (opts.hdr) {
+            if (gl.getExtension('EXT_color_buffer_float')) {
+                this.hdr = true;
+                this.pipeline = 'hdr';
+            } else {
+                this.pipeline = 'classic (no float RT)';
+            }
+        }
+        this.exposureStops = 2.0;      // HDR star-field lift, in stops
+        this.bloomStrength = 0.35;
 
         this.progPoints = compile(gl, VS_POINTS, FS_POINTS);
         this.progLines = compile(gl, VS_LINES, FS_LINES);
@@ -189,7 +392,61 @@ export class Renderer {
         this.tex = gl.createTexture();
         this._fboSize = [0, 0];
 
+        if (this.hdr) {
+            this.progPointsHdr = compile(gl, VS_POINTS_HDR, FS_POINTS_HDR);
+            this.progBright = compile(gl, VS_QUAD, FS_BRIGHT);
+            this.progBlur = compile(gl, VS_QUAD, FS_BLUR);
+            this.progLensHdr = compile(gl, VS_QUAD, FS_LENS_HDR);
+            this.bufVel = gl.createBuffer();
+            this.texBB = this._makeBBLut(gl);
+            this.fboBloomA = gl.createFramebuffer();
+            this.fboBloomB = gl.createFramebuffer();
+            this.texBloomA = gl.createTexture();
+            this.texBloomB = gl.createTexture();
+            this._bloomSize = [0, 0];
+        }
+
         this.camera = null;    // GodCamera, assigned by main before first render
+    }
+
+    /** 256×1 sRGB blackbody LUT over ln T ∈ [ln 2000, ln 45000]. */
+    _makeBBLut(gl) {
+        const N = 256;
+        const data = new Uint8Array(N * 4);
+        const lg0 = Math.log(2000), lg1 = Math.log(45000);
+        for (let i = 0; i < N; i++) {
+            const [r, g, b] = blackbodyRGB(Math.exp(lg0 + (i + 0.5) / N * (lg1 - lg0)));
+            data[i * 4] = Math.round(r * 255);
+            data[i * 4 + 1] = Math.round(g * 255);
+            data[i * 4 + 2] = Math.round(b * 255);
+            data[i * 4 + 3] = 255;
+        }
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, N, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        return tex;
+    }
+
+    /**
+     * Overlay-line color for the current pipeline. HDR draws into a linear
+     * buffer that later gets exposure + ACES + gamma, so display-space
+     * overlay colors are linearized and pre-divided by the exposure — the
+     * round trip lands them where the classic path shows them, while the
+     * star field (not pre-divided) gets the full HDR lift.
+     */
+    _lc(r, g, b, a) {
+        if (!this.hdr) return [r, g, b, a];
+        const inv = 1 / Math.pow(2, this.exposureStops);
+        return [
+            Math.pow(r * a, 2.2) * inv,
+            Math.pow(g * a, 2.2) * inv,
+            Math.pow(b * a, 2.2) * inv,
+            1,
+        ];
     }
 
     resize() {
@@ -199,15 +456,35 @@ export class Renderer {
         const h = Math.max(Math.floor(canvas.clientHeight * dpr), 32);
         if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
         if (this._fboSize[0] !== w || this._fboSize[1] !== h) {
+            const setup = (tex) => {
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            };
             gl.bindTexture(gl.TEXTURE_2D, this.tex);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            if (this.hdr) {
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+            } else {
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+            }
+            setup(this.tex);
             gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
             gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.tex, 0);
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            if (this.hdr) {
+                const bw = Math.max(w >> 1, 16), bh = Math.max(h >> 1, 16);
+                for (const [tex, fbo] of [[this.texBloomA, this.fboBloomA],
+                                          [this.texBloomB, this.fboBloomB]]) {
+                    gl.bindTexture(gl.TEXTURE_2D, tex);
+                    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, bw, bh, 0, gl.RGBA, gl.HALF_FLOAT, null);
+                    setup(tex);
+                    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+                    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+                }
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+                this._bloomSize = [bw, bh];
+            }
             this._fboSize = [w, h];
         }
     }
@@ -250,7 +527,8 @@ export class Renderer {
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
         gl.viewport(0, 0, w, h);
-        gl.clearColor(0.008, 0.006, 0.016, 1);
+        const bg = this._lc(0.008, 0.006, 0.016, 1);
+        gl.clearColor(bg[0], bg[1], bg[2], 1);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.disable(gl.DEPTH_TEST);
         gl.enable(gl.BLEND);
@@ -260,7 +538,8 @@ export class Renderer {
         if (rings?.length) {
             gl.useProgram(this.progLines);
             gl.uniformMatrix4fv(gl.getUniformLocation(this.progLines, 'uMvp'), false, mvp);
-            gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'), 0.4, 0.55, 0.9, 0.12);
+            gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'),
+                ...this._lc(0.4, 0.55, 0.9, 0.12));
             for (const R of rings) this._drawRing(R, eye);
         }
 
@@ -286,16 +565,7 @@ export class Renderer {
             gl.drawArrays(gl.POINTS, 0, 1);
         }
 
-        // lens + shadow composite to screen: gather every lane's holes
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, w, h);
-        gl.disable(gl.BLEND);
-        gl.useProgram(this.progLens);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.tex);
-        gl.uniform1i(gl.getUniformLocation(this.progLens, 'uScene'), 0);
-        gl.uniform2f(gl.getUniformLocation(this.progLens, 'uRes'), w, h);
-
+        // gather every lane's holes for the lens/composite pass
         const lens = new Float32Array(24);
         let nLens = 0;
         if (lensOn !== false) {
@@ -320,12 +590,91 @@ export class Renderer {
                 }
             }
         }
+        if (this.hdr) {
+            this._postHdr(lens, nLens, w, h);
+            return;
+        }
+
+        // classic: single lens + shadow composite to screen
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, w, h);
+        gl.disable(gl.BLEND);
+        gl.useProgram(this.progLens);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.tex);
+        gl.uniform1i(gl.getUniformLocation(this.progLens, 'uScene'), 0);
+        gl.uniform2f(gl.getUniformLocation(this.progLens, 'uRes'), w, h);
         gl.uniform4fv(gl.getUniformLocation(this.progLens, 'uLens'), lens);
         gl.uniform1i(gl.getUniformLocation(this.progLens, 'uNLens'), nLens);
+        this._quad();
+    }
+
+    /** Fullscreen-triangle draw with the currently bound program/target. */
+    _quad() {
+        const { gl } = this;
         gl.bindBuffer(gl.ARRAY_BUFFER, this.bufQuad);
         gl.enableVertexAttribArray(0);
         gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    /** HDR post: bright pass → separable blur ×2 widths → lens composite
+     *  (warp + bloom add + exposure + ACES + sRGB) to the screen. */
+    _postHdr(lens, nLens, w, h) {
+        const { gl } = this;
+        const [bw, bh] = this._bloomSize;
+        gl.disable(gl.BLEND);
+        gl.disableVertexAttribArray(1);
+        if (this.hdr) gl.disableVertexAttribArray(2);
+
+        // bright-pass downsample: scene → bloomA (half res)
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboBloomA);
+        gl.viewport(0, 0, bw, bh);
+        gl.useProgram(this.progBright);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.tex);
+        gl.uniform1i(gl.getUniformLocation(this.progBright, 'uScene'), 0);
+        gl.uniform2f(gl.getUniformLocation(this.progBright, 'uTexel'), 1 / w, 1 / h);
+        gl.uniform1f(gl.getUniformLocation(this.progBright, 'uThresh'), 1.0);
+        gl.uniform1f(gl.getUniformLocation(this.progBright, 'uKnee'), 0.6);
+        this._quad();
+
+        // two blur octaves (σ≈2 at 1× then 2× texel) — a cheap 2-mip pyramid
+        gl.useProgram(this.progBlur);
+        gl.uniform1i(gl.getUniformLocation(this.progBlur, 'uInput'), 0);
+        const uTexel = gl.getUniformLocation(this.progBlur, 'uTexel');
+        const uAxis = gl.getUniformLocation(this.progBlur, 'uAxis');
+        for (const [src, dst, ax, ay, s] of [
+            [this.texBloomA, this.fboBloomB, 1, 0, 1],
+            [this.texBloomB, this.fboBloomA, 0, 1, 1],
+            [this.texBloomA, this.fboBloomB, 1, 0, 2],
+            [this.texBloomB, this.fboBloomA, 0, 1, 2],
+        ]) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, dst);
+            gl.bindTexture(gl.TEXTURE_2D, src);
+            gl.uniform2f(uTexel, s / bw, s / bh);
+            gl.uniform2f(uAxis, ax, ay);
+            this._quad();
+        }
+
+        // composite to screen
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, w, h);
+        gl.useProgram(this.progLensHdr);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.tex);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, this.texBloomA);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform1i(gl.getUniformLocation(this.progLensHdr, 'uScene'), 0);
+        gl.uniform1i(gl.getUniformLocation(this.progLensHdr, 'uBloom'), 1);
+        gl.uniform2f(gl.getUniformLocation(this.progLensHdr, 'uRes'), w, h);
+        gl.uniform4fv(gl.getUniformLocation(this.progLensHdr, 'uLens'), lens);
+        gl.uniform1i(gl.getUniformLocation(this.progLensHdr, 'uNLens'), nLens);
+        gl.uniform1f(gl.getUniformLocation(this.progLensHdr, 'uBloomStr'), this.bloomStrength);
+        gl.uniform1f(gl.getUniformLocation(this.progLensHdr, 'uExposure'),
+            Math.pow(2, this.exposureStops));
+        this._quad();
     }
 
     /** One lane's geometry: trails, stars (tinted), overlays, shells. */
@@ -350,7 +699,8 @@ export class Renderer {
                     rel[k + 1] = o[k + 1] - eye[1];
                     rel[k + 2] = o[k + 2] - eye[2];
                 }
-                gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'), ...cols[i % 2]);
+                gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'),
+                    ...this._lc(...cols[i % 2]));
                 gl.bindBuffer(gl.ARRAY_BUFFER, this.bufLine);
                 gl.bufferData(gl.ARRAY_BUFFER, rel.subarray(0, o.length), gl.DYNAMIC_DRAW);
                 gl.enableVertexAttribArray(0);
@@ -360,11 +710,26 @@ export class Renderer {
         }
 
         if (lane.n) {
-            gl.useProgram(this.progPoints);
-            gl.uniformMatrix4fv(gl.getUniformLocation(this.progPoints, 'uMvp'), false, mvp);
-            gl.uniform1f(gl.getUniformLocation(this.progPoints, 'uPxScale'), h * 0.9);
+            const prog = this.hdr ? this.progPointsHdr : this.progPoints;
+            gl.useProgram(prog);
+            gl.uniformMatrix4fv(gl.getUniformLocation(prog, 'uMvp'), false, mvp);
+            gl.uniform1f(gl.getUniformLocation(prog, 'uPxScale'), h * 0.9);
             const t = lane.tint ?? [1, 1, 1];
-            gl.uniform3f(gl.getUniformLocation(this.progPoints, 'uTint'), t[0], t[1], t[2]);
+            gl.uniform3f(gl.getUniformLocation(prog, 'uTint'), t[0], t[1], t[2]);
+            if (this.hdr) {
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, this.texBB);
+                gl.uniform1i(gl.getUniformLocation(prog, 'uBB'), 0);
+                if (lane.vel && lane.vel.length >= lane.n * 3) {
+                    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufVel);
+                    gl.bufferData(gl.ARRAY_BUFFER, lane.vel.subarray(0, lane.n * 3), gl.DYNAMIC_DRAW);
+                    gl.enableVertexAttribArray(2);
+                    gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 0, 0);
+                } else {
+                    gl.disableVertexAttribArray(2);
+                    gl.vertexAttrib3f(2, 0, 0, 0);   // no velocity → no Doppler
+                }
+            }
             const len = lane.n * 3;
             const rel = this._starRel && this._starRel.length >= len
                 ? this._starRel : (this._starRel = new Float32Array(len));
@@ -400,7 +765,8 @@ export class Renderer {
                     rel[k + 1] = ln.buf[k + 1] - eye[1];
                     rel[k + 2] = ln.buf[k + 2] - eye[2];
                 }
-                gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'), ...ln.color);
+                gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'),
+                    ...this._lc(...ln.color));
                 gl.bindBuffer(gl.ARRAY_BUFFER, this.bufLine);
                 gl.bufferData(gl.ARRAY_BUFFER, rel.subarray(0, len), gl.DYNAMIC_DRAW);
                 gl.enableVertexAttribArray(0);
@@ -433,7 +799,7 @@ export class Renderer {
         const N = 72;
         const v = this._shellBuf || (this._shellBuf = new Float32Array((N + 1) * 3));
         gl.uniform4f(gl.getUniformLocation(this.progLines, 'uColor'),
-            0.85, 0.80, 1.0, Math.max(sh.alpha, 0));
+            ...this._lc(0.85, 0.80, 1.0, Math.max(sh.alpha, 0)));
         const cx = sh.center[0] - eye[0], cy = sh.center[1] - eye[1], cz = sh.center[2] - eye[2];
         const R = sh.radius;
         // three orthogonal great circles: xy, yz, xz
