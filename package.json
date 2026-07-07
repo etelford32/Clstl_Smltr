@@ -20,8 +20,8 @@
     "@vercel/edge": "^1.1.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.50.0",
-    "playwright": "^1.50.0"
+    "@playwright/test": "^1.56.0",
+    "playwright": "^1.56.0"
   },
   "engines": {
     "node": "22.x"
