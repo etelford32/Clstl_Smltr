@@ -209,3 +209,54 @@ behind `?renderer=3d`.**
 3. Then Phase 6 (GW strain ripples) or Phase 5 (WebGPU N-body) — both
    independent. Phase 1 task 5 (trail ribbons) + screenshot smoke test
    still open.
+
+---
+
+## Session 4 — 2026-07-07 (3D by default + deterministic playback)
+
+Context: PR #903 (sessions 1–3) merged to main. Elliot hit the live
+DEFAULT page (classic — no flag), saw the stacked composite plus the
+orbital-phase aliasing spirograph at hardening zoom, and directed:
+"make it 3D" (flip the default) and "make sure it's deterministic".
+
+### Done
+
+**Deterministic binary playback (the spirograph fix).**
+- Root cause: the lane engine accumulated the Kepler phase from the
+  per-frame dtSim; at 1× playback the timeline sweeps Myr–Gyr per wall
+  second while the binaries orbit in centuries–kyr, so the phase aliased
+  wall-clock-dependently and the trail polylines wove the tangle in
+  Elliot's screenshot.
+- Fix: history samples now carry their Kepler period; the approach loop
+  accumulates the sinking nuclei's circling at build time; `sampleAt`
+  extends the accumulated phase within a segment; the engine reads phase
+  as a pure function of t outside the PN window (inside it, the live PN
+  integration owns the phase — by design, documented).
+- Trails gate on temporal resolvability (frame dt < P/6, else clear).
+- New contract: `tests/observatory-determinism.mjs` — walks of 9 vs 233
+  vs 61 uneven frames land on BIT-IDENTICAL binary positions in both
+  hardening and approach; scrub-back reproduces epochs exactly.
+
+**3D experience is now the DEFAULT.**
+- `flags.js`: `RENDER_3D = renderer !== 'classic'`; `?renderer=classic`
+  restores the original stacked flat composite; `?renderer=3d` links
+  still work. HDR still degrades gracefully without float render
+  targets (layout separation applies regardless).
+- Methods panel updated: depth-separated scene + τ ruler, HDR star
+  rendering, two-regime lensing with the superposed-KS approximation
+  note (the promise from session 3), deterministic-playback note.
+
+### Verification record (session 4)
+- 22/22 physics (incl. WASM parity) · 6/6 determinism · 18/18 geodesic ·
+  nav-lint clean.
+- Headless at Elliot's exact regime (τ −1.13 Gyr, a402 a = 5.19 pc,
+  1× playing, core zoom): clean star field, trails suppressed, no
+  spirograph. Default URL boots hdr + separated; classic hatch boots
+  stacked + classic pipeline.
+
+### Exact resume state for Session 5
+1. Phase 4 volumetric disk (see session-3 notes — unchanged).
+2. Plan Q4 remains open: min-GPU auto-disable via frame-time probe now
+   matters more since 3D is default (HUD gives the measurement; wire a
+   quality step-down if sustained frame time exceeds budget).
+3. Trail ribbons + repo screenshot smoke test still open.
