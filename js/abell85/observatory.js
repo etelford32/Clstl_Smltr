@@ -33,6 +33,8 @@ import { Renderer, Trail } from './render.js';
 import { GodCamera } from './camera.js';
 import { tAt, buildTauAxis, eventsTau, indexOfTau } from './twinsync.js';
 import { fmtLen, fmtTime, fmtMass, fmtFreq, rSchw, rGrav } from './units.js';
+import { RENDER_3D, PERF_HUD } from './flags.js';
+import { PerfHudSystem } from './perfhud.js';
 
 const LOOP_SECONDS = 260;
 
@@ -89,7 +91,7 @@ export function boot(els) {
     const world = new World();
     const res = world.res;
     res.els = els;
-    res.renderer = new Renderer(els.canvas);
+    res.renderer = new Renderer(els.canvas, { hdr: RENDER_3D });
     res.cam = new GodCamera();
     res.renderer.camera = res.cam;
     res.cam.dist = 14000;
@@ -134,6 +136,7 @@ export function boot(els) {
     world.system(new AnalyticsSystem());
     world.system(new UISystem());
     world.system(new AudioSystem());
+    if (PERF_HUD) world.system(new PerfHudSystem());
 
     let last = performance.now();
     function frame(wall) {
