@@ -25,7 +25,7 @@
 import { World } from './ecs.js';
 import { makeScenario, buildHistory, sampleAt } from './physics.js';
 import { LaneEngine } from './laneengine.js';
-import { orbitalBasis } from './geometry.js';
+import { orbitalBasis, toWorld } from './geometry.js';
 import { MergerChoreo } from './merger.js';
 import { GwAudio } from './gwaudio.js';
 import { ptaSensitivity } from './observables.js';
@@ -487,7 +487,10 @@ class TrailSystem {
             const dt = t - (this._t.get(l.id) ?? t);
             this._t.set(l.id, t);
             const a = l.state?.now?.a;
-            if (a > 0 && dt > keplerPeriodMyr(a, l.sc.mTot) / 6) {
+            // orbitResolved doubles as the switch for the osculating-orbit
+            // guides in RenderSystem: unresolved → draw the ellipse instead
+            l.orbitResolved = !(a > 0 && dt > keplerPeriodMyr(a, l.sc.mTot) / 6);
+            if (!l.orbitResolved) {
                 if (l.trails[0].count) l.trails.forEach(tr => tr.clear());
                 continue;
             }
@@ -757,15 +760,50 @@ class RenderSystem {
         const S = LANE_SEP, T = S * 0.035;
         const line = (pts, color) => ({ buf: Float32Array.from(pts), count: pts.length / 3, color });
         res.ruler = [
-            line([0, 0, -1.3 * S, 0, 0, 1.3 * S], [0.55, 0.6, 0.95, 0.10]),
+            line([0, 0, -1.3 * S, 0, 0, 1.3 * S], [0.55, 0.6, 0.95, 0.16]),
         ];
         for (const l of res.lanes()) {
             const [t0, t1, t2] = l.def.tint;
             const z = l.offset[2];
             res.ruler.push(
-                line([-T, 0, z, T, 0, z], [t0, t1, t2, 0.30]),
-                line([0, -T, z, 0, T, z], [t0, t1, t2, 0.30]));
+                line([-T, 0, z, T, 0, z], [t0, t1, t2, 0.40]),
+                line([0, -T, z, 0, T, z], [t0, t1, t2, 0.40]));
         }
+    }
+
+    /**
+     * Osculating-orbit guides: each body's actual 3D ellipse around the
+     * barycenter (a, e, ϖ in the lane's tilted orbital plane). Drawn when
+     * playback cannot temporally resolve the orbit — the regime where
+     * trails are suppressed and the binary would otherwise read as two
+     * flickering dots with no visible plane. The beacons ride exactly on
+     * these curves (same elements, same basis). Buffers cached per lane.
+     */
+    _orbitGuides(l) {
+        const n = l.state?.now;
+        if (!n || !(n.a > 0)) return null;
+        const N = 96;
+        if (!l._guides) {
+            l._guides = [new Float32Array((N + 1) * 3), new Float32Array((N + 1) * 3)];
+        }
+        const f1 = l.sc.m2 / l.sc.mTot, f2 = -l.sc.m1 / l.sc.mTot;
+        const [g1, g2] = l._guides;
+        for (let i = 0; i <= N; i++) {
+            const E = (i / N) * 2 * Math.PI;
+            const r = n.a * (1 - n.e * Math.cos(E));
+            const nu = 2 * Math.atan2(
+                Math.sqrt(1 + n.e) * Math.sin(E / 2),
+                Math.sqrt(1 - n.e) * Math.cos(E / 2));
+            const ang = nu + n.peri;
+            const p = toWorld(l.basis, r * Math.cos(ang), r * Math.sin(ang));
+            g1[i * 3] = p[0] * f1; g1[i * 3 + 1] = p[1] * f1; g1[i * 3 + 2] = p[2] * f1;
+            g2[i * 3] = p[0] * f2; g2[i * 3 + 1] = p[1] * f2; g2[i * 3 + 2] = p[2] * f2;
+        }
+        const [t0, t1, t2] = l.def.tint;
+        return [
+            { buf: g1, count: N + 1, color: [t0, t1, t2, 0.30] },
+            { buf: g2, count: N + 1, color: [t0, t1, t2, 0.22] },
+        ];
     }
 
     update(world, dt, wall) {
@@ -777,6 +815,13 @@ class RenderSystem {
                 buf: r.buf, count: r.count,
                 color: [l.def.tint[0], l.def.tint[1], l.def.tint[2], 0.05 + 0.06 * (i + 1)],
             }));
+            // orbit guides when trails can't resolve the period (and the PN
+            // rosette isn't already drawing the real precessing ellipses);
+            // 3D layout only — the classic hatch stays as it always was
+            if (RENDER_3D && !l.orbitResolved && !l.rosette.length) {
+                const g = this._orbitGuides(l);
+                if (g) extraLines.push(...g);
+            }
             if (res.sel?.laneId === l.id && res.sel.trailBuf) {
                 extraLines.push({
                     buf: res.sel.trailBuf.buf, count: res.sel.trailBuf.count,
