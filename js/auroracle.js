@@ -142,6 +142,8 @@ const state = {
   ensemble: null,            // forecastAurora() output
   cells: null,               // last OVATION bright-cell grid (for "your sky" + globe)
   outlook: null,             // historically-driven 30-day Kp outlook (/api/aurora/outlook)
+  outlookMeta: null,         // provenance of the outlook: { generated_at, age_seconds, noaa45, source }
+  outlookRetrying: true,     // outlook fetch in flight / retry scheduled (true at boot)
   hydrated: false,
 };
 const geo = () => geomagLat(state.user.lat, state.user.lon);
@@ -223,20 +225,68 @@ async function patchOperational() {
 
 /* ════ historically-driven 30-day outlook (NOAA 45-day Ap + 27-day recurrence) ════
  * Replaces the synthetic month/week back-half with a real, observation-grounded
- * forecast. Best-effort: on any failure the synthetic sketch stays, so the
- * teaser never blocks on this (AURORACLE_ML_PLAN.md §6, Phase 1). */
-async function fetchOutlook() {
+ * forecast. Best-effort with retries: the teaser never blocks on this, but a
+ * transient failure no longer silently pins paying users to the synthetic
+ * sketch for the whole visit (AURORACLE_ML_PLAN.md §6, Phase 1). The status
+ * line under the month chart (#au-outlook-status) always says which one is
+ * showing. Retry spacing clears the API's 60s error-cache before re-asking. */
+const OUTLOOK_RETRY_MS = [30e3, 90e3, 300e3];
+
+async function fetchOutlook(attempt = 0) {
   try {
     const r = await fetch('/api/aurora/outlook', { mode: 'cors' });
     const j = await r.json();
     const days = j?.data?.days;
-    if (!Array.isArray(days) || !days.length) return;
+    if (!r.ok || !Array.isArray(days) || !days.length) throw new Error(j?.error || `outlook HTTP ${r.status}`);
     state.outlook = days;            // [{ i, date, kp_p10, kp_p50, kp_p90, driver }]
+    state.outlookMeta = {
+      generated_at: j.generated_at || j?.data?.made_at || null,
+      age_seconds:  Number.isFinite(j.age_seconds) ? j.age_seconds : null,
+      // null = the API computed without the 45-day feed (recurrence+climatology
+      // degraded mode); undefined = older payload that predates the field.
+      noaa45: j?.data?.meta ? (j.data.meta.noaa45_source ?? null) : undefined,
+      source: j?.data?.meta?.source || j.source || null,
+    };
+    state.outlookRetrying = false;
     buildWeek();                     // re-seed week from the outlook…
     patchNearTerm();                 // …then re-assert the fresher 3-day near-term
     buildMonth();
     render();
-  } catch (_) { /* synthetic stays */ }
+  } catch (_) {
+    if (state.outlook) return;       // keep showing the last good outlook
+    state.outlookRetrying = attempt < OUTLOOK_RETRY_MS.length;
+    renderOutlookStatus();           // synthetic sketch stays — but say so
+    if (state.outlookRetrying) setTimeout(() => fetchOutlook(attempt + 1), OUTLOOK_RETRY_MS[attempt]);
+  }
+}
+
+/** Provenance line under the 30-day chart — paying users must be able to tell
+ *  a live outlook from the zero-data-deps illustrative sketch at a glance.
+ *  (The sketch quietly standing in for real data is exactly the failure mode
+ *  that shipped when NOAA retired the 45-day URL — never hide it again.) */
+function renderOutlookStatus() {
+  const el = document.getElementById('au-outlook-status'); if (!el) return;
+  const m = state.outlookMeta;
+  if (state.outlook) {
+    const age = m?.age_seconds;
+    const ageTxt = !Number.isFinite(age) ? '' :
+      age < 90 ? ' · updated just now' :
+      age < 5400 ? ` · updated ${Math.round(age / 60)} min ago` :
+      ` · updated ${Math.round(age / 3600)} h ago`;
+    if (m?.noaa45 === null) {
+      el.className = 'au-outlook-status degraded';
+      el.innerHTML = `<span class="au-os-pip"></span><span><b>Live outlook (reduced)</b> — 27-day recurrence + climatology; the NOAA 45-day feed is temporarily down${ageTxt}.</span>`;
+    } else {
+      el.className = 'au-outlook-status live';
+      el.innerHTML = `<span class="au-os-pip"></span><span><b>Live outlook</b> — NOAA 45-day Ap + 27-day recurrence${ageTxt}.</span>`;
+    }
+  } else if (state.outlookRetrying) {
+    el.className = 'au-outlook-status sketch';
+    el.innerHTML = `<span class="au-os-pip"></span><span>Connecting to the live outlook — showing an illustrative sketch meanwhile…</span>`;
+  } else {
+    el.className = 'au-outlook-status sketch';
+    el.innerHTML = `<span class="au-os-pip"></span><span><b>Illustrative sketch</b> — the live outlook is unavailable right now. Reload to retry.</span>`;
+  }
 }
 
 /* ════ rolling forecast skill ("track record") — Phase 2 ════
@@ -285,6 +335,7 @@ function kpAtHours(h) {
 function render() {
   renderContext(); renderHero(); renderViewingWindow(); renderWeek(); renderMonth(); renderHighlights();
   renderProbability();  // depends on week[0]; safe to re-run on any render
+  renderOutlookStatus();
 }
 
 function renderViewingWindow() {
@@ -504,11 +555,24 @@ function renderMonth() {
           font-family="'JetBrains Mono',monospace" font-size="10.5">visible here only in an extreme storm (Kp&gt;9)</text>`;
   }
 
-  const rc = 29;
-  g += `<line x1="${x(rc)}" y1="${padT}" x2="${x(rc)}" y2="${padT + plotH}" stroke="${COL('--c-storm')}"
-        stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>`;
-  g += `<text x="${x(rc)}" y="${padT + plotH - 6}" text-anchor="end" fill="${COL('--c-storm')}"
-        font-family="'JetBrains Mono',monospace" font-size="9">coronal hole returns (+27d) →</text>`;
+  // Recurrence annotation. With a live outlook, mark the strongest
+  // recurrence-driven day in the back half — the day the 27-day analog
+  // actually flags — and skip the marker when no day is recurrence-driven.
+  // The static day-29 story marker only survives on the synthetic sketch.
+  let rc = 29, rcLabel = 'coronal hole returns (+27d) →';
+  if (state.outlook) {
+    rc = -1;
+    for (let d = 14; d < N; d++) {
+      if (m.drivers[d] === 'recurrence' && (rc < 0 || m.med[d] > m.med[rc])) rc = d;
+    }
+    rcLabel = 'recurrence peak (+27d) →';
+  }
+  if (rc >= 0) {
+    g += `<line x1="${x(rc)}" y1="${padT}" x2="${x(rc)}" y2="${padT + plotH}" stroke="${COL('--c-storm')}"
+          stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>`;
+    g += `<text x="${x(rc)}" y="${padT + plotH - 6}" text-anchor="end" fill="${COL('--c-storm')}"
+          font-family="'JetBrains Mono',monospace" font-size="9">${rcLabel}</text>`;
+  }
 
   [0, 7, 14, 21, 28].forEach(d => {
     const lab = d === 0 ? 'Today' : m.dates[d].toLocaleDateString(undefined, { month: 'short', day: 'numeric' });

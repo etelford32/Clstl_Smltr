@@ -7,9 +7,9 @@
  * enter as a scored member only once it beats this baseline on the leaderboard.
  *
  * Signal (every number traces to a driver — CLAUDE.md §7):
- *   • NOAA's 45-day Ap forecast (`text/45-day-ap-forecast.txt`) — SWPC's
- *     operational, recurrence-grounded daily outlook. Converted Ap→Kp, this is
- *     the p50 backbone for days 0–29.
+ *   • NOAA's 45-day Ap forecast (via _lib/ap45.js) — SWPC's operational,
+ *     recurrence-grounded daily outlook. Converted Ap→Kp, this is the p50
+ *     backbone for days 0–29.
  *   • 27-day recurrence analog — the observed planetary-K record shifted +27 d
  *     (one solar rotation). Where it overlaps the forecast window it cross-
  *     checks NOAA and, on disagreement, widens the confidence band. This is the
@@ -17,16 +17,17 @@
  *   • Climatological spread — the band grows with lead time; a known recurrent
  *     peak lifts p90 so the night's upside isn't hidden.
  *
- * Reuses ap-history.js's exported parsers so the Ap table + 45-day text parsing
- * stay single-sourced. This module does fetches but no DB / DOM — it's imported
- * by both the cron writer (api/cron/aurora-outlook.js) and the read endpoint
+ * The 45-day feed goes through _lib/ap45.js (JSON → text → legacy-text source
+ * chain) — NOAA retired the old 45-day-ap-forecast.txt URL on 2026-03-01
+ * (SCN 26-10) and the single-URL fetch this module launched with 404'd on
+ * every run. This module does fetches but no DB / DOM — it's imported by both
+ * the cron writer (api/cron/aurora-outlook.js) and the read endpoint
  * (api/aurora/outlook.js, live-compute fallback).
  */
 import { fetchWithTimeout } from './responses.js';
-import { _parseDailyApForecast } from '../noaa/ap-history.js';
+import { fetch45DayForecast } from './ap45.js';
 
 const NOAA_PLANETARY_K = 'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json';
-const NOAA_45DAY       = 'https://services.swpc.noaa.gov/text/45-day-ap-forecast.txt';
 
 // Canonical NOAA Kp→ap table (Kp 0..9). Mirrors ap-history.js#_kpToAp /
 // engine.js#kpToAp — duplicated (not imported) only for the inverse direction.
@@ -79,31 +80,38 @@ async function fetchObservedDailyKp() {
     return byDay;
 }
 
-/** NOAA 45-day daily Ap forecast → UTC day → Kp. */
+/** NOAA 45-day daily Ap forecast → { byDay: UTC day → Kp, source }. */
 async function fetchPredictedDailyKp(nowMs) {
-    const res = await fetchWithTimeout(NOAA_45DAY, { headers: { Accept: 'text/plain' } });
-    if (!res.ok) throw new Error(`45-day HTTP ${res.status}`);
-    const text = await res.text();
-    const daily = _parseDailyApForecast(text, nowMs);   // [{ t (UTC midnight), ap }]
+    const { rows, source } = await fetch45DayForecast(nowMs);
     const byDay = new Map();
-    for (const d of daily) byDay.set(utcDayMs(d.t), apToKp(d.ap));
-    return byDay;
+    for (const d of rows) { if (d.ap != null) byDay.set(utcDayMs(d.t), apToKp(d.ap)); }
+    return { byDay, source };
 }
 
 /**
  * Compute the 30-day daily Kp outlook (p10/p50/p90 + per-day driver).
- * Throws only if the NOAA 45-day forecast can't be fetched/parsed; the
- * recurrence overlay degrades silently.
+ *
+ * Degrades in layers rather than failing whole: with the 45-day feed down the
+ * outlook is still real — 27-day recurrence where the observed record covers
+ * the day, quiet-Sun climatology elsewhere (with a wider band and honest
+ * per-day `driver` tags). Throws only when BOTH feeds are empty, i.e. there
+ * is nothing observation-grounded to publish at all.
  *
  * @param {number} [nowMs]
  * @returns {Promise<{made_at:string, version:string, days:Array, meta:object}>}
  */
 export async function computeOutlook(nowMs = Date.now()) {
-    const [predicted, observed] = await Promise.all([
+    const [predictedRes, observedRes] = await Promise.allSettled([
         fetchPredictedDailyKp(nowMs),
-        fetchObservedDailyKp().catch(() => new Map()),   // recurrence optional
+        fetchObservedDailyKp(),
     ]);
-    if (!predicted.size) throw new Error('no NOAA 45-day Ap forecast rows');
+    const predicted   = predictedRes.status === 'fulfilled' ? predictedRes.value.byDay : new Map();
+    const noaa45Src   = predictedRes.status === 'fulfilled' ? predictedRes.value.source : null;
+    const noaa45Error = predictedRes.status === 'rejected' ? (predictedRes.reason?.message || 'failed') : null;
+    const observed    = observedRes.status === 'fulfilled' ? observedRes.value : new Map();
+    if (!predicted.size && !observed.size) {
+        throw new Error(`no 45-day forecast and no observed Kp (${noaa45Error || 'empty feeds'})`);
+    }
 
     const today = utcDayMs(nowMs), N = 30, REC = 27 * DAY_MS;
     const days = [];
@@ -126,9 +134,12 @@ export async function computeOutlook(nowMs = Date.now()) {
         p50 = clamp09(p50);
 
         // Band: climatological growth with lead, widened by NOAA↔recurrence
-        // disagreement; an ~80% interval (±1.28σ).
+        // disagreement; an ~80% interval (±1.28σ). Fewer independent sources
+        // for the day → wider band.
         const base     = Math.min(2.3, 0.5 + 0.06 * d);
-        const disagree = (noaa != null && recMean != null) ? 0.4 * Math.abs(noaa - recMean) : 0.3;
+        const disagree = (noaa != null && recMean != null) ? 0.4 * Math.abs(noaa - recMean)
+                       : (noaa != null || recMean != null) ? 0.5
+                       : 0.8;
         const sigma    = Math.min(2.6, base + disagree);
         let p10 = clamp09(p50 - 1.2816 * sigma);
         let p90 = clamp09(p50 + 1.2816 * sigma);
@@ -136,9 +147,13 @@ export async function computeOutlook(nowMs = Date.now()) {
         if (p10 > p50) p10 = p50;
         if (p90 < p50) p90 = p50;
 
-        let driver = 'noaa-45d';
-        if (recMean != null && recMean > (noaa ?? recMean) + 0.5) driver = 'recurrence';
-        else if (d >= 20) driver = 'climatology';
+        // Per-day driver — what the p50 actually leans on. The client's month
+        // chart uses these to place its recurrence annotation, so keep them
+        // truthful: 'climatology' means no source covered the day at all.
+        let driver;
+        if (noaa != null)         driver = (recMean != null && recMean > noaa + 0.5) ? 'recurrence' : 'noaa-45d';
+        else if (recMean != null) driver = 'recurrence';
+        else                      driver = 'climatology';
 
         days.push({
             i: d, date: isoDate(dayMs),
@@ -169,10 +184,14 @@ export async function computeOutlook(nowMs = Date.now()) {
         observed: observedDaily,
         persistence_kp,
         meta: {
-            source: 'NOAA SWPC 45-day Ap forecast + 27-day Kp recurrence',
+            source: predicted.size
+                ? 'NOAA SWPC 45-day Ap forecast + 27-day Kp recurrence'
+                : '27-day Kp recurrence + climatology (45-day feed unavailable)',
             forecast_days:   predicted.size,
             observed_days:   observed.size,
             recurrence_days: recDays,
+            noaa45_source:   noaa45Src,     // which URL variant landed; null = feed down
+            noaa45_error:    noaa45Error,   // why, when down
         },
     };
 }
