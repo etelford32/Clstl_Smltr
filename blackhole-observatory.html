@@ -264,6 +264,7 @@ canvas.obs-chart { height:100%; border:1px solid rgba(138,123,255,.18); border-r
                        title="shared timeline in τ = time to coalescence">
                 <span id="tauLabel" class="tau">—</span>
                 <label>follow binaries <input id="follow" type="checkbox"></label>
+                <label title="when idle, the camera rides each inspiral down to its coalescence and back out">cinema <input id="cinema" type="checkbox" checked></label>
                 <button id="audioBtn" type="button" title="sonified GW chirp of the selected system (frequency ×3·10¹⁰)">🔇 GW audio</button>
             </div>
             <div class="obs-analytics">
@@ -394,6 +395,7 @@ try {
         inspector: $('inspector'), audioBtn: $('audioBtn'),
         playBtn: $('playBtn'), speed: $('speed'),
         timeline: $('timeline'), tauLabel: $('tauLabel'), follow: $('follow'),
+        cinema: $('cinema'),
         viewCore: $('viewCore'), viewInfl: $('viewInfl'),
         chartTau: $('chartTau'), chartGw: $('chartGw'), grid: $('grid'),
         methods: $('methods'), methodsBtn: $('methodsBtn'), methodsClose: $('methodsClose'),
