@@ -18,6 +18,7 @@
 const EASE_RATE = 4;          // 1/s — exponential approach for transitions
 const DAMP_RATE = 5;          // 1/s — velocity damping in fly mode
 const THRUST_GAIN = 6;        // accel = gain × targetSpeed
+const INERTIA_DAMP = 3.2;     // 1/s — orbit-drag release momentum decay
 
 export class GodCamera {
     constructor() {
@@ -70,10 +71,27 @@ export class GodCamera {
         return { fwd, right, up };
     }
 
+    /** Grab: kill any residual release-spin so the rig feels planted. */
+    onDragStart() {
+        this._vYaw = 0; this._vPitch = 0;
+        this._dragT = performance.now();
+        this.dragging = true;
+    }
+
+    onDragEnd() { this.dragging = false; }
+
     onDrag(dx, dy) {
         const s = this.mode === 'fly' ? -1 : 1;   // fly = mouse-look, orbit = grab
         this.yaw += s * dx * 0.005;
         this.pitch = Math.min(Math.max(this.pitch + s * dy * 0.005, -1.45), 1.45);
+        // Inertia bookkeeping (orbit mode): smoothed per-event angular rate,
+        // released as momentum in update() when the pointer lets go.
+        const now = performance.now();
+        const dtE = Math.min(Math.max((now - (this._dragT ?? now)) / 1000, 1e-3), 0.1);
+        this._dragT = now;
+        const k = 0.35;
+        this._vYaw = (1 - k) * (this._vYaw ?? 0) + k * (s * dx * 0.005) / dtE;
+        this._vPitch = (1 - k) * (this._vPitch ?? 0) + k * (s * dy * 0.005) / dtE;
     }
 
     onWheel(deltaY) {
@@ -104,10 +122,12 @@ export class GodCamera {
         return this.mode;
     }
 
-    /** Smooth cinematic move (orbit mode) to a given radius. */
-    transitionTo(dist) {
+    /** Smooth cinematic move (orbit mode) to a given radius, optionally
+     *  re-targeting the rig (fly-between for depth-separated systems). */
+    transitionTo(dist, target = null) {
         if (this.mode === 'fly') this.toggleMode();
         this.goalDist = Math.min(Math.max(dist, this.distClamp[0]), this.distClamp[1]);
+        if (target) this.goalTarget = [target[0], target[1], target[2]];
     }
 
     /**
@@ -123,6 +143,41 @@ export class GodCamera {
                 if (Math.abs(this.dist - this.goalDist) / this.goalDist < 0.005) {
                     this.dist = this.goalDist; this.goalDist = null;
                 }
+            }
+            if (this.goalTarget) {
+                const k = 1 - Math.exp(-EASE_RATE * dt);
+                const g = this.goalTarget, t = this.target;
+                let d2 = 0;
+                for (let i = 0; i < 3; i++) {
+                    t[i] += (g[i] - t[i]) * k;
+                    d2 += (g[i] - t[i]) ** 2;
+                }
+                // finish threshold scales with the rig radius, not absolutes —
+                // the same rig spans kpc scenes and sub-pc horizon zooms
+                if (d2 < (this.dist * 0.002) ** 2) {
+                    this.target = [g[0], g[1], g[2]];
+                    this.goalTarget = null;
+                }
+            }
+            // drag inertia — ONLY for callers using the onDragStart/onDragEnd
+            // protocol (this.dragging !== undefined); pages that wire onDrag
+            // alone (main.js, cinema.js, twin.js) keep the pre-inertia feel.
+            // While the pointer is held STILL the smoothed rate decays fast
+            // (a long hold releases planted, not spinning); once released,
+            // the residual rate coasts and damps out.
+            if (this.dragging === undefined) return;
+            const idleMs = performance.now() - (this._dragT ?? -1e9);
+            if (this.dragging) {
+                if (idleMs > 60) {
+                    const d = Math.exp(-12 * dt);
+                    this._vYaw = (this._vYaw ?? 0) * d;
+                    this._vPitch = (this._vPitch ?? 0) * d;
+                }
+            } else if ((Math.abs(this._vYaw ?? 0) + Math.abs(this._vPitch ?? 0)) > 1e-3) {
+                this.yaw += this._vYaw * dt;
+                this.pitch = Math.min(Math.max(this.pitch + this._vPitch * dt, -1.45), 1.45);
+                const d = Math.exp(-INERTIA_DAMP * dt);
+                this._vYaw *= d; this._vPitch *= d;
             }
             return;
         }

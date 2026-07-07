@@ -7,13 +7,15 @@
 //   → { type:'init',  lanes:[{id, opts}] }
 //   → { type:'reconfigure', id, overrides }
 //   → { type:'frame', seq, ts:[{id, t}], tick,
-//       pools:{ [id]: {pos:ArrayBuffer, flags:ArrayBuffer} } }   // returned buffers
+//       pools:{ [id]: {pos:ArrayBuffer, flags:ArrayBuffer, vel:ArrayBuffer} } }
 //   ← { type:'ready', lanes:[{id, n, meta}] }
-//   ← { type:'state', seq, lanes:[{id, n, pos, flags, bhs, now, phase, lc,
-//                                  rGamma, merged, rosette}] }   // pos/flags transferred
+//   ← { type:'state', seq, lanes:[{id, n, pos, flags, vel, bhs, now, phase,
+//                                  lc, rGamma, merged, rosette}] }   // pos/flags/vel transferred
 //
-// Star positions/flags travel as transferables and are ping-ponged back on
-// the next frame message, so steady-state allocates nothing.
+// Star positions/flags/velocities travel as transferables and are ping-ponged
+// back on the next frame message, so steady-state allocates nothing.
+// Velocities feed the renderer's Doppler beaming/tinting (docs/observatory-3d/);
+// they are the same km/s values the inspector already reads per-star.
 
 import { LaneEngine } from './laneengine.js';
 import { loadNbodyWasm } from './wasmcluster.js';
@@ -81,12 +83,15 @@ self.onmessage = (ev) => {
                 ? new Float32Array(pool.pos, 0, n * 3) : new Float32Array(n * 3);
             const flags = pool?.flags && pool.flags.byteLength >= n
                 ? new Uint8Array(pool.flags, 0, n) : new Uint8Array(n);
+            const vel = pool?.vel && pool.vel.byteLength >= n * 12
+                ? new Float32Array(pool.vel, 0, n * 3) : new Float32Array(n * 3);
             pos.set(eng.cluster.pos.subarray(0, n * 3));
             flags.set(eng.cluster.flags.subarray(0, n));
-            transfer.push(pos.buffer, flags.buffer);
+            vel.set(eng.cluster.vel.subarray(0, n * 3));
+            transfer.push(pos.buffer, flags.buffer, vel.buffer);
             out.push({
                 ...st, n,
-                pos: pos.buffer, flags: flags.buffer,
+                pos: pos.buffer, flags: flags.buffer, vel: vel.buffer,
                 rosette: eng.rosette.map(r => ({ pts: Array.from(r.buf), count: r.count })),
             });
         }
