@@ -155,6 +155,16 @@ const tag = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '');
     const lastFc = st.series.forecast[st.series.forecast.length - 1];
     assert.ok(lastFc.dst < st.now.dstModel, 'in-transit southward IMF keeps injecting');
 
+    // The Sun→Earth bridge: in-transit parcels are exposed, arrival-sorted,
+    // and the strongest upcoming parcel carries the storm driver
+    // (fixture: v=400, Bz=−14 ⇒ VBs = 5.6 mV/m exactly).
+    const tr = st.transit;
+    assert.ok(tr.parcels.length > 30, `parcels in transit = ${tr.parcels.length}`);
+    assert.ok(tr.parcels.every(p => p.tArrive > nowMs));
+    assert.ok(tr.parcels.every((p, i) => i === 0 || p.tArrive >= tr.parcels[i - 1].tArrive));
+    assert.ok(Math.abs(tr.strongest.vbs - 5.6) < 1e-9, `strongest VBs = ${tr.strongest.vbs}`);
+    assert.ok(tr.strongest.etaMin > 0 && tr.strongest.etaMin <= st.forecastLeadMin);
+
     // Insufficient inputs → null, not a throw.
     assert.equal(computeState([], observed, 3, nowMs), null);
     assert.equal(computeState(drivers, [], 3, nowMs), null);
