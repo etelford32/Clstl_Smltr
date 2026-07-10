@@ -278,4 +278,11 @@
     <priority>0.3</priority>
   </url>
 
+  <url>
+    <loc>https://parkersphysics.com/ring-current.html</loc>
+    <lastmod>2026-07-10</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+  </url>
+
 </urlset>
