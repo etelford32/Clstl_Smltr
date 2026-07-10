@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import {
     noaaNum, noaaTimeMs, mergeDriverSeries, parseKyotoDst, parseLatestKp,
-    observedDstAt, computeState,
+    observedDstAt, computeState, omniToReplay, computeReplayState,
 } from '../js/ring-current-feed.js';
 
 let n = 0;
@@ -133,8 +133,25 @@ const tag = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '');
     for (let h = 0; h <= 25; h++) observed.push({ t: T0 + h * 3.6e6, dst: -15 });
 
     const nowMs = T0 + 24 * 60 * 60_000;   // "now" = last L1 sample time
-    const st = computeState(drivers, observed, 3, nowMs);
+    const st = computeState(drivers, observed, 3, nowMs, 145);
     assert.ok(st, 'state computed');
+
+    // Research-driven additions: Kp→ap + F10.7 surfaced for the density
+    // panel; parameter band present, bracketing the forecast, and widening.
+    assert.equal(st.now.apNow, 15);        // Kp 3o → ap 15 (NOAA table)
+    assert.equal(st.now.f107, 145);
+    assert.ok(st.series.band.length > 10);
+    const bandByT = new Map(st.series.band.map(b => [b.t, b]));
+    for (const p of st.series.forecast) {
+        const b = bandByT.get(p.t);
+        assert.ok(b && b.lo <= p.dst + 1e-9 && b.hi >= p.dst - 1e-9, 'band brackets forecast');
+    }
+    const bw = st.series.band;
+    assert.ok((bw[bw.length - 1].hi - bw[bw.length - 1].lo) > (bw[0].hi - bw[0].lo),
+        'band widens toward the horizon');
+    // Fixture reaches ≈−66 nT with forecast to ≈−77: next threshold (−100)
+    // is NOT crossed → no alert. (Crossing logic itself is model-tested.)
+    assert.equal(st.alert, null);
 
     // At 400 km/s the L1→Earth delay is ~62.5 min: the trailing samples
     // haven't arrived — that IS the forecast window.
@@ -169,6 +186,43 @@ const tag = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '');
     assert.equal(computeState([], observed, 3, nowMs), null);
     assert.equal(computeState(drivers, [], 3, nowMs), null);
     ok('computeState: forecast window ≈ L1 lead, storm state, skill, null-safe');
+}
+
+// ── 8. omniToReplay (Gannon-style hindcast ingredients) ──────────────────────
+{
+    const iso = ms => new Date(ms).toISOString();
+    const payload = { data: {
+        t:      [iso(T0), iso(T0 + 300_000), iso(T0 + 600_000), 'garbage'],
+        v:      [450, null, 700, 500],           // null → driver row dropped
+        np:     [5, 8, 12, 1],
+        bz_gsm: [-2, -20, -30, -1],
+        sym_h:  [-15, -80, 9999, -120],          // 9999 fill → observed dropped
+    } };
+    const r = omniToReplay(payload);
+    assert.equal(r.drivers.length, 2);           // t[0] and t[2]
+    assert.equal(r.drivers[1].bz, -30);
+    assert.equal(r.observed.length, 2);          // fills and bad times dropped
+    assert.equal(r.observed[1].dst, -80);
+    assert.equal(omniToReplay({ data: { t: [] } }), null);
+    assert.equal(omniToReplay(null), null);
+
+    // End-to-end hindcast: replay does NOT re-propagate (OMNI is already
+    // bow-shock-shifted) — model tracks span exactly the driver window.
+    const drivers = [], observed = [];
+    for (let m = 0; m <= 12 * 60; m++) {
+        const t = T0 + m * 60_000;
+        drivers.push({ t, v: 700, n: 20, bz: m > 4 * 60 ? -25 : 0 });
+        if (m % 60 === 0) observed.push({ t, dst: m > 5 * 60 ? -150 : -20 });
+    }
+    const replay = computeReplayState(drivers, observed, 'test-storm');
+    assert.equal(replay.window.startMs, drivers[0].t);
+    assert.equal(replay.window.endMs, drivers[drivers.length - 1].t);
+    assert.ok(replay.peak.model.dst < -150, `Gannon-class drivers ⇒ deep Dst, got ${replay.peak.model.dst}`);
+    assert.equal(replay.peak.observed.dst, -150);
+    assert.ok(Number.isFinite(replay.skill.rmse) && replay.skill.n >= 12);
+    assert.ok(replay.series.band.length === replay.series.model.length);
+    assert.equal(computeReplayState([], observed), null);
+    ok('omniToReplay + computeReplayState: hindcast without double propagation');
 }
 
 console.log(`\nring-current-feed-parsers: all ${n} test groups passed`);
