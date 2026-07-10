@@ -64,12 +64,22 @@ const CRON_SECRET  = process.env.CRON_SECRET || '';
 const NOAA_WIND_URL = 'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json';
 const NOAA_MAG_URL  = 'https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json';
 
-// DSCOVR "products/solar-wind" fallback, used only when the RTSW feed is stale
-// or unavailable (RTSW periodically gaps for tens of minutes to hours). Shape
-// differs: [ [header...], [row,row...] ] with string cells, so it is normalised
-// to objects before the shared cleanField()/pick logic runs.
-const DSCOVR_PLASMA_URL = 'https://services.swpc.noaa.gov/products/solar-wind/plasma-2-hour.json';
-const DSCOVR_MAG_URL    = 'https://services.swpc.noaa.gov/products/solar-wind/mag-2-hour.json';
+// Fallback, used only when the RTSW feed is stale or unavailable (RTSW
+// periodically gaps for tens of minutes to hours; on 2026-07-10 its plasma
+// went fill-only for a full day while SWPC's propagated feed stayed live).
+//
+// WARNING: the whole products/solar-wind/ directory (plasma-2-hour.json,
+// mag-*.json, …) is RETIRED at NOAA — every variant 404s (verified live
+// 2026-07-10, same retirement wave as the 45-day text product that killed
+// the aurora_outlook cron; see api/_lib/ap45.js). Do not "restore" those
+// URLs. The geospace propagated feed below is the supported replacement:
+// one product carrying plasma AND IMF, source-switched by SWPC between
+// DSCOVR/ACE, ~1-min cadence over the trailing hour. Shape is
+// [ [header...], [row,row...] ] — normalised to objects before the shared
+// cleanField()/pick logic runs. Its time_tag is the L1 observation time
+// (propagated_time_tag is Earth arrival), matching RTSW semantics for the
+// dedup/staleness contract.
+const PROPAGATED_URL = 'https://services.swpc.noaa.gov/products/geospace/propagated-solar-wind-1-hour.json';
 
 const SOURCE_TAG    = 'noaa-swpc';
 const PIPELINE      = 'solar_wind';
@@ -188,17 +198,19 @@ function extractRTSW(windRows, magRows) {
     };
 }
 
-// Same normalised shape from the DSCOVR products fallback feeds.
-function extractDSCOVR(plasmaArr, magArr) {
-    const p = rowsFromProduct(plasmaArr);
-    if (!p.length) return null;
+// Same normalised shape from the geospace propagated fallback feed. One
+// product carries both plasma and IMF per row; if the newest valid-speed
+// row happens to have null mag cells, walk back for the newest valid mag.
+function extractPropagated(arr) {
+    const rows = rowsFromProduct(arr);
+    if (!rows.length) return null;
     let plasma = null;
-    for (let i = p.length - 1; i >= 0; i--) {
-        const speed = cleanField(p[i], 'speed');
-        if (speed != null && speed > 0) { plasma = { row: p[i], speed }; break; }
+    for (let i = rows.length - 1; i >= 0; i--) {
+        const speed = cleanField(rows[i], 'speed');
+        if (speed != null && speed > 0) { plasma = { row: rows[i], speed }; break; }
     }
     if (!plasma) return null;
-    const mag = pickLatestValidMag(rowsFromProduct(magArr));
+    const mag = pickLatestValidMag(rows);
     return {
         observedAt:  normTime(plasma.row.time_tag),
         speed:       plasma.speed,
@@ -225,7 +237,7 @@ export default async function handler(req) {
 
     // 1) Primary source: RTSW plasma + mag (mag is best-effort — if it fails,
     //    plasma still writes and Bz stays null, i.e. no regression vs. before).
-    //    Fall back to the DSCOVR products feeds when RTSW is missing or stale,
+    //    Fall back to the geospace propagated feed when RTSW is missing or stale,
     //    so a NOAA RTSW gap no longer freezes ingestion.
     let data = null;
     let feed = 'rtsw';
@@ -247,15 +259,11 @@ export default async function handler(req) {
 
     if (!data || isStale(data)) {
         try {
-            const [pl, mg] = await Promise.all([
-                getJson(DSCOVR_PLASMA_URL),
-                getJson(DSCOVR_MAG_URL).catch((e) => { notes.push(`dscovr-mag:${e.message}`); return []; }),
-            ]);
-            const alt = extractDSCOVR(pl, mg);
-            if (alt && !isStale(alt)) { data = alt; feed = 'dscovr-products'; }
-            else if (alt) notes.push('dscovr also stale');
+            const alt = extractPropagated(await getJson(PROPAGATED_URL));
+            if (alt && !isStale(alt)) { data = alt; feed = 'geospace-propagated'; }
+            else if (alt) notes.push('geospace-propagated also stale');
         } catch (e) {
-            notes.push(`dscovr:${e.message}`);
+            notes.push(`geospace-propagated:${e.message}`);
         }
     }
 
