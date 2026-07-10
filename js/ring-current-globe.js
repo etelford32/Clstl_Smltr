@@ -7,11 +7,19 @@
  *
  *   earth          textured sphere + additive atmosphere shell
  *   fieldLines     dipole cage — r = L·cos²λ at L = 2…6 × 12 meridians
- *   ions           ~3200 drift-animated points, WESTWARD, warm colors
- *   electrons      ~1400 drift-animated points, EASTWARD, cool colors
+ *   ions           ~3200 points, WESTWARD drift + REAL field-line bounce
+ *                  between mirror points (pitch angles above the loss cone)
+ *   electrons      ~1400 points, EASTWARD, same trapped-motion geometry
  *   ringTorus      symmetric glow at the model's peak L (|Dst*|-driven)
  *   partialArc     dusk-centred arc — the partial ring current bulge
  *   plasmapause    thin cyan ring at Carpenter–Anderson Lpp(Kp)
+ *   sun + transit  Sun sprite at +X and the incoming solar wind stream:
+ *                  every not-yet-arrived L1 parcel (feed state.transit)
+ *                  rendered at its REAL time-to-arrival along the corridor,
+ *                  colored by Bz (southward hot / northward cool), brightness
+ *                  by dynamic pressure. This is the visible bridge between
+ *                  the Sun-side and Earth-side digital twins: the forecast
+ *                  window as matter in flight, in true real time.
  *
  * Azimuth convention: position = (r·cosθ, y, r·sinθ);
  * MLT = (12 + θ·12/π) mod 24 — noon (12 MLT) at +X, the dusk bulge at
@@ -28,6 +36,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     radialProfile, azimuthalWeight, driftRateRadPerHour, ringPeakL,
+    dipoleFieldLinePoint, mirrorLatitude, lossConeAngle, dynamicPressure,
 } from './ring-current-model.js';
 
 // Keep in sync with js/earth-skin.js EARTH_TEXTURES (version-pinned CDN).
@@ -36,27 +45,52 @@ const EARTH_DAY_TEXTURE = 'https://unpkg.com/three-globe@2.31.0/example/img/eart
 const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);
 const ELECTRON_COLOR = new THREE.Color(0.35, 0.75, 1.00);
 
+/**
+ * Trapped population with REAL dipole bounce geometry: each particle gets an
+ * equatorial pitch angle sampled ABOVE the loss cone (below it precipitates —
+ * those never appear), the corresponding mirror latitude from μ-conservation,
+ * and oscillates along its field line r = L·cos²λ between ±λ_m. Bounce runs
+ * at a viewing-friendly rate (real bounce is ~seconds — far below frame
+ * perception at drift compression; same pedagogical decoupling as
+ * js/van-allen-particles.js), deeper mirrors bouncing slower (T_b grows as
+ * α_eq shrinks). Drift stays physical: rate × timeCompression.
+ */
 function makePopulation(count, species) {
-    const L      = new Float32Array(count);
-    const theta  = new Float32Array(count);
-    const eKev   = new Float32Array(count);
-    const yAmp   = new Float32Array(count);
-    const yPhase = new Float32Array(count);
-    const rate   = new Float32Array(count);   // rad/h, signed
+    const L       = new Float32Array(count);
+    const theta   = new Float32Array(count);
+    const eKev    = new Float32Array(count);
+    const mirrorL = new Float32Array(count);  // mirror latitude (rad)
+    const bRate   = new Float32Array(count);  // bounce viewing rate (rad/s)
+    const bPhase  = new Float32Array(count);
+    const rate    = new Float32Array(count);  // drift rad/h, signed
     for (let i = 0; i < count; i++) {
-        L[i]      = 1.9 + Math.random() * 4.6;
-        theta[i]  = Math.random() * 2 * Math.PI;
-        eKev[i]   = 20 * Math.pow(250 / 20, Math.random());     // log-uniform 20–250 keV
-        yAmp[i]   = Math.abs(gauss()) * 0.30 * (L[i] / 4);
-        yPhase[i] = Math.random() * 2 * Math.PI;
-        rate[i]   = driftRateRadPerHour(eKev[i], L[i], species);
+        L[i]     = 1.9 + Math.random() * 4.6;
+        theta[i] = Math.random() * 2 * Math.PI;
+        eKev[i]  = 20 * Math.pow(250 / 20, Math.random());      // log-uniform 20–250 keV
+        // Pitch angle above the loss cone, biased toward 90° (trapped
+        // distributions peak at equatorial mirroring).
+        const lc = lossConeAngle(L[i]);
+        const alpha = lc + (Math.PI / 2 - lc) * Math.pow(Math.random(), 0.45);
+        mirrorL[i] = mirrorLatitude(alpha);
+        bRate[i]   = (1.1 + Math.random() * 1.2) / (1 + 1.8 * mirrorL[i]);
+        bPhase[i]  = Math.random() * 2 * Math.PI;
+        rate[i]    = driftRateRadPerHour(eKev[i], L[i], species);
     }
-    return { count, species, L, theta, eKev, yAmp, yPhase, rate };
+    return { count, species, L, theta, eKev, mirrorL, bRate, bPhase, rate };
 }
 
-function gauss() {
-    return (Math.random() + Math.random() + Math.random() + Math.random() - 2) / 2;
-}
+// ── Incoming solar wind stream (the Sun→Earth twin bridge) ──────────────────
+// Each parcel = one not-yet-arrived L1 sample from feed state.transit,
+// rendered as a small cluster at the corridor position matching its REAL
+// time-to-arrival (this deliberately ignores the drift time compression —
+// the stream is an honest, real-time forecast display, not an animation).
+const TRANSIT = Object.freeze({
+    MAX_PARCELS: 120,
+    PTS_PER:     8,
+    X_MP:        11,     // corridor end ≈ subsolar magnetopause (R_E)
+    X_SUN:       52,     // corridor start, toward the Sun sprite
+    LEAD_MAX:    75,     // minutes mapped across the corridor
+});
 
 export class RingCurrentGlobe {
     constructor(container, opts = {}) {
@@ -70,8 +104,9 @@ export class RingCurrentGlobe {
         this._disposed = false;
         this._raf = 0;
         this._lastT = 0;
-        this._bouncePhase = 0;
+        this._tView = 0;          // viewing-time clock for the bounce motion
         this._builtPeakL = 0;
+        this._parcels = [];       // in-transit L1 samples (state.transit)
 
         const w = container.clientWidth || 800;
         const h = container.clientHeight || 600;
@@ -89,7 +124,7 @@ export class RingCurrentGlobe {
         this._controls.enableDamping = true;
         this._controls.dampingFactor = 0.06;
         this._controls.minDistance = 2.5;
-        this._controls.maxDistance = 60;
+        this._controls.maxDistance = 140;   // far enough to frame the Sun corridor
 
         // Lighting: Sun from +X.
         this._scene.add(new THREE.AmbientLight(0x8899bb, 0.55));
@@ -101,6 +136,7 @@ export class RingCurrentGlobe {
         this._buildFieldLines();
         this._buildParticles();
         this._buildRings();
+        this._buildSunAndTransit();
 
         this._onResize = () => this._resize();
         window.addEventListener('resize', this._onResize);
@@ -229,10 +265,100 @@ export class RingCurrentGlobe {
         this._builtPeakL = peakL;
     }
 
+    _buildSunAndTransit() {
+        // Sun glow: canvas radial-gradient sprite at +X (noon MLT direction).
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 128;
+        const g = cv.getContext('2d');
+        const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+        grad.addColorStop(0.00, 'rgba(255,244,214,1)');
+        grad.addColorStop(0.25, 'rgba(255,214,120,0.85)');
+        grad.addColorStop(0.60, 'rgba(255,150,60,0.25)');
+        grad.addColorStop(1.00, 'rgba(255,120,40,0)');
+        g.fillStyle = grad;
+        g.fillRect(0, 0, 128, 128);
+        const tex = new THREE.CanvasTexture(cv);
+        this._sunMat = new THREE.SpriteMaterial({
+            map: tex, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.95,
+        });
+        this._sun = new THREE.Sprite(this._sunMat);
+        this._sun.position.set(TRANSIT.X_SUN + 8, 0, 0);
+        this._sun.scale.setScalar(11);
+        this._scene.add(this._sun);
+
+        // Transit parcel points (positions/colors filled per frame).
+        const N = TRANSIT.MAX_PARCELS * TRANSIT.PTS_PER;
+        this._transitGeo = new THREE.BufferGeometry();
+        this._transitPos = new Float32Array(N * 3);
+        this._transitCol = new Float32Array(N * 3);
+        this._transitGeo.setAttribute('position', new THREE.BufferAttribute(this._transitPos, 3).setUsage(THREE.DynamicDrawUsage));
+        this._transitGeo.setAttribute('color',    new THREE.BufferAttribute(this._transitCol, 3).setUsage(THREE.DynamicDrawUsage));
+        // Fixed per-slot cluster offsets (YZ disc + slight x scatter) so
+        // parcels keep a stable shape as they advance.
+        this._transitOff = new Float32Array(N * 3);
+        for (let i = 0; i < N; i++) {
+            const a = Math.random() * 2 * Math.PI;
+            const r = Math.sqrt(Math.random()) * 1.35;
+            this._transitOff[i * 3]     = (Math.random() - 0.5) * 0.9;
+            this._transitOff[i * 3 + 1] = Math.sin(a) * r;
+            this._transitOff[i * 3 + 2] = Math.cos(a) * r;
+        }
+        const mat = new THREE.PointsMaterial({
+            size: 0.16, vertexColors: true, transparent: true, opacity: 0.95,
+            blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+        });
+        this._transit = new THREE.Points(this._transitGeo, mat);
+        this._transit.frustumCulled = false;
+        this._scene.add(this._transit);
+    }
+
+    /** Corridor rendering: real time-to-arrival → position between Sun and
+     *  magnetopause. Runs every frame so parcels creep Earthward in true
+     *  real time and vanish exactly when their plasma reaches Earth. */
+    _updateTransit() {
+        const now = Date.now();
+        const pos = this._transitPos, col = this._transitCol, off = this._transitOff;
+        let slot = 0;
+        for (const p of this._parcels) {
+            if (slot >= TRANSIT.MAX_PARCELS) break;
+            const mins = (p.tArrive - now) / 60_000;
+            if (mins <= 0 || mins > TRANSIT.LEAD_MAX) continue;
+            const x = TRANSIT.X_MP + (mins / TRANSIT.LEAD_MAX) * (TRANSIT.X_SUN - TRANSIT.X_MP);
+            // Southward Bz (the injector) renders hot; northward renders cool.
+            const south = Number.isFinite(p.bz) && p.bz < 0;
+            const mag = Number.isFinite(p.bz) ? Math.min(1, Math.abs(p.bz) / 15) : 0.2;
+            const R = south ? 1.0 : 0.30, G = south ? 0.45 - 0.15 * mag : 0.75, B = south ? 0.22 : 1.0;
+            const pdyn = dynamicPressure(p.n, p.v);
+            const bright = 0.30 + 0.70 * Math.min(1, (pdyn ?? 1.5) / 8);
+            for (let k = 0; k < TRANSIT.PTS_PER; k++) {
+                const j = (slot * TRANSIT.PTS_PER + k) * 3;
+                pos[j]     = x + off[j];
+                pos[j + 1] = off[j + 1];
+                pos[j + 2] = off[j + 2];
+                col[j]     = R * bright;
+                col[j + 1] = G * bright;
+                col[j + 2] = B * bright;
+            }
+            slot++;
+        }
+        // Park unused slots at the origin, black (invisible under additive).
+        for (let s = slot * TRANSIT.PTS_PER; s < TRANSIT.MAX_PARCELS * TRANSIT.PTS_PER; s++) {
+            pos[s * 3] = pos[s * 3 + 1] = pos[s * 3 + 2] = 0;
+            col[s * 3] = col[s * 3 + 1] = col[s * 3 + 2] = 0;
+        }
+        this._transitGeo.attributes.position.needsUpdate = true;
+        this._transitGeo.attributes.color.needsUpdate = true;
+    }
+
     // ── State & animation ───────────────────────────────────────────────────
 
     /** Feed the latest model state (detail of ring-current-feed 'state'). */
     setState(state) {
+        this._parcels = state?.transit?.parcels?.slice(0, TRANSIT.MAX_PARCELS) ?? [];
+        // Sun glow tracks the strongest incoming driver — a storm you can
+        // see coming before it arrives.
+        const sv = state?.transit?.strongest?.vbs ?? 0;
+        if (this._sunMat) this._sunMat.opacity = 0.75 + 0.25 * Math.min(1, sv / 6);
         const now = state?.now;
         if (!now) return;
         this._state = {
@@ -257,9 +383,10 @@ export class RingCurrentGlobe {
 
     tick(dt) {
         const dtH = (dt * this._timeCompression) / 3600;   // viewing → model hours
-        this._bouncePhase += dt * 2.4;                     // decorative bounce rate
+        this._tView += dt;
         this._updatePopulation(this._ions, dtH);
         this._updatePopulation(this._electrons, dtH);
+        this._updateTransit();
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
     }
@@ -268,18 +395,23 @@ export class RingCurrentGlobe {
         const { pop, pos, col, baseColor } = P;
         const { dstStar, asym } = this._state;
         const intensity = 0.25 + 0.75 * Math.min(1, Math.abs(dstStar) / 150);
+        const tv = this._tView;
         for (let i = 0; i < pop.count; i++) {
             let th = pop.theta[i] + pop.rate[i] * dtH;
             if (th > 2 * Math.PI) th -= 2 * Math.PI;
             else if (th < 0) th += 2 * Math.PI;
             pop.theta[i] = th;
 
+            // Bounce along the field line r = L·cos²λ between ±mirror
+            // latitude — the particle physically follows its flux tube, so
+            // the ring reads as a true 3D shell, not a flat annulus.
             const L = pop.L[i];
-            const y = pop.yAmp[i] * Math.sin(this._bouncePhase + pop.yPhase[i]);
+            const lam = pop.mirrorL[i] * Math.sin(pop.bRate[i] * tv + pop.bPhase[i]);
+            const fl = dipoleFieldLinePoint(L, lam);
             const j = i * 3;
-            pos[j]     = L * Math.cos(th);
-            pos[j + 1] = y;
-            pos[j + 2] = L * Math.sin(th);
+            pos[j]     = fl.rho * Math.cos(th);
+            pos[j + 1] = fl.y;
+            pos[j + 2] = fl.rho * Math.sin(th);
 
             const mlt = (12 + th * 12 / Math.PI) % 24;
             const w = radialProfile(L, dstStar) * azimuthalWeight(mlt, asym) * intensity;

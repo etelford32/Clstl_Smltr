@@ -29,6 +29,7 @@ import {
     propagateToEarth, dpsEnergyJ, ringPeakL, radialProfile,
     asymmetry, azimuthalWeight, driftPeriodHours, driftRateRadPerHour,
     plasmapauseL, stormClass, skill, newellCoupling,
+    dipoleFieldLinePoint, dipoleFieldRatio, mirrorLatitude, lossConeAngle,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -247,6 +248,34 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.equal(newellCoupling(400, null, 8), 0);
     assert.equal(newellCoupling(null, 0, -5), null);
     ok('Newell: north-gated, exact due-south form, By quadrature, monotone');
+}
+
+// ── Dipole trapped motion ────────────────────────────────────────────────────
+{
+    // Field line: equator (λ=0) → r = ρ = L, y = 0; footpoint where r = 1.
+    const eq = dipoleFieldLinePoint(4, 0);
+    assert.ok(Math.abs(eq.r - 4) < 1e-12 && Math.abs(eq.rho - 4) < 1e-12 && eq.y === 0);
+    const lamFoot = Math.acos(Math.sqrt(1 / 4));            // r = 1 at cos²λ = 1/L
+    assert.ok(Math.abs(dipoleFieldLinePoint(4, lamFoot).r - 1) < 1e-12);
+    // Field ratio: 1 at the equator, exactly 2·√4/... : B(60°)/B_eq for the
+    // classic check — √(1+3·0.75)/0.5⁶ = √3.25/0.015625.
+    assert.ok(Math.abs(dipoleFieldRatio(0) - 1) < 1e-12);
+    const lam60 = Math.PI / 3;
+    assert.ok(Math.abs(dipoleFieldRatio(lam60) - Math.sqrt(3.25) / 0.5 ** 6) < 1e-9);
+
+    // Mirror latitude: 90° pitch ⇒ equatorially mirroring (λm = 0);
+    // smaller α_eq ⇒ deeper mirror; consistency: B(λm)/B_eq = 1/sin²α.
+    assert.equal(mirrorLatitude(Math.PI / 2), 0);
+    const a45 = mirrorLatitude(Math.PI / 4), a30 = mirrorLatitude(Math.PI / 6);
+    assert.ok(a30 > a45 && a45 > 0);
+    assert.ok(Math.abs(dipoleFieldRatio(a45) - 2) < 1e-6, 'sin²45° = 1/2 ⇒ B ratio 2');
+
+    // Loss cone shrinks with L and stays in (0, 90°).
+    const lc3 = lossConeAngle(3), lc6 = lossConeAngle(6);
+    assert.ok(lc3 > lc6 && lc6 > 0 && lc3 < Math.PI / 2);
+    // L=3: sin²α = 1/√(4·729 − 3·243) = 1/√2187
+    assert.ok(Math.abs(Math.sin(lc3) ** 2 - 1 / Math.sqrt(2187)) < 1e-12);
+    ok('dipole: field line geometry, B ratio, mirror latitude, loss cone');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

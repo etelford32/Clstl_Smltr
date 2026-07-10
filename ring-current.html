@@ -134,6 +134,14 @@ body {
 .rc-skill b { color:#e8edf7; font-variant-numeric:tabular-nums; }
 #rc-chart { width:100%; height:240px; display:block; }
 
+.rc-bridge-links { display:flex; flex-wrap:wrap; gap:7px; margin-top:9px; }
+.rc-bridge-links a {
+    font-size:.72rem; font-weight:650; text-decoration:none; color:#cdd5e4;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13);
+    border-radius:6px; padding:4px 9px; transition:background .2s, border-color .2s;
+}
+.rc-bridge-links a:hover { background:rgba(255,255,255,.13); border-color:rgba(255,176,102,.5); }
+
 .rc-ctl { display:flex; align-items:center; gap:10px; font-size:.72rem; color:#8b94ad; }
 .rc-ctl input[type=range] { flex:1; accent-color:#ff9a3d; }
 .rc-ctl .rc-v { font-size:.72rem; }
@@ -180,12 +188,14 @@ body {
 <div class="rc-layout">
     <div class="rc-stage" id="rc-stage">
         <div class="rc-legend">
-            <span class="rc-dot" style="background:#ffa040"></span>Ions 20&ndash;250 keV &mdash; drift west<br>
+            <span class="rc-dot" style="background:#ffa040"></span>Ions &mdash; drift west, bounce on field lines<br>
             <span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east<br>
             <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause (Kp)<br>
-            <span class="rc-dot" style="background:#ff9a3d"></span>Peak current shell
+            <span class="rc-dot" style="background:#ff9a3d"></span>Peak current shell<br>
+            <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
+            <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz
         </div>
-        <div class="rc-stage-hint">drag to orbit &middot; scroll to zoom &middot; Sun at +X (noon MLT)</div>
+        <div class="rc-stage-hint">drag to orbit &middot; scroll out to see the Sun corridor &middot; incoming stream moves in REAL time</div>
     </div>
 
     <div class="rc-col">
@@ -217,6 +227,24 @@ body {
             <div class="rc-kv"><span class="rc-k">Newell d&Phi;/dt</span><span class="rc-v" id="rc-newell">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">decay time &tau;</span><span class="rc-v" id="rc-tau">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">Kp / plasmapause</span><span class="rc-v" id="rc-kp">&mdash;</span></div>
+        </section>
+
+        <section class="rc-panel">
+            <h2>Sun &rarr; Earth twin bridge</h2>
+            <div class="rc-kv"><span class="rc-k">parcels in transit</span><span class="rc-v" id="rc-parcels">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">strongest incoming</span><span class="rc-v" id="rc-strongest">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">arrives in</span><span class="rc-v" id="rc-strongest-eta">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">thermosphere drag risk</span><span class="rc-v" id="rc-drag">&mdash;</span></div>
+            <div class="rc-bridge-links">
+                <a href="/sun.html" title="Solar surface twin — where this wind left the Sun">&#9728;&#65039; Sun twin</a>
+                <a href="/space-weather.html" title="Full space-weather dashboard">&#9889; Dashboard</a>
+                <a href="/upper-atmosphere.html" title="Thermosphere twin — where this energy ends up as satellite drag">&#127777;&#65039; Upper Atmosphere twin</a>
+            </div>
+            <div style="font-size:.68rem;color:#5d6684;margin-top:6px;line-height:1.5;">
+                The incoming stream in the 3D view is real matter measured at L1
+                and not yet arrived &mdash; the live handoff from the Sun-side
+                twin to this one, and onward into thermosphere drag.
+            </div>
         </section>
 
         <section class="rc-panel">
@@ -277,6 +305,7 @@ let globe = null;
 try {
     const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260710');
     globe = new RingCurrentGlobe(stage, { timeCompression: 600 });
+    window.rcGlobe = globe;   // debug/probe handle (tests/ smoke probes)
 } catch (err) {
     console.warn('[ring-current] 3D disabled:', err);
     stage.insertAdjacentHTML('beforeend',
@@ -361,6 +390,23 @@ function renderHud(s) {
         $('rc-fc-dst').textContent = '—';
         $('rc-fc-trend').textContent = '—';
     }
+
+    // Sun → Earth twin bridge
+    const tr = s.transit;
+    $('rc-parcels').textContent = tr?.parcels?.length
+        ? `${tr.parcels.length} × 1-min L1 samples` : '—';
+    if (tr?.strongest) {
+        const st2 = tr.strongest;
+        $('rc-strongest').textContent = `VBs ${fmt(st2.vbs, 2)} mV/m · Bz ${fmt(st2.bz, 1)} nT`;
+        $('rc-strongest-eta').textContent = `${st2.etaMin} min`;
+    } else {
+        $('rc-strongest').textContent = tr?.parcels?.length ? 'all northward (no driver)' : '—';
+        $('rc-strongest-eta').textContent = '—';
+    }
+    // Qualitative thermosphere handoff: storm-time ring current heating ⇒
+    // density enhancement ⇒ drag. Tier follows the Dst storm class.
+    const DRAG = ['Nominal', 'Slightly elevated', 'Elevated', 'High', 'Severe', 'Extreme'];
+    $('rc-drag').textContent = DRAG[storm.level] ?? '—';
 
     $('rc-rmse').textContent = fmt(s.skill?.rmse, 1, ' nT');
     $('rc-bias').textContent = Number.isFinite(s.skill?.bias)
