@@ -64,7 +64,9 @@ const SLOPE_STEADY = 2.0;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-const speedNorm = v => Math.max(0, Math.min(1, (v - 250) / 650));
+// Null-safe: mag-only rows (plasma outage, speed IS NULL — see
+// record_solar_wind_backfill) must not turn speed_norm into NaN.
+const speedNorm = v => Number.isFinite(v) ? Math.max(0, Math.min(1, (v - 250) / 650)) : null;
 
 function linearSlope(vals) {
     const n = vals.length;
@@ -225,7 +227,8 @@ export default async function handler(request) {
             updated,
             current: {
                 speed_km_s:      latest.speed_km_s,
-                speed_norm:      Math.round(speedNorm(latest.speed_km_s) * 1000) / 1000,
+                speed_norm:      speedNorm(latest.speed_km_s) != null
+                                     ? Math.round(speedNorm(latest.speed_km_s) * 1000) / 1000 : null,
                 density_cc:      latest.density_cc,
                 temperature_K:   latest.temperature_k,
                 bt_nT:           latest.bt_nt,
@@ -252,7 +255,8 @@ export default async function handler(request) {
         body.data.series = ascending.map(r => ({
             timestamp:  r.observed_at,
             speed_km_s: r.speed_km_s,
-            speed_norm: Math.round(speedNorm(r.speed_km_s) * 1000) / 1000,
+            speed_norm: speedNorm(r.speed_km_s) != null
+                            ? Math.round(speedNorm(r.speed_km_s) * 1000) / 1000 : null,
             density_cc: r.density_cc,
             bt_nT:      r.bt_nt,
             bz_nT:      r.bz_nt,

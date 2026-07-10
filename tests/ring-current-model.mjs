@@ -28,7 +28,7 @@ import {
     obmQ, obmTau, burtonQ, stepDstStar, integrateDst,
     propagateToEarth, dpsEnergyJ, ringPeakL, radialProfile,
     asymmetry, azimuthalWeight, driftPeriodHours, driftRateRadPerHour,
-    plasmapauseL, stormClass, skill,
+    plasmapauseL, stormClass, skill, newellCoupling,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -227,6 +227,26 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.ok(Math.abs(couplingVBs(500, -10) - 5) < 1e-12);  // 500·10·1e-3
     assert.equal(couplingVBs(null, -5), null);
     ok('VBs: northward gated to 0; 500 km/s × −10 nT = 5 mV/m');
+}
+
+// ── Newell (2007) coupling ───────────────────────────────────────────────────
+{
+    assert.equal(newellCoupling(400, 0, 8), 0);      // due north ⇒ zero
+    // Due south: dΦ/dt = v^(4/3)·|Bz|^(2/3) exactly (sin(π/2) = 1).
+    const south = newellCoupling(400, 0, -10);
+    assert.ok(Math.abs(south - Math.pow(400, 4 / 3) * Math.pow(10, 2 / 3)) < 1e-6);
+    // Monotonic in southward |Bz| and in v.
+    assert.ok(newellCoupling(400, 0, -20) > south);
+    assert.ok(newellCoupling(800, 0, -10) > south);
+    // Pure By still couples (θc = π/2): factor sin(π/4)^(8/3) ≈ 0.397.
+    const byOnly = newellCoupling(400, 10, 0);
+    assert.ok(byOnly > 0 && byOnly < south);
+    assert.ok(Math.abs(byOnly / (Math.pow(400, 4 / 3) * Math.pow(10, 2 / 3)) -
+        Math.pow(Math.SQRT1_2, 8 / 3)) < 1e-9);
+    // Null-safe: missing By treated as 0, missing v/Bz → null.
+    assert.equal(newellCoupling(400, null, 8), 0);
+    assert.equal(newellCoupling(null, 0, -5), null);
+    ok('Newell: north-gated, exact due-south form, By quadrature, monotone');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

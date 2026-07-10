@@ -194,12 +194,23 @@ Three.js 0.160 importmap, NOAA browser-direct / NASA via edge.
 
 ---
 
-## 7. Later phases (not in this branch)
+## 7. Later phases
 
-- **Phase 2 — persistence + hindcast**: `ring_current_state` Supabase table
-  (service-role-only, zero-policy RLS like `forecast_log`), written by a
-  small cron so model skill accumulates server-side; Gannon SYM-H replay mode
-  on the page; O⁺/H⁺ composition split during storms.
+- **Phase 2 — persistence (LANDED 2026-07-10)**: see
+  `supabase-solar-wind-enrichment-migration.sql`. The existing cron now also
+  (a) batch-backfills the full-day RTSW series hourly via
+  `record_solar_wind_backfill` (outage holes self-heal; the RPC only fills
+  NULLs), (b) writes MAG-ONLY rows when plasma is stale but the magnetometer
+  is live (speed IS NULL — the 2026-07 outage's needless Bz hole), (c)
+  upserts hourly Kyoto Dst + Kp into `geomag_indices` every 15 min, and (d)
+  logs the O'Brien–McPherron nowcast into `ring_current_log` using the same
+  `js/ring-current-model.js` the page runs. All zero-policy-RLS
+  service-role tables (intentional — advisor false positive). Newell (2007)
+  coupling added to the model + page HUD (derivable from stored fields — no
+  schema change).
+- **Phase 2b — hindcast (not started)**: Gannon SYM-H replay mode on the
+  page via `/api/omni/imf`; O⁺/H⁺ composition split during storms; a page
+  panel reading the `ring_current_log` ↔ `geomag_indices` skill join.
 - **Phase 3 — operator surface**: Dst-threshold alert type (`notify_*` column
   + `js/alert-engine.js` check + `account.html` toggle, per CLAUDE.md
   heuristic), GOES magnetometer cross-check, coupling to the LEO-drag

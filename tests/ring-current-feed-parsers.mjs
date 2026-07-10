@@ -53,15 +53,17 @@ const tag = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '');
         { time_tag: tag(T0 + 180_000), proton_speed: 500, proton_density: 10 },   // no mag minute
     ];
     const mag = [
-        { time_tag: tag(T0),           bz_gsm: -5, bt: 8 },
-        { time_tag: tag(T0 + 120_000), bz: -12, bt: 15 },     // plain bz fallback
+        { time_tag: tag(T0),           bz_gsm: -5, bt: 8, by_gsm: 4, bx_gsm: 1 },
+        { time_tag: tag(T0 + 120_000), bz: -12, bt: 15, by: -3 },   // plain-name fallbacks
         { time_tag: tag(T0 + 240_000), bz_gsm: 3, bt: 5 },    // no plasma minute → ignored
     ];
     const s = mergeDriverSeries(wind, mag);
     assert.equal(s.length, 3);                      // fill row gone
     assert.deepEqual(s.map(r => r.v), [400, 450, 500]);
     assert.equal(s[0].bz, -5);
+    assert.equal(s[0].by, 4);                       // By carried for Newell coupling
     assert.equal(s[1].bz, -12);
+    assert.equal(s[1].by, -3);
     assert.equal(s[2].bz, null);                    // plasma-only minute
     assert.ok(s[0].t < s[1].t && s[1].t < s[2].t);
     assert.deepEqual(mergeDriverSeries(null, null), []);
