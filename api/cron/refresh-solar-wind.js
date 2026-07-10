@@ -56,7 +56,21 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABAS
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const CRON_SECRET  = process.env.CRON_SECRET || '';
 
+// RTSW real-time feeds. Plasma (speed/density/temperature) and the IMF
+// (bt/bz/bx/by) live in SEPARATE products — rtsw_wind_1m.json is plasma-ONLY.
+// Fetching only the wind feed is why bz_nt/bt_nt were null for every row
+// (cleanField(row,'bz_gsm') never matched a key). See js/swpc-feed.js and
+// js/auroracle.js, which already fetch the mag product separately.
 const NOAA_WIND_URL = 'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json';
+const NOAA_MAG_URL  = 'https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json';
+
+// DSCOVR "products/solar-wind" fallback, used only when the RTSW feed is stale
+// or unavailable (RTSW periodically gaps for tens of minutes to hours). Shape
+// differs: [ [header...], [row,row...] ] with string cells, so it is normalised
+// to objects before the shared cleanField()/pick logic runs.
+const DSCOVR_PLASMA_URL = 'https://services.swpc.noaa.gov/products/solar-wind/plasma-2-hour.json';
+const DSCOVR_MAG_URL    = 'https://services.swpc.noaa.gov/products/solar-wind/mag-2-hour.json';
+
 const SOURCE_TAG    = 'noaa-swpc';
 const PIPELINE      = 'solar_wind';
 
@@ -126,6 +140,82 @@ function pickLatestValid(rows) {
     return null;
 }
 
+// Walk backwards for the newest MAG row carrying a usable field value.
+function pickLatestValidMag(rows) {
+    if (!Array.isArray(rows)) return null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+        const bt = cleanField(rows[i], 'bt');
+        const bz = cleanField(rows[i], 'bz_gsm', 'bz', 'bz_gse');
+        if (bt != null || bz != null) return rows[i];
+    }
+    return null;
+}
+
+// NOAA "products/solar-wind" arrays are [ [header], [row], ... ]; turn them
+// into plain objects so the same cleanField()/pick helpers apply.
+function rowsFromProduct(arr) {
+    if (!Array.isArray(arr) || arr.length < 2) return [];
+    const head = arr[0];
+    return arr.slice(1).map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]])));
+}
+
+function normTime(t) {
+    return String(t || '').replace(' ', 'T').replace(/Z?$/, 'Z');
+}
+
+async function getJson(url, timeoutMs = 10_000) {
+    const res = await fetchWithTimeout(url, { timeoutMs, headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+}
+
+// Build a normalised sample {observedAt, speed, density, temperature, bt,bz,bx,by}
+// from the RTSW plasma + mag feeds. Mag is best-effort: if it is missing the
+// plasma sample still writes (Bz simply stays null, i.e. no regression).
+function extractRTSW(windRows, magRows) {
+    const plasma = pickLatestValid(windRows);
+    if (!plasma) return null;
+    const mag = pickLatestValidMag(magRows);
+    return {
+        observedAt:  normTime(plasma.row.time_tag),
+        speed:       plasma.speed,
+        density:     cleanField(plasma.row, 'proton_density', 'density'),
+        temperature: cleanField(plasma.row, 'proton_temperature', 'temperature'),
+        bt: mag ? cleanField(mag, 'bt') : null,
+        bz: mag ? cleanField(mag, 'bz_gsm', 'bz', 'bz_gse') : null,
+        bx: mag ? cleanField(mag, 'bx_gsm', 'bx') : null,
+        by: mag ? cleanField(mag, 'by_gsm', 'by') : null,
+    };
+}
+
+// Same normalised shape from the DSCOVR products fallback feeds.
+function extractDSCOVR(plasmaArr, magArr) {
+    const p = rowsFromProduct(plasmaArr);
+    if (!p.length) return null;
+    let plasma = null;
+    for (let i = p.length - 1; i >= 0; i--) {
+        const speed = cleanField(p[i], 'speed');
+        if (speed != null && speed > 0) { plasma = { row: p[i], speed }; break; }
+    }
+    if (!plasma) return null;
+    const mag = pickLatestValidMag(rowsFromProduct(magArr));
+    return {
+        observedAt:  normTime(plasma.row.time_tag),
+        speed:       plasma.speed,
+        density:     cleanField(plasma.row, 'density'),
+        temperature: cleanField(plasma.row, 'temperature'),
+        bt: mag ? cleanField(mag, 'bt') : null,
+        bz: mag ? cleanField(mag, 'bz_gsm', 'bz') : null,
+        bx: mag ? cleanField(mag, 'bx_gsm', 'bx') : null,
+        by: mag ? cleanField(mag, 'by_gsm', 'by') : null,
+    };
+}
+
+function isStale(sample) {
+    const ms = Date.parse(sample.observedAt);
+    return !Number.isFinite(ms) || (Date.now() - ms > MAX_SAMPLE_AGE_MS);
+}
+
 // ── Handler ───────────────────────────────────────────────────────────
 export default async function handler(req) {
     if (!isAuthorized(req)) return jsonResp({ error: 'unauthorized' }, 401);
@@ -133,57 +223,69 @@ export default async function handler(req) {
 
     const dryRun = new URL(req.url).searchParams.get('dry') === '1';
 
-    // 1) Fetch the NOAA feed.
-    let rows;
+    // 1) Primary source: RTSW plasma + mag (mag is best-effort — if it fails,
+    //    plasma still writes and Bz stays null, i.e. no regression vs. before).
+    //    Fall back to the DSCOVR products feeds when RTSW is missing or stale,
+    //    so a NOAA RTSW gap no longer freezes ingestion.
+    let data = null;
+    let feed = 'rtsw';
+    const notes = [];
+
     try {
-        const res = await fetchWithTimeout(NOAA_WIND_URL, {
-            timeoutMs: 10_000,
-            headers: { Accept: 'application/json' },
-        });
-        if (!res.ok) throw new Error(`NOAA HTTP ${res.status}`);
-        rows = await res.json();
+        const [wind, mag] = await Promise.all([
+            getJson(NOAA_WIND_URL),
+            getJson(NOAA_MAG_URL).catch((e) => { notes.push(`rtsw-mag:${e.message}`); return []; }),
+        ]);
+        if (Array.isArray(wind) && wind.length) {
+            data = extractRTSW(wind, Array.isArray(mag) ? mag : []);
+        } else {
+            notes.push('rtsw-wind payload empty');
+        }
     } catch (e) {
-        if (!dryRun) await recordFailure(`NOAA fetch failed: ${e.message}`);
-        return jsonResp({ error: 'noaa_fetch_failed', detail: e.message }, 502);
+        notes.push(`rtsw-wind:${e.message}`);
     }
 
-    if (!Array.isArray(rows) || rows.length === 0) {
-        if (!dryRun) await recordFailure('NOAA payload not a non-empty array');
-        return jsonResp({ error: 'noaa_bad_payload' }, 502);
+    if (!data || isStale(data)) {
+        try {
+            const [pl, mg] = await Promise.all([
+                getJson(DSCOVR_PLASMA_URL),
+                getJson(DSCOVR_MAG_URL).catch((e) => { notes.push(`dscovr-mag:${e.message}`); return []; }),
+            ]);
+            const alt = extractDSCOVR(pl, mg);
+            if (alt && !isStale(alt)) { data = alt; feed = 'dscovr-products'; }
+            else if (alt) notes.push('dscovr also stale');
+        } catch (e) {
+            notes.push(`dscovr:${e.message}`);
+        }
     }
 
-    // 2) Latest valid sample.
-    const picked = pickLatestValid(rows);
-    if (!picked) {
-        if (!dryRun) await recordFailure('no valid speed in NOAA payload');
-        return jsonResp({ error: 'noaa_all_fill' }, 502);
+    // 2) Validate the chosen sample.
+    if (!data) {
+        if (!dryRun) await recordFailure(`no valid sample (${notes.join('; ').slice(0, 400)})`);
+        return jsonResp({ error: 'no_valid_sample', notes }, 502);
     }
-
-    // NOAA time_tag is "YYYY-MM-DD HH:MM:SS.ms" (space separator, no tz).
-    const observedAt = String(picked.row.time_tag || '').replace(' ', 'T').replace(/Z?$/, 'Z');
-    const observedMs = Date.parse(observedAt);
-    if (!Number.isFinite(observedMs)) {
-        if (!dryRun) await recordFailure(`unparseable time_tag: ${picked.row.time_tag}`);
-        return jsonResp({ error: 'noaa_bad_time_tag' }, 502);
+    if (!Number.isFinite(Date.parse(data.observedAt))) {
+        if (!dryRun) await recordFailure(`unparseable time_tag: ${data.observedAt}`);
+        return jsonResp({ error: 'bad_time_tag', observed_at: data.observedAt }, 502);
     }
-    if (Date.now() - observedMs > MAX_SAMPLE_AGE_MS) {
-        if (!dryRun) await recordFailure(`stale feed: latest valid sample ${observedAt}`);
-        return jsonResp({ error: 'noaa_stale', observed_at: observedAt }, 502);
+    if (isStale(data)) {
+        if (!dryRun) await recordFailure(`stale feed: latest valid sample ${data.observedAt} (${feed})`);
+        return jsonResp({ error: 'stale', observed_at: data.observedAt, feed, notes }, 502);
     }
 
     const sample = {
-        p_observed_at:   observedAt,
+        p_observed_at:   data.observedAt,
         p_source:        SOURCE_TAG,
-        p_speed_km_s:    picked.speed,
-        p_density_cc:    cleanField(picked.row, 'proton_density', 'density'),
-        p_temperature_k: cleanField(picked.row, 'proton_temperature', 'temperature'),
-        p_bt_nt:         cleanField(picked.row, 'bt'),
-        p_bz_nt:         cleanField(picked.row, 'bz_gsm', 'bz'),
-        p_bx_nt:         cleanField(picked.row, 'bx_gsm', 'bx'),
-        p_by_nt:         cleanField(picked.row, 'by_gsm', 'by'),
+        p_speed_km_s:    data.speed,
+        p_density_cc:    data.density,
+        p_temperature_k: data.temperature,
+        p_bt_nt:         data.bt,
+        p_bz_nt:         data.bz,
+        p_bx_nt:         data.bx,
+        p_by_nt:         data.by,
     };
 
-    if (dryRun) return jsonResp({ ok: true, dryRun: true, sample });
+    if (dryRun) return jsonResp({ ok: true, dryRun: true, feed, notes, sample });
 
     // 3) One-row write. Validation (±10 min window, 100–3000 km/s) lives
     //    in the SECURITY DEFINER RPC; id is null on same-minute dedup.
@@ -206,5 +308,5 @@ export default async function handler(req) {
     try { await rpc('record_pipeline_success', { p_name: PIPELINE, p_source: SOURCE_TAG }); }
     catch { /* swallow */ }
 
-    return jsonResp({ ok: true, id: insertedId, observed_at: observedAt, deduped: insertedId == null, trimmed });
+    return jsonResp({ ok: true, id: insertedId, observed_at: data.observedAt, feed, deduped: insertedId == null, trimmed });
 }
