@@ -58,6 +58,7 @@ const NAV_DROPDOWNS = [
         items: [
             { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',   tier: 'public', icon: '🌤️', id: 'weather' },
             { href: 'auroracle.html', label: 'AurOracle', sub: 'Predict the aurora · 7-night + 30-day outlook', tier: 'public', icon: '🌌', badge: 'NEW', id: 'auroracle' },
+            { href: 'ring-current.html', label: 'Ring Current', sub: 'Live Dst digital twin · L1-driven forecast', tier: 'public', icon: '🧲', badge: 'NEW', id: 'ring-current' },
             { href: 'far-side-watch.html', label: 'Far-Side Watch', sub: 'Regions rotating in · days-to-weeks horizon', tier: 'public', icon: '🌗', badge: 'NEW', id: 'far-side-watch' },
             { href: 'gannon-superstorm.html', label: 'Gannon Superstorm', sub: 'May 2024 G5 hindcast · MHD-corrected density', tier: 'public', icon: '⚡', badge: 'NEW', id: 'gannon-superstorm' },
             { href: 'blog-gannon-hindcast.html', label: 'The Index That Lied', sub: 'Gannon hindcast write-up · EN/ES/FR', tier: 'public', icon: '📝', badge: 'NEW', id: 'blog-gannon-hindcast' },
