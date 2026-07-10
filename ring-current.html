@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ring Current Simulation · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/ring-current.html">
+<meta name="description" content="Real-time digital twin of Earth's ring current. L1 solar wind drives an O'Brien–McPherron Dst model with a genuine 30–60 minute forecast, validated live against the Kyoto Dst index.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/ring-current.html">
+<meta property="og:title" content="Ring Current Simulation — Parkers Physics">
+<meta property="og:description" content="Real-time digital twin of Earth's ring current: L1-driven physics, trapped-energy nowcast, and a genuine 30–60 minute Dst forecast with live skill scores.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ring Current Simulation — Parkers Physics">
+<meta name="twitter:description" content="Real-time digital twin of Earth's ring current: L1-driven physics, trapped-energy nowcast, and a genuine 30–60 minute Dst forecast with live skill scores.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<!-- Canonical nav: structure + styling owned by js/nav.js + js/nav-styles.css.
+     All page CSS below is rc- prefixed; there is intentionally NO nav styling
+     here (js/nav-styles.css owns it). -->
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+    min-height:100vh;
+    background:#03010e;
+    color:#cdd5e4;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    overflow-x:hidden;
+}
+
+.rc-hero {
+    padding:26px 22px 10px;
+    display:flex; flex-wrap:wrap; align-items:baseline; gap:12px;
+}
+.rc-hero h1 {
+    font-size:1.45rem; font-weight:800;
+    background:linear-gradient(45deg,#ff9a3d,#ffd700);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.rc-hero .rc-sub { font-size:.85rem; color:#8b94ad; }
+.rc-live {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:.7rem; font-weight:700; letter-spacing:.08em; color:#7fe6c3;
+    border:1px solid rgba(127,230,195,.35); border-radius:999px; padding:3px 10px;
+}
+.rc-live::before {
+    content:''; width:7px; height:7px; border-radius:50%;
+    background:#37e0a0; box-shadow:0 0 8px #37e0a0;
+    animation:rc-pulse 2.2s ease-in-out infinite;
+}
+@keyframes rc-pulse { 50% { opacity:.35; } }
+.rc-live.rc-stale { color:#ffb066; border-color:rgba(255,176,102,.4); }
+.rc-live.rc-stale::before { background:#ffb066; box-shadow:0 0 8px #ffb066; animation:none; }
+
+.rc-layout {
+    display:grid; grid-template-columns:minmax(0,1fr) 330px;
+    gap:14px; padding:8px 22px 14px;
+}
+.rc-stage {
+    position:relative; min-height:520px; border-radius:14px; overflow:hidden;
+    background:radial-gradient(ellipse at 30% 20%, #0a1030 0%, #03010e 70%);
+    border:1px solid rgba(255,255,255,.07);
+}
+.rc-stage canvas { display:block; }
+.rc-stage-hint {
+    position:absolute; left:12px; bottom:10px; font-size:.68rem; color:#5d6684;
+    pointer-events:none;
+}
+.rc-legend {
+    position:absolute; right:12px; top:10px; font-size:.68rem; color:#8b94ad;
+    background:rgba(3,1,14,.55); border:1px solid rgba(255,255,255,.08);
+    border-radius:8px; padding:7px 10px; line-height:1.7; pointer-events:none;
+}
+.rc-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:baseline; }
+
+.rc-col { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.rc-panel {
+    background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.08);
+    border-radius:12px; padding:13px 15px;
+}
+.rc-panel h2 {
+    font-size:.72rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+    color:#8b94ad; margin-bottom:9px;
+}
+.rc-kv { display:flex; justify-content:space-between; align-items:baseline; padding:2.5px 0; gap:8px; }
+.rc-kv .rc-k { font-size:.78rem; color:#8b94ad; }
+.rc-kv .rc-v { font-size:.86rem; font-weight:650; color:#e8edf7; font-variant-numeric:tabular-nums; text-align:right; }
+.rc-v.rc-south { color:#ff7d66; }
+.rc-v.rc-north { color:#7fe6c3; }
+
+.rc-energy { font-size:1.5rem; font-weight:800; color:#ffd700; padding:2px 0 6px; font-variant-numeric:tabular-nums; }
+.rc-storm-badge {
+    display:inline-block; font-size:.72rem; font-weight:800; letter-spacing:.05em;
+    border-radius:6px; padding:3px 9px; margin-top:2px;
+}
+.rc-storm-0 { background:rgba(127,230,195,.13); color:#7fe6c3; }
+.rc-storm-1 { background:rgba(255,214,102,.14); color:#ffd666; }
+.rc-storm-2 { background:rgba(255,176,102,.16); color:#ffb066; }
+.rc-storm-3 { background:rgba(255,125,102,.18); color:#ff7d66; }
+.rc-storm-4 { background:rgba(255,82,82,.2);   color:#ff6b6b; }
+.rc-storm-5 { background:rgba(255,46,99,.24);  color:#ff4d79; }
+
+.rc-balance { margin-top:8px; }
+.rc-balance-bar {
+    height:8px; border-radius:4px; overflow:hidden; display:flex;
+    background:rgba(255,255,255,.06); margin-top:4px;
+}
+.rc-balance-inj { background:linear-gradient(90deg,#ff5c47,#ff9a3d); height:100%; }
+.rc-balance-dec { background:linear-gradient(90deg,#2fd3a8,#59e0d8); height:100%; }
+.rc-balance-lab { display:flex; justify-content:space-between; font-size:.66rem; color:#8b94ad; margin-top:3px; }
+
+.rc-chart-wrap { padding:0 22px 8px; }
+.rc-chart-panel {
+    background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.08);
+    border-radius:12px; padding:13px 15px;
+}
+.rc-chart-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:14px; margin-bottom:6px; }
+.rc-chart-head h2 {
+    font-size:.72rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:#8b94ad;
+}
+.rc-skill { font-size:.72rem; color:#8b94ad; }
+.rc-skill b { color:#e8edf7; font-variant-numeric:tabular-nums; }
+#rc-chart { width:100%; height:240px; display:block; }
+
+.rc-ctl { display:flex; align-items:center; gap:10px; font-size:.72rem; color:#8b94ad; }
+.rc-ctl input[type=range] { flex:1; accent-color:#ff9a3d; }
+.rc-ctl .rc-v { font-size:.72rem; }
+
+.rc-foot {
+    padding:6px 22px 26px; font-size:.68rem; color:#5d6684; line-height:1.7; max-width:1100px;
+}
+.rc-foot a { color:#8b94ad; }
+
+@media (max-width: 900px) {
+    .rc-layout { grid-template-columns:1fr; }
+    .rc-stage { min-height:400px; }
+}
+@media (max-width: 768px) {
+    .rc-hero { padding:18px 14px 6px; }
+    .rc-layout, .rc-chart-wrap { padding-left:14px; padding-right:14px; }
+    .rc-foot { padding-left:14px; padding-right:14px; }
+}
+</style>
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<link rel="preconnect" href="https://unpkg.com" crossorigin>
+<link rel="preconnect" href="https://services.swpc.noaa.gov" crossorigin>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
+</head>
+<body>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260710"; initNav("ring-current");</script>
+
+<header class="rc-hero">
+    <h1>Ring Current Simulation</h1>
+    <span class="rc-sub">Real-time digital twin of Earth&rsquo;s ring current &mdash; L1-driven physics, validated live against Kyoto Dst</span>
+    <span class="rc-live" id="rc-live">LIVE</span>
+</header>
+
+<div class="rc-layout">
+    <div class="rc-stage" id="rc-stage">
+        <div class="rc-legend">
+            <span class="rc-dot" style="background:#ffa040"></span>Ions 20&ndash;250 keV &mdash; drift west<br>
+            <span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east<br>
+            <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause (Kp)<br>
+            <span class="rc-dot" style="background:#ff9a3d"></span>Peak current shell
+        </div>
+        <div class="rc-stage-hint">drag to orbit &middot; scroll to zoom &middot; Sun at +X (noon MLT)</div>
+    </div>
+
+    <div class="rc-col">
+        <section class="rc-panel">
+            <h2>Ring current state</h2>
+            <div class="rc-energy" id="rc-energy">&mdash;</div>
+            <div class="rc-kv"><span class="rc-k">trapped energy (DPS)</span><span class="rc-v" id="rc-energy-note">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">Dst observed (Kyoto)</span><span class="rc-v" id="rc-dst-obs">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">Dst model</span><span class="rc-v" id="rc-dst-model">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">Dst* (pressure-corrected)</span><span class="rc-v" id="rc-dst-star">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">peak current shell</span><span class="rc-v" id="rc-peakl">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">dusk asymmetry</span><span class="rc-v" id="rc-asym">&mdash;</span></div>
+            <div id="rc-storm" class="rc-storm-badge rc-storm-0">&mdash;</div>
+            <div class="rc-balance">
+                <div class="rc-k" style="font-size:.72rem;color:#8b94ad;">injection vs decay (nT/h)</div>
+                <div class="rc-balance-bar"><div class="rc-balance-inj" id="rc-bar-inj" style="width:0%"></div><div class="rc-balance-dec" id="rc-bar-dec" style="width:0%"></div></div>
+                <div class="rc-balance-lab"><span id="rc-inj-lab">Q = &mdash;</span><span id="rc-dec-lab">decay = &mdash;</span></div>
+            </div>
+        </section>
+
+        <section class="rc-panel">
+            <h2>Live drivers &mdash; L1 solar wind</h2>
+            <div class="rc-kv"><span class="rc-k">speed</span><span class="rc-v" id="rc-v">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">density</span><span class="rc-v" id="rc-n">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">IMF Bz (GSM)</span><span class="rc-v" id="rc-bz">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">IMF |B|</span><span class="rc-v" id="rc-bt">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">dyn. pressure</span><span class="rc-v" id="rc-pdyn">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">coupling VBs</span><span class="rc-v" id="rc-vbs">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">decay time &tau;</span><span class="rc-v" id="rc-tau">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">Kp / plasmapause</span><span class="rc-v" id="rc-kp">&mdash;</span></div>
+        </section>
+
+        <section class="rc-panel">
+            <h2>Forecast &mdash; L1 lead time</h2>
+            <div class="rc-kv"><span class="rc-k">horizon</span><span class="rc-v" id="rc-lead">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">Dst at horizon</span><span class="rc-v" id="rc-fc-dst">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">trend</span><span class="rc-v" id="rc-fc-trend">&mdash;</span></div>
+            <div style="font-size:.68rem;color:#5d6684;margin-top:6px;line-height:1.5;">
+                The newest L1 samples measure plasma that has not yet reached Earth
+                &mdash; this window is a genuine forecast, not an extrapolation.
+            </div>
+        </section>
+
+        <section class="rc-panel">
+            <h2>Drift animation</h2>
+            <div class="rc-ctl">
+                <span>speed</span>
+                <input type="range" id="rc-speed" min="60" max="3600" step="60" value="600">
+                <span class="rc-v" id="rc-speed-lab">600&times;</span>
+            </div>
+        </section>
+    </div>
+</div>
+
+<div class="rc-chart-wrap">
+    <div class="rc-chart-panel">
+        <div class="rc-chart-head">
+            <h2>Dst &mdash; model vs observed, 24 h + forecast</h2>
+            <span class="rc-skill">model skill (24 h): RMSE <b id="rc-rmse">&mdash;</b> &middot; bias <b id="rc-bias">&mdash;</b></span>
+            <span class="rc-skill"><span class="rc-dot" style="background:#59e0d8"></span>observed
+                <span class="rc-dot" style="background:#ff9a3d;margin-left:10px"></span>model
+                <span class="rc-dot" style="background:#ffd700;margin-left:10px"></span>forecast</span>
+        </div>
+        <canvas id="rc-chart"></canvas>
+    </div>
+</div>
+
+<footer class="rc-foot">
+    Model: O&rsquo;Brien &amp; McPherron (2000) injection&ndash;decay driven by VBs, pressure-corrected via
+    Burton et al. (1975); trapped energy from the Dessler&ndash;Parker&ndash;Sckopke relation; drift
+    kinematics per Schulz &amp; Lanzerotti (1974); plasmapause per Carpenter &amp; Anderson (1992).
+    Data: NOAA SWPC real-time solar wind (DSCOVR/ACE at L1, plasma + magnetometer), Kyoto WDC Dst
+    quicklook, planetary Kp. The model anchors on observed Dst 24 h ago and free-runs &mdash; the
+    skill numbers above are honest out-of-sample error, recomputed every minute.
+    See <a href="/RING_CURRENT_SIMULATION_PLAN.md">the build plan</a> for the physics and roadmap.
+</footer>
+
+<script type="module">
+import { RingCurrentFeed } from './js/ring-current-feed.js?v=20260710';
+
+const $ = id => document.getElementById(id);
+const stage = $('rc-stage');
+
+// ── 3D twin: loaded dynamically so a WebGL/importmap failure degrades to
+//    data panels + chart instead of blanking the page. ─────────────────────
+let globe = null;
+try {
+    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260710');
+    globe = new RingCurrentGlobe(stage, { timeCompression: 600 });
+} catch (err) {
+    console.warn('[ring-current] 3D disabled:', err);
+    stage.insertAdjacentHTML('beforeend',
+        '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d6684;font-size:.8rem;">3D view unavailable — data panels remain live</div>');
+}
+
+$('rc-speed').addEventListener('input', (e) => {
+    const x = Number(e.target.value);
+    $('rc-speed-lab').textContent = `${x}×`;
+    globe?.setTimeCompression(x);
+});
+
+// ── Formatting helpers ──────────────────────────────────────────────────────
+const SUP = { '-':'⁻', 0:'⁰',1:'¹',2:'²',3:'³',4:'⁴',5:'⁵',6:'⁶',7:'⁷',8:'⁸',9:'⁹' };
+const sup = n => String(n).split('').map(c => SUP[c] ?? c).join('');
+function fmtEnergy(j) {
+    if (!Number.isFinite(j) || j <= 0) return '—';
+    const exp = Math.floor(Math.log10(j));
+    return `${(j / 10 ** exp).toFixed(2)} × 10${sup(exp)} J`;
+}
+const fmt = (x, d = 1, unit = '') => Number.isFinite(x) ? `${x.toFixed(d)}${unit}` : '—';
+
+// ── HUD ─────────────────────────────────────────────────────────────────────
+function renderHud(s) {
+    const live = $('rc-live');
+    if (!s?.now) {
+        live.textContent = s?.mode === 'degraded' ? 'DEGRADED' : 'CONNECTING…';
+        live.classList.add('rc-stale');
+        return;
+    }
+    const ageMin = s.now.dstObservedAt ? (Date.now() - s.now.dstObservedAt) / 60_000 : null;
+    const stale = ageMin != null && ageMin > 180;
+    live.textContent = s.mode === 'degraded' ? 'LIVE · SHORT WINDOW' : (stale ? 'STALE' : 'LIVE');
+    live.classList.toggle('rc-stale', stale || s.mode === 'degraded');
+
+    $('rc-energy').textContent = fmtEnergy(s.now.energyJ);
+    $('rc-energy-note').textContent = Number.isFinite(s.now.dstStarModel)
+        ? `≈ ${(s.now.energyJ / 4.021e13).toFixed(0)} nT of |Dst*|` : '—';
+    $('rc-dst-obs').textContent   = fmt(s.now.dstObserved, 0, ' nT');
+    $('rc-dst-model').textContent = fmt(s.now.dstModel, 1, ' nT');
+    $('rc-dst-star').textContent  = fmt(s.now.dstStarModel, 1, ' nT');
+    $('rc-peakl').textContent     = fmt(s.now.peakL, 2, ' Rᴇ');
+    $('rc-asym').textContent      = Number.isFinite(s.now.asymmetry?.amplitude)
+        ? `${Math.round(s.now.asymmetry.amplitude * 100)}% @ ${s.now.asymmetry.mltPeakHours} MLT` : '—';
+
+    const storm = s.now.storm ?? { level: 0, label: 'Quiet' };
+    const badge = $('rc-storm');
+    badge.textContent = storm.label;
+    badge.className = `rc-storm-badge rc-storm-${storm.level}`;
+
+    const q = Math.abs(s.now.injectionQ ?? 0), dec = Math.abs(s.now.decayRate ?? 0);
+    const tot = q + dec || 1;
+    $('rc-bar-inj').style.width = `${(q / tot) * 100}%`;
+    $('rc-bar-dec').style.width = `${(dec / tot) * 100}%`;
+    $('rc-inj-lab').textContent = `Q = ${fmt(-q, 1)} nT/h`;
+    $('rc-dec-lab').textContent = `decay = +${fmt(dec, 1)} nT/h`;
+
+    $('rc-v').textContent    = fmt(s.drivers.v, 0, ' km/s');
+    $('rc-n').textContent    = fmt(s.drivers.n, 1, ' /cm³');
+    const bzEl = $('rc-bz');
+    bzEl.textContent = fmt(s.drivers.bz, 1, ' nT');
+    bzEl.className = 'rc-v ' + (s.drivers.bz < 0 ? 'rc-south' : 'rc-north');
+    $('rc-bt').textContent   = fmt(s.drivers.bt, 1, ' nT');
+    $('rc-pdyn').textContent = fmt(s.drivers.pdyn, 2, ' nPa');
+    $('rc-vbs').textContent  = fmt(s.drivers.vbs, 2, ' mV/m');
+    $('rc-tau').textContent  = fmt(s.now.tauHours, 1, ' h');
+    $('rc-kp').textContent   = Number.isFinite(s.now.kp)
+        ? `Kp ${s.now.kp.toFixed(1)} · Lpp ${fmt(s.now.plasmapauseL, 1)} Rᴇ` : '—';
+
+    $('rc-lead').textContent = s.forecastLeadMin ? `+${s.forecastLeadMin} min` : '—';
+    const fc = s.series.forecast;
+    if (fc?.length) {
+        const end = fc[fc.length - 1].dst;
+        $('rc-fc-dst').textContent = fmt(end, 1, ' nT');
+        const delta = end - s.now.dstModel;
+        $('rc-fc-trend').textContent =
+            delta < -3 ? '▼ intensifying' : delta > 3 ? '▲ recovering' : '▶ steady';
+    } else {
+        $('rc-fc-dst').textContent = '—';
+        $('rc-fc-trend').textContent = '—';
+    }
+
+    $('rc-rmse').textContent = fmt(s.skill?.rmse, 1, ' nT');
+    $('rc-bias').textContent = Number.isFinite(s.skill?.bias)
+        ? `${s.skill.bias >= 0 ? '+' : ''}${s.skill.bias.toFixed(1)} nT` : '—';
+}
+
+// ── Chart (2D canvas, no lib) ───────────────────────────────────────────────
+const chart = $('rc-chart');
+const ctx = chart.getContext('2d');
+
+function drawChart(s) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = chart.clientWidth, H = chart.clientHeight || 240;
+    if (!W) return;
+    chart.width = W * dpr; chart.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    if (!s?.series) return;
+
+    const { model = [], forecast = [], observed = [] } = s.series;
+    const all = [...model, ...forecast, ...observed];
+    if (all.length < 2) return;
+
+    const PAD = { l: 44, r: 10, t: 8, b: 20 };
+    const t0 = Math.min(...all.map(p => p.t)), t1 = Math.max(...all.map(p => p.t));
+    let yMin = Math.min(0, ...all.map(p => p.dst)), yMax = Math.max(10, ...all.map(p => p.dst));
+    const pad = (yMax - yMin) * 0.12 || 5;
+    yMin -= pad; yMax += pad;
+    const X = t => PAD.l + ((t - t0) / (t1 - t0)) * (W - PAD.l - PAD.r);
+    const Y = d => PAD.t + ((yMax - d) / (yMax - yMin)) * (H - PAD.t - PAD.b);
+
+    // grid: 4 h verticals + y ticks
+    ctx.strokeStyle = 'rgba(255,255,255,.06)';
+    ctx.fillStyle = '#5d6684';
+    ctx.font = '10px system-ui';
+    ctx.lineWidth = 1;
+    for (let t = Math.ceil(t0 / 14.4e6) * 14.4e6; t <= t1; t += 14.4e6) {
+        ctx.beginPath(); ctx.moveTo(X(t), PAD.t); ctx.lineTo(X(t), H - PAD.b); ctx.stroke();
+        const d = new Date(t);
+        ctx.fillText(`${String(d.getUTCHours()).padStart(2, '0')}:00`, X(t) - 13, H - 6);
+    }
+    const yStep = (yMax - yMin) > 150 ? 50 : (yMax - yMin) > 60 ? 20 : 10;
+    for (let y = Math.ceil(yMin / yStep) * yStep; y <= yMax; y += yStep) {
+        ctx.beginPath(); ctx.moveTo(PAD.l, Y(y)); ctx.lineTo(W - PAD.r, Y(y)); ctx.stroke();
+        ctx.fillText(`${y}`, 8, Y(y) + 3);
+    }
+    // zero line
+    ctx.strokeStyle = 'rgba(255,255,255,.18)';
+    ctx.beginPath(); ctx.moveTo(PAD.l, Y(0)); ctx.lineTo(W - PAD.r, Y(0)); ctx.stroke();
+
+    const line = (pts, color, dash = []) => {
+        if (pts.length < 2) return;
+        ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.setLineDash(dash);
+        ctx.beginPath();
+        pts.forEach((p, i) => i ? ctx.lineTo(X(p.t), Y(p.dst)) : ctx.moveTo(X(p.t), Y(p.dst)));
+        ctx.stroke(); ctx.setLineDash([]);
+    };
+
+    // forecast zone shading + now line
+    const nowX = X(s.updated);
+    ctx.fillStyle = 'rgba(255,215,0,.05)';
+    ctx.fillRect(nowX, PAD.t, W - PAD.r - nowX, H - PAD.t - PAD.b);
+    ctx.strokeStyle = 'rgba(255,255,255,.35)';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(nowX, PAD.t); ctx.lineTo(nowX, H - PAD.b); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#8b94ad'; ctx.fillText('now', nowX + 4, PAD.t + 10);
+
+    line(observed, '#59e0d8');
+    line(model, '#ff9a3d');
+    if (model.length && forecast.length) {
+        line([model[model.length - 1], ...forecast], '#ffd700', [6, 4]);
+    }
+}
+
+// ── Wire the feed ───────────────────────────────────────────────────────────
+let lastState = null;
+const feed = new RingCurrentFeed();
+feed.addEventListener('state', (e) => {
+    lastState = e.detail;
+    renderHud(lastState);
+    drawChart(lastState);
+    globe?.setState(lastState);
+});
+feed.start();
+window.addEventListener('resize', () => drawChart(lastState));
+</script>
+
+</body>
+</html>
