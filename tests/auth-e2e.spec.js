@@ -57,6 +57,15 @@ const json = (obj, status = 200) => ({ status, contentType: 'application/json', 
  *   'network'  → aborted connection
  */
 async function stubSupabase(page, { tokenResult = 'success' } = {}) {
+    // CRITICAL ordering: Playwright matches routes in REVERSE registration
+    // order, so this telemetry catch-all must be registered FIRST or it
+    // shadows every specific mock below it. Registered last (as it was until
+    // 2026-07), it answered the password grant with `{}` — supabase-js then
+    // resolved with no session and no error, the signin page silently stayed
+    // put, and the happy-path spec failed in all three browsers on every run
+    // since the suite was introduced.
+    await page.route('**/auth/v1/**', (route) => route.fulfill(json({})));
+
     await page.route('**/auth/v1/token**', (route) => {
         if (tokenResult === 'network') return route.abort();
         if (tokenResult === 'badcreds') {
@@ -69,9 +78,6 @@ async function stubSupabase(page, { tokenResult = 'success' } = {}) {
     await page.route('**/rest/v1/user_profiles**', (route) => route.fulfill(json([mockProfileRow])));
     // effective_plan_for + any other RPC — non-fatal in app code, stubbed for quiet.
     await page.route('**/rest/v1/rpc/**', (route) => route.fulfill(json('free')));
-    // Telemetry RPCs fired by the sentinel / funnel — swallow so they never
-    // reach a real project and never slow the test.
-    await page.route('**/auth/v1/**', (route) => route.fulfill(json({})));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
