@@ -311,6 +311,59 @@ export function driftRateRadPerHour(eKev, L, species = 'ion') {
     return sign * 2 * Math.PI / T;
 }
 
+// ── Dipole trapped motion (drives the 3D twin's bounce) ─────────────────────
+
+/**
+ * Point on a dipole field line at L, magnetic latitude λ (rad):
+ *   r(λ)  = L·cos²λ            (radial distance, R_E)
+ *   ρ     = r·cosλ = L·cos³λ   (equatorial-plane distance)
+ *   y     = r·sinλ             (height above the equatorial plane)
+ * Returns { r, rho, y }.
+ */
+export function dipoleFieldLinePoint(L, latRad) {
+    const c = Math.cos(latRad);
+    const r = L * c * c;
+    return { r, rho: r * c, y: r * Math.sin(latRad) };
+}
+
+/** Dipole field strength ratio B(λ)/B_eq = √(1 + 3sin²λ) / cos⁶λ. */
+export function dipoleFieldRatio(latRad) {
+    const s = Math.sin(latRad), c = Math.cos(latRad);
+    return Math.sqrt(1 + 3 * s * s) / (c ** 6);
+}
+
+/**
+ * Mirror latitude (rad) for an equatorial pitch angle α_eq (rad): the λ_m
+ * where the first adiabatic invariant forces v_∥ → 0,
+ *   sin²α_eq = B_eq / B(λ_m).
+ * α_eq = 90° ⇒ λ_m = 0 (equatorially mirroring); smaller α_eq ⇒ deeper
+ * mirror. Solved by bisection (B ratio is monotonic in λ).
+ */
+export function mirrorLatitude(alphaEqRad) {
+    const s2 = Math.sin(alphaEqRad) ** 2;
+    if (!(s2 > 0) || s2 >= 1) return 0;
+    const target = 1 / s2;                    // B(λm)/B_eq at the mirror point
+    let lo = 0, hi = 89.9 * Math.PI / 180;
+    for (let i = 0; i < 60; i++) {
+        const mid = (lo + hi) / 2;
+        if (dipoleFieldRatio(mid) < target) lo = mid;
+        else hi = mid;
+    }
+    return (lo + hi) / 2;
+}
+
+/**
+ * Equatorial loss-cone half-angle (rad) at drift shell L: particles with
+ * α_eq below this mirror inside the atmosphere and precipitate.
+ *   sin²α_lc = 1 / √(4L⁶ − 3L⁵)
+ * (Same expression as js/van-allen-particles.js — keep in sync.)
+ */
+export function lossConeAngle(L) {
+    if (!Number.isFinite(L) || L <= 1) return Math.PI / 2;
+    const s2 = 1 / Math.sqrt(4 * L ** 6 - 3 * L ** 5);
+    return Math.asin(Math.min(1, Math.sqrt(s2)));
+}
+
 /** Carpenter & Anderson (1992) plasmapause L: Lpp = 5.6 − 0.46·Kp, clamped. */
 export function plasmapauseL(kp) {
     const k = Number.isFinite(kp) ? kp : 2;

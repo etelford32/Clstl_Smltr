@@ -164,6 +164,20 @@ export function computeState(driverSeries, observedDst, kp, nowMs) {
     const obsWindow = observedDst.filter(o => o.t >= propagated[0].t - 30 * 60_000);
     const modelSkill = skill(arrived, obsWindow);
 
+    // The Sun→Earth bridge: parcels measured at L1 that have NOT yet arrived.
+    // These are real matter in transit — the physical content of the forecast
+    // window, rendered as the incoming stream on the 3D twin.
+    const parcels = propagated
+        .filter(p => p.t > nowMs)
+        .map(p => ({ tArrive: p.t, tL1: p.tL1, v: p.v, n: p.n, bz: p.bz, bt: p.bt }));
+    let strongest = null;
+    for (const p of parcels) {
+        const pv = couplingVBs(p.v, p.bz);
+        if (pv != null && (!strongest || pv > strongest.vbs)) {
+            strongest = { vbs: pv, bz: p.bz, v: p.v, etaMin: Math.round((p.tArrive - nowMs) / 60_000) };
+        }
+    }
+
     const obsNow  = observedDst[observedDst.length - 1];
     const asym    = asymmetry(nowPt.vbs);
 
@@ -201,6 +215,7 @@ export function computeState(driverSeries, observedDst, kp, nowMs) {
             observed: obsWindow,
         },
         skill: modelSkill,
+        transit: { parcels, strongest },
         forecastLeadMin: forecast.length
             ? Math.round((forecast[forecast.length - 1].t - nowMs) / 60_000)
             : 0,
