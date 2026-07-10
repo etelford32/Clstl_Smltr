@@ -119,9 +119,11 @@ ring-current / coupling model of its southward-IMF driver. The uploaded patch
 
 - also fetches `rtsw_mag_1m.json` and merges the latest valid mag row
   (best-effort: plasma still writes if mag fails — no regression);
-- adds a DSCOVR `products/solar-wind/{plasma,mag}-2-hour.json` fallback used
-  only when RTSW is missing or stale (fixes the ~24 h "stale feed" heartbeat
-  failures);
+- adds a stale-RTSW fallback (fixes the ~24 h "stale feed" heartbeat
+  failures). NOTE: the patch's original `products/solar-wind/*` DSCOVR URLs
+  turned out to be retired at NOAA (404, verified live 2026-07-10); the
+  fallback now uses `products/geospace/propagated-solar-wind-1-hour.json`,
+  which carries plasma + IMF in one product and stays live when RTSW gaps;
 - preserves the pipeline contract: `noaa-swpc` source tag,
   `record_pipeline_*` heartbeats, ±9.5 min staleness threshold, same RPC.
 
