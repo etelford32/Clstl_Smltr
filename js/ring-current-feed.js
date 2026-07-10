@@ -74,7 +74,7 @@ export function mergeDriverSeries(windRows, magRows) {
             v,
             n:    noaaNum(r.proton_density ?? r.density),
             temp: noaaNum(r.proton_temperature ?? r.temperature),
-            bz: null, bt: null,
+            bz: null, bt: null, bx: null, by: null,
         });
     }
     for (const r of Array.isArray(magRows) ? magRows : []) {
@@ -84,6 +84,8 @@ export function mergeDriverSeries(windRows, magRows) {
         if (!row) continue;
         row.bz = noaaNum(r.bz_gsm ?? r.bz ?? r.bz_gse);
         row.bt = noaaNum(r.bt);
+        row.bx = noaaNum(r.bx_gsm ?? r.bx);
+        row.by = noaaNum(r.by_gsm ?? r.by);   // Newell coupling needs By
     }
     return [...byMin.values()].sort((a, b) => a.t - b.t);
 }
@@ -173,6 +175,7 @@ export function computeState(driverSeries, observedDst, kp, nowMs) {
             n:  latestValid(driverSeries, 'n'),
             bz: latestValid(driverSeries, 'bz'),
             bt: latestValid(driverSeries, 'bt'),
+            by: latestValid(driverSeries, 'by'),
             vbs:  nowPt.vbs,
             pdyn: nowPt.pdyn,
         },
@@ -329,7 +332,9 @@ export class RingCurrentFeed extends EventTarget {
         const key = minuteKey(t);
         const row = {
             t: key, v: cur.speed_km_s, n: cur.density_cc ?? null,
-            bz: cur.bz_nT ?? null, bt: cur.bt_nT ?? null, temp: cur.temperature_K ?? null,
+            bz: cur.bz_nT ?? null, bt: cur.bt_nT ?? null,
+            bx: cur.bx_nT ?? null, by: cur.by_nT ?? null,
+            temp: cur.temperature_K ?? null,
         };
         const last = this._drivers[this._drivers.length - 1];
         if (last && last.t === key) this._drivers[this._drivers.length - 1] = row;

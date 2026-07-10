@@ -214,6 +214,7 @@ body {
             <div class="rc-kv"><span class="rc-k">IMF |B|</span><span class="rc-v" id="rc-bt">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">dyn. pressure</span><span class="rc-v" id="rc-pdyn">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">coupling VBs</span><span class="rc-v" id="rc-vbs">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">Newell d&Phi;/dt</span><span class="rc-v" id="rc-newell">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">decay time &tau;</span><span class="rc-v" id="rc-tau">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">Kp / plasmapause</span><span class="rc-v" id="rc-kp">&mdash;</span></div>
         </section>
@@ -265,6 +266,7 @@ body {
 
 <script type="module">
 import { RingCurrentFeed } from './js/ring-current-feed.js?v=20260710';
+import { newellCoupling } from './js/ring-current-model.js?v=20260710';
 
 const $ = id => document.getElementById(id);
 const stage = $('rc-stage');
@@ -340,6 +342,9 @@ function renderHud(s) {
     $('rc-bt').textContent   = fmt(s.drivers.bt, 1, ' nT');
     $('rc-pdyn').textContent = fmt(s.drivers.pdyn, 2, ' nPa');
     $('rc-vbs').textContent  = fmt(s.drivers.vbs, 2, ' mV/m');
+    const dphi = newellCoupling(s.drivers.v, s.drivers.by, s.drivers.bz);
+    $('rc-newell').textContent = Number.isFinite(dphi)
+        ? `${Math.round(dphi).toLocaleString('en-US')}` : '—';
     $('rc-tau').textContent  = fmt(s.now.tauHours, 1, ' h');
     $('rc-kp').textContent   = Number.isFinite(s.now.kp)
         ? `Kp ${s.now.kp.toFixed(1)} · Lpp ${fmt(s.now.plasmapauseL, 1)} Rᴇ` : '—';

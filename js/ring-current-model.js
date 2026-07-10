@@ -82,6 +82,30 @@ export function couplingVBs(v, bz) {
 }
 
 /**
+ * Newell et al. (2007) coupling function dΦ_MP/dt — the best general-purpose
+ * solar-wind–magnetosphere coupling proxy across ten magnetospheric state
+ * variables:
+ *
+ *   dΦ/dt = v^(4/3) · B_T^(2/3) · sin^(8/3)(θc/2)
+ *
+ * where B_T = √(By² + Bz²) is the transverse IMF and θc = atan2(|By|, Bz)
+ * the IMF clock angle (0 = due north ⇒ no coupling; π = due south ⇒ max).
+ * Mixed units, as customary: v in km/s, B in nT → typical values 0 (quiet
+ * northward) to ~50 000 (major storm). Fully derivable from fields already
+ * stored in solar_wind_samples — no schema change needed.
+ */
+export function newellCoupling(v, by, bz) {
+    if (!Number.isFinite(v) || !Number.isFinite(bz)) return null;
+    const byV = Number.isFinite(by) ? by : 0;
+    const bT = Math.sqrt(byV * byV + bz * bz);
+    if (bT === 0) return 0;
+    const clock = Math.atan2(Math.abs(byV), bz);        // [0, π]
+    return Math.pow(Math.max(0, v), 4 / 3) *
+           Math.pow(bT, 2 / 3) *
+           Math.pow(Math.sin(clock / 2), 8 / 3);
+}
+
+/**
  * Pressure-corrected index: Dst* = Dst − b·√Pdyn + c.
  * Removes magnetopause-current contamination so Dst* isolates the ring
  * current. Null-safe: without pressure, returns Dst unchanged.
