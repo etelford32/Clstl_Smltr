@@ -813,6 +813,49 @@ export function carringtonL0(ms) {
  * slow wind needs a tight (≤12°) match, otherwise it is streamer-belt
  * wind by default. Returns null when there is nothing to match against.
  */
+/**
+ * Per-hole historical wind association — the INVERSE of attributeWindSource.
+ * Every 1-min driver sample back-maps to its own source longitude (its own
+ * measured speed at its own L1 time); a sample "belongs" to a hole when
+ * within tolDeg of Carrington longitude. Each hole's association is then
+ * the count + median speed of ITS samples: a measured record of what Earth
+ * actually received from that hole's longitude. Holes with no arrivals in
+ * the driver window (e.g. east of the central meridian — their wind hasn't
+ * arrived yet) return assoc: null; consumers treat that as "no record this
+ * rotation", not zero. Same validated mapping the back-mapping study
+ * scored (82 % fast-wind hit at ±20° vs 37 % chance).
+ *
+ * @param {Array} holes    HEK rows ({ lat_deg, lon_carrington_deg, ... })
+ * @param {Array} drivers  [{ t, v }] 1-min series (24 h typical); strided
+ *                         internally to ~10-min samples
+ * @returns holes decorated with assoc: { n, vMed } | null
+ */
+export function holeWindAssociation(holes, drivers, tolDeg = 15) {
+    if (!Array.isArray(holes) || !holes.length) return [];
+    const src = [];
+    if (Array.isArray(drivers)) {
+        for (let i = 0; i < drivers.length; i += 10) {
+            const d = drivers[i];
+            if (!d || !Number.isFinite(d.v) || d.v < 100 || !Number.isFinite(d.t)) continue;
+            const dep = sunDepartureMs(d.t, d.v);
+            if (dep == null) continue;
+            src.push({ lon: carringtonL0(dep).L0, v: d.v });
+        }
+    }
+    return holes.map(h => {
+        const lon = h?.lon_carrington_deg;
+        if (!Number.isFinite(lon) || !src.length) return { ...h, assoc: null };
+        const vs = [];
+        for (const s of src) {
+            const dd = Math.abs((((s.lon - lon) % 360) + 540) % 360 - 180);
+            if (dd <= tolDeg) vs.push(s.v);
+        }
+        if (!vs.length) return { ...h, assoc: null };
+        vs.sort((a, b) => a - b);
+        return { ...h, assoc: { n: vs.length, vMed: vs[Math.floor(vs.length / 2)] } };
+    });
+}
+
 export function attributeWindSource(holes, srcCarringtonLon, vKmS) {
     if (!Array.isArray(holes) || !holes.length || !Number.isFinite(srcCarringtonLon)) return null;
     let best = null;

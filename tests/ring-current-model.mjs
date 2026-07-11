@@ -35,7 +35,7 @@ import {
     geocoronalDensity, chargeExchangeCrossSection, chargeExchangeLifetimeHours,
     earthOrbit, shueStandoffRe, shueAlpha, shueRadiusRe, bowShockStandoffRe,
     SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
-    carringtonL0, attributeWindSource,
+    carringtonL0, attributeWindSource, holeWindAssociation,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -575,6 +575,40 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.equal(attributeWindSource([], 10, 500), null);
     assert.equal(attributeWindSource(holes, NaN, 500), null);
     ok('Carrington L0/B0: 13.2°/d synodic, 27.28 d period, B0 seasonal anchors; CH attribution');
+}
+
+// ── 24. Per-hole historical wind association (inverse back-mapping) ─────────
+{
+    const now = Date.UTC(2026, 6, 11);
+    // 24 h of constant 600 km/s drivers: every sample back-maps near ONE
+    // source longitude arc (L0 sweeps ~13.2° over the day of departures).
+    const drivers = Array.from({ length: 1440 }, (_, i) => ({
+        t: now - (1440 - i) * 60_000, v: 600,
+    }));
+    const arcLon = carringtonL0(sunDepartureMs(now - 12 * 3.6e6, 600)).L0;
+    const holes = [
+        { lat_deg: 10, lon_carrington_deg: arcLon },                    // on the arc
+        { lat_deg: 10, lon_carrington_deg: (arcLon + 90) % 360 },       // far away
+    ];
+    const out = holeWindAssociation(holes, drivers);
+    assert.ok(out[0].assoc && out[0].assoc.n > 50, `on-arc n = ${out[0].assoc?.n}`);
+    assert.equal(out[0].assoc.vMed, 600);
+    // The hole Earth's wind never traced to has NO record — null, not zero.
+    assert.equal(out[1].assoc, null);
+    // Mixed speeds attribute separately: slow samples map ~20° further
+    // back in longitude than fast ones from the same arrival day.
+    // (10-min blocks — the associator strides by 10 samples, so per-sample
+    // alternation would only ever land on one speed.)
+    const mixed = drivers.map((d, i) => ({ ...d, v: Math.floor(i / 10) % 2 ? 380 : 640 }));
+    const lonSlow = carringtonL0(sunDepartureMs(now - 12 * 3.6e6, 380)).L0;
+    const out2 = holeWindAssociation(
+        [{ lat_deg: 0, lon_carrington_deg: lonSlow }], mixed, 10);
+    assert.ok(out2[0].assoc && Math.abs(out2[0].assoc.vMed - 380) < 30,
+        `slow hole vMed = ${out2[0].assoc?.vMed}`);
+    // Null-safety: empty inputs.
+    assert.deepEqual(holeWindAssociation([], drivers), []);
+    assert.equal(holeWindAssociation(holes, [])[0].assoc, null);
+    ok('hole↔wind association: on-arc record (v=600), off-arc null, speed-resolved');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

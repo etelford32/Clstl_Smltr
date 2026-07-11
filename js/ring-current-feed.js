@@ -34,7 +34,7 @@ import {
     oxygenFraction, subsolarPoint, dipoleTiltRad, chargeExchangeLifetimeHours,
     shueStandoffRe, shueAlpha,
     SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
-    carringtonL0, attributeWindSource,
+    carringtonL0, attributeWindSource, holeWindAssociation,
 } from './ring-current-model.js';
 
 // rtsw_mag_1m is not in config.NOAA — defined locally, same as js/swpc-feed.js.
@@ -633,7 +633,12 @@ export class RingCurrentFeed extends EventTarget {
             sl.l0NowDeg         = cur.L0;
             sl.b0NowDeg         = cur.B0;
             sl.source = attributeWindSource(this._holes, dep.L0, state?.drivers?.v);
-            sl.holes  = this._holes ?? [];
+            // Each hole decorated with its own measured arrival record
+            // (inverse back-mapping over the 24 h driver series): the twin
+            // scales each hole's emission activity by what Earth actually
+            // received from that hole's longitude. Holes east of the
+            // meridian carry assoc: null — their wind hasn't arrived yet.
+            sl.holes = holeWindAssociation(this._holes, this._drivers);
         }
         this.dispatchEvent(new CustomEvent('state', {
             detail: state ? { ...state, goes, compute, mode: this._mode, errors: this._errors.slice(-3) }

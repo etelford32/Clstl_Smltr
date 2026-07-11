@@ -1191,7 +1191,9 @@ export class RingCurrentGlobe {
             x: new Float32Array(EMIT_N), y: new Float32Array(EMIT_N), z: new Float32Array(EMIT_N),
             age: new Float32Array(EMIT_N), life: new Float32Array(EMIT_N),
             warm: new Float32Array(EMIT_N),
+            vKm:  new Float32Array(EMIT_N),   // per-puff speed = its hole's record
         };
+        this._diskHoleW = 0;
         this._emCursor = 0;
         this._emAccum = 0;
         this._srcDisk = null;      // back-mapped source on the disk (setState)
@@ -1782,16 +1784,23 @@ export class RingCurrentGlobe {
                 if (em.mode[j2] === 0) { i = j2; this._emCursor = j2 + 1; break; }
             }
             if (i < 0) break;
-            // 70 % from the back-mapped source region (the hole feeding the
-            // wind arriving NOW), 30 % from any other visible coronal hole.
-            let latDeg = 0, lonW = 0;
-            if (this._srcDisk && Math.random() < 0.7) {
+            // Weighted by each hole's OWN arrival record (setState). The
+            // back-mapped source region keeps a floor share so the marker
+            // always visibly smokes; without any record data the source
+            // region is the only honest spawn site.
+            let latDeg = 0, lonW = 0, vPuff = this._driverV;
+            const pickSrc = this._srcDisk &&
+                (Math.random() < 0.35 || !this._diskHoleW);
+            if (pickSrc) {
                 latDeg = this._srcDisk.latDeg;
                 lonW = Math.min(this._srcDisk.lonWDeg, 80);
-            } else if (this._diskHoles.length) {
-                const h = this._diskHoles[(Math.random() * this._diskHoles.length) | 0];
+            } else if (this._diskHoleW) {
+                let rw = Math.random() * this._diskHoleW;
+                let h = this._diskHoles[this._diskHoles.length - 1];
+                for (const hh of this._diskHoles) { rw -= hh.w; if (rw <= 0) { h = hh; break; } }
                 latDeg = h.lat; lonW = h.lonW;
-            } else if (!this._srcDisk) {
+                if (Number.isFinite(h.vAssoc)) vPuff = h.vAssoc;
+            } else {
                 continue;   // no source fix yet — don't invent one
             }
             em.mode[i] = 1;
@@ -1800,11 +1809,15 @@ export class RingCurrentGlobe {
             em.z[i] = -R_DISK * Math.sin(lonW * d2r) * Math.cos(latDeg * d2r) + (Math.random() - 0.5) * 0.55;
             em.age[i] = 0;
             em.life[i] = 5 + Math.random() * 5;
-            em.warm[i] = 0.75 + Math.random() * 0.25;
+            // Fast-record holes read hotter (toward white) — the same
+            // energy cue the trapped populations use.
+            em.warm[i] = (0.6 + 0.4 * Math.min(1, vPuff / 620)) * (0.85 + Math.random() * 0.15);
+            em.vKm[i] = vPuff;
         }
-        // Honest Earthward drift: v × τ ÷ the leg's own km-per-unit.
+        // Honest Earthward drift, PER PUFF: each hole's plasma crawls at
+        // its own recorded speed × τ ÷ the leg's km-per-unit.
         const kmPerUnit = (SOLAR.AU_KM - PHYS.L1_KM) / 8;
-        const drift = this._driverV * this._clock.tau / kmPerUnit;
+        const drift = this._clock.tau / kmPerUnit;
         const pos = this._emPos, col = this._emCol;
         for (let i = 0; i < em.mode.length; i++) {
             const j = i * 3;
@@ -1815,7 +1828,7 @@ export class RingCurrentGlobe {
                 col[j] = col[j + 1] = col[j + 2] = 0;
                 continue;
             }
-            em.x[i] -= drift * dt;
+            em.x[i] -= em.vKm[i] * drift * dt;
             const k = em.age[i] / em.life[i];
             const b = Math.sin(Math.min(1, k * 1.15) * Math.PI) * 0.55 * em.warm[i];
             pos[j]     = em.x[i];
@@ -2387,10 +2400,19 @@ export class RingCurrentGlobe {
         this._srcDisk = Number.isFinite(sl?.stonyhurstNowDeg)
             ? { latDeg: sl.source?.hole?.lat_deg ?? 0, lonWDeg: sl.stonyhurstNowDeg }
             : null;
+        // Spawn weights from each hole's OWN measured arrival record
+        // (feed: holeWindAssociation) — a hole whose longitude fed the
+        // last 24 h of arrivals puffs harder and its puffs crawl at ITS
+        // median speed; holes with no record yet (east of the meridian)
+        // idle at a floor rate rather than being invented.
         this._diskHoles = (sl?.holes ?? []).map(h => {
             const lonW = ((h.lon_carrington_deg - sl.l0NowDeg) % 360 + 540) % 360 - 180;
-            return { lat: h.lat_deg ?? 0, lonW };
+            const w = h.assoc
+                ? (0.5 + 1.5 * Math.min(1, h.assoc.n / 90)) * Math.min(2, h.assoc.vMed / 450)
+                : 0.35;
+            return { lat: h.lat_deg ?? 0, lonW, w, vAssoc: h.assoc?.vMed ?? null };
         }).filter(h => Math.abs(h.lonW) < 80 && Math.abs(h.lat) < 70);
+        this._diskHoleW = this._diskHoles.reduce((s, h) => s + h.w, 0);
         if (this._srcDisk && this._spiralPos) {
             const d2r = Math.PI / 180;
             const lonW = Math.min(this._srcDisk.lonWDeg, 80) * d2r;
@@ -2415,7 +2437,7 @@ export class RingCurrentGlobe {
             this._drawLabel(this._helioLab, 'SUN → L1 — THE UNMEASURED LEG', [
                 `${Number.isFinite(sl.days) ? sl.days.toFixed(1) : '—'} d in flight · light: 8.3 min`,
                 'plasma is only measured when it crosses the gate',
-                'puffs = live source activity (persistence)',
+                'puff rate & speed ∝ each hole’s own arrival record',
                 'leg drawn ≈2 900× more compressed than near-Earth',
             ], '#ffd27a');
         }

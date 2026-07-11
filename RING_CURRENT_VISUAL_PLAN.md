@@ -71,7 +71,13 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   honest crawl (the Sun→L1 leg is ≈2 900× more compressed than
 >   near-Earth — disclosed in the SUN→L1 label), swell/fade is a labeled
 >   rendering cue. A schematic Parker-spiral streamline (live garden-hose
->   angle) ties the source to the L1 gate. The τ-sweep wrap — which read
+>   angle) ties the source to the L1 gate. Per-hole emission (same day):
+>   `holeWindAssociation` (model, tested) inverse-back-maps the 24 h
+>   driver series — every sample knows its own source longitude — giving
+>   each visible hole a measured arrival record { n, vMed }. Puff rate is
+>   weighted by that record and each puff crawls at ITS hole's recorded
+>   speed; holes with no record yet (east of the meridian) idle at a
+>   floor rather than being invented. The τ-sweep wrap — which read
 >   as "the simulation reset itself" — is now legible: a sweep-progress
 >   bar under the SIM TIME badge, a "↻ replaying the same real window"
 >   flash on wrap, and an ~0.8 s transit-stream opacity dip (uFade)
