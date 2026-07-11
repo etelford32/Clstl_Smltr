@@ -792,7 +792,13 @@ export function carringtonL0(ms) {
     const lam = ((earthOrbit(ms).lonDeg + 180) % 360) * d2r;
     const lamK = lam - K;
     const eta = Math.atan2(Math.sin(lamK) * Math.cos(I), Math.cos(lamK)) / d2r;
-    const L0 = ((eta - theta) % 360 + 360) % 360;
+    // +180: the (JD − 2398220)·360/25.38 phase convention lands the prime
+    // meridian half a rotation off the operational (HEK/SDO) Carrington
+    // frame. EMPIRICALLY PINNED against HEK hgc_x − hgs_x pairs: offset
+    // was 180.00° exactly at 2026-07-07T20:02 and 2026-07-08T00:02 UT
+    // (L0 = 339.96° / 337.75°) — found by the back-mapping validation
+    // study BEFORE the constant shipped anywhere. Tests anchor these.
+    const L0 = ((eta - theta + 180) % 360 + 360) % 360;
     const B0 = Math.asin(Math.sin(lamK) * Math.sin(I)) / d2r;
     return { L0, B0 };
 }

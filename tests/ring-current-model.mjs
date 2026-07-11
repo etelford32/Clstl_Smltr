@@ -550,6 +550,13 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.ok(Math.abs(carringtonL0(Date.UTC(2026, 5, 6)).B0) < 0.6, 'B0 ≈ 0 near Jun 6');
     assert.ok(carringtonL0(Date.UTC(2026, 8, 8)).B0 > 6.9, 'B0 max near Sep 8');
     assert.ok(carringtonL0(Date.UTC(2026, 2, 5)).B0 < -6.9, 'B0 min near Mar 5');
+    // ABSOLUTE zero-point pinned against the HEK/SDO operational frame
+    // (L0 = hgc_x − hgs_x from catalogued CH detections). These anchors
+    // caught a 180° phase error — do not relax them.
+    const a1 = carringtonL0(Date.parse('2026-07-08T00:02:41Z')).L0;
+    const a2 = carringtonL0(Date.parse('2026-07-07T20:02:41Z')).L0;
+    assert.ok(Math.abs(a1 - 337.75) < 0.35, `HEK anchor 1: ${a1.toFixed(2)} vs 337.75`);
+    assert.ok(Math.abs(a2 - 339.96) < 0.35, `HEK anchor 2: ${a2.toFixed(2)} vs 339.96`);
     // Attribution: fast wind matches a CH within 20° (with wraparound)…
     const holes = [
         { lat_deg: 15, lon_carrington_deg: 358, frm_name: 'SPoCA-CH' },
