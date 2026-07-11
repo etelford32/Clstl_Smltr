@@ -45,6 +45,52 @@ const EARTH_DAY_TEXTURE = 'https://unpkg.com/three-globe@2.31.0/example/img/eart
 const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);
 const ELECTRON_COLOR = new THREE.Color(0.35, 0.75, 1.00);
 
+// Soft-glow point shader: every particle renders as a gaussian orb with a
+// hot core instead of a hard square — one material for populations, transit
+// stream, and pressure envelope.
+function glowPointsMaterial(size, opacity) {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        vertexColors: true,
+        uniforms: { uSize: { value: size } },
+        vertexShader: `uniform float uSize; varying vec3 vC;
+            void main() {
+                vC = color;
+                vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = uSize * 320.0 / -mv.z;
+                gl_Position = projectionMatrix * mv;
+            }`,
+        fragmentShader: `varying vec3 vC;
+            void main() {
+                float r = length(gl_PointCoord - vec2(0.5)) * 2.0;
+                float a = exp(-4.5 * r * r) - 0.011;
+                if (a <= 0.0) discard;
+                gl_FragColor = vec4(vC * (1.0 + 0.7 * (1.0 - r)), a * ${opacity.toFixed(2)});
+            }`,
+    });
+}
+
+// Fresnel rim-glow atmosphere — the limb brightens like scattered light.
+function atmosphereMaterial() {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, side: THREE.BackSide,
+        blending: THREE.AdditiveBlending,
+        vertexShader: `varying vec3 vN; varying vec3 vP;
+            void main() {
+                vN = normalize(normalMatrix * normal);
+                vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                vP = mv.xyz;
+                gl_Position = projectionMatrix * mv;
+            }`,
+        fragmentShader: `varying vec3 vN; varying vec3 vP;
+            void main() {
+                float f = pow(1.0 - abs(dot(normalize(vN), normalize(-vP))), 2.5);
+                gl_FragColor = vec4(vec3(0.25, 0.52, 1.0) * f * 1.7, f * 0.9);
+            }`,
+    });
+}
+
+
 /**
  * Trapped population with REAL dipole bounce geometry: each particle gets an
  * equatorial pitch angle sampled ABOVE the loss cone (below it precipitates —
@@ -189,10 +235,7 @@ export class RingCurrentGlobe {
 
         const atmo = new THREE.Mesh(
             new THREE.SphereGeometry(1.045, 48, 48),
-            new THREE.MeshBasicMaterial({
-                color: 0x3d6bff, transparent: true, opacity: 0.08,
-                blending: THREE.AdditiveBlending, side: THREE.BackSide, depthWrite: false,
-            }),
+            atmosphereMaterial(),
         );
         this._scene.add(atmo);
     }
@@ -232,10 +275,7 @@ export class RingCurrentGlobe {
         const col = new Float32Array(pop.count * 3);
         geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
         geo.setAttribute('color',    new THREE.BufferAttribute(col, 3).setUsage(THREE.DynamicDrawUsage));
-        const mat = new THREE.PointsMaterial({
-            size, vertexColors: true, transparent: true, opacity: 0.9,
-            blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
-        });
+        const mat = glowPointsMaterial(size, 0.9);
         const points = new THREE.Points(geo, mat);
         points.frustumCulled = false;
         this._scene.add(points);
@@ -326,10 +366,7 @@ export class RingCurrentGlobe {
             this._transitOff[i * 3 + 1] = Math.sin(a) * r;
             this._transitOff[i * 3 + 2] = Math.cos(a) * r;
         }
-        const mat = new THREE.PointsMaterial({
-            size: 0.16, vertexColors: true, transparent: true, opacity: 0.95,
-            blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
-        });
+        const mat = glowPointsMaterial(0.16, 0.95);
         this._transit = new THREE.Points(this._transitGeo, mat);
         this._transit.frustumCulled = false;
         this._scene.add(this._transit);
@@ -348,6 +385,19 @@ export class RingCurrentGlobe {
         }));
         this._wave.frustumCulled = false;
         this._scene.add(this._wave);
+
+        // 3D pressure envelope: a ring of points around the corridor axis at
+        // each sample, radius ∝ density — the barometric wave as a volume.
+        this._envSeg = 10;
+        const EN = TRANSIT.MAX_PARCELS * this._envSeg;
+        this._envPos = new Float32Array(EN * 3);
+        this._envCol = new Float32Array(EN * 3);
+        this._envGeo = new THREE.BufferGeometry();
+        this._envGeo.setAttribute('position', new THREE.BufferAttribute(this._envPos, 3).setUsage(THREE.DynamicDrawUsage));
+        this._envGeo.setAttribute('color',    new THREE.BufferAttribute(this._envCol, 3).setUsage(THREE.DynamicDrawUsage));
+        this._env = new THREE.Points(this._envGeo, glowPointsMaterial(0.10, 0.55));
+        this._env.frustumCulled = false;
+        this._scene.add(this._env);
         const base = new Float32Array([TRANSIT.X_MP, TRANSIT.WAVE_Y, 0, TRANSIT.X_SUN, TRANSIT.WAVE_Y, 0]);
         const baseGeo = new THREE.BufferGeometry();
         baseGeo.setAttribute('position', new THREE.BufferAttribute(base, 3));
@@ -359,6 +409,38 @@ export class RingCurrentGlobe {
     /** Stream coloring: 'bz' (driver) | 'temp' (heat map) | 'density'. */
     setStreamMode(mode) {
         this._streamMode = mode === 'temp' || mode === 'density' ? mode : 'bz';
+    }
+
+    // In-scene live stat labels: one pinned to the incoming wind corridor,
+    // one above the ring current — the numbers travel with the physics they
+    // describe, refreshed on every feed state tick.
+    _makeLabel(x, y, z, w = 7.5) {
+        const cv = document.createElement('canvas');
+        cv.width = 512; cv.height = 224;
+        const tex = new THREE.CanvasTexture(cv);
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: tex, transparent: true, depthWrite: false, opacity: 0.95,
+        }));
+        sp.position.set(x, y, z);
+        sp.scale.set(w, w * 224 / 512, 1);
+        this._scene.add(sp);
+        return { cv, tex, sp };
+    }
+
+    _drawLabel(lab, title, lines, accent = '#7fe6c3') {
+        const g = lab.cv.getContext('2d');
+        g.clearRect(0, 0, 512, 224);
+        g.fillStyle = 'rgba(3,1,14,0.55)';
+        g.fillRect(0, 0, 512, 224);
+        g.strokeStyle = 'rgba(255,255,255,0.18)';
+        g.strokeRect(1, 1, 510, 222);
+        g.fillStyle = accent;
+        g.font = '700 30px system-ui';
+        g.fillText(title, 16, 40);
+        g.fillStyle = '#e8edf7';
+        g.font = '600 27px system-ui';
+        lines.forEach((s, i) => g.fillText(s, 16, 82 + i * 36));
+        lab.tex.needsUpdate = true;
     }
 
     /** Corridor rendering: real time-to-arrival → position between Sun and
@@ -400,9 +482,30 @@ export class RingCurrentGlobe {
             this._wavePos[w]     = x;
             this._wavePos[w + 1] = TRANSIT.WAVE_Y + TRANSIT.WAVE_AMP * nNorm;
             this._wavePos[w + 2] = 0;
+            // 3D envelope ring at this sample — the wave revolved around the
+            // corridor axis (radius ∝ density), slowly rotating for depth.
+            const rad = 1.0 + 2.6 * nNorm;
+            const spin = now / 9000;
+            for (let k = 0; k < this._envSeg; k++) {
+                const a = spin + (k / this._envSeg) * 2 * Math.PI;
+                const e = (wi * this._envSeg + k) * 3;
+                this._envPos[e]     = x;
+                this._envPos[e + 1] = Math.sin(a) * rad;
+                this._envPos[e + 2] = Math.cos(a) * rad;
+                this._envCol[e]     = R * 0.5;
+                this._envCol[e + 1] = G * 0.5;
+                this._envCol[e + 2] = B * 0.5;
+            }
             wi++;
             slot++;
         }
+        // Park unused envelope rings.
+        for (let s = wi * this._envSeg; s < TRANSIT.MAX_PARCELS * this._envSeg; s++) {
+            this._envPos[s * 3] = this._envPos[s * 3 + 1] = this._envPos[s * 3 + 2] = 0;
+            this._envCol[s * 3] = this._envCol[s * 3 + 1] = this._envCol[s * 3 + 2] = 0;
+        }
+        this._envGeo.attributes.position.needsUpdate = true;
+        this._envGeo.attributes.color.needsUpdate = true;
         // Park unused point slots (black under additive = invisible).
         for (let s = slot * TRANSIT.PTS_PER; s < TRANSIT.MAX_PARCELS * TRANSIT.PTS_PER; s++) {
             pos[s * 3] = pos[s * 3 + 1] = pos[s * 3 + 2] = 0;
@@ -426,6 +529,26 @@ export class RingCurrentGlobe {
     /** Feed the latest model state (detail of ring-current-feed 'state'). */
     setState(state) {
         this._parcels = state?.transit?.parcels?.slice(0, TRANSIT.MAX_PARCELS) ?? [];
+        // Live in-scene stats (created lazily so a WebGL-only failure can't
+        // block construction).
+        if (!this._windLab) {
+            this._windLab = this._makeLabel((TRANSIT.X_MP + TRANSIT.X_SUN) / 2, TRANSIT.WAVE_Y + 6.2, 0, 9);
+            this._ringLab = this._makeLabel(0, 7.8, 0, 9);
+        }
+        const d = state?.drivers, nw = state?.now;
+        const f1 = (x, u, dg = 1) => Number.isFinite(x) ? `${x.toFixed(dg)}${u}` : '—';
+        if (d) this._drawLabel(this._windLab, 'INCOMING WIND — LIVE (L1)', [
+            `v ${f1(d.v, ' km/s', 0)}   n ${f1(d.n, ' /cm³')}`,
+            `Bz ${f1(d.bz, ' nT')}   Pdyn ${f1(d.pdyn, ' nPa', 2)}`,
+            `VBs ${f1(d.vbs, ' mV/m', 2)}`,
+            `${state?.transit?.parcels?.length ?? 0} parcels in transit`,
+        ], '#ffd9b0');
+        if (nw) this._drawLabel(this._ringLab, 'RING CURRENT — LIVE', [
+            `Dst ${f1(nw.dstModel, ' nT')} (obs ${f1(nw.dstObserved, '', 0)})`,
+            `W ${Number.isFinite(nw.energyJ) ? (nw.energyJ / 1e15).toFixed(2) + '×10¹⁵ J' : '—'}`,
+            `peak L ${f1(nw.peakL, ' Rᴇ', 2)}   τ ${f1(nw.tauHours, ' h')}`,
+            `${nw.storm?.label ?? ''}`,
+        ]);
         // Sun glow tracks the strongest incoming driver — a storm you can
         // see coming before it arrives.
         const sv = state?.transit?.strongest?.vbs ?? 0;
