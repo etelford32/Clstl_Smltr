@@ -197,6 +197,7 @@ function trappedPointsMaterial(size, opacity, color) {
             attribute vec3 kin;
             attribute vec4 life;
             varying float vW;
+            varying float vE;   // energy-dispersion tint, 0 = 20 keV … 1 = 250 keV
             const float PI = 3.14159265358979;
             const float DW = ${DEATH_WINDOW.toFixed(3)};   // death-window fraction
 
@@ -212,6 +213,17 @@ function trappedPointsMaterial(size, opacity, color) {
                 float L    = position.x;
                 float lamM = position.z;
                 float lt   = life.y;
+
+                // Energy-dispersion tint: no extra attribute needed — the
+                // drift rate already ENCODES energy. Inverting the model's
+                // exact driftPeriodHours (2π·q·B₀·R_E²/(3·L·E) ⇒
+                // T_h = 734.4/(L·E_keV) at the equator):
+                //   E_keV = 734.4·|rate|/(2π·L)
+                // Log-normalised over the built 20–250 keV range. Fast pale
+                // particles visibly LAP deep slow ones: the dispersion that
+                // smears injections into a ring, now watchable.
+                vE = clamp(log(734.4 * abs(kin.x) / (6.28318531 * L) / 20.0) / 2.5257,
+                           0.0, 1.0);
 
                 // ── Lifecycle clock (sim hours) — mirrors particlePose() ──
                 float age   = uDriftHours + life.x;
@@ -278,11 +290,18 @@ function trappedPointsMaterial(size, opacity, color) {
         fragmentShader: `
             uniform vec3 uColor; uniform float uOpacity;
             varying float vW;
+            varying float vE;
             void main() {
                 float r = length(gl_PointCoord - vec2(0.5)) * 2.0;
                 float a = exp(-4.5 * r * r) - 0.011;
                 if (a <= 0.0) discard;
-                gl_FragColor = vec4(uColor * (1.0 + 0.7 * (1.0 - r)) * vW, a * uOpacity);
+                // Energy tint within the species color: 20 keV = deeper and
+                // dimmer, 250 keV = paler, pushed toward white. Subtle — the
+                // species hue still dominates.
+                vec3 c = mix(uColor * 0.78,
+                             min(vec3(1.0), uColor * 1.18 + vec3(0.22, 0.18, 0.12)),
+                             vE);
+                gl_FragColor = vec4(c * (1.0 + 0.7 * (1.0 - r)) * vW, a * uOpacity);
             }`,
     });
 }
@@ -308,7 +327,10 @@ function axisLine(halfLen, color, opacity) {
 // spatial compression is explicit, not smuggled in as an animation speed.
 const TRANSIT = Object.freeze({
     MAX_PARCELS: 120,
-    PTS_PER:     14,     // per-slot budget; VISIBLE count scales with density
+    PTS_PER:     14,     // per-slot BASE budget; VISIBLE count scales with density
+    DENS_MAX:    4,      // buffers sized for the ×4 stream-density setting
+                         // (a VISUAL multiplier on rendered points per 1-min
+                         // sample — never more data than was measured)
     X_MP:        SCALE.CORRIDOR.X_MP,    // ≈ subsolar magnetopause (R_E)
     X_SUN:       SCALE.CORRIDOR.X_SUN,   // corridor start, toward the Sun
     WAVE_Y:      4.2,    // baseline height of the barometric density trace
@@ -811,7 +833,8 @@ export class RingCurrentGlobe {
         this._scene.add(this._sun);
 
         // Transit parcel points (positions/colors filled per frame).
-        const N = TRANSIT.MAX_PARCELS * TRANSIT.PTS_PER;
+        this._streamDensity = 1;   // ×1 | ×2 | ×4 — page control
+        const N = TRANSIT.MAX_PARCELS * TRANSIT.PTS_PER * TRANSIT.DENS_MAX;
         this._transitGeo = new THREE.BufferGeometry();
         this._transitPos = new Float32Array(N * 3);
         this._transitCol = new Float32Array(N * 3);
@@ -888,6 +911,13 @@ export class RingCurrentGlobe {
     /** Stream coloring: 'bz' (driver) | 'temp' (heat map) | 'density'. */
     setStreamMode(mode) {
         this._streamMode = mode === 'temp' || mode === 'density' ? mode : 'bz';
+    }
+
+    /** Stream density ×1/×2/×4 — a VISUAL multiplier on rendered points per
+     *  1-min L1 sample (and on injection-burst counts). More pixels, never
+     *  more data: parcel count, positions, and physics are untouched. */
+    setStreamDensity(x) {
+        this._streamDensity = [1, 2, 4].includes(x) ? x : 1;
     }
 
     // In-scene live stat labels: one pinned to the incoming wind corridor,
@@ -967,9 +997,11 @@ export class RingCurrentGlobe {
             // BAROMETRIC compression: visible particle count per 1-min sample
             // scales with density — compression fronts read as dense bright
             // bands, exactly like a longitudinal pressure wave.
-            const visible = 3 + Math.round((TRANSIT.PTS_PER - 3) * nNorm);
-            for (let k = 0; k < TRANSIT.PTS_PER; k++) {
-                const j = (slot * TRANSIT.PTS_PER + k) * 3;
+            const stride = TRANSIT.PTS_PER * TRANSIT.DENS_MAX;
+            const visible = Math.min(stride,
+                (3 + Math.round((TRANSIT.PTS_PER - 3) * nNorm)) * this._streamDensity);
+            for (let k = 0; k < stride; k++) {
+                const j = (slot * stride + k) * 3;
                 if (k < visible) {
                     // Motion is toward −x, so the trail extends sunward (+x),
                     // fading toward its tip.
@@ -1057,7 +1089,8 @@ export class RingCurrentGlobe {
         this._envGeo.attributes.position.needsUpdate = true;
         this._envGeo.attributes.color.needsUpdate = true;
         // Park unused point slots (black under additive = invisible).
-        for (let s = slot * TRANSIT.PTS_PER; s < TRANSIT.MAX_PARCELS * TRANSIT.PTS_PER; s++) {
+        const strideAll = TRANSIT.PTS_PER * TRANSIT.DENS_MAX;
+        for (let s = slot * strideAll; s < TRANSIT.MAX_PARCELS * strideAll; s++) {
             pos[s * 3] = pos[s * 3 + 1] = pos[s * 3 + 2] = 0;
             col[s * 3] = col[s * 3 + 1] = col[s * 3 + 2] = 0;
         }
@@ -1254,7 +1287,8 @@ export class RingCurrentGlobe {
     _spawnInjection(vbs, lpp) {
         const inj = this._inj;
         const tauScale = Math.min(1, 60 / this._clock.tau);
-        const count = Math.max(4, Math.round((6 + 11 * Math.min(6, vbs)) * tauScale));
+        const count = Math.max(4, Math.round((6 + 11 * Math.min(6, vbs)) * tauScale))
+            * (this._streamDensity ?? 1);   // pool-capped; drops, never grows
         for (let c = 0; c < count; c++) {
             // Ring cursor; skip slots still alive (pool full ⇒ drop, not grow).
             let i = -1;
@@ -1406,7 +1440,7 @@ export class RingCurrentGlobe {
         this._ray.params.Points.threshold = 1.0;
         for (const hit of this._ray.intersectObject(this._transit)) {
             if (hit.point.length() < 1.6) continue;
-            const p = this._slotParcel?.[Math.floor(hit.index / TRANSIT.PTS_PER)];
+            const p = this._slotParcel?.[Math.floor(hit.index / (TRANSIT.PTS_PER * TRANSIT.DENS_MAX))];
             if (!p) continue;
             if (!best) best = { kind: 'parcel', p };
             break;

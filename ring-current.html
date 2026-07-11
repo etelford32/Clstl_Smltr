@@ -247,6 +247,7 @@ body {
             <span class="rc-dot" style="background:#94ff57"></span>O&#8314; ions &mdash; ionospheric, dies ~10&times; sooner (two-phase decay)<br>
             <span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;opposite drifts = one westward current</span><br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;tint = energy: pale ≈250 keV laps deep ≈20 keV (dispersion)</span><br>
             <span class="rc-dot" style="background:#fff3a0"></span>Injection &mdash; tail burst forks: ions &rarr; dusk &middot; e&#8315; &rarr; dawn<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;deaths: fade-out = ENA escape &middot; surface streak = precipitation</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;faint equatorial haze = ENA glow (how imagers see the ring)</span><br>
@@ -393,6 +394,12 @@ body {
                 <button class="rc-mode-btn" data-mode="temp">Temp heat map</button>
                 <button class="rc-mode-btn" data-mode="density">Density</button>
             </div>
+            <div class="rc-ctl" style="margin-top:8px;">
+                <span>stream density</span>
+                <button class="rc-mode-btn rc-on" data-dens="1">&times;1</button>
+                <button class="rc-mode-btn" data-dens="2">&times;2</button>
+                <button class="rc-mode-btn" data-dens="4">&times;4</button>
+            </div>
             <div style="font-size:.66rem;color:#5d6684;margin-top:6px;line-height:1.5;">
                 One clock, real velocities: stream, ring drift, particle
                 lifetimes, injections and Earth&rsquo;s spin all move at their
@@ -498,6 +505,12 @@ document.querySelectorAll('.rc-mode-btn[data-tau]').forEach(btn => btn.addEventL
 document.querySelectorAll('.rc-mode-btn[data-mode]').forEach(btn => btn.addEventListener('click', () => {
     document.querySelectorAll('.rc-mode-btn[data-mode]').forEach(b => b.classList.toggle('rc-on', b === btn));
     globe?.setStreamMode(btn.dataset.mode);
+}));
+// Stream density ×1/×2/×4 — a visual multiplier on rendered points per
+// 1-min sample (and injection-burst size). More pixels, never more data.
+document.querySelectorAll('.rc-mode-btn[data-dens]').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.rc-mode-btn[data-dens]').forEach(b => b.classList.toggle('rc-on', b === btn));
+    globe?.setStreamDensity(Number(btn.dataset.dens));
 }));
 
 // ── Earth clock & orbit — the scene's Earth follows the sim clock ──────────
