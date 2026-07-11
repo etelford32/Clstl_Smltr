@@ -27,9 +27,9 @@
 
 import { NOAA, INTERVALS } from './config.js';
 import {
-    integrateDst, propagateToEarth, couplingVBs, dynamicPressure,
-    dpsEnergyJ, ringPeakL, asymmetry, plasmapauseL, stormClass,
-    toDstStar, obmQ, obmTau, skill,
+    integrateDst, integrateDstEnsemble, propagateToEarth, couplingVBs,
+    dynamicPressure, dpsEnergyJ, ringPeakL, asymmetry, plasmapauseL,
+    stormClass, toDstStar, obmQ, obmTau, skill, findThresholdCrossing, kpToAp,
 } from './ring-current-model.js';
 
 // rtsw_mag_1m is not in config.NOAA — defined locally, same as js/swpc-feed.js.
@@ -142,7 +142,7 @@ export function observedDstAt(series, t) {
  * @returns {object|null} state (see emit shape below) or null if inputs
  *          are insufficient to anchor the model.
  */
-export function computeState(driverSeries, observedDst, kp, nowMs) {
+export function computeState(driverSeries, observedDst, kp, nowMs, f107 = null) {
     if (!driverSeries?.length || !observedDst?.length) return null;
 
     // Earth-arrival time base: the trailing samples haven't arrived yet —
@@ -153,8 +153,10 @@ export function computeState(driverSeries, observedDst, kp, nowMs) {
     const dst0 = observedDstAt(observedDst, propagated[0].t);
     if (!Number.isFinite(dst0)) return null;
 
-    // Anchor ONCE at window start, then free-run (skill would be fake otherwise).
-    const track = integrateDst(propagated, dst0);
+    // Anchor ONCE at window start, then free-run (skill would be fake
+    // otherwise). The ensemble adds the (a, τ) parameter-sensitivity band
+    // operators need for conjunction work (see RING_CURRENT_USER_RESEARCH.md).
+    const { central: track, band } = integrateDstEnsemble(propagated, dst0);
     if (!track.length) return null;
 
     const arrived  = track.filter(p => p.t <= nowMs);
@@ -208,17 +210,88 @@ export function computeState(driverSeries, observedDst, kp, nowMs) {
             asymmetry:    asym,
             plasmapauseL: plasmapauseL(kp),
             kp,
+            apNow:        kpToAp(kp),
+            f107,
         },
+        // Predictive alert: first forecast crossing of the next storm-class
+        // threshold — genuine lead time (the driver is already measured at L1).
+        alert: (() => {
+            const x = findThresholdCrossing(nowPt.dst, forecast);
+            return x ? { ...x, etaMin: Math.round((x.t - nowMs) / 60_000) } : null;
+        })(),
         series: {
             model:    arrived.map(p => ({ t: p.t, dst: p.dst, dstStar: p.dstStar })),
             forecast: forecast.map(p => ({ t: p.t, dst: p.dst, dstStar: p.dstStar })),
             observed: obsWindow,
+            // Parameter-sensitivity band, forecast window + trailing 3 h.
+            band: band.filter(b => b.t > nowMs - 3 * 3.6e6),
         },
         skill: modelSkill,
         transit: { parcels, strongest },
         forecastLeadMin: forecast.length
             ? Math.round((forecast[forecast.length - 1].t - nowMs) / 60_000)
             : 0,
+    };
+}
+
+/**
+ * /api/omni/imf columnar payload → replay ingredients for historical event
+ * hindcasts (e.g. the May 2024 Gannon G5). SYM-H is the 1-min-resolution
+ * equivalent of Dst, so it slots directly into the observed series.
+ * Pure — node-tested; the page's replay mode is just
+ * computeState(drivers, observed, kp, endMs) over this output.
+ *
+ * @returns {{drivers: Array<{t,v,n,bz}>, observed: Array<{t,dst}>} | null}
+ */
+export function omniToReplay(payload) {
+    const d = payload?.data;
+    if (!Array.isArray(d?.t) || !d.t.length) return null;
+    const drivers = [], observed = [];
+    for (let i = 0; i < d.t.length; i++) {
+        const t = Date.parse(d.t[i]);
+        if (!Number.isFinite(t)) continue;
+        const v = Number(d.v?.[i]), n = Number(d.np?.[i]), bz = Number(d.bz_gsm?.[i]);
+        if (Number.isFinite(v) && v > 100 && v < 3000) {
+            drivers.push({
+                t, v,
+                n:  Number.isFinite(n)  ? n  : null,
+                bz: Number.isFinite(bz) ? bz : null,
+            });
+        }
+        const sym = Number(d.sym_h?.[i]);
+        if (Number.isFinite(sym) && Math.abs(sym) < 1000) observed.push({ t, dst: sym });
+    }
+    return drivers.length && observed.length ? { drivers, observed } : null;
+}
+
+/**
+ * Historical-event hindcast state (e.g. Gannon May 2024). Unlike live
+ * computeState this does NOT ballistically propagate: OMNI HRO drivers are
+ * already time-shifted to the bow shock nose, so re-propagating would
+ * double-shift by ~40–60 min. Anchors once on the first observed value,
+ * free-runs the ensemble, scores against the full observed series.
+ */
+export function computeReplayState(drivers, observed, label = 'replay') {
+    if (!drivers?.length || !observed?.length) return null;
+    const dst0 = observedDstAt(observed, drivers[0].t);
+    const { central: track, band } = integrateDstEnsemble(drivers, dst0);
+    if (!track.length) return null;
+    let peak = track[0];
+    for (const p of track) if (p.dst < peak.dst) peak = p;
+    let obsPeak = observed[0];
+    for (const o of observed) if (o.dst < obsPeak.dst) obsPeak = o;
+    return {
+        label,
+        updated: track[track.length - 1].t,
+        window:  { startMs: track[0].t, endMs: track[track.length - 1].t },
+        series: {
+            model:    track.map(p => ({ t: p.t, dst: p.dst, dstStar: p.dstStar })),
+            forecast: [],
+            observed,
+            band,
+        },
+        skill: skill(track, observed),
+        peak: { model: { t: peak.t, dst: peak.dst }, observed: { t: obsPeak.t, dst: obsPeak.dst } },
     };
 }
 
@@ -250,6 +323,7 @@ export class RingCurrentFeed extends EventTarget {
         this._drivers  = [];      // merged 1-min series (L1 time base)
         this._observed = [];      // [{t, dst}]
         this._kp       = null;
+        this._f107     = null;    // daily F10.7 (sfu) for the density panel
         this._timers   = {};
         this._mode     = 'full';  // 'full' | 'degraded'
         this._started  = false;
@@ -335,6 +409,15 @@ export class RingCurrentFeed extends EventTarget {
         }
 
         if (this._kp == null) await this._refreshKp().catch(e => this._noteError(e));
+
+        // F10.7 (daily cadence — T3 refresh is generous) via our own
+        // normalized edge endpoint; drives the thermosphere density panel.
+        try {
+            const rf = await getJson('/api/noaa/radio-flux');
+            const sfu = rf?.data?.current?.flux_sfu;
+            if (Number.isFinite(sfu) && sfu > 40 && sfu < 500) this._f107 = sfu;
+        } catch (e) { this._noteError(e); }
+
         this._emit();
     }
 
@@ -362,7 +445,7 @@ export class RingCurrentFeed extends EventTarget {
     }
 
     _emit() {
-        const state = computeState(this._drivers, this._observed, this._kp, Date.now());
+        const state = computeState(this._drivers, this._observed, this._kp, Date.now(), this._f107);
         this.dispatchEvent(new CustomEvent('state', {
             detail: state ? { ...state, mode: this._mode, errors: this._errors.slice(-3) }
                           : { mode: this._mode, errors: this._errors.slice(-3), updated: Date.now() },

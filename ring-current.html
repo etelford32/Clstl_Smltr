@@ -134,6 +134,24 @@ body {
 .rc-skill b { color:#e8edf7; font-variant-numeric:tabular-nums; }
 #rc-chart { width:100%; height:240px; display:block; }
 
+.rc-alert {
+    margin:4px 22px 0; padding:9px 14px; border-radius:10px;
+    background:rgba(255,125,102,.12); border:1px solid rgba(255,125,102,.45);
+    color:#ffb4a6; font-size:.82rem; font-weight:650;
+    display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+}
+.rc-alert .rc-alert-eta { color:#fff; font-variant-numeric:tabular-nums; }
+.rc-alert[hidden] { display:none; }
+
+.rc-replay-btn {
+    font-size:.72rem; font-weight:700; cursor:pointer;
+    background:rgba(255,215,0,.10); color:#ffd700;
+    border:1px solid rgba(255,215,0,.35); border-radius:6px; padding:4px 10px;
+    transition:background .2s;
+}
+.rc-replay-btn:hover { background:rgba(255,215,0,.2); }
+.rc-replay-btn.rc-on { background:rgba(255,215,0,.25); }
+
 .rc-bridge-links { display:flex; flex-wrap:wrap; gap:7px; margin-top:9px; }
 .rc-bridge-links a {
     font-size:.72rem; font-weight:650; text-decoration:none; color:#cdd5e4;
@@ -184,6 +202,12 @@ body {
     <span class="rc-sub">Real-time digital twin of Earth&rsquo;s ring current &mdash; L1-driven physics, validated live against Kyoto Dst</span>
     <span class="rc-live" id="rc-live">LIVE</span>
 </header>
+
+<div class="rc-alert" id="rc-alert" hidden>
+    <span>&#9888;&#65039; <span id="rc-alert-text">&mdash;</span></span>
+    <span class="rc-alert-eta" id="rc-alert-eta"></span>
+    <span style="font-weight:400;color:#8b94ad;font-size:.72rem;">L1-measured driver already in transit &mdash; genuine lead time, ±parameter band</span>
+</div>
 
 <div class="rc-layout">
     <div class="rc-stage" id="rc-stage">
@@ -259,6 +283,20 @@ body {
         </section>
 
         <section class="rc-panel">
+            <h2>Storm drag impact &mdash; thermosphere</h2>
+            <div class="rc-kv"><span class="rc-k">&Delta;&rho; @ 300 km</span><span class="rc-v" id="rc-rho-300">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">&Delta;&rho; @ 400 km</span><span class="rc-v" id="rc-rho-400">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">&Delta;&rho; @ 550 km</span><span class="rc-v" id="rc-rho-550">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">&Delta;&rho; @ 800 km</span><span class="rc-v" id="rc-rho-800">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">inputs</span><span class="rc-v" id="rc-rho-inputs">&mdash;</span></div>
+            <div style="font-size:.68rem;color:#5d6684;margin-top:6px;line-height:1.5;">
+                Density change vs quiet (ap 4), from the same thermosphere engine
+                as the Upper Atmosphere twin, driven by live Kp&rarr;ap and F10.7.
+                Storm-time density is the #1 LEO drag error source.
+            </div>
+        </section>
+
+        <section class="rc-panel">
             <h2>Drift animation</h2>
             <div class="rc-ctl">
                 <span>speed</span>
@@ -272,8 +310,9 @@ body {
 <div class="rc-chart-wrap">
     <div class="rc-chart-panel">
         <div class="rc-chart-head">
-            <h2>Dst &mdash; model vs observed, 24 h + forecast</h2>
-            <span class="rc-skill">model skill (24 h): RMSE <b id="rc-rmse">&mdash;</b> &middot; bias <b id="rc-bias">&mdash;</b></span>
+            <h2 id="rc-chart-title">Dst &mdash; model vs observed, 24 h + forecast</h2>
+            <span class="rc-skill">model skill: RMSE <b id="rc-rmse">&mdash;</b> &middot; bias <b id="rc-bias">&mdash;</b></span>
+            <button class="rc-replay-btn" id="rc-replay">&#9654; Replay Gannon G5 (May 2024)</button>
             <span class="rc-skill"><span class="rc-dot" style="background:#59e0d8"></span>observed
                 <span class="rc-dot" style="background:#ff9a3d;margin-left:10px"></span>model
                 <span class="rc-dot" style="background:#ffd700;margin-left:10px"></span>forecast</span>
@@ -293,7 +332,7 @@ body {
 </footer>
 
 <script type="module">
-import { RingCurrentFeed } from './js/ring-current-feed.js?v=20260710';
+import { RingCurrentFeed, omniToReplay, computeReplayState } from './js/ring-current-feed.js?v=20260710';
 import { newellCoupling } from './js/ring-current-model.js?v=20260710';
 
 const $ = id => document.getElementById(id);
@@ -408,9 +447,54 @@ function renderHud(s) {
     const DRAG = ['Nominal', 'Slightly elevated', 'Elevated', 'High', 'Severe', 'Extreme'];
     $('rc-drag').textContent = DRAG[storm.level] ?? '—';
 
-    $('rc-rmse').textContent = fmt(s.skill?.rmse, 1, ' nT');
-    $('rc-bias').textContent = Number.isFinite(s.skill?.bias)
-        ? `${s.skill.bias >= 0 ? '+' : ''}${s.skill.bias.toFixed(1)} nT` : '—';
+    if (!replayState) {
+        $('rc-rmse').textContent = fmt(s.skill?.rmse, 1, ' nT');
+        $('rc-bias').textContent = Number.isFinite(s.skill?.bias)
+            ? `${s.skill.bias >= 0 ? '+' : ''}${s.skill.bias.toFixed(1)} nT` : '—';
+    }
+
+    // Predictive threshold alert — the 30–90 min lead users ask for.
+    const alertEl = $('rc-alert');
+    if (s.alert) {
+        $('rc-alert-text').textContent =
+            `Model forecasts Dst crossing ${s.alert.threshold} nT (${
+                s.alert.threshold <= -100 ? 'Strong storm' : s.alert.threshold <= -50 ? 'Moderate storm' : 'Minor storm'})`;
+        $('rc-alert-eta').textContent = `in ≈${s.alert.etaMin} min`;
+        alertEl.hidden = false;
+    } else {
+        alertEl.hidden = true;
+    }
+
+    renderDensity(s);
+}
+
+// ── Storm drag impact — same engine as the Upper Atmosphere twin ────────────
+let densityFn = null, densityLoading = false;
+function renderDensity(s) {
+    const ap = s.now.apNow;
+    if (!Number.isFinite(ap)) return;
+    if (!densityFn) {
+        if (!densityLoading) {
+            densityLoading = true;
+            import('./js/upper-atmosphere-engine.js?v=20260710')
+                .then(m => { densityFn = m.density; renderDensity(s); })
+                .catch(err => console.warn('[ring-current] density engine unavailable:', err));
+        }
+        return;
+    }
+    const f107 = Number.isFinite(s.now.f107) ? s.now.f107 : 120;
+    for (const alt of [300, 400, 550, 800]) {
+        try {
+            const storm = densityFn({ altitudeKm: alt, f107Sfu: f107, ap }).rho;
+            const quiet = densityFn({ altitudeKm: alt, f107Sfu: f107, ap: 4 }).rho;
+            const pct = (storm / quiet - 1) * 100;
+            const el = $(`rc-rho-${alt}`);
+            el.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(0)}%`;
+            el.className = 'rc-v ' + (pct > 25 ? 'rc-south' : '');
+        } catch { /* engine bounds — leave the dash */ }
+    }
+    $('rc-rho-inputs').textContent =
+        `ap ${ap} · F10.7 ${Number.isFinite(s.now.f107) ? f107.toFixed(0) : `${f107} (assumed)`}`;
 }
 
 // ── Chart (2D canvas, no lib) ───────────────────────────────────────────────
@@ -465,6 +549,17 @@ function drawChart(s) {
         ctx.stroke(); ctx.setLineDash([]);
     };
 
+    // Parameter-sensitivity band (a, τ ±25% ensemble envelope).
+    const band = s.series.band;
+    if (band?.length > 1) {
+        ctx.fillStyle = 'rgba(255,154,61,.13)';
+        ctx.beginPath();
+        band.forEach((b, i) => i ? ctx.lineTo(X(b.t), Y(b.hi)) : ctx.moveTo(X(b.t), Y(b.hi)));
+        for (let i = band.length - 1; i >= 0; i--) ctx.lineTo(X(band[i].t), Y(band[i].lo));
+        ctx.closePath();
+        ctx.fill();
+    }
+
     // forecast zone shading + now line
     const nowX = X(s.updated);
     ctx.fillStyle = 'rgba(255,215,0,.05)';
@@ -482,17 +577,52 @@ function drawChart(s) {
     }
 }
 
+// ── Gannon G5 replay (hindcast mode) ────────────────────────────────────────
+// Same model, historical OMNI drivers (already bow-shock-shifted — no
+// re-propagation), scored against SYM-H. Validation you can see.
+let replayState = null;
+const replayBtn = $('rc-replay');
+replayBtn.addEventListener('click', async () => {
+    if (replayState) {                      // exit replay
+        replayState = null;
+        replayBtn.textContent = '▶ Replay Gannon G5 (May 2024)';
+        replayBtn.classList.remove('rc-on');
+        $('rc-chart-title').textContent = 'Dst — model vs observed, 24 h + forecast';
+        if (lastState) { renderHud(lastState); drawChart(lastState); }
+        return;
+    }
+    replayBtn.textContent = '… loading OMNI';
+    try {
+        const res = await fetch('/api/omni/imf?start=2024-05-09&end=2024-05-13&step_min=5&fields=t,bz_gsm,v,np,sym_h');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const ingredients = omniToReplay(await res.json());
+        replayState = computeReplayState(ingredients?.drivers, ingredients?.observed, 'Gannon G5');
+        if (!replayState) throw new Error('empty OMNI window');
+        replayBtn.textContent = '◼ Exit replay';
+        replayBtn.classList.add('rc-on');
+        $('rc-chart-title').textContent =
+            `REPLAY — Gannon G5, May 2024 · model vs SYM-H · peak model ${replayState.peak.model.dst.toFixed(0)} nT / observed ${replayState.peak.observed.dst.toFixed(0)} nT`;
+        $('rc-rmse').textContent = `${replayState.skill.rmse.toFixed(1)} nT`;
+        $('rc-bias').textContent = `${replayState.skill.bias >= 0 ? '+' : ''}${replayState.skill.bias.toFixed(1)} nT`;
+        drawChart(replayState);
+    } catch (err) {
+        console.warn('[ring-current] replay unavailable:', err);
+        replayBtn.textContent = '▶ Replay Gannon G5 (May 2024)';
+        replayState = null;
+    }
+});
+
 // ── Wire the feed ───────────────────────────────────────────────────────────
 let lastState = null;
 const feed = new RingCurrentFeed();
 feed.addEventListener('state', (e) => {
     lastState = e.detail;
     renderHud(lastState);
-    drawChart(lastState);
+    if (!replayState) drawChart(lastState);
     globe?.setState(lastState);
 });
 feed.start();
-window.addEventListener('resize', () => drawChart(lastState));
+window.addEventListener('resize', () => drawChart(replayState ?? lastState));
 </script>
 
 </body>

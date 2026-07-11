@@ -30,6 +30,7 @@ import {
     asymmetry, azimuthalWeight, driftPeriodHours, driftRateRadPerHour,
     plasmapauseL, stormClass, skill, newellCoupling,
     dipoleFieldLinePoint, dipoleFieldRatio, mirrorLatitude, lossConeAngle,
+    integrateDstEnsemble, findThresholdCrossing, kpToAp,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -276,6 +277,47 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     // L=3: sin²α = 1/√(4·729 − 3·243) = 1/√2187
     assert.ok(Math.abs(Math.sin(lc3) ** 2 - 1 / Math.sqrt(2187)) < 1e-12);
     ok('dipole: field line geometry, B ratio, mirror latitude, loss cone');
+}
+
+// ── Ensemble band, threshold crossing, Kp→ap ─────────────────────────────────
+{
+    const t0 = 1_700_000_000_000;
+    const storm = [];
+    for (let m = 0; m <= 6 * 60; m += 1) {
+        storm.push({ t: t0 + m * 60_000, v: 600, n: 15, bz: -15 });
+    }
+    const { central, band } = integrateDstEnsemble(storm, -10);
+    assert.equal(band.length, central.length);
+    // Band brackets the central track everywhere and widens under driving.
+    assert.ok(central.every((p, i) => band[i].lo <= p.dst + 1e-9 && band[i].hi >= p.dst - 1e-9));
+    const w0 = band[10].hi - band[10].lo;
+    const wEnd = band[band.length - 1].hi - band[band.length - 1].lo;
+    assert.ok(wEnd > w0 && wEnd > 10, `band widens: ${w0} → ${wEnd}`);
+    // Central run identical to plain integrateDst (scales default to 1).
+    const plain = integrateDst(storm, -10);
+    assert.ok(Math.abs(plain[plain.length - 1].dst - central[central.length - 1].dst) < 1e-12);
+    assert.deepEqual(integrateDstEnsemble([], -10).band, []);
+
+    // Threshold crossing: next threshold below −40 is −50.
+    const fc = [
+        { t: t0 + 1, dst: -45 }, { t: t0 + 2, dst: -52 }, { t: t0 + 3, dst: -80 },
+    ];
+    const x = findThresholdCrossing(-40, fc);
+    assert.equal(x.threshold, -50);
+    assert.equal(x.t, t0 + 2);
+    assert.equal(findThresholdCrossing(-40, [{ t: t0, dst: -45 }]), null);  // no crossing
+    assert.equal(findThresholdCrossing(-400, fc), null);                    // below all thresholds
+    assert.equal(findThresholdCrossing(null, fc), null);
+
+    // Kp→ap: exact NOAA table anchors.
+    assert.equal(kpToAp(0), 0);
+    assert.equal(kpToAp(4), 27);
+    assert.equal(kpToAp(9), 400);
+    assert.equal(kpToAp(6.33), 94);   // 6+ → ap 94
+    assert.equal(kpToAp(5.67), 67);   // 6− → ap 67
+    assert.equal(kpToAp(12), 400);    // clamped
+    assert.equal(kpToAp(null), null);
+    ok('ensemble band, threshold crossing, Kp→ap');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

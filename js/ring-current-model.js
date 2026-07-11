@@ -152,9 +152,9 @@ export function burtonQ(vbs) {
  * steps stay unconditionally stable:
  *   Dst*ₖ₊₁ = (Dst*ₖ + Q·dt) / (1 + dt/τ)
  */
-export function stepDstStar(dstStar, vbs, dtHours, model = 'obm') {
-    const q   = model === 'burton' ? burtonQ(vbs) : obmQ(vbs);
-    const tau = model === 'burton' ? BURTON.TAU_H : obmTau(vbs);
+export function stepDstStar(dstStar, vbs, dtHours, model = 'obm', qScale = 1, tauScale = 1) {
+    const q   = (model === 'burton' ? burtonQ(vbs) : obmQ(vbs)) * qScale;
+    const tau = (model === 'burton' ? BURTON.TAU_H : obmTau(vbs)) * tauScale;
     const dt  = Math.max(0, dtHours);
     return { dstStar: (dstStar + q * dt) / (1 + dt / tau), q, tau };
 }
@@ -174,6 +174,8 @@ export function stepDstStar(dstStar, vbs, dtHours, model = 'obm') {
  */
 export function integrateDst(samples, dst0, opts = {}) {
     const model = opts.model === 'burton' ? 'burton' : 'obm';
+    const qScale   = Number.isFinite(opts.qScale)   ? opts.qScale   : 1;
+    const tauScale = Number.isFinite(opts.tauScale) ? opts.tauScale : 1;
     if (!Array.isArray(samples) || samples.length === 0 || !Number.isFinite(dst0)) return [];
 
     const MAX_STEP_H = 10 / 60;
@@ -198,7 +200,7 @@ export function integrateDst(samples, dst0, opts = {}) {
         // Hold the previous driver across the interval (sub-step long gaps).
         while (dtH > 0) {
             const step = Math.min(dtH, MAX_STEP_H);
-            ({ dstStar } = stepDstStar(dstStar, vbs, step, model));
+            ({ dstStar } = stepDstStar(dstStar, vbs, step, model, qScale, tauScale));
             dtH -= step;
         }
 
@@ -214,6 +216,73 @@ export function integrateDst(samples, dst0, opts = {}) {
         out.push({ t: s.t, dstStar, dst: toDst(dstStar, pdyn), q, tau, vbs, pdyn });
     }
     return out;
+}
+
+/**
+ * Parameter-ensemble integration for an uncertainty band. Runs the central
+ * O'Brien–McPherron fit plus the four corners of (a, τ) each perturbed by
+ * ±spread (default 25% — a deliberate SENSITIVITY band on the empirical fit
+ * coefficients, labeled as such in the UI; it is not a full forecast
+ * uncertainty, which would also need driver and propagation error).
+ * Operators need bands, not points: forecast uncertainty propagates
+ * directly into conjunction probability-of-collision (Parker 2024,
+ * doi:10.1029/2023SW003818 — see RING_CURRENT_USER_RESEARCH.md).
+ *
+ * @returns {{ central: Array, band: Array<{t, lo, hi}> }}
+ */
+export function integrateDstEnsemble(samples, dst0, opts = {}) {
+    const spread = Number.isFinite(opts.spread) ? opts.spread : 0.25;
+    const central = integrateDst(samples, dst0, opts);
+    if (!central.length) return { central, band: [] };
+    const corners = [
+        { qScale: 1 - spread, tauScale: 1 - spread },
+        { qScale: 1 - spread, tauScale: 1 + spread },
+        { qScale: 1 + spread, tauScale: 1 - spread },
+        { qScale: 1 + spread, tauScale: 1 + spread },
+    ].map(c => integrateDst(samples, dst0, { ...opts, ...c }));
+    const band = central.map((p, i) => {
+        let lo = p.dst, hi = p.dst;
+        for (const track of corners) {
+            const d = track[i]?.dst;
+            if (Number.isFinite(d)) { if (d < lo) lo = d; if (d > hi) hi = d; }
+        }
+        return { t: p.t, lo, hi };
+    });
+    return { central, band };
+}
+
+/**
+ * First forecast crossing of the next storm-class threshold below the
+ * current level (thresholds mirror stormClass / api/noaa/dst.js). Returns
+ * { threshold, t, dst } for the first forecast point at/below a threshold
+ * the present value has not already crossed, or null. This is the
+ * "predictive alert 30–90 min ahead" both operator and aurora users ask
+ * for — and it is genuine lead time, because the driver is already
+ * measured at L1.
+ */
+export function findThresholdCrossing(dstNow, forecast) {
+    if (!Number.isFinite(dstNow) || !Array.isArray(forecast)) return null;
+    const THRESHOLDS = [-30, -50, -100, -200, -350];
+    const next = THRESHOLDS.find(th => dstNow > th);
+    if (next === undefined) return null;
+    for (const p of forecast) {
+        if (Number.isFinite(p.dst) && p.dst <= next) {
+            return { threshold: next, t: p.t, dst: p.dst };
+        }
+    }
+    return null;
+}
+
+// ── Kp → ap (NOAA standard conversion, exact table) ──────────────────────────
+// Index = Kp in thirds (0o, 0+, 1−, 1o, … 9o). Used to drive the thermosphere
+// engine (js/upper-atmosphere-engine.js density()) from the live Kp.
+const AP_TABLE = [0, 2, 3, 4, 5, 6, 7, 9, 12, 15, 18, 22, 27, 32, 39, 48,
+    56, 67, 80, 94, 111, 132, 154, 179, 207, 236, 300, 400];
+
+export function kpToAp(kp) {
+    if (!Number.isFinite(kp)) return null;
+    const idx = Math.max(0, Math.min(27, Math.round(kp * 3)));
+    return AP_TABLE[idx];
 }
 
 // ── L1 ballistic propagation (the forecast horizon) ──────────────────────────
