@@ -113,7 +113,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     ringPeakL, dynamicPressure, subsolarPoint, dipoleTiltRad,
-    couplingVBs, driftRateRadPerHour, driftPeriodHours,
+    couplingVBs, driftRateRadPerHour, driftPeriodHours, shueRadiusRe,
 } from './ring-current-model.js';
 import {
     buildPopulation, POPULATIONS, particlePose, hash1, DEATH_WINDOW,
@@ -307,6 +307,11 @@ function trappedPointsMaterial(size, opacity, color) {
 }
 
 
+const smoothstepJs = (a, b, x) => {
+    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+};
+
 /** Thin polar axis line through the origin, length ±halfLen. */
 function axisLine(halfLen, color, opacity) {
     const geo = new THREE.BufferGeometry();
@@ -421,6 +426,76 @@ function windSheetMaterial(dataTex) {
                 gl_FragColor = vec4(col * b, min(1.0, b) * 0.5);
             }`,
     });
+}
+
+/**
+ * Boundary-surface material (magnetopause / bow shock). The GEOMETRY is a
+ * static (θ, φ) parameter grid — the vertex shader evaluates the live Shue
+ * (1998) surface r(θ) = uRScale·uR0·(2/(1+cosθ))^uAlpha every frame, so a
+ * pressure pulse deforms the whole shell with two uniform writes. Fragment:
+ * screen-space-derivative normals → fresnel rim (the boundary reads as a
+ * translucent membrane), a faint tailward shimmer so it reads as a surface
+ * IN a flow, and a warm tint + brightening as compression (uCompress) rises.
+ */
+function boundaryMaterial(tint, opacity, rScale) {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+            uR0:       { value: 10.2 },
+            uAlpha:    { value: 0.6 },
+            uRScale:   { value: rScale },
+            uTint:     { value: new THREE.Color(tint) },
+            uOpacity:  { value: opacity },
+            uCompress: { value: 0 },
+            uTime:     { value: 0 },
+        },
+        vertexShader: `
+            uniform float uR0, uAlpha, uRScale;
+            varying vec3 vPos;
+            void main() {
+                float th = position.x, ph = position.y;
+                float r = uRScale * uR0 * pow(2.0 / (1.0 + cos(th)), uAlpha);
+                vec3 p = vec3(r * cos(th), r * sin(th) * sin(ph), r * sin(th) * cos(ph));
+                vPos = p;
+                gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+            }`,
+        fragmentShader: `
+            uniform vec3 uTint;
+            uniform float uOpacity, uCompress, uTime;
+            varying vec3 vPos;
+            void main() {
+                vec3 N = normalize(cross(dFdx(vPos), dFdy(vPos)));
+                vec3 V = normalize(cameraPosition - vPos);
+                float rim = pow(1.0 - abs(dot(N, V)), 2.0);
+                float shim = 0.85 + 0.15 * sin(vPos.x * 1.3 - uTime * 1.1
+                                               + atan(vPos.y, vPos.z) * 2.0);
+                vec3 col = mix(uTint, vec3(1.0, 0.62, 0.35), uCompress);
+                float a = uOpacity * (rim * 0.85 + 0.05) * shim * (1.0 + 0.9 * uCompress);
+                gl_FragColor = vec4(col * a, a);
+            }`,
+    });
+}
+
+/** Static (θ, φ) parameter grid the boundary vertex shader deforms. */
+function boundaryGrid(thetaMax, rows, cols) {
+    const pos = [], idx = [];
+    for (let i = 0; i <= rows; i++) {
+        const th = (i / rows) * thetaMax;
+        for (let j = 0; j <= cols; j++) {
+            pos.push(th, (j / cols) * 2 * Math.PI, 0);
+        }
+    }
+    for (let i = 0; i < rows; i++) {
+        for (let j = 0; j < cols; j++) {
+            const a = i * (cols + 1) + j, b = a + cols + 1;
+            idx.push(a, b, a + 1, b, b + 1, a + 1);
+        }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    return geo;
 }
 
 /**
@@ -560,6 +635,7 @@ export class RingCurrentGlobe {
         this._buildParticles();
         this._buildRings();
         this._buildSunAndTransit();
+        this._buildBoundaries();
         this._buildFlashes();
         this._buildInjections();
         this._buildCinematics();
@@ -960,7 +1036,10 @@ export class RingCurrentGlobe {
      *  and parcels vanish exactly when their plasma reaches Earth. */
     _updateTransit(simNow, wallNow) {
         const tau = this._clock.tau;
-        const spanX = TRANSIT.X_SUN - TRANSIT.X_MP;
+        // The corridor's Earth-end is the LIVE Shue nose — under a pressure
+        // pulse the whole stream visibly reaches deeper before coupling.
+        const xmp = this._mpR0 + 0.4;
+        const spanX = TRANSIT.X_SUN - xmp;
         const pos = this._transitPos, col = this._transitCol, off = this._transitOff;
         // Heartbeat: parcels pulse on their 1-min sample cadence (wall time —
         // it's live instrumentation, not physics). Prominent in Real mode.
@@ -976,7 +1055,7 @@ export class RingCurrentGlobe {
             const remain = p.tArrive - simNow;
             if (remain <= 0) continue;                   // arrived (in sim) — see flashes
             const f = Math.min(1, remain / dur);         // 1 = just left L1, 0 = arriving
-            const x = TRANSIT.X_MP + f * spanX;
+            const x = xmp + f * spanX;
             const nNorm = Math.max(0, Math.min(1, (Number.isFinite(p.n) ? p.n : 3) / TRANSIT.N_REF));
             const [R, G, B] = streamColor(this._streamMode, p);
             const pdyn = dynamicPressure(p.n, p.v);
@@ -1036,7 +1115,7 @@ export class RingCurrentGlobe {
         let vSum = 0;
         for (const s of waveSamples) {
             vSum += s.vNorm;
-            const c = Math.round(((s.x - TRANSIT.X_MP) / spanX) * (bins - 1));
+            const c = Math.round(((s.x - xmp) / spanX) * (bins - 1));
             for (let b = Math.max(0, c - 2); b <= Math.min(bins - 1, c + 2); b++) {
                 const w = 1 - Math.abs(b - c) / 3;
                 const o = b * 4;
@@ -1107,6 +1186,131 @@ export class RingCurrentGlobe {
         this._transitGeo.attributes.color.needsUpdate = true;
     }
 
+    // ── Boundaries (Shue 1998) + the magnetosheath river ────────────────────
+
+    /** Magnetopause + bow shock as live-deforming Shue surfaces, and the
+     *  sheath-tracer pool: arriving parcels DEFLECT and stream around the
+     *  boundary like a river around a boulder — slow at the nose,
+     *  accelerating along the flanks, fading tailward. Axisymmetric about
+     *  GSM X by construction, so they live at scene root (no dipole tilt). */
+    _buildBoundaries() {
+        this._mpR0 = 10.2;      // eased live values (Shue standoff, flaring)
+        this._mpAlpha = 0.6;
+        this._mpTarget = { r0: 10.2, alpha: 0.6 };
+        this._mpMat = boundaryMaterial(0x7fb4ff, 0.10, 1.0);
+        this._mpMesh = new THREE.Mesh(boundaryGrid(2.0, 30, 44), this._mpMat);
+        this._mpMesh.frustumCulled = false;
+        this._scene.add(this._mpMesh);
+        // Bow shock: upstream, wider flaring, fainter, teal. Dayside only —
+        // its tail is off-story here.
+        this._bsMat = boundaryMaterial(0x59e0d8, 0.055, 1.29);
+        this._bsMesh = new THREE.Mesh(boundaryGrid(1.35, 20, 44), this._bsMat);
+        this._bsMesh.frustumCulled = false;
+        this._scene.add(this._bsMesh);
+
+        // Sheath river tracers.
+        const N = 700;
+        this._shGeo = new THREE.BufferGeometry();
+        this._shPos = new Float32Array(N * 3);
+        this._shCol = new Float32Array(N * 3);
+        this._shGeo.setAttribute('position', new THREE.BufferAttribute(this._shPos, 3).setUsage(THREE.DynamicDrawUsage));
+        this._shGeo.setAttribute('color',    new THREE.BufferAttribute(this._shCol, 3).setUsage(THREE.DynamicDrawUsage));
+        this._shPts = new THREE.Points(this._shGeo, glowPointsMaterial(0.13, 0.9));
+        this._shPts.frustumCulled = false;
+        this._scene.add(this._shPts);
+        this._sh = {
+            mode:  new Uint8Array(N),
+            th:    new Float32Array(N),    // solar-zenith angle along the surface
+            ph:    new Float32Array(N),    // azimuth around the Sun–Earth axis
+            jit:   new Float32Array(N),    // standoff offset (sheath thickness)
+            vKm:   new Float32Array(N),    // parcel's measured speed
+            south: new Uint8Array(N),
+            nN:    new Float32Array(N),
+            age:   new Float32Array(N),
+        };
+        this._shCursor = 0;
+    }
+
+    /** Most of an arriving parcel becomes sheath flow — spawn its tracers.
+     *  No τ down-scaling (unlike injections): tracer flight time is honest
+     *  (~4 real minutes of sheath transit ⇒ ~0.8 s at ×300), so the pool
+     *  self-limits and the river stays visibly fed at high compression. */
+    _spawnSheath(p) {
+        const sh = this._sh;
+        const count = 3 + 3 * (this._streamDensity ?? 1);
+        for (let c = 0; c < count; c++) {
+            let i = -1;
+            for (let probe = 0; probe < sh.mode.length; probe++) {
+                const j = (this._shCursor + probe) % sh.mode.length;
+                if (sh.mode[j] === 0) { i = j; this._shCursor = j + 1; break; }
+            }
+            if (i < 0) return;
+            sh.mode[i]  = 1;
+            sh.th[i]    = 0.10 + Math.random() * 0.30;
+            sh.ph[i]    = Math.random() * 2 * Math.PI;
+            sh.jit[i]   = 1.06 + Math.random() * 0.10;   // just OUTSIDE the boundary
+            sh.vKm[i]   = Number.isFinite(p.v) ? p.v : 400;
+            sh.south[i] = Number.isFinite(p.bz) && p.bz < 0 ? 1 : 0;
+            sh.nN[i]    = Math.max(0.15, Math.min(1, (Number.isFinite(p.n) ? p.n : 3) / TRANSIT.N_REF));
+            sh.age[i]   = 0;
+        }
+    }
+
+    /** Advance the river: dθ/dt = v_apparent·flowFactor / r(θ). Spreiter-like
+     *  profile — stagnant at the nose, ~90% of wind speed by the flanks.
+     *  Speed uses the LIVE τ (the one-clock invariant), so the river crawls
+     *  honestly at Real ×1 and courses at ×300. */
+    _updateSheath(dt) {
+        const sh = this._sh;
+        const pos = this._shPos, col = this._shCol;
+        const vScale = this._clock.tau / SCALE.NEAR_EARTH.kmPerUnit;   // km/s → units/s
+        for (let i = 0; i < sh.mode.length; i++) {
+            const j = i * 3;
+            if (sh.mode[i] === 0) { col[j] = col[j + 1] = col[j + 2] = 0; continue; }
+            sh.age[i] += dt;
+            const th = sh.th[i];
+            const r = shueRadiusRe(th, this._mpR0, this._mpAlpha) * sh.jit[i];
+            const flow = 0.22 + 0.68 * Math.min(1, th / 1.5);   // nose-stagnant → flank-fast
+            sh.th[i] += (sh.vKm[i] * vScale * flow / Math.max(2, r)) * dt;
+            if (sh.th[i] > 2.05 || sh.age[i] > 40) {
+                sh.mode[i] = 0;
+                col[j] = col[j + 1] = col[j + 2] = 0;
+                continue;
+            }
+            const st = Math.sin(th), ct = Math.cos(th);
+            pos[j]     = r * ct;
+            pos[j + 1] = r * st * Math.sin(sh.ph[i]);
+            pos[j + 2] = r * st * Math.cos(sh.ph[i]);
+            const fade = (1 - smoothstepJs(1.45, 2.05, th)) * (0.35 + 0.65 * sh.nN[i]);
+            if (sh.south[i]) {
+                col[j] = 1.0 * fade; col[j + 1] = 0.42 * fade; col[j + 2] = 0.2 * fade;
+            } else {
+                col[j] = 0.32 * fade; col[j + 1] = 0.68 * fade; col[j + 2] = 1.0 * fade;
+            }
+        }
+        this._shGeo.attributes.position.needsUpdate = true;
+        this._shGeo.attributes.color.needsUpdate = true;
+    }
+
+    /** Ease the boundary toward the live Shue target (the real response is
+     *  minutes; ~1.5 s of viewing keeps it legible without popping) and
+     *  propagate the nose to everything anchored on it. */
+    _updateBoundaries(dt) {
+        const k = 1 - Math.exp(-dt / 1.5);
+        this._mpR0    += (this._mpTarget.r0 - this._mpR0) * k;
+        this._mpAlpha += (this._mpTarget.alpha - this._mpAlpha) * k;
+        const compress = Math.max(0, Math.min(1, (10.2 - this._mpR0) / 4.5));
+        for (const m of [this._mpMat, this._bsMat]) {
+            m.uniforms.uR0.value = this._mpR0;
+            m.uniforms.uAlpha.value = this._mpAlpha;
+            m.uniforms.uCompress.value = compress;
+            m.uniforms.uTime.value = this._tView;
+        }
+        // The corridor's Earth-end IS the live nose: the wind sheet clips
+        // there and the parcel positions in _updateTransit use it.
+        this._windMat.uniforms.uXmp.value = this._mpR0 + 0.4;
+    }
+
     // ── Arrival flashes + injection triggers (#917) ─────────────────────────
 
     /** Fire the parcels whose tArrive fell inside (lastSimNow, simNow] this
@@ -1126,6 +1330,9 @@ export class RingCurrentGlobe {
             if (vbs >= INJECT.VBS_MIN) {
                 this._spawnInjection(vbs, this._state.plasmapauseL);
             }
+            // The river: most of every arriving parcel DEFLECTS into the
+            // magnetosheath and streams around the boundary.
+            this._spawnSheath(p);
             // Shock-arrival moment: a ≥2× dynamic-pressure step between
             // consecutive arrivals IS an interplanetary shock/compression
             // front hitting the magnetopause. Cooldown-limited so high τ
@@ -1226,7 +1433,7 @@ export class RingCurrentGlobe {
         const south = Number.isFinite(bz) && bz < 0;
         f.mat.color.setRGB(...(south ? [1.0, 0.55, 0.3] : [0.45, 0.7, 1.0]));
         f.sp.position.set(
-            TRANSIT.X_MP + 0.3,
+            this._mpR0 + 0.3,   // ON the live Shue nose
             (Math.random() - 0.5) * 2.2,
             (Math.random() - 0.5) * 2.2,
         );
@@ -1529,6 +1736,14 @@ export class RingCurrentGlobe {
         }
         // ENA imaging target: emission tracks the trapped-ion content.
         this._enaTarget = Math.min(1, Math.abs(this._state.dstStar) / 120);
+        // Live Shue boundary target (eased in _updateBoundaries).
+        const mp = state?.now?.magnetopause;
+        if (mp && Number.isFinite(mp.r0)) {
+            this._mpTarget = {
+                r0: Math.max(4.5, Math.min(13, mp.r0)),
+                alpha: Math.max(0.4, Math.min(0.85, mp.alpha)),
+            };
+        }
         // Drive the EarthSkin from the SAME live state as the ring: aurora
         // oval from Kp + southward Bz + ap-proxied hemispheric power, and the
         // skin's ring-current nightside heating glow from this page's own
@@ -1594,11 +1809,13 @@ export class RingCurrentGlobe {
                 e.mat.uniforms.uBounceSec.value  = this._tView - e.k * TRAIL_VIEW_S;
             }
         }
+        this._updateBoundaries(dt);
         this._updateTransit(simNow, wallNow);
         this._detectArrivals(simNow);
         this._lastSimNow = simNow;
         this._updateFlashes(dt);
         this._updateInjections(dt, dSimH);
+        this._updateSheath(dt);
         this._updateCinematics(dt);
         this._updateTooltip(wallNow);
         this._controls.update();

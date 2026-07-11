@@ -33,7 +33,7 @@ import {
     integrateDstEnsemble, findThresholdCrossing, kpToAp, oxygenFraction,
     bouncePeriodSeconds, subsolarPoint, dipoleTiltRad,
     geocoronalDensity, chargeExchangeCrossSection, chargeExchangeLifetimeHours,
-    earthOrbit,
+    earthOrbit, shueStandoffRe, shueAlpha, shueRadiusRe, bowShockStandoffRe,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -471,6 +471,32 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.equal(earthOrbit(Date.UTC(2026, 6, 11)).dayOfYear, 192);
     assert.equal(earthOrbit(NaN), null);
     ok('earth orbit: perihelion/aphelion r, equinox longitudes, mean motion');
+}
+
+// ── Shue (1998) magnetopause + bow shock ─────────────────────────────────────
+{
+    // Nominal wind ⇒ ~10.3 R_E nose; classic anchors from the paper's regime.
+    const r0n = shueStandoffRe(2, 0);
+    assert.ok(r0n > 9.8 && r0n < 10.8, `nominal r₀ = ${r0n}`);
+    // Pressure compresses: r₀ ∝ Pdyn^(−1/6.6) exactly.
+    assert.ok(Math.abs(shueStandoffRe(20, 0) / r0n - Math.pow(10, -1 / 6.6)) < 1e-9);
+    // Southward Bz erodes the dayside further at fixed pressure.
+    assert.ok(shueStandoffRe(2, -15) < shueStandoffRe(2, 0));
+    assert.ok(shueStandoffRe(2, +10) > shueStandoffRe(2, 0));
+    // Extreme storm drives the nose INSIDE geosynchronous orbit (6.6 R_E).
+    assert.ok(shueStandoffRe(30, -20) < 6.6, `storm r₀ = ${shueStandoffRe(30, -20)}`);
+    // Flaring: α > 0.5 nominally, grows with southward Bz and pressure.
+    const aN = shueAlpha(2, 0);
+    assert.ok(aN > 0.5 && aN < 0.72, `α = ${aN}`);
+    assert.ok(shueAlpha(2, -10) > aN && shueAlpha(10, 0) > aN);
+    // Surface shape: r(0) = r₀; monotonically opens toward the flanks.
+    assert.equal(shueRadiusRe(0, 10, 0.6), 10);
+    assert.ok(shueRadiusRe(1.2, 10, 0.6) > shueRadiusRe(0.6, 10, 0.6));
+    // Bow shock sits upstream of the magnetopause by the F&R ratio.
+    assert.ok(Math.abs(bowShockStandoffRe(2, 0) / r0n - 1.29) < 1e-9);
+    // Null-safety: defaults, no throws.
+    assert.ok(Number.isFinite(shueStandoffRe(null, null)));
+    ok('Shue: nominal ~10.3 Rᴇ, Pdyn^-1/6.6, Bz erosion, sub-GEO extremes, flaring');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

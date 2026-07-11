@@ -439,6 +439,51 @@ export function plasmapauseL(kp) {
     return Math.max(1.8, Math.min(6.5, 5.6 - 0.46 * k));
 }
 
+// ── Magnetopause & bow shock (Shue et al. 1998 — the boundary conditions) ────
+
+/**
+ * Shue et al. (1998) subsolar magnetopause standoff distance (R_E):
+ *
+ *   r₀ = (10.22 + 1.29·tanh(0.184·(Bz + 8.14))) · Pdyn^(−1/6.6)
+ *
+ * The two live drivers do exactly what intuition says: dynamic pressure
+ * pushes the nose in (r₀ ∝ Pdyn^−0.152), and southward Bz erodes it further
+ * (reconnection peels flux off the dayside). Nominal wind (2 nPa, Bz 0)
+ * ⇒ ~10.3 R_E; a big storm (30 nPa, −20 nT) ⇒ ~5.4 R_E — INSIDE
+ * geosynchronous orbit, which is why GEO satellites sometimes find
+ * themselves in the solar wind during extreme events.
+ */
+export function shueStandoffRe(pdynNPa, bzNT) {
+    const p = Number.isFinite(pdynNPa) && pdynNPa > 0 ? pdynNPa : 2;
+    const bz = Number.isFinite(bzNT) ? bzNT : 0;
+    return (10.22 + 1.29 * Math.tanh(0.184 * (bz + 8.14))) * Math.pow(p, -1 / 6.6);
+}
+
+/**
+ * Shue (1998) tail-flaring exponent α = (0.58 − 0.007·Bz)·(1 + 0.024·ln Pdyn).
+ * α > 0.5 ⇒ the tail boundary keeps opening; southward Bz flares it more.
+ */
+export function shueAlpha(pdynNPa, bzNT) {
+    const p = Number.isFinite(pdynNPa) && pdynNPa > 0 ? pdynNPa : 2;
+    const bz = Number.isFinite(bzNT) ? bzNT : 0;
+    return (0.58 - 0.007 * bz) * (1 + 0.024 * Math.log(p));
+}
+
+/**
+ * Shue magnetopause radius at solar-zenith angle θ (rad from the +X nose):
+ * r(θ) = r₀·(2/(1+cosθ))^α. Valid to θ ≈ 2 rad; diverges toward the tail.
+ */
+export function shueRadiusRe(thetaRad, r0, alpha) {
+    if (!Number.isFinite(thetaRad) || !Number.isFinite(r0) || !Number.isFinite(alpha)) return null;
+    return r0 * Math.pow(2 / (1 + Math.cos(Math.min(2.0, Math.abs(thetaRad)))), alpha);
+}
+
+/** Bow-shock standoff (R_E) — Farris & Russell (1994)-class ratio ≈ 1.29·r₀
+ *  for typical magnetosonic Mach numbers. Order-of-magnitude for the twin. */
+export function bowShockStandoffRe(pdynNPa, bzNT) {
+    return 1.29 * shueStandoffRe(pdynNPa, bzNT);
+}
+
 // ── Composition (O⁺/H⁺ split — Phase 2b) ─────────────────────────────────────
 
 /**

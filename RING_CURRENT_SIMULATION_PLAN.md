@@ -228,11 +228,16 @@ Three.js 0.160 importmap, NOAA browser-direct / NASA via edge.
   tooltips were ported onto the GPU pipeline — see the integration note in
   RING_CURRENT_VISUAL_PLAN.md. HUD gains a live charge-exchange-τ row.
   **Sun→surface journey map**: measured L1 transit ✓ → magnetopause arrival
-  flash ✓ → nightside injection burst ✓ → trapped drift/bounce ✓ → loss
-  (ENA / precipitation-to-surface) ✓. NOT yet rendered: the
-  magnetosheath/flank/tail leg between arrival and injection (parcels end
-  at the magnetopause; injections restart at midnight) — that leg is the
-  next fidelity step.
+  flash ✓ → magnetosheath deflection around the live Shue boundary ✓
+  (2026-07-11: the river — tracers stream nose→flank at Spreiter-like
+  speeds along r(θ)) → nightside injection burst ✓ → trapped drift/bounce
+  ✓ → loss (ENA / precipitation-to-surface) ✓. The boundary itself is
+  live: Shue (1998) r₀(Pdyn, Bz) + α flaring drive a deforming
+  magnetopause membrane, a Farris–Russell bow shock, the corridor's
+  Earth-end, the wind sheet's clip, and the arrival-flash anchor; the HUD
+  shows the nose distance and flags sub-GEO crossings. Remaining
+  unrendered leg: tail transport between the flanks and the midnight
+  injection point.
 - **EarthSkin integration (2026-07-11, third pass)**: the page's Earth is
   now the SHARED `js/earth-skin.js` stack (same renderer as earth.html and
   the space-weather globe) — Blue Marble, city lights, ocean specular,

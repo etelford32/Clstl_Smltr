@@ -256,6 +256,8 @@ body {
             <span class="rc-dot" style="background:#37e0a0"></span>Aurora oval &mdash; live Kp/Bz at the magnetic pole<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
             <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz<br>
+            <span class="rc-dot" style="background:#7fb4ff"></span>Magnetopause (Shue98, live) &middot; <span class="rc-dot" style="background:#59e0d8"></span>bow shock<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;arrivals deflect &mdash; the sheath river parts around the boundary</span><br>
             <span style="color:#5d6684">trail length &prop; speed &middot; flash &prop; VBs on arrival</span>
         </div>
         <div class="rc-stage-hint">drag to orbit &middot; scroll out for the Sun corridor &middot; one clock drives stream, ring, lifecycle &amp; Earth spin &middot; hover any particle for its data &middot; GSM frame</div>
@@ -290,6 +292,7 @@ body {
             <div class="rc-kv"><span class="rc-k">IMF Bz (GSM)</span><span class="rc-v" id="rc-bz">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">IMF |B|</span><span class="rc-v" id="rc-bt">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">dyn. pressure</span><span class="rc-v" id="rc-pdyn">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">magnetopause nose (Shue98)</span><span class="rc-v" id="rc-mp">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">coupling VBs</span><span class="rc-v" id="rc-vbs">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">Newell d&Phi;/dt</span><span class="rc-v" id="rc-newell">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">decay time &tau;</span><span class="rc-v" id="rc-tau">&mdash;</span></div>
@@ -618,6 +621,11 @@ function renderHud(s) {
     bzEl.className = 'rc-v ' + (s.drivers.bz < 0 ? 'rc-south' : 'rc-north');
     $('rc-bt').textContent   = fmt(s.drivers.bt, 1, ' nT');
     $('rc-pdyn').textContent = fmt(s.drivers.pdyn, 2, ' nPa');
+    const mp = s.now.magnetopause;
+    const mpEl = $('rc-mp');
+    mpEl.textContent = mp && Number.isFinite(mp.r0)
+        ? `${mp.r0.toFixed(1)} Rᴇ${mp.r0 < 6.6 ? ' — inside GEO!' : ''}` : '—';
+    mpEl.className = 'rc-v ' + (mp && mp.r0 < 8 ? 'rc-south' : '');
     $('rc-vbs').textContent  = fmt(s.drivers.vbs, 2, ' mV/m');
     const dphi = newellCoupling(s.drivers.v, s.drivers.by, s.drivers.bz);
     $('rc-newell').textContent = Number.isFinite(dphi)
