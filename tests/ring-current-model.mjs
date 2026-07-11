@@ -30,7 +30,7 @@ import {
     asymmetry, azimuthalWeight, driftPeriodHours, driftRateRadPerHour,
     plasmapauseL, stormClass, skill, newellCoupling,
     dipoleFieldLinePoint, dipoleFieldRatio, mirrorLatitude, lossConeAngle,
-    integrateDstEnsemble, findThresholdCrossing, kpToAp,
+    integrateDstEnsemble, findThresholdCrossing, kpToAp, oxygenFraction,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -318,6 +318,28 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.equal(kpToAp(12), 400);    // clamped
     assert.equal(kpToAp(null), null);
     ok('ensemble band, threshold crossing, Kp→ap');
+}
+
+// ── O⁺/H⁺ composition (Phase 2b) ─────────────────────────────────────────────
+{
+    // Literature anchors (Hamilton 1988; Daglis 1999): quiet ≲10%,
+    // moderate ~20–30%, intense ≥45%, never above the 0.64 asymptote.
+    assert.ok(Math.abs(oxygenFraction(0) - 0.06) < 1e-12, 'quiet ≈ 6%');
+    const f100 = oxygenFraction(-100), f200 = oxygenFraction(-200);
+    assert.ok(f100 > 0.25 && f100 < 0.40, `f_O(−100) = ${f100}`);
+    assert.ok(f200 > 0.40 && f200 < 0.55, `f_O(−200) = ${f200}`);
+    // Monotone in storm depth, bounded.
+    let prev = 0;
+    for (let d = 0; d >= -600; d -= 20) {
+        const f = oxygenFraction(d);
+        assert.ok(f >= prev - 1e-12, 'f_O grows with storm depth');
+        assert.ok(f >= 0.06 && f < 0.64, `bounded: f_O(${d}) = ${f}`);
+        prev = f;
+    }
+    // Positive Dst* clamps to quiet; null-safe.
+    assert.equal(oxygenFraction(25), oxygenFraction(0));
+    assert.equal(oxygenFraction(null), oxygenFraction(0));
+    ok('composition: quiet 6% → storm ≥45% O⁺, monotone, bounded < 0.64');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

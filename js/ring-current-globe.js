@@ -7,8 +7,15 @@
  *
  *   earth          textured sphere + additive atmosphere shell
  *   fieldLines     dipole cage — r = L·cos²λ at L = 2…6 × 12 meridians
- *   ions           ~3200 points, WESTWARD drift + REAL field-line bounce
+ *   ions H⁺        ~2100 points, WESTWARD drift + REAL field-line bounce
  *                  between mirror points (pitch angles above the loss cone)
+ *   ions O⁺        ~1100 points, same drift (gradient–curvature drift period
+ *                  is mass-independent at fixed energy) but visibly slower
+ *                  bounce (T_b ∝ √m — 4× for O⁺; drawn at 2.5× for
+ *                  legibility). Relative BRIGHTNESS of the two ion
+ *                  populations tracks the model's storm-time O⁺ energy
+ *                  fraction (oxygenFraction), so a deep main phase visibly
+ *                  turns the ring ionospheric-green.
  *   electrons      ~1400 points, EASTWARD, same trapped-motion geometry
  *   ringTorus      symmetric glow at the model's peak L (|Dst*|-driven)
  *   partialArc     dusk-centred arc — the partial ring current bulge
@@ -42,8 +49,14 @@ import {
 // Keep in sync with js/earth-skin.js EARTH_TEXTURES (version-pinned CDN).
 const EARTH_DAY_TEXTURE = 'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg';
 
-const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);
+const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);   // H⁺ (solar wind)
+const ION_O_COLOR    = new THREE.Color(0.58, 1.00, 0.34);   // O⁺ (ionospheric outflow)
 const ELECTRON_COLOR = new THREE.Color(0.35, 0.75, 1.00);
+
+// Fraction of ion PARTICLES built as O⁺. Fixed at build time (species can't
+// flip mid-flight without a bounce-phase jump); the on-screen energy mix is
+// steered per frame by brightness, normalised against this build ratio.
+const O_BUILD_FRACTION = 1100 / 3200;
 
 // Soft-glow point shader: every particle renders as a gaussian orb with a
 // hot core instead of a hard square — one material for populations, transit
@@ -101,7 +114,7 @@ function atmosphereMaterial() {
  * js/van-allen-particles.js), deeper mirrors bouncing slower (T_b grows as
  * α_eq shrinks). Drift stays physical: rate × timeCompression.
  */
-function makePopulation(count, species) {
+function makePopulation(count, species, bounceScale = 1) {
     const L       = new Float32Array(count);
     const theta   = new Float32Array(count);
     const eKev    = new Float32Array(count);
@@ -118,7 +131,7 @@ function makePopulation(count, species) {
         const lc = lossConeAngle(L[i]);
         const alpha = lc + (Math.PI / 2 - lc) * Math.pow(Math.random(), 0.45);
         mirrorL[i] = mirrorLatitude(alpha);
-        bRate[i]   = (1.1 + Math.random() * 1.2) / (1 + 1.8 * mirrorL[i]);
+        bRate[i]   = bounceScale * (1.1 + Math.random() * 1.2) / (1 + 1.8 * mirrorL[i]);
         bPhase[i]  = Math.random() * 2 * Math.PI;
         rate[i]    = driftRateRadPerHour(eKev[i], L[i], species);
     }
@@ -265,8 +278,23 @@ export class RingCurrentGlobe {
     }
 
     _buildParticles() {
-        this._ions      = this._makePoints(makePopulation(3200, 'ion'),      ION_COLOR,      0.085);
+        // Ion budget split H⁺/O⁺ at O_BUILD_FRACTION. O⁺ drifts identically
+        // (drift period is mass-independent at fixed energy) but bounces
+        // slower — T_b ∝ √m ⇒ 4× for O⁺; drawn at 2.5× (1/0.4) so the slow
+        // bounce reads without looking frozen (bounce is decorative
+        // viewing-rate anyway, see header).
+        this._ionsH     = this._makePoints(makePopulation(2100, 'ion'),           ION_COLOR,   0.085);
+        this._ionsO     = this._makePoints(makePopulation(1100, 'ion', 0.4),      ION_O_COLOR, 0.095);
         this._electrons = this._makePoints(makePopulation(1400, 'electron'), ELECTRON_COLOR, 0.060);
+        // Start at the quiet-time energy mix (≈6% O⁺).
+        this._setCompositionMix(0.06);
+    }
+
+    /** Brightness-steer the two ion populations to an O⁺ energy fraction. */
+    _setCompositionMix(fO) {
+        const f = Math.max(0, Math.min(0.8, Number.isFinite(fO) ? fO : 0.06));
+        this._ionsO.mix = Math.min(1.8, f / O_BUILD_FRACTION);
+        this._ionsH.mix = Math.min(1.3, (1 - f) / (1 - O_BUILD_FRACTION));
     }
 
     _makePoints(pop, baseColor, size) {
@@ -279,7 +307,7 @@ export class RingCurrentGlobe {
         const points = new THREE.Points(geo, mat);
         points.frustumCulled = false;
         this._scene.add(points);
-        return { pop, geo, pos, col, baseColor, points };
+        return { pop, geo, pos, col, baseColor, points, mix: 1 };
     }
 
     _buildRings() {
@@ -547,7 +575,8 @@ export class RingCurrentGlobe {
             `Dst ${f1(nw.dstModel, ' nT')} (obs ${f1(nw.dstObserved, '', 0)})`,
             `W ${Number.isFinite(nw.energyJ) ? (nw.energyJ / 1e15).toFixed(2) + '×10¹⁵ J' : '—'}`,
             `peak L ${f1(nw.peakL, ' Rᴇ', 2)}   τ ${f1(nw.tauHours, ' h')}`,
-            `${nw.storm?.label ?? ''}`,
+            `${nw.storm?.label ?? ''}${Number.isFinite(nw.oxygenFraction)
+                ? ` · O⁺ ${Math.round(nw.oxygenFraction * 100)}%` : ''}`,
         ]);
         // Sun glow tracks the strongest incoming driver — a storm you can
         // see coming before it arrives.
@@ -561,6 +590,7 @@ export class RingCurrentGlobe {
             asym:         now.asymmetry || { amplitude: 0, mltPeakHours: 19 },
             plasmapauseL: Number.isFinite(now.plasmapauseL) ? now.plasmapauseL : 4.7,
         };
+        this._setCompositionMix(now.oxygenFraction);
         if (Math.abs(this._state.peakL - this._builtPeakL) > 0.12) {
             this._rebuildTorus(this._state.peakL);
         }
@@ -578,7 +608,8 @@ export class RingCurrentGlobe {
     tick(dt) {
         const dtH = (dt * this._timeCompression) / 3600;   // viewing → model hours
         this._tView += dt;
-        this._updatePopulation(this._ions, dtH);
+        this._updatePopulation(this._ionsH, dtH);
+        this._updatePopulation(this._ionsO, dtH);
         this._updatePopulation(this._electrons, dtH);
         this._updateTransit();
         this._controls.update();
@@ -586,9 +617,10 @@ export class RingCurrentGlobe {
     }
 
     _updatePopulation(P, dtH) {
-        const { pop, pos, col, baseColor } = P;
+        const { pop, pos, col, baseColor, mix } = P;
         const { dstStar, asym } = this._state;
-        const intensity = 0.25 + 0.75 * Math.min(1, Math.abs(dstStar) / 150);
+        // mix: composition brightness steer (H⁺ vs O⁺ energy share).
+        const intensity = (0.25 + 0.75 * Math.min(1, Math.abs(dstStar) / 150)) * mix;
         const tv = this._tView;
         for (let i = 0; i < pop.count; i++) {
             let th = pop.theta[i] + pop.rate[i] * dtH;

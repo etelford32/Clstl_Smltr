@@ -439,6 +439,31 @@ export function plasmapauseL(kp) {
     return Math.max(1.8, Math.min(6.5, 5.6 - 0.46 * k));
 }
 
+// ── Composition (O⁺/H⁺ split — Phase 2b) ─────────────────────────────────────
+
+/**
+ * O⁺ fraction of the ring current energy density vs storm intensity.
+ *
+ * Quiet time the ring current is solar-wind protons (O⁺ ≲ 10%); storm-time
+ * injection is fed by ionospheric outflow, so the O⁺ share GROWS with storm
+ * depth — ~30% for moderate storms, ≥50% for intense ones (Hamilton et al.
+ * 1988 AMPTE/CCE; Daglis et al. 1999, Space Sci. Rev. 91). Empirical smooth
+ * fit through those anchors, asymptoting at 0.64 (the one-off ~80% extremes
+ * of great storms are deliberately not chased):
+ *
+ *   f_O(Dst*) = 0.06 + 0.58 · (1 − e^(Dst* / 180)),  Dst* ≤ 0
+ *
+ * O⁺ matters beyond bookkeeping: at ring-current energies its charge-exchange
+ * cross-section with geocoronal H exceeds H⁺'s, so an O⁺-rich storm-time ring
+ * decays faster at first — part of the observed two-phase recovery. The OBM
+ * τ(VBs) fit already absorbs this in aggregate; this function only PARTITIONS
+ * the energy for display, it does not feed back into the integration.
+ */
+export function oxygenFraction(dstStar) {
+    const d = Number.isFinite(dstStar) ? Math.min(0, dstStar) : 0;
+    return 0.06 + 0.58 * (1 - Math.exp(d / 180));
+}
+
 // ── Classification & skill ───────────────────────────────────────────────────
 
 /** Storm class from (uncorrected) Dst — mirrors api/noaa/dst.js exactly. */

@@ -135,6 +135,8 @@ ring-current / coupling model of its southward-IMF driver. The uploaded patch
 | Latest sample append | `/api/solar-wind/latest` (Supabase cache, 30 s CDN) | T1 (60 s) |
 | Observed Dst (24 h) | NOAA `kyoto-dst.json`, browser-direct | T3 (15 min) |
 | Kp (plasmapause) | NOAA `planetary_k_index_1m.json`, browser-direct | T2 (5 min) |
+| GOES Hp (GEO cross-check) | NOAA `goes/primary/magnetometers-1-day.json`, browser-direct, best-effort | T3 (15 min) |
+| Server skill ledger | `/api/ring-current/skill` (Supabase join, 10-min CDN TTL) | T3 (15 min) |
 
 Fallback: if browser-direct NOAA is unreachable, the feed degrades to
 `/api/solar-wind/latest?series=1` (60 min) + `/api/noaa/dst` (recent
@@ -149,8 +151,10 @@ readings) — shorter window, page still live.
 | `js/ring-current-model.js` | Pure physics, no DOM/THREE — unit-testable. Coupling, OBM/Burton integration, pressure correction, DPS energy, radial profile, asymmetry, drift periods, storm classification, ballistic L1 propagation, skill metrics (RMSE/bias). |
 | `js/ring-current-feed.js` | Data layer. Polls the feeds above, normalises fill values, assembles a merged 1-min driver series, anchors the model on observed Dst 24 h ago, re-integrates, emits `state` events. |
 | `js/ring-current-globe.js` | Three.js scene: Earth (pinned three-globe CDN textures), dipole field lines, drift-animated ion/electron particle populations with Dst*-driven density + dusk-side partial-ring asymmetry, plasmapause ring. |
-| `ring-current.html` | Page shell: canonical nav (`<nav></nav>` + `initNav`), HUD panels (drivers / state / forecast), model-vs-observed Dst chart with forecast strip (2D canvas, no chart lib). |
+| `ring-current.html` | Page shell: canonical nav (`<nav></nav>` + `initNav`), HUD panels (drivers / state / forecast / validation), model-vs-observed Dst chart with forecast strip (2D canvas, no chart lib). |
+| `api/ring-current/skill.js` | Published skill ledger (Phase 2b): edge function joining `ring_current_log` ↔ `geomag_indices` via service role — aggregates only, raw rows never leave. Pure core `ledgerSkillSummary` is node-tested. |
 | `tests/ring-current-model.mjs` | Node physics tests (same pattern as `tests/abell85-physics.mjs`). |
+| `tests/ring-current-skill-endpoint.mjs` | Node tests for the ledger join/aggregation. |
 
 Navigation: one new entry in the **Space Weather** dropdown of `js/nav.js`
 (`ring-current.html`, id `ring-current`, badge NEW). `scripts/lint-nav.mjs`
@@ -208,13 +212,29 @@ Three.js 0.160 importmap, NOAA browser-direct / NASA via edge.
   service-role tables (intentional — advisor false positive). Newell (2007)
   coupling added to the model + page HUD (derivable from stored fields — no
   schema change).
-- **Phase 2b — hindcast (not started)**: Gannon SYM-H replay mode on the
-  page via `/api/omni/imf`; O⁺/H⁺ composition split during storms; a page
-  panel reading the `ring_current_log` ↔ `geomag_indices` skill join.
-- **Phase 3 — operator surface**: Dst-threshold alert type (`notify_*` column
-  + `js/alert-engine.js` check + `account.html` toggle, per CLAUDE.md
-  heuristic), GOES magnetometer cross-check, coupling to the LEO-drag
-  forecast (ring-current heating → thermosphere density).
+- **Phase 2b — hindcast (LANDED)**: Gannon SYM-H replay mode on the page via
+  `/api/omni/imf` (PR #914). O⁺/H⁺ composition split (2026-07-11):
+  `oxygenFraction(dstStar)` in the model (Hamilton 1988 / Daglis 1999
+  anchors, display-only — it partitions energy, it does NOT feed back into
+  the OBM integration, whose τ fit already absorbs composition-dependent
+  decay in aggregate), HUD row, and a brightness-steered H⁺/O⁺ particle
+  split on the globe (species fixed at build so bounce phase never jumps;
+  the ENERGY mix is steered by relative brightness). Skill-ledger panel
+  (2026-07-11): `api/ring-current/skill.js` joins `ring_current_log` ↔
+  `geomag_indices` server-side with the SAME `skill()` the page runs, and
+  the page's "Independent validation" panel shows 24 h / 7 d RMSE+bias plus
+  daily bars. Only aggregates leave the endpoint — the tables stay
+  service-role-only.
+- **Phase 3 — operator surface (partial)**: GOES magnetometer cross-check
+  LANDED 2026-07-11 — browser-direct `json/goes/primary/magnetometers-1-day`
+  (T3, best-effort), `parseGoesMag` / `goesCrossCheck` in the feed. Hp vs
+  its 24 h median is an INDEPENDENT in-situ measurement, never a model
+  input; disagreement renders as 'mixed' (local-time / compression), not as
+  an error. REMAINING: Dst-threshold alert type (`notify_*` column +
+  `js/alert-engine.js` check + `account.html` toggle, per CLAUDE.md
+  heuristic — needs a `user_profiles` migration, keep it a dedicated PR),
+  coupling to the LEO-drag forecast (ring-current heating → thermosphere
+  density).
 
 ---
 
