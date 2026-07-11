@@ -160,8 +160,20 @@ body {
 }
 .rc-bridge-links a:hover { background:rgba(255,255,255,.13); border-color:rgba(255,176,102,.5); }
 
-.rc-ctl { display:flex; align-items:center; gap:10px; font-size:.72rem; color:#8b94ad; }
+.rc-ctl { display:flex; align-items:center; gap:10px; font-size:.72rem; color:#8b94ad; flex-wrap:wrap; }
 .rc-ctl input[type=range] { flex:1; accent-color:#ff9a3d; }
+
+/* One-clock badge: the active τ is visible at all times (SIM ×300 / REAL ×1). */
+.rc-simtime {
+    position:absolute; left:12px; top:10px; z-index:4; pointer-events:none;
+    font-size:.72rem; font-weight:800; letter-spacing:.07em; color:#ffd9b0;
+    background:rgba(3,1,14,.6); border:1px solid rgba(255,154,61,.35);
+    border-radius:8px; padding:5px 11px; font-variant-numeric:tabular-nums;
+}
+.rc-simtime.rc-real { color:#7fe6c3; border-color:rgba(127,230,195,.35); }
+.rc-simtime .rc-simtime-sub {
+    display:block; font-weight:400; font-size:.64rem; color:#8b94ad; letter-spacing:0;
+}
 .rc-mode-btn {
     font-size:.68rem; font-weight:650; cursor:pointer; color:#cdd5e4;
     background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13);
@@ -217,15 +229,19 @@ body {
 
 <div class="rc-layout">
     <div class="rc-stage" id="rc-stage">
+        <div class="rc-simtime" id="rc-simtime">SIM TIME &times;300</div>
         <div class="rc-legend">
             <span class="rc-dot" style="background:#ffa040"></span>Ions &mdash; drift west, bounce on field lines<br>
             <span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;opposite drifts = one westward current</span><br>
+            <span class="rc-dot" style="background:#fff3a0"></span>Injection &mdash; tail burst &rarr; slow drift<br>
             <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause (Kp)<br>
             <span class="rc-dot" style="background:#ff9a3d"></span>Peak current shell<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
-            <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz
+            <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz<br>
+            <span style="color:#5d6684">trail length &prop; speed &middot; flash &prop; VBs on arrival</span>
         </div>
-        <div class="rc-stage-hint">drag to orbit &middot; scroll out to see the Sun corridor &middot; incoming stream moves in REAL time</div>
+        <div class="rc-stage-hint">drag to orbit &middot; scroll out for the Sun corridor &middot; one clock drives stream, ring &amp; injections &middot; hover any particle for its data</div>
     </div>
 
     <div class="rc-col">
@@ -305,9 +321,11 @@ body {
         <section class="rc-panel">
             <h2>Display</h2>
             <div class="rc-ctl">
-                <span>speed</span>
-                <input type="range" id="rc-speed" min="60" max="3600" step="60" value="600">
-                <span class="rc-v" id="rc-speed-lab">600&times;</span>
+                <span>sim clock &tau;</span>
+                <button class="rc-mode-btn" data-tau="1">Real &times;1</button>
+                <button class="rc-mode-btn" data-tau="60">&times;60</button>
+                <button class="rc-mode-btn rc-on" data-tau="300">&times;300</button>
+                <button class="rc-mode-btn" data-tau="1000">&times;1000</button>
             </div>
             <div class="rc-ctl" style="margin-top:8px;">
                 <span>stream</span>
@@ -316,9 +334,14 @@ body {
                 <button class="rc-mode-btn" data-mode="density">Density</button>
             </div>
             <div style="font-size:.66rem;color:#5d6684;margin-top:6px;line-height:1.5;">
-                Particle count per 1-min sample scales with density (compression
-                fronts = bright bands); the trace above the stream is the live
-                barometric n(x) wave, sliding Earthward in real time.
+                One clock, real velocities: every population moves at its
+                measured physical speed &times; &tau;. <b>Real &times;1</b> is
+                the honest mode &mdash; parcels crawl at true speed and the
+                stillness is integrity, not a bug. Compressed presets
+                fast-forward the same L1 data (relative speeds preserved) and
+                replay the forecast window when the sweep passes it. Particle
+                count per 1-min sample scales with density; the trace above
+                the stream is the live barometric n(x) wave.
             </div>
         </section>
     </div>
@@ -345,22 +368,42 @@ body {
     Data: NOAA SWPC real-time solar wind (DSCOVR/ACE at L1, plasma + magnetometer), Kyoto WDC Dst
     quicklook, planetary Kp. The model anchors on observed Dst 24 h ago and free-runs &mdash; the
     skill numbers above are honest out-of-sample error, recomputed every minute.
+    Time &amp; scale: one simulation clock &tau; drives every population at its true physical
+    velocity. The near-Earth region is spatially linear (1 unit = 1 Rᴇ = 6,371 km); the
+    L1&rarr;magnetopause corridor is compressed &asymp;5.5&times; (1 unit &asymp; 34,900 km), so the
+    on-screen stream:ring speed ratio is &asymp;6:1 rather than the physical &asymp;100:1 &mdash;
+    disclosed here instead of hidden in animation speeds.
     See <a href="/RING_CURRENT_SIMULATION_PLAN.md">the build plan</a> for the physics and roadmap.
 </footer>
 
 <script type="module">
 import { RingCurrentFeed, omniToReplay, computeReplayState } from './js/ring-current-feed.js?v=20260710';
 import { newellCoupling } from './js/ring-current-model.js?v=20260710';
+import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260710';
 
 const $ = id => document.getElementById(id);
 const stage = $('rc-stage');
+
+// ── THE simulation clock — shared by the 3D scene and every UI readout.
+//    One τ; apparent speed = physical velocity × τ ÷ local scale. ──────────
+const clock = new SimClock({ tau: TAU_DEFAULT });
+
+function renderSimBadge() {
+    const badge = $('rc-simtime');
+    const t = clock.tau;
+    badge.classList.toggle('rc-real', t === 1);
+    badge.innerHTML = t === 1
+        ? 'REAL TIME ×1<span class="rc-simtime-sub">true physical speeds — watch the leading edge creep</span>'
+        : `SIM TIME ×${t}<span class="rc-simtime-sub">1 s of viewing = ${t >= 60 ? `${Math.round(t / 60)} min` : `${t} s`} of real time</span>`;
+}
+renderSimBadge();
 
 // ── 3D twin: loaded dynamically so a WebGL/importmap failure degrades to
 //    data panels + chart instead of blanking the page. ─────────────────────
 let globe = null;
 try {
     const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260710');
-    globe = new RingCurrentGlobe(stage, { timeCompression: 600 });
+    globe = new RingCurrentGlobe(stage, { clock });
     window.rcGlobe = globe;   // debug/probe handle (tests/ smoke probes)
 } catch (err) {
     console.warn('[ring-current] 3D disabled:', err);
@@ -368,13 +411,16 @@ try {
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d6684;font-size:.8rem;">3D view unavailable — data panels remain live</div>');
 }
 
-$('rc-speed').addEventListener('input', (e) => {
-    const x = Number(e.target.value);
-    $('rc-speed-lab').textContent = `${x}×`;
-    globe?.setTimeCompression(x);
-});
-document.querySelectorAll('.rc-mode-btn').forEach(btn => btn.addEventListener('click', () => {
-    document.querySelectorAll('.rc-mode-btn').forEach(b => b.classList.toggle('rc-on', b === btn));
+// Selectors are scoped: [data-tau] = sim clock presets, [data-mode] = stream
+// coloring. They share .rc-mode-btn styling only.
+document.querySelectorAll('.rc-mode-btn[data-tau]').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.rc-mode-btn[data-tau]').forEach(b => b.classList.toggle('rc-on', b === btn));
+    clock.setTau(Number(btn.dataset.tau));
+    renderSimBadge();
+    if (lastState) renderHud(lastState);   // refresh the sim-speed ETA sub-label
+}));
+document.querySelectorAll('.rc-mode-btn[data-mode]').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.rc-mode-btn[data-mode]').forEach(b => b.classList.toggle('rc-on', b === btn));
     globe?.setStreamMode(btn.dataset.mode);
 }));
 
@@ -458,7 +504,12 @@ function renderHud(s) {
     if (tr?.strongest) {
         const st2 = tr.strongest;
         $('rc-strongest').textContent = `VBs ${fmt(st2.vbs, 2)} mV/m · Bz ${fmt(st2.bz, 1)} nT`;
-        $('rc-strongest-eta').textContent = `${st2.etaMin} min`;
+        // The countdown is REAL time (a genuine forecast); the sub-label maps
+        // it onto the sim clock when τ ≠ 1.
+        const simS = simSecondsForRealMinutes(st2.etaMin, clock.tau);
+        $('rc-strongest-eta').textContent = clock.tau > 1
+            ? `${st2.etaMin} min · ≈${simS < 10 ? simS.toFixed(1) : Math.round(simS)} s at ×${clock.tau}`
+            : `${st2.etaMin} min`;
     } else {
         $('rc-strongest').textContent = tr?.parcels?.length ? 'all northward (no driver)' : '—';
         $('rc-strongest-eta').textContent = '—';
