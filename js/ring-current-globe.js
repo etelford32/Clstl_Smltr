@@ -107,6 +107,17 @@
  * |Dst*|-coupled visible particle count, and hover tooltips (data behind
  * any particle). #917's drift signs were written for the pre-fix mirrored
  * frame — re-derived here for true GSM (westward = θ increasing).
+ *
+ * TAIL TRANSPORT (the journey's last rendered leg, 2026-07-11): sheath
+ * tracers reaching the end of the rendered flank (θ > 2.05) fork on a
+ * VBs gate — southward IMF drives flank/tail reconnection that feeds a
+ * fraction of the sheath plasma into the plasma sheet (stage 2). Captured
+ * tracers converge onto the flapping equatorial sheet, E×B-convect
+ * EARTHWARD at the cross-tail-field return speed (~tens of km/s, VBs-
+ * scaled, τ-honest through the same one-clock invariant), and HAND OFF at
+ * the midnight injection region as a mini injection burst — the same
+ * matter, traced Sun → L1 → sheath → tail → injection → drift → loss.
+ * See _updateSheath.
  */
 
 import * as THREE from 'three';
@@ -424,6 +435,63 @@ function windSheetMaterial(dataTex) {
                 float b = (0.12 + 1.25 * n) * wave * body * d.a;
                 b *= 1.0 + 1.7 * front + crackle;
                 gl_FragColor = vec4(col * b, min(1.0, b) * 0.5);
+            }`,
+    });
+}
+
+/**
+ * Plasma-sheet return-flow sheet: the tail-transport leg rendered as a
+ * MEDIUM, the same pattern as the solar-wind sheet — a thin equatorial
+ * sheet spanning the near tail whose waves march EARTHWARD at the live
+ * VBs-scaled E×B return speed (uFlow advanced per frame through the
+ * one-clock invariant: near-frozen at Real ×1, streaming at ×300), with
+ * brightness following the eased tail-feeding level — the SAME VBs gate
+ * the stage-2 tracers take, so the sheet lights up exactly when matter is
+ * actually entering the tail. Color ramps cool blue (fresh captured
+ * plasma, tailward) → gold at the inner edge, matching the tracer tint.
+ * Flapping is a wall-time rendering cue (sheet thickness oscillation);
+ * bulk wave motion is τ-honest. Subtle: peak additive alpha ≈ 0.15.
+ */
+function tailSheetMaterial() {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+            uFeed: { value: 0 },    // eased tail-feeding level 0..1 (VBs gate)
+            uFlow: { value: 0 },    // Earthward wave phase (τ-honest advance)
+            uTime: { value: 0 },    // wall seconds — flapping only
+        },
+        vertexShader: `
+            uniform float uTime;
+            varying vec3 vLoc;
+            void main() {
+                vec3 p = position;
+                // Plasma-sheet flapping: gentle travelling warp, growing
+                // tailward (the near-Earth sheet is anchored by the dipole).
+                float amp = 0.55 * smoothstep(-7.0, -20.0, p.x);
+                p.y += amp * sin(p.x * 0.45 + uTime * 0.5 + p.z * 0.25);
+                vLoc = p;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+            }`,
+        fragmentShader: `
+            uniform float uFeed, uFlow, uTime;
+            varying vec3 vLoc;
+            void main() {
+                // Envelope: fade at the flanks, the far tail, and toward the
+                // injection region (the burst pool takes the story over).
+                float ez = 1.0 - smoothstep(5.5, 8.5, abs(vLoc.z));
+                float ex = smoothstep(-26.0, -22.0, vLoc.x)
+                         * (1.0 - smoothstep(-9.5, -6.5, vLoc.x));
+                // Earthward-marching waves: sin(k·x − uFlow), uFlow advanced
+                // at k × the live E×B return speed — the flow itself.
+                float wave = 0.55 + 0.45 * sin(vLoc.x * 1.7 - uFlow)
+                           * (0.6 + 0.4 * sin(vLoc.x * 0.63 - uFlow * 0.37 + vLoc.z * 0.8));
+                // Heat ramp matching the stage-2 tracer tint: cool captured
+                // plasma tailward → gold approaching the handoff.
+                float heat = smoothstep(-22.0, -8.0, vLoc.x);
+                vec3 col = mix(vec3(0.30, 0.45, 0.85), vec3(1.0, 0.82, 0.45), heat);
+                float b = uFeed * ez * ex * wave * 1.5;
+                gl_FragColor = vec4(col * b, min(1.0, b) * 0.22);
             }`,
     });
 }
@@ -1219,7 +1287,7 @@ export class RingCurrentGlobe {
         this._shPts.frustumCulled = false;
         this._scene.add(this._shPts);
         this._sh = {
-            mode:  new Uint8Array(N),
+            mode:  new Uint8Array(N),      // 0 free · 1 sheath flank flow · 2 tail return
             th:    new Float32Array(N),    // solar-zenith angle along the surface
             ph:    new Float32Array(N),    // azimuth around the Sun–Earth axis
             jit:   new Float32Array(N),    // standoff offset (sheath thickness)
@@ -1227,15 +1295,33 @@ export class RingCurrentGlobe {
             south: new Uint8Array(N),
             nN:    new Float32Array(N),
             age:   new Float32Array(N),
+            vbs:   new Float32Array(N),    // parcel's VBs — tail-entry gate + return speed
+            px:    new Float32Array(N),    // stage-2 cartesian state (scene units)
+            py:    new Float32Array(N),
+            pz:    new Float32Array(N),
         };
         this._shCursor = 0;
+        this._tailHandoffs = 0;   // journey closures: tail tracers reaching midnight
+
+        // Plasma-sheet return-flow sheet (the tail leg as a medium — see
+        // tailSheetMaterial). Scene root, like the stage-2 tracers riding it:
+        // both approximate the sheet as the GSM equatorial plane, so they
+        // stay coplanar under dipole tilt.
+        this._tailMat = tailSheetMaterial();
+        const sheetGeo = new THREE.PlaneGeometry(19.5, 17, 48, 20);
+        sheetGeo.rotateX(-Math.PI / 2);       // XY plane → XZ (equatorial)
+        sheetGeo.translate(-16.25, 0, 0);     // spans x ∈ [−26, −6.5], |z| ≤ 8.5
+        this._tailSheet = new THREE.Mesh(sheetGeo, this._tailMat);
+        this._tailSheet.frustumCulled = false;
+        this._scene.add(this._tailSheet);
+        this._driverVbs = 0;   // live upstream VBs (setState) — feeds the gate
     }
 
     /** Most of an arriving parcel becomes sheath flow — spawn its tracers.
      *  No τ down-scaling (unlike injections): tracer flight time is honest
      *  (~4 real minutes of sheath transit ⇒ ~0.8 s at ×300), so the pool
      *  self-limits and the river stays visibly fed at high compression. */
-    _spawnSheath(p) {
+    _spawnSheath(p, vbs) {
         const sh = this._sh;
         const count = 3 + 3 * (this._streamDensity ?? 1);
         for (let c = 0; c < count; c++) {
@@ -1253,43 +1339,144 @@ export class RingCurrentGlobe {
             sh.south[i] = Number.isFinite(p.bz) && p.bz < 0 ? 1 : 0;
             sh.nN[i]    = Math.max(0.15, Math.min(1, (Number.isFinite(p.n) ? p.n : 3) / TRANSIT.N_REF));
             sh.age[i]   = 0;
+            sh.vbs[i]   = Number.isFinite(vbs) ? vbs : 0;
         }
     }
 
-    /** Advance the river: dθ/dt = v_apparent·flowFactor / r(θ). Spreiter-like
-     *  profile — stagnant at the nose, ~90% of wind speed by the flanks.
-     *  Speed uses the LIVE τ (the one-clock invariant), so the river crawls
-     *  honestly at Real ×1 and courses at ×300. */
+    /** Advance the river and its tail-return leg — the journey's last
+     *  rendered gap, closed.
+     *
+     *  Stage 1 (sheath flank flow): dθ/dt = v_apparent·flowFactor / r(θ),
+     *  Spreiter-like — stagnant at the nose, ~90% of wind speed by the
+     *  flanks. At the end of the rendered flank (θ > 2.05) the plasma
+     *  FORKS on a VBs gate: southward IMF drives flank/distant-neutral-
+     *  line reconnection that feeds a fraction into the tail (→ stage 2);
+     *  the rest streams past downstream and leaves the story.
+     *
+     *  Stage 2 (tail return convection): the tracer keeps streaming
+     *  antisunward while the entry inflow (~60 km/s) reels it toward the
+     *  tail axis; once inside the tail (lateral < 8.5 Rᴇ) it is captured
+     *  into the flapping plasma sheet and E×B-convects EARTHWARD at
+     *  v = E/B ≈ 25·(VBs/2) km/s (cross-tail field ~0.2–2 mV/m over
+     *  B ~10–20 nT ⇒ tens of km/s; ~½–3 h from −20 Rᴇ — the substorm
+     *  growth-phase timescale). Reaching the injection region near
+     *  midnight it HANDS OFF as a mini injection burst: the same matter,
+     *  Sun → L1 → sheath → tail → injection. Tracers that pass x < −26 Rᴇ
+     *  are lost downtail (plasmoid release). Bulk motion is τ-honest via
+     *  the one-clock invariant (crawls at ×1, courses at ×300); only the
+     *  sheet-capture fine structure (flapping, midnight funneling) is a
+     *  wall-time rendering cue.
+     */
     _updateSheath(dt) {
         const sh = this._sh;
         const pos = this._shPos, col = this._shCol;
         const vScale = this._clock.tau / SCALE.NEAR_EARTH.kmPerUnit;   // km/s → units/s
+        const rHand  = Math.max(6.8, this._state.plasmapauseL + 2.2);  // injection inner edge
+        const kSheet = 1 - Math.exp(-dt / 2.8);   // sheet-capture ease (rendering cue)
+        const kMid   = 1 - Math.exp(-dt / 4.0);   // midnight funneling (rendering cue)
         for (let i = 0; i < sh.mode.length; i++) {
             const j = i * 3;
-            if (sh.mode[i] === 0) { col[j] = col[j + 1] = col[j + 2] = 0; continue; }
-            sh.age[i] += dt;
-            const th = sh.th[i];
-            const r = shueRadiusRe(th, this._mpR0, this._mpAlpha) * sh.jit[i];
-            const flow = 0.22 + 0.68 * Math.min(1, th / 1.5);   // nose-stagnant → flank-fast
-            sh.th[i] += (sh.vKm[i] * vScale * flow / Math.max(2, r)) * dt;
-            if (sh.th[i] > 2.05 || sh.age[i] > 40) {
-                sh.mode[i] = 0;
-                col[j] = col[j + 1] = col[j + 2] = 0;
-                continue;
+            if (sh.mode[i] === 1) {
+                sh.age[i] += dt;
+                const th = sh.th[i];
+                const r = shueRadiusRe(th, this._mpR0, this._mpAlpha) * sh.jit[i];
+                const flow = 0.22 + 0.68 * Math.min(1, th / 1.5);   // nose-stagnant → flank-fast
+                sh.th[i] += (sh.vKm[i] * vScale * flow / Math.max(2, r)) * dt;
+                if (sh.th[i] > 2.05 || sh.age[i] > 40) {
+                    const pEnter = sh.south[i]
+                        ? Math.min(0.9, 0.35 + 0.12 * sh.vbs[i]) : 0.06;
+                    if (sh.th[i] > 2.05 && Math.random() < pEnter) {
+                        // Fork taken: hand the surface point to stage 2.
+                        const r2 = shueRadiusRe(sh.th[i], this._mpR0, this._mpAlpha) * sh.jit[i];
+                        const st2 = Math.sin(sh.th[i]);
+                        sh.mode[i] = 2;
+                        sh.px[i] = r2 * Math.cos(sh.th[i]);
+                        sh.py[i] = r2 * st2 * Math.sin(sh.ph[i]);
+                        sh.pz[i] = r2 * st2 * Math.cos(sh.ph[i]);
+                        sh.age[i] = 0;
+                    } else {
+                        sh.mode[i] = 0;
+                    }
+                }
             }
-            const st = Math.sin(th), ct = Math.cos(th);
-            pos[j]     = r * ct;
-            pos[j + 1] = r * st * Math.sin(sh.ph[i]);
-            pos[j + 2] = r * st * Math.cos(sh.ph[i]);
-            const fade = (1 - smoothstepJs(1.45, 2.05, th)) * (0.35 + 0.65 * sh.nN[i]);
-            if (sh.south[i]) {
-                col[j] = 1.0 * fade; col[j + 1] = 0.42 * fade; col[j + 2] = 0.2 * fade;
+            if (sh.mode[i] === 2) {
+                sh.age[i] += dt;
+                const lat = Math.hypot(sh.py[i], sh.pz[i]);
+                if (lat > 8.5) {
+                    // Entry: still antisunward with the sheath while the
+                    // reconnection inflow (~60 km/s) reels it tailward-in.
+                    sh.px[i] -= sh.vKm[i] * 0.15 * vScale * dt;
+                    const shrink = Math.max(0, lat - 60 * vScale * dt) / Math.max(1e-6, lat);
+                    sh.py[i] *= shrink;
+                    sh.pz[i] *= shrink;
+                } else {
+                    // Captured: Earthward E×B return flow, VBs-scaled.
+                    const vE = 25 * Math.max(0.3, Math.min(3, sh.vbs[i] / 2));   // km/s
+                    sh.px[i] += vE * vScale * dt;
+                    const flap = Math.sin(this._tView * 0.4 + sh.ph[i] * 3.0) * 0.7;
+                    sh.py[i] += (flap - sh.py[i]) * kSheet;
+                    sh.pz[i] -= sh.pz[i] * kMid;
+                    const rNow = Math.hypot(sh.px[i], sh.py[i], sh.pz[i]);
+                    if (rNow < rHand && sh.px[i] < 0) {
+                        // ── HANDOFF: the tail leg closes at midnight — the
+                        // same matter becomes a (mini) injection burst.
+                        this._tailHandoffs++;
+                        if (sh.vbs[i] >= INJECT.VBS_MIN) {
+                            this._spawnInjection(sh.vbs[i], this._state.plasmapauseL, 0.25);
+                        }
+                        sh.mode[i] = 0;
+                    }
+                }
+                if (sh.mode[i] === 2 &&
+                    (sh.px[i] < -26 || sh.px[i] > -1.5 || sh.age[i] > 90)) {
+                    sh.mode[i] = 0;   // lost downtail / slipped past / timed out
+                }
+            }
+            if (sh.mode[i] === 0) { col[j] = col[j + 1] = col[j + 2] = 0; continue; }
+            if (sh.mode[i] === 1) {
+                const th = sh.th[i];
+                const r = shueRadiusRe(th, this._mpR0, this._mpAlpha) * sh.jit[i];
+                const st = Math.sin(th), ct = Math.cos(th);
+                pos[j]     = r * ct;
+                pos[j + 1] = r * st * Math.sin(sh.ph[i]);
+                pos[j + 2] = r * st * Math.cos(sh.ph[i]);
+                // Fades toward the flank END but keeps a floor — the strands
+                // that fork into the tail continue seamlessly at stage-2's
+                // entry brightness instead of vanishing and reappearing.
+                const fade = (1 - 0.7 * smoothstepJs(1.45, 2.05, th)) * (0.35 + 0.65 * sh.nN[i]);
+                if (sh.south[i]) {
+                    col[j] = 1.0 * fade; col[j + 1] = 0.42 * fade; col[j + 2] = 0.2 * fade;
+                } else {
+                    col[j] = 0.32 * fade; col[j + 1] = 0.68 * fade; col[j + 2] = 1.0 * fade;
+                }
             } else {
-                col[j] = 0.32 * fade; col[j + 1] = 0.68 * fade; col[j + 2] = 1.0 * fade;
+                pos[j]     = sh.px[i];
+                pos[j + 1] = sh.py[i];
+                pos[j + 2] = sh.pz[i];
+                // Sheath tint warming to plasma-sheet gold as it approaches
+                // the handoff — cool captured plasma re-energising inward.
+                const rNow = Math.hypot(sh.px[i], sh.py[i], sh.pz[i]);
+                const heat = 1 - smoothstepJs(rHand, 18, rNow);
+                const bright = (0.30 + 0.55 * heat) * (0.4 + 0.6 * sh.nN[i]);
+                const R0 = sh.south[i] ? 1.0 : 0.32;
+                const G0 = sh.south[i] ? 0.42 : 0.68;
+                const B0 = sh.south[i] ? 0.20 : 1.00;
+                col[j]     = (R0 + (1.00 - R0) * heat) * bright;
+                col[j + 1] = (G0 + (0.82 - G0) * heat) * bright;
+                col[j + 2] = (B0 + (0.45 - B0) * heat) * bright;
             }
         }
         this._shGeo.attributes.position.needsUpdate = true;
         this._shGeo.attributes.color.needsUpdate = true;
+        // Tail sheet: waves march Earthward at the LIVE E×B return speed
+        // (identical formula to the tracers — one physics, two renderings);
+        // feeding level eases toward the live VBs gate over ~3 s.
+        const vbsD = this._driverVbs ?? 0;
+        const vE0 = 25 * Math.max(0.3, Math.min(3, vbsD / 2));   // km/s
+        const tu = this._tailMat.uniforms;
+        tu.uFlow.value = (tu.uFlow.value + 1.7 * vE0 * vScale * dt) % (Math.PI * 2000);
+        tu.uTime.value = this._tView;
+        tu.uFeed.value += (Math.min(1, vbsD / 4) - tu.uFeed.value) * (1 - Math.exp(-dt / 3));
     }
 
     /** Ease the boundary toward the live Shue target (the real response is
@@ -1331,8 +1518,9 @@ export class RingCurrentGlobe {
                 this._spawnInjection(vbs, this._state.plasmapauseL);
             }
             // The river: most of every arriving parcel DEFLECTS into the
-            // magnetosheath and streams around the boundary.
-            this._spawnSheath(p);
+            // magnetosheath and streams around the boundary (VBs rides along
+            // as the stage-2 tail-entry gate + return-flow speed).
+            this._spawnSheath(p, vbs);
             // Shock-arrival moment: a ≥2× dynamic-pressure step between
             // consecutive arrivals IS an interplanetary shock/compression
             // front hitting the magnetopause. Cooldown-limited so high τ
@@ -1490,11 +1678,12 @@ export class RingCurrentGlobe {
      *  the arriving parcel's VBs and inversely with τ (at high compression
      *  parcels arrive many per second — the stream of bursts is continuous,
      *  which is exactly the storm-time picture). Injections penetrate deeper
-     *  when the plasmapause contracts. */
-    _spawnInjection(vbs, lpp) {
+     *  when the plasmapause contracts. `scale` < 1 gives the mini bursts a
+     *  tail-transport handoff fires (the traced matter arriving). */
+    _spawnInjection(vbs, lpp, scale = 1) {
         const inj = this._inj;
         const tauScale = Math.min(1, 60 / this._clock.tau);
-        const count = Math.max(4, Math.round((6 + 11 * Math.min(6, vbs)) * tauScale))
+        const count = Math.max(2, Math.round((6 + 11 * Math.min(6, vbs)) * tauScale * scale))
             * (this._streamDensity ?? 1);   // pool-capped; drops, never grows
         for (let c = 0; c < count; c++) {
             // Ring cursor; skip slots still alive (pool full ⇒ drop, not grow).
@@ -1713,6 +1902,9 @@ export class RingCurrentGlobe {
             `${nw.storm?.label ?? ''}${Number.isFinite(nw.oxygenFraction)
                 ? ` · O⁺ ${Math.round(nw.oxygenFraction * 100)}%` : ''}`,
         ]);
+        // Live upstream VBs — the tail sheet's feeding gate (same coupling
+        // function that gates injections and the stage-2 tail fork).
+        this._driverVbs = Number.isFinite(state?.drivers?.vbs) ? state.drivers.vbs : 0;
         // Sun glow tracks the strongest incoming driver — a storm you can
         // see coming before it arrives (opacity + a breathing pulse in tick).
         const sv = state?.transit?.strongest?.vbs ?? 0;

@@ -63,6 +63,16 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   time, mean-solar local time at the saved user location (js/user-location
 >   longitude — civil tz needs a tz db), and Earth's true orbital position
 >   (earthOrbit: heliocentric λ, r in AU, Kepler-second-law-tested).
+> - **Tail transport** (2026-07-11, the journey's last leg): sheath tracers
+>   reaching the flank end fork on a VBs gate into a stage-2 tail-return
+>   state — antisunward + ~60 km/s entry inflow until captured inside the
+>   tail, then Earthward E×B convection at 25·(VBs/2) km/s to a midnight
+>   HANDOFF that spawns a mini injection burst (same matter, full chain).
+>   τ-honest bulk motion; sheet-capture flapping/funneling are labeled
+>   rendering cues. The `tailSheetMaterial` shader renders the return flow
+>   as a medium (wind-sheet pattern): Earthward-marching waves at the live
+>   E×B rate, brightness eased toward the same VBs gate, cool-blue→gold
+>   ramp matching the stage-2 tracer tint exactly.
 
 ---
 

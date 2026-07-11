@@ -227,17 +227,34 @@ Three.js 0.160 importmap, NOAA browser-direct / NASA via edge.
   re-derived for the GSM-true frame), Dst-coupled visible count, and
   tooltips were ported onto the GPU pipeline — see the integration note in
   RING_CURRENT_VISUAL_PLAN.md. HUD gains a live charge-exchange-τ row.
-  **Sun→surface journey map**: measured L1 transit ✓ → magnetopause arrival
-  flash ✓ → magnetosheath deflection around the live Shue boundary ✓
-  (2026-07-11: the river — tracers stream nose→flank at Spreiter-like
-  speeds along r(θ)) → nightside injection burst ✓ → trapped drift/bounce
-  ✓ → loss (ENA / precipitation-to-surface) ✓. The boundary itself is
-  live: Shue (1998) r₀(Pdyn, Bz) + α flaring drive a deforming
-  magnetopause membrane, a Farris–Russell bow shock, the corridor's
-  Earth-end, the wind sheet's clip, and the arrival-flash anchor; the HUD
-  shows the nose distance and flags sub-GEO crossings. Remaining
-  unrendered leg: tail transport between the flanks and the midnight
-  injection point.
+  **Sun→surface journey map — COMPLETE (2026-07-11)**: measured L1 transit
+  ✓ → magnetopause arrival flash ✓ → magnetosheath deflection around the
+  live Shue boundary ✓ (the river — tracers stream nose→flank at
+  Spreiter-like speeds along r(θ)) → **tail transport ✓** → nightside
+  injection burst ✓ → trapped drift/bounce ✓ → loss (ENA /
+  precipitation-to-surface) ✓. The boundary itself is live: Shue (1998)
+  r₀(Pdyn, Bz) + α flaring drive a deforming magnetopause membrane, a
+  Farris–Russell bow shock, the corridor's Earth-end, the wind sheet's
+  clip, and the arrival-flash anchor; the HUD shows the nose distance and
+  flags sub-GEO crossings.
+  **Tail transport (the last leg, closed)**: at the end of the rendered
+  flank (θ > 2.05) sheath tracers fork on a VBs gate — southward IMF
+  drives flank/distant-neutral-line reconnection that feeds a fraction
+  into the tail (stage 2); the rest streams past downtail. Stage-2
+  tracers keep moving antisunward while the entry inflow (~60 km/s)
+  reels them toward the tail axis; inside the tail (lateral < 8.5 Rᴇ)
+  they are captured into the flapping plasma sheet and E×B-convect
+  EARTHWARD at v = E/B ≈ 25·(VBs/2) km/s (tens of km/s — ~½–3 h from
+  −20 Rᴇ, the substorm growth-phase timescale), handing off at the
+  midnight injection region as a mini injection burst: the same matter,
+  Sun → L1 → sheath → tail → injection → drift → loss. Tracers passing
+  x < −26 Rᴇ are lost downtail (plasmoid release). Bulk motion is
+  τ-honest via the one-clock invariant. A `tailSheetMaterial` shader (the
+  wind-sheet pattern) renders the plasma-sheet return flow as a medium:
+  Earthward-marching waves at the live E×B speed, brightness eased toward
+  the same VBs feeding gate, cool-blue→gold heat ramp matching the tracer
+  tint. Headless-verified: ~220 concurrent stage-2 tracers and ~790
+  midnight handoffs across two ×300 storm sweeps, zero page errors.
 - **EarthSkin integration (2026-07-11, third pass)**: the page's Earth is
   now the SHARED `js/earth-skin.js` stack (same renderer as earth.html and
   the space-weather globe) — Blue Marble, city lights, ocean specular,
