@@ -157,7 +157,9 @@ function glowPointsMaterial(size, opacity) {
             void main() {
                 vC = color;
                 vec4 mv = modelViewMatrix * vec4(position, 1.0);
-                gl_PointSize = uSize * 320.0 / -mv.z;
+                // 1.5 px LOD floor: stream/sheath/injection points stay
+                // visible from the wide corridor view instead of vanishing.
+                gl_PointSize = max(uSize * 320.0 / -mv.z, 1.5);
                 gl_Position = projectionMatrix * mv;
             }`,
         fragmentShader: `varying vec3 vC;
@@ -202,10 +204,13 @@ function trappedPointsMaterial(size, opacity, color) {
             uMix:        { value: 1 },      // composition brightness steer
             uInjection:  { value: 0 },      // |Q| / 12 nT/h, clamped 0..1
             uVisFrac:    { value: 0.45 },   // visible-count fraction (Dst-coupled)
+            uMinPx:      { value: 1.4 },    // LOD floor — raised as camera recedes
+            uFarBoost:   { value: 0 },      // LOD brightness lift for clamped points
         },
         vertexShader: `
             uniform float uSize, uDriftHours, uBounceSec, uDstStar,
-                          uAsymAmp, uAsymMlt, uMix, uInjection, uVisFrac;
+                          uAsymAmp, uAsymMlt, uMix, uInjection, uVisFrac,
+                          uMinPx, uFarBoost;
             attribute vec3 kin;
             attribute vec4 life;
             varying float vW;
@@ -296,7 +301,15 @@ function trappedPointsMaterial(size, opacity, color) {
                 vW *= birth * death * vis;
 
                 vec4 mv = modelViewMatrix * vec4(p, 1.0);
-                gl_PointSize = uSize * 320.0 / -mv.z;
+                // LOD: per-particle size variance (the ring reads as a
+                // DISCRETE medium, not uniform grain), a minimum pixel
+                // floor so particles survive zoom-out instead of dropping
+                // sub-pixel, and a brightness lift that grows only for
+                // points the floor actually clamped — near views unchanged.
+                float sz = 0.75 + 0.7 * hash1(life.w * 3.71);
+                float px = uSize * sz * 320.0 / -mv.z;
+                gl_PointSize = max(px, uMinPx);
+                vW *= 1.0 + uFarBoost * (1.0 - min(1.0, px / 3.0));
                 gl_Position = projectionMatrix * mv;
             }`,
         fragmentShader: `
@@ -936,7 +949,9 @@ export class RingCurrentGlobe {
             ep.frustumCulled = false;
             ep.visible = (this._perf?.tier ?? 0) < 2;   // quality tier 2 sheds echoes
             this._magGroup.add(ep);
-            echoes.push({ mat: em, k, points: ep });
+            // baseOp: LOD raises echo opacity with camera distance so the
+            // zoomed-out ring reads as a FLOWING river (comet-tail texture).
+            echoes.push({ mat: em, k, points: ep, baseOp: 0.9 * (k === 1 ? 0.38 : 0.16) });
         }
         return { points, mat, pop, echoes };
     }
@@ -1894,8 +1909,29 @@ export class RingCurrentGlobe {
             age:     new Float32Array(N),    // wall-s since spawn (fade cue)
             yAmp:    new Float32Array(N),
             bPh:     new Float32Array(N),
+            mate:    new Int16Array(N).fill(-1),   // paired ion↔electron slot
         };
         this._injCursor = 0;
+
+        // Pair tethers: injections are QUASI-NEUTRAL — every burst delivers
+        // ions and electrons together, and only gradient–curvature drift
+        // splits them (ions west, electrons east). Each tether connects a
+        // pair born on the same flux tube and fades as they separate: the
+        // stretching itself IS the charge separation that constitutes the
+        // westward ring current. One LineSegments draw, pool-capped.
+        const LINKS = 220;
+        this._linkCap = LINKS;
+        this._linkPos = new Float32Array(LINKS * 6);
+        this._linkCol = new Float32Array(LINKS * 6);
+        this._linkGeo = new THREE.BufferGeometry();
+        this._linkGeo.setAttribute('position', new THREE.BufferAttribute(this._linkPos, 3).setUsage(THREE.DynamicDrawUsage));
+        this._linkGeo.setAttribute('color',    new THREE.BufferAttribute(this._linkCol, 3).setUsage(THREE.DynamicDrawUsage));
+        this._links = new THREE.LineSegments(this._linkGeo, new THREE.LineBasicMaterial({
+            vertexColors: true, transparent: true, opacity: 0.6,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        this._links.frustumCulled = false;
+        this._magGroup.add(this._links);
     }
 
     /** Burst of hot ions entering from the nightside tail. Count scales with
@@ -1909,33 +1945,52 @@ export class RingCurrentGlobe {
         const tauScale = Math.min(1, 60 / this._clock.tau);
         const count = Math.max(2, Math.round((6 + 11 * Math.min(6, vbs)) * tauScale * scale))
             * (this._streamDensity ?? 1);   // pool-capped; drops, never grows
-        for (let c = 0; c < count; c++) {
-            // Ring cursor; skip slots still alive (pool full ⇒ drop, not grow).
-            let i = -1;
+        // Ring cursor; skip slots still alive (pool full ⇒ drop, not grow).
+        const alloc = () => {
             for (let probe = 0; probe < INJECT.CAP; probe++) {
                 const j = (this._injCursor + probe) % INJECT.CAP;
-                if (inj.mode[j] === 0) { i = j; this._injCursor = j + 1; break; }
+                if (inj.mode[j] === 0) { this._injCursor = j + 1; return j; }
             }
-            if (i < 0) return;
+            return -1;
+        };
+        // The plasma sheet is QUASI-NEUTRAL: the burst spawns ion–electron
+        // PAIRS born on the same flux tube. The ENTRY surge is E×B
+        // convection (charge-independent — the pair rides in together);
+        // gradient–curvature drift takes over at the trapping point and
+        // splits it — ions WEST toward dusk, electrons EAST toward dawn,
+        // the classic dispersionless-injection signature seen at GEO. The
+        // mate index drives the fading tether in _updateInjections.
+        const fill = (i, electron, theta, r, targetL, yAmp, bPh) => {
             inj.mode[i]    = 1;
-            // The burst FORKS by charge: the ENTRY surge is E×B convection
-            // (charge-independent — both species pour in together), then
-            // gradient–curvature drift takes over at the trapping point and
-            // splits it: ions curve WEST toward dusk, electrons EAST toward
-            // dawn — the classic dispersionless-injection signature seen at
-            // geosynchronous satellites.
-            const electron = Math.random() < 0.35;
             inj.species[i] = electron ? 1 : 0;
-            inj.theta[i]   = Math.PI + (Math.random() - 0.5) * 1.4;   // ~21–03 MLT
-            inj.r[i]       = 7.8 + Math.random() * 1.6;
-            inj.targetL[i] = Math.max(2.2, lpp - 0.4 - Math.random() * 1.6);
-            const eKev     = 30 + 220 * Math.random() ** 2;
+            inj.theta[i]   = theta;
+            inj.r[i]       = r;
+            inj.targetL[i] = targetL;
+            const eKev     = electron ? 20 + 120 * Math.random() ** 2
+                                      : 30 + 220 * Math.random() ** 2;
             // Scene-θ sign: westward = θ increasing in the GSM frame (#917
             // was written for the pre-fix mirrored frame — sign re-derived).
-            inj.rate[i]    = -driftRateRadPerHour(eKev, inj.targetL[i], electron ? 'electron' : 'ion');
+            inj.rate[i]    = -driftRateRadPerHour(eKev, targetL, electron ? 'electron' : 'ion');
             inj.age[i]     = 0;
-            inj.yAmp[i]    = (Math.random() - 0.5) * 0.7;
-            inj.bPh[i]     = Math.random() * 2 * Math.PI;
+            inj.yAmp[i]    = yAmp;
+            inj.bPh[i]     = bPh;
+            inj.mate[i]    = -1;
+        };
+        const pairs = Math.max(1, Math.round(count / 2));
+        for (let c = 0; c < pairs; c++) {
+            const theta   = Math.PI + (Math.random() - 0.5) * 1.4;   // ~21–03 MLT
+            const r       = 7.8 + Math.random() * 1.6;
+            const targetL = Math.max(2.2, lpp - 0.4 - Math.random() * 1.6);
+            const yAmp    = (Math.random() - 0.5) * 0.7;
+            const bPh     = Math.random() * 2 * Math.PI;
+            const iIon = alloc();
+            if (iIon < 0) return;
+            fill(iIon, false, theta, r, targetL, yAmp, bPh);
+            const iEl = alloc();
+            if (iEl < 0) return;              // pool pressure: lone ion, no tether
+            fill(iEl, true, theta, r, targetL, yAmp, bPh);
+            inj.mate[iIon] = iEl;
+            inj.mate[iEl]  = iIon;
         }
     }
 
@@ -1958,6 +2013,9 @@ export class RingCurrentGlobe {
             inj.age[i] += dt;
             if (inj.age[i] > INJECT.LIFE_S) {
                 inj.mode[i] = 0;
+                // Unlink the tether — slots recycle, stale mates would
+                // draw lines between unrelated particles.
+                if (inj.mate[i] >= 0) { inj.mate[inj.mate[i]] = -1; inj.mate[i] = -1; }
                 col[j] = col[j + 1] = col[j + 2] = 0;
                 continue;
             }
@@ -1986,6 +2044,32 @@ export class RingCurrentGlobe {
         }
         this._injGeo.attributes.position.needsUpdate = true;
         this._injGeo.attributes.color.needsUpdate = true;
+        // ── Pair tethers: ion→electron chords, warm→blue gradient, fading
+        //    with age and stretch. The visible stretching is the drift
+        //    separation — charge separation = the westward current. ────────
+        const lp = this._linkPos, lc = this._linkCol;
+        let li = 0;
+        for (let i = 0; i < INJECT.CAP && li < this._linkCap; i++) {
+            const m = inj.mate[i];
+            if (m <= i || inj.mode[i] === 0 || inj.mode[m] === 0) continue;
+            const age = Math.max(inj.age[i], inj.age[m]);
+            if (age > 9) continue;
+            const a = i * 3, b = m * 3;
+            const d = Math.hypot(pos[a] - pos[b], pos[a + 1] - pos[b + 1], pos[a + 2] - pos[b + 2]);
+            if (d > 5.5) continue;
+            const o = li * 6;
+            // Quadratic stretch fade: long chords vanish quickly, so the
+            // tethers read as delicate filaments, not a thicket.
+            const fade = (1 - age / 9) * (1 - d / 5.5) ** 2 * 0.34;
+            lp[o]     = pos[a]; lp[o + 1] = pos[a + 1]; lp[o + 2] = pos[a + 2];
+            lp[o + 3] = pos[b]; lp[o + 4] = pos[b + 1]; lp[o + 5] = pos[b + 2];
+            lc[o]     = 1.00 * fade; lc[o + 1] = 0.62 * fade; lc[o + 2] = 0.30 * fade;
+            lc[o + 3] = 0.35 * fade; lc[o + 4] = 0.62 * fade; lc[o + 5] = 1.00 * fade;
+            li++;
+        }
+        for (let s = li * 6; s < this._linkCap * 6; s++) { lp[s] = 0; lc[s] = 0; }
+        this._linkGeo.attributes.position.needsUpdate = true;
+        this._linkGeo.attributes.color.needsUpdate = true;
     }
 
     // ── Hover tooltips (#917) — the data behind any particle ────────────────
@@ -2263,12 +2347,22 @@ export class RingCurrentGlobe {
         // geometry at clocks lagged by k·TRAIL_VIEW_S of VIEWING time — the
         // integrated path, τ-honest (sub-pixel at ×1).
         const lagH = TRAIL_VIEW_S * this._clock.tau / 3600;
+        // LOD driver: 0 at ≤26 units (near orbits — unchanged), 1 by ~80
+        // (the full Sun-corridor view). Raises the point-size floor and
+        // clamped-point brightness, and thickens the trail echoes so the
+        // distant ring reads as a discrete flowing river, not dust.
+        const lodT = Math.min(1, Math.max(0, (this._camera.position.length() - 26) / 55));
         for (const p of Object.values(this._popPoints ?? {})) {
             p.mat.uniforms.uDriftHours.value = this._simHours;
             p.mat.uniforms.uBounceSec.value  = this._tView;
+            p.mat.uniforms.uMinPx.value      = 1.4 + 1.8 * lodT;
+            p.mat.uniforms.uFarBoost.value   = 1.1 * lodT;
             for (const e of p.echoes) {
                 e.mat.uniforms.uDriftHours.value = this._simHours - e.k * lagH;
                 e.mat.uniforms.uBounceSec.value  = this._tView - e.k * TRAIL_VIEW_S;
+                e.mat.uniforms.uMinPx.value      = 1.2 + 1.5 * lodT;
+                e.mat.uniforms.uFarBoost.value   = 1.1 * lodT;
+                e.mat.uniforms.uOpacity.value    = e.baseOp * (1 + 1.6 * lodT);
             }
         }
         let tNow = performance.now();
