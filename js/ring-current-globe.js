@@ -214,7 +214,17 @@ export class RingCurrentGlobe {
             if (this._disposed) return;
             const dt = this._lastT ? Math.min(0.1, (t - this._lastT) / 1000) : 0.016;
             this._lastT = t;
-            this.tick(dt);
+            // Self-healing loop: one bad frame must NEVER kill the RAF chain
+            // (an uncaught throw here would freeze every motion system at
+            // once — drift, bounce, wave, transit — permanently).
+            try {
+                this.tick(dt);
+            } catch (err) {
+                if (!this._tickErrLogged) {
+                    this._tickErrLogged = true;
+                    console.error('[ring-current-globe] tick error (loop continues):', err);
+                }
+            }
             this._raf = requestAnimationFrame(this._animate);
         };
         this._raf = requestAnimationFrame(this._animate);
