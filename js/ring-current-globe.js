@@ -125,7 +125,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     ringPeakL, dynamicPressure, subsolarPoint, dipoleTiltRad,
     couplingVBs, driftRateRadPerHour, driftPeriodHours, shueRadiusRe,
-    sunDepartureMs,
+    sunDepartureMs, SOLAR, PHYS,
 } from './ring-current-model.js';
 import {
     buildPopulation, POPULATIONS, particlePose, hash1, DEATH_WINDOW,
@@ -152,7 +152,7 @@ function glowPointsMaterial(size, opacity) {
     return new THREE.ShaderMaterial({
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
         vertexColors: true,
-        uniforms: { uSize: { value: size } },
+        uniforms: { uSize: { value: size }, uFade: { value: 1 } },
         vertexShader: `uniform float uSize; varying vec3 vC;
             void main() {
                 vC = color;
@@ -162,12 +162,14 @@ function glowPointsMaterial(size, opacity) {
                 gl_PointSize = max(uSize * 320.0 / -mv.z, 1.5);
                 gl_Position = projectionMatrix * mv;
             }`,
-        fragmentShader: `varying vec3 vC;
+        // uFade: whole-pool dip used by the sweep-wrap transition (the
+        // transit stream fades for ~0.8 s instead of teleporting).
+        fragmentShader: `varying vec3 vC; uniform float uFade;
             void main() {
                 float r = length(gl_PointCoord - vec2(0.5)) * 2.0;
                 float a = exp(-4.5 * r * r) - 0.011;
                 if (a <= 0.0) discard;
-                gl_FragColor = vec4(vC * (1.0 + 0.7 * (1.0 - r)), a * ${opacity.toFixed(2)});
+                gl_FragColor = vec4(vC * (1.0 + 0.7 * (1.0 - r)) * uFade, a * ${opacity.toFixed(2)} * uFade);
             }`,
     });
 }
@@ -451,13 +453,20 @@ function l1GateMaterial(radius) {
 function windSheetMaterial(dataTex) {
     return new THREE.ShaderMaterial({
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide,
+        // BackSide, deliberately: since the volumetric flare the default
+        // camera sits INSIDE the tube — DoubleSide was rasterizing every
+        // screen pixel twice (near wall + far wall), a measurable stutter
+        // source on integrated GPUs. BackSide keeps the look-through-the-
+        // volume reading from outside and the surrounding-walls reading
+        // from inside at HALF the fill cost.
+        side: THREE.BackSide,
         uniforms: {
             uData: { value: dataTex },
             uXmp:  { value: SCALE.CORRIDOR.X_MP },
             uSpan: { value: SCALE.CORRIDOR.SPAN },
             uFlow: { value: 0 },     // wave phase — advanced at τ-scaled speed
             uTime: { value: 0 },     // wall seconds (crackle flicker)
+            uFade: { value: 1 },     // sweep-wrap dip (see glowPointsMaterial)
         },
         vertexShader: `
             varying vec3 vW; varying vec3 vN;
@@ -468,7 +477,7 @@ function windSheetMaterial(dataTex) {
             }`,
         fragmentShader: `
             uniform sampler2D uData;
-            uniform float uXmp, uSpan, uFlow, uTime;
+            uniform float uXmp, uSpan, uFlow, uTime, uFade;
             varying vec3 vW; varying vec3 vN;
             void main() {
                 float u = clamp((vW.x - uXmp) / uSpan, 0.0, 1.0);
@@ -490,7 +499,7 @@ function windSheetMaterial(dataTex) {
                 vec3 col = mix(vec3(0.28, 0.58, 1.0), vec3(1.0, 0.42, 0.16), south);
                 // Strong southward sections crackle — the dangerous stuff flickers.
                 float crackle = south * 0.22 * (0.5 + 0.5 * sin(uTime * 21.0 + vW.x * 6.3));
-                float b = (0.12 + 1.25 * n) * wave * body * d.a;
+                float b = (0.12 + 1.25 * n) * wave * body * d.a * uFade;
                 b *= 1.0 + 1.7 * front + crackle;
                 gl_FragColor = vec4(col * b, min(1.0, b) * 0.5);
             }`,
@@ -731,6 +740,7 @@ export class RingCurrentGlobe {
         this._raf = 0;
         this._lastT = 0;
         this._tView = 0;          // wall-clock seconds — TRUE bounce time (×1 exception)
+        this._wrapT = 1;          // sweep-wrap dip timer (1 = no dip pending)
         this._simHours = 0;       // SIM hours — drift + lifecycle clock (SimClock)
         this._builtPeakL = 0;
         this._parcels = [];       // in-transit L1 samples (state.transit)
@@ -870,6 +880,8 @@ export class RingCurrentGlobe {
      */
     _buildParticles() {
         this._popPoints = {};    // key → { points, mat }
+        this._popList = [];      // same records, cached (tick runs per frame —
+                                 // Object.values() there was per-frame garbage)
         this._pendingMix = 0.06; // quiet-time O⁺ energy mix until first state
         const styles = {
             ionsH:     { color: ION_COLOR,      size: 0.085 },
@@ -879,6 +891,7 @@ export class RingCurrentGlobe {
         const addPop = (key, pop) => {
             if (this._disposed) return;
             this._popPoints[key] = this._makePoints(pop, styles[key].color, styles[key].size);
+            this._popList.push(this._popPoints[key]);
             this._setCompositionMix(this._pendingMix);
         };
         const buildInline = () => {
@@ -1086,6 +1099,13 @@ export class RingCurrentGlobe {
             this._transitOff[i * 3 + 2] = Math.cos(a) * r;
             this._transitEnv[i] = core ? 1 : 0.55 - 0.25 * (r / 15);
         }
+        // Reusable wind-profile sample pool: _updateTransit fills these IN
+        // PLACE every frame. The old per-frame object literals were a
+        // steady GC source (≈120 allocations × 60 fps) — collector pauses
+        // read as stutter. Pool + in-place insertion sort = zero per-frame
+        // allocation on this path.
+        this._wsPool = Array.from({ length: TRANSIT.MAX_PARCELS },
+            () => ({ x: 0, nNorm: 0, R: 0, G: 0, B: 0, south: 0, vNorm: 0 }));
         const mat = glowPointsMaterial(0.22, 0.95);   // brighter, fatter parcels
         this._transit = new THREE.Points(this._transitGeo, mat);
         this._transit.frustumCulled = false;
@@ -1145,6 +1165,54 @@ export class RingCurrentGlobe {
         this._l1Craft.position.set(TRANSIT.X_SUN, 2.5, 2.5);
         this._scene.add(this._l1Craft);
         this._lastSampleTL1 = 0;
+
+        // ── Solar-origin emission — the journey's TRUE start ────────────────
+        // The Sun→L1 leg is UNMEASURED (plasma is only sampled at the gate)
+        // and drawn ≈2 900× more compressed than near-Earth (1.47×10⁸ km in
+        // 8 scene units), so honest motion here is near-stillness: the leg
+        // takes days at any τ. What CAN be shown honestly is the source's
+        // emission ACTIVITY: puffs born at the back-mapped source region
+        // (and the visible coronal holes) at a cadence tied to the LIVE
+        // measured flux — n·v of the wind arriving now is what this source
+        // was emitting when that plasma left, per the ledger. Bulk drift is
+        // the honest crawl; the swell-and-fade is a rendering cue (same
+        // rule as arrival flashes). The gap label discloses all of it.
+        const EMIT_N = 240;
+        this._emGeo = new THREE.BufferGeometry();
+        this._emPos = new Float32Array(EMIT_N * 3);
+        this._emCol = new Float32Array(EMIT_N * 3);
+        this._emGeo.setAttribute('position', new THREE.BufferAttribute(this._emPos, 3).setUsage(THREE.DynamicDrawUsage));
+        this._emGeo.setAttribute('color',    new THREE.BufferAttribute(this._emCol, 3).setUsage(THREE.DynamicDrawUsage));
+        this._emPts = new THREE.Points(this._emGeo, glowPointsMaterial(0.14, 0.85));
+        this._emPts.frustumCulled = false;
+        this._scene.add(this._emPts);
+        this._em = {
+            mode: new Uint8Array(EMIT_N),
+            x: new Float32Array(EMIT_N), y: new Float32Array(EMIT_N), z: new Float32Array(EMIT_N),
+            age: new Float32Array(EMIT_N), life: new Float32Array(EMIT_N),
+            warm: new Float32Array(EMIT_N),
+        };
+        this._emCursor = 0;
+        this._emAccum = 0;
+        this._srcDisk = null;      // back-mapped source on the disk (setState)
+        this._diskHoles = [];      // visible CHs in disk coords (setState)
+        this._driverV = 400;
+        this._driverN = 3;
+
+        // Parker-spiral streamline: the garden-hose connection from the
+        // source region to the L1 gate. SCHEMATIC at this compression (the
+        // real spiral wraps 40–60° of longitude); curvature direction and
+        // magnitude from the live spiral angle. Rebuilt each feed state.
+        this._spiralPos = new Float32Array(25 * 3);
+        this._spiralGeo = new THREE.BufferGeometry();
+        this._spiralGeo.setAttribute('position', new THREE.BufferAttribute(this._spiralPos, 3).setUsage(THREE.DynamicDrawUsage));
+        this._spiral = new THREE.Line(this._spiralGeo, new THREE.LineBasicMaterial({
+            color: 0x7fe6c3, transparent: true, opacity: 0.28,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        this._spiral.frustumCulled = false;
+        this._spiral.visible = false;   // until the first source fix
+        this._scene.add(this._spiral);
 
         // Barometric trace: n(x) as a polyline riding above the corridor —
         // the pressure-wave shape of the incoming wind, sliding Earthward in
@@ -1318,7 +1386,8 @@ export class RingCurrentGlobe {
         // it's live instrumentation, not physics). Prominent in Real mode.
         const hbAmp = tau === 1 ? 0.22 : 0.07;
         let slot = 0;
-        const waveSamples = [];   // {x, nNorm, R, G, B} — x-sorted below
+        const ws = this._wsPool;   // pooled samples, filled in place; wsN live
+        let wsN = 0;
         this._slotParcel = this._slotParcel || [];
         this._slotParcel.length = 0;
         for (const p of this._parcels) {
@@ -1372,13 +1441,12 @@ export class RingCurrentGlobe {
                 }
             }
             this._slotParcel[slot] = p;   // hover tooltip lookup
-            waveSamples.push({
-                x, nNorm, R, G, B,
-                // Wind-sheet profile channels: Bz southness (−15 nT → 1,
-                // +15 → 0) and speed norm for local wave advection.
-                south: Math.max(0, Math.min(1, 0.5 - (Number.isFinite(p.bz) ? p.bz : 0) / 30)),
-                vNorm: Math.max(0, Math.min(1, ((Number.isFinite(p.v) ? p.v : 400) - 250) / 650)),
-            });
+            const s = ws[wsN++];
+            s.x = x; s.nNorm = nNorm; s.R = R; s.G = G; s.B = B;
+            // Wind-sheet profile channels: Bz southness (−15 nT → 1,
+            // +15 → 0) and speed norm for local wave advection.
+            s.south = Math.max(0, Math.min(1, 0.5 - (Number.isFinite(p.bz) ? p.bz : 0) / 30));
+            s.vNorm = Math.max(0, Math.min(1, ((Number.isFinite(p.v) ? p.v : 400) - 250) / 650));
             slot++;
         }
         // ── Wind-sheet profile: splat the parcels into the 128-bin texture
@@ -1387,7 +1455,8 @@ export class RingCurrentGlobe {
         const bins = this._windBins, wd = this._windData;
         wd.fill(0);
         let vSum = 0;
-        for (const s of waveSamples) {
+        for (let si = 0; si < wsN; si++) {
+            const s = ws[si];
             vSum += s.vNorm;
             const c = Math.round(((s.x - xmp) / spanX) * (bins - 1));
             for (let b = Math.max(0, c - 2); b <= Math.min(bins - 1, c + 2); b++) {
@@ -1403,7 +1472,7 @@ export class RingCurrentGlobe {
         // Advance the wave phase at the mean τ-scaled apparent speed (the
         // same invariant the trails use) so the sheet's waves sweep
         // Earthward at an honest rate — near-frozen at ×1, rolling at ×300.
-        const meanV = waveSamples.length ? 250 + 650 * (vSum / waveSamples.length) : 400;
+        const meanV = wsN ? 250 + 650 * (vSum / wsN) : 400;
         this._windMat.uniforms.uFlow.value =
             (this._windMat.uniforms.uFlow.value +
              (this._lastDt ?? 0.016) * apparentUnitsPerSec(meanV, SCALE.CORRIDOR.kmPerUnit, tau) * 2.4)
@@ -1411,9 +1480,17 @@ export class RingCurrentGlobe {
         this._windMat.uniforms.uTime.value = wallNow / 1000 % 3600;
         // Barometric trace + envelope, x-sorted (overtaking can reorder
         // parcels relative to arrival order — the trace is n(x), not n(t)).
-        waveSamples.sort((a, b) => a.x - b.x);
+        // In-place insertion sort of the first wsN pool entries: near-sorted
+        // input each frame, zero allocation (Array.sort allocates).
+        for (let si = 1; si < wsN; si++) {
+            const s = ws[si];
+            let k2 = si - 1;
+            while (k2 >= 0 && ws[k2].x > s.x) { ws[k2 + 1] = ws[k2]; k2--; }
+            ws[k2 + 1] = s;
+        }
         let wi = 0;
-        for (const s of waveSamples) {
+        for (let si = 0; si < wsN; si++) {
+            const s = ws[si];
             const w = wi * 3;
             this._wavePos[w]     = s.x;
             this._wavePos[w + 1] = TRANSIT.WAVE_Y + TRANSIT.WAVE_AMP * s.nNorm;
@@ -1683,6 +1760,71 @@ export class RingCurrentGlobe {
         tu.uFlow.value = (tu.uFlow.value + 1.7 * vE0 * vScale * dt) % (Math.PI * 2000);
         tu.uTime.value = this._tView;
         tu.uFeed.value += (Math.min(1, vbsD / 4) - tu.uFeed.value) * (1 - Math.exp(-dt / 3));
+    }
+
+    /** Solar-origin emission: spawn puffs at the live-flux cadence, drift
+     *  them Earthward at the leg's HONEST apparent speed (a crawl — this
+     *  leg is ~2 900× more compressed than near-Earth), swell-and-fade as
+     *  a rendering cue. See the build comment in _buildSunAndTransit. */
+    _updateEmission(dt) {
+        const em = this._em;
+        const d2r = Math.PI / 180;
+        const SUN_X = TRANSIT.X_SUN + 8;     // sun sprite center
+        const R_DISK = 1.98;                 // photosphere radius (scene units)
+        // Live-flux cadence: quiet ≈2 puffs/s → dense fast wind ≈8/s.
+        const flux = Math.min(3, (this._driverN / 6) * (this._driverV / 450));
+        this._emAccum += dt * (2 + 2.2 * flux) * (this._streamDensity ?? 1);
+        while (this._emAccum >= 1) {
+            this._emAccum -= 1;
+            let i = -1;
+            for (let probe = 0; probe < em.mode.length; probe++) {
+                const j2 = (this._emCursor + probe) % em.mode.length;
+                if (em.mode[j2] === 0) { i = j2; this._emCursor = j2 + 1; break; }
+            }
+            if (i < 0) break;
+            // 70 % from the back-mapped source region (the hole feeding the
+            // wind arriving NOW), 30 % from any other visible coronal hole.
+            let latDeg = 0, lonW = 0;
+            if (this._srcDisk && Math.random() < 0.7) {
+                latDeg = this._srcDisk.latDeg;
+                lonW = Math.min(this._srcDisk.lonWDeg, 80);
+            } else if (this._diskHoles.length) {
+                const h = this._diskHoles[(Math.random() * this._diskHoles.length) | 0];
+                latDeg = h.lat; lonW = h.lonW;
+            } else if (!this._srcDisk) {
+                continue;   // no source fix yet — don't invent one
+            }
+            em.mode[i] = 1;
+            em.x[i] = SUN_X - 0.3 - Math.random() * 0.3;
+            em.y[i] = R_DISK * Math.sin(latDeg * d2r) + (Math.random() - 0.5) * 0.55;
+            em.z[i] = -R_DISK * Math.sin(lonW * d2r) * Math.cos(latDeg * d2r) + (Math.random() - 0.5) * 0.55;
+            em.age[i] = 0;
+            em.life[i] = 5 + Math.random() * 5;
+            em.warm[i] = 0.75 + Math.random() * 0.25;
+        }
+        // Honest Earthward drift: v × τ ÷ the leg's own km-per-unit.
+        const kmPerUnit = (SOLAR.AU_KM - PHYS.L1_KM) / 8;
+        const drift = this._driverV * this._clock.tau / kmPerUnit;
+        const pos = this._emPos, col = this._emCol;
+        for (let i = 0; i < em.mode.length; i++) {
+            const j = i * 3;
+            if (em.mode[i] === 0) { col[j] = col[j + 1] = col[j + 2] = 0; continue; }
+            em.age[i] += dt;
+            if (em.age[i] > em.life[i]) {
+                em.mode[i] = 0;
+                col[j] = col[j + 1] = col[j + 2] = 0;
+                continue;
+            }
+            em.x[i] -= drift * dt;
+            const k = em.age[i] / em.life[i];
+            const b = Math.sin(Math.min(1, k * 1.15) * Math.PI) * 0.55 * em.warm[i];
+            pos[j]     = em.x[i];
+            pos[j + 1] = em.y[i];
+            pos[j + 2] = em.z[i];
+            col[j] = 1.0 * b; col[j + 1] = 0.86 * b; col[j + 2] = 0.62 * b;
+        }
+        this._emGeo.attributes.position.needsUpdate = true;
+        this._emGeo.attributes.color.needsUpdate = true;
     }
 
     /** Ease the boundary toward the live Shue target (the real response is
@@ -2094,6 +2236,8 @@ export class RingCurrentGlobe {
         this._pointerPx = null;
         this._pointerDirty = false;
         this._tmpV = new THREE.Vector3();
+        this._poseScratch = {};   // reused by the pick loop (thousands of
+        this._pickPose = {};      // poses per pick — no per-particle allocs)
         const dom = this._renderer.domElement;
         this._onPointerMove = (e) => {
             const rect = dom.getBoundingClientRect();
@@ -2134,14 +2278,20 @@ export class RingCurrentGlobe {
             const visFrac = P.mat.uniforms.uVisFrac.value;
             for (let i = 0; i < pop.count; i++) {
                 if (hash1(pop.life[i * 4 + 3] * 0.517) >= visFrac) continue;  // hidden (Dst gate)
-                const q = particlePose(pop, i, this._simHours, this._tView);
+                const q = particlePose(pop, i, this._simHours, this._tView, this._poseScratch);
                 this._tmpV.set(q.x, q.y, q.z)
                     .applyMatrix4(this._magGroup.matrixWorld)
                     .project(this._camera);
                 const px = (this._tmpV.x + 1) / 2 * rect.width;
                 const py = (1 - this._tmpV.y) / 2 * rect.height;
                 const d2 = (px - this._pointerPx.x) ** 2 + (py - this._pointerPx.y) ** 2;
-                if (d2 < 144 && (!best || d2 < best.d2)) best = { kind: 'ring', key, P, i, q, d2 };
+                if (d2 < 144 && (!best || d2 < best.d2)) {
+                    // Copy out of the scratch — later iterations overwrite it.
+                    this._pickPose.ph = q.ph;
+                    this._pickPose.dying = q.dying;
+                    this._pickPose.mode = q.mode;
+                    best = { kind: 'ring', key, P, i, q: this._pickPose, d2 };
+                }
             }
         }
         // Transit parcels: their geometry holds REAL positions — raycast.
@@ -2207,6 +2357,7 @@ export class RingCurrentGlobe {
             this._windLab = this._makeLabel((TRANSIT.X_MP + TRANSIT.X_SUN) / 2, TRANSIT.WAVE_Y + 6.2, 0, 9);
             this._ringLab = this._makeLabel(0, 7.8, 0, 9);
             this._gateLab = this._makeLabel(TRANSIT.X_SUN, 20.5, 0, 10);
+            this._helioLab = this._makeLabel(TRANSIT.X_SUN + 4, -8.5, 0, 8.5);
         }
         // Gate pulse: a genuinely NEW 1-min sample landed (newest tL1 moved).
         // Wall-clock instrumentation, deliberately independent of τ.
@@ -2228,6 +2379,46 @@ export class RingCurrentGlobe {
         }
         // Live solar disk: coronal holes + the back-mapped source marker.
         if (sl) this._drawSunDisk(sl);
+        // Solar-origin emission wiring: where on the disk the puffs are
+        // born, the live drivers that set their cadence, and the schematic
+        // Parker-spiral streamline source → gate.
+        this._driverV = Number.isFinite(state?.drivers?.v) ? state.drivers.v : 400;
+        this._driverN = Number.isFinite(state?.drivers?.n) ? state.drivers.n : 3;
+        this._srcDisk = Number.isFinite(sl?.stonyhurstNowDeg)
+            ? { latDeg: sl.source?.hole?.lat_deg ?? 0, lonWDeg: sl.stonyhurstNowDeg }
+            : null;
+        this._diskHoles = (sl?.holes ?? []).map(h => {
+            const lonW = ((h.lon_carrington_deg - sl.l0NowDeg) % 360 + 540) % 360 - 180;
+            return { lat: h.lat_deg ?? 0, lonW };
+        }).filter(h => Math.abs(h.lonW) < 80 && Math.abs(h.lat) < 70);
+        if (this._srcDisk && this._spiralPos) {
+            const d2r = Math.PI / 180;
+            const lonW = Math.min(this._srcDisk.lonWDeg, 80) * d2r;
+            const lat = this._srcDisk.latDeg * d2r;
+            // Quadratic Bézier from the source point on the disk to the gate
+            // rim, bowing westward by the live garden-hose angle.
+            const p0 = [TRANSIT.X_SUN + 7.6, 1.98 * Math.sin(lat), -1.98 * Math.sin(lonW) * Math.cos(lat)];
+            const p2 = [TRANSIT.X_SUN + 0.2, 0, 0];
+            const bow = Math.tan(Math.min(70, sl.spiralDeg ?? 45) * d2r) * 1.6;
+            const p1 = [TRANSIT.X_SUN + 4, p0[1] * 0.45, p0[2] * 0.45 - bow];
+            for (let s = 0; s <= 24; s++) {
+                const t = s / 24, u2 = 1 - t;
+                for (let c = 0; c < 3; c++) {
+                    this._spiralPos[s * 3 + c] =
+                        u2 * u2 * p0[c] + 2 * t * u2 * p1[c] + t * t * p2[c];
+                }
+            }
+            this._spiralGeo.attributes.position.needsUpdate = true;
+            this._spiral.visible = true;
+        }
+        if (sl && this._helioLab) {
+            this._drawLabel(this._helioLab, 'SUN → L1 — THE UNMEASURED LEG', [
+                `${Number.isFinite(sl.days) ? sl.days.toFixed(1) : '—'} d in flight · light: 8.3 min`,
+                'plasma is only measured when it crosses the gate',
+                'puffs = live source activity (persistence)',
+                'leg drawn ≈2 900× more compressed than near-Earth',
+            ], '#ffd27a');
+        }
         const d = state?.drivers, nw = state?.now;
         const f1 = (x, u, dg = 1) => Number.isFinite(x) ? `${x.toFixed(dg)}${u}` : '—';
         if (d) this._drawLabel(this._windLab, 'INCOMING WIND — LIVE (L1)', [
@@ -2263,7 +2454,7 @@ export class RingCurrentGlobe {
             injection:    Math.min(1, Math.abs(now.injectionQ ?? 0) / 12),
         };
         this._setCompositionMix(now.oxygenFraction);
-        for (const p of Object.values(this._popPoints ?? {})) {
+        for (const p of this._popList ?? []) {
             this._syncStateUniforms(p.mat);
             for (const e of p.echoes) this._syncStateUniforms(e.mat);
         }
@@ -2313,9 +2504,23 @@ export class RingCurrentGlobe {
         const simNow = this._clock.now(wallNow);
         if (this._clock.wraps !== this._seenWraps) {
             // Sweep restarted (wrap or τ change) — don't fire the whole
-            // window's arrivals as one burst.
+            // window's arrivals as one burst, and start the wrap dip so the
+            // stream fades through the restart instead of teleporting (the
+            // "simulation reset" read — it is a REPLAY of the same real
+            // window; the page badge flashes the same message).
             this._seenWraps = this._clock.wraps;
             this._lastSimNow = simNow;
+            this._wrapT = 0;
+        }
+        // Sweep-wrap dip: transit-side visuals fade to 15 % and ease back
+        // over ~0.8 s. Only rendering opacity — physics is untouched.
+        if (this._wrapT < 0.8) {
+            this._wrapT += dt;
+            const fade = 0.15 + 0.85 * Math.min(1, this._wrapT / 0.8);
+            this._transit.material.uniforms.uFade.value = fade;
+            this._env.material.uniforms.uFade.value = fade;
+            this._windMat.uniforms.uFade.value = fade;
+            this._wave.material.opacity = 0.9 * fade;
         }
         const dSimH = this._clock.dSim(dt * 1000) / 3.6e6;   // wall s → sim hours
         this._tView += dt;
@@ -2352,7 +2557,7 @@ export class RingCurrentGlobe {
         // clamped-point brightness, and thickens the trail echoes so the
         // distant ring reads as a discrete flowing river, not dust.
         const lodT = Math.min(1, Math.max(0, (this._camera.position.length() - 26) / 55));
-        for (const p of Object.values(this._popPoints ?? {})) {
+        for (const p of this._popList ?? []) {
             p.mat.uniforms.uDriftHours.value = this._simHours;
             p.mat.uniforms.uBounceSec.value  = this._tView;
             p.mat.uniforms.uMinPx.value      = 1.4 + 1.8 * lodT;
@@ -2376,6 +2581,7 @@ export class RingCurrentGlobe {
         this._updateFlashes(dt);
         this._updateInjections(dt, dSimH);
         this._updateSheath(dt);
+        this._updateEmission(dt);
         this._updateCinematics(dt);
         tNow = performance.now();
         blend('pools', tMark, tNow); tMark = tNow;

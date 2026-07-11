@@ -186,6 +186,19 @@ body {
 .rc-simtime .rc-simtime-sub {
     display:block; font-weight:400; font-size:.64rem; color:#8b94ad; letter-spacing:0;
 }
+/* Sweep progress: at ×τ the scene fast-forwards the SAME real forecast
+   window and wraps — the bar + replay flash make the restart legible. */
+.rc-simtime.rc-replay { border-color:rgba(127,230,195,.7); }
+.rc-simtime.rc-replay::after {
+    content:'↻ replaying the same real window';
+    display:block; font-weight:600; font-size:.6rem; color:#7fe6c3; letter-spacing:0;
+}
+.rc-sweep {
+    position:absolute; left:13px; top:60px; z-index:4; width:148px; height:3px;
+    background:rgba(255,255,255,.08); border-radius:2px; overflow:hidden;
+    pointer-events:none;
+}
+.rc-sweep-bar { height:100%; width:0; background:linear-gradient(90deg,#ffd27a,#ff9a3d); }
 .rc-mode-btn {
     font-size:.68rem; font-weight:650; cursor:pointer; color:#cdd5e4;
     background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13);
@@ -251,6 +264,7 @@ body {
 <div class="rc-layout">
     <div class="rc-stage" id="rc-stage">
         <div class="rc-simtime" id="rc-simtime">SIM TIME &times;300</div>
+        <div class="rc-sweep" id="rc-sweep" hidden><div class="rc-sweep-bar" id="rc-sweep-bar"></div></div>
         <div class="rc-perf" id="rc-perf" hidden>&mdash;</div>
         <div class="rc-legend">
             <span class="rc-dot" style="background:#ffa040"></span>H&#8314; ions &mdash; drift west, true-rate bounce<br>
@@ -513,6 +527,31 @@ try {
     console.warn('[ring-current] 3D disabled:', err);
     stage.insertAdjacentHTML('beforeend',
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d6684;font-size:.8rem;">3D view unavailable — data panels remain live</div>');
+}
+
+// ── Sweep progress + replay flash ───────────────────────────────────────────
+// At τ>1 the SimClock fast-forwards the SAME real forecast window and wraps
+// (an honest replay — the data doesn't loop, the sweep does). Without a cue
+// the wrap reads as "the simulation reset itself": the bar shows where in
+// the sweep you are, and the badge flashes the replay message on each wrap
+// (the 3D stream also dips briefly — globe-side).
+{
+    const sweepEl = $('rc-sweep'), barEl = $('rc-sweep-bar'), badgeEl = $('rc-simtime');
+    let seenWraps = clock.wraps, flashT = 0;
+    setInterval(() => {
+        if (document.hidden) return;
+        const on = clock.tau > 1;
+        sweepEl.hidden = !on;
+        if (!on) { badgeEl.classList.remove('rc-replay'); return; }
+        barEl.style.width =
+            `${Math.max(0, Math.min(100, 100 * (clock.now() - Date.now()) / clock.windowMs)).toFixed(1)}%`;
+        if (clock.wraps !== seenWraps) {
+            seenWraps = clock.wraps;
+            badgeEl.classList.add('rc-replay');
+            clearTimeout(flashT);
+            flashT = setTimeout(() => badgeEl.classList.remove('rc-replay'), 1600);
+        }
+    }, 250);
 }
 
 // ── Render-performance HUD + one-shot telemetry ─────────────────────────────

@@ -63,6 +63,23 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   time, mean-solar local time at the saved user location (js/user-location
 >   longitude — civil tz needs a tz db), and Earth's true orbital position
 >   (earthOrbit: heliocentric λ, r in AU, Kepler-second-law-tested).
+> - **Solar-origin emission + legible sweep wrap + stutter fixes**
+>   (2026-07-11): the journey now STARTS at the Sun — emission puffs born
+>   at the back-mapped source region (70 % weight) and visible CHs, at a
+>   cadence tied to the live measured flux (n·v of the arriving wind =
+>   what the source emitted when that plasma left); bulk drift is the
+>   honest crawl (the Sun→L1 leg is ≈2 900× more compressed than
+>   near-Earth — disclosed in the SUN→L1 label), swell/fade is a labeled
+>   rendering cue. A schematic Parker-spiral streamline (live garden-hose
+>   angle) ties the source to the L1 gate. The τ-sweep wrap — which read
+>   as "the simulation reset itself" — is now legible: a sweep-progress
+>   bar under the SIM TIME badge, a "↻ replaying the same real window"
+>   flash on wrap, and an ~0.8 s transit-stream opacity dip (uFade)
+>   instead of a teleport. Stutter: per-frame GC eliminated on the hot
+>   paths (pooled wind-profile samples + in-place insertion sort, cached
+>   population list, particlePose scratch object for the pick loop) and
+>   the wind sheet went BackSide (the volumetric flare had the default
+>   camera INSIDE it — DoubleSide rasterized every pixel twice).
 > - **Wind source coordinates + live solar disk** (2026-07-11): the ledger
 >   now carries COORDINATES. Model: `carringtonL0(ms)` (Meeus ch. 29 disk-
 >   center L0/B0, property-tested: 13.2°/d synodic, 27.28 d period, B0
