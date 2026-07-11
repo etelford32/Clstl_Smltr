@@ -148,7 +148,7 @@ export function computeState(driverSeries, observedDst, kp, nowMs, f107 = null) 
     // Earth-arrival time base: the trailing samples haven't arrived yet —
     // they ARE the forecast window.
     const propagated = propagateToEarth(driverSeries)
-        .map(s => ({ t: s.tArrive, tL1: s.t, v: s.v, n: s.n, bz: s.bz, bt: s.bt }));
+        .map(s => ({ t: s.tArrive, tL1: s.t, v: s.v, n: s.n, bz: s.bz, bt: s.bt, temp: s.temp }));
 
     const dst0 = observedDstAt(observedDst, propagated[0].t);
     if (!Number.isFinite(dst0)) return null;
@@ -171,7 +171,7 @@ export function computeState(driverSeries, observedDst, kp, nowMs, f107 = null) 
     // window, rendered as the incoming stream on the 3D twin.
     const parcels = propagated
         .filter(p => p.t > nowMs)
-        .map(p => ({ tArrive: p.t, tL1: p.tL1, v: p.v, n: p.n, bz: p.bz, bt: p.bt }));
+        .map(p => ({ tArrive: p.t, tL1: p.tL1, v: p.v, n: p.n, bz: p.bz, bt: p.bt, temp: p.temp }));
     let strongest = null;
     for (const p of parcels) {
         const pv = couplingVBs(p.v, p.bz);
