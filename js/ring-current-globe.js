@@ -2,75 +2,140 @@
  * ring-current-globe.js — Three.js digital twin scene for ring-current.html
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * ONE CLOCK. Every population moves at its TRUE physical velocity through
- * its region's spatial scale, driven by the single SimClock τ
- * (js/sim-clock.js). Apparent speed = physical km/s × τ ÷ local km/unit.
- * Nothing is animated at a "looks nice" speed — liveliness comes from
- * rendering cues (trails, heartbeat pulses, arrival flashes), never from
- * faking a velocity. See RING_CURRENT_VISUAL_PLAN.md.
+ * FRAME — true GSM, rigidly mapped (Earth at origin, 1 unit = 1 R_E):
+ *   scene +X = GSM +X  (Sun–Earth line: the Sun really is exactly there)
+ *   scene +Y = GSM +Z  ("north")
+ *   scene −Z = GSM +Y  (dusk)   ⇒ right-handed, no mirroring
+ * MLT = (12 − θ·12/π) mod 24 where θ = atan2(z, x): noon at +X, DAWN at +Z,
+ * dusk at −Z. (Before 2026-07-11 the code used MLT = 12 + θ·12/π, which is a
+ * MIRRORED frame — impossible to reconcile with a real Earth texture — and
+ * under it the "dusk" partial-ring arc actually rendered at 13 MLT. Verified
+ * numerically before the flip; both are fixed together.)
  *
- * Scene (Earth at origin, 1 unit = 1 R_E, equatorial plane = XZ, north = +Y,
- * Sun toward +X):
+ * ONE CLOCK (SimClock, js/sim-clock.js — #917's design, unified here with
+ * this branch's GPU pipeline): drift, particle LIFECYCLE, transit advection,
+ * arrival detection, injections, and Earth spin/tilt all evaluate on the
+ * same simTime at compression τ. Apparent speed = physical velocity × τ ÷
+ * the region's disclosed spatial scale (SCALE registry). At τ=1 the entire
+ * scene is the real magnetosphere at true rate; at τ>1 the SAME data
+ * fast-forwards through the genuine forecast window and wraps to the live
+ * present (see RING_CURRENT_VISUAL_PLAN.md).
+ *   · Earth: subsolar longitude faces +X, axis tilted by the live solar
+ *     declination — both from subsolarPoint(simTime), so the terminator and
+ *     night hemisphere are the actual ones (τ>1 sweeps ≤75 min ahead: the
+ *     phase stays near-real while advancing legibly).
+ *   · Magnetosphere group tilts about scene Z by −ψ (dipoleTiltRad at
+ *     simTime) — the ±11° diurnal wobble riding the ±23° seasonal tilt.
+ *   · DISCLOSED ×1 exception: bounce runs at its TRUE physical rate in wall
+ *     seconds at every τ (ions seconds-to-a-minute, O⁺ ~4× slower,
+ *     electrons sub-second). At τ ≥ 60 real bounce would alias far above
+ *     the frame rate and read as shimmer; period and amplitude stay
+ *     physical, and at Real ×1 the whole scene — bounce included — is
+ *     true rate.
+ *
+ * PARTICLE LIFECYCLE (the Sun→surface journey, on the sim clock):
+ *   birth    nightside injection sector (~21–03 MLT, the plasma-sheet edge),
+ *            entry flash scaled by the live O'Brien–McPherron |Q|
+ *   life     drift + true-rate bounce; every particle carries its TRUE
+ *            lifetime — charge exchange vs the geocoronal H halo for ions
+ *            (energy/species/L-dependent: O⁺ ~10× shorter than H⁺ at
+ *            100 keV = the observed two-phase recovery) or nominal
+ *            scattering hours for electrons. The dusk asymmetry partly
+ *            EMERGES from birth-at-midnight + westward drift + finite
+ *            lifetime — the real mechanism.
+ *   death    ENA channel: neutralised, escapes outward while fading (how
+ *            ENA imagers photograph the ring current); precipitation
+ *            channel (deep mirrors, all electrons): slides down its field
+ *            line and impacts the atmosphere at auroral latitude — the
+ *            journey's last stop. Then rebirth, hash-jittered.
+ *   The vertex shader is a line-for-line transcription of particlePose()
+ *   in js/ring-current-particles.js — node-tested, and it drives tooltip
+ *   picking so hover agrees with the GPU. CHANGE THEM TOGETHER.
  *
  *   earth          textured sphere + additive atmosphere shell
  *   fieldLines     dipole cage — r = L·cos²λ at L = 2…6 × 12 meridians
- *   ions           ~3200 points, WESTWARD drift + REAL field-line bounce
- *                  between mirror points (pitch angles above the loss cone);
- *                  visible count + brightness track |Dst*| (quiet = thin dim
- *                  torus, storm = dense hot asymmetric)
+ *   ions H⁺        ~2100 points, WESTWARD drift + REAL field-line bounce
+ *                  between mirror points (pitch angles above the loss cone)
+ *   ions O⁺        ~1100 points, same drift (gradient–curvature drift period
+ *                  is mass-independent at fixed energy) but visibly slower
+ *                  bounce (T_b ∝ √m — 4× for O⁺; drawn at 2.5× for
+ *                  legibility). Relative BRIGHTNESS of the two ion
+ *                  populations tracks the model's storm-time O⁺ energy
+ *                  fraction (oxygenFraction), so a deep main phase visibly
+ *                  turns the ring ionospheric-green.
  *   electrons      ~1400 points, EASTWARD, same trapped-motion geometry
  *   ringTorus      symmetric glow at the model's peak L (|Dst*|-driven)
  *   partialArc     dusk-centred arc — the partial ring current bulge
  *   plasmapause    thin cyan ring at Carpenter–Anderson Lpp(Kp)
  *   sun + transit  Sun sprite at +X and the incoming solar wind stream:
  *                  every not-yet-arrived L1 parcel (feed state.transit)
- *                  advected by ITS OWN measured speed — position is the
- *                  fraction of its L1→Earth transit elapsed at simTime,
- *                  evaluated per frame (fast parcels visibly overtake slow
- *                  ones — real stream interaction). Colored by Bz
- *                  (southward hot / northward cool), trail length ∝ speed.
- *                  At τ=1 this is the honest real-time forecast window;
- *                  at τ>1 the SAME data sweeps as fast-forward and wraps.
- *   flashes        magnetopause interaction flash when a parcel arrives,
- *                  intensity ∝ its VBs — the visual handoff from
- *                  "in transit" to "coupled"
- *   injections     nightside tail bursts triggered by arriving southward
- *                  parcels: fast earthward entry (~100–350 km/s), visible
- *                  deceleration, settling into slow westward drift — WHY
- *                  storms pump the ring. Penetrate deeper when Lpp shrinks.
+ *                  rendered at its REAL time-to-arrival along the corridor,
+ *                  colored by Bz (southward hot / northward cool), brightness
+ *                  by dynamic pressure. This is the visible bridge between
+ *                  the Sun-side and Earth-side digital twins: the forecast
+ *                  window as matter in flight, in true real time.
  *
- * Azimuth convention: position = (r·cosθ, y, r·sinθ);
- * MLT = (12 + θ·12/π) mod 24 — noon (12 MLT) at +X, the dusk bulge at
- * 19 MLT ⇒ θ = 7π/12. Ions step θ negative (westward, decreasing MLT),
- * electrons positive; both carry westward current.
+ * Drift in scene θ: ions WESTWARD = MLT decreasing = θ INCREASING under this
+ * frame (sceneRate = −driftRateRadPerHour); electrons the reverse. Both
+ * still carry westward current.
  *
- * Physics weights come from js/ring-current-model.js — this file only draws.
- * Bounce motion is decorative texture (viewing-rate, like
- * js/van-allen-particles.js — real bounce is seconds-scale, sub-perceptual
- * at drift compression); DRIFT and TRANSIT both run on the SimClock.
- * At τ=300: a 500 km/s parcel crosses the corridor in ~10 s of viewing
- * while a 100 keV ion at L=4 laps Earth in ~30 s — the stream races, the
- * ring is stately. That contrast is the lesson.
+ * PIPELINE (2026-07-11 rework):
+ *   · Population attributes are built OFF-THREAD by js/ring-current-worker.js
+ *     (transferred ArrayBuffers; synchronous buildPopulation fallback when
+ *     Workers are unavailable).
+ *   · Per-frame particle KINEMATICS run on the GPU: trappedPointsMaterial's
+ *     vertex shader integrates drift (θ₀ + rate·uDriftHours) and bounce
+ *     (λ_m·sin(rate·uBounceSec + φ)) from static attributes, and evaluates
+ *     the radial profile, dusk asymmetry, and a nightside injection pulse
+ *     per vertex. The attribute buffers upload ONCE; each frame costs the
+ *     CPU a handful of uniform writes instead of 4700 position/color writes.
+ *     The GLSL is a port of radialProfile/azimuthalWeight/ringPeakL — KEEP
+ *     IN SYNC with js/ring-current-model.js (node tests pin the JS side;
+ *     the shader mirrors it line for line).
+ *   · Earth renders through the SHARED EarthSkin stack (js/earth-skin.js —
+ *     same renderer as earth.html / space-weather-globe): Blue Marble, city
+ *     lights, ocean specular, topographic bump, Rayleigh–Mie atmosphere,
+ *     magnetic-latitude aurora oval (cloud shell deliberately OFF — see
+ *     _buildEarth) — all driven by
+ *     this page's live state (Kp, Bz, ap, and the model's own Dst feeding
+ *     the skin's ring-current heating glow). The accurate spin phase is
+ *     visible as the actual night hemisphere, live.
+ *
+ * Ported from #917 onto this architecture: per-parcel transit advection
+ * (fast parcels overtake slow ones), magnetopause arrival flashes ∝ VBs,
+ * VBs-gated nightside injection bursts with physical entry deceleration,
+ * |Dst*|-coupled visible particle count, and hover tooltips (data behind
+ * any particle). #917's drift signs were written for the pre-fix mirrored
+ * frame — re-derived here for true GSM (westward = θ increasing).
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-    radialProfile, azimuthalWeight, driftRateRadPerHour, driftPeriodHours,
-    ringPeakL, dipoleFieldLinePoint, mirrorLatitude, lossConeAngle,
-    dynamicPressure, couplingVBs,
+    ringPeakL, dynamicPressure, subsolarPoint, dipoleTiltRad,
+    couplingVBs, driftRateRadPerHour, driftPeriodHours,
 } from './ring-current-model.js';
+import {
+    buildPopulation, POPULATIONS, particlePose, hash1, DEATH_WINDOW,
+} from './ring-current-particles.js';
 import { SimClock, SCALE, apparentUnitsPerSec } from './sim-clock.js';
+import { EarthSkin } from './earth-skin.js';
 
-// Keep in sync with js/earth-skin.js EARTH_TEXTURES (version-pinned CDN).
-const EARTH_DAY_TEXTURE = 'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg';
-
-const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);
+const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);   // H⁺ (solar wind)
+const ION_O_COLOR    = new THREE.Color(0.58, 1.00, 0.34);   // O⁺ (ionospheric outflow)
 const ELECTRON_COLOR = new THREE.Color(0.35, 0.75, 1.00);
 
+// Fraction of ion PARTICLES built as O⁺ (POPULATIONS in
+// js/ring-current-particles.js). Fixed at build time (species can't flip
+// mid-flight without a bounce-phase jump); the on-screen ENERGY mix is
+// steered per frame by a brightness uniform, normalised to this ratio.
+const O_BUILD_FRACTION =
+    POPULATIONS.ionsO.count / (POPULATIONS.ionsH.count + POPULATIONS.ionsO.count);
+
 // Soft-glow point shader: every particle renders as a gaussian orb with a
-// hot core instead of a hard square — one material for populations, transit
-// stream, and pressure envelope.
+// hot core instead of a hard square — used by the transit stream and the
+// pressure envelope (per-vertex colors). Trapped populations use
+// trappedPointsMaterial below, which computes kinematics on the GPU.
 function glowPointsMaterial(size, opacity) {
     return new THREE.ShaderMaterial({
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -93,59 +158,145 @@ function glowPointsMaterial(size, opacity) {
     });
 }
 
-// Fresnel rim-glow atmosphere — the limb brightens like scattered light.
-function atmosphereMaterial() {
+
+/**
+ * GPU trapped-particle material: the vertex shader IS the kinematics AND the
+ * lifecycle — a line-for-line transcription of particlePose() in
+ * js/ring-current-particles.js (node-tested reference; CHANGE TOGETHER).
+ * Attributes (built off-thread):
+ *   position = (L, θ_birth, λ_m)
+ *   kin      = (driftRate rad/h scene-signed, bounceRate rad/s, φ)
+ *   life     = (birthOffsetH, lifetimeH, lossChannel 0|±1, hashSeed)
+ * Per-frame uniforms: uDriftHours (SIM hours — drift + lifecycle),
+ * uBounceSec (wall — the disclosed ×1 bounce exception). Per-state:
+ * uDstStar, uAsymAmp, uMix, uInjection, uVisFrac (|Dst*|-coupled visible
+ * count: hidden particles keep evolving, so a deepening storm reveals a
+ * coherent ring, not a fresh scatter — #917's nVis, hash-gated on GPU).
+ * Brightness weight ports radialProfile · azimuthalWeight · ringPeakL from
+ * js/ring-current-model.js — KEEP THE GLSL IN SYNC.
+ */
+function trappedPointsMaterial(size, opacity, color) {
     return new THREE.ShaderMaterial({
-        transparent: true, depthWrite: false, side: THREE.BackSide,
-        blending: THREE.AdditiveBlending,
-        vertexShader: `varying vec3 vN; varying vec3 vP;
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: {
+            uSize:       { value: size },
+            uOpacity:    { value: opacity },
+            uColor:      { value: new THREE.Color(color) },
+            uDriftHours: { value: 0 },      // SIM hours (SimClock domain)
+            uBounceSec:  { value: 0 },      // wall seconds (×1 exception)
+            uDstStar:    { value: -10 },
+            uAsymAmp:    { value: 0 },
+            uAsymMlt:    { value: 19 },
+            uMix:        { value: 1 },      // composition brightness steer
+            uInjection:  { value: 0 },      // |Q| / 12 nT/h, clamped 0..1
+            uVisFrac:    { value: 0.45 },   // visible-count fraction (Dst-coupled)
+        },
+        vertexShader: `
+            uniform float uSize, uDriftHours, uBounceSec, uDstStar,
+                          uAsymAmp, uAsymMlt, uMix, uInjection, uVisFrac;
+            attribute vec3 kin;
+            attribute vec4 life;
+            varying float vW;
+            const float PI = 3.14159265358979;
+            const float DW = ${DEATH_WINDOW.toFixed(3)};   // death-window fraction
+
+            // Trig-free hash — IDENTICAL to hash1() in ring-current-particles.js.
+            float hash1(float p) {
+                p = fract(p * 0.1031);
+                p *= p + 33.33;
+                p *= p + p;
+                return fract(p);
+            }
+
             void main() {
-                vN = normalize(normalMatrix * normal);
-                vec4 mv = modelViewMatrix * vec4(position, 1.0);
-                vP = mv.xyz;
+                float L    = position.x;
+                float lamM = position.z;
+                float lt   = life.y;
+
+                // ── Lifecycle clock (sim hours) — mirrors particlePose() ──
+                float age   = uDriftHours + life.x;
+                float cycle = floor(age / lt);
+                float ph    = age / lt - cycle;                 // 0 birth … 1 death
+                float jit   = hash1(life.w * 61.7 + cycle);     // per-rebirth jitter
+
+                float thetaB = position.y + (jit - 0.5) * 0.7;  // nightside birth θ
+                float tKin   = min(ph, 1.0 - DW) * lt;          // kinematics freeze at death
+                float theta  = thetaB + kin.x * tKin;
+
+                float lam = lamM * sin(kin.y * uBounceSec + kin.z + cycle * 2.399);
+                float dying = smoothstep(1.0 - DW, 1.0, ph);
+                if (life.z != 0.0 && dying > 0.0) {
+                    // Precipitation: down the field line to the footpoint
+                    // (r → 1) — impacts the atmosphere at auroral latitude.
+                    float lamFoot = acos(inversesqrt(L)) * sign(life.z);
+                    lam = mix(lam, lamFoot, dying);
+                }
+                float cl = cos(lam);
+                float r  = L * cl * cl;
+                vec3 p = vec3(r * cl * cos(theta), r * sin(lam), r * cl * sin(theta));
+                if (life.z == 0.0 && dying > 0.0) {
+                    // Charge exchange: neutral now — field can't hold it;
+                    // the ENA escapes outward while fading.
+                    p *= 1.0 + dying * 2.2;
+                }
+
+                // radialProfile(L, Dst*) — GLSL port (sync with model JS).
+                float d     = min(0.0, uDstStar);
+                float peak  = 2.4 + 1.6 * exp(d / 120.0);          // ringPeakL
+                float sigma = L < peak ? 0.55 : 1.15;
+                float g     = exp(-(L - peak) * (L - peak) / (2.0 * sigma * sigma))
+                            / (1.0 + exp(-(L - 1.8) / 0.12))       // inner truncation
+                            / (1.0 + exp((L - 6.8) / 0.35));       // outer skirt
+                // azimuthalWeight — MLT = (12 − θ·12/π) mod 24 (GSM frame).
+                float mlt = mod(12.0 - theta * 12.0 / PI, 24.0);
+                float azw = 1.0 + uAsymAmp * cos((mlt - uAsymMlt) / 24.0 * 2.0 * PI);
+                // Nightside injection glow near ~1 MLT, live-scaled by |Q|.
+                float dmlt = mod(mlt - 1.0 + 12.0, 24.0) - 12.0;
+                float inj  = uInjection * exp(-dmlt * dmlt / 12.5);
+
+                float intensity = (0.25 + 0.75 * min(1.0, abs(uDstStar) / 150.0)) * uMix;
+                vW = (0.06 + 0.94 * min(1.3, g * azw * intensity)) * (1.0 + 1.4 * inj * g);
+
+                // Life envelope: fade in at birth (flash ∝ live |Q|), death
+                // by channel — ENA fades out as it escapes; precipitation
+                // flares approaching impact, then cuts at the surface.
+                float birth = smoothstep(0.0, 0.03, ph)
+                            * (1.0 + (0.6 + 2.4 * uInjection) * exp(-ph * 45.0));
+                float death = life.z == 0.0
+                    ? 1.0 - dying
+                    : (1.0 + 1.6 * smoothstep(0.55, 0.95, dying))
+                      * (1.0 - smoothstep(0.97, 1.0, dying));
+                // |Dst*|-coupled visible count (stable hash gate — hidden
+                // particles keep evolving off-screen).
+                float vis = step(hash1(life.w * 0.517), uVisFrac);
+                vW *= birth * death * vis;
+
+                vec4 mv = modelViewMatrix * vec4(p, 1.0);
+                gl_PointSize = uSize * 320.0 / -mv.z;
                 gl_Position = projectionMatrix * mv;
             }`,
-        fragmentShader: `varying vec3 vN; varying vec3 vP;
+        fragmentShader: `
+            uniform vec3 uColor; uniform float uOpacity;
+            varying float vW;
             void main() {
-                float f = pow(1.0 - abs(dot(normalize(vN), normalize(-vP))), 2.5);
-                gl_FragColor = vec4(vec3(0.25, 0.52, 1.0) * f * 1.7, f * 0.9);
+                float r = length(gl_PointCoord - vec2(0.5)) * 2.0;
+                float a = exp(-4.5 * r * r) - 0.011;
+                if (a <= 0.0) discard;
+                gl_FragColor = vec4(uColor * (1.0 + 0.7 * (1.0 - r)) * vW, a * uOpacity);
             }`,
     });
 }
 
 
-/**
- * Trapped population with REAL dipole bounce geometry: each particle gets an
- * equatorial pitch angle sampled ABOVE the loss cone (below it precipitates —
- * those never appear), the corresponding mirror latitude from μ-conservation,
- * and oscillates along its field line r = L·cos²λ between ±λ_m. Bounce runs
- * at a viewing-friendly rate (real bounce is ~seconds — far below frame
- * perception at drift compression; same pedagogical decoupling as
- * js/van-allen-particles.js), deeper mirrors bouncing slower (T_b grows as
- * α_eq shrinks). Drift stays physical: rate × timeCompression.
- */
-function makePopulation(count, species) {
-    const L       = new Float32Array(count);
-    const theta   = new Float32Array(count);
-    const eKev    = new Float32Array(count);
-    const mirrorL = new Float32Array(count);  // mirror latitude (rad)
-    const bRate   = new Float32Array(count);  // bounce viewing rate (rad/s)
-    const bPhase  = new Float32Array(count);
-    const rate    = new Float32Array(count);  // drift rad/h, signed
-    for (let i = 0; i < count; i++) {
-        L[i]     = 1.9 + Math.random() * 4.6;
-        theta[i] = Math.random() * 2 * Math.PI;
-        eKev[i]  = 20 * Math.pow(250 / 20, Math.random());      // log-uniform 20–250 keV
-        // Pitch angle above the loss cone, biased toward 90° (trapped
-        // distributions peak at equatorial mirroring).
-        const lc = lossConeAngle(L[i]);
-        const alpha = lc + (Math.PI / 2 - lc) * Math.pow(Math.random(), 0.45);
-        mirrorL[i] = mirrorLatitude(alpha);
-        bRate[i]   = (1.1 + Math.random() * 1.2) / (1 + 1.8 * mirrorL[i]);
-        bPhase[i]  = Math.random() * 2 * Math.PI;
-        rate[i]    = driftRateRadPerHour(eKev[i], L[i], species);
-    }
-    return { count, species, L, theta, eKev, mirrorL, bRate, bPhase, rate };
+/** Thin polar axis line through the origin, length ±halfLen. */
+function axisLine(halfLen, color, opacity) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(
+        new Float32Array([0, -halfLen, 0, 0, halfLen, 0]), 3));
+    return new THREE.Line(geo, new THREE.LineBasicMaterial({
+        color, transparent: true, opacity, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    }));
 }
 
 // ── Incoming solar wind stream (the Sun→Earth twin bridge) ──────────────────
@@ -165,10 +316,11 @@ const TRANSIT = Object.freeze({
     N_REF:       20,     // density (cm⁻³) that saturates count/trace scaling
 });
 
-// Nightside injection bursts (Phase 4): triggered when an arriving parcel
-// carries VBs above the O'Brien–McPherron coupling cutoff. Entry speed and
-// deceleration are physical (exponential approach, initial ~(r0−L)/T_IN R_E
-// per sim-second ≈ 100–350 km/s); the FADE is a rendering cue in wall time.
+// Nightside injection bursts (#917 Phase 4): triggered when an arriving
+// parcel carries VBs above the O'Brien–McPherron coupling cutoff. Entry
+// speed and deceleration are physical (exponential approach, initial
+// ~(r₀−L)/T_IN R_E per sim-second ≈ 100–350 km/s); the FADE is a rendering
+// cue in wall time.
 const INJECT = Object.freeze({
     CAP:        900,     // particle pool
     T_IN_S:     90,      // inflow time constant (sim seconds)
@@ -202,18 +354,20 @@ export class RingCurrentGlobe {
         // THE clock. Page passes a shared SimClock so UI and scene agree;
         // standalone use gets its own. `timeCompression` opt kept as the
         // legacy spelling of the initial τ.
-        this._clock = opts.clock ?? new SimClock({ tau: opts.timeCompression ?? 300 });
+        this._clock = opts.clock ?? new SimClock({ tau: opts.timeCompression ?? undefined });
         this._seenWraps = this._clock.wraps;
         this._lastSimNow = this._clock.now();
         this._state = {       // safe quiet defaults until the first feed state
             dstStar: -10, peakL: ringPeakL(-10),
             asym: { amplitude: 0, mltPeakHours: 19 },
             plasmapauseL: 4.7,
+            injection: 0,     // |Q|/12, clamped 0..1 — drives the nightside pulse
         };
         this._disposed = false;
         this._raf = 0;
         this._lastT = 0;
-        this._tView = 0;          // viewing-time clock for the bounce motion
+        this._tView = 0;          // wall-clock seconds — TRUE bounce time (×1 exception)
+        this._simHours = 0;       // SIM hours — drift + lifecycle clock (SimClock)
         this._builtPeakL = 0;
         this._parcels = [];       // in-transit L1 samples (state.transit)
 
@@ -235,11 +389,19 @@ export class RingCurrentGlobe {
         this._controls.minDistance = 2.5;
         this._controls.maxDistance = 140;   // far enough to frame the Sun corridor
 
-        // Lighting: Sun from +X.
+        // Lighting: Sun from +X — exactly the GSM Sun line, so the lit
+        // hemisphere IS the real dayside once Earth's spin phase is set.
         this._scene.add(new THREE.AmbientLight(0x8899bb, 0.55));
         const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
-        sun.position.set(1, 0.12, 0);
+        sun.position.set(1, 0, 0);
         this._scene.add(sun);
+
+        // Everything dipole-anchored lives here and tilts together by the
+        // live GSM dipole tilt −ψ (see header). Earth is NOT in this group —
+        // its axis tilts by the solar declination instead, so the ~11°
+        // dipole-vs-rotation-axis offset is visible, wobbling daily.
+        this._magGroup = new THREE.Group();
+        this._scene.add(this._magGroup);
 
         this._buildEarth();
         this._buildFieldLines();
@@ -266,21 +428,40 @@ export class RingCurrentGlobe {
     // ── Scene construction ──────────────────────────────────────────────────
 
     _buildEarth() {
-        const mat = new THREE.MeshPhongMaterial({ color: 0x2a4d8f, shininess: 18 });
-        new THREE.TextureLoader().load(EARTH_DAY_TEXTURE, (tex) => {
-            tex.colorSpace = THREE.SRGBColorSpace;
-            mat.map = tex;
-            mat.color.set(0xffffff);
-            mat.needsUpdate = true;
-        }, undefined, () => { /* CDN unreachable → keep the plain blue globe */ });
-        this._earth = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 48), mat);
-        this._scene.add(this._earth);
+        // Shared Earth renderer (js/earth-skin.js — the same skin earth.html
+        // and the space-weather globe use): Blue Marble + city lights + ocean
+        // specular glint + topographic bump, Rayleigh–Mie atmosphere rim,
+        // procedural cloud shell with relief lighting, magnetic-latitude
+        // aurora oval, and a ring-current nightside heating glow (u_dst_norm)
+        // that THIS page feeds from its own live O'Brien–McPherron model —
+        // the Earth's appearance and the 3D ring around it share one physics
+        // state (see setState).
+        //
+        // Frame: js/geo/coords.js maps lon 0 → +X and EAST → −Z — identical
+        // to this scene's GSM mapping (dusk at −Z), so the spin phase stays
+        // rotation.y = −λ_subsolar with the Sun fixed on world +X (that is
+        // what GSM means). Tilt group carries rotation.z = −declination; the
+        // spin group inside rotates about the tilted axis. Both update every
+        // frame from the wall clock in _updateGeometry() — the terminator,
+        // city-light hemisphere, and season are the actual ones right now.
+        this._earthTilt = new THREE.Group();   // rotation.z = −declination
+        this._earthSpin = new THREE.Group();   // rotation.y = −subsolar lon
+        this._earthTilt.add(this._earthSpin);
+        this._scene.add(this._earthTilt);
 
-        const atmo = new THREE.Mesh(
-            new THREE.SphereGeometry(1.045, 48, 48),
-            atmosphereMaterial(),
-        );
-        this._scene.add(atmo);
+        // NO cloud shell, deliberately (clouds: false): this is a
+        // magnetosphere page — the procedural cloud deck read as noise here
+        // and was removed on request. Do not re-enable it.
+        this._skin = new EarthSkin(this._earthSpin, new THREE.Vector3(1, 0, 0), {
+            radius: 1, segments: 48, clouds: false, atmosphere: true,
+        });
+        this._skin.loadTextures({
+            anisotropy: this._renderer.capabilities.getMaxAnisotropy(),
+        });   // resolves even on CDN failure — safe per-slot fallbacks
+
+        // Geographic spin axis — with the dipole axis in _magGroup this makes
+        // the daily wobble between the two visibly legible.
+        this._earthTilt.add(axisLine(1.38, 0xdfe8ff, 0.5));
     }
 
     _buildFieldLines() {
@@ -304,25 +485,97 @@ export class RingCurrentGlobe {
                 group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
             }
         }
-        this._scene.add(group);
+        this._magGroup.add(group);
     }
 
+    /**
+     * Populations are BUILT off-thread (js/ring-current-worker.js) and
+     * rendered from static GPU attributes — see header. The worker path is
+     * fire-and-forget at construction; until buffers arrive the ring simply
+     * hasn't populated yet (~a frame or two). Any worker failure falls back
+     * to building inline with the same buildPopulation the worker runs.
+     */
     _buildParticles() {
-        this._ions      = this._makePoints(makePopulation(3200, 'ion'),      ION_COLOR,      0.085);
-        this._electrons = this._makePoints(makePopulation(1400, 'electron'), ELECTRON_COLOR, 0.060);
+        this._popPoints = {};    // key → { points, mat }
+        this._pendingMix = 0.06; // quiet-time O⁺ energy mix until first state
+        const styles = {
+            ionsH:     { color: ION_COLOR,      size: 0.085 },
+            ionsO:     { color: ION_O_COLOR,    size: 0.095 },
+            electrons: { color: ELECTRON_COLOR, size: 0.060 },
+        };
+        const addPop = (key, pop) => {
+            if (this._disposed) return;
+            this._popPoints[key] = this._makePoints(pop, styles[key].color, styles[key].size);
+            this._setCompositionMix(this._pendingMix);
+        };
+        const buildInline = () => {
+            for (const [key, spec] of Object.entries(POPULATIONS)) {
+                if (!this._popPoints[key]) addPop(key, buildPopulation(spec.count, spec.species));
+            }
+        };
+        try {
+            if (typeof Worker === 'undefined') throw new Error('no Worker API');
+            const w = new Worker(new URL('./ring-current-worker.js', import.meta.url), { type: 'module' });
+            let got = 0;
+            const bail = (e) => { console.warn('[ring-current] population worker failed:', e); w.terminate(); buildInline(); };
+            const timer = setTimeout(() => bail(new Error('timeout')), 8000);
+            w.onerror = (e) => { clearTimeout(timer); bail(e.error ?? e.message ?? e); };
+            w.onmessage = (ev) => {
+                const m = ev.data;
+                if (!m?.ok) { clearTimeout(timer); bail(m?.error); return; }
+                addPop(m.id, m);
+                if (++got === Object.keys(POPULATIONS).length) { clearTimeout(timer); w.terminate(); }
+            };
+            for (const [key, spec] of Object.entries(POPULATIONS)) {
+                w.postMessage({ id: key, type: 'population', count: spec.count, species: spec.species });
+            }
+        } catch (e) {
+            console.warn('[ring-current] Workers unavailable, building populations inline:', e);
+            buildInline();
+        }
     }
 
-    _makePoints(pop, baseColor, size) {
+    /** Brightness-steer the two ion populations to an O⁺ energy fraction
+     *  (writes the uMix uniforms; safe before the buffers have arrived). */
+    _setCompositionMix(fO) {
+        const f = Math.max(0, Math.min(0.8, Number.isFinite(fO) ? fO : 0.06));
+        this._pendingMix = f;
+        const o = this._popPoints?.ionsO, h = this._popPoints?.ionsH;
+        if (o) o.mat.uniforms.uMix.value = Math.min(1.8, f / O_BUILD_FRACTION);
+        if (h) h.mat.uniforms.uMix.value = Math.min(1.3, (1 - f) / (1 - O_BUILD_FRACTION));
+    }
+
+    /** Static-attribute Points: position=(L, θ_birth, λ_m), kin, life.
+     *  Uploaded once; all motion + lifecycle happens in the vertex shader.
+     *  `pop` (incl. eKev metadata) is retained for tooltip picking via the
+     *  particlePose reference implementation. */
+    _makePoints(pop, color, size) {
         const geo = new THREE.BufferGeometry();
-        const pos = new Float32Array(pop.count * 3);
-        const col = new Float32Array(pop.count * 3);
-        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
-        geo.setAttribute('color',    new THREE.BufferAttribute(col, 3).setUsage(THREE.DynamicDrawUsage));
-        const mat = glowPointsMaterial(size, 0.9);
+        geo.setAttribute('position', new THREE.BufferAttribute(pop.seed, 3));
+        geo.setAttribute('kin',      new THREE.BufferAttribute(pop.kin, 3));
+        geo.setAttribute('life',     new THREE.BufferAttribute(pop.life, 4));
+        const mat = trappedPointsMaterial(size, 0.9, color);
+        this._syncStateUniforms(mat);
         const points = new THREE.Points(geo, mat);
-        points.frustumCulled = false;
-        this._scene.add(points);
-        return { pop, geo, pos, col, baseColor, points };
+        points.frustumCulled = false;   // position attr holds (L,θ,λ_m), not xyz
+        this._magGroup.add(points);
+        return { points, mat, pop };
+    }
+
+    /** Push the current model state into one material's uniforms. */
+    _syncStateUniforms(mat) {
+        const u = mat.uniforms;
+        u.uDriftHours.value = this._simHours;
+        u.uBounceSec.value  = this._tView;
+        u.uDstStar.value    = this._state.dstStar;
+        u.uAsymAmp.value    = this._state.asym.amplitude;
+        u.uAsymMlt.value    = this._state.asym.mltPeakHours;
+        u.uInjection.value  = this._state.injection;
+        // #917's Dst-coupled visible count: quiet ⇒ thin dim torus, storm ⇒
+        // dense. Hidden particles keep evolving (the shader always computes),
+        // so a deepening storm reveals a coherent ring, not a fresh scatter.
+        const depth = Math.min(1, Math.abs(this._state.dstStar) / 150);
+        u.uVisFrac.value = 0.40 + 0.60 * depth;
     }
 
     _buildRings() {
@@ -345,29 +598,36 @@ export class RingCurrentGlobe {
         });
         this._plasmapause = new THREE.Mesh(new THREE.TorusGeometry(4.7, 0.018, 8, 160), this._ppMat);
         this._plasmapause.rotation.x = Math.PI / 2;
-        this._scene.add(this._plasmapause);
+        this._magGroup.add(this._plasmapause);
+
+        // Dipole axis — tilts with the magnetosphere; compare against the
+        // white geographic axis to watch the real daily wobble between them.
+        this._magGroup.add(axisLine(1.75, 0xff9a3d, 0.45));
     }
 
     _rebuildTorus(peakL) {
         if (this._torus) {
-            this._scene.remove(this._torus);
+            this._magGroup.remove(this._torus);
             this._torus.geometry.dispose();
         }
         if (this._arc) {
-            this._scene.remove(this._arc);
+            this._magGroup.remove(this._arc);
             this._arc.geometry.dispose();
         }
         this._torus = new THREE.Mesh(new THREE.TorusGeometry(peakL, 0.55, 14, 96), this._torusMat);
         this._torus.rotation.x = Math.PI / 2;
-        this._scene.add(this._torus);
+        this._magGroup.add(this._torus);
 
-        // 120°-wide arc; TorusGeometry arcs start at its local +X and sweep CCW,
-        // so rotate the mesh to centre the arc on 19 MLT (θ = 7π/12).
+        // 120°-wide arc centred on dusk (19 MLT ⇒ scene θ = −7π/12). With
+        // Euler 'XYZ' the Z rotation acts first, in the torus' local plane,
+        // then rotation.x = π/2 lays it flat with local sweep angle φ mapping
+        // to scene θ = φ + rotation.z ⇒ rotation.z = θc − ARC/2. (The old
+        // −(7π/12 − ARC/2) landed the arc at 13 MLT — see header.)
         const ARC = (2 * Math.PI) / 3;
         this._arc = new THREE.Mesh(new THREE.TorusGeometry(peakL, 0.72, 14, 64, ARC), this._arcMat);
         this._arc.rotation.x = Math.PI / 2;
-        this._arc.rotation.z = -(7 * Math.PI / 12 - ARC / 2);
-        this._scene.add(this._arc);
+        this._arc.rotation.z = -7 * Math.PI / 12 - ARC / 2;
+        this._magGroup.add(this._arc);
         this._builtPeakL = peakL;
     }
 
@@ -486,8 +746,8 @@ export class RingCurrentGlobe {
         lab.tex.needsUpdate = true;
     }
 
-    /** Corridor rendering, all on the SimClock: each parcel sits at the
-     *  fraction of its OWN L1→Earth transit elapsed at simTime, so its
+    /** Corridor rendering, all on the SimClock (#917): each parcel sits at
+     *  the fraction of its OWN L1→Earth transit elapsed at simTime, so its
      *  apparent speed = measured km/s × τ ÷ SCALE.CORRIDOR.kmPerUnit —
      *  faster parcels visibly overtake slower ones (real stream
      *  interaction). Evaluated every frame; at τ=1 this is true real time
@@ -500,7 +760,7 @@ export class RingCurrentGlobe {
         // it's live instrumentation, not physics). Prominent in Real mode.
         const hbAmp = tau === 1 ? 0.22 : 0.07;
         let slot = 0;
-        const waveSamples = [];   // {x, nNorm, R, G, B} — sorted by x below
+        const waveSamples = [];   // {x, nNorm, R, G, B} — x-sorted below
         this._slotParcel = this._slotParcel || [];
         this._slotParcel.length = 0;
         for (const p of this._parcels) {
@@ -508,7 +768,7 @@ export class RingCurrentGlobe {
             const dur = p.tArrive - p.tL1;              // real transit ms at measured v
             if (!(dur > 0) || dur > 3 * 3.6e6) continue;
             const remain = p.tArrive - simNow;
-            if (remain <= 0) continue;                   // arrived (in sim) — handled by flashes
+            if (remain <= 0) continue;                   // arrived (in sim) — see flashes
             const f = Math.min(1, remain / dur);         // 1 = just left L1, 0 = arriving
             const x = TRANSIT.X_MP + f * spanX;
             const nNorm = Math.max(0, Math.min(1, (Number.isFinite(p.n) ? p.n : 3) / TRANSIT.N_REF));
@@ -602,7 +862,7 @@ export class RingCurrentGlobe {
         this._transitGeo.attributes.color.needsUpdate = true;
     }
 
-    // ── Arrival flashes + injection triggers ────────────────────────────────
+    // ── Arrival flashes + injection triggers (#917) ─────────────────────────
 
     /** Fire the parcels whose tArrive fell inside (lastSimNow, simNow] this
      *  frame: a magnetopause flash scaled by the parcel's VBs, and — for
@@ -645,7 +905,7 @@ export class RingCurrentGlobe {
             const sp = new THREE.Sprite(mat);
             sp.visible = false;
             this._scene.add(sp);
-            this._flashes.push({ sp, mat, age: 0, life: 0.9, base: 1 });
+            this._flashes.push({ sp, mat, age: 0, life: 0.9, base: 1, o0: 0.5 });
         }
     }
 
@@ -680,7 +940,11 @@ export class RingCurrentGlobe {
         }
     }
 
-    // ── Injection dynamics (Phase 4 — why storms pump the ring) ─────────────
+    // ── Injection dynamics (#917 Phase 4 — why storms pump the ring) ────────
+    // These are the ENTRY leg of the journey: hot plasma-sheet ions surging
+    // in from the tail and decelerating into drift. The trapped GPU
+    // populations then carry the story onward (drift → charge exchange /
+    // precipitation). Lives in _magGroup so bursts tilt with the dipole.
 
     _buildInjections() {
         const N = INJECT.CAP;
@@ -691,13 +955,13 @@ export class RingCurrentGlobe {
         this._injGeo.setAttribute('color',    new THREE.BufferAttribute(this._injCol, 3).setUsage(THREE.DynamicDrawUsage));
         this._injPts = new THREE.Points(this._injGeo, glowPointsMaterial(0.11, 0.95));
         this._injPts.frustumCulled = false;
-        this._scene.add(this._injPts);
+        this._magGroup.add(this._injPts);
         this._inj = {
             mode:    new Uint8Array(N),      // 0 free · 1 inflow · 2 drift
             theta:   new Float32Array(N),
             r:       new Float32Array(N),
             targetL: new Float32Array(N),
-            rate:    new Float32Array(N),    // drift rad/h (westward, signed)
+            rate:    new Float32Array(N),    // drift rad/h, SCENE-signed (+ = westward)
             age:     new Float32Array(N),    // wall-s since spawn (fade cue)
             yAmp:    new Float32Array(N),
             bPh:     new Float32Array(N),
@@ -727,7 +991,9 @@ export class RingCurrentGlobe {
             inj.r[i]       = 7.8 + Math.random() * 1.6;
             inj.targetL[i] = Math.max(2.2, lpp - 0.4 - Math.random() * 1.6);
             const eKev     = 30 + 220 * Math.random() ** 2;
-            inj.rate[i]    = driftRateRadPerHour(eKev, inj.targetL[i], 'ion');
+            // Scene-θ sign: westward = θ increasing in the GSM frame (#917
+            // was written for the pre-fix mirrored frame — sign re-derived).
+            inj.rate[i]    = -driftRateRadPerHour(eKev, inj.targetL[i], 'ion');
             inj.age[i]     = 0;
             inj.yAmp[i]    = (Math.random() - 0.5) * 0.7;
             inj.bPh[i]     = Math.random() * 2 * Math.PI;
@@ -780,7 +1046,13 @@ export class RingCurrentGlobe {
         this._injGeo.attributes.color.needsUpdate = true;
     }
 
-    // ── Hover tooltips — the data behind any particle ───────────────────────
+    // ── Hover tooltips (#917) — the data behind any particle ────────────────
+    // Ring picking CANNOT raycast the GPU populations (their position
+    // attribute holds (L, θ_birth, λ_m) seeds — the true positions exist
+    // only in the vertex shader). Instead the picker evaluates the SAME
+    // particlePose() reference the shader transcribes, projects to screen
+    // space, and picks the nearest — so hover agrees with the drawn pixel,
+    // lifecycle and all.
 
     _initTooltip() {
         const el = document.createElement('div');
@@ -788,13 +1060,14 @@ export class RingCurrentGlobe {
             'position:absolute;display:none;pointer-events:none;z-index:5;' +
             'background:rgba(3,1,14,.88);border:1px solid rgba(255,255,255,.2);' +
             'border-radius:6px;padding:6px 9px;font:600 11px system-ui;' +
-            'color:#e8edf7;line-height:1.5;max-width:250px;white-space:nowrap;';
+            'color:#e8edf7;line-height:1.5;max-width:270px;white-space:nowrap;';
         this._container.appendChild(el);
         this._tipEl = el;
         this._ray = new THREE.Raycaster();
         this._ndc = new THREE.Vector2();
         this._pointerPx = null;
         this._pointerDirty = false;
+        this._tmpV = new THREE.Vector3();
         const dom = this._renderer.domElement;
         this._onPointerMove = (e) => {
             const rect = dom.getBoundingClientRect();
@@ -820,26 +1093,34 @@ export class RingCurrentGlobe {
     _updateTooltip(wallNow) {
         if (!this._pointerDirty || !this._pointerPx || this._dragging) return;
         this._pointerDirty = false;
-        this._ray.setFromCamera(this._ndc, this._camera);
+        const rect = this._renderer.domElement.getBoundingClientRect();
 
-        // Ring populations (tight threshold), skipping Dst-hidden particles.
-        this._ray.params.Points.threshold = 0.24;
+        // Ring populations: pose-project every particle (a few thousand
+        // trig evals, pointer-move-throttled), nearest within 12 px wins.
         let best = null;
-        for (const P of [this._ions, this._electrons]) {
-            for (const hit of this._ray.intersectObject(P.points)) {
-                if (hit.index >= (P.nVis ?? P.pop.count)) continue;
-                if (hit.point.length() < 1.1) continue;      // parked/inside Earth
-                if (!best || hit.distance < best.hit.distance) best = { kind: 'ring', P, hit };
-                break;
+        for (const [key, P] of Object.entries(this._popPoints ?? {})) {
+            const pop = P.pop;
+            const visFrac = P.mat.uniforms.uVisFrac.value;
+            for (let i = 0; i < pop.count; i++) {
+                if (hash1(pop.life[i * 4 + 3] * 0.517) >= visFrac) continue;  // hidden (Dst gate)
+                const q = particlePose(pop, i, this._simHours, this._tView);
+                this._tmpV.set(q.x, q.y, q.z)
+                    .applyMatrix4(this._magGroup.matrixWorld)
+                    .project(this._camera);
+                const px = (this._tmpV.x + 1) / 2 * rect.width;
+                const py = (1 - this._tmpV.y) / 2 * rect.height;
+                const d2 = (px - this._pointerPx.x) ** 2 + (py - this._pointerPx.y) ** 2;
+                if (d2 < 144 && (!best || d2 < best.d2)) best = { kind: 'ring', key, P, i, q, d2 };
             }
         }
-        // Transit parcels (fat threshold — they're far away and clustered).
+        // Transit parcels: their geometry holds REAL positions — raycast.
+        this._ray.setFromCamera(this._ndc, this._camera);
         this._ray.params.Points.threshold = 1.0;
         for (const hit of this._ray.intersectObject(this._transit)) {
             if (hit.point.length() < 1.6) continue;
             const p = this._slotParcel?.[Math.floor(hit.index / TRANSIT.PTS_PER)];
             if (!p) continue;
-            if (!best || hit.distance < best.hit.distance) best = { kind: 'parcel', p, hit };
+            if (!best) best = { kind: 'parcel', p };
             break;
         }
 
@@ -847,12 +1128,23 @@ export class RingCurrentGlobe {
         const fmt = (x, d, u) => Number.isFinite(x) ? `${x.toFixed(d)}${u}` : '—';
         let html;
         if (best.kind === 'ring') {
-            const { pop } = best.P, i = best.hit.index;
-            const T = driftPeriodHours(pop.eKev[i], pop.L[i]);
-            html = `<b style="color:${pop.species === 'ion' ? '#ffa040' : '#59baff'}">` +
-                `${pop.species === 'ion' ? 'Ion' : 'Electron'}</b> · ${pop.eKev[i].toFixed(0)} keV` +
-                `<br>L ${pop.L[i].toFixed(2)} Rᴇ · drift ${fmt(T, 1, ' h')}/lap ` +
-                `${pop.species === 'ion' ? 'westward' : 'eastward'}`;
+            const { pop } = best.P, i = best.i, q = best.q;
+            const names = { ionsH: ['H⁺ ion', '#ffa040'], ionsO: ['O⁺ ion', '#94ff57'],
+                            electrons: ['Electron', '#59baff'] };
+            const [name, color] = names[best.key];
+            const L = pop.seed[i * 3], lt = pop.life[i * 4 + 1];
+            const T = driftPeriodHours(pop.eKev[i], L);
+            const fate = pop.life[i * 4 + 2] === 0
+                ? 'charge exchange → ENA'
+                : `precipitates (${pop.life[i * 4 + 2] > 0 ? 'N' : 'S'} atmosphere)`;
+            const status = q.dying > 0
+                ? (q.mode === 0 ? '<br><b style="color:#ffd9b0">neutralised — escaping as an ENA</b>'
+                                : '<br><b style="color:#ff7d66">precipitating into the atmosphere</b>')
+                : `<br>lifetime ${lt > 48 ? `${(lt / 24).toFixed(1)} d` : `${lt.toFixed(1)} h`}` +
+                  ` · ${((1 - q.ph) * lt).toFixed(1)} h left · fate: ${fate}`;
+            html = `<b style="color:${color}">${name}</b> · ${pop.eKev[i].toFixed(0)} keV` +
+                `<br>L ${L.toFixed(2)} Rᴇ · drift ${fmt(T, 1, ' h')}/lap ` +
+                `${best.key === 'electrons' ? 'eastward' : 'westward'}${status}`;
         } else {
             const p = best.p;
             const etaMin = Math.max(0, Math.round((p.tArrive - wallNow) / 60_000));
@@ -889,7 +1181,8 @@ export class RingCurrentGlobe {
             `Dst ${f1(nw.dstModel, ' nT')} (obs ${f1(nw.dstObserved, '', 0)})`,
             `W ${Number.isFinite(nw.energyJ) ? (nw.energyJ / 1e15).toFixed(2) + '×10¹⁵ J' : '—'}`,
             `peak L ${f1(nw.peakL, ' Rᴇ', 2)}   τ ${f1(nw.tauHours, ' h')}`,
-            `${nw.storm?.label ?? ''}`,
+            `${nw.storm?.label ?? ''}${Number.isFinite(nw.oxygenFraction)
+                ? ` · O⁺ ${Math.round(nw.oxygenFraction * 100)}%` : ''}`,
         ]);
         // Sun glow tracks the strongest incoming driver — a storm you can
         // see coming before it arrives.
@@ -902,7 +1195,25 @@ export class RingCurrentGlobe {
             peakL:        Number.isFinite(now.peakL) ? now.peakL : ringPeakL(-10),
             asym:         now.asymmetry || { amplitude: 0, mltPeakHours: 19 },
             plasmapauseL: Number.isFinite(now.plasmapauseL) ? now.plasmapauseL : 4.7,
+            // Live injection strength: |Q| ≈ 12 nT/h is already a strong
+            // storm main phase — saturate the nightside pulse there.
+            injection:    Math.min(1, Math.abs(now.injectionQ ?? 0) / 12),
         };
+        this._setCompositionMix(now.oxygenFraction);
+        for (const p of Object.values(this._popPoints ?? {})) this._syncStateUniforms(p.mat);
+        // Drive the EarthSkin from the SAME live state as the ring: aurora
+        // oval from Kp + southward Bz + ap-proxied hemispheric power, and the
+        // skin's ring-current nightside heating glow from this page's own
+        // model Dst. Normalisations match earth.html / space-weather-globe
+        // (−Bz/30, −Dst/200, (ap−12)/110).
+        const bz = state?.drivers?.bz;
+        this._skin.setSpaceWeather({
+            kp:       Number.isFinite(now.kp) ? now.kp : 0,
+            bzSouth:  Number.isFinite(bz) ? Math.max(0, Math.min(1, -bz / 30)) : 0,
+            auroraOn: true,
+            auroraAW: Number.isFinite(now.apNow) ? Math.max(0, Math.min(1, (now.apNow - 12) / 110)) : 0,
+            dstNorm:  Number.isFinite(now.dstModel) ? Math.max(0, Math.min(1, -now.dstModel / 200)) : 0,
+        });
         if (Math.abs(this._state.peakL - this._builtPeakL) > 0.12) {
             this._rebuildTorus(this._state.peakL);
         }
@@ -932,8 +1243,17 @@ export class RingCurrentGlobe {
         }
         const dSimH = this._clock.dSim(dt * 1000) / 3.6e6;   // wall s → sim hours
         this._tView += dt;
-        this._updatePopulation(this._ions, dSimH);
-        this._updatePopulation(this._electrons, dSimH);
+        this._simHours += dSimH;
+        this._updateGeometry(simNow);
+        this._skin.update(this._tView);   // aurora animation clock
+        // All trapped-particle motion + lifecycle is in the vertex shader —
+        // the per-frame CPU cost of 4 700 particles is two uniform writes
+        // per material (drift/lifecycle on SIM hours; bounce on wall — the
+        // disclosed ×1 exception, see header).
+        for (const p of Object.values(this._popPoints ?? {})) {
+            p.mat.uniforms.uDriftHours.value = this._simHours;
+            p.mat.uniforms.uBounceSec.value  = this._tView;
+        }
         this._updateTransit(simNow, wallNow);
         this._detectArrivals(simNow);
         this._lastSimNow = simNow;
@@ -944,47 +1264,16 @@ export class RingCurrentGlobe {
         this._renderer.render(this._scene, this._camera);
     }
 
-    _updatePopulation(P, dtH) {
-        const { pop, pos, col, baseColor } = P;
-        const { dstStar, asym } = this._state;
-        const depth = Math.min(1, Math.abs(dstStar) / 150);
-        const intensity = 0.25 + 0.75 * depth;
-        // Dst coupling, count edition: quiet ⇒ thin dim torus, storm main
-        // phase ⇒ dense. Hidden particles keep drifting (positions advance)
-        // so deepening storms reveal a coherent ring, not a fresh scatter.
-        const nVis = Math.floor(pop.count * (0.40 + 0.60 * depth));
-        P.nVis = nVis;
-        const tv = this._tView;
-        for (let i = 0; i < pop.count; i++) {
-            let th = pop.theta[i] + pop.rate[i] * dtH;
-            if (th > 2 * Math.PI) th -= 2 * Math.PI;
-            else if (th < 0) th += 2 * Math.PI;
-            pop.theta[i] = th;
-
-            // Bounce along the field line r = L·cos²λ between ±mirror
-            // latitude — the particle physically follows its flux tube, so
-            // the ring reads as a true 3D shell, not a flat annulus.
-            const L = pop.L[i];
-            const lam = pop.mirrorL[i] * Math.sin(pop.bRate[i] * tv + pop.bPhase[i]);
-            const fl = dipoleFieldLinePoint(L, lam);
-            const j = i * 3;
-            pos[j]     = fl.rho * Math.cos(th);
-            pos[j + 1] = fl.y;
-            pos[j + 2] = fl.rho * Math.sin(th);
-
-            if (i >= nVis) {   // black under additive blending = invisible
-                col[j] = col[j + 1] = col[j + 2] = 0;
-                continue;
-            }
-            const mlt = (12 + th * 12 / Math.PI) % 24;
-            const w = radialProfile(L, dstStar) * azimuthalWeight(mlt, asym) * intensity;
-            const b = 0.06 + 0.94 * Math.min(1.3, w);
-            col[j]     = baseColor.r * b;
-            col[j + 1] = baseColor.g * b;
-            col[j + 2] = baseColor.b * b;
-        }
-        P.geo.attributes.position.needsUpdate = true;
-        P.geo.attributes.color.needsUpdate = true;
+    /** Earth spin/tilt + magnetosphere dipole tilt at SIM time — the one
+     *  clock. At τ=1 simNow ≡ wall: everything exactly real. At τ>1 the
+     *  phase sweeps ≤75 min ahead and wraps with the forecast window, so it
+     *  stays near-real while advancing legibly. ~40 flops; fine every frame. */
+    _updateGeometry(simNow) {
+        const sp = subsolarPoint(simNow);
+        this._earthTilt.rotation.z = -sp.latDeg * Math.PI / 180;   // axis by declination
+        this._earthSpin.rotation.y = -sp.lonDeg * Math.PI / 180;   // subsolar lon → +X
+        this._magGroup.rotation.z  = -dipoleTiltRad(simNow);       // GSM dipole tilt ψ
+        this._magGroup.updateMatrixWorld();                        // tooltip picking reads it
     }
 
     _resize() {

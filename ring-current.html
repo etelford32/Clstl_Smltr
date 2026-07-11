@@ -152,6 +152,14 @@ body {
 .rc-replay-btn:hover { background:rgba(255,215,0,.2); }
 .rc-replay-btn.rc-on { background:rgba(255,215,0,.25); }
 
+.rc-sep { border-top:1px solid rgba(255,255,255,.08); margin:8px 0; }
+.rc-bars { display:flex; align-items:flex-end; gap:4px; height:34px; margin-top:8px; }
+.rc-bars .rc-bar {
+    flex:1; min-height:2px; border-radius:2px 2px 0 0; opacity:.85;
+    background:linear-gradient(180deg,#ff9a3d,#8a5420);
+}
+.rc-bars .rc-bar-empty { background:rgba(255,255,255,.08); }
+
 .rc-bridge-links { display:flex; flex-wrap:wrap; gap:7px; margin-top:9px; }
 .rc-bridge-links a {
     font-size:.72rem; font-weight:650; text-decoration:none; color:#cdd5e4;
@@ -161,7 +169,6 @@ body {
 .rc-bridge-links a:hover { background:rgba(255,255,255,.13); border-color:rgba(255,176,102,.5); }
 
 .rc-ctl { display:flex; align-items:center; gap:10px; font-size:.72rem; color:#8b94ad; flex-wrap:wrap; }
-.rc-ctl input[type=range] { flex:1; accent-color:#ff9a3d; }
 
 /* One-clock badge: the active τ is visible at all times (SIM ×300 / REAL ×1). */
 .rc-simtime {
@@ -231,17 +238,20 @@ body {
     <div class="rc-stage" id="rc-stage">
         <div class="rc-simtime" id="rc-simtime">SIM TIME &times;300</div>
         <div class="rc-legend">
-            <span class="rc-dot" style="background:#ffa040"></span>Ions &mdash; drift west, bounce on field lines<br>
+            <span class="rc-dot" style="background:#ffa040"></span>H&#8314; ions &mdash; drift west, true-rate bounce<br>
+            <span class="rc-dot" style="background:#94ff57"></span>O&#8314; ions &mdash; ionospheric, dies ~10&times; sooner (two-phase decay)<br>
             <span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;opposite drifts = one westward current</span><br>
             <span class="rc-dot" style="background:#fff3a0"></span>Injection &mdash; tail burst &rarr; slow drift<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;deaths: fade-out = ENA escape &middot; surface streak = precipitation</span><br>
             <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause (Kp)<br>
-            <span class="rc-dot" style="background:#ff9a3d"></span>Peak current shell<br>
+            <span class="rc-dot" style="background:#dfe8ff"></span>Spin axis &middot; <span class="rc-dot" style="background:#ff9a3d"></span>dipole axis &mdash; watch the daily wobble<br>
+            <span class="rc-dot" style="background:#37e0a0"></span>Aurora oval &mdash; live Kp/Bz at the magnetic pole<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
             <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz<br>
             <span style="color:#5d6684">trail length &prop; speed &middot; flash &prop; VBs on arrival</span>
         </div>
-        <div class="rc-stage-hint">drag to orbit &middot; scroll out for the Sun corridor &middot; one clock drives stream, ring &amp; injections &middot; hover any particle for its data</div>
+        <div class="rc-stage-hint">drag to orbit &middot; scroll out for the Sun corridor &middot; one clock drives stream, ring, lifecycle &amp; Earth spin &middot; hover any particle for its data &middot; GSM frame</div>
     </div>
 
     <div class="rc-col">
@@ -254,6 +264,10 @@ body {
             <div class="rc-kv"><span class="rc-k">Dst* (pressure-corrected)</span><span class="rc-v" id="rc-dst-star">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">peak current shell</span><span class="rc-v" id="rc-peakl">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">dusk asymmetry</span><span class="rc-v" id="rc-asym">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">composition (energy)</span><span class="rc-v" id="rc-ofrac">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">charge-exchange &tau; (50 keV @ peak L)</span><span class="rc-v" id="rc-celife">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">dipole tilt &psi;</span><span class="rc-v" id="rc-tilt">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">subsolar point</span><span class="rc-v" id="rc-subsolar">&mdash;</span></div>
             <div id="rc-storm" class="rc-storm-badge rc-storm-0">&mdash;</div>
             <div class="rc-balance">
                 <div class="rc-k" style="font-size:.72rem;color:#8b94ad;">injection vs decay (nT/h)</div>
@@ -319,6 +333,24 @@ body {
         </section>
 
         <section class="rc-panel">
+            <h2>Independent validation</h2>
+            <div class="rc-kv"><span class="rc-k">GOES Hp (GEO, 6.6 R&#7431;)</span><span class="rc-v" id="rc-goes-hp">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">&Delta;Hp vs 24 h median</span><span class="rc-v" id="rc-goes-dhp">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">in-situ agreement</span><span class="rc-v" id="rc-goes-verdict">&mdash;</span></div>
+            <div class="rc-sep"></div>
+            <div class="rc-kv"><span class="rc-k">ledger skill &mdash; 24 h</span><span class="rc-v" id="rc-lg-24">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">ledger skill &mdash; 7 d</span><span class="rc-v" id="rc-lg-7d">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">server ledger</span><span class="rc-v" id="rc-lg-meta">&mdash;</span></div>
+            <div class="rc-bars" id="rc-lg-bars" title="daily RMSE, last 7 days"></div>
+            <div style="font-size:.68rem;color:#5d6684;margin-top:6px;line-height:1.5;">
+                GOES magnetometer is an independent NOAA measurement at GEO
+                &mdash; never an input to the model. The skill ledger is
+                computed server-side every 15 min against Kyoto Dst, whether
+                or not anyone is watching. Skill shown, not claimed.
+            </div>
+        </section>
+
+        <section class="rc-panel">
             <h2>Display</h2>
             <div class="rc-ctl">
                 <span>sim clock &tau;</span>
@@ -334,14 +366,18 @@ body {
                 <button class="rc-mode-btn" data-mode="density">Density</button>
             </div>
             <div style="font-size:.66rem;color:#5d6684;margin-top:6px;line-height:1.5;">
-                One clock, real velocities: every population moves at its
-                measured physical speed &times; &tau;. <b>Real &times;1</b> is
-                the honest mode &mdash; parcels crawl at true speed and the
-                stillness is integrity, not a bug. Compressed presets
-                fast-forward the same L1 data (relative speeds preserved) and
-                replay the forecast window when the sweep passes it. Particle
-                count per 1-min sample scales with density; the trace above
-                the stream is the live barometric n(x) wave.
+                One clock, real velocities: stream, ring drift, particle
+                lifetimes, injections and Earth&rsquo;s spin all move at their
+                physical rate &times; &tau;. <b>Real &times;1</b> is the honest
+                mode &mdash; stillness is integrity, not a bug. Compressed
+                presets fast-forward the same L1 data (relative speeds
+                preserved) and replay the forecast window when the sweep
+                passes it. Bounce is the one disclosed &times;1 exception (it
+                would alias above the frame rate). Deaths are physical:
+                charge-exchange lifetimes vs the geocoronal H halo (O&#8314;
+                dies ~10&times; faster &mdash; the two-phase recovery), deep
+                mirrors precipitate to the surface. GPU particles; model
+                integration in a Web Worker.
             </div>
         </section>
     </div>
@@ -365,21 +401,32 @@ body {
     Model: O&rsquo;Brien &amp; McPherron (2000) injection&ndash;decay driven by VBs, pressure-corrected via
     Burton et al. (1975); trapped energy from the Dessler&ndash;Parker&ndash;Sckopke relation; drift
     kinematics per Schulz &amp; Lanzerotti (1974); plasmapause per Carpenter &amp; Anderson (1992).
-    Data: NOAA SWPC real-time solar wind (DSCOVR/ACE at L1, plasma + magnetometer), Kyoto WDC Dst
-    quicklook, planetary Kp. The model anchors on observed Dst 24 h ago and free-runs &mdash; the
-    skill numbers above are honest out-of-sample error, recomputed every minute.
+    Storm-time O&#8314;/H&#8314; composition split per Hamilton et al. (1988) / Daglis et al. (1999).
+    The 3D scene is a true GSM frame: Earth&rsquo;s spin phase and axial tilt follow the live
+    subsolar point, the magnetosphere tilts by the live dipole tilt angle &psi; (IGRF dipole
+    axis + low-precision solar ephemeris), and particle bounce runs at its physical period
+    &mdash; only drift is time-compressed, and 1&times; makes the whole scene real time.
+    Particle lifetimes are physical: charge exchange against the Rairden (1986) geocoronal H
+    profile with Lindsay&ndash;Stebbings-class cross-sections (O&#8314; &sim;10&times; shorter-lived than
+    H&#8314; at 100 keV &mdash; the two-phase recovery); deep-mirror ions and electrons precipitate.
     Time &amp; scale: one simulation clock &tau; drives every population at its true physical
-    velocity. The near-Earth region is spatially linear (1 unit = 1 Rᴇ = 6,371 km); the
+    velocity. The near-Earth region is spatially linear (1 unit = 1 R&#7431; = 6,371 km); the
     L1&rarr;magnetopause corridor is compressed &asymp;5.5&times; (1 unit &asymp; 34,900 km), so the
     on-screen stream:ring speed ratio is &asymp;6:1 rather than the physical &asymp;100:1 &mdash;
     disclosed here instead of hidden in animation speeds.
+    Data: NOAA SWPC real-time solar wind (DSCOVR/ACE at L1, plasma + magnetometer), Kyoto WDC Dst
+    quicklook, planetary Kp, GOES primary magnetometer (independent GEO cross-check).
+    The model anchors on observed Dst 24 h ago and free-runs &mdash; the
+    skill numbers above are honest out-of-sample error, recomputed every minute; the
+    validation panel adds the server-side skill ledger, logged every 15 minutes.
     See <a href="/RING_CURRENT_SIMULATION_PLAN.md">the build plan</a> for the physics and roadmap.
 </footer>
 
 <script type="module">
-import { RingCurrentFeed, omniToReplay, computeReplayState } from './js/ring-current-feed.js?v=20260710';
-import { newellCoupling } from './js/ring-current-model.js?v=20260710';
-import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260710';
+import { RingCurrentFeed, omniToReplay, computeReplayState } from './js/ring-current-feed.js?v=20260711';
+import { newellCoupling } from './js/ring-current-model.js?v=20260711';
+import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260711';
+import { INTERVALS } from './js/config.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('rc-stage');
@@ -402,7 +449,7 @@ renderSimBadge();
 //    data panels + chart instead of blanking the page. ─────────────────────
 let globe = null;
 try {
-    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260710');
+    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260711');
     globe = new RingCurrentGlobe(stage, { clock });
     window.rcGlobe = globe;   // debug/probe handle (tests/ smoke probes)
 } catch (err) {
@@ -456,6 +503,19 @@ function renderHud(s) {
     $('rc-peakl').textContent     = fmt(s.now.peakL, 2, ' Rᴇ');
     $('rc-asym').textContent      = Number.isFinite(s.now.asymmetry?.amplitude)
         ? `${Math.round(s.now.asymmetry.amplitude * 100)}% @ ${s.now.asymmetry.mltPeakHours} MLT` : '—';
+    const fO = s.now.oxygenFraction;
+    $('rc-ofrac').textContent = Number.isFinite(fO)
+        ? `O⁺ ${Math.round(fO * 100)}% · H⁺ ${Math.round((1 - fO) * 100)}%` : '—';
+    const fmtLife = (h) => !Number.isFinite(h) ? '—'
+        : h > 48 ? `${(h / 24).toFixed(1)} d` : `${h.toFixed(1)} h`;
+    $('rc-celife').textContent = Number.isFinite(s.now.ceLifetimeH50)
+        ? `H⁺ ${fmtLife(s.now.ceLifetimeH50)} · O⁺ ${fmtLife(s.now.ceLifetimeO50)}` : '—';
+    const psi = s.now.dipoleTiltDeg;
+    $('rc-tilt').textContent = Number.isFinite(psi)
+        ? `${psi >= 0 ? '+' : ''}${psi.toFixed(1)}° ${psi >= 0 ? 'sunward' : 'antisunward'}` : '—';
+    const ss = s.now.subsolar;
+    $('rc-subsolar').textContent = ss
+        ? `${Math.abs(ss.latDeg).toFixed(1)}°${ss.latDeg >= 0 ? 'N' : 'S'} ${Math.abs(ss.lonDeg).toFixed(0)}°${ss.lonDeg >= 0 ? 'E' : 'W'}` : '—';
 
     const storm = s.now.storm ?? { level: 0, label: 'Quiet' };
     const badge = $('rc-storm');
@@ -538,7 +598,62 @@ function renderHud(s) {
     }
 
     renderDensity(s);
+    renderGoes(s.goes);
 }
+
+// ── GOES GEO cross-check — independent in-situ measurement, model-blind ─────
+const GOES_VERDICT = {
+    'consistent-storm': '✓ consistent — GEO field depressed',
+    'consistent-quiet': '✓ consistent — both quiet',
+    'mixed':            '◐ mixed — local-time / compression',
+};
+function renderGoes(gc) {
+    if (!gc) return;   // <2 h of samples or feed unreachable — keep dashes
+    $('rc-goes-hp').textContent =
+        `${gc.hp.toFixed(0)} nT${Number.isFinite(gc.sat) ? ` · GOES-${gc.sat}` : ''}${gc.ageMin > 30 ? ' · stale' : ''}`;
+    const dEl = $('rc-goes-dhp');
+    dEl.textContent = `${gc.dHp >= 0 ? '+' : ''}${gc.dHp.toFixed(0)} nT`;
+    dEl.className = 'rc-v ' + (gc.dHp <= -12 ? 'rc-south' : '');
+    $('rc-goes-verdict').textContent = GOES_VERDICT[gc.verdict] ?? '—';
+}
+
+// ── Server skill ledger — /api/ring-current/skill (ring_current_log ⨝
+//    geomag_indices, computed by the cron whether or not the page is open) ───
+function renderSkillLedger(d) {
+    const fmtW = (x) => x && Number.isFinite(x.rmse)
+        ? `RMSE ${x.rmse} · bias ${x.bias >= 0 ? '+' : ''}${x.bias} nT (n=${x.n})`
+        : 'warming up';
+    $('rc-lg-24').textContent = fmtW(d?.windows?.h24);
+    $('rc-lg-7d').textContent = fmtW(d?.windows?.d7);
+    const lg = d?.ledger;
+    $('rc-lg-meta').textContent = lg
+        ? `${lg.model_rows} runs · latest ${lg.latest_model ? lg.latest_model.slice(11, 16) + 'Z' : '—'}`
+        : '—';
+    const bars = $('rc-lg-bars');
+    bars.innerHTML = '';
+    const daily = Array.isArray(d?.daily) ? d.daily : [];
+    const max = Math.max(10, ...daily.map(x => x.rmse ?? 0));
+    for (const day of daily) {
+        const el = document.createElement('div');
+        const has = Number.isFinite(day.rmse);
+        el.className = 'rc-bar' + (has ? '' : ' rc-bar-empty');
+        el.style.height = has ? `${Math.max(8, (day.rmse / max) * 100)}%` : '2px';
+        el.title = has ? `${day.day} — RMSE ${day.rmse} nT (n=${day.n})` : `${day.day} — no data`;
+        bars.appendChild(el);
+    }
+}
+async function loadSkillLedger() {
+    try {
+        const res = await fetch('/api/ring-current/skill');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        renderSkillLedger(await res.json());
+    } catch (err) {
+        console.warn('[ring-current] skill ledger unavailable:', err);
+    }
+}
+loadSkillLedger();
+// T3 cadence matches the endpoint's 10-min CDN TTL; no polling while hidden.
+setInterval(() => { if (!document.hidden) loadSkillLedger(); }, INTERVALS.T3);
 
 // ── Storm drag impact — same engine as the Upper Atmosphere twin ────────────
 let densityFn = null, densityLoading = false;
@@ -689,6 +804,7 @@ let lastState = null;
 const feed = new RingCurrentFeed();
 feed.addEventListener('state', (e) => {
     lastState = e.detail;
+    window.rcState = lastState;   // debug/probe handle (tests/ smoke probes)
     renderHud(lastState);
     if (!replayState) drawChart(lastState);
     globe?.setState(lastState);
