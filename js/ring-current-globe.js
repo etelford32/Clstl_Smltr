@@ -401,6 +401,63 @@ function windSheetMaterial(dataTex) {
     });
 }
 
+/**
+ * ENA glow halo — how the ring current is actually PHOTOGRAPHED. Charge
+ * exchange turns trapped ions into energetic neutral atoms that stream off
+ * in straight lines; imagers (IMAGE/HENA, TWINS) integrate that emission
+ * into a diffuse glow. Emission ∝ ion flux × geocoronal density, so the
+ * shader multiplies the same radialProfile the populations use by the
+ * n_H ∝ L⁻³·⁵ halo — brightest just inside the ring's inner edge. VERY
+ * subtle by design: peak additive alpha ≈ 0.05, and the amplitude EASES
+ * toward its |Dst*|-driven target over ~8 s in tick(), like a real
+ * integrating imager accumulating counts.
+ */
+function enaHaloMaterial() {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+            uEna:     { value: 0 },      // eased accumulation amplitude 0..1
+            uDstStar: { value: -10 },
+            uAsymAmp: { value: 0 },
+            uAsymMlt: { value: 19 },
+            uTime:    { value: 0 },
+        },
+        vertexShader: `
+            varying vec2 vXY;
+            void main() {
+                vXY = position.xy;   // RingGeometry local plane (pre-tilt)
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+        fragmentShader: `
+            uniform float uEna, uDstStar, uAsymAmp, uAsymMlt, uTime;
+            varying vec2 vXY;
+            const float PI = 3.14159265358979;
+            void main() {
+                float L = length(vXY);
+                // radialProfile — same GLSL port as the populations.
+                float d     = min(0.0, uDstStar);
+                float peak  = 2.4 + 1.6 * exp(d / 120.0);
+                float sigma = L < peak ? 0.55 : 1.15;
+                float flux  = exp(-(L - peak) * (L - peak) / (2.0 * sigma * sigma))
+                            / (1.0 + exp(-(L - 1.8) / 0.12))
+                            / (1.0 + exp((L - 6.8) / 0.35));
+                // Geocorona n_H ∝ L^-3.5, normalised at L=2 — ENA emission
+                // is flux × n_H, so the glow hugs the ring's inner edge.
+                float nH = pow(max(1.05, L) / 2.0, -3.5);
+                // Mild MLT weighting: the emission follows the (asymmetric)
+                // ion distribution — mesh rotation.x maps local +y → scene z,
+                // so θ = atan2(y, x) directly.
+                float mlt = mod(12.0 - atan(vXY.y, vXY.x) * 12.0 / PI, 24.0);
+                float azw = 1.0 + 0.5 * uAsymAmp * cos((mlt - uAsymMlt) / 24.0 * 2.0 * PI);
+                // Slow imager-noise shimmer, near-subliminal.
+                float shim = 0.92 + 0.08 * sin(uTime * 0.7 + L * 3.1 + mlt);
+                float b = uEna * flux * nH * azw * shim;
+                gl_FragColor = vec4(vec3(0.95, 0.86, 0.70) * b, 0.12);
+            }`,
+    });
+}
+
 // Stream color modes. 'bz' keeps the driver semantics (southward hot /
 // northward cool); 'temp' is a plasma-temperature heat map (log₁₀ T over
 // 10⁴–10⁶ K, blue → orange → white); 'density' maps n to teal → white.
@@ -483,6 +540,7 @@ export class RingCurrentGlobe {
         this._buildSunAndTransit();
         this._buildFlashes();
         this._buildInjections();
+        this._buildCinematics();
         this._initTooltip();
 
         this._onResize = () => this._resize();
@@ -694,6 +752,15 @@ export class RingCurrentGlobe {
         // Dipole axis — tilts with the magnetosphere; compare against the
         // white geographic axis to watch the real daily wobble between them.
         this._magGroup.add(axisLine(1.75, 0xff9a3d, 0.45));
+
+        // ENA glow halo — in the dipole group so the emission tilts with
+        // the ring it images. Amplitude eases toward its |Dst*| target in
+        // tick() (~8 s time constant — an integrating imager, not a lamp).
+        this._enaMat = enaHaloMaterial();
+        this._enaHalo = new THREE.Mesh(new THREE.RingGeometry(1.3, 5.4, 96, 24), this._enaMat);
+        this._enaHalo.rotation.x = Math.PI / 2;
+        this._magGroup.add(this._enaHalo);
+        this._enaTarget = 0;
     }
 
     _rebuildTorus(peakL) {
@@ -1026,7 +1093,71 @@ export class RingCurrentGlobe {
             if (vbs >= INJECT.VBS_MIN) {
                 this._spawnInjection(vbs, this._state.plasmapauseL);
             }
+            // Shock-arrival moment: a ≥2× dynamic-pressure step between
+            // consecutive arrivals IS an interplanetary shock/compression
+            // front hitting the magnetopause. Cooldown-limited so high τ
+            // can't strobe; the effect itself is near-subliminal (tick()).
+            const pd = dynamicPressure(p.n, p.v);
+            if (Number.isFinite(pd)) {
+                if (this._prevArrivalPdyn != null && pd >= 2 * this._prevArrivalPdyn &&
+                    pd > 2.5 && (this._lastT - this._lastShockMs) > 20_000) {
+                    this._shockT = 0;
+                    this._lastShockMs = this._lastT;
+                }
+                this._prevArrivalPdyn = pd;
+            }
         }
+    }
+
+    /** Subtle cinematic layer: a fullscreen additive veil (peak alpha 0.05)
+     *  + a 0.45° FOV breath, fired only on real shock arrivals. Both are
+     *  suppressed entirely under prefers-reduced-motion. */
+    _buildCinematics() {
+        this._veilMat = new THREE.ShaderMaterial({
+            transparent: true, depthTest: false, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            uniforms: { uA: { value: 0 } },
+            vertexShader: `void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+            fragmentShader: `uniform float uA;
+                void main() { gl_FragColor = vec4(1.0, 0.97, 0.9, uA); }`,
+        });
+        this._veil = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this._veilMat);
+        this._veil.renderOrder = 999;
+        this._veil.frustumCulled = false;
+        this._scene.add(this._veil);
+        this._shockT = 1e9;             // seconds since the last shock fired
+        this._lastShockMs = -1e9;
+        this._prevArrivalPdyn = null;
+        this._baseFov = this._camera.fov;
+        this._reducedMotion = typeof matchMedia === 'function' &&
+            matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
+    _updateCinematics(dt) {
+        // Shock veil + FOV breath: sine-in, exponential-out over ~1.2 s.
+        if (this._shockT < 1.2) {
+            this._shockT += dt;
+            const k = Math.min(1, this._shockT / 1.2);
+            const env = this._reducedMotion ? 0
+                : Math.sin(k * Math.PI) * Math.exp(-1.8 * k);
+            this._veilMat.uniforms.uA.value = 0.05 * env;
+            const fov = this._baseFov - 0.45 * env;
+            if (Math.abs(fov - this._camera.fov) > 1e-4) {
+                this._camera.fov = fov;
+                this._camera.updateProjectionMatrix();
+            }
+        } else if (this._veilMat.uniforms.uA.value !== 0) {
+            this._veilMat.uniforms.uA.value = 0;
+            this._camera.fov = this._baseFov;
+            this._camera.updateProjectionMatrix();
+        }
+        // ENA halo: ease toward the |Dst*| target like an integrating imager.
+        const u = this._enaMat.uniforms;
+        u.uEna.value += (this._enaTarget - u.uEna.value) * (1 - Math.exp(-dt / 8));
+        u.uTime.value = this._tView;
+        u.uDstStar.value = this._state.dstStar;
+        u.uAsymAmp.value = this._state.asym.amplitude;
+        u.uAsymMlt.value = this._state.asym.mltPeakHours;
     }
 
     _buildFlashes() {
@@ -1103,6 +1234,7 @@ export class RingCurrentGlobe {
         this._magGroup.add(this._injPts);
         this._inj = {
             mode:    new Uint8Array(N),      // 0 free · 1 inflow · 2 drift
+            species: new Uint8Array(N),      // 0 ion · 1 electron — the burst FORKS
             theta:   new Float32Array(N),
             r:       new Float32Array(N),
             targetL: new Float32Array(N),
@@ -1132,13 +1264,21 @@ export class RingCurrentGlobe {
             }
             if (i < 0) return;
             inj.mode[i]    = 1;
+            // The burst FORKS by charge: the ENTRY surge is E×B convection
+            // (charge-independent — both species pour in together), then
+            // gradient–curvature drift takes over at the trapping point and
+            // splits it: ions curve WEST toward dusk, electrons EAST toward
+            // dawn — the classic dispersionless-injection signature seen at
+            // geosynchronous satellites.
+            const electron = Math.random() < 0.35;
+            inj.species[i] = electron ? 1 : 0;
             inj.theta[i]   = Math.PI + (Math.random() - 0.5) * 1.4;   // ~21–03 MLT
             inj.r[i]       = 7.8 + Math.random() * 1.6;
             inj.targetL[i] = Math.max(2.2, lpp - 0.4 - Math.random() * 1.6);
             const eKev     = 30 + 220 * Math.random() ** 2;
             // Scene-θ sign: westward = θ increasing in the GSM frame (#917
             // was written for the pre-fix mirrored frame — sign re-derived).
-            inj.rate[i]    = -driftRateRadPerHour(eKev, inj.targetL[i], 'ion');
+            inj.rate[i]    = -driftRateRadPerHour(eKev, inj.targetL[i], electron ? 'electron' : 'ion');
             inj.age[i]     = 0;
             inj.yAmp[i]    = (Math.random() - 0.5) * 0.7;
             inj.bPh[i]     = Math.random() * 2 * Math.PI;
@@ -1179,13 +1319,16 @@ export class RingCurrentGlobe {
             pos[j]     = inj.r[i] * Math.cos(th);
             pos[j + 1] = y;
             pos[j + 2] = inj.r[i] * Math.sin(th);
-            // Hot white-yellow at entry, cooling to ion orange, then fading.
+            // Hot white at entry (species indistinguishable in the E×B
+            // surge), cooling to the species color as the fork develops:
+            // ion orange sweeping duskward, electron blue dawnward.
             const heat = Math.max(0, 1 - inj.age[i] / 8);
             const fade = 1 - inj.age[i] / INJECT.LIFE_S;
             const b = (0.55 + 0.65 * heat) * fade;
-            col[j]     = (ION_COLOR.r + (1.00 - ION_COLOR.r) * heat) * b;
-            col[j + 1] = (ION_COLOR.g + (0.95 - ION_COLOR.g) * heat) * b;
-            col[j + 2] = (ION_COLOR.b + (0.62 - ION_COLOR.b) * heat) * b;
+            const base = inj.species[i] === 1 ? ELECTRON_COLOR : ION_COLOR;
+            col[j]     = (base.r + (1.00 - base.r) * heat) * b;
+            col[j + 1] = (base.g + (0.95 - base.g) * heat) * b;
+            col[j + 2] = (base.b + (0.80 - base.b) * heat) * b;
         }
         this._injGeo.attributes.position.needsUpdate = true;
         this._injGeo.attributes.color.needsUpdate = true;
@@ -1350,6 +1493,8 @@ export class RingCurrentGlobe {
             this._syncStateUniforms(p.mat);
             for (const e of p.echoes) this._syncStateUniforms(e.mat);
         }
+        // ENA imaging target: emission tracks the trapped-ion content.
+        this._enaTarget = Math.min(1, Math.abs(this._state.dstStar) / 120);
         // Drive the EarthSkin from the SAME live state as the ring: aurora
         // oval from Kp + southward Bz + ap-proxied hemispheric power, and the
         // skin's ring-current nightside heating glow from this page's own
@@ -1420,6 +1565,7 @@ export class RingCurrentGlobe {
         this._lastSimNow = simNow;
         this._updateFlashes(dt);
         this._updateInjections(dt, dSimH);
+        this._updateCinematics(dt);
         this._updateTooltip(wallNow);
         this._controls.update();
         this._renderer.render(this._scene, this._camera);

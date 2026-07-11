@@ -45,6 +45,18 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   compression-front bands. Cinematic, but every pixel traces to a measured
 >   L1 sample; near-frozen at Real ×1 like everything else. The Sun's corona
 >   breathes with the strongest incoming VBs.
+> - **Subtle cinematics** (2026-07-11): (a) shock-arrival moment — a ≥2×
+>   dynamic-pressure step between consecutive magnetopause arrivals fires a
+>   fullscreen additive veil (peak alpha 0.05) + a 0.45° FOV breath over
+>   ~1.2 s, 20 s cooldown, fully suppressed under prefers-reduced-motion;
+>   (b) ENA glow halo — an equatorial shader disc in the dipole group,
+>   emission = radialProfile × geocoronal L⁻³·⁵ (how IMAGE/TWINS photograph
+>   the ring), amplitude EASED toward its |Dst*| target over ~8 s like an
+>   integrating imager. (c) Injection bursts FORK by charge: the E×B entry
+>   surge is species-blind, then gradient-curvature drift splits it — ions
+>   west toward dusk, electrons east toward dawn (the dispersionless-
+>   injection signature). Keep all three subtle; they are measurements
+>   wearing makeup, not effects.
 > - **Layout**: the stage is viewport-capped (clamp 520px–74vh–920px,
 >   align-self:start) so the scene stays above the fold instead of
 >   stretching to the panel column. The page also shows the sim-clock UTC
