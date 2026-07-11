@@ -408,6 +408,28 @@ export class RingCurrentGlobe {
         this._env = new THREE.Points(this._envGeo, glowPointsMaterial(0.10, 0.55));
         this._env.frustumCulled = false;
         this._scene.add(this._env);
+
+        // Continuous solar particle emission: ambient wind flowing Sun->Earth
+        // at the LIVE measured speed (recycled at the magnetopause).
+        this._emitN = 700;
+        this._emitPos = new Float32Array(this._emitN * 3);
+        this._emitCol = new Float32Array(this._emitN * 3);
+        for (let i = 0; i < this._emitN; i++) {
+            const j = i * 3;
+            this._emitPos[j] = TRANSIT.X_MP + Math.random() * (TRANSIT.X_SUN + 8 - TRANSIT.X_MP);
+            const a = Math.random() * 2 * Math.PI, r = Math.sqrt(Math.random()) * 2.6;
+            this._emitPos[j+1] = Math.sin(a) * r;
+            this._emitPos[j+2] = Math.cos(a) * r;
+            this._emitCol[j] = 1.0; this._emitCol[j+1] = 0.85; this._emitCol[j+2] = 0.55;
+        }
+        this._emitGeo = new THREE.BufferGeometry();
+        this._emitGeo.setAttribute('position', new THREE.BufferAttribute(this._emitPos, 3).setUsage(THREE.DynamicDrawUsage));
+        this._emitGeo.setAttribute('color', new THREE.BufferAttribute(this._emitCol, 3).setUsage(THREE.DynamicDrawUsage));
+        this._emit = new THREE.Points(this._emitGeo, glowPointsMaterial(0.09, 0.5));
+        this._emit.frustumCulled = false;
+        this._scene.add(this._emit);
+        this._liveV = 400;
+
         const base = new Float32Array([TRANSIT.X_MP, TRANSIT.WAVE_Y, 0, TRANSIT.X_SUN, TRANSIT.WAVE_Y, 0]);
         const baseGeo = new THREE.BufferGeometry();
         baseGeo.setAttribute('position', new THREE.BufferAttribute(base, 3));
@@ -546,6 +568,7 @@ export class RingCurrentGlobe {
             this._ringLab = this._makeLabel(0, 7.8, 0, 9);
         }
         const d = state?.drivers, nw = state?.now;
+        if (Number.isFinite(d?.v)) this._liveV = d.v;
         const f1 = (x, u, dg = 1) => Number.isFinite(x) ? `${x.toFixed(dg)}${u}` : '—';
         if (d) this._drawLabel(this._windLab, 'INCOMING WIND — LIVE (L1)', [
             `v ${f1(d.v, ' km/s', 0)}   n ${f1(d.n, ' /cm³')}`,
@@ -591,6 +614,15 @@ export class RingCurrentGlobe {
         this._updatePopulation(this._ions, dtH);
         this._updatePopulation(this._electrons, dtH);
         this._updateTransit();
+        // Solar emission: visible flow scaled from the live wind speed
+        // (~0.9 units/s at 450 km/s) so the Sun's output is always moving.
+        const flow = dt * (this._liveV / 500);
+        for (let i = 0; i < this._emitN; i++) {
+            const j = i * 3;
+            this._emitPos[j] -= flow * (0.7 + 0.6 * ((i * 2654435761) % 100) / 100);
+            if (this._emitPos[j] < TRANSIT.X_MP) this._emitPos[j] = TRANSIT.X_SUN + 8;
+        }
+        this._emitGeo.attributes.position.needsUpdate = true;
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
     }
