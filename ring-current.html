@@ -69,7 +69,12 @@ body {
     gap:14px; padding:8px 22px 14px;
 }
 .rc-stage {
-    position:relative; min-height:520px; border-radius:14px; overflow:hidden;
+    position:relative; border-radius:14px; overflow:hidden;
+    /* Viewport-capped and NOT stretched to the panel column (align-self),
+       so the 3D scene stays above the fold — previously the grid stretched
+       the stage to ~1900px and Earth sat a full screen below the hero. */
+    height:clamp(520px, 74vh, 920px);
+    align-self:start;
     background:radial-gradient(ellipse at 30% 20%, #0a1030 0%, #03010e 70%);
     border:1px solid rgba(255,255,255,.07);
 }
@@ -186,6 +191,15 @@ body {
     background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13);
     border-radius:6px; padding:3px 8px;
 }
+/* Live render-performance chip (fps · frame ms · dpr · draws · tier). */
+.rc-perf {
+    position:absolute; right:10px; bottom:8px; z-index:4; pointer-events:none;
+    font:600 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color:#5d6684; background:rgba(3,1,14,.5);
+    border:1px solid rgba(255,255,255,.07); border-radius:5px; padding:3px 7px;
+    font-variant-numeric:tabular-nums;
+}
+.rc-perf.rc-perf-warn { color:#ffb066; border-color:rgba(255,176,102,.3); }
 .rc-mode-btn.rc-on { background:rgba(255,154,61,.22); border-color:rgba(255,154,61,.55); color:#ffd9b0; }
 .rc-ctl .rc-v { font-size:.72rem; }
 
@@ -196,7 +210,7 @@ body {
 
 @media (max-width: 900px) {
     .rc-layout { grid-template-columns:1fr; }
-    .rc-stage { min-height:400px; }
+    .rc-stage { height:clamp(400px, 58vh, 640px); }
 }
 @media (max-width: 768px) {
     .rc-hero { padding:18px 14px 6px; }
@@ -237,18 +251,24 @@ body {
 <div class="rc-layout">
     <div class="rc-stage" id="rc-stage">
         <div class="rc-simtime" id="rc-simtime">SIM TIME &times;300</div>
+        <div class="rc-perf" id="rc-perf" hidden>&mdash;</div>
         <div class="rc-legend">
             <span class="rc-dot" style="background:#ffa040"></span>H&#8314; ions &mdash; drift west, true-rate bounce<br>
             <span class="rc-dot" style="background:#94ff57"></span>O&#8314; ions &mdash; ionospheric, dies ~10&times; sooner (two-phase decay)<br>
             <span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;opposite drifts = one westward current</span><br>
-            <span class="rc-dot" style="background:#fff3a0"></span>Injection &mdash; tail burst &rarr; slow drift<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;tint = energy: pale ≈250 keV laps deep ≈20 keV (dispersion)</span><br>
+            <span class="rc-dot" style="background:#fff3a0"></span>Injection &mdash; tail burst forks: ions &rarr; dusk &middot; e&#8315; &rarr; dawn<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;deaths: fade-out = ENA escape &middot; surface streak = precipitation</span><br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;faint equatorial haze = ENA glow (how imagers see the ring)</span><br>
             <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause (Kp)<br>
             <span class="rc-dot" style="background:#dfe8ff"></span>Spin axis &middot; <span class="rc-dot" style="background:#ff9a3d"></span>dipole axis &mdash; watch the daily wobble<br>
             <span class="rc-dot" style="background:#37e0a0"></span>Aurora oval &mdash; live Kp/Bz at the magnetic pole<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
             <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz<br>
+            <span class="rc-dot" style="background:#7fb4ff"></span>Magnetopause (Shue98, live) &middot; <span class="rc-dot" style="background:#59e0d8"></span>bow shock<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;arrivals deflect &mdash; the sheath river parts around the boundary</span><br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;southward IMF: flank strands turn gold &mdash; tail return flow &rarr; midnight injection</span><br>
             <span style="color:#5d6684">trail length &prop; speed &middot; flash &prop; VBs on arrival</span>
         </div>
         <div class="rc-stage-hint">drag to orbit &middot; scroll out for the Sun corridor &middot; one clock drives stream, ring, lifecycle &amp; Earth spin &middot; hover any particle for its data &middot; GSM frame</div>
@@ -283,6 +303,7 @@ body {
             <div class="rc-kv"><span class="rc-k">IMF Bz (GSM)</span><span class="rc-v" id="rc-bz">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">IMF |B|</span><span class="rc-v" id="rc-bt">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">dyn. pressure</span><span class="rc-v" id="rc-pdyn">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">magnetopause nose (Shue98)</span><span class="rc-v" id="rc-mp">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">coupling VBs</span><span class="rc-v" id="rc-vbs">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">Newell d&Phi;/dt</span><span class="rc-v" id="rc-newell">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">decay time &tau;</span><span class="rc-v" id="rc-tau">&mdash;</span></div>
@@ -304,6 +325,28 @@ body {
                 The incoming stream in the 3D view is real matter measured at L1
                 and not yet arrived &mdash; the live handoff from the Sun-side
                 twin to this one, and onward into thermosphere drag.
+            </div>
+        </section>
+
+        <section class="rc-panel">
+            <h2>Earth &mdash; time &amp; orbit</h2>
+            <div class="rc-kv"><span class="rc-k">sim clock (UTC)</span><span class="rc-v" id="rc-clock-utc">&mdash;</span></div>
+            <div class="rc-kv" id="rc-clock-local-row" hidden><span class="rc-k" id="rc-clock-local-k">local</span><span class="rc-v" id="rc-clock-local">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">orbital position</span><span class="rc-v" id="rc-orbit">&mdash;</span></div>
+            <div style="display:flex;gap:12px;align-items:center;margin-top:6px;">
+                <svg id="rc-orbit-svg" width="88" height="88" viewBox="-50 -50 100 100" style="flex:none" aria-label="Earth's position in its orbit">
+                    <circle cx="0" cy="0" r="40" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="1"/>
+                    <circle cx="0" cy="0" r="4.5" fill="#ffd700"/>
+                    <line id="rc-orbit-peri" x1="36" y1="0" x2="44" y2="0" stroke="rgba(255,154,61,.7)" stroke-width="1.4"/>
+                    <circle id="rc-orbit-earth" cx="40" cy="0" r="3.2" fill="#59baff"/>
+                    <text id="rc-orbit-doy" x="0" y="3" text-anchor="middle" font-size="9" fill="#8b94ad"></text>
+                </svg>
+                <div style="font-size:.66rem;color:#5d6684;line-height:1.5;">
+                    True orbital position (heliocentric &lambda;, Sun&ndash;Earth
+                    distance; tick = perihelion). Earth&rsquo;s spin in the scene
+                    follows the sim clock &mdash; at &times;1 this IS the current
+                    UTC day and terminator.
+                </div>
             </div>
         </section>
 
@@ -365,6 +408,12 @@ body {
                 <button class="rc-mode-btn" data-mode="temp">Temp heat map</button>
                 <button class="rc-mode-btn" data-mode="density">Density</button>
             </div>
+            <div class="rc-ctl" style="margin-top:8px;">
+                <span>stream density</span>
+                <button class="rc-mode-btn rc-on" data-dens="1">&times;1</button>
+                <button class="rc-mode-btn" data-dens="2">&times;2</button>
+                <button class="rc-mode-btn" data-dens="4">&times;4</button>
+            </div>
             <div style="font-size:.66rem;color:#5d6684;margin-top:6px;line-height:1.5;">
                 One clock, real velocities: stream, ring drift, particle
                 lifetimes, injections and Earth&rsquo;s spin all move at their
@@ -424,8 +473,9 @@ body {
 
 <script type="module">
 import { RingCurrentFeed, omniToReplay, computeReplayState } from './js/ring-current-feed.js?v=20260711';
-import { newellCoupling } from './js/ring-current-model.js?v=20260711';
+import { newellCoupling, earthOrbit } from './js/ring-current-model.js?v=20260711';
 import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260711';
+import { loadUserLocation } from './js/user-location.js';
 import { INTERVALS } from './js/config.js';
 
 const $ = id => document.getElementById(id);
@@ -458,6 +508,35 @@ try {
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d6684;font-size:.8rem;">3D view unavailable — data panels remain live</div>');
 }
 
+// ── Render-performance HUD + one-shot telemetry ─────────────────────────────
+// The globe instruments itself (per-section CPU EMAs, p95 frame time, an
+// adaptive quality tier that sheds rendering cost — never physics — under
+// sustained slow frames). The chip shows the live numbers; one anonymous
+// app_perf sample ships after ~45 s so real-device performance lands in
+// client_telemetry (existing recordPerf surface).
+if (globe) {
+    const perfEl = $('rc-perf');
+    perfEl.hidden = false;
+    setInterval(() => {
+        if (document.hidden) return;
+        const p = globe.perf;
+        perfEl.textContent =
+            `${p.fps.toFixed(0)} fps · ${p.frameMs.toFixed(1)} ms (p95 ${p.p95Ms.toFixed(0)})` +
+            ` · dpr ${p.pixelRatio.toFixed(2)} · ${p.drawCalls} draws` +
+            (p.tier ? ` · quality −${p.tier}` : '');
+        perfEl.classList.toggle('rc-perf-warn', p.frameMs > 26 || p.tier > 0);
+    }, 1000);
+    setTimeout(async () => {
+        try {
+            const { telemetry } = await import('./js/telemetry.js');
+            const p = globe.perf;
+            telemetry.recordPerf('ring3d_frame_ms', p.frameMs);
+            telemetry.recordPerf('ring3d_frame_p95_ms', p.p95Ms);
+            telemetry.recordPerf('ring3d_quality_tier', p.tier);
+        } catch { /* telemetry is best-effort, never load-bearing */ }
+    }, 45_000);
+}
+
 // Selectors are scoped: [data-tau] = sim clock presets, [data-mode] = stream
 // coloring. They share .rc-mode-btn styling only.
 document.querySelectorAll('.rc-mode-btn[data-tau]').forEach(btn => btn.addEventListener('click', () => {
@@ -470,6 +549,52 @@ document.querySelectorAll('.rc-mode-btn[data-mode]').forEach(btn => btn.addEvent
     document.querySelectorAll('.rc-mode-btn[data-mode]').forEach(b => b.classList.toggle('rc-on', b === btn));
     globe?.setStreamMode(btn.dataset.mode);
 }));
+// Stream density ×1/×2/×4 — a visual multiplier on rendered points per
+// 1-min sample (and injection-burst size). More pixels, never more data.
+document.querySelectorAll('.rc-mode-btn[data-dens]').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.rc-mode-btn[data-dens]').forEach(b => b.classList.toggle('rc-on', b === btn));
+    globe?.setStreamDensity(Number(btn.dataset.dens));
+}));
+
+// ── Earth clock & orbit — the scene's Earth follows the sim clock ──────────
+const userLoc = loadUserLocation();
+if (userLoc && Number.isFinite(userLoc.lon)) {
+    $('rc-clock-local-row').hidden = false;
+    $('rc-clock-local-k').textContent = `local (mean solar) — ${userLoc.city ?? 'saved location'}`;
+}
+// Earth's heliocentric longitude at perihelion (~Jan 3): geocentric solar
+// λ ≈ 283° there, so Earth sits at 283 − 180 = 103°.
+const PERI_LON_DEG = 103;
+{
+    const a = PERI_LON_DEG * Math.PI / 180;
+    const t = $('rc-orbit-peri');
+    t.setAttribute('x1', (36 * Math.cos(a)).toFixed(1));
+    t.setAttribute('y1', (-36 * Math.sin(a)).toFixed(1));
+    t.setAttribute('x2', (44 * Math.cos(a)).toFixed(1));
+    t.setAttribute('y2', (-44 * Math.sin(a)).toFixed(1));
+}
+function renderEarthClock() {
+    const simMs = clock.now();
+    $('rc-clock-utc').textContent =
+        new Date(simMs).toISOString().slice(11, 19) + (clock.tau > 1 ? ` (×${clock.tau})` : '');
+    if (userLoc && Number.isFinite(userLoc.lon)) {
+        // Mean solar time at the saved longitude (UTC + 4 min per °E).
+        // Civil-zone offsets need a tz database; mean solar is the honest,
+        // computable choice on a physics page — it is what the terminator
+        // on the globe actually shows.
+        $('rc-clock-local').textContent =
+            new Date(simMs + userLoc.lon * 240000).toISOString().slice(11, 16);
+    }
+    const ob = earthOrbit(simMs);
+    $('rc-orbit').textContent = `day ${ob.dayOfYear} · ${ob.rAU.toFixed(4)} AU · λ ${ob.lonDeg.toFixed(0)}°`;
+    const a = ob.lonDeg * Math.PI / 180;
+    const e = $('rc-orbit-earth');
+    e.setAttribute('cx', (40 * Math.cos(a)).toFixed(1));
+    e.setAttribute('cy', (-40 * Math.sin(a)).toFixed(1));
+    $('rc-orbit-doy').textContent = `d${ob.dayOfYear}`;
+}
+renderEarthClock();
+setInterval(renderEarthClock, 1000);
 
 // ── Formatting helpers ──────────────────────────────────────────────────────
 const SUP = { '-':'⁻', 0:'⁰',1:'¹',2:'²',3:'³',4:'⁴',5:'⁵',6:'⁶',7:'⁷',8:'⁸',9:'⁹' };
@@ -536,6 +661,11 @@ function renderHud(s) {
     bzEl.className = 'rc-v ' + (s.drivers.bz < 0 ? 'rc-south' : 'rc-north');
     $('rc-bt').textContent   = fmt(s.drivers.bt, 1, ' nT');
     $('rc-pdyn').textContent = fmt(s.drivers.pdyn, 2, ' nPa');
+    const mp = s.now.magnetopause;
+    const mpEl = $('rc-mp');
+    mpEl.textContent = mp && Number.isFinite(mp.r0)
+        ? `${mp.r0.toFixed(1)} Rᴇ${mp.r0 < 6.6 ? ' — inside GEO!' : ''}` : '—';
+    mpEl.className = 'rc-v ' + (mp && mp.r0 < 8 ? 'rc-south' : '');
     $('rc-vbs').textContent  = fmt(s.drivers.vbs, 2, ' mV/m');
     const dphi = newellCoupling(s.drivers.v, s.drivers.by, s.drivers.bz);
     $('rc-newell').textContent = Number.isFinite(dphi)

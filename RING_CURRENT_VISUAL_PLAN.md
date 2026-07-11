@@ -31,6 +31,64 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   (accurate at ×1, honest fast-forward that wraps with the sweep).
 > - **Particle lifetimes** (charge exchange / precipitation, the Sun→surface
 >   journey) tick on the sim clock — see RING_CURRENT_SIMULATION_PLAN.md.
+> - **Trails are integrated paths** (2026-07-11): every trail spans exactly
+>   the trajectory covered in the last TRAIL_VIEW_S (0.45 s) of VIEWING —
+>   corridor trails = apparent speed × window; ring trails re-draw the same
+>   GPU geometry at lagged clocks, so they follow the true curved
+>   drift+bounce path, honor the lifecycle, and collapse to sub-pixel at
+>   Real ×1 (honest stillness). No decorative streaks.
+> - **Wind sheet** (2026-07-11): the corridor carries a translucent flux-tube
+>   mesh whose fragment shader reads a live 128-bin profile texture rebuilt
+>   per frame from the REAL parcel series — density → glow, Bz → cool-north /
+>   hot-south color + crackle, per-bin speed → local wave advection at the
+>   τ-scaled invariant rate, and steep density gradients auto-highlight as
+>   compression-front bands. Cinematic, but every pixel traces to a measured
+>   L1 sample; near-frozen at Real ×1 like everything else. The Sun's corona
+>   breathes with the strongest incoming VBs.
+> - **Subtle cinematics** (2026-07-11): (a) shock-arrival moment — a ≥2×
+>   dynamic-pressure step between consecutive magnetopause arrivals fires a
+>   fullscreen additive veil (peak alpha 0.05) + a 0.45° FOV breath over
+>   ~1.2 s, 20 s cooldown, fully suppressed under prefers-reduced-motion;
+>   (b) ENA glow halo — an equatorial shader disc in the dipole group,
+>   emission = radialProfile × geocoronal L⁻³·⁵ (how IMAGE/TWINS photograph
+>   the ring), amplitude EASED toward its |Dst*| target over ~8 s like an
+>   integrating imager. (c) Injection bursts FORK by charge: the E×B entry
+>   surge is species-blind, then gradient-curvature drift splits it — ions
+>   west toward dusk, electrons east toward dawn (the dispersionless-
+>   injection signature). Keep all three subtle; they are measurements
+>   wearing makeup, not effects.
+> - **Layout**: the stage is viewport-capped (clamp 520px–74vh–920px,
+>   align-self:start) so the scene stays above the fold instead of
+>   stretching to the panel column. The page also shows the sim-clock UTC
+>   time, mean-solar local time at the saved user location (js/user-location
+>   longitude — civil tz needs a tz db), and Earth's true orbital position
+>   (earthOrbit: heliocentric λ, r in AU, Kepler-second-law-tested).
+> - **Volumetric stream + shock front + perf instrumentation** (2026-07-11):
+>   the incoming stream is FULLY 3D — each parcel renders as a dense core
+>   plus an envelope filling a 15 Rᴇ-radius cross-section (wider than the
+>   quiet dayside magnetopause flank), so arriving fronts visibly engulf
+>   the magnetosphere; the wind sheet flares 3.4 → 15.5 Rᴇ to match. Real
+>   IP shocks now also SWEEP the boundary surfaces: a gaussian band in the
+>   boundary shaders advances nose→tail at the shock's own τ-scaled speed
+>   (dθ/dt = v_app/r), bow shock leading, magnetopause trailing by the
+>   sheath transit — in-scene physics, so it stays under
+>   prefers-reduced-motion while the veil/FOV breath remain suppressed.
+>   Performance: the globe instruments itself (per-section CPU EMAs, p95
+>   frame ring buffer, renderer.info) behind a `perf` getter feeding a live
+>   HUD chip + a one-shot anonymous `recordPerf` sample at ~45 s; sustained
+>   slow frames step an adaptive quality tier down (dpr cap → echoes off →
+>   wind sheet/ENA/envelope off) — rendering cost only, never physics.
+>   Tooltip pose-projection picking is capped at ~14 Hz.
+> - **Tail transport** (2026-07-11, the journey's last leg): sheath tracers
+>   reaching the flank end fork on a VBs gate into a stage-2 tail-return
+>   state — antisunward + ~60 km/s entry inflow until captured inside the
+>   tail, then Earthward E×B convection at 25·(VBs/2) km/s to a midnight
+>   HANDOFF that spawns a mini injection burst (same matter, full chain).
+>   τ-honest bulk motion; sheet-capture flapping/funneling are labeled
+>   rendering cues. The `tailSheetMaterial` shader renders the return flow
+>   as a medium (wind-sheet pattern): Earthward-marching waves at the live
+>   E×B rate, brightness eased toward the same VBs gate, cool-blue→gold
+>   ramp matching the stage-2 tracer tint exactly.
 
 ---
 

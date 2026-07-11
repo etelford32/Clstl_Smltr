@@ -33,6 +33,7 @@ import {
     integrateDstEnsemble, findThresholdCrossing, kpToAp, oxygenFraction,
     bouncePeriodSeconds, subsolarPoint, dipoleTiltRad,
     geocoronalDensity, chargeExchangeCrossSection, chargeExchangeLifetimeHours,
+    earthOrbit, shueStandoffRe, shueAlpha, shueRadiusRe, bowShockStandoffRe,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -444,6 +445,58 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.equal(chargeExchangeLifetimeHours(50, 3, 'electron'), null);
     assert.equal(chargeExchangeLifetimeHours(NaN, 3), null);
     ok('lifetimes: σ(E) shapes, H⁺50@L3 ≈ 12 h, O⁺ ~10× faster, τ ∝ L^3.5');
+}
+
+// ── Earth orbit ──────────────────────────────────────────────────────────────
+{
+    // Perihelion ~Jan 3 (r → 0.9833), aphelion ~Jul 4 (r → 1.0167).
+    const peri = earthOrbit(Date.UTC(2026, 0, 3, 12));
+    const aph  = earthOrbit(Date.UTC(2026, 6, 4, 12));
+    assert.ok(peri.rAU < 0.9835, `perihelion r = ${peri.rAU}`);
+    assert.ok(aph.rAU > 1.0165, `aphelion r = ${aph.rAU}`);
+    // Equinoxes: heliocentric Earth longitude 180° (Mar) / 0° (Sep).
+    const mar = earthOrbit(Date.UTC(2026, 2, 20, 12)).lonDeg;
+    assert.ok(Math.abs(mar - 180) < 1.2, `March equinox λ = ${mar}`);
+    const sep = earthOrbit(Date.UTC(2026, 8, 23, 12)).lonDeg;
+    assert.ok(Math.min(sep, 360 - sep) < 1.2, `Sept equinox λ = ${sep}`);
+    // Kepler's second law: true angular motion is SLOWER than the 0.9856°/day
+    // mean near aphelion (July) and FASTER near perihelion (January).
+    const adv = (m, d) => {
+        const p = earthOrbit(Date.UTC(2026, m, d)), q = earthOrbit(Date.UTC(2026, m, d + 10));
+        return ((q.lonDeg - p.lonDeg + 360) % 360) / 10;
+    };
+    const julRate = adv(6, 11), janRate = adv(0, 5);
+    assert.ok(julRate < 0.9856 && julRate > 0.94, `aphelion rate = ${julRate}°/d`);
+    assert.ok(janRate > 0.9856 && janRate < 1.03, `perihelion rate = ${janRate}°/d`);
+    assert.equal(earthOrbit(Date.UTC(2026, 6, 11)).dayOfYear, 192);
+    assert.equal(earthOrbit(NaN), null);
+    ok('earth orbit: perihelion/aphelion r, equinox longitudes, mean motion');
+}
+
+// ── Shue (1998) magnetopause + bow shock ─────────────────────────────────────
+{
+    // Nominal wind ⇒ ~10.3 R_E nose; classic anchors from the paper's regime.
+    const r0n = shueStandoffRe(2, 0);
+    assert.ok(r0n > 9.8 && r0n < 10.8, `nominal r₀ = ${r0n}`);
+    // Pressure compresses: r₀ ∝ Pdyn^(−1/6.6) exactly.
+    assert.ok(Math.abs(shueStandoffRe(20, 0) / r0n - Math.pow(10, -1 / 6.6)) < 1e-9);
+    // Southward Bz erodes the dayside further at fixed pressure.
+    assert.ok(shueStandoffRe(2, -15) < shueStandoffRe(2, 0));
+    assert.ok(shueStandoffRe(2, +10) > shueStandoffRe(2, 0));
+    // Extreme storm drives the nose INSIDE geosynchronous orbit (6.6 R_E).
+    assert.ok(shueStandoffRe(30, -20) < 6.6, `storm r₀ = ${shueStandoffRe(30, -20)}`);
+    // Flaring: α > 0.5 nominally, grows with southward Bz and pressure.
+    const aN = shueAlpha(2, 0);
+    assert.ok(aN > 0.5 && aN < 0.72, `α = ${aN}`);
+    assert.ok(shueAlpha(2, -10) > aN && shueAlpha(10, 0) > aN);
+    // Surface shape: r(0) = r₀; monotonically opens toward the flanks.
+    assert.equal(shueRadiusRe(0, 10, 0.6), 10);
+    assert.ok(shueRadiusRe(1.2, 10, 0.6) > shueRadiusRe(0.6, 10, 0.6));
+    // Bow shock sits upstream of the magnetopause by the F&R ratio.
+    assert.ok(Math.abs(bowShockStandoffRe(2, 0) / r0n - 1.29) < 1e-9);
+    // Null-safety: defaults, no throws.
+    assert.ok(Number.isFinite(shueStandoffRe(null, null)));
+    ok('Shue: nominal ~10.3 Rᴇ, Pdyn^-1/6.6, Bz erosion, sub-GEO extremes, flaring');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

@@ -124,6 +124,14 @@ const kinCol = (pop, c) => Array.from({ length: pop.count }, (_, i) => pop.kin[i
     let oShorter = 0;
     for (let i = 0; i < 600; i++) if (o.life[i * 4 + 1] < h.life[i * 4 + 1]) oShorter++;
     assert.ok(oShorter / 600 > 0.55, `O⁺ shorter-lived fraction = ${oShorter / 600}`);
+    // The shader's energy decoding — E_keV = 734.4·|rate|/(2π·L), inverting
+    // the model's exact drift constant — must round-trip the builder's
+    // buffers: the energy-dispersion tint depends on it (globe GLSL).
+    for (const i of [0, 99, 399]) {
+        const derived = 734.4 * Math.abs(h.kin[i * 3]) / (2 * Math.PI * h.seed[i * 3]);
+        assert.ok(Math.abs(derived - h.eKev[i]) / h.eKev[i] < 1e-4,
+            `E decode: ${derived} vs ${h.eKev[i]}`);
+    }
     // Loss channels: ions mostly charge-exchange with a deep-mirror
     // precipitating minority; electrons always precipitate.
     const precipFrac = pop => {

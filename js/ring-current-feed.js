@@ -32,6 +32,7 @@ import {
     dynamicPressure, dpsEnergyJ, ringPeakL, asymmetry, plasmapauseL,
     stormClass, toDstStar, obmQ, obmTau, skill, findThresholdCrossing, kpToAp,
     oxygenFraction, subsolarPoint, dipoleTiltRad, chargeExchangeLifetimeHours,
+    shueStandoffRe, shueAlpha,
 } from './ring-current-model.js';
 
 // rtsw_mag_1m is not in config.NOAA — defined locally, same as js/swpc-feed.js.
@@ -277,6 +278,12 @@ export function computeState(driverSeries, observedDst, kp, nowMs, f107 = null) 
             // Live Sun–Earth geometry (what the 3D twin's Earth/dipole track).
             subsolar:       subsolarPoint(nowMs),
             dipoleTiltDeg:  dipoleTiltRad(nowMs) * 180 / Math.PI,
+            // Shue (1998) magnetopause — the live boundary condition the
+            // twin's corridor, wind sheet, and sheath river all follow.
+            magnetopause: {
+                r0:    shueStandoffRe(nowPt.pdyn, latestValid(driverSeries, 'bz')),
+                alpha: shueAlpha(nowPt.pdyn, latestValid(driverSeries, 'bz')),
+            },
             plasmapauseL: plasmapauseL(kp),
             kp,
             apNow:        kpToAp(kp),

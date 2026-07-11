@@ -107,13 +107,24 @@
  * |Dst*|-coupled visible particle count, and hover tooltips (data behind
  * any particle). #917's drift signs were written for the pre-fix mirrored
  * frame — re-derived here for true GSM (westward = θ increasing).
+ *
+ * TAIL TRANSPORT (the journey's last rendered leg, 2026-07-11): sheath
+ * tracers reaching the end of the rendered flank (θ > 2.05) fork on a
+ * VBs gate — southward IMF drives flank/tail reconnection that feeds a
+ * fraction of the sheath plasma into the plasma sheet (stage 2). Captured
+ * tracers converge onto the flapping equatorial sheet, E×B-convect
+ * EARTHWARD at the cross-tail-field return speed (~tens of km/s, VBs-
+ * scaled, τ-honest through the same one-clock invariant), and HAND OFF at
+ * the midnight injection region as a mini injection burst — the same
+ * matter, traced Sun → L1 → sheath → tail → injection → drift → loss.
+ * See _updateSheath.
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     ringPeakL, dynamicPressure, subsolarPoint, dipoleTiltRad,
-    couplingVBs, driftRateRadPerHour, driftPeriodHours,
+    couplingVBs, driftRateRadPerHour, driftPeriodHours, shueRadiusRe,
 } from './ring-current-model.js';
 import {
     buildPopulation, POPULATIONS, particlePose, hash1, DEATH_WINDOW,
@@ -197,6 +208,7 @@ function trappedPointsMaterial(size, opacity, color) {
             attribute vec3 kin;
             attribute vec4 life;
             varying float vW;
+            varying float vE;   // energy-dispersion tint, 0 = 20 keV … 1 = 250 keV
             const float PI = 3.14159265358979;
             const float DW = ${DEATH_WINDOW.toFixed(3)};   // death-window fraction
 
@@ -212,6 +224,17 @@ function trappedPointsMaterial(size, opacity, color) {
                 float L    = position.x;
                 float lamM = position.z;
                 float lt   = life.y;
+
+                // Energy-dispersion tint: no extra attribute needed — the
+                // drift rate already ENCODES energy. Inverting the model's
+                // exact driftPeriodHours (2π·q·B₀·R_E²/(3·L·E) ⇒
+                // T_h = 734.4/(L·E_keV) at the equator):
+                //   E_keV = 734.4·|rate|/(2π·L)
+                // Log-normalised over the built 20–250 keV range. Fast pale
+                // particles visibly LAP deep slow ones: the dispersion that
+                // smears injections into a ring, now watchable.
+                vE = clamp(log(734.4 * abs(kin.x) / (6.28318531 * L) / 20.0) / 2.5257,
+                           0.0, 1.0);
 
                 // ── Lifecycle clock (sim hours) — mirrors particlePose() ──
                 float age   = uDriftHours + life.x;
@@ -278,15 +301,27 @@ function trappedPointsMaterial(size, opacity, color) {
         fragmentShader: `
             uniform vec3 uColor; uniform float uOpacity;
             varying float vW;
+            varying float vE;
             void main() {
                 float r = length(gl_PointCoord - vec2(0.5)) * 2.0;
                 float a = exp(-4.5 * r * r) - 0.011;
                 if (a <= 0.0) discard;
-                gl_FragColor = vec4(uColor * (1.0 + 0.7 * (1.0 - r)) * vW, a * uOpacity);
+                // Energy tint within the species color: 20 keV = deeper and
+                // dimmer, 250 keV = paler, pushed toward white. Subtle — the
+                // species hue still dominates.
+                vec3 c = mix(uColor * 0.78,
+                             min(vec3(1.0), uColor * 1.18 + vec3(0.22, 0.18, 0.12)),
+                             vE);
+                gl_FragColor = vec4(c * (1.0 + 0.7 * (1.0 - r)) * vW, a * uOpacity);
             }`,
     });
 }
 
+
+const smoothstepJs = (a, b, x) => {
+    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+};
 
 /** Thin polar axis line through the origin, length ±halfLen. */
 function axisLine(halfLen, color, opacity) {
@@ -308,13 +343,26 @@ function axisLine(halfLen, color, opacity) {
 // spatial compression is explicit, not smuggled in as an animation speed.
 const TRANSIT = Object.freeze({
     MAX_PARCELS: 120,
-    PTS_PER:     14,     // per-slot budget; VISIBLE count scales with density
+    PTS_PER:     14,     // per-slot BASE budget; VISIBLE count scales with density
+    DENS_MAX:    4,      // buffers sized for the ×4 stream-density setting
+                         // (a VISUAL multiplier on rendered points per 1-min
+                         // sample — never more data than was measured)
     X_MP:        SCALE.CORRIDOR.X_MP,    // ≈ subsolar magnetopause (R_E)
     X_SUN:       SCALE.CORRIDOR.X_SUN,   // corridor start, toward the Sun
     WAVE_Y:      4.2,    // baseline height of the barometric density trace
     WAVE_AMP:    3.2,    // trace amplitude at n = N_REF
     N_REF:       20,     // density (cm⁻³) that saturates count/trace scaling
 });
+
+// ── Trails are INTEGRATED PATHS, not decorations ─────────────────────────────
+// Every trail spans exactly the trajectory covered in the last TRAIL_VIEW_S
+// seconds of VIEWING: length = apparent speed × TRAIL_VIEW_S for the straight
+// corridor stream, and for ring particles the trail is the SAME kinematics
+// re-evaluated at lagged clocks — a true curved drift+bounce arc. Because the
+// window is viewing time, trails scale honestly with τ and collapse to
+// sub-pixel at Real ×1 (real motion IS near-stillness; no fake streaks).
+const TRAIL_VIEW_S = 0.45;
+const RING_TRAIL_ECHOES = 2;   // lagged re-draws of each population
 
 // Nightside injection bursts (#917 Phase 4): triggered when an arriving
 // parcel carries VBs above the O'Brien–McPherron coupling cutoff. Entry
@@ -327,6 +375,264 @@ const INJECT = Object.freeze({
     LIFE_S:     26,      // wall-clock fade after settling into drift
     VBS_MIN:    0.5,     // ≈ OBM Ec — northward/weak parcels don't inject
 });
+
+/**
+ * Solar-wind sheet: the wind rendered as a continuous MEDIUM, not just dots.
+ * An open flux tube spans the corridor; the fragment shader reads a 128-bin
+ * 1-D profile texture rebuilt every frame from the REAL parcel series —
+ *   R = density norm   → glow brightness (compression fronts = bright bands)
+ *   G = Bz southness   → color (cool blue north → hot orange south) + a
+ *                        fast crackle on strongly-southward sections
+ *   B = speed norm     → local wave advection rate
+ *   A = presence       → discard where no data
+ * Longitudinal waves sweep Earthward at the τ-scaled apparent speed (uFlow
+ * advanced per frame by the invariant), and the shader brightens where the
+ * density GRADIENT is steep — interplanetary compression fronts highlight
+ * themselves. Cinematic, but every pixel traces to a measured L1 sample.
+ */
+function windSheetMaterial(dataTex) {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+            uData: { value: dataTex },
+            uXmp:  { value: SCALE.CORRIDOR.X_MP },
+            uSpan: { value: SCALE.CORRIDOR.SPAN },
+            uFlow: { value: 0 },     // wave phase — advanced at τ-scaled speed
+            uTime: { value: 0 },     // wall seconds (crackle flicker)
+        },
+        vertexShader: `
+            varying vec3 vW; varying vec3 vN;
+            void main() {
+                vW = (modelMatrix * vec4(position, 1.0)).xyz;
+                vN = normalize(mat3(modelMatrix) * normal);
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+        fragmentShader: `
+            uniform sampler2D uData;
+            uniform float uXmp, uSpan, uFlow, uTime;
+            varying vec3 vW; varying vec3 vN;
+            void main() {
+                float u = clamp((vW.x - uXmp) / uSpan, 0.0, 1.0);
+                vec4 d = texture2D(uData, vec2(u, 0.5));
+                if (d.a < 0.02) discard;
+                float n = d.r;
+                float south = smoothstep(0.5, 0.95, d.g);
+                float vLoc = 0.45 + 0.85 * d.b;
+                // Waves sweeping Earthward (−x) at the local τ-scaled speed.
+                float ph = vW.x * 2.4 + uFlow * vLoc;
+                float wave = 0.55 + 0.45 * sin(ph) * (0.6 + 0.4 * sin(ph * 0.37 + 1.7));
+                // Compression fronts: steep density gradient → bright band.
+                float front = smoothstep(0.08, 0.30,
+                    abs(texture2D(uData, vec2(u + 0.02, 0.5)).r -
+                        texture2D(uData, vec2(u - 0.02, 0.5)).r));
+                // Volume feel: brightest looking through the tube's middle.
+                float rim = abs(dot(normalize(vN), normalize(cameraPosition - vW)));
+                float body = pow(rim, 1.5);
+                vec3 col = mix(vec3(0.28, 0.58, 1.0), vec3(1.0, 0.42, 0.16), south);
+                // Strong southward sections crackle — the dangerous stuff flickers.
+                float crackle = south * 0.22 * (0.5 + 0.5 * sin(uTime * 21.0 + vW.x * 6.3));
+                float b = (0.12 + 1.25 * n) * wave * body * d.a;
+                b *= 1.0 + 1.7 * front + crackle;
+                gl_FragColor = vec4(col * b, min(1.0, b) * 0.5);
+            }`,
+    });
+}
+
+/**
+ * Plasma-sheet return-flow sheet: the tail-transport leg rendered as a
+ * MEDIUM, the same pattern as the solar-wind sheet — a thin equatorial
+ * sheet spanning the near tail whose waves march EARTHWARD at the live
+ * VBs-scaled E×B return speed (uFlow advanced per frame through the
+ * one-clock invariant: near-frozen at Real ×1, streaming at ×300), with
+ * brightness following the eased tail-feeding level — the SAME VBs gate
+ * the stage-2 tracers take, so the sheet lights up exactly when matter is
+ * actually entering the tail. Color ramps cool blue (fresh captured
+ * plasma, tailward) → gold at the inner edge, matching the tracer tint.
+ * Flapping is a wall-time rendering cue (sheet thickness oscillation);
+ * bulk wave motion is τ-honest. Subtle: peak additive alpha ≈ 0.15.
+ */
+function tailSheetMaterial() {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+            uFeed: { value: 0 },    // eased tail-feeding level 0..1 (VBs gate)
+            uFlow: { value: 0 },    // Earthward wave phase (τ-honest advance)
+            uTime: { value: 0 },    // wall seconds — flapping only
+        },
+        vertexShader: `
+            uniform float uTime;
+            varying vec3 vLoc;
+            void main() {
+                vec3 p = position;
+                // Plasma-sheet flapping: gentle travelling warp, growing
+                // tailward (the near-Earth sheet is anchored by the dipole).
+                float amp = 0.55 * smoothstep(-7.0, -20.0, p.x);
+                p.y += amp * sin(p.x * 0.45 + uTime * 0.5 + p.z * 0.25);
+                vLoc = p;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+            }`,
+        fragmentShader: `
+            uniform float uFeed, uFlow, uTime;
+            varying vec3 vLoc;
+            void main() {
+                // Envelope: fade at the flanks, the far tail, and toward the
+                // injection region (the burst pool takes the story over).
+                float ez = 1.0 - smoothstep(5.5, 8.5, abs(vLoc.z));
+                float ex = smoothstep(-26.0, -22.0, vLoc.x)
+                         * (1.0 - smoothstep(-9.5, -6.5, vLoc.x));
+                // Earthward-marching waves: sin(k·x − uFlow), uFlow advanced
+                // at k × the live E×B return speed — the flow itself.
+                float wave = 0.55 + 0.45 * sin(vLoc.x * 1.7 - uFlow)
+                           * (0.6 + 0.4 * sin(vLoc.x * 0.63 - uFlow * 0.37 + vLoc.z * 0.8));
+                // Heat ramp matching the stage-2 tracer tint: cool captured
+                // plasma tailward → gold approaching the handoff.
+                float heat = smoothstep(-22.0, -8.0, vLoc.x);
+                vec3 col = mix(vec3(0.30, 0.45, 0.85), vec3(1.0, 0.82, 0.45), heat);
+                float b = uFeed * ez * ex * wave * 1.5;
+                gl_FragColor = vec4(col * b, min(1.0, b) * 0.22);
+            }`,
+    });
+}
+
+/**
+ * Boundary-surface material (magnetopause / bow shock). The GEOMETRY is a
+ * static (θ, φ) parameter grid — the vertex shader evaluates the live Shue
+ * (1998) surface r(θ) = uRScale·uR0·(2/(1+cosθ))^uAlpha every frame, so a
+ * pressure pulse deforms the whole shell with two uniform writes. Fragment:
+ * screen-space-derivative normals → fresnel rim (the boundary reads as a
+ * translucent membrane), a faint tailward shimmer so it reads as a surface
+ * IN a flow, and a warm tint + brightening as compression (uCompress) rises.
+ */
+function boundaryMaterial(tint, opacity, rScale) {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+            uR0:       { value: 10.2 },
+            uAlpha:    { value: 0.6 },
+            uRScale:   { value: rScale },
+            uTint:     { value: new THREE.Color(tint) },
+            uOpacity:  { value: opacity },
+            uCompress: { value: 0 },
+            uTime:     { value: 0 },
+            uShockTh:  { value: -9 },    // shock-front band center (solar-zenith θ)
+            uShockAmp: { value: 0 },     // band amplitude — decays as it sweeps
+        },
+        vertexShader: `
+            uniform float uR0, uAlpha, uRScale;
+            varying vec3 vPos;
+            void main() {
+                float th = position.x, ph = position.y;
+                float r = uRScale * uR0 * pow(2.0 / (1.0 + cos(th)), uAlpha);
+                vec3 p = vec3(r * cos(th), r * sin(th) * sin(ph), r * sin(th) * cos(ph));
+                vPos = p;
+                gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+            }`,
+        fragmentShader: `
+            uniform vec3 uTint;
+            uniform float uOpacity, uCompress, uTime, uShockTh, uShockAmp;
+            varying vec3 vPos;
+            void main() {
+                vec3 N = normalize(cross(dFdx(vPos), dFdy(vPos)));
+                vec3 V = normalize(cameraPosition - vPos);
+                float rim = pow(1.0 - abs(dot(N, V)), 2.0);
+                float shim = 0.85 + 0.15 * sin(vPos.x * 1.3 - uTime * 1.1
+                                               + atan(vPos.y, vPos.z) * 2.0);
+                vec3 col = mix(uTint, vec3(1.0, 0.62, 0.35), uCompress);
+                float a = uOpacity * (rim * 0.85 + 0.05) * shim * (1.0 + 0.9 * uCompress);
+                // Shock front: a gaussian band (σ ≈ 0.11 rad) at the live
+                // front position, sweeping nose→tail as _updateCinematics
+                // advances uShockTh at the shock's own τ-scaled speed — the
+                // interplanetary shock visibly WASHES OVER the boundary.
+                float thF = atan(length(vPos.yz), vPos.x);
+                float band = uShockAmp
+                    * exp(-(thF - uShockTh) * (thF - uShockTh) / 0.024);
+                col = mix(col, vec3(1.0, 0.85, 0.6), min(0.7, band));
+                a *= 1.0 + 2.6 * band;
+                gl_FragColor = vec4(col * a, a);
+            }`,
+    });
+}
+
+/** Static (θ, φ) parameter grid the boundary vertex shader deforms. */
+function boundaryGrid(thetaMax, rows, cols) {
+    const pos = [], idx = [];
+    for (let i = 0; i <= rows; i++) {
+        const th = (i / rows) * thetaMax;
+        for (let j = 0; j <= cols; j++) {
+            pos.push(th, (j / cols) * 2 * Math.PI, 0);
+        }
+    }
+    for (let i = 0; i < rows; i++) {
+        for (let j = 0; j < cols; j++) {
+            const a = i * (cols + 1) + j, b = a + cols + 1;
+            idx.push(a, b, a + 1, b, b + 1, a + 1);
+        }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    return geo;
+}
+
+/**
+ * ENA glow halo — how the ring current is actually PHOTOGRAPHED. Charge
+ * exchange turns trapped ions into energetic neutral atoms that stream off
+ * in straight lines; imagers (IMAGE/HENA, TWINS) integrate that emission
+ * into a diffuse glow. Emission ∝ ion flux × geocoronal density, so the
+ * shader multiplies the same radialProfile the populations use by the
+ * n_H ∝ L⁻³·⁵ halo — brightest just inside the ring's inner edge. VERY
+ * subtle by design: peak additive alpha ≈ 0.05, and the amplitude EASES
+ * toward its |Dst*|-driven target over ~8 s in tick(), like a real
+ * integrating imager accumulating counts.
+ */
+function enaHaloMaterial() {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+            uEna:     { value: 0 },      // eased accumulation amplitude 0..1
+            uDstStar: { value: -10 },
+            uAsymAmp: { value: 0 },
+            uAsymMlt: { value: 19 },
+            uTime:    { value: 0 },
+        },
+        vertexShader: `
+            varying vec2 vXY;
+            void main() {
+                vXY = position.xy;   // RingGeometry local plane (pre-tilt)
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+        fragmentShader: `
+            uniform float uEna, uDstStar, uAsymAmp, uAsymMlt, uTime;
+            varying vec2 vXY;
+            const float PI = 3.14159265358979;
+            void main() {
+                float L = length(vXY);
+                // radialProfile — same GLSL port as the populations.
+                float d     = min(0.0, uDstStar);
+                float peak  = 2.4 + 1.6 * exp(d / 120.0);
+                float sigma = L < peak ? 0.55 : 1.15;
+                float flux  = exp(-(L - peak) * (L - peak) / (2.0 * sigma * sigma))
+                            / (1.0 + exp(-(L - 1.8) / 0.12))
+                            / (1.0 + exp((L - 6.8) / 0.35));
+                // Geocorona n_H ∝ L^-3.5, normalised at L=2 — ENA emission
+                // is flux × n_H, so the glow hugs the ring's inner edge.
+                float nH = pow(max(1.05, L) / 2.0, -3.5);
+                // Mild MLT weighting: the emission follows the (asymmetric)
+                // ion distribution — mesh rotation.x maps local +y → scene z,
+                // so θ = atan2(y, x) directly.
+                float mlt = mod(12.0 - atan(vXY.y, vXY.x) * 12.0 / PI, 24.0);
+                float azw = 1.0 + 0.5 * uAsymAmp * cos((mlt - uAsymMlt) / 24.0 * 2.0 * PI);
+                // Slow imager-noise shimmer, near-subliminal.
+                float shim = 0.92 + 0.08 * sin(uTime * 0.7 + L * 3.1 + mlt);
+                float b = uEna * flux * nH * azw * shim;
+                gl_FragColor = vec4(vec3(0.95, 0.86, 0.70) * b, 0.12);
+            }`,
+    });
+}
 
 // Stream color modes. 'bz' keeps the driver semantics (southward hot /
 // northward cool); 'temp' is a plasma-temperature heat map (log₁₀ T over
@@ -370,6 +676,13 @@ export class RingCurrentGlobe {
         this._simHours = 0;       // SIM hours — drift + lifecycle clock (SimClock)
         this._builtPeakL = 0;
         this._parcels = [];       // in-transit L1 samples (state.transit)
+        // Performance instrumentation: per-section CPU EMAs, a frame-time
+        // ring buffer (p95), and an adaptive quality tier — see _perfCheck.
+        this._perf = {
+            frameMs: 16.7, buf: new Float32Array(240), bi: 0, bn: 0,
+            sections: { state: 0, transit: 0, pools: 0, tooltip: 0, render: 0 },
+            tier: 0, slow: 0, lastCheck: 0,
+        };
 
         const w = container.clientWidth || 800;
         const h = container.clientHeight || 600;
@@ -408,8 +721,10 @@ export class RingCurrentGlobe {
         this._buildParticles();
         this._buildRings();
         this._buildSunAndTransit();
+        this._buildBoundaries();
         this._buildFlashes();
         this._buildInjections();
+        this._buildCinematics();
         this._initTooltip();
 
         this._onResize = () => this._resize();
@@ -540,9 +855,13 @@ export class RingCurrentGlobe {
     _setCompositionMix(fO) {
         const f = Math.max(0, Math.min(0.8, Number.isFinite(fO) ? fO : 0.06));
         this._pendingMix = f;
-        const o = this._popPoints?.ionsO, h = this._popPoints?.ionsH;
-        if (o) o.mat.uniforms.uMix.value = Math.min(1.8, f / O_BUILD_FRACTION);
-        if (h) h.mat.uniforms.uMix.value = Math.min(1.3, (1 - f) / (1 - O_BUILD_FRACTION));
+        const setMix = (P, v) => {
+            if (!P) return;
+            P.mat.uniforms.uMix.value = v;
+            for (const e of P.echoes) e.mat.uniforms.uMix.value = v;
+        };
+        setMix(this._popPoints?.ionsO, Math.min(1.8, f / O_BUILD_FRACTION));
+        setMix(this._popPoints?.ionsH, Math.min(1.3, (1 - f) / (1 - O_BUILD_FRACTION)));
     }
 
     /** Static-attribute Points: position=(L, θ_birth, λ_m), kin, life.
@@ -559,7 +878,22 @@ export class RingCurrentGlobe {
         const points = new THREE.Points(geo, mat);
         points.frustumCulled = false;   // position attr holds (L,θ,λ_m), not xyz
         this._magGroup.add(points);
-        return { points, mat, pop };
+        // Integrated drift trails: re-draw the SAME geometry with lagged
+        // clocks (tick() sets uDriftHours/uBounceSec back by k·TRAIL_VIEW_S
+        // of viewing) — each echo is where every particle truly WAS, so the
+        // trail follows its curved drift+bounce path, honors the lifecycle,
+        // and collapses at Real ×1. Geometry is shared; cost = 2 extra draws.
+        const echoes = [];
+        for (let k = 1; k <= RING_TRAIL_ECHOES; k++) {
+            const em = trappedPointsMaterial(size * (1 - 0.22 * k), 0.9 * (k === 1 ? 0.38 : 0.16), color);
+            this._syncStateUniforms(em);
+            const ep = new THREE.Points(geo, em);
+            ep.frustumCulled = false;
+            ep.visible = (this._perf?.tier ?? 0) < 2;   // quality tier 2 sheds echoes
+            this._magGroup.add(ep);
+            echoes.push({ mat: em, k, points: ep });
+        }
+        return { points, mat, pop, echoes };
     }
 
     /** Push the current model state into one material's uniforms. */
@@ -603,6 +937,15 @@ export class RingCurrentGlobe {
         // Dipole axis — tilts with the magnetosphere; compare against the
         // white geographic axis to watch the real daily wobble between them.
         this._magGroup.add(axisLine(1.75, 0xff9a3d, 0.45));
+
+        // ENA glow halo — in the dipole group so the emission tilts with
+        // the ring it images. Amplitude eases toward its |Dst*| target in
+        // tick() (~8 s time constant — an integrating imager, not a lamp).
+        this._enaMat = enaHaloMaterial();
+        this._enaHalo = new THREE.Mesh(new THREE.RingGeometry(1.3, 5.4, 96, 24), this._enaMat);
+        this._enaHalo.rotation.x = Math.PI / 2;
+        this._magGroup.add(this._enaHalo);
+        this._enaTarget = 0;
     }
 
     _rebuildTorus(peakL) {
@@ -653,27 +996,61 @@ export class RingCurrentGlobe {
         this._scene.add(this._sun);
 
         // Transit parcel points (positions/colors filled per frame).
-        const N = TRANSIT.MAX_PARCELS * TRANSIT.PTS_PER;
+        this._streamDensity = 1;   // ×1 | ×2 | ×4 — page control
+        const N = TRANSIT.MAX_PARCELS * TRANSIT.PTS_PER * TRANSIT.DENS_MAX;
         this._transitGeo = new THREE.BufferGeometry();
         this._transitPos = new Float32Array(N * 3);
         this._transitCol = new Float32Array(N * 3);
         this._transitGeo.setAttribute('position', new THREE.BufferAttribute(this._transitPos, 3).setUsage(THREE.DynamicDrawUsage));
         this._transitGeo.setAttribute('color',    new THREE.BufferAttribute(this._transitCol, 3).setUsage(THREE.DynamicDrawUsage));
-        // Fixed per-slot cluster offsets (YZ disc + slight x scatter) so
-        // parcels keep a stable shape as they advance.
+        // Fixed per-slot cluster offsets so parcels keep a stable shape as
+        // they advance. FULLY 3D cross-section: a dense core (the corridor
+        // axis the labels and barometric trace describe) plus an envelope
+        // filling a 15 R_E-radius cylinder — wider than the quiet-time
+        // dayside magnetopause flank (~15.5 R_E at the terminator), so each
+        // arriving front visibly ENGULFS the magnetosphere the way the real
+        // wind does: Earth sits inside the stream, not beside a beam. A
+        // 1-min L1 sample IS a plane front — spreading its render across
+        // the full cross-section is more faithful than the old narrow jet.
+        // Envelope points fade with radius (per-point factor) so the medium
+        // reads airy and the core stays hot.
         this._transitOff = new Float32Array(N * 3);
+        this._transitEnv = new Float32Array(N);
         for (let i = 0; i < N; i++) {
             const a = Math.random() * 2 * Math.PI;
-            const r = Math.sqrt(Math.random()) * 1.35;
-            this._transitOff[i * 3]     = (Math.random() - 0.5) * 0.9;
+            const core = Math.random() < 0.55;
+            const r = core ? Math.sqrt(Math.random()) * 1.6
+                           : 1.6 + 13.4 * Math.random() ** 1.5;
+            this._transitOff[i * 3]     = (Math.random() - 0.5) * (core ? 0.9 : 2.6);
             this._transitOff[i * 3 + 1] = Math.sin(a) * r;
             this._transitOff[i * 3 + 2] = Math.cos(a) * r;
+            this._transitEnv[i] = core ? 1 : 0.55 - 0.25 * (r / 15);
         }
-        const mat = glowPointsMaterial(0.16, 0.95);
+        const mat = glowPointsMaterial(0.22, 0.95);   // brighter, fatter parcels
         this._transit = new THREE.Points(this._transitGeo, mat);
         this._transit.frustumCulled = false;
         this._scene.add(this._transit);
         this._streamMode = 'bz';
+
+        // Solar-wind sheet: an open flux tube spanning the corridor, shaded
+        // per-fragment from the live 128-bin parcel profile (see
+        // windSheetMaterial). FLARED toward Earth (3.4 → 15.5 R_E) to match
+        // the volumetric stream cross-section: the medium widens around the
+        // obstacle like flow past a blunt body, and the magnetosphere ends
+        // up INSIDE the wind's silhouette — encompassed, as it really is.
+        this._windBins = 128;
+        this._windData = new Uint8Array(this._windBins * 4);
+        this._windTex = new THREE.DataTexture(this._windData, this._windBins, 1, THREE.RGBAFormat);
+        this._windTex.magFilter = THREE.LinearFilter;
+        this._windTex.minFilter = THREE.LinearFilter;
+        this._windMat = windSheetMaterial(this._windTex);
+        const tube = new THREE.CylinderGeometry(3.4, 15.5, SCALE.CORRIDOR.SPAN, 40, 64, true);
+        tube.rotateZ(-Math.PI / 2);   // cylinder +Y axis → +X (sunward)
+        tube.translate((TRANSIT.X_MP + TRANSIT.X_SUN) / 2, 0, 0);
+        this._windSheet = new THREE.Mesh(tube, this._windMat);
+        this._windSheet.frustumCulled = false;
+        this._scene.add(this._windSheet);
+        this._sunVbsNorm = 0;   // strongest incoming VBs (0..1) — Sun breathing
 
         // Barometric trace: n(x) as a polyline riding above the corridor —
         // the pressure-wave shape of the incoming wind, sliding Earthward in
@@ -683,7 +1060,7 @@ export class RingCurrentGlobe {
         this._waveGeo = new THREE.BufferGeometry();
         this._waveGeo.setAttribute('position', new THREE.BufferAttribute(this._wavePos, 3).setUsage(THREE.DynamicDrawUsage));
         this._wave = new THREE.Line(this._waveGeo, new THREE.LineBasicMaterial({
-            color: 0x7fe6c3, transparent: true, opacity: 0.75,
+            color: 0x7fe6c3, transparent: true, opacity: 0.9,
             blending: THREE.AdditiveBlending, depthWrite: false,
         }));
         this._wave.frustumCulled = false;
@@ -698,7 +1075,7 @@ export class RingCurrentGlobe {
         this._envGeo = new THREE.BufferGeometry();
         this._envGeo.setAttribute('position', new THREE.BufferAttribute(this._envPos, 3).setUsage(THREE.DynamicDrawUsage));
         this._envGeo.setAttribute('color',    new THREE.BufferAttribute(this._envCol, 3).setUsage(THREE.DynamicDrawUsage));
-        this._env = new THREE.Points(this._envGeo, glowPointsMaterial(0.10, 0.55));
+        this._env = new THREE.Points(this._envGeo, glowPointsMaterial(0.13, 0.75));
         this._env.frustumCulled = false;
         this._scene.add(this._env);
         const base = new Float32Array([TRANSIT.X_MP, TRANSIT.WAVE_Y, 0, TRANSIT.X_SUN, TRANSIT.WAVE_Y, 0]);
@@ -712,6 +1089,13 @@ export class RingCurrentGlobe {
     /** Stream coloring: 'bz' (driver) | 'temp' (heat map) | 'density'. */
     setStreamMode(mode) {
         this._streamMode = mode === 'temp' || mode === 'density' ? mode : 'bz';
+    }
+
+    /** Stream density ×1/×2/×4 — a VISUAL multiplier on rendered points per
+     *  1-min L1 sample (and on injection-burst counts). More pixels, never
+     *  more data: parcel count, positions, and physics are untouched. */
+    setStreamDensity(x) {
+        this._streamDensity = [1, 2, 4].includes(x) ? x : 1;
     }
 
     // In-scene live stat labels: one pinned to the incoming wind corridor,
@@ -754,7 +1138,10 @@ export class RingCurrentGlobe {
      *  and parcels vanish exactly when their plasma reaches Earth. */
     _updateTransit(simNow, wallNow) {
         const tau = this._clock.tau;
-        const spanX = TRANSIT.X_SUN - TRANSIT.X_MP;
+        // The corridor's Earth-end is the LIVE Shue nose — under a pressure
+        // pulse the whole stream visibly reaches deeper before coupling.
+        const xmp = this._mpR0 + 0.4;
+        const spanX = TRANSIT.X_SUN - xmp;
         const pos = this._transitPos, col = this._transitCol, off = this._transitOff;
         // Heartbeat: parcels pulse on their 1-min sample cadence (wall time —
         // it's live instrumentation, not physics). Prominent in Real mode.
@@ -770,11 +1157,11 @@ export class RingCurrentGlobe {
             const remain = p.tArrive - simNow;
             if (remain <= 0) continue;                   // arrived (in sim) — see flashes
             const f = Math.min(1, remain / dur);         // 1 = just left L1, 0 = arriving
-            const x = TRANSIT.X_MP + f * spanX;
+            const x = xmp + f * spanX;
             const nNorm = Math.max(0, Math.min(1, (Number.isFinite(p.n) ? p.n : 3) / TRANSIT.N_REF));
             const [R, G, B] = streamColor(this._streamMode, p);
             const pdyn = dynamicPressure(p.n, p.v);
-            let bright = 0.30 + 0.70 * Math.min(1, (pdyn ?? 1.5) / 8);
+            let bright = 0.45 + 0.75 * Math.min(1, (pdyn ?? 1.5) / 8);
             bright *= 1 + hbAmp * Math.cos(2 * Math.PI * ((wallNow - (p.tL1 ?? 0)) % 60_000) / 60_000);
             if (tau === 1) {
                 // Flow-field pulse (Real mode only): a brightness wave sliding
@@ -782,21 +1169,26 @@ export class RingCurrentGlobe {
                 // pulse only conveys direction while honest motion is sub-pixel.
                 bright *= 1 + 0.30 * Math.sin(2 * Math.PI * (x / 9 + wallNow / 3000));
             }
-            // Trail length ∝ apparent speed (invariant: km/s × τ ÷ km/unit) —
-            // fast parcels streak, slow ones stay compact; ~0 at τ=1.
-            const trail = Math.min(7, Math.max(0.15,
-                0.45 * apparentUnitsPerSec(Number.isFinite(p.v) ? p.v : 400, SCALE.CORRIDOR.kmPerUnit, tau)));
+            // Trail = the path integrated over the last TRAIL_VIEW_S seconds
+            // of viewing (apparent speed × window; invariant km/s × τ ÷
+            // km/unit) — fast parcels streak further because they truly
+            // covered more corridor; sub-pixel at τ=1.
+            const trail = Math.min(9, Math.max(0.1,
+                TRAIL_VIEW_S * apparentUnitsPerSec(Number.isFinite(p.v) ? p.v : 400, SCALE.CORRIDOR.kmPerUnit, tau)));
             // BAROMETRIC compression: visible particle count per 1-min sample
             // scales with density — compression fronts read as dense bright
             // bands, exactly like a longitudinal pressure wave.
-            const visible = 3 + Math.round((TRANSIT.PTS_PER - 3) * nNorm);
-            for (let k = 0; k < TRANSIT.PTS_PER; k++) {
-                const j = (slot * TRANSIT.PTS_PER + k) * 3;
+            const stride = TRANSIT.PTS_PER * TRANSIT.DENS_MAX;
+            const visible = Math.min(stride,
+                (3 + Math.round((TRANSIT.PTS_PER - 3) * nNorm)) * this._streamDensity);
+            for (let k = 0; k < stride; k++) {
+                const j = (slot * stride + k) * 3;
                 if (k < visible) {
                     // Motion is toward −x, so the trail extends sunward (+x),
-                    // fading toward its tip.
+                    // fading toward its tip. Envelope points (wide cross-
+                    // section) carry their radial fade.
                     const tFrac = visible > 1 ? k / (visible - 1) : 0;
-                    const fade = 1 - 0.62 * tFrac;
+                    const fade = (1 - 0.62 * tFrac) * this._transitEnv[slot * stride + k];
                     pos[j]     = x + off[j] * 0.5 + tFrac * trail;
                     pos[j + 1] = off[j + 1];
                     pos[j + 2] = off[j + 2];
@@ -809,9 +1201,43 @@ export class RingCurrentGlobe {
                 }
             }
             this._slotParcel[slot] = p;   // hover tooltip lookup
-            waveSamples.push({ x, nNorm, R, G, B });
+            waveSamples.push({
+                x, nNorm, R, G, B,
+                // Wind-sheet profile channels: Bz southness (−15 nT → 1,
+                // +15 → 0) and speed norm for local wave advection.
+                south: Math.max(0, Math.min(1, 0.5 - (Number.isFinite(p.bz) ? p.bz : 0) / 30)),
+                vNorm: Math.max(0, Math.min(1, ((Number.isFinite(p.v) ? p.v : 400) - 250) / 650)),
+            });
             slot++;
         }
+        // ── Wind-sheet profile: splat the parcels into the 128-bin texture
+        //    (max-blend, ±2-bin tent) — the shader turns this into the
+        //    glowing medium with waves, fronts, and Bz coloring. ────────────
+        const bins = this._windBins, wd = this._windData;
+        wd.fill(0);
+        let vSum = 0;
+        for (const s of waveSamples) {
+            vSum += s.vNorm;
+            const c = Math.round(((s.x - xmp) / spanX) * (bins - 1));
+            for (let b = Math.max(0, c - 2); b <= Math.min(bins - 1, c + 2); b++) {
+                const w = 1 - Math.abs(b - c) / 3;
+                const o = b * 4;
+                wd[o]     = Math.max(wd[o],     Math.round(255 * s.nNorm * w));
+                wd[o + 1] = Math.max(wd[o + 1], Math.round(255 * s.south * w));
+                wd[o + 2] = Math.max(wd[o + 2], Math.round(255 * s.vNorm * w));
+                wd[o + 3] = Math.max(wd[o + 3], Math.round(235 * w));
+            }
+        }
+        this._windTex.needsUpdate = true;
+        // Advance the wave phase at the mean τ-scaled apparent speed (the
+        // same invariant the trails use) so the sheet's waves sweep
+        // Earthward at an honest rate — near-frozen at ×1, rolling at ×300.
+        const meanV = waveSamples.length ? 250 + 650 * (vSum / waveSamples.length) : 400;
+        this._windMat.uniforms.uFlow.value =
+            (this._windMat.uniforms.uFlow.value +
+             (this._lastDt ?? 0.016) * apparentUnitsPerSec(meanV, SCALE.CORRIDOR.kmPerUnit, tau) * 2.4)
+            % (Math.PI * 2000);
+        this._windMat.uniforms.uTime.value = wallNow / 1000 % 3600;
         // Barometric trace + envelope, x-sorted (overtaking can reorder
         // parcels relative to arrival order — the trace is n(x), not n(t)).
         waveSamples.sort((a, b) => a.x - b.x);
@@ -845,7 +1271,8 @@ export class RingCurrentGlobe {
         this._envGeo.attributes.position.needsUpdate = true;
         this._envGeo.attributes.color.needsUpdate = true;
         // Park unused point slots (black under additive = invisible).
-        for (let s = slot * TRANSIT.PTS_PER; s < TRANSIT.MAX_PARCELS * TRANSIT.PTS_PER; s++) {
+        const strideAll = TRANSIT.PTS_PER * TRANSIT.DENS_MAX;
+        for (let s = slot * strideAll; s < TRANSIT.MAX_PARCELS * strideAll; s++) {
             pos[s * 3] = pos[s * 3 + 1] = pos[s * 3 + 2] = 0;
             col[s * 3] = col[s * 3 + 1] = col[s * 3 + 2] = 0;
         }
@@ -860,6 +1287,250 @@ export class RingCurrentGlobe {
         this._waveGeo.attributes.position.needsUpdate = true;
         this._transitGeo.attributes.position.needsUpdate = true;
         this._transitGeo.attributes.color.needsUpdate = true;
+    }
+
+    // ── Boundaries (Shue 1998) + the magnetosheath river ────────────────────
+
+    /** Magnetopause + bow shock as live-deforming Shue surfaces, and the
+     *  sheath-tracer pool: arriving parcels DEFLECT and stream around the
+     *  boundary like a river around a boulder — slow at the nose,
+     *  accelerating along the flanks, fading tailward. Axisymmetric about
+     *  GSM X by construction, so they live at scene root (no dipole tilt). */
+    _buildBoundaries() {
+        this._mpR0 = 10.2;      // eased live values (Shue standoff, flaring)
+        this._mpAlpha = 0.6;
+        this._mpTarget = { r0: 10.2, alpha: 0.6 };
+        this._mpMat = boundaryMaterial(0x7fb4ff, 0.10, 1.0);
+        this._mpMesh = new THREE.Mesh(boundaryGrid(2.0, 30, 44), this._mpMat);
+        this._mpMesh.frustumCulled = false;
+        this._scene.add(this._mpMesh);
+        // Bow shock: upstream, wider flaring, fainter, teal. Dayside only —
+        // its tail is off-story here.
+        this._bsMat = boundaryMaterial(0x59e0d8, 0.055, 1.29);
+        this._bsMesh = new THREE.Mesh(boundaryGrid(1.35, 20, 44), this._bsMat);
+        this._bsMesh.frustumCulled = false;
+        this._scene.add(this._bsMesh);
+
+        // Sheath river tracers.
+        const N = 700;
+        this._shGeo = new THREE.BufferGeometry();
+        this._shPos = new Float32Array(N * 3);
+        this._shCol = new Float32Array(N * 3);
+        this._shGeo.setAttribute('position', new THREE.BufferAttribute(this._shPos, 3).setUsage(THREE.DynamicDrawUsage));
+        this._shGeo.setAttribute('color',    new THREE.BufferAttribute(this._shCol, 3).setUsage(THREE.DynamicDrawUsage));
+        this._shPts = new THREE.Points(this._shGeo, glowPointsMaterial(0.13, 0.9));
+        this._shPts.frustumCulled = false;
+        this._scene.add(this._shPts);
+        this._sh = {
+            mode:  new Uint8Array(N),      // 0 free · 1 sheath flank flow · 2 tail return
+            th:    new Float32Array(N),    // solar-zenith angle along the surface
+            ph:    new Float32Array(N),    // azimuth around the Sun–Earth axis
+            jit:   new Float32Array(N),    // standoff offset (sheath thickness)
+            vKm:   new Float32Array(N),    // parcel's measured speed
+            south: new Uint8Array(N),
+            nN:    new Float32Array(N),
+            age:   new Float32Array(N),
+            vbs:   new Float32Array(N),    // parcel's VBs — tail-entry gate + return speed
+            px:    new Float32Array(N),    // stage-2 cartesian state (scene units)
+            py:    new Float32Array(N),
+            pz:    new Float32Array(N),
+        };
+        this._shCursor = 0;
+        this._tailHandoffs = 0;   // journey closures: tail tracers reaching midnight
+
+        // Plasma-sheet return-flow sheet (the tail leg as a medium — see
+        // tailSheetMaterial). Scene root, like the stage-2 tracers riding it:
+        // both approximate the sheet as the GSM equatorial plane, so they
+        // stay coplanar under dipole tilt.
+        this._tailMat = tailSheetMaterial();
+        const sheetGeo = new THREE.PlaneGeometry(19.5, 17, 48, 20);
+        sheetGeo.rotateX(-Math.PI / 2);       // XY plane → XZ (equatorial)
+        sheetGeo.translate(-16.25, 0, 0);     // spans x ∈ [−26, −6.5], |z| ≤ 8.5
+        this._tailSheet = new THREE.Mesh(sheetGeo, this._tailMat);
+        this._tailSheet.frustumCulled = false;
+        this._scene.add(this._tailSheet);
+        this._driverVbs = 0;   // live upstream VBs (setState) — feeds the gate
+    }
+
+    /** Most of an arriving parcel becomes sheath flow — spawn its tracers.
+     *  No τ down-scaling (unlike injections): tracer flight time is honest
+     *  (~4 real minutes of sheath transit ⇒ ~0.8 s at ×300), so the pool
+     *  self-limits and the river stays visibly fed at high compression. */
+    _spawnSheath(p, vbs) {
+        const sh = this._sh;
+        const count = 3 + 3 * (this._streamDensity ?? 1);
+        for (let c = 0; c < count; c++) {
+            let i = -1;
+            for (let probe = 0; probe < sh.mode.length; probe++) {
+                const j = (this._shCursor + probe) % sh.mode.length;
+                if (sh.mode[j] === 0) { i = j; this._shCursor = j + 1; break; }
+            }
+            if (i < 0) return;
+            sh.mode[i]  = 1;
+            sh.th[i]    = 0.10 + Math.random() * 0.30;
+            sh.ph[i]    = Math.random() * 2 * Math.PI;
+            sh.jit[i]   = 1.06 + Math.random() * 0.10;   // just OUTSIDE the boundary
+            sh.vKm[i]   = Number.isFinite(p.v) ? p.v : 400;
+            sh.south[i] = Number.isFinite(p.bz) && p.bz < 0 ? 1 : 0;
+            sh.nN[i]    = Math.max(0.15, Math.min(1, (Number.isFinite(p.n) ? p.n : 3) / TRANSIT.N_REF));
+            sh.age[i]   = 0;
+            sh.vbs[i]   = Number.isFinite(vbs) ? vbs : 0;
+        }
+    }
+
+    /** Advance the river and its tail-return leg — the journey's last
+     *  rendered gap, closed.
+     *
+     *  Stage 1 (sheath flank flow): dθ/dt = v_apparent·flowFactor / r(θ),
+     *  Spreiter-like — stagnant at the nose, ~90% of wind speed by the
+     *  flanks. At the end of the rendered flank (θ > 2.05) the plasma
+     *  FORKS on a VBs gate: southward IMF drives flank/distant-neutral-
+     *  line reconnection that feeds a fraction into the tail (→ stage 2);
+     *  the rest streams past downstream and leaves the story.
+     *
+     *  Stage 2 (tail return convection): the tracer keeps streaming
+     *  antisunward while the entry inflow (~60 km/s) reels it toward the
+     *  tail axis; once inside the tail (lateral < 8.5 Rᴇ) it is captured
+     *  into the flapping plasma sheet and E×B-convects EARTHWARD at
+     *  v = E/B ≈ 25·(VBs/2) km/s (cross-tail field ~0.2–2 mV/m over
+     *  B ~10–20 nT ⇒ tens of km/s; ~½–3 h from −20 Rᴇ — the substorm
+     *  growth-phase timescale). Reaching the injection region near
+     *  midnight it HANDS OFF as a mini injection burst: the same matter,
+     *  Sun → L1 → sheath → tail → injection. Tracers that pass x < −26 Rᴇ
+     *  are lost downtail (plasmoid release). Bulk motion is τ-honest via
+     *  the one-clock invariant (crawls at ×1, courses at ×300); only the
+     *  sheet-capture fine structure (flapping, midnight funneling) is a
+     *  wall-time rendering cue.
+     */
+    _updateSheath(dt) {
+        const sh = this._sh;
+        const pos = this._shPos, col = this._shCol;
+        const vScale = this._clock.tau / SCALE.NEAR_EARTH.kmPerUnit;   // km/s → units/s
+        const rHand  = Math.max(6.8, this._state.plasmapauseL + 2.2);  // injection inner edge
+        const kSheet = 1 - Math.exp(-dt / 2.8);   // sheet-capture ease (rendering cue)
+        const kMid   = 1 - Math.exp(-dt / 4.0);   // midnight funneling (rendering cue)
+        for (let i = 0; i < sh.mode.length; i++) {
+            const j = i * 3;
+            if (sh.mode[i] === 1) {
+                sh.age[i] += dt;
+                const th = sh.th[i];
+                const r = shueRadiusRe(th, this._mpR0, this._mpAlpha) * sh.jit[i];
+                const flow = 0.22 + 0.68 * Math.min(1, th / 1.5);   // nose-stagnant → flank-fast
+                sh.th[i] += (sh.vKm[i] * vScale * flow / Math.max(2, r)) * dt;
+                if (sh.th[i] > 2.05 || sh.age[i] > 40) {
+                    const pEnter = sh.south[i]
+                        ? Math.min(0.9, 0.35 + 0.12 * sh.vbs[i]) : 0.06;
+                    if (sh.th[i] > 2.05 && Math.random() < pEnter) {
+                        // Fork taken: hand the surface point to stage 2.
+                        const r2 = shueRadiusRe(sh.th[i], this._mpR0, this._mpAlpha) * sh.jit[i];
+                        const st2 = Math.sin(sh.th[i]);
+                        sh.mode[i] = 2;
+                        sh.px[i] = r2 * Math.cos(sh.th[i]);
+                        sh.py[i] = r2 * st2 * Math.sin(sh.ph[i]);
+                        sh.pz[i] = r2 * st2 * Math.cos(sh.ph[i]);
+                        sh.age[i] = 0;
+                    } else {
+                        sh.mode[i] = 0;
+                    }
+                }
+            }
+            if (sh.mode[i] === 2) {
+                sh.age[i] += dt;
+                const lat = Math.hypot(sh.py[i], sh.pz[i]);
+                if (lat > 8.5) {
+                    // Entry: still antisunward with the sheath while the
+                    // reconnection inflow (~60 km/s) reels it tailward-in.
+                    sh.px[i] -= sh.vKm[i] * 0.15 * vScale * dt;
+                    const shrink = Math.max(0, lat - 60 * vScale * dt) / Math.max(1e-6, lat);
+                    sh.py[i] *= shrink;
+                    sh.pz[i] *= shrink;
+                } else {
+                    // Captured: Earthward E×B return flow, VBs-scaled.
+                    const vE = 25 * Math.max(0.3, Math.min(3, sh.vbs[i] / 2));   // km/s
+                    sh.px[i] += vE * vScale * dt;
+                    const flap = Math.sin(this._tView * 0.4 + sh.ph[i] * 3.0) * 0.7;
+                    sh.py[i] += (flap - sh.py[i]) * kSheet;
+                    sh.pz[i] -= sh.pz[i] * kMid;
+                    const rNow = Math.hypot(sh.px[i], sh.py[i], sh.pz[i]);
+                    if (rNow < rHand && sh.px[i] < 0) {
+                        // ── HANDOFF: the tail leg closes at midnight — the
+                        // same matter becomes a (mini) injection burst.
+                        this._tailHandoffs++;
+                        if (sh.vbs[i] >= INJECT.VBS_MIN) {
+                            this._spawnInjection(sh.vbs[i], this._state.plasmapauseL, 0.25);
+                        }
+                        sh.mode[i] = 0;
+                    }
+                }
+                if (sh.mode[i] === 2 &&
+                    (sh.px[i] < -26 || sh.px[i] > -1.5 || sh.age[i] > 90)) {
+                    sh.mode[i] = 0;   // lost downtail / slipped past / timed out
+                }
+            }
+            if (sh.mode[i] === 0) { col[j] = col[j + 1] = col[j + 2] = 0; continue; }
+            if (sh.mode[i] === 1) {
+                const th = sh.th[i];
+                const r = shueRadiusRe(th, this._mpR0, this._mpAlpha) * sh.jit[i];
+                const st = Math.sin(th), ct = Math.cos(th);
+                pos[j]     = r * ct;
+                pos[j + 1] = r * st * Math.sin(sh.ph[i]);
+                pos[j + 2] = r * st * Math.cos(sh.ph[i]);
+                // Fades toward the flank END but keeps a floor — the strands
+                // that fork into the tail continue seamlessly at stage-2's
+                // entry brightness instead of vanishing and reappearing.
+                const fade = (1 - 0.7 * smoothstepJs(1.45, 2.05, th)) * (0.35 + 0.65 * sh.nN[i]);
+                if (sh.south[i]) {
+                    col[j] = 1.0 * fade; col[j + 1] = 0.42 * fade; col[j + 2] = 0.2 * fade;
+                } else {
+                    col[j] = 0.32 * fade; col[j + 1] = 0.68 * fade; col[j + 2] = 1.0 * fade;
+                }
+            } else {
+                pos[j]     = sh.px[i];
+                pos[j + 1] = sh.py[i];
+                pos[j + 2] = sh.pz[i];
+                // Sheath tint warming to plasma-sheet gold as it approaches
+                // the handoff — cool captured plasma re-energising inward.
+                const rNow = Math.hypot(sh.px[i], sh.py[i], sh.pz[i]);
+                const heat = 1 - smoothstepJs(rHand, 18, rNow);
+                const bright = (0.30 + 0.55 * heat) * (0.4 + 0.6 * sh.nN[i]);
+                const R0 = sh.south[i] ? 1.0 : 0.32;
+                const G0 = sh.south[i] ? 0.42 : 0.68;
+                const B0 = sh.south[i] ? 0.20 : 1.00;
+                col[j]     = (R0 + (1.00 - R0) * heat) * bright;
+                col[j + 1] = (G0 + (0.82 - G0) * heat) * bright;
+                col[j + 2] = (B0 + (0.45 - B0) * heat) * bright;
+            }
+        }
+        this._shGeo.attributes.position.needsUpdate = true;
+        this._shGeo.attributes.color.needsUpdate = true;
+        // Tail sheet: waves march Earthward at the LIVE E×B return speed
+        // (identical formula to the tracers — one physics, two renderings);
+        // feeding level eases toward the live VBs gate over ~3 s.
+        const vbsD = this._driverVbs ?? 0;
+        const vE0 = 25 * Math.max(0.3, Math.min(3, vbsD / 2));   // km/s
+        const tu = this._tailMat.uniforms;
+        tu.uFlow.value = (tu.uFlow.value + 1.7 * vE0 * vScale * dt) % (Math.PI * 2000);
+        tu.uTime.value = this._tView;
+        tu.uFeed.value += (Math.min(1, vbsD / 4) - tu.uFeed.value) * (1 - Math.exp(-dt / 3));
+    }
+
+    /** Ease the boundary toward the live Shue target (the real response is
+     *  minutes; ~1.5 s of viewing keeps it legible without popping) and
+     *  propagate the nose to everything anchored on it. */
+    _updateBoundaries(dt) {
+        const k = 1 - Math.exp(-dt / 1.5);
+        this._mpR0    += (this._mpTarget.r0 - this._mpR0) * k;
+        this._mpAlpha += (this._mpTarget.alpha - this._mpAlpha) * k;
+        const compress = Math.max(0, Math.min(1, (10.2 - this._mpR0) / 4.5));
+        for (const m of [this._mpMat, this._bsMat]) {
+            m.uniforms.uR0.value = this._mpR0;
+            m.uniforms.uAlpha.value = this._mpAlpha;
+            m.uniforms.uCompress.value = compress;
+            m.uniforms.uTime.value = this._tView;
+        }
+        // The corridor's Earth-end IS the live nose: the wind sheet clips
+        // there and the parcel positions in _updateTransit use it.
+        this._windMat.uniforms.uXmp.value = this._mpR0 + 0.4;
     }
 
     // ── Arrival flashes + injection triggers (#917) ─────────────────────────
@@ -881,7 +1552,108 @@ export class RingCurrentGlobe {
             if (vbs >= INJECT.VBS_MIN) {
                 this._spawnInjection(vbs, this._state.plasmapauseL);
             }
+            // The river: most of every arriving parcel DEFLECTS into the
+            // magnetosheath and streams around the boundary (VBs rides along
+            // as the stage-2 tail-entry gate + return-flow speed).
+            this._spawnSheath(p, vbs);
+            // Shock-arrival moment: a ≥2× dynamic-pressure step between
+            // consecutive arrivals IS an interplanetary shock/compression
+            // front hitting the magnetopause. Cooldown-limited so high τ
+            // can't strobe; the effect itself is near-subliminal (tick()).
+            const pd = dynamicPressure(p.n, p.v);
+            if (Number.isFinite(pd)) {
+                if (this._prevArrivalPdyn != null && pd >= 2 * this._prevArrivalPdyn &&
+                    pd > 2.5 && (this._lastT - this._lastShockMs) > 20_000) {
+                    this._shockT = 0;
+                    this._lastShockMs = this._lastT;
+                    // Physical front: sweeps the boundary surfaces nose→tail
+                    // at the shock's own measured speed (τ-scaled). Amplitude
+                    // grows with the pressure ratio, capped.
+                    this._front = {
+                        th: 0.05,
+                        vKm: Number.isFinite(p.v) ? p.v : 500,
+                        amp: Math.min(1, 0.5 + 0.25 * (pd / this._prevArrivalPdyn - 2)),
+                    };
+                }
+                this._prevArrivalPdyn = pd;
+            }
         }
+    }
+
+    /** Subtle cinematic layer: a fullscreen additive veil (peak alpha 0.05)
+     *  + a 0.45° FOV breath, fired only on real shock arrivals. Both are
+     *  suppressed entirely under prefers-reduced-motion. */
+    _buildCinematics() {
+        this._veilMat = new THREE.ShaderMaterial({
+            transparent: true, depthTest: false, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            uniforms: { uA: { value: 0 } },
+            vertexShader: `void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+            fragmentShader: `uniform float uA;
+                void main() { gl_FragColor = vec4(1.0, 0.97, 0.9, uA); }`,
+        });
+        this._veil = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this._veilMat);
+        this._veil.renderOrder = 999;
+        this._veil.frustumCulled = false;
+        this._scene.add(this._veil);
+        this._shockT = 1e9;             // seconds since the last shock fired
+        this._lastShockMs = -1e9;
+        this._prevArrivalPdyn = null;
+        this._front = null;             // sweeping shock band (boundary shaders)
+        this._baseFov = this._camera.fov;
+        this._reducedMotion = typeof matchMedia === 'function' &&
+            matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
+    _updateCinematics(dt) {
+        // Shock veil + FOV breath: sine-in, exponential-out over ~1.2 s.
+        if (this._shockT < 1.2) {
+            this._shockT += dt;
+            const k = Math.min(1, this._shockT / 1.2);
+            const env = this._reducedMotion ? 0
+                : Math.sin(k * Math.PI) * Math.exp(-1.8 * k);
+            this._veilMat.uniforms.uA.value = 0.05 * env;
+            const fov = this._baseFov - 0.45 * env;
+            if (Math.abs(fov - this._camera.fov) > 1e-4) {
+                this._camera.fov = fov;
+                this._camera.updateProjectionMatrix();
+            }
+        } else if (this._veilMat.uniforms.uA.value !== 0) {
+            this._veilMat.uniforms.uA.value = 0;
+            this._camera.fov = this._baseFov;
+            this._camera.updateProjectionMatrix();
+        }
+        // Shock front sweep: advance the band along the boundary at the
+        // shock's τ-scaled apparent speed, dθ/dt = v_app / r(θ) — honest
+        // under the one clock (minutes across the dayside at Real ×1,
+        // ~a second at ×300). The band lives on the SURFACES (in-scene
+        // physics, not a camera effect), so prefers-reduced-motion keeps
+        // it while the veil + FOV breath above stay suppressed.
+        if (this._front) {
+            const f = this._front;
+            const vApp = f.vKm * this._clock.tau / SCALE.NEAR_EARTH.kmPerUnit;
+            const rBs = shueRadiusRe(Math.min(f.th, 1.3), this._mpR0, this._mpAlpha) * 1.29;
+            f.th += (vApp / Math.max(6, rBs)) * dt;
+            f.amp *= Math.exp(-dt / 2.5);
+            // Bow shock leads; the magnetopause band trails by the sheath
+            // transit (the compression takes time to cross the sheath).
+            this._bsMat.uniforms.uShockTh.value = f.th;
+            this._bsMat.uniforms.uShockAmp.value = f.amp;
+            this._mpMat.uniforms.uShockTh.value = f.th - 0.12;
+            this._mpMat.uniforms.uShockAmp.value = f.amp * 0.85;
+            if (f.th > 2.6 || f.amp < 0.02) {
+                this._front = null;
+                this._bsMat.uniforms.uShockAmp.value = 0;
+                this._mpMat.uniforms.uShockAmp.value = 0;
+            }
+        }
+        // ENA halo: ease toward the |Dst*| target like an integrating imager.
+        const u = this._enaMat.uniforms;
+        u.uEna.value += (this._enaTarget - u.uEna.value) * (1 - Math.exp(-dt / 8));
+        u.uTime.value = this._tView;
+        u.uDstStar.value = this._state.dstStar;
+        u.uAsymAmp.value = this._state.asym.amplitude;
+        u.uAsymMlt.value = this._state.asym.mltPeakHours;
     }
 
     _buildFlashes() {
@@ -917,7 +1689,7 @@ export class RingCurrentGlobe {
         const south = Number.isFinite(bz) && bz < 0;
         f.mat.color.setRGB(...(south ? [1.0, 0.55, 0.3] : [0.45, 0.7, 1.0]));
         f.sp.position.set(
-            TRANSIT.X_MP + 0.3,
+            this._mpR0 + 0.3,   // ON the live Shue nose
             (Math.random() - 0.5) * 2.2,
             (Math.random() - 0.5) * 2.2,
         );
@@ -958,6 +1730,7 @@ export class RingCurrentGlobe {
         this._magGroup.add(this._injPts);
         this._inj = {
             mode:    new Uint8Array(N),      // 0 free · 1 inflow · 2 drift
+            species: new Uint8Array(N),      // 0 ion · 1 electron — the burst FORKS
             theta:   new Float32Array(N),
             r:       new Float32Array(N),
             targetL: new Float32Array(N),
@@ -973,11 +1746,13 @@ export class RingCurrentGlobe {
      *  the arriving parcel's VBs and inversely with τ (at high compression
      *  parcels arrive many per second — the stream of bursts is continuous,
      *  which is exactly the storm-time picture). Injections penetrate deeper
-     *  when the plasmapause contracts. */
-    _spawnInjection(vbs, lpp) {
+     *  when the plasmapause contracts. `scale` < 1 gives the mini bursts a
+     *  tail-transport handoff fires (the traced matter arriving). */
+    _spawnInjection(vbs, lpp, scale = 1) {
         const inj = this._inj;
         const tauScale = Math.min(1, 60 / this._clock.tau);
-        const count = Math.max(4, Math.round((6 + 11 * Math.min(6, vbs)) * tauScale));
+        const count = Math.max(2, Math.round((6 + 11 * Math.min(6, vbs)) * tauScale * scale))
+            * (this._streamDensity ?? 1);   // pool-capped; drops, never grows
         for (let c = 0; c < count; c++) {
             // Ring cursor; skip slots still alive (pool full ⇒ drop, not grow).
             let i = -1;
@@ -987,13 +1762,21 @@ export class RingCurrentGlobe {
             }
             if (i < 0) return;
             inj.mode[i]    = 1;
+            // The burst FORKS by charge: the ENTRY surge is E×B convection
+            // (charge-independent — both species pour in together), then
+            // gradient–curvature drift takes over at the trapping point and
+            // splits it: ions curve WEST toward dusk, electrons EAST toward
+            // dawn — the classic dispersionless-injection signature seen at
+            // geosynchronous satellites.
+            const electron = Math.random() < 0.35;
+            inj.species[i] = electron ? 1 : 0;
             inj.theta[i]   = Math.PI + (Math.random() - 0.5) * 1.4;   // ~21–03 MLT
             inj.r[i]       = 7.8 + Math.random() * 1.6;
             inj.targetL[i] = Math.max(2.2, lpp - 0.4 - Math.random() * 1.6);
             const eKev     = 30 + 220 * Math.random() ** 2;
             // Scene-θ sign: westward = θ increasing in the GSM frame (#917
             // was written for the pre-fix mirrored frame — sign re-derived).
-            inj.rate[i]    = -driftRateRadPerHour(eKev, inj.targetL[i], 'ion');
+            inj.rate[i]    = -driftRateRadPerHour(eKev, inj.targetL[i], electron ? 'electron' : 'ion');
             inj.age[i]     = 0;
             inj.yAmp[i]    = (Math.random() - 0.5) * 0.7;
             inj.bPh[i]     = Math.random() * 2 * Math.PI;
@@ -1034,13 +1817,16 @@ export class RingCurrentGlobe {
             pos[j]     = inj.r[i] * Math.cos(th);
             pos[j + 1] = y;
             pos[j + 2] = inj.r[i] * Math.sin(th);
-            // Hot white-yellow at entry, cooling to ion orange, then fading.
+            // Hot white at entry (species indistinguishable in the E×B
+            // surge), cooling to the species color as the fork develops:
+            // ion orange sweeping duskward, electron blue dawnward.
             const heat = Math.max(0, 1 - inj.age[i] / 8);
             const fade = 1 - inj.age[i] / INJECT.LIFE_S;
             const b = (0.55 + 0.65 * heat) * fade;
-            col[j]     = (ION_COLOR.r + (1.00 - ION_COLOR.r) * heat) * b;
-            col[j + 1] = (ION_COLOR.g + (0.95 - ION_COLOR.g) * heat) * b;
-            col[j + 2] = (ION_COLOR.b + (0.62 - ION_COLOR.b) * heat) * b;
+            const base = inj.species[i] === 1 ? ELECTRON_COLOR : ION_COLOR;
+            col[j]     = (base.r + (1.00 - base.r) * heat) * b;
+            col[j + 1] = (base.g + (0.95 - base.g) * heat) * b;
+            col[j + 2] = (base.b + (0.80 - base.b) * heat) * b;
         }
         this._injGeo.attributes.position.needsUpdate = true;
         this._injGeo.attributes.color.needsUpdate = true;
@@ -1092,6 +1878,11 @@ export class RingCurrentGlobe {
 
     _updateTooltip(wallNow) {
         if (!this._pointerDirty || !this._pointerPx || this._dragging) return;
+        // Pose-projection picking is ~4700 trig evals + allocs — cap it at
+        // ~14 Hz (pointerDirty stays set, so the pick lands a frame later;
+        // imperceptible against a 12 px hit radius).
+        if (wallNow - (this._lastPickMs ?? 0) < 70) return;
+        this._lastPickMs = wallNow;
         this._pointerDirty = false;
         const rect = this._renderer.domElement.getBoundingClientRect();
 
@@ -1118,7 +1909,7 @@ export class RingCurrentGlobe {
         this._ray.params.Points.threshold = 1.0;
         for (const hit of this._ray.intersectObject(this._transit)) {
             if (hit.point.length() < 1.6) continue;
-            const p = this._slotParcel?.[Math.floor(hit.index / TRANSIT.PTS_PER)];
+            const p = this._slotParcel?.[Math.floor(hit.index / (TRANSIT.PTS_PER * TRANSIT.DENS_MAX))];
             if (!p) continue;
             if (!best) best = { kind: 'parcel', p };
             break;
@@ -1184,10 +1975,14 @@ export class RingCurrentGlobe {
             `${nw.storm?.label ?? ''}${Number.isFinite(nw.oxygenFraction)
                 ? ` · O⁺ ${Math.round(nw.oxygenFraction * 100)}%` : ''}`,
         ]);
+        // Live upstream VBs — the tail sheet's feeding gate (same coupling
+        // function that gates injections and the stage-2 tail fork).
+        this._driverVbs = Number.isFinite(state?.drivers?.vbs) ? state.drivers.vbs : 0;
         // Sun glow tracks the strongest incoming driver — a storm you can
-        // see coming before it arrives.
+        // see coming before it arrives (opacity + a breathing pulse in tick).
         const sv = state?.transit?.strongest?.vbs ?? 0;
-        if (this._sunMat) this._sunMat.opacity = 0.75 + 0.25 * Math.min(1, sv / 6);
+        this._sunVbsNorm = Math.min(1, sv / 6);
+        if (this._sunMat) this._sunMat.opacity = 0.75 + 0.25 * this._sunVbsNorm;
         const now = state?.now;
         if (!now) return;
         this._state = {
@@ -1200,7 +1995,20 @@ export class RingCurrentGlobe {
             injection:    Math.min(1, Math.abs(now.injectionQ ?? 0) / 12),
         };
         this._setCompositionMix(now.oxygenFraction);
-        for (const p of Object.values(this._popPoints ?? {})) this._syncStateUniforms(p.mat);
+        for (const p of Object.values(this._popPoints ?? {})) {
+            this._syncStateUniforms(p.mat);
+            for (const e of p.echoes) this._syncStateUniforms(e.mat);
+        }
+        // ENA imaging target: emission tracks the trapped-ion content.
+        this._enaTarget = Math.min(1, Math.abs(this._state.dstStar) / 120);
+        // Live Shue boundary target (eased in _updateBoundaries).
+        const mp = state?.now?.magnetopause;
+        if (mp && Number.isFinite(mp.r0)) {
+            this._mpTarget = {
+                r0: Math.max(4.5, Math.min(13, mp.r0)),
+                alpha: Math.max(0.4, Math.min(0.85, mp.alpha)),
+            };
+        }
         // Drive the EarthSkin from the SAME live state as the ring: aurora
         // oval from Kp + southward Bz + ap-proxied hemispheric power, and the
         // skin's ring-current nightside heating glow from this page's own
@@ -1244,24 +2052,113 @@ export class RingCurrentGlobe {
         const dSimH = this._clock.dSim(dt * 1000) / 3.6e6;   // wall s → sim hours
         this._tView += dt;
         this._simHours += dSimH;
+        this._lastDt = dt;
+        // Sun corona breathes with the strongest incoming VBs — a storm you
+        // can FEEL approaching before it arrives (cinematic, data-driven).
+        this._sun.scale.setScalar(11 * (1 + (0.02 + 0.09 * (this._sunVbsNorm ?? 0))
+            * Math.sin(wallNow / 600)));
+        // Section timing (EMA α=0.05): where each frame's CPU goes. ~6
+        // performance.now() calls/frame — negligible against what they map.
+        const S = this._perf.sections, blend = (k, t0, t1) => { S[k] += (t1 - t0 - S[k]) * 0.05; };
+        let tMark = performance.now();
         this._updateGeometry(simNow);
         this._skin.update(this._tView);   // aurora animation clock
         // All trapped-particle motion + lifecycle is in the vertex shader —
         // the per-frame CPU cost of 4 700 particles is two uniform writes
         // per material (drift/lifecycle on SIM hours; bounce on wall — the
-        // disclosed ×1 exception, see header).
+        // disclosed ×1 exception, see header). Trail echoes re-draw the same
+        // geometry at clocks lagged by k·TRAIL_VIEW_S of VIEWING time — the
+        // integrated path, τ-honest (sub-pixel at ×1).
+        const lagH = TRAIL_VIEW_S * this._clock.tau / 3600;
         for (const p of Object.values(this._popPoints ?? {})) {
             p.mat.uniforms.uDriftHours.value = this._simHours;
             p.mat.uniforms.uBounceSec.value  = this._tView;
+            for (const e of p.echoes) {
+                e.mat.uniforms.uDriftHours.value = this._simHours - e.k * lagH;
+                e.mat.uniforms.uBounceSec.value  = this._tView - e.k * TRAIL_VIEW_S;
+            }
         }
+        let tNow = performance.now();
+        blend('state', tMark, tNow); tMark = tNow;
+        this._updateBoundaries(dt);
         this._updateTransit(simNow, wallNow);
         this._detectArrivals(simNow);
         this._lastSimNow = simNow;
+        tNow = performance.now();
+        blend('transit', tMark, tNow); tMark = tNow;
         this._updateFlashes(dt);
         this._updateInjections(dt, dSimH);
+        this._updateSheath(dt);
+        this._updateCinematics(dt);
+        tNow = performance.now();
+        blend('pools', tMark, tNow); tMark = tNow;
         this._updateTooltip(wallNow);
+        tNow = performance.now();
+        blend('tooltip', tMark, tNow); tMark = tNow;
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
+        blend('render', tMark, performance.now());
+        this._perfCheck(wallNow, dt);
+    }
+
+    /** Frame accounting + adaptive quality. Frame-time EMA and a 240-frame
+     *  ring buffer (p95); once per second, sustained slowness (EMA > 26 ms
+     *  for 4 consecutive checks) steps the quality tier DOWN — never back
+     *  up (no flip-flopping):
+     *    1 — pixel ratio capped at 1.25
+     *    2 — pixel ratio 1.0 + trail echoes off (6 fewer point draws)
+     *    3 — wind sheet, ENA halo + pressure envelope off (overdraw)
+     *  Physics is NEVER degraded — only rendering cost. Live numbers via
+     *  the perf getter feed the page's HUD chip and one-shot telemetry. */
+    _perfCheck(wallNow, dt) {
+        const p = this._perf;
+        const ms = dt * 1000;
+        p.frameMs += (ms - p.frameMs) * 0.05;
+        p.buf[p.bi] = ms;
+        p.bi = (p.bi + 1) % p.buf.length;
+        p.bn++;
+        if (wallNow - p.lastCheck < 1000) return;
+        p.lastCheck = wallNow;
+        if (p.frameMs > 26) p.slow++; else p.slow = Math.max(0, p.slow - 1);
+        if (p.slow >= 4 && p.tier < 3) {
+            p.tier++;
+            p.slow = 0;
+            if (p.tier === 1) {
+                this._renderer.setPixelRatio(Math.min(1.25, window.devicePixelRatio || 1));
+                this._resize();
+            } else if (p.tier === 2) {
+                this._renderer.setPixelRatio(1);
+                this._resize();
+                for (const P of Object.values(this._popPoints ?? {})) {
+                    for (const e of P.echoes) e.points.visible = false;
+                }
+            } else {
+                this._windSheet.visible = false;
+                this._enaHalo.visible = false;
+                this._env.visible = false;
+            }
+            console.info(`[ring-current] frame ${p.frameMs.toFixed(1)} ms sustained — quality tier ${p.tier}`);
+        }
+    }
+
+    /** Live performance snapshot (page HUD + telemetry + probes). */
+    get perf() {
+        const p = this._perf;
+        const n = Math.min(p.bn, p.buf.length);
+        let p95 = 0;
+        if (n > 10) {
+            const arr = Array.from(p.buf.subarray(0, n)).sort((a, b) => a - b);
+            p95 = arr[Math.floor(n * 0.95)];
+        }
+        const r = this._renderer.info.render;
+        return {
+            fps: p.frameMs > 0 ? 1000 / p.frameMs : 0,
+            frameMs: p.frameMs, p95Ms: p95,
+            sections: { ...p.sections },
+            tier: p.tier,
+            pixelRatio: this._renderer.getPixelRatio(),
+            drawCalls: r.calls, triangles: r.triangles, points: r.points,
+        };
     }
 
     /** Earth spin/tilt + magnetosphere dipole tilt at SIM time — the one
