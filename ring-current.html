@@ -162,6 +162,12 @@ body {
 
 .rc-ctl { display:flex; align-items:center; gap:10px; font-size:.72rem; color:#8b94ad; }
 .rc-ctl input[type=range] { flex:1; accent-color:#ff9a3d; }
+.rc-mode-btn {
+    font-size:.68rem; font-weight:650; cursor:pointer; color:#cdd5e4;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13);
+    border-radius:6px; padding:3px 8px;
+}
+.rc-mode-btn.rc-on { background:rgba(255,154,61,.22); border-color:rgba(255,154,61,.55); color:#ffd9b0; }
 .rc-ctl .rc-v { font-size:.72rem; }
 
 .rc-foot {
@@ -297,11 +303,22 @@ body {
         </section>
 
         <section class="rc-panel">
-            <h2>Drift animation</h2>
+            <h2>Display</h2>
             <div class="rc-ctl">
                 <span>speed</span>
                 <input type="range" id="rc-speed" min="60" max="3600" step="60" value="600">
                 <span class="rc-v" id="rc-speed-lab">600&times;</span>
+            </div>
+            <div class="rc-ctl" style="margin-top:8px;">
+                <span>stream</span>
+                <button class="rc-mode-btn rc-on" data-mode="bz">IMF Bz</button>
+                <button class="rc-mode-btn" data-mode="temp">Temp heat map</button>
+                <button class="rc-mode-btn" data-mode="density">Density</button>
+            </div>
+            <div style="font-size:.66rem;color:#5d6684;margin-top:6px;line-height:1.5;">
+                Particle count per 1-min sample scales with density (compression
+                fronts = bright bands); the trace above the stream is the live
+                barometric n(x) wave, sliding Earthward in real time.
             </div>
         </section>
     </div>
@@ -356,6 +373,10 @@ $('rc-speed').addEventListener('input', (e) => {
     $('rc-speed-lab').textContent = `${x}×`;
     globe?.setTimeCompression(x);
 });
+document.querySelectorAll('.rc-mode-btn').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.rc-mode-btn').forEach(b => b.classList.toggle('rc-on', b === btn));
+    globe?.setStreamMode(btn.dataset.mode);
+}));
 
 // ── Formatting helpers ──────────────────────────────────────────────────────
 const SUP = { '-':'⁻', 0:'⁰',1:'¹',2:'²',3:'³',4:'⁴',5:'⁵',6:'⁶',7:'⁷',8:'⁸',9:'⁹' };
