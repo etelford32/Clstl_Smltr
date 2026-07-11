@@ -67,9 +67,13 @@
  *     The GLSL is a port of radialProfile/azimuthalWeight/ringPeakL — KEEP
  *     IN SYNC with js/ring-current-model.js (node tests pin the JS side;
  *     the shader mirrors it line for line).
- *   · Earth renders through a day/night terminator shader (Blue Marble +
- *     city-lights textures, twilight band at the limb) — the accurate spin
- *     phase is visible as the actual night hemisphere, live.
+ *   · Earth renders through the SHARED EarthSkin stack (js/earth-skin.js —
+ *     same renderer as earth.html / space-weather-globe): Blue Marble, city
+ *     lights, ocean specular, topographic bump, Rayleigh–Mie atmosphere,
+ *     procedural cloud shell, magnetic-latitude aurora oval — all driven by
+ *     this page's live state (Kp, Bz, ap, and the model's own Dst feeding
+ *     the skin's ring-current heating glow). The accurate spin phase is
+ *     visible as the actual night hemisphere, live.
  *
  * Drift runs at real rate × timeCompression (default 600×, so a 100 keV ion
  * at L=3 laps Earth in ~14 s of viewing; set 1× for true real time).
@@ -81,10 +85,7 @@ import {
     ringPeakL, dynamicPressure, subsolarPoint, dipoleTiltRad,
 } from './ring-current-model.js';
 import { buildPopulation, POPULATIONS } from './ring-current-particles.js';
-
-// Keep in sync with js/earth-skin.js EARTH_TEXTURES (version-pinned CDN).
-const EARTH_DAY_TEXTURE   = 'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg';
-const EARTH_NIGHT_TEXTURE = 'https://unpkg.com/three-globe@2.31.0/example/img/earth-night.jpg';
+import { EarthSkin } from './earth-skin.js';
 
 const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);   // H⁺ (solar wind)
 const ION_O_COLOR    = new THREE.Color(0.58, 1.00, 0.34);   // O⁺ (ionospheric outflow)
@@ -119,26 +120,6 @@ function glowPointsMaterial(size, opacity) {
                 float a = exp(-4.5 * r * r) - 0.011;
                 if (a <= 0.0) discard;
                 gl_FragColor = vec4(vC * (1.0 + 0.7 * (1.0 - r)), a * ${opacity.toFixed(2)});
-            }`,
-    });
-}
-
-// Fresnel rim-glow atmosphere — the limb brightens like scattered light.
-function atmosphereMaterial() {
-    return new THREE.ShaderMaterial({
-        transparent: true, depthWrite: false, side: THREE.BackSide,
-        blending: THREE.AdditiveBlending,
-        vertexShader: `varying vec3 vN; varying vec3 vP;
-            void main() {
-                vN = normalize(normalMatrix * normal);
-                vec4 mv = modelViewMatrix * vec4(position, 1.0);
-                vP = mv.xyz;
-                gl_Position = projectionMatrix * mv;
-            }`,
-        fragmentShader: `varying vec3 vN; varying vec3 vP;
-            void main() {
-                float f = pow(1.0 - abs(dot(normalize(vN), normalize(-vP))), 2.5);
-                gl_FragColor = vec4(vec3(0.25, 0.52, 1.0) * f * 1.7, f * 0.9);
             }`,
     });
 }
@@ -220,48 +201,6 @@ function trappedPointsMaterial(size, opacity, color) {
     });
 }
 
-/**
- * Earth day/night terminator shader — what makes the accurate spin VISIBLE:
- * Blue Marble on the sunlit side, real city lights on the night side, an
- * orange twilight band at the terminator. Sun direction is the GSM +X axis
- * (constant by construction); the normal is taken in world space so the
- * mesh's live spin/tilt does the work. Textures are optional — flat
- * ocean-blue / near-black fallbacks keep the globe drawable offline.
- */
-function earthDayNightMaterial() {
-    return new THREE.ShaderMaterial({
-        uniforms: {
-            uDay:      { value: null },
-            uNight:    { value: null },
-            uHasDay:   { value: 0 },
-            uHasNight: { value: 0 },
-        },
-        vertexShader: `
-            varying vec2 vUv; varying vec3 vN;
-            void main() {
-                vUv = uv;
-                vN = normalize(mat3(modelMatrix) * normal);   // rotation-only: no scale
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }`,
-        fragmentShader: `
-            uniform sampler2D uDay, uNight;
-            uniform float uHasDay, uHasNight;
-            varying vec2 vUv; varying vec3 vN;
-            void main() {
-                float ndl = dot(normalize(vN), vec3(1.0, 0.0, 0.0));   // Sun = +X (GSM)
-                vec3 day   = mix(vec3(0.16, 0.30, 0.56), texture2D(uDay,   vUv).rgb, uHasDay);
-                vec3 night = mix(vec3(0.012, 0.02, 0.05),
-                                 texture2D(uNight, vUv).rgb * 1.7 + texture2D(uDay, vUv).rgb * 0.05,
-                                 uHasNight);
-                float dayMix = smoothstep(-0.08, 0.18, ndl);
-                vec3 col = mix(night, day * (0.24 + 0.96 * max(0.0, ndl)), dayMix);
-                // Twilight: warm scatter band hugging the terminator.
-                float tw = exp(-pow((ndl + 0.02) / 0.10, 2.0));
-                col += vec3(1.0, 0.45, 0.22) * tw * 0.16;
-                gl_FragColor = vec4(col, 1.0);
-            }`,
-    });
-}
 
 /** Thin polar axis line through the origin, length ±halfLen. */
 function axisLine(halfLen, color, opacity) {
@@ -382,38 +321,40 @@ export class RingCurrentGlobe {
     // ── Scene construction ──────────────────────────────────────────────────
 
     _buildEarth() {
-        const mat = earthDayNightMaterial();
-        const loader = new THREE.TextureLoader();
-        // Raw (non-sRGB-tagged) sampling on purpose: the shader outputs the
-        // texture values directly, same policy as the other raw shaders here.
-        loader.load(EARTH_DAY_TEXTURE, (tex) => {
-            mat.uniforms.uDay.value = tex;
-            mat.uniforms.uHasDay.value = 1;
-        }, undefined, () => { /* CDN unreachable → flat ocean-blue dayside */ });
-        loader.load(EARTH_NIGHT_TEXTURE, (tex) => {
-            mat.uniforms.uNight.value = tex;
-            mat.uniforms.uHasNight.value = 1;
-        }, undefined, () => { /* fallback near-black nightside */ });
-        // Tilt group carries the axial tilt (rotation.z = −declination, pole
-        // toward the Sun in northern summer); the mesh inside spins about the
-        // tilted axis. Spin phase: THREE.SphereGeometry puts the equirect
-        // texture's center meridian (lon 0) on +X at rotation.y = 0, and a
-        // point at east longitude λ at scene θ = −λ; rotation.y = −λ_subsolar
-        // therefore faces the true subsolar longitude at the Sun. Updated
-        // every frame from the wall clock in tick().
-        this._earthTilt = new THREE.Group();
-        this._earth = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 48), mat);
-        this._earthTilt.add(this._earth);
+        // Shared Earth renderer (js/earth-skin.js — the same skin earth.html
+        // and the space-weather globe use): Blue Marble + city lights + ocean
+        // specular glint + topographic bump, Rayleigh–Mie atmosphere rim,
+        // procedural cloud shell with relief lighting, magnetic-latitude
+        // aurora oval, and a ring-current nightside heating glow (u_dst_norm)
+        // that THIS page feeds from its own live O'Brien–McPherron model —
+        // the Earth's appearance and the 3D ring around it share one physics
+        // state (see setState).
+        //
+        // Frame: js/geo/coords.js maps lon 0 → +X and EAST → −Z — identical
+        // to this scene's GSM mapping (dusk at −Z), so the spin phase stays
+        // rotation.y = −λ_subsolar with the Sun fixed on world +X (that is
+        // what GSM means). Tilt group carries rotation.z = −declination; the
+        // spin group inside rotates about the tilted axis. Both update every
+        // frame from the wall clock in _updateGeometry() — the terminator,
+        // city-light hemisphere, and season are the actual ones right now.
+        this._earthTilt = new THREE.Group();   // rotation.z = −declination
+        this._earthSpin = new THREE.Group();   // rotation.y = −subsolar lon
+        this._earthTilt.add(this._earthSpin);
+        this._scene.add(this._earthTilt);
+
+        this._skin = new EarthSkin(this._earthSpin, new THREE.Vector3(1, 0, 0), {
+            radius: 1, segments: 48, clouds: true, atmosphere: true,
+        });
+        this._skin.loadTextures({
+            anisotropy: this._renderer.capabilities.getMaxAnisotropy(),
+        });   // resolves even on CDN failure — safe per-slot fallbacks
+        // Mid quality tier for the cloud FBM: this globe shares its frame
+        // budget with 4 700 GPU particles and the transit stream.
+        this._skin.cloudU.u_quality.value = 0.8;
+
         // Geographic spin axis — with the dipole axis in _magGroup this makes
         // the daily wobble between the two visibly legible.
         this._earthTilt.add(axisLine(1.38, 0xdfe8ff, 0.5));
-        this._scene.add(this._earthTilt);
-
-        const atmo = new THREE.Mesh(
-            new THREE.SphereGeometry(1.045, 48, 48),
-            atmosphereMaterial(),
-        );
-        this._scene.add(atmo);
     }
 
     _buildFieldLines() {
@@ -814,6 +755,19 @@ export class RingCurrentGlobe {
         };
         this._setCompositionMix(now.oxygenFraction);
         for (const p of Object.values(this._popPoints ?? {})) this._syncStateUniforms(p.mat);
+        // Drive the EarthSkin from the SAME live state as the ring: aurora
+        // oval from Kp + southward Bz + ap-proxied hemispheric power, and the
+        // skin's ring-current nightside heating glow from this page's own
+        // model Dst. Normalisations match earth.html / space-weather-globe
+        // (−Bz/30, −Dst/200, (ap−12)/110).
+        const bz = state?.drivers?.bz;
+        this._skin.setSpaceWeather({
+            kp:       Number.isFinite(now.kp) ? now.kp : 0,
+            bzSouth:  Number.isFinite(bz) ? Math.max(0, Math.min(1, -bz / 30)) : 0,
+            auroraOn: true,
+            auroraAW: Number.isFinite(now.apNow) ? Math.max(0, Math.min(1, (now.apNow - 12) / 110)) : 0,
+            dstNorm:  Number.isFinite(now.dstModel) ? Math.max(0, Math.min(1, -now.dstModel / 200)) : 0,
+        });
         if (Math.abs(this._state.peakL - this._builtPeakL) > 0.12) {
             this._rebuildTorus(this._state.peakL);
         }
@@ -833,6 +787,7 @@ export class RingCurrentGlobe {
         this._tView += dt;
         this._driftHours += dtH;
         this._updateGeometry();
+        this._skin.update(this._tView);   // cloud drift/morph + aurora animation
         // All particle motion is in the vertex shader — the per-frame CPU
         // cost of 4 700 particles is these two uniform writes per material.
         for (const p of Object.values(this._popPoints ?? {})) {
@@ -851,7 +806,7 @@ export class RingCurrentGlobe {
         const nowMs = Date.now();
         const sp = subsolarPoint(nowMs);
         this._earthTilt.rotation.z = -sp.latDeg * Math.PI / 180;   // axis by declination
-        this._earth.rotation.y     = -sp.lonDeg * Math.PI / 180;   // subsolar lon → +X
+        this._earthSpin.rotation.y = -sp.lonDeg * Math.PI / 180;   // subsolar lon → +X
         this._magGroup.rotation.z  = -dipoleTiltRad(nowMs);        // GSM dipole tilt ψ
     }
 

@@ -205,10 +205,20 @@ Three.js 0.160 importmap, NOAA browser-direct / NASA via edge.
   model). Attribute buffers are built in `js/ring-current-worker.js` and
   transferred; the same worker runs the feed's `computeState` tick
   (`state.compute` reports 'worker'|'inline'; any failure falls back to
-  identical inline compute). Earth draws through a day/night terminator
-  shader (Blue Marble + city lights + twilight band) so the accurate spin
-  phase is visible as the actual night hemisphere. Spin and dipole axis
-  lines make the daily wobble between the two axes legible.
+  identical inline compute). Spin and dipole axis lines make the daily
+  wobble between the two axes legible.
+- **EarthSkin integration (2026-07-11, third pass)**: the page's Earth is
+  now the SHARED `js/earth-skin.js` stack (same renderer as earth.html and
+  the space-weather globe) — Blue Marble, city lights, ocean specular,
+  topographic bump, Rayleigh–Mie atmosphere, procedural clouds
+  (u_quality 0.8 — the frame budget is shared with the GPU particles),
+  magnetic-latitude aurora oval. Fed from THIS page's live state in
+  `setState`: Kp, −Bz/30, ap→auroraAW, and the model's own Dst into the
+  skin's `u_dst_norm` ring-current heating glow — Earth's appearance and
+  the ring around it share one physics state. Frame note: coords.js maps
+  lon 0 → +X, east → −Z — identical to the scene's GSM mapping, so the
+  spin phase stays `rotation.y = −λ_subsolar` (spin group), tilt
+  `rotation.z = −declination` (tilt group), Sun constant on world +X.
 
 ---
 
