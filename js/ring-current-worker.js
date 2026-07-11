@@ -35,10 +35,10 @@ export function handleRequest(msg) {
     const { id, type } = msg ?? {};
     try {
         if (type === 'population') {
-            const { count, species, seed, kin } = buildPopulation(msg.count, msg.species);
+            const { count, species, seed, kin, life, eKev } = buildPopulation(msg.count, msg.species);
             return {
-                response: { id, ok: true, count, species, seed, kin },
-                transfer: [seed.buffer, kin.buffer],
+                response: { id, ok: true, count, species, seed, kin, life, eKev },
+                transfer: [seed.buffer, kin.buffer, life.buffer, eKev.buffer],
             };
         }
         if (type === 'state') {

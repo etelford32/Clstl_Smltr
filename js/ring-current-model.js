@@ -494,6 +494,58 @@ export function bouncePeriodSeconds(eKev, L, alphaEqRad = Math.PI / 2, species =
     return (4 * L * PHYS.R_E_M / v) * (1.30 - 0.56 * Math.sin(a));
 }
 
+// ── Particle lifetimes (loss channels — the end of the Sun→surface journey) ──
+
+/**
+ * Geocoronal neutral-hydrogen density (cm⁻³) at dipole distance L. The
+ * exosphere's H halo is what ring-current ions charge-exchange against.
+ * Power-law fit through Rairden et al. (1986) Chamberlain-model values
+ * (~4×10⁴ near the exobase, ~10³ at 3 R_E, ~10² at 5 R_E) — smooth,
+ * order-of-magnitude, activity-independent.
+ */
+export function geocoronalDensity(L) {
+    if (!Number.isFinite(L)) return null;
+    return 4.4e4 * Math.pow(Math.max(1.05, L), -3.5);
+}
+
+/**
+ * Charge-exchange cross-section (cm²) with geocoronal H.
+ *
+ *   H⁺ + H → H(ENA) + H⁺ : large (~2×10⁻¹⁵) at keV energies, collapsing
+ *     steeply above tens of keV (Lindsay & Stebbings 2005 anchors).
+ *   O⁺ + H → O(ENA) + H⁺ : ~10⁻¹⁵ and nearly FLAT through ring-current
+ *     energies — which is why the storm-time O⁺-rich ring decays fast
+ *     while the ≥100 keV proton tail survives for days: the observed
+ *     two-phase recovery.
+ *
+ * Smooth order-of-magnitude fits for the visual twin — not for flux
+ * modeling. Electrons don't charge-exchange: null.
+ */
+export function chargeExchangeCrossSection(eKev, species = 'ion') {
+    if (!Number.isFinite(eKev) || eKev <= 0) return null;
+    if (species === 'electron') return null;
+    if (species === 'oxygen') return 1.0e-15 / (1 + Math.pow(eKev / 300, 1.5));
+    return 2.0e-15 / (1 + Math.pow(eKev / 10, 2));            // H⁺ / proton
+}
+
+/**
+ * Charge-exchange lifetime (hours): τ = 1 / (σ(E) · n_H(L) · v).
+ * Anchors this produces: 50 keV H⁺ at L=3 ≈ 12 h; 100 keV H⁺ ≈ 34 h;
+ * 100 keV O⁺ ≈ 3 h (dies an order of magnitude faster — two-phase decay);
+ * τ ∝ L^3.5 as the geocorona thins outward. Electrons: null (their ring
+ * lifetime is wave scattering, not charge exchange — no clean closed form).
+ */
+export function chargeExchangeLifetimeHours(eKev, L, species = 'ion') {
+    const sigma = chargeExchangeCrossSection(eKev, species);
+    const nH = geocoronalDensity(L);
+    if (sigma == null || nH == null || !Number.isFinite(L) || L <= 0) return null;
+    const m = SPECIES_MASS_KG[species] ?? SPECIES_MASS_KG.ion;
+    const c = 2.99792458e8;
+    const gamma = 1 + (eKev * PHYS.KEV_J) / (m * c * c);
+    const vCm = c * Math.sqrt(1 - 1 / (gamma * gamma)) * 100;   // cm/s
+    return 1 / (sigma * nH * vCm) / 3600;
+}
+
 // ── Sun–Earth geometry (drives the twin's accurate Earth + GSM frame) ────────
 
 /**

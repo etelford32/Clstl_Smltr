@@ -207,6 +207,32 @@ Three.js 0.160 importmap, NOAA browser-direct / NASA via edge.
   (`state.compute` reports 'worker'|'inline'; any failure falls back to
   identical inline compute). Spin and dipole axis lines make the daily
   wobble between the two axes legible.
+- **Particle lifetimes + SimClock unification (2026-07-11, fourth pass —
+  merged with #917)**: every trapped particle now carries its TRUE lifetime
+  and dies on screen. Model: `geocoronalDensity` (Rairden 1986 fit),
+  `chargeExchangeCrossSection` (Lindsay–Stebbings-class σ(E): H⁺ collapses
+  above tens of keV, O⁺ flat), `chargeExchangeLifetimeHours`
+  (τ = 1/σn_Hv — H⁺ 50 keV @ L3 ≈ 12 h, O⁺ ~10× shorter at 100 keV = the
+  two-phase recovery, τ ∝ L^3.5; electrons get nominal scattering hours,
+  labeled viz-grade). Lifecycle runs ENTIRELY in the vertex shader on the
+  SimClock: birth in the nightside injection sector (flash ∝ live |Q|),
+  drift life, death by ENA escape (outward fade — the ENA-imaging story) or
+  field-aligned precipitation to the SURFACE at auroral latitude, then
+  hash-jittered rebirth. The dusk asymmetry now partly EMERGES from
+  birth-at-midnight + westward drift + finite lifetime. `particlePose()` in
+  js/ring-current-particles.js is the node-tested reference the GLSL
+  transcribes (drives tooltip picking — keep in sync). #917's SimClock is
+  THE clock (τ presets ×1/60/300/1000, sweep-wrap over the forecast
+  window); its transit advection, arrival flashes, injections (drift sign
+  re-derived for the GSM-true frame), Dst-coupled visible count, and
+  tooltips were ported onto the GPU pipeline — see the integration note in
+  RING_CURRENT_VISUAL_PLAN.md. HUD gains a live charge-exchange-τ row.
+  **Sun→surface journey map**: measured L1 transit ✓ → magnetopause arrival
+  flash ✓ → nightside injection burst ✓ → trapped drift/bounce ✓ → loss
+  (ENA / precipitation-to-surface) ✓. NOT yet rendered: the
+  magnetosheath/flank/tail leg between arrival and injection (parcels end
+  at the magnetopause; injections restart at midnight) — that leg is the
+  next fidelity step.
 - **EarthSkin integration (2026-07-11, third pass)**: the page's Earth is
   now the SHARED `js/earth-skin.js` stack (same renderer as earth.html and
   the space-weather globe) — Blue Marble, city lights, ocean specular,

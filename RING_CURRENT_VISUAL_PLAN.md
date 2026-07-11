@@ -10,6 +10,28 @@ time-compression factor τ, real physical velocities everywhere.
 Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scale registry),
 `js/ring-current-globe.js` (scene), `ring-current.html` (τ UI), `tests/sim-clock.mjs`.
 
+> **INTEGRATION NOTE (2026-07-11, merged with the GPU branch).** This plan
+> was implemented against the pre-GPU globe; the port onto the GPU/worker
+> architecture kept every feature but changed some mechanics:
+> - **Frame:** the original scene was a MIRRORED GSM (its "dusk" arc actually
+>   rendered at 13 MLT). The GSM-true frame flip re-derives all drift signs
+>   (westward = θ INCREASING); the injections' drift sign was corrected in
+>   the port. Do not copy pre-merge sign conventions.
+> - **Ring populations** are GPU-shader particles (static attributes, motion
+>   in the vertex shader), so `nVis` count-culling became a hash-gated
+>   `uVisFrac` uniform and tooltip picking uses `particlePose()` (the
+>   node-tested reference the shader transcribes) projected to screen space
+>   — Raycaster cannot see GPU-computed positions.
+> - **Bounce is a disclosed ×1 exception** to the one-clock rule (real
+>   bounce aliases above the frame rate at τ ≥ 60; period/amplitude stay
+>   physical, and Real ×1 is fully true-rate). This plan's "bounce is
+>   decorative texture" is superseded: bounce is PHYSICAL, just never
+>   compressed.
+> - **Earth spin/tilt and the dipole-tilt wobble** also run on the SimClock
+>   (accurate at ×1, honest fast-forward that wraps with the sweep).
+> - **Particle lifetimes** (charge exchange / precipitation, the Sun→surface
+>   journey) tick on the sim clock — see RING_CURRENT_SIMULATION_PLAN.md.
+
 ---
 
 ## Guiding Invariant

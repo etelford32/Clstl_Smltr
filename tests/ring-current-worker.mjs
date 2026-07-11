@@ -32,8 +32,13 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.equal(response.species, 'oxygen');
     assert.equal(response.seed.length, 384);
     assert.equal(response.kin.length, 384);
-    assert.deepEqual(transfer, [response.seed.buffer, response.kin.buffer]);
-    ok('population: buffers built and listed for zero-copy transfer');
+    assert.equal(response.life.length, 512);
+    assert.equal(response.eKev.length, 128);
+    assert.deepEqual(transfer, [
+        response.seed.buffer, response.kin.buffer,
+        response.life.buffer, response.eKev.buffer,
+    ]);
+    ok('population: seed/kin/life/eKev buffers listed for zero-copy transfer');
 }
 
 // ── 2. state request ≡ direct computeState ───────────────────────────────────

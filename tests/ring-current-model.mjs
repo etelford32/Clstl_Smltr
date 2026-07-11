@@ -32,6 +32,7 @@ import {
     dipoleFieldLinePoint, dipoleFieldRatio, mirrorLatitude, lossConeAngle,
     integrateDstEnsemble, findThresholdCrossing, kpToAp, oxygenFraction,
     bouncePeriodSeconds, subsolarPoint, dipoleTiltRad,
+    geocoronalDensity, chargeExchangeCrossSection, chargeExchangeLifetimeHours,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -414,6 +415,35 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.ok(Math.abs(deg(t0) - deg(t0 + 86400e3)) < 1.5);
     assert.equal(dipoleTiltRad(null), null);
     ok('dipole tilt: ±33° solstice extremes near 17/05 UT, ±11° equinox wobble');
+}
+
+// ── Particle lifetimes (loss channels — Sun→surface journey) ─────────────────
+{
+    // Geocorona: Rairden-ish anchors, monotone thinning outward.
+    const n3 = geocoronalDensity(3);
+    assert.ok(n3 > 500 && n3 < 1500, `n_H(3) = ${n3}`);
+    assert.ok(geocoronalDensity(2) > n3 && n3 > geocoronalDensity(5));
+    // σ(E): H⁺ collapses above tens of keV; O⁺ nearly flat through
+    // ring-current energies; electrons don't charge-exchange.
+    assert.ok(chargeExchangeCrossSection(10, 'ion') >
+              5 * chargeExchangeCrossSection(50, 'ion'));
+    const oFlat = chargeExchangeCrossSection(100, 'oxygen') /
+                  chargeExchangeCrossSection(20, 'oxygen');
+    assert.ok(oFlat > 0.7 && oFlat <= 1, `O⁺ flatness = ${oFlat}`);
+    assert.equal(chargeExchangeCrossSection(50, 'electron'), null);
+    // Lifetime anchors + the two-phase-decay ordering.
+    const h50  = chargeExchangeLifetimeHours(50, 3, 'ion');
+    const h100 = chargeExchangeLifetimeHours(100, 3, 'ion');
+    const o100 = chargeExchangeLifetimeHours(100, 3, 'oxygen');
+    assert.ok(h50 > 5 && h50 < 25, `τ_ce(H⁺ 50 keV, L3) = ${h50} h`);
+    assert.ok(h100 > 24, `τ_ce(H⁺ 100 keV, L3) = ${h100} h`);
+    assert.ok(h100 / o100 > 3, `two-phase decay: H⁺/O⁺ ratio = ${h100 / o100}`);
+    // τ ∝ L^3.5 (geocorona power law; σ·v fixed at fixed E).
+    const lRatio = chargeExchangeLifetimeHours(50, 5, 'ion') / h50;
+    assert.ok(Math.abs(lRatio - Math.pow(5 / 3, 3.5)) < 0.05, `L-scaling ${lRatio}`);
+    assert.equal(chargeExchangeLifetimeHours(50, 3, 'electron'), null);
+    assert.equal(chargeExchangeLifetimeHours(NaN, 3), null);
+    ok('lifetimes: σ(E) shapes, H⁺50@L3 ≈ 12 h, O⁺ ~10× faster, τ ∝ L^3.5');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

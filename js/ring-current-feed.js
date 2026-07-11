@@ -31,7 +31,7 @@ import {
     integrateDst, integrateDstEnsemble, propagateToEarth, couplingVBs,
     dynamicPressure, dpsEnergyJ, ringPeakL, asymmetry, plasmapauseL,
     stormClass, toDstStar, obmQ, obmTau, skill, findThresholdCrossing, kpToAp,
-    oxygenFraction, subsolarPoint, dipoleTiltRad,
+    oxygenFraction, subsolarPoint, dipoleTiltRad, chargeExchangeLifetimeHours,
 } from './ring-current-model.js';
 
 // rtsw_mag_1m is not in config.NOAA — defined locally, same as js/swpc-feed.js.
@@ -269,6 +269,11 @@ export function computeState(driverSeries, observedDst, kp, nowMs, f107 = null) 
             peakL:        ringPeakL(nowPt.dstStar),
             asymmetry:    asym,
             oxygenFraction: oxygenFraction(nowPt.dstStar),
+            // Charge-exchange lifetimes of a reference 50 keV ion at the
+            // current peak shell — the live "how fast is the ring dying"
+            // number (O⁺ ≪ H⁺ = the two-phase recovery).
+            ceLifetimeH50: chargeExchangeLifetimeHours(50, ringPeakL(nowPt.dstStar), 'ion'),
+            ceLifetimeO50: chargeExchangeLifetimeHours(50, ringPeakL(nowPt.dstStar), 'oxygen'),
             // Live Sun–Earth geometry (what the 3D twin's Earth/dipole track).
             subsolar:       subsolarPoint(nowMs),
             dipoleTiltDeg:  dipoleTiltRad(nowMs) * 180 / Math.PI,

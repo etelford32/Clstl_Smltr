@@ -168,8 +168,19 @@ body {
 }
 .rc-bridge-links a:hover { background:rgba(255,255,255,.13); border-color:rgba(255,176,102,.5); }
 
-.rc-ctl { display:flex; align-items:center; gap:10px; font-size:.72rem; color:#8b94ad; }
-.rc-ctl input[type=range] { flex:1; accent-color:#ff9a3d; }
+.rc-ctl { display:flex; align-items:center; gap:10px; font-size:.72rem; color:#8b94ad; flex-wrap:wrap; }
+
+/* One-clock badge: the active τ is visible at all times (SIM ×300 / REAL ×1). */
+.rc-simtime {
+    position:absolute; left:12px; top:10px; z-index:4; pointer-events:none;
+    font-size:.72rem; font-weight:800; letter-spacing:.07em; color:#ffd9b0;
+    background:rgba(3,1,14,.6); border:1px solid rgba(255,154,61,.35);
+    border-radius:8px; padding:5px 11px; font-variant-numeric:tabular-nums;
+}
+.rc-simtime.rc-real { color:#7fe6c3; border-color:rgba(127,230,195,.35); }
+.rc-simtime .rc-simtime-sub {
+    display:block; font-weight:400; font-size:.64rem; color:#8b94ad; letter-spacing:0;
+}
 .rc-mode-btn {
     font-size:.68rem; font-weight:650; cursor:pointer; color:#cdd5e4;
     background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13);
@@ -225,18 +236,22 @@ body {
 
 <div class="rc-layout">
     <div class="rc-stage" id="rc-stage">
+        <div class="rc-simtime" id="rc-simtime">SIM TIME &times;300</div>
         <div class="rc-legend">
-            <span class="rc-dot" style="background:#ffa040"></span>H&#8314; ions &mdash; drift west, bounce on field lines<br>
-            <span class="rc-dot" style="background:#94ff57"></span>O&#8314; ions &mdash; ionospheric, storm-injected, slower bounce<br>
+            <span class="rc-dot" style="background:#ffa040"></span>H&#8314; ions &mdash; drift west, true-rate bounce<br>
+            <span class="rc-dot" style="background:#94ff57"></span>O&#8314; ions &mdash; ionospheric, dies ~10&times; sooner (two-phase decay)<br>
             <span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;opposite drifts = one westward current</span><br>
+            <span class="rc-dot" style="background:#fff3a0"></span>Injection &mdash; tail burst &rarr; slow drift<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;deaths: fade-out = ENA escape &middot; surface streak = precipitation</span><br>
             <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause (Kp)<br>
             <span class="rc-dot" style="background:#dfe8ff"></span>Spin axis &middot; <span class="rc-dot" style="background:#ff9a3d"></span>dipole axis &mdash; watch the daily wobble<br>
             <span class="rc-dot" style="background:#37e0a0"></span>Aurora oval &mdash; live Kp/Bz at the magnetic pole<br>
-            <span class="rc-dot" style="background:#ff9a3d"></span>Peak current shell<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
-            <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz
+            <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz<br>
+            <span style="color:#5d6684">trail length &prop; speed &middot; flash &prop; VBs on arrival</span>
         </div>
-        <div class="rc-stage-hint">drag to orbit &middot; scroll out to see the Sun corridor &middot; Earth day&ndash;night, dipole tilt, bounce &amp; stream are LIVE real time &middot; GSM frame</div>
+        <div class="rc-stage-hint">drag to orbit &middot; scroll out for the Sun corridor &middot; one clock drives stream, ring, lifecycle &amp; Earth spin &middot; hover any particle for its data &middot; GSM frame</div>
     </div>
 
     <div class="rc-col">
@@ -250,6 +265,7 @@ body {
             <div class="rc-kv"><span class="rc-k">peak current shell</span><span class="rc-v" id="rc-peakl">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">dusk asymmetry</span><span class="rc-v" id="rc-asym">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">composition (energy)</span><span class="rc-v" id="rc-ofrac">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">charge-exchange &tau; (50 keV @ peak L)</span><span class="rc-v" id="rc-celife">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">dipole tilt &psi;</span><span class="rc-v" id="rc-tilt">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">subsolar point</span><span class="rc-v" id="rc-subsolar">&mdash;</span></div>
             <div id="rc-storm" class="rc-storm-badge rc-storm-0">&mdash;</div>
@@ -337,10 +353,11 @@ body {
         <section class="rc-panel">
             <h2>Display</h2>
             <div class="rc-ctl">
-                <span>drift</span>
-                <input type="range" id="rc-speed" min="60" max="3600" step="60" value="600">
-                <span class="rc-v" id="rc-speed-lab">600&times;</span>
-                <button class="rc-mode-btn" id="rc-rt" title="Drop drift compression to 1× — every motion in the scene at its true rate">&#9678; 1&times; real</button>
+                <span>sim clock &tau;</span>
+                <button class="rc-mode-btn" data-tau="1">Real &times;1</button>
+                <button class="rc-mode-btn" data-tau="60">&times;60</button>
+                <button class="rc-mode-btn rc-on" data-tau="300">&times;300</button>
+                <button class="rc-mode-btn" data-tau="1000">&times;1000</button>
             </div>
             <div class="rc-ctl" style="margin-top:8px;">
                 <span>stream</span>
@@ -349,14 +366,18 @@ body {
                 <button class="rc-mode-btn" data-mode="density">Density</button>
             </div>
             <div style="font-size:.66rem;color:#5d6684;margin-top:6px;line-height:1.5;">
-                Only drift is compressed &mdash; Earth&rsquo;s spin, the dipole
-                tilt wobble, particle bounce, and the incoming stream always run
-                at their true real-time rates. At 1&times; the whole scene is
-                real time. Nightside ring brightening is the LIVE injection
-                strength |Q| &mdash; fresh plasma-sheet plasma entering near
-                01 MLT and drifting west toward dusk. Particle motion is
-                computed on the GPU; the model integration runs in a Web
-                Worker off the UI thread.
+                One clock, real velocities: stream, ring drift, particle
+                lifetimes, injections and Earth&rsquo;s spin all move at their
+                physical rate &times; &tau;. <b>Real &times;1</b> is the honest
+                mode &mdash; stillness is integrity, not a bug. Compressed
+                presets fast-forward the same L1 data (relative speeds
+                preserved) and replay the forecast window when the sweep
+                passes it. Bounce is the one disclosed &times;1 exception (it
+                would alias above the frame rate). Deaths are physical:
+                charge-exchange lifetimes vs the geocoronal H halo (O&#8314;
+                dies ~10&times; faster &mdash; the two-phase recovery), deep
+                mirrors precipitate to the surface. GPU particles; model
+                integration in a Web Worker.
             </div>
         </section>
     </div>
@@ -385,6 +406,14 @@ body {
     subsolar point, the magnetosphere tilts by the live dipole tilt angle &psi; (IGRF dipole
     axis + low-precision solar ephemeris), and particle bounce runs at its physical period
     &mdash; only drift is time-compressed, and 1&times; makes the whole scene real time.
+    Particle lifetimes are physical: charge exchange against the Rairden (1986) geocoronal H
+    profile with Lindsay&ndash;Stebbings-class cross-sections (O&#8314; &sim;10&times; shorter-lived than
+    H&#8314; at 100 keV &mdash; the two-phase recovery); deep-mirror ions and electrons precipitate.
+    Time &amp; scale: one simulation clock &tau; drives every population at its true physical
+    velocity. The near-Earth region is spatially linear (1 unit = 1 R&#7431; = 6,371 km); the
+    L1&rarr;magnetopause corridor is compressed &asymp;5.5&times; (1 unit &asymp; 34,900 km), so the
+    on-screen stream:ring speed ratio is &asymp;6:1 rather than the physical &asymp;100:1 &mdash;
+    disclosed here instead of hidden in animation speeds.
     Data: NOAA SWPC real-time solar wind (DSCOVR/ACE at L1, plasma + magnetometer), Kyoto WDC Dst
     quicklook, planetary Kp, GOES primary magnetometer (independent GEO cross-check).
     The model anchors on observed Dst 24 h ago and free-runs &mdash; the
@@ -396,17 +425,32 @@ body {
 <script type="module">
 import { RingCurrentFeed, omniToReplay, computeReplayState } from './js/ring-current-feed.js?v=20260711';
 import { newellCoupling } from './js/ring-current-model.js?v=20260711';
+import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260711';
 import { INTERVALS } from './js/config.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('rc-stage');
+
+// ── THE simulation clock — shared by the 3D scene and every UI readout.
+//    One τ; apparent speed = physical velocity × τ ÷ local scale. ──────────
+const clock = new SimClock({ tau: TAU_DEFAULT });
+
+function renderSimBadge() {
+    const badge = $('rc-simtime');
+    const t = clock.tau;
+    badge.classList.toggle('rc-real', t === 1);
+    badge.innerHTML = t === 1
+        ? 'REAL TIME ×1<span class="rc-simtime-sub">true physical speeds — watch the leading edge creep</span>'
+        : `SIM TIME ×${t}<span class="rc-simtime-sub">1 s of viewing = ${t >= 60 ? `${Math.round(t / 60)} min` : `${t} s`} of real time</span>`;
+}
+renderSimBadge();
 
 // ── 3D twin: loaded dynamically so a WebGL/importmap failure degrades to
 //    data panels + chart instead of blanking the page. ─────────────────────
 let globe = null;
 try {
     const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260711');
-    globe = new RingCurrentGlobe(stage, { timeCompression: 600 });
+    globe = new RingCurrentGlobe(stage, { clock });
     window.rcGlobe = globe;   // debug/probe handle (tests/ smoke probes)
 } catch (err) {
     console.warn('[ring-current] 3D disabled:', err);
@@ -414,26 +458,16 @@ try {
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d6684;font-size:.8rem;">3D view unavailable — data panels remain live</div>');
 }
 
-$('rc-speed').addEventListener('input', (e) => {
-    const x = Number(e.target.value);
-    $('rc-speed-lab').textContent = `${x}×`;
-    globe?.setTimeCompression(x);
-});
-// 1× real time: drop drift compression to unity — with bounce, Earth spin,
-// dipole wobble and the stream already wall-clock-true, the whole scene
-// becomes the actual magnetosphere at actual speed.
-$('rc-rt').addEventListener('click', () => {
-    const btn = $('rc-rt');
-    const slider = $('rc-speed');
-    const on = !btn.classList.contains('rc-on');
-    btn.classList.toggle('rc-on', on);
-    slider.disabled = on;
-    const x = on ? 1 : Number(slider.value);
-    $('rc-speed-lab').textContent = `${x}×`;
-    globe?.setTimeCompression(x);
-});
-document.querySelectorAll('.rc-mode-btn').forEach(btn => btn.addEventListener('click', () => {
-    document.querySelectorAll('.rc-mode-btn').forEach(b => b.classList.toggle('rc-on', b === btn));
+// Selectors are scoped: [data-tau] = sim clock presets, [data-mode] = stream
+// coloring. They share .rc-mode-btn styling only.
+document.querySelectorAll('.rc-mode-btn[data-tau]').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.rc-mode-btn[data-tau]').forEach(b => b.classList.toggle('rc-on', b === btn));
+    clock.setTau(Number(btn.dataset.tau));
+    renderSimBadge();
+    if (lastState) renderHud(lastState);   // refresh the sim-speed ETA sub-label
+}));
+document.querySelectorAll('.rc-mode-btn[data-mode]').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.rc-mode-btn[data-mode]').forEach(b => b.classList.toggle('rc-on', b === btn));
     globe?.setStreamMode(btn.dataset.mode);
 }));
 
@@ -472,6 +506,10 @@ function renderHud(s) {
     const fO = s.now.oxygenFraction;
     $('rc-ofrac').textContent = Number.isFinite(fO)
         ? `O⁺ ${Math.round(fO * 100)}% · H⁺ ${Math.round((1 - fO) * 100)}%` : '—';
+    const fmtLife = (h) => !Number.isFinite(h) ? '—'
+        : h > 48 ? `${(h / 24).toFixed(1)} d` : `${h.toFixed(1)} h`;
+    $('rc-celife').textContent = Number.isFinite(s.now.ceLifetimeH50)
+        ? `H⁺ ${fmtLife(s.now.ceLifetimeH50)} · O⁺ ${fmtLife(s.now.ceLifetimeO50)}` : '—';
     const psi = s.now.dipoleTiltDeg;
     $('rc-tilt').textContent = Number.isFinite(psi)
         ? `${psi >= 0 ? '+' : ''}${psi.toFixed(1)}° ${psi >= 0 ? 'sunward' : 'antisunward'}` : '—';
@@ -526,7 +564,12 @@ function renderHud(s) {
     if (tr?.strongest) {
         const st2 = tr.strongest;
         $('rc-strongest').textContent = `VBs ${fmt(st2.vbs, 2)} mV/m · Bz ${fmt(st2.bz, 1)} nT`;
-        $('rc-strongest-eta').textContent = `${st2.etaMin} min`;
+        // The countdown is REAL time (a genuine forecast); the sub-label maps
+        // it onto the sim clock when τ ≠ 1.
+        const simS = simSecondsForRealMinutes(st2.etaMin, clock.tau);
+        $('rc-strongest-eta').textContent = clock.tau > 1
+            ? `${st2.etaMin} min · ≈${simS < 10 ? simS.toFixed(1) : Math.round(simS)} s at ×${clock.tau}`
+            : `${st2.etaMin} min`;
     } else {
         $('rc-strongest').textContent = tr?.parcels?.length ? 'all northward (no driver)' : '—';
         $('rc-strongest-eta').textContent = '—';

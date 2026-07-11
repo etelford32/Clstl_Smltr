@@ -12,20 +12,45 @@
  * under it the "dusk" partial-ring arc actually rendered at 13 MLT. Verified
  * numerically before the flip; both are fixed together.)
  *
- * REAL-TIME accuracy (all clock-driven, independent of the drift slider):
- *   · Earth spins at the true rate with the true phase: the subsolar
- *     longitude faces +X and the axis tilts by the live solar declination
- *     (subsolarPoint), so the terminator, seasons and day/night hemisphere
- *     are the actual ones right now.
- *   · The whole magnetosphere group (field cage, populations, torus, arc,
- *     plasmapause) tilts about scene Z by −ψ, the live GSM dipole tilt
- *     (dipoleTiltRad) — by GSM's definition the dipole axis lies in the
- *     X–Z(GSM) plane, so one axis suffices. Watch the ±11° diurnal wobble
- *     ride on the ±23° seasonal tilt, in real time.
- *   · Bounce runs at the TRUE physical rate (bouncePeriodSeconds — ions
- *     seconds-to-a-minute, O⁺ 4× slower, electrons sub-second), never
- *     compressed. Only DRIFT uses the time-compression slider (1× = fully
- *     real); the incoming stream was already real-time.
+ * ONE CLOCK (SimClock, js/sim-clock.js — #917's design, unified here with
+ * this branch's GPU pipeline): drift, particle LIFECYCLE, transit advection,
+ * arrival detection, injections, and Earth spin/tilt all evaluate on the
+ * same simTime at compression τ. Apparent speed = physical velocity × τ ÷
+ * the region's disclosed spatial scale (SCALE registry). At τ=1 the entire
+ * scene is the real magnetosphere at true rate; at τ>1 the SAME data
+ * fast-forwards through the genuine forecast window and wraps to the live
+ * present (see RING_CURRENT_VISUAL_PLAN.md).
+ *   · Earth: subsolar longitude faces +X, axis tilted by the live solar
+ *     declination — both from subsolarPoint(simTime), so the terminator and
+ *     night hemisphere are the actual ones (τ>1 sweeps ≤75 min ahead: the
+ *     phase stays near-real while advancing legibly).
+ *   · Magnetosphere group tilts about scene Z by −ψ (dipoleTiltRad at
+ *     simTime) — the ±11° diurnal wobble riding the ±23° seasonal tilt.
+ *   · DISCLOSED ×1 exception: bounce runs at its TRUE physical rate in wall
+ *     seconds at every τ (ions seconds-to-a-minute, O⁺ ~4× slower,
+ *     electrons sub-second). At τ ≥ 60 real bounce would alias far above
+ *     the frame rate and read as shimmer; period and amplitude stay
+ *     physical, and at Real ×1 the whole scene — bounce included — is
+ *     true rate.
+ *
+ * PARTICLE LIFECYCLE (the Sun→surface journey, on the sim clock):
+ *   birth    nightside injection sector (~21–03 MLT, the plasma-sheet edge),
+ *            entry flash scaled by the live O'Brien–McPherron |Q|
+ *   life     drift + true-rate bounce; every particle carries its TRUE
+ *            lifetime — charge exchange vs the geocoronal H halo for ions
+ *            (energy/species/L-dependent: O⁺ ~10× shorter than H⁺ at
+ *            100 keV = the observed two-phase recovery) or nominal
+ *            scattering hours for electrons. The dusk asymmetry partly
+ *            EMERGES from birth-at-midnight + westward drift + finite
+ *            lifetime — the real mechanism.
+ *   death    ENA channel: neutralised, escapes outward while fading (how
+ *            ENA imagers photograph the ring current); precipitation
+ *            channel (deep mirrors, all electrons): slides down its field
+ *            line and impacts the atmosphere at auroral latitude — the
+ *            journey's last stop. Then rebirth, hash-jittered.
+ *   The vertex shader is a line-for-line transcription of particlePose()
+ *   in js/ring-current-particles.js — node-tested, and it drives tooltip
+ *   picking so hover agrees with the GPU. CHANGE THEM TOGETHER.
  *
  *   earth          textured sphere + additive atmosphere shell
  *   fieldLines     dipole cage — r = L·cos²λ at L = 2…6 × 12 meridians
@@ -76,16 +101,24 @@
  *     the skin's ring-current heating glow). The accurate spin phase is
  *     visible as the actual night hemisphere, live.
  *
- * Drift runs at real rate × timeCompression (default 600×, so a 100 keV ion
- * at L=3 laps Earth in ~14 s of viewing; set 1× for true real time).
+ * Ported from #917 onto this architecture: per-parcel transit advection
+ * (fast parcels overtake slow ones), magnetopause arrival flashes ∝ VBs,
+ * VBs-gated nightside injection bursts with physical entry deceleration,
+ * |Dst*|-coupled visible particle count, and hover tooltips (data behind
+ * any particle). #917's drift signs were written for the pre-fix mirrored
+ * frame — re-derived here for true GSM (westward = θ increasing).
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     ringPeakL, dynamicPressure, subsolarPoint, dipoleTiltRad,
+    couplingVBs, driftRateRadPerHour, driftPeriodHours,
 } from './ring-current-model.js';
-import { buildPopulation, POPULATIONS } from './ring-current-particles.js';
+import {
+    buildPopulation, POPULATIONS, particlePose, hash1, DEATH_WINDOW,
+} from './ring-current-particles.js';
+import { SimClock, SCALE, apparentUnitsPerSec } from './sim-clock.js';
 import { EarthSkin } from './earth-skin.js';
 
 const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);   // H⁺ (solar wind)
@@ -127,16 +160,20 @@ function glowPointsMaterial(size, opacity) {
 
 
 /**
- * GPU trapped-particle material: the vertex shader IS the kinematics.
- * Attributes (from js/ring-current-particles.js, built off-thread):
- *   position = (L, θ₀, λ_m)     kin = (driftRate rad/h, bounceRate rad/s, φ)
- * Uniforms advance per frame (uDriftHours × compression, uBounceSec wall
- * clock) and per state tick (uDstStar, uAsymAmp, uMix, uInjection). The
- * brightness weight ports radialProfile · azimuthalWeight · intensity from
- * js/ring-current-model.js — KEEP THE GLSL IN SYNC with the JS — plus a
- * nightside injection pulse: fresh plasma-sheet plasma entering near ~1 MLT,
- * scaled by the live O'Brien–McPherron injection |Q|. That's the ring's
- * actual dynamic: nightside feed-in, westward drift, dusk build-up.
+ * GPU trapped-particle material: the vertex shader IS the kinematics AND the
+ * lifecycle — a line-for-line transcription of particlePose() in
+ * js/ring-current-particles.js (node-tested reference; CHANGE TOGETHER).
+ * Attributes (built off-thread):
+ *   position = (L, θ_birth, λ_m)
+ *   kin      = (driftRate rad/h scene-signed, bounceRate rad/s, φ)
+ *   life     = (birthOffsetH, lifetimeH, lossChannel 0|±1, hashSeed)
+ * Per-frame uniforms: uDriftHours (SIM hours — drift + lifecycle),
+ * uBounceSec (wall — the disclosed ×1 bounce exception). Per-state:
+ * uDstStar, uAsymAmp, uMix, uInjection, uVisFrac (|Dst*|-coupled visible
+ * count: hidden particles keep evolving, so a deepening storm reveals a
+ * coherent ring, not a fresh scatter — #917's nVis, hash-gated on GPU).
+ * Brightness weight ports radialProfile · azimuthalWeight · ringPeakL from
+ * js/ring-current-model.js — KEEP THE GLSL IN SYNC.
  */
 function trappedPointsMaterial(size, opacity, color) {
     return new THREE.ShaderMaterial({
@@ -145,28 +182,63 @@ function trappedPointsMaterial(size, opacity, color) {
             uSize:       { value: size },
             uOpacity:    { value: opacity },
             uColor:      { value: new THREE.Color(color) },
-            uDriftHours: { value: 0 },      // model-hours (advances × compression)
-            uBounceSec:  { value: 0 },      // wall-clock seconds (never compressed)
+            uDriftHours: { value: 0 },      // SIM hours (SimClock domain)
+            uBounceSec:  { value: 0 },      // wall seconds (×1 exception)
             uDstStar:    { value: -10 },
             uAsymAmp:    { value: 0 },
             uAsymMlt:    { value: 19 },
             uMix:        { value: 1 },      // composition brightness steer
             uInjection:  { value: 0 },      // |Q| / 12 nT/h, clamped 0..1
+            uVisFrac:    { value: 0.45 },   // visible-count fraction (Dst-coupled)
         },
         vertexShader: `
             uniform float uSize, uDriftHours, uBounceSec, uDstStar,
-                          uAsymAmp, uAsymMlt, uMix, uInjection;
+                          uAsymAmp, uAsymMlt, uMix, uInjection, uVisFrac;
             attribute vec3 kin;
+            attribute vec4 life;
             varying float vW;
             const float PI = 3.14159265358979;
+            const float DW = ${DEATH_WINDOW.toFixed(3)};   // death-window fraction
+
+            // Trig-free hash — IDENTICAL to hash1() in ring-current-particles.js.
+            float hash1(float p) {
+                p = fract(p * 0.1031);
+                p *= p + 33.33;
+                p *= p + p;
+                return fract(p);
+            }
+
             void main() {
-                // Kinematics: drift + bounce along the dipole field line.
-                float L     = position.x;
-                float theta = position.y + kin.x * uDriftHours;
-                float lam   = position.z * sin(kin.y * uBounceSec + kin.z);
-                float cl    = cos(lam);
-                float r     = L * cl * cl;
+                float L    = position.x;
+                float lamM = position.z;
+                float lt   = life.y;
+
+                // ── Lifecycle clock (sim hours) — mirrors particlePose() ──
+                float age   = uDriftHours + life.x;
+                float cycle = floor(age / lt);
+                float ph    = age / lt - cycle;                 // 0 birth … 1 death
+                float jit   = hash1(life.w * 61.7 + cycle);     // per-rebirth jitter
+
+                float thetaB = position.y + (jit - 0.5) * 0.7;  // nightside birth θ
+                float tKin   = min(ph, 1.0 - DW) * lt;          // kinematics freeze at death
+                float theta  = thetaB + kin.x * tKin;
+
+                float lam = lamM * sin(kin.y * uBounceSec + kin.z + cycle * 2.399);
+                float dying = smoothstep(1.0 - DW, 1.0, ph);
+                if (life.z != 0.0 && dying > 0.0) {
+                    // Precipitation: down the field line to the footpoint
+                    // (r → 1) — impacts the atmosphere at auroral latitude.
+                    float lamFoot = acos(inversesqrt(L)) * sign(life.z);
+                    lam = mix(lam, lamFoot, dying);
+                }
+                float cl = cos(lam);
+                float r  = L * cl * cl;
                 vec3 p = vec3(r * cl * cos(theta), r * sin(lam), r * cl * sin(theta));
+                if (life.z == 0.0 && dying > 0.0) {
+                    // Charge exchange: neutral now — field can't hold it;
+                    // the ENA escapes outward while fading.
+                    p *= 1.0 + dying * 2.2;
+                }
 
                 // radialProfile(L, Dst*) — GLSL port (sync with model JS).
                 float d     = min(0.0, uDstStar);
@@ -178,13 +250,26 @@ function trappedPointsMaterial(size, opacity, color) {
                 // azimuthalWeight — MLT = (12 − θ·12/π) mod 24 (GSM frame).
                 float mlt = mod(12.0 - theta * 12.0 / PI, 24.0);
                 float azw = 1.0 + uAsymAmp * cos((mlt - uAsymMlt) / 24.0 * 2.0 * PI);
-                // Nightside injection: gaussian sector near ~1 MLT (the
-                // storm-time injection boundary), live-scaled by |Q|.
+                // Nightside injection glow near ~1 MLT, live-scaled by |Q|.
                 float dmlt = mod(mlt - 1.0 + 12.0, 24.0) - 12.0;
                 float inj  = uInjection * exp(-dmlt * dmlt / 12.5);
 
                 float intensity = (0.25 + 0.75 * min(1.0, abs(uDstStar) / 150.0)) * uMix;
                 vW = (0.06 + 0.94 * min(1.3, g * azw * intensity)) * (1.0 + 1.4 * inj * g);
+
+                // Life envelope: fade in at birth (flash ∝ live |Q|), death
+                // by channel — ENA fades out as it escapes; precipitation
+                // flares approaching impact, then cuts at the surface.
+                float birth = smoothstep(0.0, 0.03, ph)
+                            * (1.0 + (0.6 + 2.4 * uInjection) * exp(-ph * 45.0));
+                float death = life.z == 0.0
+                    ? 1.0 - dying
+                    : (1.0 + 1.6 * smoothstep(0.55, 0.95, dying))
+                      * (1.0 - smoothstep(0.97, 1.0, dying));
+                // |Dst*|-coupled visible count (stable hash gate — hidden
+                // particles keep evolving off-screen).
+                float vis = step(hash1(life.w * 0.517), uVisFrac);
+                vW *= birth * death * vis;
 
                 vec4 mv = modelViewMatrix * vec4(p, 1.0);
                 gl_PointSize = uSize * 320.0 / -mv.z;
@@ -215,19 +300,32 @@ function axisLine(halfLen, color, opacity) {
 }
 
 // ── Incoming solar wind stream (the Sun→Earth twin bridge) ──────────────────
-// Each parcel = one not-yet-arrived L1 sample from feed state.transit,
-// rendered as a small cluster at the corridor position matching its REAL
-// time-to-arrival (this deliberately ignores the drift time compression —
-// the stream is an honest, real-time forecast display, not an animation).
+// Each parcel = one not-yet-arrived L1 sample from feed state.transit.
+// Position = fraction of its OWN L1→Earth transit elapsed at simTime
+// (per-parcel measured speed ⇒ fast parcels overtake slow ones), evaluated
+// every frame from the SimClock — never only at data-fetch time. Corridor
+// geometry lives in the SCALE registry (js/sim-clock.js) so the leg's
+// spatial compression is explicit, not smuggled in as an animation speed.
 const TRANSIT = Object.freeze({
     MAX_PARCELS: 120,
     PTS_PER:     14,     // per-slot budget; VISIBLE count scales with density
-    X_MP:        11,     // corridor end ≈ subsolar magnetopause (R_E)
-    X_SUN:       52,     // corridor start, toward the Sun sprite
-    LEAD_MAX:    75,     // minutes mapped across the corridor
+    X_MP:        SCALE.CORRIDOR.X_MP,    // ≈ subsolar magnetopause (R_E)
+    X_SUN:       SCALE.CORRIDOR.X_SUN,   // corridor start, toward the Sun
     WAVE_Y:      4.2,    // baseline height of the barometric density trace
     WAVE_AMP:    3.2,    // trace amplitude at n = N_REF
     N_REF:       20,     // density (cm⁻³) that saturates count/trace scaling
+});
+
+// Nightside injection bursts (#917 Phase 4): triggered when an arriving
+// parcel carries VBs above the O'Brien–McPherron coupling cutoff. Entry
+// speed and deceleration are physical (exponential approach, initial
+// ~(r₀−L)/T_IN R_E per sim-second ≈ 100–350 km/s); the FADE is a rendering
+// cue in wall time.
+const INJECT = Object.freeze({
+    CAP:        900,     // particle pool
+    T_IN_S:     90,      // inflow time constant (sim seconds)
+    LIFE_S:     26,      // wall-clock fade after settling into drift
+    VBS_MIN:    0.5,     // ≈ OBM Ec — northward/weak parcels don't inject
 });
 
 // Stream color modes. 'bz' keeps the driver semantics (southward hot /
@@ -253,7 +351,12 @@ function streamColor(mode, p) {
 export class RingCurrentGlobe {
     constructor(container, opts = {}) {
         this._container = container;
-        this._timeCompression = opts.timeCompression ?? 600;
+        // THE clock. Page passes a shared SimClock so UI and scene agree;
+        // standalone use gets its own. `timeCompression` opt kept as the
+        // legacy spelling of the initial τ.
+        this._clock = opts.clock ?? new SimClock({ tau: opts.timeCompression ?? undefined });
+        this._seenWraps = this._clock.wraps;
+        this._lastSimNow = this._clock.now();
         this._state = {       // safe quiet defaults until the first feed state
             dstStar: -10, peakL: ringPeakL(-10),
             asym: { amplitude: 0, mltPeakHours: 19 },
@@ -263,8 +366,8 @@ export class RingCurrentGlobe {
         this._disposed = false;
         this._raf = 0;
         this._lastT = 0;
-        this._tView = 0;          // wall-clock seconds — TRUE bounce time
-        this._driftHours = 0;     // model-hours — drift time × compression
+        this._tView = 0;          // wall-clock seconds — TRUE bounce time (×1 exception)
+        this._simHours = 0;       // SIM hours — drift + lifecycle clock (SimClock)
         this._builtPeakL = 0;
         this._parcels = [];       // in-transit L1 samples (state.transit)
 
@@ -305,6 +408,9 @@ export class RingCurrentGlobe {
         this._buildParticles();
         this._buildRings();
         this._buildSunAndTransit();
+        this._buildFlashes();
+        this._buildInjections();
+        this._initTooltip();
 
         this._onResize = () => this._resize();
         window.addEventListener('resize', this._onResize);
@@ -439,29 +545,37 @@ export class RingCurrentGlobe {
         if (h) h.mat.uniforms.uMix.value = Math.min(1.3, (1 - f) / (1 - O_BUILD_FRACTION));
     }
 
-    /** Static-attribute Points: position=(L, θ₀, λ_m), kin=(drift, bounce, φ).
-     *  Uploaded once; all motion happens in the vertex shader. */
+    /** Static-attribute Points: position=(L, θ_birth, λ_m), kin, life.
+     *  Uploaded once; all motion + lifecycle happens in the vertex shader.
+     *  `pop` (incl. eKev metadata) is retained for tooltip picking via the
+     *  particlePose reference implementation. */
     _makePoints(pop, color, size) {
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(pop.seed, 3));
         geo.setAttribute('kin',      new THREE.BufferAttribute(pop.kin, 3));
+        geo.setAttribute('life',     new THREE.BufferAttribute(pop.life, 4));
         const mat = trappedPointsMaterial(size, 0.9, color);
         this._syncStateUniforms(mat);
         const points = new THREE.Points(geo, mat);
-        points.frustumCulled = false;   // position attr holds (L,θ₀,λ_m), not xyz
+        points.frustumCulled = false;   // position attr holds (L,θ,λ_m), not xyz
         this._magGroup.add(points);
-        return { points, mat };
+        return { points, mat, pop };
     }
 
     /** Push the current model state into one material's uniforms. */
     _syncStateUniforms(mat) {
         const u = mat.uniforms;
-        u.uDriftHours.value = this._driftHours;
+        u.uDriftHours.value = this._simHours;
         u.uBounceSec.value  = this._tView;
         u.uDstStar.value    = this._state.dstStar;
         u.uAsymAmp.value    = this._state.asym.amplitude;
         u.uAsymMlt.value    = this._state.asym.mltPeakHours;
         u.uInjection.value  = this._state.injection;
+        // #917's Dst-coupled visible count: quiet ⇒ thin dim torus, storm ⇒
+        // dense. Hidden particles keep evolving (the shader always computes),
+        // so a deepening storm reveals a coherent ring, not a fresh scatter.
+        const depth = Math.min(1, Math.abs(this._state.dstStar) / 150);
+        u.uVisFrac.value = 0.40 + 0.60 * depth;
     }
 
     _buildRings() {
@@ -632,22 +746,46 @@ export class RingCurrentGlobe {
         lab.tex.needsUpdate = true;
     }
 
-    /** Corridor rendering: real time-to-arrival → position between Sun and
-     *  magnetopause. Runs every frame so parcels creep Earthward in true
-     *  real time and vanish exactly when their plasma reaches Earth. */
-    _updateTransit() {
-        const now = Date.now();
+    /** Corridor rendering, all on the SimClock (#917): each parcel sits at
+     *  the fraction of its OWN L1→Earth transit elapsed at simTime, so its
+     *  apparent speed = measured km/s × τ ÷ SCALE.CORRIDOR.kmPerUnit —
+     *  faster parcels visibly overtake slower ones (real stream
+     *  interaction). Evaluated every frame; at τ=1 this is true real time
+     *  and parcels vanish exactly when their plasma reaches Earth. */
+    _updateTransit(simNow, wallNow) {
+        const tau = this._clock.tau;
+        const spanX = TRANSIT.X_SUN - TRANSIT.X_MP;
         const pos = this._transitPos, col = this._transitCol, off = this._transitOff;
-        let slot = 0, wi = 0;
+        // Heartbeat: parcels pulse on their 1-min sample cadence (wall time —
+        // it's live instrumentation, not physics). Prominent in Real mode.
+        const hbAmp = tau === 1 ? 0.22 : 0.07;
+        let slot = 0;
+        const waveSamples = [];   // {x, nNorm, R, G, B} — x-sorted below
+        this._slotParcel = this._slotParcel || [];
+        this._slotParcel.length = 0;
         for (const p of this._parcels) {
             if (slot >= TRANSIT.MAX_PARCELS) break;
-            const mins = (p.tArrive - now) / 60_000;
-            if (mins <= 0 || mins > TRANSIT.LEAD_MAX) continue;
-            const x = TRANSIT.X_MP + (mins / TRANSIT.LEAD_MAX) * (TRANSIT.X_SUN - TRANSIT.X_MP);
+            const dur = p.tArrive - p.tL1;              // real transit ms at measured v
+            if (!(dur > 0) || dur > 3 * 3.6e6) continue;
+            const remain = p.tArrive - simNow;
+            if (remain <= 0) continue;                   // arrived (in sim) — see flashes
+            const f = Math.min(1, remain / dur);         // 1 = just left L1, 0 = arriving
+            const x = TRANSIT.X_MP + f * spanX;
             const nNorm = Math.max(0, Math.min(1, (Number.isFinite(p.n) ? p.n : 3) / TRANSIT.N_REF));
             const [R, G, B] = streamColor(this._streamMode, p);
             const pdyn = dynamicPressure(p.n, p.v);
-            const bright = 0.30 + 0.70 * Math.min(1, (pdyn ?? 1.5) / 8);
+            let bright = 0.30 + 0.70 * Math.min(1, (pdyn ?? 1.5) / 8);
+            bright *= 1 + hbAmp * Math.cos(2 * Math.PI * ((wallNow - (p.tL1 ?? 0)) % 60_000) / 60_000);
+            if (tau === 1) {
+                // Flow-field pulse (Real mode only): a brightness wave sliding
+                // Earthward at an INDICATOR speed — positions stay true, the
+                // pulse only conveys direction while honest motion is sub-pixel.
+                bright *= 1 + 0.30 * Math.sin(2 * Math.PI * (x / 9 + wallNow / 3000));
+            }
+            // Trail length ∝ apparent speed (invariant: km/s × τ ÷ km/unit) —
+            // fast parcels streak, slow ones stay compact; ~0 at τ=1.
+            const trail = Math.min(7, Math.max(0.15,
+                0.45 * apparentUnitsPerSec(Number.isFinite(p.v) ? p.v : 400, SCALE.CORRIDOR.kmPerUnit, tau)));
             // BAROMETRIC compression: visible particle count per 1-min sample
             // scales with density — compression fronts read as dense bright
             // bands, exactly like a longitudinal pressure wave.
@@ -655,38 +793,49 @@ export class RingCurrentGlobe {
             for (let k = 0; k < TRANSIT.PTS_PER; k++) {
                 const j = (slot * TRANSIT.PTS_PER + k) * 3;
                 if (k < visible) {
-                    pos[j]     = x + off[j];
+                    // Motion is toward −x, so the trail extends sunward (+x),
+                    // fading toward its tip.
+                    const tFrac = visible > 1 ? k / (visible - 1) : 0;
+                    const fade = 1 - 0.62 * tFrac;
+                    pos[j]     = x + off[j] * 0.5 + tFrac * trail;
                     pos[j + 1] = off[j + 1];
                     pos[j + 2] = off[j + 2];
-                    col[j]     = R * bright;
-                    col[j + 1] = G * bright;
-                    col[j + 2] = B * bright;
+                    col[j]     = R * bright * fade;
+                    col[j + 1] = G * bright * fade;
+                    col[j + 2] = B * bright * fade;
                 } else {
                     pos[j] = pos[j + 1] = pos[j + 2] = 0;
                     col[j] = col[j + 1] = col[j + 2] = 0;
                 }
             }
-            // Wave trace vertex: pressure curve above the corridor.
+            this._slotParcel[slot] = p;   // hover tooltip lookup
+            waveSamples.push({ x, nNorm, R, G, B });
+            slot++;
+        }
+        // Barometric trace + envelope, x-sorted (overtaking can reorder
+        // parcels relative to arrival order — the trace is n(x), not n(t)).
+        waveSamples.sort((a, b) => a.x - b.x);
+        let wi = 0;
+        for (const s of waveSamples) {
             const w = wi * 3;
-            this._wavePos[w]     = x;
-            this._wavePos[w + 1] = TRANSIT.WAVE_Y + TRANSIT.WAVE_AMP * nNorm;
+            this._wavePos[w]     = s.x;
+            this._wavePos[w + 1] = TRANSIT.WAVE_Y + TRANSIT.WAVE_AMP * s.nNorm;
             this._wavePos[w + 2] = 0;
             // 3D envelope ring at this sample — the wave revolved around the
             // corridor axis (radius ∝ density), slowly rotating for depth.
-            const rad = 1.0 + 2.6 * nNorm;
-            const spin = now / 9000;
+            const rad = 1.0 + 2.6 * s.nNorm;
+            const spin = wallNow / 9000;
             for (let k = 0; k < this._envSeg; k++) {
                 const a = spin + (k / this._envSeg) * 2 * Math.PI;
                 const e = (wi * this._envSeg + k) * 3;
-                this._envPos[e]     = x;
+                this._envPos[e]     = s.x;
                 this._envPos[e + 1] = Math.sin(a) * rad;
                 this._envPos[e + 2] = Math.cos(a) * rad;
-                this._envCol[e]     = R * 0.5;
-                this._envCol[e + 1] = G * 0.5;
-                this._envCol[e + 2] = B * 0.5;
+                this._envCol[e]     = s.R * 0.5;
+                this._envCol[e + 1] = s.G * 0.5;
+                this._envCol[e + 2] = s.B * 0.5;
             }
             wi++;
-            slot++;
         }
         // Park unused envelope rings.
         for (let s = wi * this._envSeg; s < TRANSIT.MAX_PARCELS * this._envSeg; s++) {
@@ -711,6 +860,302 @@ export class RingCurrentGlobe {
         this._waveGeo.attributes.position.needsUpdate = true;
         this._transitGeo.attributes.position.needsUpdate = true;
         this._transitGeo.attributes.color.needsUpdate = true;
+    }
+
+    // ── Arrival flashes + injection triggers (#917) ─────────────────────────
+
+    /** Fire the parcels whose tArrive fell inside (lastSimNow, simNow] this
+     *  frame: a magnetopause flash scaled by the parcel's VBs, and — for
+     *  southward parcels above the coupling cutoff — a nightside injection
+     *  burst. Interval crossing (not a seen-set) so each parcel fires once
+     *  per sweep and replays honestly after a wrap. */
+    _detectArrivals(simNow) {
+        let flashes = 0;
+        for (const p of this._parcels) {
+            if (!(p.tArrive > this._lastSimNow && p.tArrive <= simNow)) continue;
+            const vbs = couplingVBs(p.v, p.bz) ?? 0;
+            if (flashes < 3) {
+                this._spawnFlash(vbs, p.bz);
+                flashes++;
+            }
+            if (vbs >= INJECT.VBS_MIN) {
+                this._spawnInjection(vbs, this._state.plasmapauseL);
+            }
+        }
+    }
+
+    _buildFlashes() {
+        // Shared soft radial texture; per-flash tint via material color.
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 64;
+        const g = cv.getContext('2d');
+        const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+        grad.addColorStop(0.0, 'rgba(255,255,255,1)');
+        grad.addColorStop(0.4, 'rgba(255,255,255,0.5)');
+        grad.addColorStop(1.0, 'rgba(255,255,255,0)');
+        g.fillStyle = grad;
+        g.fillRect(0, 0, 64, 64);
+        const tex = new THREE.CanvasTexture(cv);
+        this._flashes = [];
+        for (let i = 0; i < 8; i++) {
+            const mat = new THREE.SpriteMaterial({
+                map: tex, blending: THREE.AdditiveBlending, depthWrite: false,
+                transparent: true, opacity: 0,
+            });
+            const sp = new THREE.Sprite(mat);
+            sp.visible = false;
+            this._scene.add(sp);
+            this._flashes.push({ sp, mat, age: 0, life: 0.9, base: 1, o0: 0.5 });
+        }
+    }
+
+    /** Interaction flash at the magnetopause — the visible handoff from
+     *  "in transit" to "coupled". Intensity ∝ VBs; southward reads hot. */
+    _spawnFlash(vbs, bz) {
+        const f = this._flashes?.find(f => !f.sp.visible) ?? null;
+        if (!f) return;
+        const south = Number.isFinite(bz) && bz < 0;
+        f.mat.color.setRGB(...(south ? [1.0, 0.55, 0.3] : [0.45, 0.7, 1.0]));
+        f.sp.position.set(
+            TRANSIT.X_MP + 0.3,
+            (Math.random() - 0.5) * 2.2,
+            (Math.random() - 0.5) * 2.2,
+        );
+        f.base = 1.4 + 2.4 * Math.min(1, vbs / 6);
+        f.age = 0;
+        f.o0 = south ? 0.85 : 0.4;
+        f.sp.scale.setScalar(f.base);
+        f.mat.opacity = f.o0;
+        f.sp.visible = true;
+    }
+
+    _updateFlashes(dt) {
+        for (const f of this._flashes) {
+            if (!f.sp.visible) continue;
+            f.age += dt;
+            const k = f.age / f.life;
+            if (k >= 1) { f.sp.visible = false; f.mat.opacity = 0; continue; }
+            f.sp.scale.setScalar(f.base * (1 + 1.8 * k));
+            f.mat.opacity = f.o0 * (1 - k) ** 1.4;
+        }
+    }
+
+    // ── Injection dynamics (#917 Phase 4 — why storms pump the ring) ────────
+    // These are the ENTRY leg of the journey: hot plasma-sheet ions surging
+    // in from the tail and decelerating into drift. The trapped GPU
+    // populations then carry the story onward (drift → charge exchange /
+    // precipitation). Lives in _magGroup so bursts tilt with the dipole.
+
+    _buildInjections() {
+        const N = INJECT.CAP;
+        this._injGeo = new THREE.BufferGeometry();
+        this._injPos = new Float32Array(N * 3);
+        this._injCol = new Float32Array(N * 3);
+        this._injGeo.setAttribute('position', new THREE.BufferAttribute(this._injPos, 3).setUsage(THREE.DynamicDrawUsage));
+        this._injGeo.setAttribute('color',    new THREE.BufferAttribute(this._injCol, 3).setUsage(THREE.DynamicDrawUsage));
+        this._injPts = new THREE.Points(this._injGeo, glowPointsMaterial(0.11, 0.95));
+        this._injPts.frustumCulled = false;
+        this._magGroup.add(this._injPts);
+        this._inj = {
+            mode:    new Uint8Array(N),      // 0 free · 1 inflow · 2 drift
+            theta:   new Float32Array(N),
+            r:       new Float32Array(N),
+            targetL: new Float32Array(N),
+            rate:    new Float32Array(N),    // drift rad/h, SCENE-signed (+ = westward)
+            age:     new Float32Array(N),    // wall-s since spawn (fade cue)
+            yAmp:    new Float32Array(N),
+            bPh:     new Float32Array(N),
+        };
+        this._injCursor = 0;
+    }
+
+    /** Burst of hot ions entering from the nightside tail. Count scales with
+     *  the arriving parcel's VBs and inversely with τ (at high compression
+     *  parcels arrive many per second — the stream of bursts is continuous,
+     *  which is exactly the storm-time picture). Injections penetrate deeper
+     *  when the plasmapause contracts. */
+    _spawnInjection(vbs, lpp) {
+        const inj = this._inj;
+        const tauScale = Math.min(1, 60 / this._clock.tau);
+        const count = Math.max(4, Math.round((6 + 11 * Math.min(6, vbs)) * tauScale));
+        for (let c = 0; c < count; c++) {
+            // Ring cursor; skip slots still alive (pool full ⇒ drop, not grow).
+            let i = -1;
+            for (let probe = 0; probe < INJECT.CAP; probe++) {
+                const j = (this._injCursor + probe) % INJECT.CAP;
+                if (inj.mode[j] === 0) { i = j; this._injCursor = j + 1; break; }
+            }
+            if (i < 0) return;
+            inj.mode[i]    = 1;
+            inj.theta[i]   = Math.PI + (Math.random() - 0.5) * 1.4;   // ~21–03 MLT
+            inj.r[i]       = 7.8 + Math.random() * 1.6;
+            inj.targetL[i] = Math.max(2.2, lpp - 0.4 - Math.random() * 1.6);
+            const eKev     = 30 + 220 * Math.random() ** 2;
+            // Scene-θ sign: westward = θ increasing in the GSM frame (#917
+            // was written for the pre-fix mirrored frame — sign re-derived).
+            inj.rate[i]    = -driftRateRadPerHour(eKev, inj.targetL[i], 'ion');
+            inj.age[i]     = 0;
+            inj.yAmp[i]    = (Math.random() - 0.5) * 0.7;
+            inj.bPh[i]     = Math.random() * 2 * Math.PI;
+        }
+    }
+
+    /** Inflow: exponential approach to the target L on the SIM clock —
+     *  initial speed ≈ (r₀−L)/T_IN R_E per sim-second (~100–350 km/s), with
+     *  the deceleration that makes the fast-arrival → slow-drift transition
+     *  legible. Drift: the particle's own energy-dependent westward rate.
+     *  Fade is wall-clock (a rendering cue, not physics). */
+    _updateInjections(dt, dSimH) {
+        const inj = this._inj;
+        const pos = this._injPos, col = this._injCol;
+        const dSimS = dSimH * 3600;
+        const ease = 1 - Math.exp(-dSimS / INJECT.T_IN_S);
+        for (let i = 0; i < INJECT.CAP; i++) {
+            const j = i * 3;
+            if (inj.mode[i] === 0) {
+                col[j] = col[j + 1] = col[j + 2] = 0;
+                continue;
+            }
+            inj.age[i] += dt;
+            if (inj.age[i] > INJECT.LIFE_S) {
+                inj.mode[i] = 0;
+                col[j] = col[j + 1] = col[j + 2] = 0;
+                continue;
+            }
+            if (inj.mode[i] === 1) {
+                inj.r[i] += (inj.targetL[i] - inj.r[i]) * ease;
+                inj.theta[i] += inj.rate[i] * dSimH * 0.6;   // partial drift while entering
+                if (inj.r[i] - inj.targetL[i] < 0.1) inj.mode[i] = 2;
+            } else {
+                inj.theta[i] += inj.rate[i] * dSimH;
+            }
+            const th = inj.theta[i];
+            const y = inj.yAmp[i] * Math.sin(inj.bPh[i] + this._tView * 1.4);
+            pos[j]     = inj.r[i] * Math.cos(th);
+            pos[j + 1] = y;
+            pos[j + 2] = inj.r[i] * Math.sin(th);
+            // Hot white-yellow at entry, cooling to ion orange, then fading.
+            const heat = Math.max(0, 1 - inj.age[i] / 8);
+            const fade = 1 - inj.age[i] / INJECT.LIFE_S;
+            const b = (0.55 + 0.65 * heat) * fade;
+            col[j]     = (ION_COLOR.r + (1.00 - ION_COLOR.r) * heat) * b;
+            col[j + 1] = (ION_COLOR.g + (0.95 - ION_COLOR.g) * heat) * b;
+            col[j + 2] = (ION_COLOR.b + (0.62 - ION_COLOR.b) * heat) * b;
+        }
+        this._injGeo.attributes.position.needsUpdate = true;
+        this._injGeo.attributes.color.needsUpdate = true;
+    }
+
+    // ── Hover tooltips (#917) — the data behind any particle ────────────────
+    // Ring picking CANNOT raycast the GPU populations (their position
+    // attribute holds (L, θ_birth, λ_m) seeds — the true positions exist
+    // only in the vertex shader). Instead the picker evaluates the SAME
+    // particlePose() reference the shader transcribes, projects to screen
+    // space, and picks the nearest — so hover agrees with the drawn pixel,
+    // lifecycle and all.
+
+    _initTooltip() {
+        const el = document.createElement('div');
+        el.style.cssText =
+            'position:absolute;display:none;pointer-events:none;z-index:5;' +
+            'background:rgba(3,1,14,.88);border:1px solid rgba(255,255,255,.2);' +
+            'border-radius:6px;padding:6px 9px;font:600 11px system-ui;' +
+            'color:#e8edf7;line-height:1.5;max-width:270px;white-space:nowrap;';
+        this._container.appendChild(el);
+        this._tipEl = el;
+        this._ray = new THREE.Raycaster();
+        this._ndc = new THREE.Vector2();
+        this._pointerPx = null;
+        this._pointerDirty = false;
+        this._tmpV = new THREE.Vector3();
+        const dom = this._renderer.domElement;
+        this._onPointerMove = (e) => {
+            const rect = dom.getBoundingClientRect();
+            this._ndc.set(
+                ((e.clientX - rect.left) / rect.width) * 2 - 1,
+                -((e.clientY - rect.top) / rect.height) * 2 + 1,
+            );
+            this._pointerPx = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            this._pointerDirty = true;
+        };
+        this._onPointerLeave = () => {
+            this._pointerPx = null;
+            this._tipEl.style.display = 'none';
+        };
+        this._onPointerDown = () => { this._dragging = true; this._tipEl.style.display = 'none'; };
+        this._onPointerUp = () => { this._dragging = false; };
+        dom.addEventListener('pointermove', this._onPointerMove);
+        dom.addEventListener('pointerleave', this._onPointerLeave);
+        dom.addEventListener('pointerdown', this._onPointerDown);
+        window.addEventListener('pointerup', this._onPointerUp);
+    }
+
+    _updateTooltip(wallNow) {
+        if (!this._pointerDirty || !this._pointerPx || this._dragging) return;
+        this._pointerDirty = false;
+        const rect = this._renderer.domElement.getBoundingClientRect();
+
+        // Ring populations: pose-project every particle (a few thousand
+        // trig evals, pointer-move-throttled), nearest within 12 px wins.
+        let best = null;
+        for (const [key, P] of Object.entries(this._popPoints ?? {})) {
+            const pop = P.pop;
+            const visFrac = P.mat.uniforms.uVisFrac.value;
+            for (let i = 0; i < pop.count; i++) {
+                if (hash1(pop.life[i * 4 + 3] * 0.517) >= visFrac) continue;  // hidden (Dst gate)
+                const q = particlePose(pop, i, this._simHours, this._tView);
+                this._tmpV.set(q.x, q.y, q.z)
+                    .applyMatrix4(this._magGroup.matrixWorld)
+                    .project(this._camera);
+                const px = (this._tmpV.x + 1) / 2 * rect.width;
+                const py = (1 - this._tmpV.y) / 2 * rect.height;
+                const d2 = (px - this._pointerPx.x) ** 2 + (py - this._pointerPx.y) ** 2;
+                if (d2 < 144 && (!best || d2 < best.d2)) best = { kind: 'ring', key, P, i, q, d2 };
+            }
+        }
+        // Transit parcels: their geometry holds REAL positions — raycast.
+        this._ray.setFromCamera(this._ndc, this._camera);
+        this._ray.params.Points.threshold = 1.0;
+        for (const hit of this._ray.intersectObject(this._transit)) {
+            if (hit.point.length() < 1.6) continue;
+            const p = this._slotParcel?.[Math.floor(hit.index / TRANSIT.PTS_PER)];
+            if (!p) continue;
+            if (!best) best = { kind: 'parcel', p };
+            break;
+        }
+
+        if (!best) { this._tipEl.style.display = 'none'; return; }
+        const fmt = (x, d, u) => Number.isFinite(x) ? `${x.toFixed(d)}${u}` : '—';
+        let html;
+        if (best.kind === 'ring') {
+            const { pop } = best.P, i = best.i, q = best.q;
+            const names = { ionsH: ['H⁺ ion', '#ffa040'], ionsO: ['O⁺ ion', '#94ff57'],
+                            electrons: ['Electron', '#59baff'] };
+            const [name, color] = names[best.key];
+            const L = pop.seed[i * 3], lt = pop.life[i * 4 + 1];
+            const T = driftPeriodHours(pop.eKev[i], L);
+            const fate = pop.life[i * 4 + 2] === 0
+                ? 'charge exchange → ENA'
+                : `precipitates (${pop.life[i * 4 + 2] > 0 ? 'N' : 'S'} atmosphere)`;
+            const status = q.dying > 0
+                ? (q.mode === 0 ? '<br><b style="color:#ffd9b0">neutralised — escaping as an ENA</b>'
+                                : '<br><b style="color:#ff7d66">precipitating into the atmosphere</b>')
+                : `<br>lifetime ${lt > 48 ? `${(lt / 24).toFixed(1)} d` : `${lt.toFixed(1)} h`}` +
+                  ` · ${((1 - q.ph) * lt).toFixed(1)} h left · fate: ${fate}`;
+            html = `<b style="color:${color}">${name}</b> · ${pop.eKev[i].toFixed(0)} keV` +
+                `<br>L ${L.toFixed(2)} Rᴇ · drift ${fmt(T, 1, ' h')}/lap ` +
+                `${best.key === 'electrons' ? 'eastward' : 'westward'}${status}`;
+        } else {
+            const p = best.p;
+            const etaMin = Math.max(0, Math.round((p.tArrive - wallNow) / 60_000));
+            html = `<b style="color:#ffd9b0">L1 parcel</b> · v ${fmt(p.v, 0, ' km/s')}` +
+                `<br>Bz ${fmt(p.bz, 1, ' nT')} · n ${fmt(p.n, 1, ' /cm³')}` +
+                `<br>arrives in ${etaMin} min (real)`;
+        }
+        this._tipEl.innerHTML = html;
+        this._tipEl.style.left = `${this._pointerPx.x + 14}px`;
+        this._tipEl.style.top = `${this._pointerPx.y + 12}px`;
+        this._tipEl.style.display = 'block';
     }
 
     // ── State & animation ───────────────────────────────────────────────────
@@ -779,36 +1224,56 @@ export class RingCurrentGlobe {
         this._plasmapause.scale.setScalar(pp / 4.7);
     }
 
+    /** The shared SimClock — the page's τ UI drives this same instance. */
+    get clock() { return this._clock; }
+
+    /** Legacy spelling kept for probes/back-compat: sets the SimClock τ. */
     setTimeCompression(x) {
-        this._timeCompression = Math.max(1, x);
+        this._clock.setTau(x);
     }
 
     tick(dt) {
-        const dtH = (dt * this._timeCompression) / 3600;   // viewing → model hours
+        const wallNow = Date.now();
+        const simNow = this._clock.now(wallNow);
+        if (this._clock.wraps !== this._seenWraps) {
+            // Sweep restarted (wrap or τ change) — don't fire the whole
+            // window's arrivals as one burst.
+            this._seenWraps = this._clock.wraps;
+            this._lastSimNow = simNow;
+        }
+        const dSimH = this._clock.dSim(dt * 1000) / 3.6e6;   // wall s → sim hours
         this._tView += dt;
-        this._driftHours += dtH;
-        this._updateGeometry();
+        this._simHours += dSimH;
+        this._updateGeometry(simNow);
         this._skin.update(this._tView);   // aurora animation clock
-        // All particle motion is in the vertex shader — the per-frame CPU
-        // cost of 4 700 particles is these two uniform writes per material.
+        // All trapped-particle motion + lifecycle is in the vertex shader —
+        // the per-frame CPU cost of 4 700 particles is two uniform writes
+        // per material (drift/lifecycle on SIM hours; bounce on wall — the
+        // disclosed ×1 exception, see header).
         for (const p of Object.values(this._popPoints ?? {})) {
-            p.mat.uniforms.uDriftHours.value = this._driftHours;
+            p.mat.uniforms.uDriftHours.value = this._simHours;
             p.mat.uniforms.uBounceSec.value  = this._tView;
         }
-        this._updateTransit();
+        this._updateTransit(simNow, wallNow);
+        this._detectArrivals(simNow);
+        this._lastSimNow = simNow;
+        this._updateFlashes(dt);
+        this._updateInjections(dt, dSimH);
+        this._updateTooltip(wallNow);
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
     }
 
-    /** Wall-clock-accurate Earth spin/tilt + magnetosphere dipole tilt.
-     *  Always real time — deliberately NOT scaled by the drift compression,
-     *  same policy as the transit stream. ~40 flops; fine every frame. */
-    _updateGeometry() {
-        const nowMs = Date.now();
-        const sp = subsolarPoint(nowMs);
+    /** Earth spin/tilt + magnetosphere dipole tilt at SIM time — the one
+     *  clock. At τ=1 simNow ≡ wall: everything exactly real. At τ>1 the
+     *  phase sweeps ≤75 min ahead and wraps with the forecast window, so it
+     *  stays near-real while advancing legibly. ~40 flops; fine every frame. */
+    _updateGeometry(simNow) {
+        const sp = subsolarPoint(simNow);
         this._earthTilt.rotation.z = -sp.latDeg * Math.PI / 180;   // axis by declination
         this._earthSpin.rotation.y = -sp.lonDeg * Math.PI / 180;   // subsolar lon → +X
-        this._magGroup.rotation.z  = -dipoleTiltRad(nowMs);        // GSM dipole tilt ψ
+        this._magGroup.rotation.z  = -dipoleTiltRad(simNow);       // GSM dipole tilt ψ
+        this._magGroup.updateMatrixWorld();                        // tooltip picking reads it
     }
 
     _resize() {
@@ -823,6 +1288,11 @@ export class RingCurrentGlobe {
         this._disposed = true;
         cancelAnimationFrame(this._raf);
         window.removeEventListener('resize', this._onResize);
+        this._renderer.domElement.removeEventListener('pointermove', this._onPointerMove);
+        this._renderer.domElement.removeEventListener('pointerleave', this._onPointerLeave);
+        this._renderer.domElement.removeEventListener('pointerdown', this._onPointerDown);
+        window.removeEventListener('pointerup', this._onPointerUp);
+        this._tipEl?.remove();
         this._scene.traverse(o => {
             o.geometry?.dispose?.();
             if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose());
