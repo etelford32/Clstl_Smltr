@@ -576,6 +576,33 @@ export function subsolarPoint(ms) {
     };
 }
 
+/**
+ * Earth's position in its orbit at a UTC epoch — same Meeus low-precision
+ * ephemeris as dipoleTiltRad, so the twin's orbital readout and its dipole
+ * tilt can never disagree about where the Sun is.
+ *
+ * @returns {{lonDeg:number, rAU:number, dayOfYear:number}|null}
+ *   lonDeg     heliocentric ecliptic longitude of EARTH, [0,360)
+ *              (= geocentric solar longitude + 180°; ~0.9856°/day)
+ *   rAU        Sun–Earth distance (AU): 0.9833 at perihelion (~Jan 3),
+ *              1.0167 at aphelion (~Jul 4) — e = 0.0167
+ *   dayOfYear  1-based UTC day of year
+ */
+export function earthOrbit(ms) {
+    if (!Number.isFinite(ms)) return null;
+    const rad = Math.PI / 180;
+    const n = ms / 86400000 + 2440587.5 - 2451545.0;     // days since J2000.0
+    const L = (280.460 + 0.9856474 * n) % 360;
+    const g = ((357.528 + 0.9856003 * n) % 360) * rad;   // mean anomaly
+    const lamSun = L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g);
+    const d = new Date(ms);
+    return {
+        lonDeg: ((lamSun + 180) % 360 + 360) % 360,
+        rAU: 1.00014 - 0.01671 * Math.cos(g) - 0.00014 * Math.cos(2 * g),
+        dayOfYear: Math.floor((ms - Date.UTC(d.getUTCFullYear(), 0, 1)) / 86400000) + 1,
+    };
+}
+
 // IGRF-14-ish geomagnetic (dipole) north pole, epoch ~2025.
 const GEOMAG_POLE = Object.freeze({ latDeg: 80.7, lonDeg: -72.7 });
 

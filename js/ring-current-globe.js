@@ -316,6 +316,16 @@ const TRANSIT = Object.freeze({
     N_REF:       20,     // density (cm⁻³) that saturates count/trace scaling
 });
 
+// ── Trails are INTEGRATED PATHS, not decorations ─────────────────────────────
+// Every trail spans exactly the trajectory covered in the last TRAIL_VIEW_S
+// seconds of VIEWING: length = apparent speed × TRAIL_VIEW_S for the straight
+// corridor stream, and for ring particles the trail is the SAME kinematics
+// re-evaluated at lagged clocks — a true curved drift+bounce arc. Because the
+// window is viewing time, trails scale honestly with τ and collapse to
+// sub-pixel at Real ×1 (real motion IS near-stillness; no fake streaks).
+const TRAIL_VIEW_S = 0.45;
+const RING_TRAIL_ECHOES = 2;   // lagged re-draws of each population
+
 // Nightside injection bursts (#917 Phase 4): triggered when an arriving
 // parcel carries VBs above the O'Brien–McPherron coupling cutoff. Entry
 // speed and deceleration are physical (exponential approach, initial
@@ -540,9 +550,13 @@ export class RingCurrentGlobe {
     _setCompositionMix(fO) {
         const f = Math.max(0, Math.min(0.8, Number.isFinite(fO) ? fO : 0.06));
         this._pendingMix = f;
-        const o = this._popPoints?.ionsO, h = this._popPoints?.ionsH;
-        if (o) o.mat.uniforms.uMix.value = Math.min(1.8, f / O_BUILD_FRACTION);
-        if (h) h.mat.uniforms.uMix.value = Math.min(1.3, (1 - f) / (1 - O_BUILD_FRACTION));
+        const setMix = (P, v) => {
+            if (!P) return;
+            P.mat.uniforms.uMix.value = v;
+            for (const e of P.echoes) e.mat.uniforms.uMix.value = v;
+        };
+        setMix(this._popPoints?.ionsO, Math.min(1.8, f / O_BUILD_FRACTION));
+        setMix(this._popPoints?.ionsH, Math.min(1.3, (1 - f) / (1 - O_BUILD_FRACTION)));
     }
 
     /** Static-attribute Points: position=(L, θ_birth, λ_m), kin, life.
@@ -559,7 +573,21 @@ export class RingCurrentGlobe {
         const points = new THREE.Points(geo, mat);
         points.frustumCulled = false;   // position attr holds (L,θ,λ_m), not xyz
         this._magGroup.add(points);
-        return { points, mat, pop };
+        // Integrated drift trails: re-draw the SAME geometry with lagged
+        // clocks (tick() sets uDriftHours/uBounceSec back by k·TRAIL_VIEW_S
+        // of viewing) — each echo is where every particle truly WAS, so the
+        // trail follows its curved drift+bounce path, honors the lifecycle,
+        // and collapses at Real ×1. Geometry is shared; cost = 2 extra draws.
+        const echoes = [];
+        for (let k = 1; k <= RING_TRAIL_ECHOES; k++) {
+            const em = trappedPointsMaterial(size * (1 - 0.22 * k), 0.9 * (k === 1 ? 0.38 : 0.16), color);
+            this._syncStateUniforms(em);
+            const ep = new THREE.Points(geo, em);
+            ep.frustumCulled = false;
+            this._magGroup.add(ep);
+            echoes.push({ mat: em, k });
+        }
+        return { points, mat, pop, echoes };
     }
 
     /** Push the current model state into one material's uniforms. */
@@ -782,10 +810,12 @@ export class RingCurrentGlobe {
                 // pulse only conveys direction while honest motion is sub-pixel.
                 bright *= 1 + 0.30 * Math.sin(2 * Math.PI * (x / 9 + wallNow / 3000));
             }
-            // Trail length ∝ apparent speed (invariant: km/s × τ ÷ km/unit) —
-            // fast parcels streak, slow ones stay compact; ~0 at τ=1.
-            const trail = Math.min(7, Math.max(0.15,
-                0.45 * apparentUnitsPerSec(Number.isFinite(p.v) ? p.v : 400, SCALE.CORRIDOR.kmPerUnit, tau)));
+            // Trail = the path integrated over the last TRAIL_VIEW_S seconds
+            // of viewing (apparent speed × window; invariant km/s × τ ÷
+            // km/unit) — fast parcels streak further because they truly
+            // covered more corridor; sub-pixel at τ=1.
+            const trail = Math.min(9, Math.max(0.1,
+                TRAIL_VIEW_S * apparentUnitsPerSec(Number.isFinite(p.v) ? p.v : 400, SCALE.CORRIDOR.kmPerUnit, tau)));
             // BAROMETRIC compression: visible particle count per 1-min sample
             // scales with density — compression fronts read as dense bright
             // bands, exactly like a longitudinal pressure wave.
@@ -1200,7 +1230,10 @@ export class RingCurrentGlobe {
             injection:    Math.min(1, Math.abs(now.injectionQ ?? 0) / 12),
         };
         this._setCompositionMix(now.oxygenFraction);
-        for (const p of Object.values(this._popPoints ?? {})) this._syncStateUniforms(p.mat);
+        for (const p of Object.values(this._popPoints ?? {})) {
+            this._syncStateUniforms(p.mat);
+            for (const e of p.echoes) this._syncStateUniforms(e.mat);
+        }
         // Drive the EarthSkin from the SAME live state as the ring: aurora
         // oval from Kp + southward Bz + ap-proxied hemispheric power, and the
         // skin's ring-current nightside heating glow from this page's own
@@ -1249,10 +1282,17 @@ export class RingCurrentGlobe {
         // All trapped-particle motion + lifecycle is in the vertex shader —
         // the per-frame CPU cost of 4 700 particles is two uniform writes
         // per material (drift/lifecycle on SIM hours; bounce on wall — the
-        // disclosed ×1 exception, see header).
+        // disclosed ×1 exception, see header). Trail echoes re-draw the same
+        // geometry at clocks lagged by k·TRAIL_VIEW_S of VIEWING time — the
+        // integrated path, τ-honest (sub-pixel at ×1).
+        const lagH = TRAIL_VIEW_S * this._clock.tau / 3600;
         for (const p of Object.values(this._popPoints ?? {})) {
             p.mat.uniforms.uDriftHours.value = this._simHours;
             p.mat.uniforms.uBounceSec.value  = this._tView;
+            for (const e of p.echoes) {
+                e.mat.uniforms.uDriftHours.value = this._simHours - e.k * lagH;
+                e.mat.uniforms.uBounceSec.value  = this._tView - e.k * TRAIL_VIEW_S;
+            }
         }
         this._updateTransit(simNow, wallNow);
         this._detectArrivals(simNow);

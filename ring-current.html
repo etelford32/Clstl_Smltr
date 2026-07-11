@@ -69,7 +69,12 @@ body {
     gap:14px; padding:8px 22px 14px;
 }
 .rc-stage {
-    position:relative; min-height:520px; border-radius:14px; overflow:hidden;
+    position:relative; border-radius:14px; overflow:hidden;
+    /* Viewport-capped and NOT stretched to the panel column (align-self),
+       so the 3D scene stays above the fold — previously the grid stretched
+       the stage to ~1900px and Earth sat a full screen below the hero. */
+    height:clamp(520px, 74vh, 920px);
+    align-self:start;
     background:radial-gradient(ellipse at 30% 20%, #0a1030 0%, #03010e 70%);
     border:1px solid rgba(255,255,255,.07);
 }
@@ -196,7 +201,7 @@ body {
 
 @media (max-width: 900px) {
     .rc-layout { grid-template-columns:1fr; }
-    .rc-stage { min-height:400px; }
+    .rc-stage { height:clamp(400px, 58vh, 640px); }
 }
 @media (max-width: 768px) {
     .rc-hero { padding:18px 14px 6px; }
@@ -304,6 +309,28 @@ body {
                 The incoming stream in the 3D view is real matter measured at L1
                 and not yet arrived &mdash; the live handoff from the Sun-side
                 twin to this one, and onward into thermosphere drag.
+            </div>
+        </section>
+
+        <section class="rc-panel">
+            <h2>Earth &mdash; time &amp; orbit</h2>
+            <div class="rc-kv"><span class="rc-k">sim clock (UTC)</span><span class="rc-v" id="rc-clock-utc">&mdash;</span></div>
+            <div class="rc-kv" id="rc-clock-local-row" hidden><span class="rc-k" id="rc-clock-local-k">local</span><span class="rc-v" id="rc-clock-local">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">orbital position</span><span class="rc-v" id="rc-orbit">&mdash;</span></div>
+            <div style="display:flex;gap:12px;align-items:center;margin-top:6px;">
+                <svg id="rc-orbit-svg" width="88" height="88" viewBox="-50 -50 100 100" style="flex:none" aria-label="Earth's position in its orbit">
+                    <circle cx="0" cy="0" r="40" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="1"/>
+                    <circle cx="0" cy="0" r="4.5" fill="#ffd700"/>
+                    <line id="rc-orbit-peri" x1="36" y1="0" x2="44" y2="0" stroke="rgba(255,154,61,.7)" stroke-width="1.4"/>
+                    <circle id="rc-orbit-earth" cx="40" cy="0" r="3.2" fill="#59baff"/>
+                    <text id="rc-orbit-doy" x="0" y="3" text-anchor="middle" font-size="9" fill="#8b94ad"></text>
+                </svg>
+                <div style="font-size:.66rem;color:#5d6684;line-height:1.5;">
+                    True orbital position (heliocentric &lambda;, Sun&ndash;Earth
+                    distance; tick = perihelion). Earth&rsquo;s spin in the scene
+                    follows the sim clock &mdash; at &times;1 this IS the current
+                    UTC day and terminator.
+                </div>
             </div>
         </section>
 
@@ -424,8 +451,9 @@ body {
 
 <script type="module">
 import { RingCurrentFeed, omniToReplay, computeReplayState } from './js/ring-current-feed.js?v=20260711';
-import { newellCoupling } from './js/ring-current-model.js?v=20260711';
+import { newellCoupling, earthOrbit } from './js/ring-current-model.js?v=20260711';
 import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260711';
+import { loadUserLocation } from './js/user-location.js';
 import { INTERVALS } from './js/config.js';
 
 const $ = id => document.getElementById(id);
@@ -470,6 +498,46 @@ document.querySelectorAll('.rc-mode-btn[data-mode]').forEach(btn => btn.addEvent
     document.querySelectorAll('.rc-mode-btn[data-mode]').forEach(b => b.classList.toggle('rc-on', b === btn));
     globe?.setStreamMode(btn.dataset.mode);
 }));
+
+// ── Earth clock & orbit — the scene's Earth follows the sim clock ──────────
+const userLoc = loadUserLocation();
+if (userLoc && Number.isFinite(userLoc.lon)) {
+    $('rc-clock-local-row').hidden = false;
+    $('rc-clock-local-k').textContent = `local (mean solar) — ${userLoc.city ?? 'saved location'}`;
+}
+// Earth's heliocentric longitude at perihelion (~Jan 3): geocentric solar
+// λ ≈ 283° there, so Earth sits at 283 − 180 = 103°.
+const PERI_LON_DEG = 103;
+{
+    const a = PERI_LON_DEG * Math.PI / 180;
+    const t = $('rc-orbit-peri');
+    t.setAttribute('x1', (36 * Math.cos(a)).toFixed(1));
+    t.setAttribute('y1', (-36 * Math.sin(a)).toFixed(1));
+    t.setAttribute('x2', (44 * Math.cos(a)).toFixed(1));
+    t.setAttribute('y2', (-44 * Math.sin(a)).toFixed(1));
+}
+function renderEarthClock() {
+    const simMs = clock.now();
+    $('rc-clock-utc').textContent =
+        new Date(simMs).toISOString().slice(11, 19) + (clock.tau > 1 ? ` (×${clock.tau})` : '');
+    if (userLoc && Number.isFinite(userLoc.lon)) {
+        // Mean solar time at the saved longitude (UTC + 4 min per °E).
+        // Civil-zone offsets need a tz database; mean solar is the honest,
+        // computable choice on a physics page — it is what the terminator
+        // on the globe actually shows.
+        $('rc-clock-local').textContent =
+            new Date(simMs + userLoc.lon * 240000).toISOString().slice(11, 16);
+    }
+    const ob = earthOrbit(simMs);
+    $('rc-orbit').textContent = `day ${ob.dayOfYear} · ${ob.rAU.toFixed(4)} AU · λ ${ob.lonDeg.toFixed(0)}°`;
+    const a = ob.lonDeg * Math.PI / 180;
+    const e = $('rc-orbit-earth');
+    e.setAttribute('cx', (40 * Math.cos(a)).toFixed(1));
+    e.setAttribute('cy', (-40 * Math.sin(a)).toFixed(1));
+    $('rc-orbit-doy').textContent = `d${ob.dayOfYear}`;
+}
+renderEarthClock();
+setInterval(renderEarthClock, 1000);
 
 // ── Formatting helpers ──────────────────────────────────────────────────────
 const SUP = { '-':'⁻', 0:'⁰',1:'¹',2:'²',3:'³',4:'⁴',5:'⁵',6:'⁶',7:'⁷',8:'⁸',9:'⁹' };

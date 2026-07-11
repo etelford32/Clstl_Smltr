@@ -33,6 +33,7 @@ import {
     integrateDstEnsemble, findThresholdCrossing, kpToAp, oxygenFraction,
     bouncePeriodSeconds, subsolarPoint, dipoleTiltRad,
     geocoronalDensity, chargeExchangeCrossSection, chargeExchangeLifetimeHours,
+    earthOrbit,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -444,6 +445,32 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.equal(chargeExchangeLifetimeHours(50, 3, 'electron'), null);
     assert.equal(chargeExchangeLifetimeHours(NaN, 3), null);
     ok('lifetimes: σ(E) shapes, H⁺50@L3 ≈ 12 h, O⁺ ~10× faster, τ ∝ L^3.5');
+}
+
+// ── Earth orbit ──────────────────────────────────────────────────────────────
+{
+    // Perihelion ~Jan 3 (r → 0.9833), aphelion ~Jul 4 (r → 1.0167).
+    const peri = earthOrbit(Date.UTC(2026, 0, 3, 12));
+    const aph  = earthOrbit(Date.UTC(2026, 6, 4, 12));
+    assert.ok(peri.rAU < 0.9835, `perihelion r = ${peri.rAU}`);
+    assert.ok(aph.rAU > 1.0165, `aphelion r = ${aph.rAU}`);
+    // Equinoxes: heliocentric Earth longitude 180° (Mar) / 0° (Sep).
+    const mar = earthOrbit(Date.UTC(2026, 2, 20, 12)).lonDeg;
+    assert.ok(Math.abs(mar - 180) < 1.2, `March equinox λ = ${mar}`);
+    const sep = earthOrbit(Date.UTC(2026, 8, 23, 12)).lonDeg;
+    assert.ok(Math.min(sep, 360 - sep) < 1.2, `Sept equinox λ = ${sep}`);
+    // Kepler's second law: true angular motion is SLOWER than the 0.9856°/day
+    // mean near aphelion (July) and FASTER near perihelion (January).
+    const adv = (m, d) => {
+        const p = earthOrbit(Date.UTC(2026, m, d)), q = earthOrbit(Date.UTC(2026, m, d + 10));
+        return ((q.lonDeg - p.lonDeg + 360) % 360) / 10;
+    };
+    const julRate = adv(6, 11), janRate = adv(0, 5);
+    assert.ok(julRate < 0.9856 && julRate > 0.94, `aphelion rate = ${julRate}°/d`);
+    assert.ok(janRate > 0.9856 && janRate < 1.03, `perihelion rate = ${janRate}°/d`);
+    assert.equal(earthOrbit(Date.UTC(2026, 6, 11)).dayOfYear, 192);
+    assert.equal(earthOrbit(NaN), null);
+    ok('earth orbit: perihelion/aphelion r, equinox longitudes, mean motion');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

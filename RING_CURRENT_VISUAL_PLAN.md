@@ -31,6 +31,18 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   (accurate at ×1, honest fast-forward that wraps with the sweep).
 > - **Particle lifetimes** (charge exchange / precipitation, the Sun→surface
 >   journey) tick on the sim clock — see RING_CURRENT_SIMULATION_PLAN.md.
+> - **Trails are integrated paths** (2026-07-11): every trail spans exactly
+>   the trajectory covered in the last TRAIL_VIEW_S (0.45 s) of VIEWING —
+>   corridor trails = apparent speed × window; ring trails re-draw the same
+>   GPU geometry at lagged clocks, so they follow the true curved
+>   drift+bounce path, honor the lifecycle, and collapse to sub-pixel at
+>   Real ×1 (honest stillness). No decorative streaks.
+> - **Layout**: the stage is viewport-capped (clamp 520px–74vh–920px,
+>   align-self:start) so the scene stays above the fold instead of
+>   stretching to the panel column. The page also shows the sim-clock UTC
+>   time, mean-solar local time at the saved user location (js/user-location
+>   longitude — civil tz needs a tz db), and Earth's true orbital position
+>   (earthOrbit: heliocentric λ, r in AU, Kepler-second-law-tested).
 
 ---
 
