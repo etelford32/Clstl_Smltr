@@ -765,3 +765,66 @@ export function sourceRotationDeg(vKmS) {
     if (!Number.isFinite(vKmS) || vKmS < 100) return null;
     return SOLAR.OMEGA_RAD_S * (SOLAR.AU_KM / vKmS) * 180 / Math.PI;
 }
+
+/**
+ * Carrington coordinates of the solar disk center as seen from Earth
+ * (Meeus, Astronomical Algorithms ch. 29): L0 = heliographic longitude of
+ * the central meridian in the Carrington frame (decreases ~13.2°/day —
+ * the SYNODIC rate, because Earth orbits while the Sun rotates), B0 = the
+ * ±7.25° heliographic latitude tilt of the disk center. Apparent solar
+ * longitude comes from earthOrbit (aberration ~0.006° ignored); good to
+ * ~0.1°, far inside ballistic back-mapping's ±½-day (±6°) uncertainty.
+ *
+ * This is the bridge between the timing ledger and REAL solar imagery:
+ * the wind arriving now was on the Earth-facing central meridian at
+ * departure, so its source Carrington longitude is simply L0(departure) —
+ * directly comparable with HEK coronal-hole detections (hgc_x).
+ */
+export function carringtonL0(ms) {
+    const jd = ms / 86400000 + 2440587.5;
+    const d2r = Math.PI / 180;
+    // Sidereal rotation phase from the Carrington epoch (JD 2398220.0).
+    const theta = (((jd - 2398220.0) * 360 / 25.38) % 360 + 360) % 360;
+    // Ascending node of the solar equator on the ecliptic.
+    const K = (73.6667 + 1.3958333 * (jd - 2396758.0) / 36525) * d2r;
+    const I = 7.25 * d2r;                        // solar equator inclination
+    // Apparent geocentric solar longitude = Earth's heliocentric + 180°.
+    const lam = ((earthOrbit(ms).lonDeg + 180) % 360) * d2r;
+    const lamK = lam - K;
+    const eta = Math.atan2(Math.sin(lamK) * Math.cos(I), Math.cos(lamK)) / d2r;
+    const L0 = ((eta - theta) % 360 + 360) % 360;
+    const B0 = Math.asin(Math.sin(lamK) * Math.sin(I)) / d2r;
+    return { L0, B0 };
+}
+
+/**
+ * Match a back-mapped source Carrington longitude against the HEK
+ * coronal-hole catalog (api/hek/coronal-holes rows: { lat_deg,
+ * lon_carrington_deg, frm_name, ... }). Scoring favors low/mid-latitude
+ * holes — polar-hole wind mostly misses the ecliptic — via a latitude
+ * penalty above ±45°. Attribution rules follow the standard solar-wind
+ * taxonomy: fast wind (≥480 km/s) traces to a CH within 20° of longitude;
+ * slow wind needs a tight (≤12°) match, otherwise it is streamer-belt
+ * wind by default. Returns null when there is nothing to match against.
+ */
+export function attributeWindSource(holes, srcCarringtonLon, vKmS) {
+    if (!Array.isArray(holes) || !holes.length || !Number.isFinite(srcCarringtonLon)) return null;
+    let best = null;
+    for (const h of holes) {
+        const lon = h?.lon_carrington_deg;
+        if (!Number.isFinite(lon)) continue;
+        const dLon = Math.abs((((lon - srcCarringtonLon) % 360) + 540) % 360 - 180);
+        const latPen = Math.max(0, Math.abs(h.lat_deg ?? 90) - 45) * 0.8;
+        const score = dLon + latPen;
+        if (!best || score < best.score) best = { hole: h, dLon, score };
+    }
+    if (!best) return null;
+    const fast = Number.isFinite(vKmS) && vKmS >= 480;
+    const matched = best.dLon <= (fast ? 20 : 12);
+    return {
+        matched,
+        kind: matched ? 'coronal-hole' : (fast ? 'unattributed-fast' : 'streamer-belt'),
+        dLonDeg: best.dLon,
+        hole: matched ? best.hole : null,
+    };
+}

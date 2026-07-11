@@ -34,6 +34,7 @@ import {
     oxygenFraction, subsolarPoint, dipoleTiltRad, chargeExchangeLifetimeHours,
     shueStandoffRe, shueAlpha,
     SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
+    carringtonL0, attributeWindSource,
 } from './ring-current-model.js';
 
 // rtsw_mag_1m is not in config.NOAA — defined locally, same as js/swpc-feed.js.
@@ -418,6 +419,7 @@ export class RingCurrentFeed extends EventTarget {
         this._kp       = null;
         this._f107     = null;    // daily F10.7 (sfu) for the density panel
         this._goes     = [];      // GOES Hp series (GEO in-situ cross-check)
+        this._holes    = [];      // HEK coronal holes (wind source attribution)
         this._timers   = {};
         this._mode     = 'full';  // 'full' | 'degraded'
         this._started  = false;
@@ -565,6 +567,15 @@ export class RingCurrentFeed extends EventTarget {
             if (goes.length) this._goes = goes;
         } catch (e) { this._noteError(e); }
 
+        // HEK coronal-hole catalog (30-min upstream cache) — the real solar
+        // imagery the back-mapped wind source is matched against. Best-
+        // effort: on failure the ledger still carries coordinates, just no
+        // structure attribution.
+        try {
+            const ch = await getJson('/api/hek/coronal-holes');
+            if (Array.isArray(ch?.data?.holes)) this._holes = ch.data.holes;
+        } catch (e) { this._noteError(e); }
+
         this._emit();
     }
 
@@ -606,6 +617,24 @@ export class RingCurrentFeed extends EventTarget {
     _dispatch(state) {
         const goes = goesCrossCheck(this._goes, state?.now?.dstModel ?? null, Date.now());
         const compute = this._worker && !this._workerBroken ? 'worker' : 'inline';
+        // Source mapping (main thread — needs this._holes, which the worker
+        // doesn't carry): the wind arriving now was on the Earth-facing
+        // central meridian at departure, so its source Carrington longitude
+        // is L0(departure); its Stonyhurst position TODAY is how far the
+        // Sun has since carried it toward the west limb. Then match against
+        // the HEK coronal-hole catalog.
+        const sl = state?.now?.sunLag;
+        if (sl && Number.isFinite(sl.departureMs)) {
+            const nowMs = state.updated ?? Date.now();
+            const dep = carringtonL0(sl.departureMs);
+            const cur = carringtonL0(nowMs);
+            sl.carringtonLon    = dep.L0;
+            sl.stonyhurstNowDeg = ((dep.L0 - cur.L0) % 360 + 360) % 360;
+            sl.l0NowDeg         = cur.L0;
+            sl.b0NowDeg         = cur.B0;
+            sl.source = attributeWindSource(this._holes, dep.L0, state?.drivers?.v);
+            sl.holes  = this._holes ?? [];
+        }
         this.dispatchEvent(new CustomEvent('state', {
             detail: state ? { ...state, goes, compute, mode: this._mode, errors: this._errors.slice(-3) }
                           : { goes, compute, mode: this._mode, errors: this._errors.slice(-3), updated: Date.now() },

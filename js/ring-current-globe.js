@@ -1020,20 +1020,20 @@ export class RingCurrentGlobe {
     }
 
     _buildSunAndTransit() {
-        // Sun glow: canvas radial-gradient sprite at +X (noon MLT direction).
-        const cv = document.createElement('canvas');
-        cv.width = cv.height = 128;
-        const g = cv.getContext('2d');
-        const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-        grad.addColorStop(0.00, 'rgba(255,244,214,1)');
-        grad.addColorStop(0.25, 'rgba(255,214,120,0.85)');
-        grad.addColorStop(0.60, 'rgba(255,150,60,0.25)');
-        grad.addColorStop(1.00, 'rgba(255,120,40,0)');
-        g.fillStyle = grad;
-        g.fillRect(0, 0, 128, 128);
-        const tex = new THREE.CanvasTexture(cv);
+        // Sun: a live solar DISK, not just a glow. The sprite billboards
+        // toward the camera, and in this Earth-anchored scene that IS the
+        // Earth-facing hemisphere — so Stonyhurst coordinates map straight
+        // onto it (disk center = central meridian, west limb right, north
+        // up). _drawSunDisk repaints it from each feed state: limb-darkened
+        // photosphere, HEK coronal holes rotated to their CURRENT disk
+        // positions, and a teal marker at the back-mapped source of the
+        // wind arriving now — real imagery timing on the Sun end.
+        this._sunCv = document.createElement('canvas');
+        this._sunCv.width = this._sunCv.height = 256;
+        this._sunTex = new THREE.CanvasTexture(this._sunCv);
+        this._drawSunDisk(null);
         this._sunMat = new THREE.SpriteMaterial({
-            map: tex, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.95,
+            map: this._sunTex, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.95,
         });
         this._sun = new THREE.Sprite(this._sunMat);
         this._sun.position.set(TRANSIT.X_SUN + 8, 0, 0);
@@ -1163,6 +1163,83 @@ export class RingCurrentGlobe {
         this._scene.add(new THREE.Line(baseGeo, new THREE.LineBasicMaterial({
             color: 0x5f79b8, transparent: true, opacity: 0.25, depthWrite: false,
         })));
+    }
+
+    /**
+     * Repaint the Sun sprite from the feed's sunLag ledger: corona glow,
+     * limb-darkened photosphere, HEK coronal holes at TODAY's Stonyhurst
+     * positions (catalog Carrington lon − live L0; dark, as they appear in
+     * EUV), and the back-mapped source marker of the wind arriving now —
+     * a teal ring that has rotated stonyhurstNowDeg toward the west limb
+     * since the plasma left (dashed once it passes behind the limb). A few
+     * dozen 2D calls per feed state (~30 s) — negligible.
+     */
+    _drawSunDisk(sl) {
+        const g = this._sunCv.getContext('2d');
+        const C = 128, R = 46;                       // center, disk radius (px)
+        const d2r = Math.PI / 180;
+        g.clearRect(0, 0, 256, 256);
+        // Corona glow out to the sprite edge.
+        let grad = g.createRadialGradient(C, C, R * 0.75, C, C, 128);
+        grad.addColorStop(0.00, 'rgba(255,214,120,0.85)');
+        grad.addColorStop(0.35, 'rgba(255,150,60,0.25)');
+        grad.addColorStop(1.00, 'rgba(255,120,40,0)');
+        g.fillStyle = grad;
+        g.fillRect(0, 0, 256, 256);
+        // Photosphere with limb darkening.
+        grad = g.createRadialGradient(C, C, 0, C, C, R);
+        grad.addColorStop(0.00, 'rgba(255,248,226,1)');
+        grad.addColorStop(0.72, 'rgba(255,226,150,0.98)');
+        grad.addColorStop(1.00, 'rgba(255,170,80,0.9)');
+        g.fillStyle = grad;
+        g.beginPath();
+        g.arc(C, C, R, 0, 2 * Math.PI);
+        g.fill();
+        // Coronal holes on today's visible disk (clipped to the limb).
+        const l0 = sl?.l0NowDeg;
+        if (Number.isFinite(l0)) {
+            g.save();
+            g.beginPath();
+            g.arc(C, C, R, 0, 2 * Math.PI);
+            g.clip();
+            for (const h of sl.holes ?? []) {
+                if (!Number.isFinite(h?.lon_carrington_deg)) continue;
+                const lon = ((h.lon_carrington_deg - l0) % 360 + 540) % 360 - 180;
+                const lat = h.lat_deg ?? 0;
+                if (Math.abs(lon) > 85 || Math.abs(lat) > 80) continue;   // far side
+                const x = C + R * Math.sin(lon * d2r) * Math.cos(lat * d2r);
+                const y = C - R * Math.sin(lat * d2r);
+                g.fillStyle = 'rgba(30,18,52,0.72)';
+                g.beginPath();
+                g.ellipse(x, y,
+                    Math.max(3, 9 * Math.abs(Math.cos(lon * d2r))),
+                    Math.max(3, 9 * Math.abs(Math.cos(lat * d2r))), 0, 0, 2 * Math.PI);
+                g.fill();
+            }
+            g.restore();
+        }
+        // Back-mapped source of the wind arriving NOW.
+        const west = sl?.stonyhurstNowDeg;
+        if (Number.isFinite(west)) {
+            const lat = sl?.source?.hole?.lat_deg ?? 0;
+            const lon = Math.min(west, 88);
+            const x = C + R * Math.sin(lon * d2r) * Math.cos(lat * d2r);
+            const y = C - R * Math.sin(lat * d2r);
+            g.strokeStyle = '#7fe6c3';
+            g.lineWidth = 2;
+            if (west > 88) g.setLineDash([3, 3]);    // already behind the limb
+            g.beginPath();
+            g.arc(x, y, 7, 0, 2 * Math.PI);
+            g.stroke();
+            g.setLineDash([]);
+            g.beginPath();
+            for (const [dx, dy] of [[10, 0], [-10, 0], [0, 10], [0, -10]]) {
+                g.moveTo(x + dx * 0.5, y + dy * 0.5);
+                g.lineTo(x + dx, y + dy);
+            }
+            g.stroke();
+        }
+        this._sunTex.needsUpdate = true;
     }
 
     /** Stream coloring: 'bz' (driver) | 'temp' (heat map) | 'density'. */
@@ -2060,10 +2137,13 @@ export class RingCurrentGlobe {
             this._drawLabel(this._gateLab, 'L1 — MEASUREMENT PLANE', [
                 'DSCOVR/ACE sample here every 60 s',
                 `wind left Sun ${Number.isFinite(sl.days) ? sl.days.toFixed(1) : '—'} d ago (ballistic)`,
+                `source Carrington ${Number.isFinite(sl.carringtonLon) ? Math.round(sl.carringtonLon) + '°' : '—'}` +
+                    `${Number.isFinite(sl.stonyhurstNowDeg) ? ` · now W${Math.round(Math.min(sl.stonyhurstNowDeg, 99))}` : ''}`,
                 `light does the trip in ${sl.lightMin.toFixed(1)} min`,
-                `Sun rotated ${Number.isFinite(sl.sourceRotDeg) ? Math.round(sl.sourceRotDeg) : '—'}° during transit`,
             ], '#9ecbff');
         }
+        // Live solar disk: coronal holes + the back-mapped source marker.
+        if (sl) this._drawSunDisk(sl);
         const d = state?.drivers, nw = state?.now;
         const f1 = (x, u, dg = 1) => Number.isFinite(x) ? `${x.toFixed(dg)}${u}` : '—';
         if (d) this._drawLabel(this._windLab, 'INCOMING WIND — LIVE (L1)', [

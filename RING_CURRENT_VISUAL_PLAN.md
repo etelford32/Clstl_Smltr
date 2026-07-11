@@ -63,6 +63,21 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   time, mean-solar local time at the saved user location (js/user-location
 >   longitude — civil tz needs a tz db), and Earth's true orbital position
 >   (earthOrbit: heliocentric λ, r in AU, Kepler-second-law-tested).
+> - **Wind source coordinates + live solar disk** (2026-07-11): the ledger
+>   now carries COORDINATES. Model: `carringtonL0(ms)` (Meeus ch. 29 disk-
+>   center L0/B0, property-tested: 13.2°/d synodic, 27.28 d period, B0
+>   seasonal anchors) and `attributeWindSource(holes, lon, v)` (fast wind
+>   → CH within 20°, slow → ≤12° else streamer belt; polar-lat penalty).
+>   Feed `_dispatch` back-maps the arriving wind to its source Carrington
+>   longitude (= L0 at departure), computes where that source sits on
+>   TODAY's disk (Stonyhurst W = L0(dep) − L0(now)), and matches it against
+>   the HEK coronal-hole catalog (existing /api/hek/coronal-holes edge
+>   route, now also served by dev-server). The Sun sprite became a live
+>   disk: limb-darkened photosphere + HEK holes rotated to current disk
+>   positions + a teal ring at the back-mapped source (dashed once behind
+>   the west limb). HUD "traces to" row names the structure — e.g.
+>   "coronal hole (SPoCA) S25 · Car 145° · now W37" — and the L1 gate
+>   label carries the same coordinates.
 > - **L1 measurement plane + emission→reception ledger** (2026-07-11): L1
 >   is rendered as the instrument it is — a translucent aperture disc (the
 >   "3D sheet") at the corridor start with a range-ring graticule, pulsing

@@ -35,6 +35,7 @@ import {
     geocoronalDensity, chargeExchangeCrossSection, chargeExchangeLifetimeHours,
     earthOrbit, shueStandoffRe, shueAlpha, shueRadiusRe, bowShockStandoffRe,
     SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
+    carringtonL0, attributeWindSource,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -528,6 +529,45 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.equal(parkerSpiralDeg(0), null);
     assert.equal(sourceRotationDeg(undefined), null);
     ok('Sun→Earth ledger: 8.3 light-min, 4.3 d @ 400 km/s, ~1.5 d dispersion, 45° spiral');
+}
+
+// ── 23. Carrington coordinates + coronal-hole attribution ───────────────────
+{
+    const DAY = 86.4e6;
+    const t0 = Date.UTC(2026, 6, 11);   // 2026-07-11
+    const { L0, B0 } = carringtonL0(t0);
+    assert.ok(L0 >= 0 && L0 < 360 && Number.isFinite(B0));
+    // Synodic retrograde rate ≈ 13.2°/day (varies slightly with Earth's
+    // orbital speed): check over 10 days.
+    const dL = ((L0 - carringtonL0(t0 + 10 * DAY).L0) % 360 + 360) % 360;
+    assert.ok(Math.abs(dL / 10 - 13.2) < 0.5, `synodic rate ${(dL / 10).toFixed(2)}°/d`);
+    // One Carrington rotation (27.2753 d synodic) returns L0 to ~itself.
+    const dRot = ((L0 - carringtonL0(t0 + 27.2753 * DAY).L0) % 360 + 360) % 360;
+    assert.ok(dRot < 4 || dRot > 356, `CR period residual ${dRot.toFixed(1)}°`);
+    // B0 bounded by the 7.25° solar-equator tilt; known seasonal anchors:
+    // ~0° in early June, max ≈ +7.2° early September, min ≈ −7.2° early March.
+    for (let k = 0; k < 12; k++) assert.ok(Math.abs(carringtonL0(t0 + k * 30 * DAY).B0) < 7.26);
+    assert.ok(Math.abs(carringtonL0(Date.UTC(2026, 5, 6)).B0) < 0.6, 'B0 ≈ 0 near Jun 6');
+    assert.ok(carringtonL0(Date.UTC(2026, 8, 8)).B0 > 6.9, 'B0 max near Sep 8');
+    assert.ok(carringtonL0(Date.UTC(2026, 2, 5)).B0 < -6.9, 'B0 min near Mar 5');
+    // Attribution: fast wind matches a CH within 20° (with wraparound)…
+    const holes = [
+        { lat_deg: 15, lon_carrington_deg: 358, frm_name: 'SPoCA-CH' },
+        { lat_deg: -72, lon_carrington_deg: 3, frm_name: 'SPoCA-CH' },   // polar
+    ];
+    const hit = attributeWindSource(holes, 2, 600);
+    assert.ok(hit.matched && hit.kind === 'coronal-hole');
+    // …and the latitude penalty prefers the mid-lat hole over the closer
+    // polar one (polar-hole wind mostly misses the ecliptic).
+    assert.equal(hit.hole.lat_deg, 15);
+    assert.ok(Math.abs(hit.dLonDeg - 4) < 1e-9, `wrap dLon ${hit.dLonDeg}`);
+    // Slow wind far from any hole = streamer belt; fast unmatched flagged.
+    assert.equal(attributeWindSource(holes, 120, 380).kind, 'streamer-belt');
+    assert.equal(attributeWindSource(holes, 120, 650).kind, 'unattributed-fast');
+    // Null-safety.
+    assert.equal(attributeWindSource([], 10, 500), null);
+    assert.equal(attributeWindSource(holes, NaN, 500), null);
+    ok('Carrington L0/B0: 13.2°/d synodic, 27.28 d period, B0 seasonal anchors; CH attribution');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);
