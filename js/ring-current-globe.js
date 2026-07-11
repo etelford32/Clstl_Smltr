@@ -338,6 +338,69 @@ const INJECT = Object.freeze({
     VBS_MIN:    0.5,     // ≈ OBM Ec — northward/weak parcels don't inject
 });
 
+/**
+ * Solar-wind sheet: the wind rendered as a continuous MEDIUM, not just dots.
+ * An open flux tube spans the corridor; the fragment shader reads a 128-bin
+ * 1-D profile texture rebuilt every frame from the REAL parcel series —
+ *   R = density norm   → glow brightness (compression fronts = bright bands)
+ *   G = Bz southness   → color (cool blue north → hot orange south) + a
+ *                        fast crackle on strongly-southward sections
+ *   B = speed norm     → local wave advection rate
+ *   A = presence       → discard where no data
+ * Longitudinal waves sweep Earthward at the τ-scaled apparent speed (uFlow
+ * advanced per frame by the invariant), and the shader brightens where the
+ * density GRADIENT is steep — interplanetary compression fronts highlight
+ * themselves. Cinematic, but every pixel traces to a measured L1 sample.
+ */
+function windSheetMaterial(dataTex) {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+            uData: { value: dataTex },
+            uXmp:  { value: SCALE.CORRIDOR.X_MP },
+            uSpan: { value: SCALE.CORRIDOR.SPAN },
+            uFlow: { value: 0 },     // wave phase — advanced at τ-scaled speed
+            uTime: { value: 0 },     // wall seconds (crackle flicker)
+        },
+        vertexShader: `
+            varying vec3 vW; varying vec3 vN;
+            void main() {
+                vW = (modelMatrix * vec4(position, 1.0)).xyz;
+                vN = normalize(mat3(modelMatrix) * normal);
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+        fragmentShader: `
+            uniform sampler2D uData;
+            uniform float uXmp, uSpan, uFlow, uTime;
+            varying vec3 vW; varying vec3 vN;
+            void main() {
+                float u = clamp((vW.x - uXmp) / uSpan, 0.0, 1.0);
+                vec4 d = texture2D(uData, vec2(u, 0.5));
+                if (d.a < 0.02) discard;
+                float n = d.r;
+                float south = smoothstep(0.5, 0.95, d.g);
+                float vLoc = 0.45 + 0.85 * d.b;
+                // Waves sweeping Earthward (−x) at the local τ-scaled speed.
+                float ph = vW.x * 2.4 + uFlow * vLoc;
+                float wave = 0.55 + 0.45 * sin(ph) * (0.6 + 0.4 * sin(ph * 0.37 + 1.7));
+                // Compression fronts: steep density gradient → bright band.
+                float front = smoothstep(0.08, 0.30,
+                    abs(texture2D(uData, vec2(u + 0.02, 0.5)).r -
+                        texture2D(uData, vec2(u - 0.02, 0.5)).r));
+                // Volume feel: brightest looking through the tube's middle.
+                float rim = abs(dot(normalize(vN), normalize(cameraPosition - vW)));
+                float body = pow(rim, 1.5);
+                vec3 col = mix(vec3(0.28, 0.58, 1.0), vec3(1.0, 0.42, 0.16), south);
+                // Strong southward sections crackle — the dangerous stuff flickers.
+                float crackle = south * 0.22 * (0.5 + 0.5 * sin(uTime * 21.0 + vW.x * 6.3));
+                float b = (0.12 + 1.25 * n) * wave * body * d.a;
+                b *= 1.0 + 1.7 * front + crackle;
+                gl_FragColor = vec4(col * b, min(1.0, b) * 0.5);
+            }`,
+    });
+}
+
 // Stream color modes. 'bz' keeps the driver semantics (southward hot /
 // northward cool); 'temp' is a plasma-temperature heat map (log₁₀ T over
 // 10⁴–10⁶ K, blue → orange → white); 'density' maps n to teal → white.
@@ -697,11 +760,29 @@ export class RingCurrentGlobe {
             this._transitOff[i * 3 + 1] = Math.sin(a) * r;
             this._transitOff[i * 3 + 2] = Math.cos(a) * r;
         }
-        const mat = glowPointsMaterial(0.16, 0.95);
+        const mat = glowPointsMaterial(0.22, 0.95);   // brighter, fatter parcels
         this._transit = new THREE.Points(this._transitGeo, mat);
         this._transit.frustumCulled = false;
         this._scene.add(this._transit);
         this._streamMode = 'bz';
+
+        // Solar-wind sheet: an open flux tube spanning the corridor, shaded
+        // per-fragment from the live 128-bin parcel profile (see
+        // windSheetMaterial). Slightly tapered toward Earth — the flow
+        // funnels toward the magnetopause.
+        this._windBins = 128;
+        this._windData = new Uint8Array(this._windBins * 4);
+        this._windTex = new THREE.DataTexture(this._windData, this._windBins, 1, THREE.RGBAFormat);
+        this._windTex.magFilter = THREE.LinearFilter;
+        this._windTex.minFilter = THREE.LinearFilter;
+        this._windMat = windSheetMaterial(this._windTex);
+        const tube = new THREE.CylinderGeometry(2.5, 1.7, SCALE.CORRIDOR.SPAN, 26, 64, true);
+        tube.rotateZ(-Math.PI / 2);   // cylinder +Y axis → +X (sunward)
+        tube.translate((TRANSIT.X_MP + TRANSIT.X_SUN) / 2, 0, 0);
+        this._windSheet = new THREE.Mesh(tube, this._windMat);
+        this._windSheet.frustumCulled = false;
+        this._scene.add(this._windSheet);
+        this._sunVbsNorm = 0;   // strongest incoming VBs (0..1) — Sun breathing
 
         // Barometric trace: n(x) as a polyline riding above the corridor —
         // the pressure-wave shape of the incoming wind, sliding Earthward in
@@ -711,7 +792,7 @@ export class RingCurrentGlobe {
         this._waveGeo = new THREE.BufferGeometry();
         this._waveGeo.setAttribute('position', new THREE.BufferAttribute(this._wavePos, 3).setUsage(THREE.DynamicDrawUsage));
         this._wave = new THREE.Line(this._waveGeo, new THREE.LineBasicMaterial({
-            color: 0x7fe6c3, transparent: true, opacity: 0.75,
+            color: 0x7fe6c3, transparent: true, opacity: 0.9,
             blending: THREE.AdditiveBlending, depthWrite: false,
         }));
         this._wave.frustumCulled = false;
@@ -726,7 +807,7 @@ export class RingCurrentGlobe {
         this._envGeo = new THREE.BufferGeometry();
         this._envGeo.setAttribute('position', new THREE.BufferAttribute(this._envPos, 3).setUsage(THREE.DynamicDrawUsage));
         this._envGeo.setAttribute('color',    new THREE.BufferAttribute(this._envCol, 3).setUsage(THREE.DynamicDrawUsage));
-        this._env = new THREE.Points(this._envGeo, glowPointsMaterial(0.10, 0.55));
+        this._env = new THREE.Points(this._envGeo, glowPointsMaterial(0.13, 0.75));
         this._env.frustumCulled = false;
         this._scene.add(this._env);
         const base = new Float32Array([TRANSIT.X_MP, TRANSIT.WAVE_Y, 0, TRANSIT.X_SUN, TRANSIT.WAVE_Y, 0]);
@@ -802,7 +883,7 @@ export class RingCurrentGlobe {
             const nNorm = Math.max(0, Math.min(1, (Number.isFinite(p.n) ? p.n : 3) / TRANSIT.N_REF));
             const [R, G, B] = streamColor(this._streamMode, p);
             const pdyn = dynamicPressure(p.n, p.v);
-            let bright = 0.30 + 0.70 * Math.min(1, (pdyn ?? 1.5) / 8);
+            let bright = 0.45 + 0.75 * Math.min(1, (pdyn ?? 1.5) / 8);
             bright *= 1 + hbAmp * Math.cos(2 * Math.PI * ((wallNow - (p.tL1 ?? 0)) % 60_000) / 60_000);
             if (tau === 1) {
                 // Flow-field pulse (Real mode only): a brightness wave sliding
@@ -839,9 +920,43 @@ export class RingCurrentGlobe {
                 }
             }
             this._slotParcel[slot] = p;   // hover tooltip lookup
-            waveSamples.push({ x, nNorm, R, G, B });
+            waveSamples.push({
+                x, nNorm, R, G, B,
+                // Wind-sheet profile channels: Bz southness (−15 nT → 1,
+                // +15 → 0) and speed norm for local wave advection.
+                south: Math.max(0, Math.min(1, 0.5 - (Number.isFinite(p.bz) ? p.bz : 0) / 30)),
+                vNorm: Math.max(0, Math.min(1, ((Number.isFinite(p.v) ? p.v : 400) - 250) / 650)),
+            });
             slot++;
         }
+        // ── Wind-sheet profile: splat the parcels into the 128-bin texture
+        //    (max-blend, ±2-bin tent) — the shader turns this into the
+        //    glowing medium with waves, fronts, and Bz coloring. ────────────
+        const bins = this._windBins, wd = this._windData;
+        wd.fill(0);
+        let vSum = 0;
+        for (const s of waveSamples) {
+            vSum += s.vNorm;
+            const c = Math.round(((s.x - TRANSIT.X_MP) / spanX) * (bins - 1));
+            for (let b = Math.max(0, c - 2); b <= Math.min(bins - 1, c + 2); b++) {
+                const w = 1 - Math.abs(b - c) / 3;
+                const o = b * 4;
+                wd[o]     = Math.max(wd[o],     Math.round(255 * s.nNorm * w));
+                wd[o + 1] = Math.max(wd[o + 1], Math.round(255 * s.south * w));
+                wd[o + 2] = Math.max(wd[o + 2], Math.round(255 * s.vNorm * w));
+                wd[o + 3] = Math.max(wd[o + 3], Math.round(235 * w));
+            }
+        }
+        this._windTex.needsUpdate = true;
+        // Advance the wave phase at the mean τ-scaled apparent speed (the
+        // same invariant the trails use) so the sheet's waves sweep
+        // Earthward at an honest rate — near-frozen at ×1, rolling at ×300.
+        const meanV = waveSamples.length ? 250 + 650 * (vSum / waveSamples.length) : 400;
+        this._windMat.uniforms.uFlow.value =
+            (this._windMat.uniforms.uFlow.value +
+             (this._lastDt ?? 0.016) * apparentUnitsPerSec(meanV, SCALE.CORRIDOR.kmPerUnit, tau) * 2.4)
+            % (Math.PI * 2000);
+        this._windMat.uniforms.uTime.value = wallNow / 1000 % 3600;
         // Barometric trace + envelope, x-sorted (overtaking can reorder
         // parcels relative to arrival order — the trace is n(x), not n(t)).
         waveSamples.sort((a, b) => a.x - b.x);
@@ -1215,9 +1330,10 @@ export class RingCurrentGlobe {
                 ? ` · O⁺ ${Math.round(nw.oxygenFraction * 100)}%` : ''}`,
         ]);
         // Sun glow tracks the strongest incoming driver — a storm you can
-        // see coming before it arrives.
+        // see coming before it arrives (opacity + a breathing pulse in tick).
         const sv = state?.transit?.strongest?.vbs ?? 0;
-        if (this._sunMat) this._sunMat.opacity = 0.75 + 0.25 * Math.min(1, sv / 6);
+        this._sunVbsNorm = Math.min(1, sv / 6);
+        if (this._sunMat) this._sunMat.opacity = 0.75 + 0.25 * this._sunVbsNorm;
         const now = state?.now;
         if (!now) return;
         this._state = {
@@ -1277,6 +1393,11 @@ export class RingCurrentGlobe {
         const dSimH = this._clock.dSim(dt * 1000) / 3.6e6;   // wall s → sim hours
         this._tView += dt;
         this._simHours += dSimH;
+        this._lastDt = dt;
+        // Sun corona breathes with the strongest incoming VBs — a storm you
+        // can FEEL approaching before it arrives (cinematic, data-driven).
+        this._sun.scale.setScalar(11 * (1 + (0.02 + 0.09 * (this._sunVbsNorm ?? 0))
+            * Math.sin(wallNow / 600)));
         this._updateGeometry(simNow);
         this._skin.update(this._tView);   // aurora animation clock
         // All trapped-particle motion + lifecycle is in the vertex shader —

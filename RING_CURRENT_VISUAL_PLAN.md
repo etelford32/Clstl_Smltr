@@ -37,6 +37,14 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   GPU geometry at lagged clocks, so they follow the true curved
 >   drift+bounce path, honor the lifecycle, and collapse to sub-pixel at
 >   Real ×1 (honest stillness). No decorative streaks.
+> - **Wind sheet** (2026-07-11): the corridor carries a translucent flux-tube
+>   mesh whose fragment shader reads a live 128-bin profile texture rebuilt
+>   per frame from the REAL parcel series — density → glow, Bz → cool-north /
+>   hot-south color + crackle, per-bin speed → local wave advection at the
+>   τ-scaled invariant rate, and steep density gradients auto-highlight as
+>   compression-front bands. Cinematic, but every pixel traces to a measured
+>   L1 sample; near-frozen at Real ×1 like everything else. The Sun's corona
+>   breathes with the strongest incoming VBs.
 > - **Layout**: the stage is viewport-capped (clamp 520px–74vh–920px,
 >   align-self:start) so the scene stays above the fold instead of
 >   stretching to the panel column. The page also shows the sim-clock UTC
