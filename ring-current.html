@@ -191,6 +191,15 @@ body {
     background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13);
     border-radius:6px; padding:3px 8px;
 }
+/* Live render-performance chip (fps · frame ms · dpr · draws · tier). */
+.rc-perf {
+    position:absolute; right:10px; bottom:8px; z-index:4; pointer-events:none;
+    font:600 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color:#5d6684; background:rgba(3,1,14,.5);
+    border:1px solid rgba(255,255,255,.07); border-radius:5px; padding:3px 7px;
+    font-variant-numeric:tabular-nums;
+}
+.rc-perf.rc-perf-warn { color:#ffb066; border-color:rgba(255,176,102,.3); }
 .rc-mode-btn.rc-on { background:rgba(255,154,61,.22); border-color:rgba(255,154,61,.55); color:#ffd9b0; }
 .rc-ctl .rc-v { font-size:.72rem; }
 
@@ -242,6 +251,7 @@ body {
 <div class="rc-layout">
     <div class="rc-stage" id="rc-stage">
         <div class="rc-simtime" id="rc-simtime">SIM TIME &times;300</div>
+        <div class="rc-perf" id="rc-perf" hidden>&mdash;</div>
         <div class="rc-legend">
             <span class="rc-dot" style="background:#ffa040"></span>H&#8314; ions &mdash; drift west, true-rate bounce<br>
             <span class="rc-dot" style="background:#94ff57"></span>O&#8314; ions &mdash; ionospheric, dies ~10&times; sooner (two-phase decay)<br>
@@ -496,6 +506,35 @@ try {
     console.warn('[ring-current] 3D disabled:', err);
     stage.insertAdjacentHTML('beforeend',
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d6684;font-size:.8rem;">3D view unavailable — data panels remain live</div>');
+}
+
+// ── Render-performance HUD + one-shot telemetry ─────────────────────────────
+// The globe instruments itself (per-section CPU EMAs, p95 frame time, an
+// adaptive quality tier that sheds rendering cost — never physics — under
+// sustained slow frames). The chip shows the live numbers; one anonymous
+// app_perf sample ships after ~45 s so real-device performance lands in
+// client_telemetry (existing recordPerf surface).
+if (globe) {
+    const perfEl = $('rc-perf');
+    perfEl.hidden = false;
+    setInterval(() => {
+        if (document.hidden) return;
+        const p = globe.perf;
+        perfEl.textContent =
+            `${p.fps.toFixed(0)} fps · ${p.frameMs.toFixed(1)} ms (p95 ${p.p95Ms.toFixed(0)})` +
+            ` · dpr ${p.pixelRatio.toFixed(2)} · ${p.drawCalls} draws` +
+            (p.tier ? ` · quality −${p.tier}` : '');
+        perfEl.classList.toggle('rc-perf-warn', p.frameMs > 26 || p.tier > 0);
+    }, 1000);
+    setTimeout(async () => {
+        try {
+            const { telemetry } = await import('./js/telemetry.js');
+            const p = globe.perf;
+            telemetry.recordPerf('ring3d_frame_ms', p.frameMs);
+            telemetry.recordPerf('ring3d_frame_p95_ms', p.p95Ms);
+            telemetry.recordPerf('ring3d_quality_tier', p.tier);
+        } catch { /* telemetry is best-effort, never load-bearing */ }
+    }, 45_000);
 }
 
 // Selectors are scoped: [data-tau] = sim clock presets, [data-mode] = stream

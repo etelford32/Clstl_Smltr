@@ -517,6 +517,8 @@ function boundaryMaterial(tint, opacity, rScale) {
             uOpacity:  { value: opacity },
             uCompress: { value: 0 },
             uTime:     { value: 0 },
+            uShockTh:  { value: -9 },    // shock-front band center (solar-zenith θ)
+            uShockAmp: { value: 0 },     // band amplitude — decays as it sweeps
         },
         vertexShader: `
             uniform float uR0, uAlpha, uRScale;
@@ -530,7 +532,7 @@ function boundaryMaterial(tint, opacity, rScale) {
             }`,
         fragmentShader: `
             uniform vec3 uTint;
-            uniform float uOpacity, uCompress, uTime;
+            uniform float uOpacity, uCompress, uTime, uShockTh, uShockAmp;
             varying vec3 vPos;
             void main() {
                 vec3 N = normalize(cross(dFdx(vPos), dFdy(vPos)));
@@ -540,6 +542,15 @@ function boundaryMaterial(tint, opacity, rScale) {
                                                + atan(vPos.y, vPos.z) * 2.0);
                 vec3 col = mix(uTint, vec3(1.0, 0.62, 0.35), uCompress);
                 float a = uOpacity * (rim * 0.85 + 0.05) * shim * (1.0 + 0.9 * uCompress);
+                // Shock front: a gaussian band (σ ≈ 0.11 rad) at the live
+                // front position, sweeping nose→tail as _updateCinematics
+                // advances uShockTh at the shock's own τ-scaled speed — the
+                // interplanetary shock visibly WASHES OVER the boundary.
+                float thF = atan(length(vPos.yz), vPos.x);
+                float band = uShockAmp
+                    * exp(-(thF - uShockTh) * (thF - uShockTh) / 0.024);
+                col = mix(col, vec3(1.0, 0.85, 0.6), min(0.7, band));
+                a *= 1.0 + 2.6 * band;
                 gl_FragColor = vec4(col * a, a);
             }`,
     });
@@ -665,6 +676,13 @@ export class RingCurrentGlobe {
         this._simHours = 0;       // SIM hours — drift + lifecycle clock (SimClock)
         this._builtPeakL = 0;
         this._parcels = [];       // in-transit L1 samples (state.transit)
+        // Performance instrumentation: per-section CPU EMAs, a frame-time
+        // ring buffer (p95), and an adaptive quality tier — see _perfCheck.
+        this._perf = {
+            frameMs: 16.7, buf: new Float32Array(240), bi: 0, bn: 0,
+            sections: { state: 0, transit: 0, pools: 0, tooltip: 0, render: 0 },
+            tier: 0, slow: 0, lastCheck: 0,
+        };
 
         const w = container.clientWidth || 800;
         const h = container.clientHeight || 600;
@@ -871,8 +889,9 @@ export class RingCurrentGlobe {
             this._syncStateUniforms(em);
             const ep = new THREE.Points(geo, em);
             ep.frustumCulled = false;
+            ep.visible = (this._perf?.tier ?? 0) < 2;   // quality tier 2 sheds echoes
             this._magGroup.add(ep);
-            echoes.push({ mat: em, k });
+            echoes.push({ mat: em, k, points: ep });
         }
         return { points, mat, pop, echoes };
     }
@@ -984,15 +1003,28 @@ export class RingCurrentGlobe {
         this._transitCol = new Float32Array(N * 3);
         this._transitGeo.setAttribute('position', new THREE.BufferAttribute(this._transitPos, 3).setUsage(THREE.DynamicDrawUsage));
         this._transitGeo.setAttribute('color',    new THREE.BufferAttribute(this._transitCol, 3).setUsage(THREE.DynamicDrawUsage));
-        // Fixed per-slot cluster offsets (YZ disc + slight x scatter) so
-        // parcels keep a stable shape as they advance.
+        // Fixed per-slot cluster offsets so parcels keep a stable shape as
+        // they advance. FULLY 3D cross-section: a dense core (the corridor
+        // axis the labels and barometric trace describe) plus an envelope
+        // filling a 15 R_E-radius cylinder — wider than the quiet-time
+        // dayside magnetopause flank (~15.5 R_E at the terminator), so each
+        // arriving front visibly ENGULFS the magnetosphere the way the real
+        // wind does: Earth sits inside the stream, not beside a beam. A
+        // 1-min L1 sample IS a plane front — spreading its render across
+        // the full cross-section is more faithful than the old narrow jet.
+        // Envelope points fade with radius (per-point factor) so the medium
+        // reads airy and the core stays hot.
         this._transitOff = new Float32Array(N * 3);
+        this._transitEnv = new Float32Array(N);
         for (let i = 0; i < N; i++) {
             const a = Math.random() * 2 * Math.PI;
-            const r = Math.sqrt(Math.random()) * 1.35;
-            this._transitOff[i * 3]     = (Math.random() - 0.5) * 0.9;
+            const core = Math.random() < 0.55;
+            const r = core ? Math.sqrt(Math.random()) * 1.6
+                           : 1.6 + 13.4 * Math.random() ** 1.5;
+            this._transitOff[i * 3]     = (Math.random() - 0.5) * (core ? 0.9 : 2.6);
             this._transitOff[i * 3 + 1] = Math.sin(a) * r;
             this._transitOff[i * 3 + 2] = Math.cos(a) * r;
+            this._transitEnv[i] = core ? 1 : 0.55 - 0.25 * (r / 15);
         }
         const mat = glowPointsMaterial(0.22, 0.95);   // brighter, fatter parcels
         this._transit = new THREE.Points(this._transitGeo, mat);
@@ -1002,15 +1034,17 @@ export class RingCurrentGlobe {
 
         // Solar-wind sheet: an open flux tube spanning the corridor, shaded
         // per-fragment from the live 128-bin parcel profile (see
-        // windSheetMaterial). Slightly tapered toward Earth — the flow
-        // funnels toward the magnetopause.
+        // windSheetMaterial). FLARED toward Earth (3.4 → 15.5 R_E) to match
+        // the volumetric stream cross-section: the medium widens around the
+        // obstacle like flow past a blunt body, and the magnetosphere ends
+        // up INSIDE the wind's silhouette — encompassed, as it really is.
         this._windBins = 128;
         this._windData = new Uint8Array(this._windBins * 4);
         this._windTex = new THREE.DataTexture(this._windData, this._windBins, 1, THREE.RGBAFormat);
         this._windTex.magFilter = THREE.LinearFilter;
         this._windTex.minFilter = THREE.LinearFilter;
         this._windMat = windSheetMaterial(this._windTex);
-        const tube = new THREE.CylinderGeometry(2.5, 1.7, SCALE.CORRIDOR.SPAN, 26, 64, true);
+        const tube = new THREE.CylinderGeometry(3.4, 15.5, SCALE.CORRIDOR.SPAN, 40, 64, true);
         tube.rotateZ(-Math.PI / 2);   // cylinder +Y axis → +X (sunward)
         tube.translate((TRANSIT.X_MP + TRANSIT.X_SUN) / 2, 0, 0);
         this._windSheet = new THREE.Mesh(tube, this._windMat);
@@ -1151,9 +1185,10 @@ export class RingCurrentGlobe {
                 const j = (slot * stride + k) * 3;
                 if (k < visible) {
                     // Motion is toward −x, so the trail extends sunward (+x),
-                    // fading toward its tip.
+                    // fading toward its tip. Envelope points (wide cross-
+                    // section) carry their radial fade.
                     const tFrac = visible > 1 ? k / (visible - 1) : 0;
-                    const fade = 1 - 0.62 * tFrac;
+                    const fade = (1 - 0.62 * tFrac) * this._transitEnv[slot * stride + k];
                     pos[j]     = x + off[j] * 0.5 + tFrac * trail;
                     pos[j + 1] = off[j + 1];
                     pos[j + 2] = off[j + 2];
@@ -1531,6 +1566,14 @@ export class RingCurrentGlobe {
                     pd > 2.5 && (this._lastT - this._lastShockMs) > 20_000) {
                     this._shockT = 0;
                     this._lastShockMs = this._lastT;
+                    // Physical front: sweeps the boundary surfaces nose→tail
+                    // at the shock's own measured speed (τ-scaled). Amplitude
+                    // grows with the pressure ratio, capped.
+                    this._front = {
+                        th: 0.05,
+                        vKm: Number.isFinite(p.v) ? p.v : 500,
+                        amp: Math.min(1, 0.5 + 0.25 * (pd / this._prevArrivalPdyn - 2)),
+                    };
                 }
                 this._prevArrivalPdyn = pd;
             }
@@ -1556,6 +1599,7 @@ export class RingCurrentGlobe {
         this._shockT = 1e9;             // seconds since the last shock fired
         this._lastShockMs = -1e9;
         this._prevArrivalPdyn = null;
+        this._front = null;             // sweeping shock band (boundary shaders)
         this._baseFov = this._camera.fov;
         this._reducedMotion = typeof matchMedia === 'function' &&
             matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1578,6 +1622,30 @@ export class RingCurrentGlobe {
             this._veilMat.uniforms.uA.value = 0;
             this._camera.fov = this._baseFov;
             this._camera.updateProjectionMatrix();
+        }
+        // Shock front sweep: advance the band along the boundary at the
+        // shock's τ-scaled apparent speed, dθ/dt = v_app / r(θ) — honest
+        // under the one clock (minutes across the dayside at Real ×1,
+        // ~a second at ×300). The band lives on the SURFACES (in-scene
+        // physics, not a camera effect), so prefers-reduced-motion keeps
+        // it while the veil + FOV breath above stay suppressed.
+        if (this._front) {
+            const f = this._front;
+            const vApp = f.vKm * this._clock.tau / SCALE.NEAR_EARTH.kmPerUnit;
+            const rBs = shueRadiusRe(Math.min(f.th, 1.3), this._mpR0, this._mpAlpha) * 1.29;
+            f.th += (vApp / Math.max(6, rBs)) * dt;
+            f.amp *= Math.exp(-dt / 2.5);
+            // Bow shock leads; the magnetopause band trails by the sheath
+            // transit (the compression takes time to cross the sheath).
+            this._bsMat.uniforms.uShockTh.value = f.th;
+            this._bsMat.uniforms.uShockAmp.value = f.amp;
+            this._mpMat.uniforms.uShockTh.value = f.th - 0.12;
+            this._mpMat.uniforms.uShockAmp.value = f.amp * 0.85;
+            if (f.th > 2.6 || f.amp < 0.02) {
+                this._front = null;
+                this._bsMat.uniforms.uShockAmp.value = 0;
+                this._mpMat.uniforms.uShockAmp.value = 0;
+            }
         }
         // ENA halo: ease toward the |Dst*| target like an integrating imager.
         const u = this._enaMat.uniforms;
@@ -1810,6 +1878,11 @@ export class RingCurrentGlobe {
 
     _updateTooltip(wallNow) {
         if (!this._pointerDirty || !this._pointerPx || this._dragging) return;
+        // Pose-projection picking is ~4700 trig evals + allocs — cap it at
+        // ~14 Hz (pointerDirty stays set, so the pick lands a frame later;
+        // imperceptible against a 12 px hit radius).
+        if (wallNow - (this._lastPickMs ?? 0) < 70) return;
+        this._lastPickMs = wallNow;
         this._pointerDirty = false;
         const rect = this._renderer.domElement.getBoundingClientRect();
 
@@ -1984,6 +2057,10 @@ export class RingCurrentGlobe {
         // can FEEL approaching before it arrives (cinematic, data-driven).
         this._sun.scale.setScalar(11 * (1 + (0.02 + 0.09 * (this._sunVbsNorm ?? 0))
             * Math.sin(wallNow / 600)));
+        // Section timing (EMA α=0.05): where each frame's CPU goes. ~6
+        // performance.now() calls/frame — negligible against what they map.
+        const S = this._perf.sections, blend = (k, t0, t1) => { S[k] += (t1 - t0 - S[k]) * 0.05; };
+        let tMark = performance.now();
         this._updateGeometry(simNow);
         this._skin.update(this._tView);   // aurora animation clock
         // All trapped-particle motion + lifecycle is in the vertex shader —
@@ -2001,17 +2078,87 @@ export class RingCurrentGlobe {
                 e.mat.uniforms.uBounceSec.value  = this._tView - e.k * TRAIL_VIEW_S;
             }
         }
+        let tNow = performance.now();
+        blend('state', tMark, tNow); tMark = tNow;
         this._updateBoundaries(dt);
         this._updateTransit(simNow, wallNow);
         this._detectArrivals(simNow);
         this._lastSimNow = simNow;
+        tNow = performance.now();
+        blend('transit', tMark, tNow); tMark = tNow;
         this._updateFlashes(dt);
         this._updateInjections(dt, dSimH);
         this._updateSheath(dt);
         this._updateCinematics(dt);
+        tNow = performance.now();
+        blend('pools', tMark, tNow); tMark = tNow;
         this._updateTooltip(wallNow);
+        tNow = performance.now();
+        blend('tooltip', tMark, tNow); tMark = tNow;
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
+        blend('render', tMark, performance.now());
+        this._perfCheck(wallNow, dt);
+    }
+
+    /** Frame accounting + adaptive quality. Frame-time EMA and a 240-frame
+     *  ring buffer (p95); once per second, sustained slowness (EMA > 26 ms
+     *  for 4 consecutive checks) steps the quality tier DOWN — never back
+     *  up (no flip-flopping):
+     *    1 — pixel ratio capped at 1.25
+     *    2 — pixel ratio 1.0 + trail echoes off (6 fewer point draws)
+     *    3 — wind sheet, ENA halo + pressure envelope off (overdraw)
+     *  Physics is NEVER degraded — only rendering cost. Live numbers via
+     *  the perf getter feed the page's HUD chip and one-shot telemetry. */
+    _perfCheck(wallNow, dt) {
+        const p = this._perf;
+        const ms = dt * 1000;
+        p.frameMs += (ms - p.frameMs) * 0.05;
+        p.buf[p.bi] = ms;
+        p.bi = (p.bi + 1) % p.buf.length;
+        p.bn++;
+        if (wallNow - p.lastCheck < 1000) return;
+        p.lastCheck = wallNow;
+        if (p.frameMs > 26) p.slow++; else p.slow = Math.max(0, p.slow - 1);
+        if (p.slow >= 4 && p.tier < 3) {
+            p.tier++;
+            p.slow = 0;
+            if (p.tier === 1) {
+                this._renderer.setPixelRatio(Math.min(1.25, window.devicePixelRatio || 1));
+                this._resize();
+            } else if (p.tier === 2) {
+                this._renderer.setPixelRatio(1);
+                this._resize();
+                for (const P of Object.values(this._popPoints ?? {})) {
+                    for (const e of P.echoes) e.points.visible = false;
+                }
+            } else {
+                this._windSheet.visible = false;
+                this._enaHalo.visible = false;
+                this._env.visible = false;
+            }
+            console.info(`[ring-current] frame ${p.frameMs.toFixed(1)} ms sustained — quality tier ${p.tier}`);
+        }
+    }
+
+    /** Live performance snapshot (page HUD + telemetry + probes). */
+    get perf() {
+        const p = this._perf;
+        const n = Math.min(p.bn, p.buf.length);
+        let p95 = 0;
+        if (n > 10) {
+            const arr = Array.from(p.buf.subarray(0, n)).sort((a, b) => a - b);
+            p95 = arr[Math.floor(n * 0.95)];
+        }
+        const r = this._renderer.info.render;
+        return {
+            fps: p.frameMs > 0 ? 1000 / p.frameMs : 0,
+            frameMs: p.frameMs, p95Ms: p95,
+            sections: { ...p.sections },
+            tier: p.tier,
+            pixelRatio: this._renderer.getPixelRatio(),
+            drawCalls: r.calls, triangles: r.triangles, points: r.points,
+        };
     }
 
     /** Earth spin/tilt + magnetosphere dipole tilt at SIM time — the one

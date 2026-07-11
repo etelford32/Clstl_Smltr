@@ -63,6 +63,22 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   time, mean-solar local time at the saved user location (js/user-location
 >   longitude — civil tz needs a tz db), and Earth's true orbital position
 >   (earthOrbit: heliocentric λ, r in AU, Kepler-second-law-tested).
+> - **Volumetric stream + shock front + perf instrumentation** (2026-07-11):
+>   the incoming stream is FULLY 3D — each parcel renders as a dense core
+>   plus an envelope filling a 15 Rᴇ-radius cross-section (wider than the
+>   quiet dayside magnetopause flank), so arriving fronts visibly engulf
+>   the magnetosphere; the wind sheet flares 3.4 → 15.5 Rᴇ to match. Real
+>   IP shocks now also SWEEP the boundary surfaces: a gaussian band in the
+>   boundary shaders advances nose→tail at the shock's own τ-scaled speed
+>   (dθ/dt = v_app/r), bow shock leading, magnetopause trailing by the
+>   sheath transit — in-scene physics, so it stays under
+>   prefers-reduced-motion while the veil/FOV breath remain suppressed.
+>   Performance: the globe instruments itself (per-section CPU EMAs, p95
+>   frame ring buffer, renderer.info) behind a `perf` getter feeding a live
+>   HUD chip + a one-shot anonymous `recordPerf` sample at ~45 s; sustained
+>   slow frames step an adaptive quality tier down (dpr cap → echoes off →
+>   wind sheet/ENA/envelope off) — rendering cost only, never physics.
+>   Tooltip pose-projection picking is capped at ~14 Hz.
 > - **Tail transport** (2026-07-11, the journey's last leg): sheath tracers
 >   reaching the flank end fork on a VBs gate into a stage-2 tail-return
 >   state — antisunward + ~60 km/s entry inflow until captured inside the
