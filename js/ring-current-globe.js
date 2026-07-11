@@ -54,7 +54,23 @@
  * frame (sceneRate = −driftRateRadPerHour); electrons the reverse. Both
  * still carry westward current.
  *
- * Physics weights come from js/ring-current-model.js — this file only draws.
+ * PIPELINE (2026-07-11 rework):
+ *   · Population attributes are built OFF-THREAD by js/ring-current-worker.js
+ *     (transferred ArrayBuffers; synchronous buildPopulation fallback when
+ *     Workers are unavailable).
+ *   · Per-frame particle KINEMATICS run on the GPU: trappedPointsMaterial's
+ *     vertex shader integrates drift (θ₀ + rate·uDriftHours) and bounce
+ *     (λ_m·sin(rate·uBounceSec + φ)) from static attributes, and evaluates
+ *     the radial profile, dusk asymmetry, and a nightside injection pulse
+ *     per vertex. The attribute buffers upload ONCE; each frame costs the
+ *     CPU a handful of uniform writes instead of 4700 position/color writes.
+ *     The GLSL is a port of radialProfile/azimuthalWeight/ringPeakL — KEEP
+ *     IN SYNC with js/ring-current-model.js (node tests pin the JS side;
+ *     the shader mirrors it line for line).
+ *   · Earth renders through a day/night terminator shader (Blue Marble +
+ *     city-lights textures, twilight band at the limb) — the accurate spin
+ *     phase is visible as the actual night hemisphere, live.
+ *
  * Drift runs at real rate × timeCompression (default 600×, so a 100 keV ion
  * at L=3 laps Earth in ~14 s of viewing; set 1× for true real time).
  */
@@ -62,26 +78,29 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-    radialProfile, azimuthalWeight, driftRateRadPerHour, ringPeakL,
-    dipoleFieldLinePoint, mirrorLatitude, lossConeAngle, dynamicPressure,
-    bouncePeriodSeconds, subsolarPoint, dipoleTiltRad,
+    ringPeakL, dynamicPressure, subsolarPoint, dipoleTiltRad,
 } from './ring-current-model.js';
+import { buildPopulation, POPULATIONS } from './ring-current-particles.js';
 
 // Keep in sync with js/earth-skin.js EARTH_TEXTURES (version-pinned CDN).
-const EARTH_DAY_TEXTURE = 'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg';
+const EARTH_DAY_TEXTURE   = 'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg';
+const EARTH_NIGHT_TEXTURE = 'https://unpkg.com/three-globe@2.31.0/example/img/earth-night.jpg';
 
 const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);   // H⁺ (solar wind)
 const ION_O_COLOR    = new THREE.Color(0.58, 1.00, 0.34);   // O⁺ (ionospheric outflow)
 const ELECTRON_COLOR = new THREE.Color(0.35, 0.75, 1.00);
 
-// Fraction of ion PARTICLES built as O⁺. Fixed at build time (species can't
-// flip mid-flight without a bounce-phase jump); the on-screen energy mix is
-// steered per frame by brightness, normalised against this build ratio.
-const O_BUILD_FRACTION = 1100 / 3200;
+// Fraction of ion PARTICLES built as O⁺ (POPULATIONS in
+// js/ring-current-particles.js). Fixed at build time (species can't flip
+// mid-flight without a bounce-phase jump); the on-screen ENERGY mix is
+// steered per frame by a brightness uniform, normalised to this ratio.
+const O_BUILD_FRACTION =
+    POPULATIONS.ionsO.count / (POPULATIONS.ionsH.count + POPULATIONS.ionsO.count);
 
 // Soft-glow point shader: every particle renders as a gaussian orb with a
-// hot core instead of a hard square — one material for populations, transit
-// stream, and pressure envelope.
+// hot core instead of a hard square — used by the transit stream and the
+// pressure envelope (per-vertex colors). Trapped populations use
+// trappedPointsMaterial below, which computes kinematics on the GPU.
 function glowPointsMaterial(size, opacity) {
     return new THREE.ShaderMaterial({
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -126,40 +145,133 @@ function atmosphereMaterial() {
 
 
 /**
- * Trapped population with REAL dipole bounce: each particle gets an
- * equatorial pitch angle sampled ABOVE the loss cone (below it precipitates —
- * those never appear), the corresponding mirror latitude from μ-conservation,
- * and oscillates along its field line r = L·cos²λ between ±λ_m at its TRUE
- * bounce period (bouncePeriodSeconds — species mass matters: O⁺ is 4× slower
- * than H⁺ at the same energy, electrons buzz sub-second). Bounce time is
- * wall-clock, never compressed. Drift is physical rate × timeCompression,
- * sign flipped into scene θ (see header: westward = θ increasing).
- *
- * @param {'ion'|'oxygen'|'electron'} species
+ * GPU trapped-particle material: the vertex shader IS the kinematics.
+ * Attributes (from js/ring-current-particles.js, built off-thread):
+ *   position = (L, θ₀, λ_m)     kin = (driftRate rad/h, bounceRate rad/s, φ)
+ * Uniforms advance per frame (uDriftHours × compression, uBounceSec wall
+ * clock) and per state tick (uDstStar, uAsymAmp, uMix, uInjection). The
+ * brightness weight ports radialProfile · azimuthalWeight · intensity from
+ * js/ring-current-model.js — KEEP THE GLSL IN SYNC with the JS — plus a
+ * nightside injection pulse: fresh plasma-sheet plasma entering near ~1 MLT,
+ * scaled by the live O'Brien–McPherron injection |Q|. That's the ring's
+ * actual dynamic: nightside feed-in, westward drift, dusk build-up.
  */
-function makePopulation(count, species) {
-    const L       = new Float32Array(count);
-    const theta   = new Float32Array(count);
-    const eKev    = new Float32Array(count);
-    const mirrorL = new Float32Array(count);  // mirror latitude (rad)
-    const bRate   = new Float32Array(count);  // TRUE bounce rate 2π/T_b (rad/s)
-    const bPhase  = new Float32Array(count);
-    const rate    = new Float32Array(count);  // drift, scene-θ rad/h, signed
-    const driftSpecies = species === 'electron' ? 'electron' : 'ion';
-    for (let i = 0; i < count; i++) {
-        L[i]     = 1.9 + Math.random() * 4.6;
-        theta[i] = Math.random() * 2 * Math.PI;
-        eKev[i]  = 20 * Math.pow(250 / 20, Math.random());      // log-uniform 20–250 keV
-        // Pitch angle above the loss cone, biased toward 90° (trapped
-        // distributions peak at equatorial mirroring).
-        const lc = lossConeAngle(L[i]);
-        const alpha = lc + (Math.PI / 2 - lc) * Math.pow(Math.random(), 0.45);
-        mirrorL[i] = mirrorLatitude(alpha);
-        bRate[i]   = 2 * Math.PI / bouncePeriodSeconds(eKev[i], L[i], alpha, species);
-        bPhase[i]  = Math.random() * 2 * Math.PI;
-        rate[i]    = -driftRateRadPerHour(eKev[i], L[i], driftSpecies);
-    }
-    return { count, species, L, theta, eKev, mirrorL, bRate, bPhase, rate };
+function trappedPointsMaterial(size, opacity, color) {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: {
+            uSize:       { value: size },
+            uOpacity:    { value: opacity },
+            uColor:      { value: new THREE.Color(color) },
+            uDriftHours: { value: 0 },      // model-hours (advances × compression)
+            uBounceSec:  { value: 0 },      // wall-clock seconds (never compressed)
+            uDstStar:    { value: -10 },
+            uAsymAmp:    { value: 0 },
+            uAsymMlt:    { value: 19 },
+            uMix:        { value: 1 },      // composition brightness steer
+            uInjection:  { value: 0 },      // |Q| / 12 nT/h, clamped 0..1
+        },
+        vertexShader: `
+            uniform float uSize, uDriftHours, uBounceSec, uDstStar,
+                          uAsymAmp, uAsymMlt, uMix, uInjection;
+            attribute vec3 kin;
+            varying float vW;
+            const float PI = 3.14159265358979;
+            void main() {
+                // Kinematics: drift + bounce along the dipole field line.
+                float L     = position.x;
+                float theta = position.y + kin.x * uDriftHours;
+                float lam   = position.z * sin(kin.y * uBounceSec + kin.z);
+                float cl    = cos(lam);
+                float r     = L * cl * cl;
+                vec3 p = vec3(r * cl * cos(theta), r * sin(lam), r * cl * sin(theta));
+
+                // radialProfile(L, Dst*) — GLSL port (sync with model JS).
+                float d     = min(0.0, uDstStar);
+                float peak  = 2.4 + 1.6 * exp(d / 120.0);          // ringPeakL
+                float sigma = L < peak ? 0.55 : 1.15;
+                float g     = exp(-(L - peak) * (L - peak) / (2.0 * sigma * sigma))
+                            / (1.0 + exp(-(L - 1.8) / 0.12))       // inner truncation
+                            / (1.0 + exp((L - 6.8) / 0.35));       // outer skirt
+                // azimuthalWeight — MLT = (12 − θ·12/π) mod 24 (GSM frame).
+                float mlt = mod(12.0 - theta * 12.0 / PI, 24.0);
+                float azw = 1.0 + uAsymAmp * cos((mlt - uAsymMlt) / 24.0 * 2.0 * PI);
+                // Nightside injection: gaussian sector near ~1 MLT (the
+                // storm-time injection boundary), live-scaled by |Q|.
+                float dmlt = mod(mlt - 1.0 + 12.0, 24.0) - 12.0;
+                float inj  = uInjection * exp(-dmlt * dmlt / 12.5);
+
+                float intensity = (0.25 + 0.75 * min(1.0, abs(uDstStar) / 150.0)) * uMix;
+                vW = (0.06 + 0.94 * min(1.3, g * azw * intensity)) * (1.0 + 1.4 * inj * g);
+
+                vec4 mv = modelViewMatrix * vec4(p, 1.0);
+                gl_PointSize = uSize * 320.0 / -mv.z;
+                gl_Position = projectionMatrix * mv;
+            }`,
+        fragmentShader: `
+            uniform vec3 uColor; uniform float uOpacity;
+            varying float vW;
+            void main() {
+                float r = length(gl_PointCoord - vec2(0.5)) * 2.0;
+                float a = exp(-4.5 * r * r) - 0.011;
+                if (a <= 0.0) discard;
+                gl_FragColor = vec4(uColor * (1.0 + 0.7 * (1.0 - r)) * vW, a * uOpacity);
+            }`,
+    });
+}
+
+/**
+ * Earth day/night terminator shader — what makes the accurate spin VISIBLE:
+ * Blue Marble on the sunlit side, real city lights on the night side, an
+ * orange twilight band at the terminator. Sun direction is the GSM +X axis
+ * (constant by construction); the normal is taken in world space so the
+ * mesh's live spin/tilt does the work. Textures are optional — flat
+ * ocean-blue / near-black fallbacks keep the globe drawable offline.
+ */
+function earthDayNightMaterial() {
+    return new THREE.ShaderMaterial({
+        uniforms: {
+            uDay:      { value: null },
+            uNight:    { value: null },
+            uHasDay:   { value: 0 },
+            uHasNight: { value: 0 },
+        },
+        vertexShader: `
+            varying vec2 vUv; varying vec3 vN;
+            void main() {
+                vUv = uv;
+                vN = normalize(mat3(modelMatrix) * normal);   // rotation-only: no scale
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+        fragmentShader: `
+            uniform sampler2D uDay, uNight;
+            uniform float uHasDay, uHasNight;
+            varying vec2 vUv; varying vec3 vN;
+            void main() {
+                float ndl = dot(normalize(vN), vec3(1.0, 0.0, 0.0));   // Sun = +X (GSM)
+                vec3 day   = mix(vec3(0.16, 0.30, 0.56), texture2D(uDay,   vUv).rgb, uHasDay);
+                vec3 night = mix(vec3(0.012, 0.02, 0.05),
+                                 texture2D(uNight, vUv).rgb * 1.7 + texture2D(uDay, vUv).rgb * 0.05,
+                                 uHasNight);
+                float dayMix = smoothstep(-0.08, 0.18, ndl);
+                vec3 col = mix(night, day * (0.24 + 0.96 * max(0.0, ndl)), dayMix);
+                // Twilight: warm scatter band hugging the terminator.
+                float tw = exp(-pow((ndl + 0.02) / 0.10, 2.0));
+                col += vec3(1.0, 0.45, 0.22) * tw * 0.16;
+                gl_FragColor = vec4(col, 1.0);
+            }`,
+    });
+}
+
+/** Thin polar axis line through the origin, length ±halfLen. */
+function axisLine(halfLen, color, opacity) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(
+        new Float32Array([0, -halfLen, 0, 0, halfLen, 0]), 3));
+    return new THREE.Line(geo, new THREE.LineBasicMaterial({
+        color, transparent: true, opacity, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    }));
 }
 
 // ── Incoming solar wind stream (the Sun→Earth twin bridge) ──────────────────
@@ -206,11 +318,13 @@ export class RingCurrentGlobe {
             dstStar: -10, peakL: ringPeakL(-10),
             asym: { amplitude: 0, mltPeakHours: 19 },
             plasmapauseL: 4.7,
+            injection: 0,     // |Q|/12, clamped 0..1 — drives the nightside pulse
         };
         this._disposed = false;
         this._raf = 0;
         this._lastT = 0;
-        this._tView = 0;          // viewing-time clock for the bounce motion
+        this._tView = 0;          // wall-clock seconds — TRUE bounce time
+        this._driftHours = 0;     // model-hours — drift time × compression
         this._builtPeakL = 0;
         this._parcels = [];       // in-transit L1 samples (state.transit)
 
@@ -268,13 +382,18 @@ export class RingCurrentGlobe {
     // ── Scene construction ──────────────────────────────────────────────────
 
     _buildEarth() {
-        const mat = new THREE.MeshPhongMaterial({ color: 0x2a4d8f, shininess: 18 });
-        new THREE.TextureLoader().load(EARTH_DAY_TEXTURE, (tex) => {
-            tex.colorSpace = THREE.SRGBColorSpace;
-            mat.map = tex;
-            mat.color.set(0xffffff);
-            mat.needsUpdate = true;
-        }, undefined, () => { /* CDN unreachable → keep the plain blue globe */ });
+        const mat = earthDayNightMaterial();
+        const loader = new THREE.TextureLoader();
+        // Raw (non-sRGB-tagged) sampling on purpose: the shader outputs the
+        // texture values directly, same policy as the other raw shaders here.
+        loader.load(EARTH_DAY_TEXTURE, (tex) => {
+            mat.uniforms.uDay.value = tex;
+            mat.uniforms.uHasDay.value = 1;
+        }, undefined, () => { /* CDN unreachable → flat ocean-blue dayside */ });
+        loader.load(EARTH_NIGHT_TEXTURE, (tex) => {
+            mat.uniforms.uNight.value = tex;
+            mat.uniforms.uHasNight.value = 1;
+        }, undefined, () => { /* fallback near-black nightside */ });
         // Tilt group carries the axial tilt (rotation.z = −declination, pole
         // toward the Sun in northern summer); the mesh inside spins about the
         // tilted axis. Spin phase: THREE.SphereGeometry puts the equirect
@@ -285,6 +404,9 @@ export class RingCurrentGlobe {
         this._earthTilt = new THREE.Group();
         this._earth = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 48), mat);
         this._earthTilt.add(this._earth);
+        // Geographic spin axis — with the dipole axis in _magGroup this makes
+        // the daily wobble between the two visibly legible.
+        this._earthTilt.add(axisLine(1.38, 0xdfe8ff, 0.5));
         this._scene.add(this._earthTilt);
 
         const atmo = new THREE.Mesh(
@@ -318,35 +440,86 @@ export class RingCurrentGlobe {
         this._magGroup.add(group);
     }
 
+    /**
+     * Populations are BUILT off-thread (js/ring-current-worker.js) and
+     * rendered from static GPU attributes — see header. The worker path is
+     * fire-and-forget at construction; until buffers arrive the ring simply
+     * hasn't populated yet (~a frame or two). Any worker failure falls back
+     * to building inline with the same buildPopulation the worker runs.
+     */
     _buildParticles() {
-        // Ion budget split H⁺/O⁺ at O_BUILD_FRACTION. O⁺ drifts identically
-        // (drift period is mass-independent at fixed energy) but bounces at
-        // its TRUE 4×-slower period via the species mass in makePopulation.
-        this._ionsH     = this._makePoints(makePopulation(2100, 'ion'),      ION_COLOR,      0.085);
-        this._ionsO     = this._makePoints(makePopulation(1100, 'oxygen'),   ION_O_COLOR,    0.095);
-        this._electrons = this._makePoints(makePopulation(1400, 'electron'), ELECTRON_COLOR, 0.060);
-        // Start at the quiet-time energy mix (≈6% O⁺).
-        this._setCompositionMix(0.06);
+        this._popPoints = {};    // key → { points, mat }
+        this._pendingMix = 0.06; // quiet-time O⁺ energy mix until first state
+        const styles = {
+            ionsH:     { color: ION_COLOR,      size: 0.085 },
+            ionsO:     { color: ION_O_COLOR,    size: 0.095 },
+            electrons: { color: ELECTRON_COLOR, size: 0.060 },
+        };
+        const addPop = (key, pop) => {
+            if (this._disposed) return;
+            this._popPoints[key] = this._makePoints(pop, styles[key].color, styles[key].size);
+            this._setCompositionMix(this._pendingMix);
+        };
+        const buildInline = () => {
+            for (const [key, spec] of Object.entries(POPULATIONS)) {
+                if (!this._popPoints[key]) addPop(key, buildPopulation(spec.count, spec.species));
+            }
+        };
+        try {
+            if (typeof Worker === 'undefined') throw new Error('no Worker API');
+            const w = new Worker(new URL('./ring-current-worker.js', import.meta.url), { type: 'module' });
+            let got = 0;
+            const bail = (e) => { console.warn('[ring-current] population worker failed:', e); w.terminate(); buildInline(); };
+            const timer = setTimeout(() => bail(new Error('timeout')), 8000);
+            w.onerror = (e) => { clearTimeout(timer); bail(e.error ?? e.message ?? e); };
+            w.onmessage = (ev) => {
+                const m = ev.data;
+                if (!m?.ok) { clearTimeout(timer); bail(m?.error); return; }
+                addPop(m.id, m);
+                if (++got === Object.keys(POPULATIONS).length) { clearTimeout(timer); w.terminate(); }
+            };
+            for (const [key, spec] of Object.entries(POPULATIONS)) {
+                w.postMessage({ id: key, type: 'population', count: spec.count, species: spec.species });
+            }
+        } catch (e) {
+            console.warn('[ring-current] Workers unavailable, building populations inline:', e);
+            buildInline();
+        }
     }
 
-    /** Brightness-steer the two ion populations to an O⁺ energy fraction. */
+    /** Brightness-steer the two ion populations to an O⁺ energy fraction
+     *  (writes the uMix uniforms; safe before the buffers have arrived). */
     _setCompositionMix(fO) {
         const f = Math.max(0, Math.min(0.8, Number.isFinite(fO) ? fO : 0.06));
-        this._ionsO.mix = Math.min(1.8, f / O_BUILD_FRACTION);
-        this._ionsH.mix = Math.min(1.3, (1 - f) / (1 - O_BUILD_FRACTION));
+        this._pendingMix = f;
+        const o = this._popPoints?.ionsO, h = this._popPoints?.ionsH;
+        if (o) o.mat.uniforms.uMix.value = Math.min(1.8, f / O_BUILD_FRACTION);
+        if (h) h.mat.uniforms.uMix.value = Math.min(1.3, (1 - f) / (1 - O_BUILD_FRACTION));
     }
 
-    _makePoints(pop, baseColor, size) {
+    /** Static-attribute Points: position=(L, θ₀, λ_m), kin=(drift, bounce, φ).
+     *  Uploaded once; all motion happens in the vertex shader. */
+    _makePoints(pop, color, size) {
         const geo = new THREE.BufferGeometry();
-        const pos = new Float32Array(pop.count * 3);
-        const col = new Float32Array(pop.count * 3);
-        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
-        geo.setAttribute('color',    new THREE.BufferAttribute(col, 3).setUsage(THREE.DynamicDrawUsage));
-        const mat = glowPointsMaterial(size, 0.9);
+        geo.setAttribute('position', new THREE.BufferAttribute(pop.seed, 3));
+        geo.setAttribute('kin',      new THREE.BufferAttribute(pop.kin, 3));
+        const mat = trappedPointsMaterial(size, 0.9, color);
+        this._syncStateUniforms(mat);
         const points = new THREE.Points(geo, mat);
-        points.frustumCulled = false;
+        points.frustumCulled = false;   // position attr holds (L,θ₀,λ_m), not xyz
         this._magGroup.add(points);
-        return { pop, geo, pos, col, baseColor, points, mix: 1 };
+        return { points, mat };
+    }
+
+    /** Push the current model state into one material's uniforms. */
+    _syncStateUniforms(mat) {
+        const u = mat.uniforms;
+        u.uDriftHours.value = this._driftHours;
+        u.uBounceSec.value  = this._tView;
+        u.uDstStar.value    = this._state.dstStar;
+        u.uAsymAmp.value    = this._state.asym.amplitude;
+        u.uAsymMlt.value    = this._state.asym.mltPeakHours;
+        u.uInjection.value  = this._state.injection;
     }
 
     _buildRings() {
@@ -370,6 +543,10 @@ export class RingCurrentGlobe {
         this._plasmapause = new THREE.Mesh(new THREE.TorusGeometry(4.7, 0.018, 8, 160), this._ppMat);
         this._plasmapause.rotation.x = Math.PI / 2;
         this._magGroup.add(this._plasmapause);
+
+        // Dipole axis — tilts with the magnetosphere; compare against the
+        // white geographic axis to watch the real daily wobble between them.
+        this._magGroup.add(axisLine(1.75, 0xff9a3d, 0.45));
     }
 
     _rebuildTorus(peakL) {
@@ -631,8 +808,12 @@ export class RingCurrentGlobe {
             peakL:        Number.isFinite(now.peakL) ? now.peakL : ringPeakL(-10),
             asym:         now.asymmetry || { amplitude: 0, mltPeakHours: 19 },
             plasmapauseL: Number.isFinite(now.plasmapauseL) ? now.plasmapauseL : 4.7,
+            // Live injection strength: |Q| ≈ 12 nT/h is already a strong
+            // storm main phase — saturate the nightside pulse there.
+            injection:    Math.min(1, Math.abs(now.injectionQ ?? 0) / 12),
         };
         this._setCompositionMix(now.oxygenFraction);
+        for (const p of Object.values(this._popPoints ?? {})) this._syncStateUniforms(p.mat);
         if (Math.abs(this._state.peakL - this._builtPeakL) > 0.12) {
             this._rebuildTorus(this._state.peakL);
         }
@@ -650,10 +831,14 @@ export class RingCurrentGlobe {
     tick(dt) {
         const dtH = (dt * this._timeCompression) / 3600;   // viewing → model hours
         this._tView += dt;
+        this._driftHours += dtH;
         this._updateGeometry();
-        this._updatePopulation(this._ionsH, dtH);
-        this._updatePopulation(this._ionsO, dtH);
-        this._updatePopulation(this._electrons, dtH);
+        // All particle motion is in the vertex shader — the per-frame CPU
+        // cost of 4 700 particles is these two uniform writes per material.
+        for (const p of Object.values(this._popPoints ?? {})) {
+            p.mat.uniforms.uDriftHours.value = this._driftHours;
+            p.mat.uniforms.uBounceSec.value  = this._tView;
+        }
         this._updateTransit();
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
@@ -668,40 +853,6 @@ export class RingCurrentGlobe {
         this._earthTilt.rotation.z = -sp.latDeg * Math.PI / 180;   // axis by declination
         this._earth.rotation.y     = -sp.lonDeg * Math.PI / 180;   // subsolar lon → +X
         this._magGroup.rotation.z  = -dipoleTiltRad(nowMs);        // GSM dipole tilt ψ
-    }
-
-    _updatePopulation(P, dtH) {
-        const { pop, pos, col, baseColor, mix } = P;
-        const { dstStar, asym } = this._state;
-        // mix: composition brightness steer (H⁺ vs O⁺ energy share).
-        const intensity = (0.25 + 0.75 * Math.min(1, Math.abs(dstStar) / 150)) * mix;
-        const tv = this._tView;
-        for (let i = 0; i < pop.count; i++) {
-            let th = pop.theta[i] + pop.rate[i] * dtH;
-            if (th > 2 * Math.PI) th -= 2 * Math.PI;
-            else if (th < 0) th += 2 * Math.PI;
-            pop.theta[i] = th;
-
-            // Bounce along the field line r = L·cos²λ between ±mirror
-            // latitude — the particle physically follows its flux tube, so
-            // the ring reads as a true 3D shell, not a flat annulus.
-            const L = pop.L[i];
-            const lam = pop.mirrorL[i] * Math.sin(pop.bRate[i] * tv + pop.bPhase[i]);
-            const fl = dipoleFieldLinePoint(L, lam);
-            const j = i * 3;
-            pos[j]     = fl.rho * Math.cos(th);
-            pos[j + 1] = fl.y;
-            pos[j + 2] = fl.rho * Math.sin(th);
-
-            const mlt = ((12 - th * 12 / Math.PI) % 24 + 24) % 24;   // frame: dawn at +Z
-            const w = radialProfile(L, dstStar) * azimuthalWeight(mlt, asym) * intensity;
-            const b = 0.06 + 0.94 * Math.min(1.3, w);
-            col[j]     = baseColor.r * b;
-            col[j + 1] = baseColor.g * b;
-            col[j + 2] = baseColor.b * b;
-        }
-        P.geo.attributes.position.needsUpdate = true;
-        P.geo.attributes.color.needsUpdate = true;
     }
 
     _resize() {

@@ -230,6 +230,7 @@ body {
             <span class="rc-dot" style="background:#94ff57"></span>O&#8314; ions &mdash; ionospheric, storm-injected, slower bounce<br>
             <span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east<br>
             <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause (Kp)<br>
+            <span class="rc-dot" style="background:#dfe8ff"></span>Spin axis &middot; <span class="rc-dot" style="background:#ff9a3d"></span>dipole axis &mdash; watch the daily wobble<br>
             <span class="rc-dot" style="background:#ff9a3d"></span>Peak current shell<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
             <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz
@@ -350,8 +351,11 @@ body {
                 Only drift is compressed &mdash; Earth&rsquo;s spin, the dipole
                 tilt wobble, particle bounce, and the incoming stream always run
                 at their true real-time rates. At 1&times; the whole scene is
-                real time. Particle count per 1-min sample scales with density;
-                the trace above the stream is the live barometric n(x) wave.
+                real time. Nightside ring brightening is the LIVE injection
+                strength |Q| &mdash; fresh plasma-sheet plasma entering near
+                01 MLT and drifting west toward dusk. Particle motion is
+                computed on the GPU; the model integration runs in a Web
+                Worker off the UI thread.
             </div>
         </section>
     </div>
@@ -756,6 +760,7 @@ let lastState = null;
 const feed = new RingCurrentFeed();
 feed.addEventListener('state', (e) => {
     lastState = e.detail;
+    window.rcState = lastState;   // debug/probe handle (tests/ smoke probes)
     renderHud(lastState);
     if (!replayState) drawChart(lastState);
     globe?.setState(lastState);

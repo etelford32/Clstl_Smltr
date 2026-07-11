@@ -393,11 +393,15 @@ export class RingCurrentFeed extends EventTarget {
         this._mode     = 'full';  // 'full' | 'degraded'
         this._started  = false;
         this._errors   = [];
+        this._worker   = null;    // module worker running computeState
+        this._workerBroken = false;
+        this._reqId    = 0;       // latest-wins token for worker replies
     }
 
     async start() {
         if (this._started) return;
         this._started = true;
+        this._startWorker();
 
         await this._fullSync();
 
@@ -423,6 +427,42 @@ export class RingCurrentFeed extends EventTarget {
         for (const t of Object.values(this._timers)) clearInterval(t);
         this._timers = {};
         this._started = false;
+        this._worker?.terminate();
+        this._worker = null;
+    }
+
+    /**
+     * The 30 s model tick (ballistic propagation + 5-member OBM ensemble
+     * over 24 h of 1-min drivers) runs in js/ring-current-worker.js so the
+     * UI thread never stalls. The worker imports THIS module's computeState,
+     * so the physics cannot drift between threads. Any failure — no Worker
+     * API, module-worker unsupported, runtime error — flips to inline
+     * compute permanently (same function, same result, just on-thread).
+     */
+    _startWorker() {
+        if (this._worker || this._workerBroken) return;
+        try {
+            if (typeof Worker === 'undefined') throw new Error('no Worker API');
+            this._worker = new Worker(
+                new URL('./ring-current-worker.js', import.meta.url), { type: 'module' });
+            this._worker.onmessage = (e) => {
+                const m = e.data;
+                if (m?.id !== this._reqId) return;      // stale — newer request in flight
+                if (!m.ok) { this._workerFail(new Error(m.error)); return; }
+                this._dispatch(m.state);
+            };
+            this._worker.onerror = (e) => this._workerFail(e?.error ?? new Error(e?.message || 'worker error'));
+        } catch (e) {
+            this._workerFail(e);
+        }
+    }
+
+    _workerFail(e) {
+        this._noteError(e);
+        this._worker?.terminate();
+        this._worker = null;
+        this._workerBroken = true;
+        this._emit();   // re-emit inline so the pending tick isn't lost
     }
 
     async _tick(fn) {
@@ -523,11 +563,23 @@ export class RingCurrentFeed extends EventTarget {
     }
 
     _emit() {
-        const state = computeState(this._drivers, this._observed, this._kp, Date.now(), this._f107);
+        if (this._worker && !this._workerBroken) {
+            this._worker.postMessage({
+                id: ++this._reqId, type: 'state',
+                drivers: this._drivers, observed: this._observed,
+                kp: this._kp, nowMs: Date.now(), f107: this._f107,
+            });
+            return;   // _dispatch fires on the worker's reply (latest-wins)
+        }
+        this._dispatch(computeState(this._drivers, this._observed, this._kp, Date.now(), this._f107));
+    }
+
+    _dispatch(state) {
         const goes = goesCrossCheck(this._goes, state?.now?.dstModel ?? null, Date.now());
+        const compute = this._worker && !this._workerBroken ? 'worker' : 'inline';
         this.dispatchEvent(new CustomEvent('state', {
-            detail: state ? { ...state, goes, mode: this._mode, errors: this._errors.slice(-3) }
-                          : { goes, mode: this._mode, errors: this._errors.slice(-3), updated: Date.now() },
+            detail: state ? { ...state, goes, compute, mode: this._mode, errors: this._errors.slice(-3) }
+                          : { goes, compute, mode: this._mode, errors: this._errors.slice(-3), updated: Date.now() },
         }));
     }
 }

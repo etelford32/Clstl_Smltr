@@ -150,7 +150,9 @@ readings) — shorter window, page still live.
 |------|------|
 | `js/ring-current-model.js` | Pure physics, no DOM/THREE — unit-testable. Coupling, OBM/Burton integration, pressure correction, DPS energy, radial profile, asymmetry, drift periods, storm classification, ballistic L1 propagation, skill metrics (RMSE/bias). |
 | `js/ring-current-feed.js` | Data layer. Polls the feeds above, normalises fill values, assembles a merged 1-min driver series, anchors the model on observed Dst 24 h ago, re-integrates, emits `state` events. |
-| `js/ring-current-globe.js` | Three.js scene: Earth (pinned three-globe CDN textures), dipole field lines, drift-animated ion/electron particle populations with Dst*-driven density + dusk-side partial-ring asymmetry, plasmapause ring. |
+| `js/ring-current-globe.js` | Three.js scene: Earth (day/night terminator shader, pinned three-globe CDN textures), dipole field lines, GPU-shader trapped populations (drift+bounce integrated in the vertex shader from static attributes; radial/asymmetry/injection weights ported to GLSL — keep in sync with the model JS), plasmapause ring, spin+dipole axis lines. |
+| `js/ring-current-particles.js` | Pure population attribute builder (seed/kin Float32 buffers for the GPU shader). Shared by worker and globe fallback; node-tested. |
+| `js/ring-current-worker.js` | Module worker: builds populations (transferred buffers) and runs computeState off the UI thread. Pure `handleRequest` is node-tested; feed/globe fall back inline on any failure. |
 | `ring-current.html` | Page shell: canonical nav (`<nav></nav>` + `initNav`), HUD panels (drivers / state / forecast / validation), model-vs-observed Dst chart with forecast strip (2D canvas, no chart lib). |
 | `api/ring-current/skill.js` | Published skill ledger (Phase 2b): edge function joining `ring_current_log` ↔ `geomag_indices` via service role — aggregates only, raw rows never leave. Pure core `ledgerSkillSummary` is node-tested. |
 | `tests/ring-current-model.mjs` | Node physics tests (same pattern as `tests/abell85-physics.mjs`). |
@@ -194,6 +196,19 @@ Three.js 0.160 importmap, NOAA browser-direct / NASA via edge.
   (MLT = 12 + θ·12/π) and its "dusk" partial-ring arc actually rendered at
   13 MLT — verified numerically with the vendored three.js before both were
   fixed together. Do not "restore" the old arc rotation constant.
+- **GPU + worker pipeline (2026-07-11, same day, second pass)**: trapped
+  populations render through `trappedPointsMaterial` — the vertex shader
+  integrates drift/bounce from static (L, θ₀, λ_m)/(rate, rate, φ)
+  attributes and evaluates the radial profile, dusk asymmetry, and a
+  live-|Q|-scaled nightside injection pulse per vertex (GLSL ports of
+  `radialProfile`/`azimuthalWeight`/`ringPeakL` — KEEP IN SYNC with the
+  model). Attribute buffers are built in `js/ring-current-worker.js` and
+  transferred; the same worker runs the feed's `computeState` tick
+  (`state.compute` reports 'worker'|'inline'; any failure falls back to
+  identical inline compute). Earth draws through a day/night terminator
+  shader (Blue Marble + city lights + twilight band) so the accurate spin
+  phase is visible as the actual night hemisphere. Spin and dipole axis
+  lines make the daily wobble between the two axes legible.
 
 ---
 
