@@ -70,7 +70,8 @@
  *   · Earth renders through the SHARED EarthSkin stack (js/earth-skin.js —
  *     same renderer as earth.html / space-weather-globe): Blue Marble, city
  *     lights, ocean specular, topographic bump, Rayleigh–Mie atmosphere,
- *     procedural cloud shell, magnetic-latitude aurora oval — all driven by
+ *     magnetic-latitude aurora oval (cloud shell deliberately OFF — see
+ *     _buildEarth) — all driven by
  *     this page's live state (Kp, Bz, ap, and the model's own Dst feeding
  *     the skin's ring-current heating glow). The accurate spin phase is
  *     visible as the actual night hemisphere, live.
@@ -342,15 +343,15 @@ export class RingCurrentGlobe {
         this._earthTilt.add(this._earthSpin);
         this._scene.add(this._earthTilt);
 
+        // NO cloud shell, deliberately (clouds: false): this is a
+        // magnetosphere page — the procedural cloud deck read as noise here
+        // and was removed on request. Do not re-enable it.
         this._skin = new EarthSkin(this._earthSpin, new THREE.Vector3(1, 0, 0), {
-            radius: 1, segments: 48, clouds: true, atmosphere: true,
+            radius: 1, segments: 48, clouds: false, atmosphere: true,
         });
         this._skin.loadTextures({
             anisotropy: this._renderer.capabilities.getMaxAnisotropy(),
         });   // resolves even on CDN failure — safe per-slot fallbacks
-        // Mid quality tier for the cloud FBM: this globe shares its frame
-        // budget with 4 700 GPU particles and the transit stream.
-        this._skin.cloudU.u_quality.value = 0.8;
 
         // Geographic spin axis — with the dipole axis in _magGroup this makes
         // the daily wobble between the two visibly legible.
@@ -787,7 +788,7 @@ export class RingCurrentGlobe {
         this._tView += dt;
         this._driftHours += dtH;
         this._updateGeometry();
-        this._skin.update(this._tView);   // cloud drift/morph + aurora animation
+        this._skin.update(this._tView);   // aurora animation clock
         // All particle motion is in the vertex shader — the per-frame CPU
         // cost of 4 700 particles is these two uniform writes per material.
         for (const p of Object.values(this._popPoints ?? {})) {

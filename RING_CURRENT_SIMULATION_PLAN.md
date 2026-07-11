@@ -210,9 +210,10 @@ Three.js 0.160 importmap, NOAA browser-direct / NASA via edge.
 - **EarthSkin integration (2026-07-11, third pass)**: the page's Earth is
   now the SHARED `js/earth-skin.js` stack (same renderer as earth.html and
   the space-weather globe) — Blue Marble, city lights, ocean specular,
-  topographic bump, Rayleigh–Mie atmosphere, procedural clouds
-  (u_quality 0.8 — the frame budget is shared with the GPU particles),
-  magnetic-latitude aurora oval. Fed from THIS page's live state in
+  topographic bump, Rayleigh–Mie atmosphere, magnetic-latitude aurora oval.
+  The procedural CLOUD SHELL is deliberately OFF (clouds: false) — it read
+  as cartoon noise on a magnetosphere page and was removed on user request;
+  do not re-enable it here. Fed from THIS page's live state in
   `setState`: Kp, −Bz/30, ap→auroraAW, and the model's own Dst into the
   skin's `u_dst_norm` ring-current heating glow — Earth's appearance and
   the ring around it share one physics state. Frame note: coords.js maps
