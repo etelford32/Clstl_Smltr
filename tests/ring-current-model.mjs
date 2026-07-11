@@ -34,6 +34,7 @@ import {
     bouncePeriodSeconds, subsolarPoint, dipoleTiltRad,
     geocoronalDensity, chargeExchangeCrossSection, chargeExchangeLifetimeHours,
     earthOrbit, shueStandoffRe, shueAlpha, shueRadiusRe, bowShockStandoffRe,
+    SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -497,6 +498,36 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     // Null-safety: defaults, no throws.
     assert.ok(Number.isFinite(shueStandoffRe(null, null)));
     ok('Shue: nominal ~10.3 Rᴇ, Pdyn^-1/6.6, Bz erosion, sub-GEO extremes, flaring');
+}
+
+// ── 22. Sun→Earth timing: ballistic back-mapping + Parker spiral ────────────
+{
+    // Photon lag ≈ 8.32 min (1 AU / c).
+    assert.ok(Math.abs(SOLAR.LIGHT_LAG_MIN - 8.317) < 0.01, `light lag ${SOLAR.LIGHT_LAG_MIN}`);
+    // 400 km/s wind: (AU − L1)/v ≈ 4.28 days before its L1 measurement.
+    const t0 = 1.7e12;
+    const dep400 = sunDepartureMs(t0, 400);
+    const days400 = (t0 - dep400) / 86.4e6;
+    assert.ok(Math.abs(days400 - 4.28) < 0.05, `400 km/s → ${days400} d`);
+    // Fast wind arrives sooner — the dispersion that smears one solar
+    // "moment" over days of reception (the paper question).
+    const days620 = (t0 - sunDepartureMs(t0, 620)) / 86.4e6;
+    assert.ok(days620 < days400 && Math.abs(days620 - 2.76) < 0.05, `620 → ${days620} d`);
+    // Reception window between the two speeds is a MEASURABLE ~1.5 days.
+    assert.ok(days400 - days620 > 1.4 && days400 - days620 < 1.7);
+    // Parker garden-hose angle: ≈45° near 430 km/s, tighter for fast wind.
+    assert.ok(Math.abs(parkerSpiralDeg(429) - 45) < 1.0, `spiral ${parkerSpiralDeg(429)}`);
+    assert.ok(parkerSpiralDeg(700) < parkerSpiralDeg(350));
+    // Source-longitude sweep: Ω·AU/v — ~61° at 400 km/s, less when fast;
+    // consistency: tan(spiral) = rotation (radians) by construction.
+    const rot = sourceRotationDeg(400);
+    assert.ok(Math.abs(rot - 61.4) < 1.0, `rotation ${rot}`);
+    assert.ok(Math.abs(Math.tan(parkerSpiralDeg(400) * Math.PI / 180) - rot * Math.PI / 180) < 1e-9);
+    // Null-safety: garbage in ⇒ null out, no throws.
+    assert.equal(sunDepartureMs(t0, NaN), null);
+    assert.equal(parkerSpiralDeg(0), null);
+    assert.equal(sourceRotationDeg(undefined), null);
+    ok('Sun→Earth ledger: 8.3 light-min, 4.3 d @ 400 km/s, ~1.5 d dispersion, 45° spiral');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

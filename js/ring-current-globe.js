@@ -125,6 +125,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     ringPeakL, dynamicPressure, subsolarPoint, dipoleTiltRad,
     couplingVBs, driftRateRadPerHour, driftPeriodHours, shueRadiusRe,
+    sunDepartureMs,
 } from './ring-current-model.js';
 import {
     buildPopulation, POPULATIONS, particlePose, hash1, DEATH_WINDOW,
@@ -375,6 +376,50 @@ const INJECT = Object.freeze({
     LIFE_S:     26,      // wall-clock fade after settling into drift
     VBS_MIN:    0.5,     // ≈ OBM Ec — northward/weak parcels don't inject
 });
+
+/**
+ * L1 measurement plane — the "3D sheet" where every parcel is BORN. L1 is
+ * not rendered as a point because it isn't one in practice: DSCOVR/ACE fly
+ * halo orbits AROUND the libration point and deliver one plasma/field
+ * sample per minute through this aperture. The disc spans the volumetric
+ * stream's full cross-section, carries a faint instrument graticule
+ * (concentric range rings), and PULSES an expanding ring each time a new
+ * 1-minute sample lands from the feed — wall-clock, because the gate is
+ * live instrumentation, not physics (same rule as the parcel heartbeat).
+ */
+function l1GateMaterial(radius) {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+            uPulse: { value: 0 },     // 1 on sample arrival → decays in tick
+            uTime:  { value: 0 },
+        },
+        vertexShader: `varying vec2 vXY;
+            void main() {
+                vXY = position.xy;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+        fragmentShader: `
+            uniform float uPulse, uTime;
+            varying vec2 vXY;
+            void main() {
+                float r = length(vXY) / ${radius.toFixed(1)};
+                if (r > 1.0) discard;
+                // Instrument graticule: faint concentric range rings.
+                float rings = pow(abs(sin(r * 12.566)), 32.0) * 0.35;   // 4 rings
+                // Sample-crossing pulse: a ring expanding outward while the
+                // trigger decays (1 → 0), like a sonar return.
+                float pr = 1.0 - uPulse;
+                float pulse = uPulse * exp(-pow((r - pr) * 9.0, 2.0));
+                // Near-subliminal rotating sweep so the plane reads "live".
+                float sweep = 0.04 * pow(0.5 + 0.5 * sin(atan(vXY.y, vXY.x) - uTime * 0.35), 6.0);
+                float edge = smoothstep(1.0, 0.82, r);
+                float b = (0.05 + 0.08 * (1.0 - r) + rings * 0.2 + sweep * 1.6 + pulse * 0.85) * edge;
+                gl_FragColor = vec4(vec3(0.55, 0.78, 1.0) * b, b);
+            }`,
+    });
+}
 
 /**
  * Solar-wind sheet: the wind rendered as a continuous MEDIUM, not just dots.
@@ -1051,6 +1096,40 @@ export class RingCurrentGlobe {
         this._windSheet.frustumCulled = false;
         this._scene.add(this._windSheet);
         this._sunVbsNorm = 0;   // strongest incoming VBs (0..1) — Sun breathing
+
+        // ── L1 measurement plane + spacecraft (see l1GateMaterial) ──────────
+        // The gate disc sits exactly at the corridor start: x = X_SUN IS L1
+        // under the corridor's disclosed compression (SCALE.CORRIDOR maps
+        // L1→magnetopause onto X_SUN→X_MP). Radius spans the volumetric
+        // stream envelope. Pulse trigger lives in setState (new sample).
+        const GATE_R = 16.5;
+        this._gateMat = l1GateMaterial(GATE_R);
+        const gate = new THREE.Mesh(new THREE.CircleGeometry(GATE_R, 72), this._gateMat);
+        gate.rotateY(Math.PI / 2);              // disc normal down the corridor
+        gate.position.set(TRANSIT.X_SUN, 0, 0);
+        gate.frustumCulled = false;
+        this._scene.add(gate);
+        // Spacecraft marker: real L1 monitors fly Lissajous/halo orbits of
+        // ~150 000 km semi-axis (≈ 4 corridor units — drawn at that scale)
+        // with ~6-month periods; the period here is compressed to stay
+        // perceptible (a labeled rendering cue, like the parcel heartbeat).
+        const cCv = document.createElement('canvas');
+        cCv.width = cCv.height = 32;
+        const cg = cCv.getContext('2d');
+        const cGrad = cg.createRadialGradient(16, 16, 0, 16, 16, 16);
+        cGrad.addColorStop(0, 'rgba(230,242,255,1)');
+        cGrad.addColorStop(0.35, 'rgba(160,200,255,0.8)');
+        cGrad.addColorStop(1, 'rgba(120,170,255,0)');
+        cg.fillStyle = cGrad;
+        cg.fillRect(0, 0, 32, 32);
+        this._l1Craft = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cCv), blending: THREE.AdditiveBlending,
+            depthWrite: false, opacity: 0.95,
+        }));
+        this._l1Craft.scale.setScalar(0.9);
+        this._l1Craft.position.set(TRANSIT.X_SUN, 2.5, 2.5);
+        this._scene.add(this._l1Craft);
+        this._lastSampleTL1 = 0;
 
         // Barometric trace: n(x) as a polyline riding above the corridor —
         // the pressure-wave shape of the incoming wind, sliding Earthward in
@@ -1939,9 +2018,16 @@ export class RingCurrentGlobe {
         } else {
             const p = best.p;
             const etaMin = Math.max(0, Math.round((p.tArrive - wallNow) / 60_000));
+            // Per-parcel emission→reception ledger: THIS parcel's own speed
+            // dates its solar departure (ballistic back-mapping) — hovering
+            // across the stream shows the dispersion directly.
+            const dep = sunDepartureMs(p.tL1 ?? null, p.v);
+            const sunLine = dep != null
+                ? `<br>left the Sun ≈ ${((wallNow - dep) / 86.4e6).toFixed(1)} d ago (ballistic)`
+                : '';
             html = `<b style="color:#ffd9b0">L1 parcel</b> · v ${fmt(p.v, 0, ' km/s')}` +
                 `<br>Bz ${fmt(p.bz, 1, ' nT')} · n ${fmt(p.n, 1, ' /cm³')}` +
-                `<br>arrives in ${etaMin} min (real)`;
+                `<br>arrives in ${etaMin} min (real)${sunLine}`;
         }
         this._tipEl.innerHTML = html;
         this._tipEl.style.left = `${this._pointerPx.x + 14}px`;
@@ -1959,6 +2045,24 @@ export class RingCurrentGlobe {
         if (!this._windLab) {
             this._windLab = this._makeLabel((TRANSIT.X_MP + TRANSIT.X_SUN) / 2, TRANSIT.WAVE_Y + 6.2, 0, 9);
             this._ringLab = this._makeLabel(0, 7.8, 0, 9);
+            this._gateLab = this._makeLabel(TRANSIT.X_SUN, 20.5, 0, 10);
+        }
+        // Gate pulse: a genuinely NEW 1-min sample landed (newest tL1 moved).
+        // Wall-clock instrumentation, deliberately independent of τ.
+        const newestTL1 = this._parcels.reduce((m, p) => Math.max(m, p.tL1 ?? 0), 0);
+        if (newestTL1 > this._lastSampleTL1 && this._gateMat) {
+            this._lastSampleTL1 = newestTL1;
+            this._gateMat.uniforms.uPulse.value = 1;
+        }
+        // L1 gate label: the emission→reception ledger at the plane itself.
+        const sl = state?.now?.sunLag;
+        if (sl && this._gateLab) {
+            this._drawLabel(this._gateLab, 'L1 — MEASUREMENT PLANE', [
+                'DSCOVR/ACE sample here every 60 s',
+                `wind left Sun ${Number.isFinite(sl.days) ? sl.days.toFixed(1) : '—'} d ago (ballistic)`,
+                `light does the trip in ${sl.lightMin.toFixed(1)} min`,
+                `Sun rotated ${Number.isFinite(sl.sourceRotDeg) ? Math.round(sl.sourceRotDeg) : '—'}° during transit`,
+            ], '#9ecbff');
         }
         const d = state?.drivers, nw = state?.now;
         const f1 = (x, u, dg = 1) => Number.isFinite(x) ? `${x.toFixed(dg)}${u}` : '—';
@@ -2057,6 +2161,15 @@ export class RingCurrentGlobe {
         // can FEEL approaching before it arrives (cinematic, data-driven).
         this._sun.scale.setScalar(11 * (1 + (0.02 + 0.09 * (this._sunVbsNorm ?? 0))
             * Math.sin(wallNow / 600)));
+        // L1 gate: decay the sample pulse (~1.2 s), advance the sweep, and
+        // drift the spacecraft along its (period-compressed) Lissajous.
+        this._gateMat.uniforms.uPulse.value =
+            Math.max(0, this._gateMat.uniforms.uPulse.value - dt / 1.2);
+        this._gateMat.uniforms.uTime.value = this._tView;
+        this._l1Craft.position.set(
+            TRANSIT.X_SUN + 0.3,
+            3.4 * Math.sin(this._tView / 41),
+            4.2 * Math.cos(this._tView / 53));
         // Section timing (EMA α=0.05): where each frame's CPU goes. ~6
         // performance.now() calls/frame — negligible against what they map.
         const S = this._perf.sections, blend = (k, t0, t1) => { S[k] += (t1 - t0 - S[k]) * 0.05; };

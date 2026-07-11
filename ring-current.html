@@ -266,6 +266,7 @@ body {
             <span class="rc-dot" style="background:#37e0a0"></span>Aurora oval &mdash; live Kp/Bz at the magnetic pole<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
             <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz<br>
+            <span class="rc-dot" style="background:#9ecbff"></span>L1 plane &mdash; pulse = new 1-min sample &middot; dot = DSCOVR/ACE halo orbit<br>
             <span class="rc-dot" style="background:#7fb4ff"></span>Magnetopause (Shue98, live) &middot; <span class="rc-dot" style="background:#59e0d8"></span>bow shock<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;arrivals deflect &mdash; the sheath river parts around the boundary</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;southward IMF: flank strands turn gold &mdash; tail return flow &rarr; midnight injection</span><br>
@@ -315,6 +316,9 @@ body {
             <div class="rc-kv"><span class="rc-k">parcels in transit</span><span class="rc-v" id="rc-parcels">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">strongest incoming</span><span class="rc-v" id="rc-strongest">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">arrives in</span><span class="rc-v" id="rc-strongest-eta">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">wind left the Sun</span><span class="rc-v" id="rc-sunlag">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">emission &rarr; reception</span><span class="rc-v" id="rc-sunlag-cmp">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">Sun rotated in transit</span><span class="rc-v" id="rc-sunrot">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">thermosphere drag risk</span><span class="rc-v" id="rc-drag">&mdash;</span></div>
             <div class="rc-bridge-links">
                 <a href="/sun.html" title="Solar surface twin — where this wind left the Sun">&#9728;&#65039; Sun twin</a>
@@ -703,6 +707,19 @@ function renderHud(s) {
     } else {
         $('rc-strongest').textContent = tr?.parcels?.length ? 'all northward (no driver)' : '—';
         $('rc-strongest-eta').textContent = '—';
+    }
+    // Emission→reception ledger (ballistic back-mapping, model sunLag):
+    // photons 8.3 min vs plasma days — and the plasma lag disperses with
+    // speed, so "now" at Earth mixes several solar days. Hover any parcel
+    // in the 3D view for ITS departure date.
+    const sl = s.now?.sunLag;
+    if (sl && Number.isFinite(sl.days)) {
+        const d = new Date(sl.departureMs);
+        $('rc-sunlag').textContent =
+            `${d.toISOString().slice(5, 16).replace('T', ' ')} UT · ${sl.days.toFixed(1)} d ago`;
+        $('rc-sunlag-cmp').textContent = `light 8.3 min · plasma ${sl.days.toFixed(1)} d (ballistic)`;
+        $('rc-sunrot').textContent =
+            `${Math.round(sl.sourceRotDeg)}° of longitude · Parker spiral ${Math.round(sl.spiralDeg)}°`;
     }
     // Qualitative thermosphere handoff: storm-time ring current heating ⇒
     // density enhancement ⇒ drag. Tier follows the Dst storm class.

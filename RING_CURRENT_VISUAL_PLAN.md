@@ -63,6 +63,18 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   time, mean-solar local time at the saved user location (js/user-location
 >   longitude — civil tz needs a tz db), and Earth's true orbital position
 >   (earthOrbit: heliocentric λ, r in AU, Kepler-second-law-tested).
+> - **L1 measurement plane + emission→reception ledger** (2026-07-11): L1
+>   is rendered as the instrument it is — a translucent aperture disc (the
+>   "3D sheet") at the corridor start with a range-ring graticule, pulsing
+>   an expanding ring on each NEW 1-min sample (wall-clock: it is live
+>   instrumentation, like the parcel heartbeat), plus a DSCOVR/ACE dot on
+>   a real-amplitude (~4-unit), period-compressed Lissajous. The ledger
+>   (model: `SOLAR`, `sunDepartureMs` — Nolte–Roelof ballistic back-mapping
+>   — `parkerSpiralDeg`, `sourceRotationDeg`; feed: `now.sunLag`) quantifies
+>   emission vs reception: photons 8.3 min, plasma 2.8–4.3 d by speed
+>   (≈1.5 d dispersion across 400–620 km/s — the paper question), source
+>   longitude swept 40–60°. Surfaced in the bridge HUD panel, the in-scene
+>   L1 label, and per-parcel tooltips (each parcel dates its OWN departure).
 > - **Volumetric stream + shock front + perf instrumentation** (2026-07-11):
 >   the incoming stream is FULLY 3D — each parcel renders as a dense core
 >   plus an envelope filling a 15 Rᴇ-radius cross-section (wider than the

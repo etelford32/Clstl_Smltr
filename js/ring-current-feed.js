@@ -33,6 +33,7 @@ import {
     stormClass, toDstStar, obmQ, obmTau, skill, findThresholdCrossing, kpToAp,
     oxygenFraction, subsolarPoint, dipoleTiltRad, chargeExchangeLifetimeHours,
     shueStandoffRe, shueAlpha,
+    SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
 } from './ring-current-model.js';
 
 // rtsw_mag_1m is not in config.NOAA — defined locally, same as js/swpc-feed.js.
@@ -288,6 +289,22 @@ export function computeState(driverSeries, observedDst, kp, nowMs, f107 = null) 
             kp,
             apNow:        kpToAp(kp),
             f107,
+            // Emission→reception ledger: ballistic back-mapping of the wind
+            // Earth is receiving NOW to its solar departure. Photons take
+            // 8.3 min; this plasma took days — and the lag disperses with
+            // speed, so one solar moment arrives smeared over ~1.5 days
+            // (the paper question the HUD + L1 gate label surface).
+            sunLag: (() => {
+                const v = latestValid(driverSeries, 'v');
+                const dep = sunDepartureMs(nowMs, v);
+                return {
+                    departureMs:  dep,
+                    days:         dep != null ? (nowMs - dep) / 86.4e6 : null,
+                    lightMin:     SOLAR.LIGHT_LAG_MIN,
+                    spiralDeg:    parkerSpiralDeg(v),
+                    sourceRotDeg: sourceRotationDeg(v),
+                };
+            })(),
         },
         // Predictive alert: first forecast crossing of the next storm-class
         // threshold — genuine lead time (the driver is already measured at L1).

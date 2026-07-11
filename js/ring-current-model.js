@@ -721,3 +721,47 @@ export function skill(modelSeries, observedSeries, tolMs = 30 * 60 * 1000) {
     if (!n) return { rmse: null, bias: null, n: 0 };
     return { rmse: Math.sqrt(sumSq / n), bias: sum / n, n };
 }
+
+// ── Sun → Earth timing: the emission/reception ledger ───────────────────────
+// The measurable gap the page surfaces as a first-class quantity: photons
+// reach Earth in 8.3 minutes, but the PLASMA arriving now left the corona
+// days ago — and how many days depends on each parcel's own speed, so one
+// solar "moment" arrives smeared over days and what Earth receives at any
+// instant is a mixture of emissions from different solar days (and, because
+// the Sun rotates under the outflow, different source longitudes). That
+// dispersion is the classic ballistic back-mapping question (Nolte & Roelof
+// 1973) and the quantitative hook the UI exposes per parcel and in bulk.
+
+/** Constants for the emission→reception ledger. */
+export const SOLAR = Object.freeze({
+    AU_KM:         1.496e8,                        // Sun–Earth distance
+    OMEGA_RAD_S:   2 * Math.PI / (25.38 * 86400),  // sidereal (Carrington) rotation
+    LIGHT_LAG_MIN: 1.496e8 / 299792.458 / 60,      // photon travel time ≈ 8.32 min
+});
+
+/**
+ * Ballistic solar-departure estimate: plasma measured at L1 at tL1Ms with
+ * speed v left the corona (AU − L1)/v seconds earlier. Constant-speed
+ * assumption — the real wind still accelerates inside ~0.1 AU and stream
+ * interactions rearrange arrivals, so treat as ±½ day (the solar radius,
+ * 0.5% of the leg, is ignored). ≈2.8 d at 620 km/s, ≈4.3 d at 400 km/s.
+ */
+export function sunDepartureMs(tL1Ms, vKmS) {
+    if (!Number.isFinite(tL1Ms) || !Number.isFinite(vKmS) || vKmS < 100) return null;
+    return tL1Ms - ((SOLAR.AU_KM - PHYS.L1_KM) / vKmS) * 1000;
+}
+
+/** Parker-spiral garden-hose angle at 1 AU: atan(Ω·r/v) — ≈45° at 430 km/s
+ *  (Ω·1 AU ≈ 429 km/s, the classic coincidence). */
+export function parkerSpiralDeg(vKmS) {
+    if (!Number.isFinite(vKmS) || vKmS < 100) return null;
+    return Math.atan2(SOLAR.OMEGA_RAD_S * SOLAR.AU_KM, vKmS) * 180 / Math.PI;
+}
+
+/** Solar rotation swept during the Sun→Earth transit, Ω·(AU/v): the wind
+ *  arriving now left a source this many degrees east of the current
+ *  sub-Earth longitude (the Sun turned under the outflow while it flew). */
+export function sourceRotationDeg(vKmS) {
+    if (!Number.isFinite(vKmS) || vKmS < 100) return null;
+    return SOLAR.OMEGA_RAD_S * (SOLAR.AU_KM / vKmS) * 180 / Math.PI;
+}
