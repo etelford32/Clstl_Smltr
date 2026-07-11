@@ -337,6 +337,12 @@ export class RingCurrentFeed extends EventTarget {
         await this._fullSync();
 
         this._timers.t1 = setInterval(() => this._tick(() => this._appendLatest()), INTERVALS.T1);
+        // Guaranteed update loop: recompute + emit every 30 s regardless of
+        // fetch outcomes — the forecast window, transit set, and model "now"
+        // all advance with wall time even when upstreams are quiet/failing.
+        this._timers.emit = setInterval(() => {
+            if (typeof document === 'undefined' || !document.hidden) this._emit();
+        }, 30_000);
         this._timers.t2 = setInterval(() => this._tick(() => this._refreshKp()),    INTERVALS.T2);
         this._timers.t3 = setInterval(() => this._tick(() => this._fullSync()),     INTERVALS.T3);
 

@@ -45,6 +45,52 @@ const EARTH_DAY_TEXTURE = 'https://unpkg.com/three-globe@2.31.0/example/img/eart
 const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);
 const ELECTRON_COLOR = new THREE.Color(0.35, 0.75, 1.00);
 
+// Soft-glow point shader: every particle renders as a gaussian orb with a
+// hot core instead of a hard square — one material for populations, transit
+// stream, and pressure envelope.
+function glowPointsMaterial(size, opacity) {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        vertexColors: true,
+        uniforms: { uSize: { value: size } },
+        vertexShader: `uniform float uSize; varying vec3 vC;
+            void main() {
+                vC = color;
+                vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = uSize * 320.0 / -mv.z;
+                gl_Position = projectionMatrix * mv;
+            }`,
+        fragmentShader: `varying vec3 vC;
+            void main() {
+                float r = length(gl_PointCoord - vec2(0.5)) * 2.0;
+                float a = exp(-4.5 * r * r) - 0.011;
+                if (a <= 0.0) discard;
+                gl_FragColor = vec4(vC * (1.0 + 0.7 * (1.0 - r)), a * ${opacity.toFixed(2)});
+            }`,
+    });
+}
+
+// Fresnel rim-glow atmosphere — the limb brightens like scattered light.
+function atmosphereMaterial() {
+    return new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, side: THREE.BackSide,
+        blending: THREE.AdditiveBlending,
+        vertexShader: `varying vec3 vN; varying vec3 vP;
+            void main() {
+                vN = normalize(normalMatrix * normal);
+                vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                vP = mv.xyz;
+                gl_Position = projectionMatrix * mv;
+            }`,
+        fragmentShader: `varying vec3 vN; varying vec3 vP;
+            void main() {
+                float f = pow(1.0 - abs(dot(normalize(vN), normalize(-vP))), 2.5);
+                gl_FragColor = vec4(vec3(0.25, 0.52, 1.0) * f * 1.7, f * 0.9);
+            }`,
+    });
+}
+
+
 /**
  * Trapped population with REAL dipole bounce geometry: each particle gets an
  * equatorial pitch angle sampled ABOVE the loss cone (below it precipitates —
@@ -189,10 +235,7 @@ export class RingCurrentGlobe {
 
         const atmo = new THREE.Mesh(
             new THREE.SphereGeometry(1.045, 48, 48),
-            new THREE.MeshBasicMaterial({
-                color: 0x3d6bff, transparent: true, opacity: 0.08,
-                blending: THREE.AdditiveBlending, side: THREE.BackSide, depthWrite: false,
-            }),
+            atmosphereMaterial(),
         );
         this._scene.add(atmo);
     }
@@ -232,10 +275,7 @@ export class RingCurrentGlobe {
         const col = new Float32Array(pop.count * 3);
         geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
         geo.setAttribute('color',    new THREE.BufferAttribute(col, 3).setUsage(THREE.DynamicDrawUsage));
-        const mat = new THREE.PointsMaterial({
-            size, vertexColors: true, transparent: true, opacity: 0.9,
-            blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
-        });
+        const mat = glowPointsMaterial(size, 0.9);
         const points = new THREE.Points(geo, mat);
         points.frustumCulled = false;
         this._scene.add(points);
@@ -326,10 +366,7 @@ export class RingCurrentGlobe {
             this._transitOff[i * 3 + 1] = Math.sin(a) * r;
             this._transitOff[i * 3 + 2] = Math.cos(a) * r;
         }
-        const mat = new THREE.PointsMaterial({
-            size: 0.16, vertexColors: true, transparent: true, opacity: 0.95,
-            blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
-        });
+        const mat = glowPointsMaterial(0.16, 0.95);
         this._transit = new THREE.Points(this._transitGeo, mat);
         this._transit.frustumCulled = false;
         this._scene.add(this._transit);
@@ -358,10 +395,7 @@ export class RingCurrentGlobe {
         this._envGeo = new THREE.BufferGeometry();
         this._envGeo.setAttribute('position', new THREE.BufferAttribute(this._envPos, 3).setUsage(THREE.DynamicDrawUsage));
         this._envGeo.setAttribute('color',    new THREE.BufferAttribute(this._envCol, 3).setUsage(THREE.DynamicDrawUsage));
-        this._env = new THREE.Points(this._envGeo, new THREE.PointsMaterial({
-            size: 0.10, vertexColors: true, transparent: true, opacity: 0.55,
-            blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
-        }));
+        this._env = new THREE.Points(this._envGeo, glowPointsMaterial(0.10, 0.55));
         this._env.frustumCulled = false;
         this._scene.add(this._env);
         const base = new Float32Array([TRANSIT.X_MP, TRANSIT.WAVE_Y, 0, TRANSIT.X_SUN, TRANSIT.WAVE_Y, 0]);
