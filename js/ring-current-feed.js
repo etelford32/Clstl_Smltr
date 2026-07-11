@@ -31,7 +31,7 @@ import {
     integrateDst, integrateDstEnsemble, propagateToEarth, couplingVBs,
     dynamicPressure, dpsEnergyJ, ringPeakL, asymmetry, plasmapauseL,
     stormClass, toDstStar, obmQ, obmTau, skill, findThresholdCrossing, kpToAp,
-    oxygenFraction,
+    oxygenFraction, subsolarPoint, dipoleTiltRad,
 } from './ring-current-model.js';
 
 // rtsw_mag_1m is not in config.NOAA — defined locally, same as js/swpc-feed.js.
@@ -269,6 +269,9 @@ export function computeState(driverSeries, observedDst, kp, nowMs, f107 = null) 
             peakL:        ringPeakL(nowPt.dstStar),
             asymmetry:    asym,
             oxygenFraction: oxygenFraction(nowPt.dstStar),
+            // Live Sun–Earth geometry (what the 3D twin's Earth/dipole track).
+            subsolar:       subsolarPoint(nowMs),
+            dipoleTiltDeg:  dipoleTiltRad(nowMs) * 180 / Math.PI,
             plasmapauseL: plasmapauseL(kp),
             kp,
             apNow:        kpToAp(kp),

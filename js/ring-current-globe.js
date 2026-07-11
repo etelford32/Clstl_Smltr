@@ -2,8 +2,30 @@
  * ring-current-globe.js — Three.js digital twin scene for ring-current.html
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * Scene (Earth at origin, 1 unit = 1 R_E, equatorial plane = XZ, north = +Y,
- * Sun toward +X):
+ * FRAME — true GSM, rigidly mapped (Earth at origin, 1 unit = 1 R_E):
+ *   scene +X = GSM +X  (Sun–Earth line: the Sun really is exactly there)
+ *   scene +Y = GSM +Z  ("north")
+ *   scene −Z = GSM +Y  (dusk)   ⇒ right-handed, no mirroring
+ * MLT = (12 − θ·12/π) mod 24 where θ = atan2(z, x): noon at +X, DAWN at +Z,
+ * dusk at −Z. (Before 2026-07-11 the code used MLT = 12 + θ·12/π, which is a
+ * MIRRORED frame — impossible to reconcile with a real Earth texture — and
+ * under it the "dusk" partial-ring arc actually rendered at 13 MLT. Verified
+ * numerically before the flip; both are fixed together.)
+ *
+ * REAL-TIME accuracy (all clock-driven, independent of the drift slider):
+ *   · Earth spins at the true rate with the true phase: the subsolar
+ *     longitude faces +X and the axis tilts by the live solar declination
+ *     (subsolarPoint), so the terminator, seasons and day/night hemisphere
+ *     are the actual ones right now.
+ *   · The whole magnetosphere group (field cage, populations, torus, arc,
+ *     plasmapause) tilts about scene Z by −ψ, the live GSM dipole tilt
+ *     (dipoleTiltRad) — by GSM's definition the dipole axis lies in the
+ *     X–Z(GSM) plane, so one axis suffices. Watch the ±11° diurnal wobble
+ *     ride on the ±23° seasonal tilt, in real time.
+ *   · Bounce runs at the TRUE physical rate (bouncePeriodSeconds — ions
+ *     seconds-to-a-minute, O⁺ 4× slower, electrons sub-second), never
+ *     compressed. Only DRIFT uses the time-compression slider (1× = fully
+ *     real); the incoming stream was already real-time.
  *
  *   earth          textured sphere + additive atmosphere shell
  *   fieldLines     dipole cage — r = L·cos²λ at L = 2…6 × 12 meridians
@@ -28,15 +50,13 @@
  *                  the Sun-side and Earth-side digital twins: the forecast
  *                  window as matter in flight, in true real time.
  *
- * Azimuth convention: position = (r·cosθ, y, r·sinθ);
- * MLT = (12 + θ·12/π) mod 24 — noon (12 MLT) at +X, the dusk bulge at
- * 19 MLT ⇒ θ = 7π/12. Ions step θ negative (westward, decreasing MLT),
- * electrons positive; both carry westward current.
+ * Drift in scene θ: ions WESTWARD = MLT decreasing = θ INCREASING under this
+ * frame (sceneRate = −driftRateRadPerHour); electrons the reverse. Both
+ * still carry westward current.
  *
  * Physics weights come from js/ring-current-model.js — this file only draws.
- * Bounce motion is decorative (viewing-rate, like js/van-allen-particles.js);
- * drift runs at real rate × timeCompression (default 600×, so a 100 keV ion
- * at L=3 laps Earth in ~14 s of viewing).
+ * Drift runs at real rate × timeCompression (default 600×, so a 100 keV ion
+ * at L=3 laps Earth in ~14 s of viewing; set 1× for true real time).
  */
 
 import * as THREE from 'three';
@@ -44,6 +64,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     radialProfile, azimuthalWeight, driftRateRadPerHour, ringPeakL,
     dipoleFieldLinePoint, mirrorLatitude, lossConeAngle, dynamicPressure,
+    bouncePeriodSeconds, subsolarPoint, dipoleTiltRad,
 } from './ring-current-model.js';
 
 // Keep in sync with js/earth-skin.js EARTH_TEXTURES (version-pinned CDN).
@@ -105,23 +126,26 @@ function atmosphereMaterial() {
 
 
 /**
- * Trapped population with REAL dipole bounce geometry: each particle gets an
+ * Trapped population with REAL dipole bounce: each particle gets an
  * equatorial pitch angle sampled ABOVE the loss cone (below it precipitates —
  * those never appear), the corresponding mirror latitude from μ-conservation,
- * and oscillates along its field line r = L·cos²λ between ±λ_m. Bounce runs
- * at a viewing-friendly rate (real bounce is ~seconds — far below frame
- * perception at drift compression; same pedagogical decoupling as
- * js/van-allen-particles.js), deeper mirrors bouncing slower (T_b grows as
- * α_eq shrinks). Drift stays physical: rate × timeCompression.
+ * and oscillates along its field line r = L·cos²λ between ±λ_m at its TRUE
+ * bounce period (bouncePeriodSeconds — species mass matters: O⁺ is 4× slower
+ * than H⁺ at the same energy, electrons buzz sub-second). Bounce time is
+ * wall-clock, never compressed. Drift is physical rate × timeCompression,
+ * sign flipped into scene θ (see header: westward = θ increasing).
+ *
+ * @param {'ion'|'oxygen'|'electron'} species
  */
-function makePopulation(count, species, bounceScale = 1) {
+function makePopulation(count, species) {
     const L       = new Float32Array(count);
     const theta   = new Float32Array(count);
     const eKev    = new Float32Array(count);
     const mirrorL = new Float32Array(count);  // mirror latitude (rad)
-    const bRate   = new Float32Array(count);  // bounce viewing rate (rad/s)
+    const bRate   = new Float32Array(count);  // TRUE bounce rate 2π/T_b (rad/s)
     const bPhase  = new Float32Array(count);
-    const rate    = new Float32Array(count);  // drift rad/h, signed
+    const rate    = new Float32Array(count);  // drift, scene-θ rad/h, signed
+    const driftSpecies = species === 'electron' ? 'electron' : 'ion';
     for (let i = 0; i < count; i++) {
         L[i]     = 1.9 + Math.random() * 4.6;
         theta[i] = Math.random() * 2 * Math.PI;
@@ -131,9 +155,9 @@ function makePopulation(count, species, bounceScale = 1) {
         const lc = lossConeAngle(L[i]);
         const alpha = lc + (Math.PI / 2 - lc) * Math.pow(Math.random(), 0.45);
         mirrorL[i] = mirrorLatitude(alpha);
-        bRate[i]   = bounceScale * (1.1 + Math.random() * 1.2) / (1 + 1.8 * mirrorL[i]);
+        bRate[i]   = 2 * Math.PI / bouncePeriodSeconds(eKev[i], L[i], alpha, species);
         bPhase[i]  = Math.random() * 2 * Math.PI;
-        rate[i]    = driftRateRadPerHour(eKev[i], L[i], species);
+        rate[i]    = -driftRateRadPerHour(eKev[i], L[i], driftSpecies);
     }
     return { count, species, L, theta, eKev, mirrorL, bRate, bPhase, rate };
 }
@@ -208,11 +232,19 @@ export class RingCurrentGlobe {
         this._controls.minDistance = 2.5;
         this._controls.maxDistance = 140;   // far enough to frame the Sun corridor
 
-        // Lighting: Sun from +X.
+        // Lighting: Sun from +X — exactly the GSM Sun line, so the lit
+        // hemisphere IS the real dayside once Earth's spin phase is set.
         this._scene.add(new THREE.AmbientLight(0x8899bb, 0.55));
         const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
-        sun.position.set(1, 0.12, 0);
+        sun.position.set(1, 0, 0);
         this._scene.add(sun);
+
+        // Everything dipole-anchored lives here and tilts together by the
+        // live GSM dipole tilt −ψ (see header). Earth is NOT in this group —
+        // its axis tilts by the solar declination instead, so the ~11°
+        // dipole-vs-rotation-axis offset is visible, wobbling daily.
+        this._magGroup = new THREE.Group();
+        this._scene.add(this._magGroup);
 
         this._buildEarth();
         this._buildFieldLines();
@@ -243,8 +275,17 @@ export class RingCurrentGlobe {
             mat.color.set(0xffffff);
             mat.needsUpdate = true;
         }, undefined, () => { /* CDN unreachable → keep the plain blue globe */ });
+        // Tilt group carries the axial tilt (rotation.z = −declination, pole
+        // toward the Sun in northern summer); the mesh inside spins about the
+        // tilted axis. Spin phase: THREE.SphereGeometry puts the equirect
+        // texture's center meridian (lon 0) on +X at rotation.y = 0, and a
+        // point at east longitude λ at scene θ = −λ; rotation.y = −λ_subsolar
+        // therefore faces the true subsolar longitude at the Sun. Updated
+        // every frame from the wall clock in tick().
+        this._earthTilt = new THREE.Group();
         this._earth = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 48), mat);
-        this._scene.add(this._earth);
+        this._earthTilt.add(this._earth);
+        this._scene.add(this._earthTilt);
 
         const atmo = new THREE.Mesh(
             new THREE.SphereGeometry(1.045, 48, 48),
@@ -274,17 +315,15 @@ export class RingCurrentGlobe {
                 group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
             }
         }
-        this._scene.add(group);
+        this._magGroup.add(group);
     }
 
     _buildParticles() {
         // Ion budget split H⁺/O⁺ at O_BUILD_FRACTION. O⁺ drifts identically
-        // (drift period is mass-independent at fixed energy) but bounces
-        // slower — T_b ∝ √m ⇒ 4× for O⁺; drawn at 2.5× (1/0.4) so the slow
-        // bounce reads without looking frozen (bounce is decorative
-        // viewing-rate anyway, see header).
-        this._ionsH     = this._makePoints(makePopulation(2100, 'ion'),           ION_COLOR,   0.085);
-        this._ionsO     = this._makePoints(makePopulation(1100, 'ion', 0.4),      ION_O_COLOR, 0.095);
+        // (drift period is mass-independent at fixed energy) but bounces at
+        // its TRUE 4×-slower period via the species mass in makePopulation.
+        this._ionsH     = this._makePoints(makePopulation(2100, 'ion'),      ION_COLOR,      0.085);
+        this._ionsO     = this._makePoints(makePopulation(1100, 'oxygen'),   ION_O_COLOR,    0.095);
         this._electrons = this._makePoints(makePopulation(1400, 'electron'), ELECTRON_COLOR, 0.060);
         // Start at the quiet-time energy mix (≈6% O⁺).
         this._setCompositionMix(0.06);
@@ -306,7 +345,7 @@ export class RingCurrentGlobe {
         const mat = glowPointsMaterial(size, 0.9);
         const points = new THREE.Points(geo, mat);
         points.frustumCulled = false;
-        this._scene.add(points);
+        this._magGroup.add(points);
         return { pop, geo, pos, col, baseColor, points, mix: 1 };
     }
 
@@ -330,29 +369,32 @@ export class RingCurrentGlobe {
         });
         this._plasmapause = new THREE.Mesh(new THREE.TorusGeometry(4.7, 0.018, 8, 160), this._ppMat);
         this._plasmapause.rotation.x = Math.PI / 2;
-        this._scene.add(this._plasmapause);
+        this._magGroup.add(this._plasmapause);
     }
 
     _rebuildTorus(peakL) {
         if (this._torus) {
-            this._scene.remove(this._torus);
+            this._magGroup.remove(this._torus);
             this._torus.geometry.dispose();
         }
         if (this._arc) {
-            this._scene.remove(this._arc);
+            this._magGroup.remove(this._arc);
             this._arc.geometry.dispose();
         }
         this._torus = new THREE.Mesh(new THREE.TorusGeometry(peakL, 0.55, 14, 96), this._torusMat);
         this._torus.rotation.x = Math.PI / 2;
-        this._scene.add(this._torus);
+        this._magGroup.add(this._torus);
 
-        // 120°-wide arc; TorusGeometry arcs start at its local +X and sweep CCW,
-        // so rotate the mesh to centre the arc on 19 MLT (θ = 7π/12).
+        // 120°-wide arc centred on dusk (19 MLT ⇒ scene θ = −7π/12). With
+        // Euler 'XYZ' the Z rotation acts first, in the torus' local plane,
+        // then rotation.x = π/2 lays it flat with local sweep angle φ mapping
+        // to scene θ = φ + rotation.z ⇒ rotation.z = θc − ARC/2. (The old
+        // −(7π/12 − ARC/2) landed the arc at 13 MLT — see header.)
         const ARC = (2 * Math.PI) / 3;
         this._arc = new THREE.Mesh(new THREE.TorusGeometry(peakL, 0.72, 14, 64, ARC), this._arcMat);
         this._arc.rotation.x = Math.PI / 2;
-        this._arc.rotation.z = -(7 * Math.PI / 12 - ARC / 2);
-        this._scene.add(this._arc);
+        this._arc.rotation.z = -7 * Math.PI / 12 - ARC / 2;
+        this._magGroup.add(this._arc);
         this._builtPeakL = peakL;
     }
 
@@ -608,12 +650,24 @@ export class RingCurrentGlobe {
     tick(dt) {
         const dtH = (dt * this._timeCompression) / 3600;   // viewing → model hours
         this._tView += dt;
+        this._updateGeometry();
         this._updatePopulation(this._ionsH, dtH);
         this._updatePopulation(this._ionsO, dtH);
         this._updatePopulation(this._electrons, dtH);
         this._updateTransit();
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
+    }
+
+    /** Wall-clock-accurate Earth spin/tilt + magnetosphere dipole tilt.
+     *  Always real time — deliberately NOT scaled by the drift compression,
+     *  same policy as the transit stream. ~40 flops; fine every frame. */
+    _updateGeometry() {
+        const nowMs = Date.now();
+        const sp = subsolarPoint(nowMs);
+        this._earthTilt.rotation.z = -sp.latDeg * Math.PI / 180;   // axis by declination
+        this._earth.rotation.y     = -sp.lonDeg * Math.PI / 180;   // subsolar lon → +X
+        this._magGroup.rotation.z  = -dipoleTiltRad(nowMs);        // GSM dipole tilt ψ
     }
 
     _updatePopulation(P, dtH) {
@@ -639,7 +693,7 @@ export class RingCurrentGlobe {
             pos[j + 1] = fl.y;
             pos[j + 2] = fl.rho * Math.sin(th);
 
-            const mlt = (12 + th * 12 / Math.PI) % 24;
+            const mlt = ((12 - th * 12 / Math.PI) % 24 + 24) % 24;   // frame: dawn at +Z
             const w = radialProfile(L, dstStar) * azimuthalWeight(mlt, asym) * intensity;
             const b = 0.06 + 0.94 * Math.min(1.3, w);
             col[j]     = baseColor.r * b;

@@ -181,6 +181,19 @@ Three.js 0.160 importmap, NOAA browser-direct / NASA via edge.
   (arrival-time propagated L1 samples), RMSE/bias over the window.
 - Time-compression control for drift animation (default ~900×), pause on
   `document.hidden` (battery/API hygiene).
+- **Frame & rotation accuracy (2026-07-11)**: the scene is a true GSM frame
+  (+X = Sun line, +Y = GSM Z, dawn at +Z — right-handed, no mirror). Earth
+  spins at the real rate with the real phase (subsolar longitude faces +X,
+  axis tilted by the live declination via `subsolarPoint`); the whole
+  magnetosphere group tilts by the live GSM dipole tilt ψ (`dipoleTiltRad`,
+  IGRF dipole axis + low-precision ephemeris, ±34° seasonal+diurnal); bounce
+  runs at TRUE physical periods (`bouncePeriodSeconds` — H⁺ ~13 s at
+  100 keV/L=3, O⁺ 4×, electrons relativistic ~0.3 s), never compressed.
+  Only drift takes the compression slider; a "1× real" toggle makes the
+  entire scene real time. NOTE: the pre-2026-07-11 frame was mirrored
+  (MLT = 12 + θ·12/π) and its "dusk" partial-ring arc actually rendered at
+  13 MLT — verified numerically with the vendored three.js before both were
+  fixed together. Do not "restore" the old arc rotation constant.
 
 ---
 

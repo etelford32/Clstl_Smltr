@@ -31,6 +31,7 @@ import {
     plasmapauseL, stormClass, skill, newellCoupling,
     dipoleFieldLinePoint, dipoleFieldRatio, mirrorLatitude, lossConeAngle,
     integrateDstEnsemble, findThresholdCrossing, kpToAp, oxygenFraction,
+    bouncePeriodSeconds, subsolarPoint, dipoleTiltRad,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -340,6 +341,79 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.equal(oxygenFraction(25), oxygenFraction(0));
     assert.equal(oxygenFraction(null), oxygenFraction(0));
     ok('composition: quiet 6% → storm ≥45% O⁺, monotone, bounded < 0.64');
+}
+
+// ── Physical bounce periods ──────────────────────────────────────────────────
+{
+    // Anchor: 100 keV H⁺, L=3, equatorial mirror → ≈13 s (Lenchek/Schulz).
+    const tH = bouncePeriodSeconds(100, 3, Math.PI / 2, 'ion');
+    assert.ok(tH > 11 && tH < 15, `T_b(H⁺ 100 keV, L3) = ${tH}`);
+    // O⁺ is √16 = 4× slower at the same energy (relativistic correction ~0).
+    const tO = bouncePeriodSeconds(100, 3, Math.PI / 2, 'oxygen');
+    assert.ok(Math.abs(tO / tH - 4) < 0.05, `O⁺/H⁺ ratio = ${tO / tH}`);
+    // 100 keV electron is RELATIVISTIC (v = 0.548c, not the 0.626c a
+    // classical v would give): ≈0.34 s.
+    const tE = bouncePeriodSeconds(100, 3, Math.PI / 2, 'electron');
+    assert.ok(tE > 0.25 && tE < 0.45, `T_b(e⁻ 100 keV, L3) = ${tE}`);
+    // Deeper mirrors bounce slower; period grows with L; null-safe.
+    assert.ok(bouncePeriodSeconds(100, 3, 20 * Math.PI / 180, 'ion') > tH);
+    assert.ok(Math.abs(bouncePeriodSeconds(100, 6, Math.PI / 2, 'ion') / tH - 2) < 0.01);
+    assert.equal(bouncePeriodSeconds(0, 3), null);
+    assert.equal(bouncePeriodSeconds(100, -1), null);
+    ok('bounce: H⁺ ≈13 s, O⁺ 4×, e⁻ relativistic ≈0.34 s, ∝L, slower off-equator');
+}
+
+// ── Subsolar point (accurate Earth) ──────────────────────────────────────────
+{
+    // Solstices: declination ±23.44°; equinox ≈ 0.
+    const jun = subsolarPoint(Date.UTC(2026, 5, 21, 12));
+    assert.ok(Math.abs(jun.latDeg - 23.44) < 0.3, `June lat = ${jun.latDeg}`);
+    const dec = subsolarPoint(Date.UTC(2026, 11, 21, 12));
+    assert.ok(Math.abs(dec.latDeg + 23.44) < 0.3, `Dec lat = ${dec.latDeg}`);
+    assert.ok(Math.abs(subsolarPoint(Date.UTC(2026, 2, 20, 12)).latDeg) < 1);
+    // Longitude: near 0 at 12 UT (± equation of time ≲ 4°), −90 at 18 UT,
+    // wrapped to (−180, 180].
+    assert.ok(Math.abs(jun.lonDeg) < 4, `noon lon = ${jun.lonDeg}`);
+    const lon18 = subsolarPoint(Date.UTC(2026, 5, 21, 18)).lonDeg;
+    assert.ok(Math.abs(lon18 + 90) < 4, `18 UT lon = ${lon18}`);
+    for (let h = 0; h < 24; h += 3) {
+        const p = subsolarPoint(Date.UTC(2026, 6, 11, h));
+        assert.ok(p.lonDeg > -180 && p.lonDeg <= 180 && Math.abs(p.latDeg) < 23.5);
+    }
+    assert.equal(subsolarPoint(NaN), null);
+    ok('subsolar: solstice/equinox declination, EoT-corrected longitude, wrapped');
+}
+
+// ── GSM dipole tilt ψ ────────────────────────────────────────────────────────
+{
+    const deg = ms => dipoleTiltRad(ms) * 180 / Math.PI;
+    // Northern-summer solstice: daily max ≈ +33° near ~17 UT (pole meridian
+    // 72.7°W faces the Sun); December mirror. Loose bands — the ephemeris
+    // and pole position are low-precision by design.
+    let mx = -99, mxH = 0, mn = 99;
+    for (let h = 0; h < 24; h += 0.25) {
+        const v = deg(Date.UTC(2026, 5, 21, 0) + h * 3.6e6);
+        if (v > mx) { mx = v; mxH = h; }
+    }
+    assert.ok(mx > 30 && mx < 37, `June max ψ = ${mx}`);
+    assert.ok(Math.abs(mxH - 17) < 2, `June max at ${mxH} UT`);
+    for (let h = 0; h < 24; h += 0.25) {
+        mn = Math.min(mn, deg(Date.UTC(2026, 11, 21, 0) + h * 3.6e6));
+    }
+    assert.ok(mn < -30 && mn > -37, `Dec min ψ = ${mn}`);
+    // Equinox: |ψ| bounded by the ~11° diurnal wobble and sign flips in a day.
+    let eqMax = -99, eqMin = 99;
+    for (let h = 0; h < 24; h += 0.25) {
+        const v = deg(Date.UTC(2026, 2, 20, 0) + h * 3.6e6);
+        eqMax = Math.max(eqMax, v); eqMin = Math.min(eqMin, v);
+    }
+    assert.ok(eqMax < 16 && eqMin > -16 && eqMax > 0 && eqMin < 0,
+        `equinox ψ ∈ [${eqMin}, ${eqMax}]`);
+    // ~24 h periodicity.
+    const t0 = Date.UTC(2026, 6, 11, 3);
+    assert.ok(Math.abs(deg(t0) - deg(t0 + 86400e3)) < 1.5);
+    assert.equal(dipoleTiltRad(null), null);
+    ok('dipole tilt: ±33° solstice extremes near 17/05 UT, ±11° equinox wobble');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

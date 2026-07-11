@@ -283,7 +283,12 @@ const tag = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '');
     assert.ok(Number.isFinite(st.now.oxygenFraction));
     assert.ok(st.now.oxygenFraction > 0.2, 'storm drives the O⁺ share up');
     assert.ok(st.now.oxygenFraction < 0.64);
-    ok('computeState: storm-time oxygenFraction surfaced for HUD + globe');
+    // Live Sun–Earth geometry for the HUD + the twin's accurate Earth:
+    // fixture nowMs = 2026-07-10T06:00Z → subsolar ≈ 22°N, ≈ 90°E.
+    assert.ok(Math.abs(st.now.subsolar.latDeg - 22.2) < 0.5, `subsolar lat ${st.now.subsolar.latDeg}`);
+    assert.ok(Math.abs(st.now.subsolar.lonDeg - 91) < 3, `subsolar lon ${st.now.subsolar.lonDeg}`);
+    assert.ok(Number.isFinite(st.now.dipoleTiltDeg) && Math.abs(st.now.dipoleTiltDeg) < 35);
+    ok('computeState: oxygenFraction + live subsolar/dipole-tilt geometry surfaced');
 }
 
 console.log(`\nring-current-feed-parsers: all ${n} test groups passed`);

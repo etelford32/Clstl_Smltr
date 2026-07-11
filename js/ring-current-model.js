@@ -464,6 +464,102 @@ export function oxygenFraction(dstStar) {
     return 0.06 + 0.58 * (1 - Math.exp(d / 180));
 }
 
+// ── Bounce kinematics (physical, drives the twin's true-rate bounce) ─────────
+
+/** Rest masses (kg). 'ion' is the H⁺ ring-current default. */
+export const SPECIES_MASS_KG = Object.freeze({
+    ion:      1.67262192369e-27,   // proton
+    proton:   1.67262192369e-27,
+    oxygen:   2.6567e-26,          // O⁺ (15.999 u)
+    electron: 9.1093837015e-31,
+});
+
+/**
+ * Dipole bounce period (seconds) — Lenchek/Schulz small-pitch-angle fit:
+ *
+ *   T_b ≈ (4·L·R_E / v) · (1.30 − 0.56·sin α_eq)
+ *
+ * v is relativistic (matters for ≳100 keV electrons; negligible for ions).
+ * Anchors: 100 keV H⁺ at L=3, α=90° → ≈13 s; O⁺ is √16 = 4× slower at the
+ * same energy; 100 keV electron ≈ 0.34 s. These are REAL times — the 3D twin
+ * runs bounce at exactly this rate, uncompressed.
+ */
+export function bouncePeriodSeconds(eKev, L, alphaEqRad = Math.PI / 2, species = 'ion') {
+    if (!Number.isFinite(eKev) || eKev <= 0 || !Number.isFinite(L) || L <= 0) return null;
+    const m = SPECIES_MASS_KG[species] ?? SPECIES_MASS_KG.ion;
+    const c = 2.99792458e8;
+    const gamma = 1 + (eKev * PHYS.KEV_J) / (m * c * c);
+    const v = c * Math.sqrt(1 - 1 / (gamma * gamma));
+    const a = Math.min(Math.PI / 2, Math.max(0.01, Number.isFinite(alphaEqRad) ? alphaEqRad : Math.PI / 2));
+    return (4 * L * PHYS.R_E_M / v) * (1.30 - 0.56 * Math.sin(a));
+}
+
+// ── Sun–Earth geometry (drives the twin's accurate Earth + GSM frame) ────────
+
+/**
+ * Subsolar point (the spot on Earth where the Sun is overhead) at a UTC
+ * epoch. Latitude = solar declination (Spencer 1971 Fourier fit, ±0.02°);
+ * longitude from UTC hour corrected by the equation of time (±16 min/yr).
+ * This is what makes the twin's Earth honest: the hemisphere facing +X
+ * (the Sun) is the hemisphere actually in daylight right now.
+ *
+ * @returns {{latDeg:number, lonDeg:number}|null}  lonDeg east-positive, (−180,180]
+ */
+export function subsolarPoint(ms) {
+    if (!Number.isFinite(ms)) return null;
+    const d = new Date(ms);
+    const year0 = Date.UTC(d.getUTCFullYear(), 0, 1);
+    const g = 2 * Math.PI * ((ms - year0) / 86400000) / 365;   // fractional-day year angle
+    const decl =
+        0.006918 - 0.399912 * Math.cos(g)     + 0.070257 * Math.sin(g)
+                 - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g)
+                 - 0.002697 * Math.cos(3 * g) + 0.001480 * Math.sin(3 * g);
+    const eotMin = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g)
+                                      - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+    const utcH = (ms / 3.6e6) % 24;
+    const lon = -15 * (utcH - 12 + eotMin / 60);
+    return {
+        latDeg: decl * 180 / Math.PI,
+        lonDeg: ((lon + 540) % 360) - 180,
+    };
+}
+
+// IGRF-14-ish geomagnetic (dipole) north pole, epoch ~2025.
+const GEOMAG_POLE = Object.freeze({ latDeg: 80.7, lonDeg: -72.7 });
+
+/**
+ * GSM dipole tilt angle ψ (radians): the angle between Earth's dipole axis
+ * and the plane perpendicular to the Sun–Earth line. Positive = dipole north
+ * tips SUNWARD (northern summer daytime). Range ≈ ±34°: ±23.4° seasonal
+ * (obliquity) ± ~11° diurnal (the dipole axis is offset from the rotation
+ * axis and swings around it once per day). By the definition of GSM, the
+ * dipole axis always lies in the GSM X–Z plane — so in the twin's scene the
+ * whole magnetosphere group tilts about one axis by exactly −ψ.
+ *
+ * Low-precision solar ephemeris + GMST (both ±0.01°-class) — plenty for a
+ * visual twin; not for conjugate-point science.
+ */
+export function dipoleTiltRad(ms) {
+    if (!Number.isFinite(ms)) return null;
+    const rad = Math.PI / 180;
+    const n = ms / 86400000 + 2440587.5 - 2451545.0;     // days since J2000.0
+    // Sun unit vector in GEI (Meeus low-precision).
+    const Lsun = (280.460 + 0.9856474 * n) % 360;
+    const gsun = ((357.528 + 0.9856003 * n) % 360) * rad;
+    const lam  = (Lsun + 1.915 * Math.sin(gsun) + 0.020 * Math.sin(2 * gsun)) * rad;
+    const eps  = (23.439 - 4e-7 * n) * rad;
+    const sx = Math.cos(lam), sy = Math.cos(eps) * Math.sin(lam), sz = Math.sin(eps) * Math.sin(lam);
+    // Dipole axis: ECEF unit vector from the geomagnetic pole, spun into GEI
+    // by Greenwich mean sidereal time.
+    const gmst  = ((280.46061837 + 360.98564736629 * n) % 360) * rad;
+    const colat = (90 - GEOMAG_POLE.latDeg) * rad, plon = GEOMAG_POLE.lonDeg * rad;
+    const mx = Math.sin(colat) * Math.cos(plon), my = Math.sin(colat) * Math.sin(plon), mz = Math.cos(colat);
+    const dot = (mx * Math.cos(gmst) - my * Math.sin(gmst)) * sx
+              + (mx * Math.sin(gmst) + my * Math.cos(gmst)) * sy
+              + mz * sz;
+    return Math.asin(Math.max(-1, Math.min(1, dot)));
+}
+
 // ── Classification & skill ───────────────────────────────────────────────────
 
 /** Storm class from (uncorrected) Dst — mirrors api/noaa/dst.js exactly. */

@@ -234,7 +234,7 @@ body {
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
             <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz
         </div>
-        <div class="rc-stage-hint">drag to orbit &middot; scroll out to see the Sun corridor &middot; incoming stream moves in REAL time</div>
+        <div class="rc-stage-hint">drag to orbit &middot; scroll out to see the Sun corridor &middot; Earth day&ndash;night, dipole tilt, bounce &amp; stream are LIVE real time &middot; GSM frame</div>
     </div>
 
     <div class="rc-col">
@@ -248,6 +248,8 @@ body {
             <div class="rc-kv"><span class="rc-k">peak current shell</span><span class="rc-v" id="rc-peakl">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">dusk asymmetry</span><span class="rc-v" id="rc-asym">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">composition (energy)</span><span class="rc-v" id="rc-ofrac">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">dipole tilt &psi;</span><span class="rc-v" id="rc-tilt">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">subsolar point</span><span class="rc-v" id="rc-subsolar">&mdash;</span></div>
             <div id="rc-storm" class="rc-storm-badge rc-storm-0">&mdash;</div>
             <div class="rc-balance">
                 <div class="rc-k" style="font-size:.72rem;color:#8b94ad;">injection vs decay (nT/h)</div>
@@ -333,9 +335,10 @@ body {
         <section class="rc-panel">
             <h2>Display</h2>
             <div class="rc-ctl">
-                <span>speed</span>
+                <span>drift</span>
                 <input type="range" id="rc-speed" min="60" max="3600" step="60" value="600">
                 <span class="rc-v" id="rc-speed-lab">600&times;</span>
+                <button class="rc-mode-btn" id="rc-rt" title="Drop drift compression to 1× — every motion in the scene at its true rate">&#9678; 1&times; real</button>
             </div>
             <div class="rc-ctl" style="margin-top:8px;">
                 <span>stream</span>
@@ -344,9 +347,11 @@ body {
                 <button class="rc-mode-btn" data-mode="density">Density</button>
             </div>
             <div style="font-size:.66rem;color:#5d6684;margin-top:6px;line-height:1.5;">
-                Particle count per 1-min sample scales with density (compression
-                fronts = bright bands); the trace above the stream is the live
-                barometric n(x) wave, sliding Earthward in real time.
+                Only drift is compressed &mdash; Earth&rsquo;s spin, the dipole
+                tilt wobble, particle bounce, and the incoming stream always run
+                at their true real-time rates. At 1&times; the whole scene is
+                real time. Particle count per 1-min sample scales with density;
+                the trace above the stream is the live barometric n(x) wave.
             </div>
         </section>
     </div>
@@ -371,6 +376,10 @@ body {
     Burton et al. (1975); trapped energy from the Dessler&ndash;Parker&ndash;Sckopke relation; drift
     kinematics per Schulz &amp; Lanzerotti (1974); plasmapause per Carpenter &amp; Anderson (1992).
     Storm-time O&#8314;/H&#8314; composition split per Hamilton et al. (1988) / Daglis et al. (1999).
+    The 3D scene is a true GSM frame: Earth&rsquo;s spin phase and axial tilt follow the live
+    subsolar point, the magnetosphere tilts by the live dipole tilt angle &psi; (IGRF dipole
+    axis + low-precision solar ephemeris), and particle bounce runs at its physical period
+    &mdash; only drift is time-compressed, and 1&times; makes the whole scene real time.
     Data: NOAA SWPC real-time solar wind (DSCOVR/ACE at L1, plasma + magnetometer), Kyoto WDC Dst
     quicklook, planetary Kp, GOES primary magnetometer (independent GEO cross-check).
     The model anchors on observed Dst 24 h ago and free-runs &mdash; the
@@ -402,6 +411,19 @@ try {
 
 $('rc-speed').addEventListener('input', (e) => {
     const x = Number(e.target.value);
+    $('rc-speed-lab').textContent = `${x}×`;
+    globe?.setTimeCompression(x);
+});
+// 1× real time: drop drift compression to unity — with bounce, Earth spin,
+// dipole wobble and the stream already wall-clock-true, the whole scene
+// becomes the actual magnetosphere at actual speed.
+$('rc-rt').addEventListener('click', () => {
+    const btn = $('rc-rt');
+    const slider = $('rc-speed');
+    const on = !btn.classList.contains('rc-on');
+    btn.classList.toggle('rc-on', on);
+    slider.disabled = on;
+    const x = on ? 1 : Number(slider.value);
     $('rc-speed-lab').textContent = `${x}×`;
     globe?.setTimeCompression(x);
 });
@@ -445,6 +467,12 @@ function renderHud(s) {
     const fO = s.now.oxygenFraction;
     $('rc-ofrac').textContent = Number.isFinite(fO)
         ? `O⁺ ${Math.round(fO * 100)}% · H⁺ ${Math.round((1 - fO) * 100)}%` : '—';
+    const psi = s.now.dipoleTiltDeg;
+    $('rc-tilt').textContent = Number.isFinite(psi)
+        ? `${psi >= 0 ? '+' : ''}${psi.toFixed(1)}° ${psi >= 0 ? 'sunward' : 'antisunward'}` : '—';
+    const ss = s.now.subsolar;
+    $('rc-subsolar').textContent = ss
+        ? `${Math.abs(ss.latDeg).toFixed(1)}°${ss.latDeg >= 0 ? 'N' : 'S'} ${Math.abs(ss.lonDeg).toFixed(0)}°${ss.lonDeg >= 0 ? 'E' : 'W'}` : '—';
 
     const storm = s.now.storm ?? { level: 0, label: 'Quiet' };
     const badge = $('rc-storm');
