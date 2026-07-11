@@ -86,11 +86,34 @@ function makePopulation(count, species) {
 // the stream is an honest, real-time forecast display, not an animation).
 const TRANSIT = Object.freeze({
     MAX_PARCELS: 120,
-    PTS_PER:     8,
+    PTS_PER:     14,     // per-slot budget; VISIBLE count scales with density
     X_MP:        11,     // corridor end ≈ subsolar magnetopause (R_E)
     X_SUN:       52,     // corridor start, toward the Sun sprite
     LEAD_MAX:    75,     // minutes mapped across the corridor
+    WAVE_Y:      4.2,    // baseline height of the barometric density trace
+    WAVE_AMP:    3.2,    // trace amplitude at n = N_REF
+    N_REF:       20,     // density (cm⁻³) that saturates count/trace scaling
 });
+
+// Stream color modes. 'bz' keeps the driver semantics (southward hot /
+// northward cool); 'temp' is a plasma-temperature heat map (log₁₀ T over
+// 10⁴–10⁶ K, blue → orange → white); 'density' maps n to teal → white.
+function streamColor(mode, p) {
+    if (mode === 'temp') {
+        const t = Number.isFinite(p.temp) ? p.temp : 8e4;
+        const f = Math.max(0, Math.min(1, (Math.log10(Math.max(1e4, t)) - 4) / 2));
+        return f < 0.5
+            ? [0.15 + 1.7 * f, 0.25 + 0.9 * f, 1.0 - 1.4 * f]     // blue → orange
+            : [1.0, 0.70 + 0.6 * (f - 0.5), 0.30 + 1.4 * (f - 0.5)]; // orange → white
+    }
+    if (mode === 'density') {
+        const f = Math.max(0, Math.min(1, (Number.isFinite(p.n) ? p.n : 3) / TRANSIT.N_REF));
+        return [0.15 + 0.85 * f, 0.55 + 0.45 * f, 0.65 + 0.35 * f];  // teal → white
+    }
+    const south = Number.isFinite(p.bz) && p.bz < 0;
+    const mag = Number.isFinite(p.bz) ? Math.min(1, Math.abs(p.bz) / 15) : 0.2;
+    return south ? [1.0, 0.45 - 0.15 * mag, 0.22] : [0.30, 0.75, 1.0];
+}
 
 export class RingCurrentGlobe {
     constructor(container, opts = {}) {
@@ -310,6 +333,32 @@ export class RingCurrentGlobe {
         this._transit = new THREE.Points(this._transitGeo, mat);
         this._transit.frustumCulled = false;
         this._scene.add(this._transit);
+        this._streamMode = 'bz';
+
+        // Barometric trace: n(x) as a polyline riding above the corridor —
+        // the pressure-wave shape of the incoming wind, sliding Earthward in
+        // real time as the plasma it describes actually approaches.
+        this._waveN = TRANSIT.MAX_PARCELS;
+        this._wavePos = new Float32Array(this._waveN * 3);
+        this._waveGeo = new THREE.BufferGeometry();
+        this._waveGeo.setAttribute('position', new THREE.BufferAttribute(this._wavePos, 3).setUsage(THREE.DynamicDrawUsage));
+        this._wave = new THREE.Line(this._waveGeo, new THREE.LineBasicMaterial({
+            color: 0x7fe6c3, transparent: true, opacity: 0.75,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        this._wave.frustumCulled = false;
+        this._scene.add(this._wave);
+        const base = new Float32Array([TRANSIT.X_MP, TRANSIT.WAVE_Y, 0, TRANSIT.X_SUN, TRANSIT.WAVE_Y, 0]);
+        const baseGeo = new THREE.BufferGeometry();
+        baseGeo.setAttribute('position', new THREE.BufferAttribute(base, 3));
+        this._scene.add(new THREE.Line(baseGeo, new THREE.LineBasicMaterial({
+            color: 0x5f79b8, transparent: true, opacity: 0.25, depthWrite: false,
+        })));
+    }
+
+    /** Stream coloring: 'bz' (driver) | 'temp' (heat map) | 'density'. */
+    setStreamMode(mode) {
+        this._streamMode = mode === 'temp' || mode === 'density' ? mode : 'bz';
     }
 
     /** Corridor rendering: real time-to-arrival → position between Sun and
@@ -318,34 +367,56 @@ export class RingCurrentGlobe {
     _updateTransit() {
         const now = Date.now();
         const pos = this._transitPos, col = this._transitCol, off = this._transitOff;
-        let slot = 0;
+        let slot = 0, wi = 0;
         for (const p of this._parcels) {
             if (slot >= TRANSIT.MAX_PARCELS) break;
             const mins = (p.tArrive - now) / 60_000;
             if (mins <= 0 || mins > TRANSIT.LEAD_MAX) continue;
             const x = TRANSIT.X_MP + (mins / TRANSIT.LEAD_MAX) * (TRANSIT.X_SUN - TRANSIT.X_MP);
-            // Southward Bz (the injector) renders hot; northward renders cool.
-            const south = Number.isFinite(p.bz) && p.bz < 0;
-            const mag = Number.isFinite(p.bz) ? Math.min(1, Math.abs(p.bz) / 15) : 0.2;
-            const R = south ? 1.0 : 0.30, G = south ? 0.45 - 0.15 * mag : 0.75, B = south ? 0.22 : 1.0;
+            const nNorm = Math.max(0, Math.min(1, (Number.isFinite(p.n) ? p.n : 3) / TRANSIT.N_REF));
+            const [R, G, B] = streamColor(this._streamMode, p);
             const pdyn = dynamicPressure(p.n, p.v);
             const bright = 0.30 + 0.70 * Math.min(1, (pdyn ?? 1.5) / 8);
+            // BAROMETRIC compression: visible particle count per 1-min sample
+            // scales with density — compression fronts read as dense bright
+            // bands, exactly like a longitudinal pressure wave.
+            const visible = 3 + Math.round((TRANSIT.PTS_PER - 3) * nNorm);
             for (let k = 0; k < TRANSIT.PTS_PER; k++) {
                 const j = (slot * TRANSIT.PTS_PER + k) * 3;
-                pos[j]     = x + off[j];
-                pos[j + 1] = off[j + 1];
-                pos[j + 2] = off[j + 2];
-                col[j]     = R * bright;
-                col[j + 1] = G * bright;
-                col[j + 2] = B * bright;
+                if (k < visible) {
+                    pos[j]     = x + off[j];
+                    pos[j + 1] = off[j + 1];
+                    pos[j + 2] = off[j + 2];
+                    col[j]     = R * bright;
+                    col[j + 1] = G * bright;
+                    col[j + 2] = B * bright;
+                } else {
+                    pos[j] = pos[j + 1] = pos[j + 2] = 0;
+                    col[j] = col[j + 1] = col[j + 2] = 0;
+                }
             }
+            // Wave trace vertex: pressure curve above the corridor.
+            const w = wi * 3;
+            this._wavePos[w]     = x;
+            this._wavePos[w + 1] = TRANSIT.WAVE_Y + TRANSIT.WAVE_AMP * nNorm;
+            this._wavePos[w + 2] = 0;
+            wi++;
             slot++;
         }
-        // Park unused slots at the origin, black (invisible under additive).
+        // Park unused point slots (black under additive = invisible).
         for (let s = slot * TRANSIT.PTS_PER; s < TRANSIT.MAX_PARCELS * TRANSIT.PTS_PER; s++) {
             pos[s * 3] = pos[s * 3 + 1] = pos[s * 3 + 2] = 0;
             col[s * 3] = col[s * 3 + 1] = col[s * 3 + 2] = 0;
         }
+        // Collapse unused trace vertices onto the last real one.
+        if (wi === 0) { this._wavePos[0] = TRANSIT.X_MP; this._wavePos[1] = TRANSIT.WAVE_Y; this._wavePos[2] = 0; wi = 1; }
+        for (let s = wi; s < this._waveN; s++) {
+            const w = s * 3, l = (wi - 1) * 3;
+            this._wavePos[w] = this._wavePos[l];
+            this._wavePos[w + 1] = this._wavePos[l + 1];
+            this._wavePos[w + 2] = this._wavePos[l + 2];
+        }
+        this._waveGeo.attributes.position.needsUpdate = true;
         this._transitGeo.attributes.position.needsUpdate = true;
         this._transitGeo.attributes.color.needsUpdate = true;
     }
