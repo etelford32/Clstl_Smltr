@@ -36,6 +36,7 @@ import {
     earthOrbit, shueStandoffRe, shueAlpha, shueRadiusRe, bowShockStandoffRe,
     SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
     carringtonL0, attributeWindSource, holeWindAssociation,
+    holeArrivalForecast, SYNODIC_DEG_PER_DAY,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -609,6 +610,49 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.deepEqual(holeWindAssociation([], drivers), []);
     assert.equal(holeWindAssociation(holes, [])[0].assoc, null);
     ok('hole↔wind association: on-arc record (v=600), off-arc null, speed-resolved');
+}
+
+// ── 25. Recurrence (27-day persistence) forecast ────────────────────────────
+{
+    const now = Date.UTC(2026, 6, 11);
+    const L0 = carringtonL0(now).L0;
+    const atW = w => (L0 + w + 360) % 360;   // Carrington lon of a hole at w° west
+    // Hole ON the meridian with a 600 km/s record: its stream arrives one
+    // ballistic transit from now (~2.84 d), from the LAST (=now) crossing.
+    const [cm] = holeArrivalForecast(
+        [{ lat_deg: 10, lon_carrington_deg: atW(0), assoc: { n: 80, vMed: 600 } }], now);
+    assert.equal(cm.forecast.basis, 'record');
+    assert.equal(cm.forecast.crossing, 'last');
+    assert.ok(Math.abs(cm.forecast.daysToArrival - 2.85) < 0.1, `CM arrival ${cm.forecast.daysToArrival}`);
+    // Hole 20°W (crossed 1.5 d ago): arrival imminent — still the last crossing.
+    const [w20] = holeArrivalForecast(
+        [{ lat_deg: -20, lon_carrington_deg: atW(20), assoc: { n: 40, vMed: 500 } }], now);
+    assert.equal(w20.forecast.crossing, 'last');
+    assert.ok(w20.forecast.daysToArrival > 1 && w20.forecast.daysToArrival < 3);
+    // Hole 70°W (its stream already passed): forecast rolls to the NEXT
+    // rotation — the classic 27-day recurrence.
+    const [w70] = holeArrivalForecast(
+        [{ lat_deg: 5, lon_carrington_deg: atW(70), assoc: { n: 90, vMed: 620 } }], now);
+    assert.equal(w70.forecast.crossing, 'next');
+    assert.ok(w70.forecast.daysToArrival > 22 && w70.forecast.daysToArrival < 28,
+        `27-d recurrence ${w70.forecast.daysToArrival}`);
+    // East hole, no record: climatology band, early < mid < late.
+    const [e30] = holeArrivalForecast(
+        [{ lat_deg: 0, lon_carrington_deg: atW(-30) }], now);
+    assert.equal(e30.forecast.basis, 'climatology');
+    assert.ok(e30.forecast.arriveEarlyMs < e30.forecast.arriveMs &&
+              e30.forecast.arriveMs < e30.forecast.arriveLateMs);
+    assert.ok(Math.abs(e30.forecast.daysToArrival - (30 / SYNODIC_DEG_PER_DAY + 3.1)) < 0.5);
+    // Polar holes are excluded (their wind misses the ecliptic); sorting
+    // puts the soonest arrival first.
+    const list = holeArrivalForecast([
+        { lat_deg: 80, lon_carrington_deg: atW(0) },
+        { lat_deg: 0, lon_carrington_deg: atW(-60) },
+        { lat_deg: 0, lon_carrington_deg: atW(5), assoc: { n: 50, vMed: 550 } },
+    ], now);
+    assert.equal(list.length, 2);
+    assert.equal(list[0].forecast.crossing, 'last');
+    ok('recurrence forecast: CM+2.8 d, ongoing-arrival, 27-d rollover, climatology, sorting');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

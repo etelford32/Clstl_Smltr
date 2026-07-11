@@ -283,6 +283,7 @@ body {
             <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz<br>
             <span class="rc-dot" style="background:#9ecbff"></span>L1 plane &mdash; pulse = new 1-min sample &middot; dot = DSCOVR/ACE halo orbit<br>
             <span class="rc-dot" style="background:#ffd27a"></span>Sun disk &mdash; dark = HEK coronal holes &middot; teal ring = source of the wind arriving now<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;amber ring = stream forecast at Earth within 5 d (27-d persistence)</span><br>
             <span class="rc-dot" style="background:#7fb4ff"></span>Magnetopause (Shue98, live) &middot; <span class="rc-dot" style="background:#59e0d8"></span>bow shock<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;arrivals deflect &mdash; the sheath river parts around the boundary</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;southward IMF: flank strands turn gold &mdash; tail return flow &rarr; midnight injection</span><br>
@@ -336,6 +337,8 @@ body {
             <div class="rc-kv"><span class="rc-k">emission &rarr; reception</span><span class="rc-v" id="rc-sunlag-cmp">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">Sun rotated in transit</span><span class="rc-v" id="rc-sunrot">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">traces to</span><span class="rc-v" id="rc-sunsrc">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">next stream (27-d persistence)</span><span class="rc-v" id="rc-recur-1">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">then</span><span class="rc-v" id="rc-recur-2">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">thermosphere drag risk</span><span class="rc-v" id="rc-drag">&mdash;</span></div>
             <div class="rc-bridge-links">
                 <a href="/sun.html" title="Solar surface twin — where this wind left the Sun">&#9728;&#65039; Sun twin</a>
@@ -783,6 +786,26 @@ function renderHud(s) {
         } else {
             $('rc-sunsrc').textContent = `${car} · ${stw} · CH catalog unavailable`;
         }
+        // Recurrence outlook (27-d persistence): each hole's next arrival
+        // window — crossing from rotation, transit ballistic, speed from
+        // the hole's OWN record when it has one (else labeled climatology).
+        const fmtRec = f => {
+            if (!f) return '—';
+            const fc = f.forecast;
+            const lat = `${(f.lat_deg ?? 0) >= 0 ? 'N' : 'S'}${Math.round(Math.abs(f.lat_deg ?? 0))}`;
+            const when = fc.daysToArrival < 0.5 ? 'arriving now'
+                : fc.daysToArrival < 1.5 ? `in ${(fc.daysToArrival * 24).toFixed(0)} h`
+                : `in ${fc.daysToArrival.toFixed(1)} d`;
+            const v = fc.basis === 'record'
+                ? `~${Math.round(fc.vUsed)} km/s (its record)`
+                : '450–650 km/s (climatology)';
+            return `CH ${lat} · ${when} · ${v}`;
+        };
+        $('rc-recur-1').textContent = fmtRec(sl.recurrence?.[0]);
+        // "then" = the first genuinely FUTURE arrival (several holes can be
+        // "arriving now" at once — one such row is enough).
+        $('rc-recur-2').textContent =
+            fmtRec(sl.recurrence?.find(f => f.forecast.daysToArrival > 0.5));
     }
     // Qualitative thermosphere handoff: storm-time ring current heating ⇒
     // density enhancement ⇒ drag. Tier follows the Dst storm class.

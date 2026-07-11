@@ -1281,8 +1281,13 @@ export class RingCurrentGlobe {
         g.arc(C, C, R, 0, 2 * Math.PI);
         g.fill();
         // Coronal holes on today's visible disk (clipped to the limb).
+        // Holes whose recurrence forecast puts a stream at Earth within
+        // 5 days get an amber ring — the disk shows tomorrow's weather.
         const l0 = sl?.l0NowDeg;
         if (Number.isFinite(l0)) {
+            const soon = new Set((sl.recurrence ?? [])
+                .filter(f => f.forecast?.daysToArrival < 5)
+                .map(f => Math.round(f.lon_carrington_deg)));
             g.save();
             g.beginPath();
             g.arc(C, C, R, 0, 2 * Math.PI);
@@ -1294,12 +1299,19 @@ export class RingCurrentGlobe {
                 if (Math.abs(lon) > 85 || Math.abs(lat) > 80) continue;   // far side
                 const x = C + R * Math.sin(lon * d2r) * Math.cos(lat * d2r);
                 const y = C - R * Math.sin(lat * d2r);
+                const rx = Math.max(3, 9 * Math.abs(Math.cos(lon * d2r)));
+                const ry = Math.max(3, 9 * Math.abs(Math.cos(lat * d2r)));
                 g.fillStyle = 'rgba(30,18,52,0.72)';
                 g.beginPath();
-                g.ellipse(x, y,
-                    Math.max(3, 9 * Math.abs(Math.cos(lon * d2r))),
-                    Math.max(3, 9 * Math.abs(Math.cos(lat * d2r))), 0, 0, 2 * Math.PI);
+                g.ellipse(x, y, rx, ry, 0, 0, 2 * Math.PI);
                 g.fill();
+                if (soon.has(Math.round(h.lon_carrington_deg))) {
+                    g.strokeStyle = 'rgba(255,210,122,0.6)';
+                    g.lineWidth = 1.5;
+                    g.beginPath();
+                    g.ellipse(x, y, rx + 3, ry + 3, 0, 0, 2 * Math.PI);
+                    g.stroke();
+                }
             }
             g.restore();
         }

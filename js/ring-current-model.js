@@ -856,6 +856,70 @@ export function holeWindAssociation(holes, drivers, tolDeg = 15) {
     });
 }
 
+/** Synodic solar rotation as seen from Earth (Carrington period 27.2753 d). */
+export const SYNODIC_DEG_PER_DAY = 360 / 27.2753;
+
+/**
+ * Recurrence (persistence) forecast — NOAA's operational technique for
+ * recurrent high-speed streams, run over the HEK catalog: a hole's wind
+ * record from one central-meridian crossing is the prediction for its
+ * next one.
+ *
+ * For each non-polar hole, both the LAST and NEXT meridian crossings are
+ * considered (a hole that crossed 2 days ago has its stream arriving
+ * ~now — the most actionable case); arrival = crossing + ballistic
+ * transit. Speed: the hole's own measured record (holeWindAssociation)
+ * with a ±60 km/s band — for west holes this projects THIS rotation's
+ * record to the next crossing, the classic 27-day recurrence — or, for
+ * holes with no record yet, a coronal-hole fast-wind climatology band
+ * [450, 650] km/s, labeled as such (basis: 'climatology'). Once the
+ * driver archive exceeds one rotation, east holes inherit last-rotation
+ * records through holeWindAssociation automatically — no new code.
+ *
+ * Returns holes decorated with .forecast, sorted by soonest arrival:
+ *   { lonWDeg, crossing:'last'|'next', crossMs, arriveMs,
+ *     arriveEarlyMs, arriveLateMs, vUsed|null, basis, daysToArrival }
+ */
+export function holeArrivalForecast(holes, nowMs, opts = {}) {
+    const latMax = opts.latMax ?? 65;
+    const [vClimLo, vClimHi] = opts.climatology ?? [450, 650];
+    if (!Array.isArray(holes) || !Number.isFinite(nowMs)) return [];
+    const DAY = 86.4e6;
+    const L0 = carringtonL0(nowMs).L0;
+    const transitDays = v => (SOLAR.AU_KM - PHYS.L1_KM) / v / 86400;
+    const out = [];
+    for (const h of holes) {
+        const lonCar = h?.lon_carrington_deg;
+        if (!Number.isFinite(lonCar) || Math.abs(h?.lat_deg ?? 90) > latMax) continue;
+        const lonW = ((lonCar - L0) % 360 + 540) % 360 - 180;   // + = west of CM
+        const sinceCross = (lonW >= 0 ? lonW : 360 + lonW) / SYNODIC_DEG_PER_DAY;
+        const untilCross = (lonW >= 0 ? 360 - lonW : -lonW) / SYNODIC_DEG_PER_DAY;
+        const rec = Number.isFinite(h?.assoc?.vMed) ? h.assoc.vMed : null;
+        const vLo = rec ? Math.max(250, rec - 60) : vClimLo;
+        const vHi = rec ? rec + 60 : vClimHi;
+        const vMid = rec ?? (vClimLo + vClimHi) / 2;
+        let best = null;
+        for (const [crossing, dDays] of [['last', -sinceCross], ['next', untilCross]]) {
+            const crossMs = nowMs + dDays * DAY;
+            const arriveLateMs = crossMs + transitDays(vLo) * DAY;
+            // +1 d grace: streams persist beyond onset — an arrival window
+            // that ended less than a day ago is spent, older ones expired.
+            if (arriveLateMs + DAY < nowMs) continue;
+            const f = {
+                lonWDeg: lonW, crossing, crossMs,
+                arriveMs:      crossMs + transitDays(vMid) * DAY,
+                arriveEarlyMs: crossMs + transitDays(vHi) * DAY,
+                arriveLateMs,
+                vUsed: rec, basis: rec ? 'record' : 'climatology',
+            };
+            f.daysToArrival = (f.arriveMs - nowMs) / DAY;
+            if (!best || f.arriveMs < best.arriveMs) best = f;
+        }
+        if (best) out.push({ ...h, forecast: best });
+    }
+    return out.sort((a, b) => a.forecast.arriveMs - b.forecast.arriveMs);
+}
+
 export function attributeWindSource(holes, srcCarringtonLon, vKmS) {
     if (!Array.isArray(holes) || !holes.length || !Number.isFinite(srcCarringtonLon)) return null;
     let best = null;

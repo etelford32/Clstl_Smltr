@@ -34,7 +34,7 @@ import {
     oxygenFraction, subsolarPoint, dipoleTiltRad, chargeExchangeLifetimeHours,
     shueStandoffRe, shueAlpha,
     SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
-    carringtonL0, attributeWindSource, holeWindAssociation,
+    carringtonL0, attributeWindSource, holeWindAssociation, holeArrivalForecast,
 } from './ring-current-model.js';
 
 // rtsw_mag_1m is not in config.NOAA — defined locally, same as js/swpc-feed.js.
@@ -639,6 +639,10 @@ export class RingCurrentFeed extends EventTarget {
             // received from that hole's longitude. Holes east of the
             // meridian carry assoc: null — their wind hasn't arrived yet.
             sl.holes = holeWindAssociation(this._holes, this._drivers);
+            // Recurrence outlook: each hole's next Earth-arrival window
+            // (crossing from solar rotation, transit ballistic, speed from
+            // the hole's own record — the 27-day persistence technique).
+            sl.recurrence = holeArrivalForecast(sl.holes, nowMs).slice(0, 4);
         }
         this.dispatchEvent(new CustomEvent('state', {
             detail: state ? { ...state, goes, compute, mode: this._mode, errors: this._errors.slice(-3) }
