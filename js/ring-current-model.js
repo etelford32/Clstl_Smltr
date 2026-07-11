@@ -828,13 +828,16 @@ export function carringtonL0(ms) {
  * @param {Array} holes    HEK rows ({ lat_deg, lon_carrington_deg, ... })
  * @param {Array} drivers  [{ t, v }] 1-min series (24 h typical); strided
  *                         internally to ~10-min samples
+ * @param {number} strideN sample stride (default 10 — right for 1-min
+ *                         series; pass 1 for pre-bucketed data, e.g. the
+ *                         validation scripts' 6-h medians)
  * @returns holes decorated with assoc: { n, vMed } | null
  */
-export function holeWindAssociation(holes, drivers, tolDeg = 15) {
+export function holeWindAssociation(holes, drivers, tolDeg = 15, strideN = 10) {
     if (!Array.isArray(holes) || !holes.length) return [];
     const src = [];
     if (Array.isArray(drivers)) {
-        for (let i = 0; i < drivers.length; i += 10) {
+        for (let i = 0; i < drivers.length; i += Math.max(1, strideN)) {
             const d = drivers[i];
             if (!d || !Number.isFinite(d.v) || d.v < 100 || !Number.isFinite(d.t)) continue;
             const dep = sunDepartureMs(d.t, d.v);
