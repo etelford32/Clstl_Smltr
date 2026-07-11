@@ -65,7 +65,7 @@ Companion to RING_CURRENT_SIMULATION_PLAN.md.
 | Index forecasts miss storms; alerts wanted 30–90 min ahead | **Threshold-crossing alert**: "model crosses −50 nT in ≈N min" from the L1-driven forecast | this branch |
 | Density is the #1 operator need | **Storm density impact panel**: site's own thermosphere engine (`js/upper-atmosphere-engine.js` density()) driven by live Kp→ap + F10.7, storm/quiet ratio at 300/400/550/800 km | this branch |
 | Skill must be shown, not claimed (2–3 wk notice impossible) | **Gannon G5 replay**: run the same model over May 2024 OMNI drivers vs SYM-H, on the page, with skill numbers | this branch |
-| 3–7 day forecasts for screening | Couple `ring_current_log` + `geomag_indices` skill ledger into a published verification page; extend drivers with 27-day recurrence | later |
+| 3–7 day forecasts for screening | Couple `ring_current_log` + `geomag_indices` skill ledger into a published verification page; extend drivers with 27-day recurrence | ledger panel landed 2026-07-11 (`/api/ring-current/skill` + "Independent validation" panel); 27-day recurrence later |
 | TraCSS / BAA | White paper: L1-driven ring-current→density chain with continuously-measured skill | later (business) |
 
 ## Sources

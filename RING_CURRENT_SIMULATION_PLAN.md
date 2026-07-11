@@ -135,6 +135,8 @@ ring-current / coupling model of its southward-IMF driver. The uploaded patch
 | Latest sample append | `/api/solar-wind/latest` (Supabase cache, 30 s CDN) | T1 (60 s) |
 | Observed Dst (24 h) | NOAA `kyoto-dst.json`, browser-direct | T3 (15 min) |
 | Kp (plasmapause) | NOAA `planetary_k_index_1m.json`, browser-direct | T2 (5 min) |
+| GOES Hp (GEO cross-check) | NOAA `goes/primary/magnetometers-1-day.json`, browser-direct, best-effort | T3 (15 min) |
+| Server skill ledger | `/api/ring-current/skill` (Supabase join, 10-min CDN TTL) | T3 (15 min) |
 
 Fallback: if browser-direct NOAA is unreachable, the feed degrades to
 `/api/solar-wind/latest?series=1` (60 min) + `/api/noaa/dst` (recent
@@ -148,9 +150,13 @@ readings) — shorter window, page still live.
 |------|------|
 | `js/ring-current-model.js` | Pure physics, no DOM/THREE — unit-testable. Coupling, OBM/Burton integration, pressure correction, DPS energy, radial profile, asymmetry, drift periods, storm classification, ballistic L1 propagation, skill metrics (RMSE/bias). |
 | `js/ring-current-feed.js` | Data layer. Polls the feeds above, normalises fill values, assembles a merged 1-min driver series, anchors the model on observed Dst 24 h ago, re-integrates, emits `state` events. |
-| `js/ring-current-globe.js` | Three.js scene: Earth (pinned three-globe CDN textures), dipole field lines, drift-animated ion/electron particle populations with Dst*-driven density + dusk-side partial-ring asymmetry, plasmapause ring. |
-| `ring-current.html` | Page shell: canonical nav (`<nav></nav>` + `initNav`), HUD panels (drivers / state / forecast), model-vs-observed Dst chart with forecast strip (2D canvas, no chart lib). |
+| `js/ring-current-globe.js` | Three.js scene: Earth (day/night terminator shader, pinned three-globe CDN textures), dipole field lines, GPU-shader trapped populations (drift+bounce integrated in the vertex shader from static attributes; radial/asymmetry/injection weights ported to GLSL — keep in sync with the model JS), plasmapause ring, spin+dipole axis lines. |
+| `js/ring-current-particles.js` | Pure population attribute builder (seed/kin Float32 buffers for the GPU shader). Shared by worker and globe fallback; node-tested. |
+| `js/ring-current-worker.js` | Module worker: builds populations (transferred buffers) and runs computeState off the UI thread. Pure `handleRequest` is node-tested; feed/globe fall back inline on any failure. |
+| `ring-current.html` | Page shell: canonical nav (`<nav></nav>` + `initNav`), HUD panels (drivers / state / forecast / validation), model-vs-observed Dst chart with forecast strip (2D canvas, no chart lib). |
+| `api/ring-current/skill.js` | Published skill ledger (Phase 2b): edge function joining `ring_current_log` ↔ `geomag_indices` via service role — aggregates only, raw rows never leave. Pure core `ledgerSkillSummary` is node-tested. |
 | `tests/ring-current-model.mjs` | Node physics tests (same pattern as `tests/abell85-physics.mjs`). |
+| `tests/ring-current-skill-endpoint.mjs` | Node tests for the ledger join/aggregation. |
 
 Navigation: one new entry in the **Space Weather** dropdown of `js/nav.js`
 (`ring-current.html`, id `ring-current`, badge NEW). `scripts/lint-nav.mjs`
@@ -177,6 +183,69 @@ Three.js 0.160 importmap, NOAA browser-direct / NASA via edge.
   (arrival-time propagated L1 samples), RMSE/bias over the window.
 - Time-compression control for drift animation (default ~900×), pause on
   `document.hidden` (battery/API hygiene).
+- **Frame & rotation accuracy (2026-07-11)**: the scene is a true GSM frame
+  (+X = Sun line, +Y = GSM Z, dawn at +Z — right-handed, no mirror). Earth
+  spins at the real rate with the real phase (subsolar longitude faces +X,
+  axis tilted by the live declination via `subsolarPoint`); the whole
+  magnetosphere group tilts by the live GSM dipole tilt ψ (`dipoleTiltRad`,
+  IGRF dipole axis + low-precision ephemeris, ±34° seasonal+diurnal); bounce
+  runs at TRUE physical periods (`bouncePeriodSeconds` — H⁺ ~13 s at
+  100 keV/L=3, O⁺ 4×, electrons relativistic ~0.3 s), never compressed.
+  Only drift takes the compression slider; a "1× real" toggle makes the
+  entire scene real time. NOTE: the pre-2026-07-11 frame was mirrored
+  (MLT = 12 + θ·12/π) and its "dusk" partial-ring arc actually rendered at
+  13 MLT — verified numerically with the vendored three.js before both were
+  fixed together. Do not "restore" the old arc rotation constant.
+- **GPU + worker pipeline (2026-07-11, same day, second pass)**: trapped
+  populations render through `trappedPointsMaterial` — the vertex shader
+  integrates drift/bounce from static (L, θ₀, λ_m)/(rate, rate, φ)
+  attributes and evaluates the radial profile, dusk asymmetry, and a
+  live-|Q|-scaled nightside injection pulse per vertex (GLSL ports of
+  `radialProfile`/`azimuthalWeight`/`ringPeakL` — KEEP IN SYNC with the
+  model). Attribute buffers are built in `js/ring-current-worker.js` and
+  transferred; the same worker runs the feed's `computeState` tick
+  (`state.compute` reports 'worker'|'inline'; any failure falls back to
+  identical inline compute). Spin and dipole axis lines make the daily
+  wobble between the two axes legible.
+- **Particle lifetimes + SimClock unification (2026-07-11, fourth pass —
+  merged with #917)**: every trapped particle now carries its TRUE lifetime
+  and dies on screen. Model: `geocoronalDensity` (Rairden 1986 fit),
+  `chargeExchangeCrossSection` (Lindsay–Stebbings-class σ(E): H⁺ collapses
+  above tens of keV, O⁺ flat), `chargeExchangeLifetimeHours`
+  (τ = 1/σn_Hv — H⁺ 50 keV @ L3 ≈ 12 h, O⁺ ~10× shorter at 100 keV = the
+  two-phase recovery, τ ∝ L^3.5; electrons get nominal scattering hours,
+  labeled viz-grade). Lifecycle runs ENTIRELY in the vertex shader on the
+  SimClock: birth in the nightside injection sector (flash ∝ live |Q|),
+  drift life, death by ENA escape (outward fade — the ENA-imaging story) or
+  field-aligned precipitation to the SURFACE at auroral latitude, then
+  hash-jittered rebirth. The dusk asymmetry now partly EMERGES from
+  birth-at-midnight + westward drift + finite lifetime. `particlePose()` in
+  js/ring-current-particles.js is the node-tested reference the GLSL
+  transcribes (drives tooltip picking — keep in sync). #917's SimClock is
+  THE clock (τ presets ×1/60/300/1000, sweep-wrap over the forecast
+  window); its transit advection, arrival flashes, injections (drift sign
+  re-derived for the GSM-true frame), Dst-coupled visible count, and
+  tooltips were ported onto the GPU pipeline — see the integration note in
+  RING_CURRENT_VISUAL_PLAN.md. HUD gains a live charge-exchange-τ row.
+  **Sun→surface journey map**: measured L1 transit ✓ → magnetopause arrival
+  flash ✓ → nightside injection burst ✓ → trapped drift/bounce ✓ → loss
+  (ENA / precipitation-to-surface) ✓. NOT yet rendered: the
+  magnetosheath/flank/tail leg between arrival and injection (parcels end
+  at the magnetopause; injections restart at midnight) — that leg is the
+  next fidelity step.
+- **EarthSkin integration (2026-07-11, third pass)**: the page's Earth is
+  now the SHARED `js/earth-skin.js` stack (same renderer as earth.html and
+  the space-weather globe) — Blue Marble, city lights, ocean specular,
+  topographic bump, Rayleigh–Mie atmosphere, magnetic-latitude aurora oval.
+  The procedural CLOUD SHELL is deliberately OFF (clouds: false) — it read
+  as cartoon noise on a magnetosphere page and was removed on user request;
+  do not re-enable it here. Fed from THIS page's live state in
+  `setState`: Kp, −Bz/30, ap→auroraAW, and the model's own Dst into the
+  skin's `u_dst_norm` ring-current heating glow — Earth's appearance and
+  the ring around it share one physics state. Frame note: coords.js maps
+  lon 0 → +X, east → −Z — identical to the scene's GSM mapping, so the
+  spin phase stays `rotation.y = −λ_subsolar` (spin group), tilt
+  `rotation.z = −declination` (tilt group), Sun constant on world +X.
 
 ---
 
@@ -208,13 +277,29 @@ Three.js 0.160 importmap, NOAA browser-direct / NASA via edge.
   service-role tables (intentional — advisor false positive). Newell (2007)
   coupling added to the model + page HUD (derivable from stored fields — no
   schema change).
-- **Phase 2b — hindcast (not started)**: Gannon SYM-H replay mode on the
-  page via `/api/omni/imf`; O⁺/H⁺ composition split during storms; a page
-  panel reading the `ring_current_log` ↔ `geomag_indices` skill join.
-- **Phase 3 — operator surface**: Dst-threshold alert type (`notify_*` column
-  + `js/alert-engine.js` check + `account.html` toggle, per CLAUDE.md
-  heuristic), GOES magnetometer cross-check, coupling to the LEO-drag
-  forecast (ring-current heating → thermosphere density).
+- **Phase 2b — hindcast (LANDED)**: Gannon SYM-H replay mode on the page via
+  `/api/omni/imf` (PR #914). O⁺/H⁺ composition split (2026-07-11):
+  `oxygenFraction(dstStar)` in the model (Hamilton 1988 / Daglis 1999
+  anchors, display-only — it partitions energy, it does NOT feed back into
+  the OBM integration, whose τ fit already absorbs composition-dependent
+  decay in aggregate), HUD row, and a brightness-steered H⁺/O⁺ particle
+  split on the globe (species fixed at build so bounce phase never jumps;
+  the ENERGY mix is steered by relative brightness). Skill-ledger panel
+  (2026-07-11): `api/ring-current/skill.js` joins `ring_current_log` ↔
+  `geomag_indices` server-side with the SAME `skill()` the page runs, and
+  the page's "Independent validation" panel shows 24 h / 7 d RMSE+bias plus
+  daily bars. Only aggregates leave the endpoint — the tables stay
+  service-role-only.
+- **Phase 3 — operator surface (partial)**: GOES magnetometer cross-check
+  LANDED 2026-07-11 — browser-direct `json/goes/primary/magnetometers-1-day`
+  (T3, best-effort), `parseGoesMag` / `goesCrossCheck` in the feed. Hp vs
+  its 24 h median is an INDEPENDENT in-situ measurement, never a model
+  input; disagreement renders as 'mixed' (local-time / compression), not as
+  an error. REMAINING: Dst-threshold alert type (`notify_*` column +
+  `js/alert-engine.js` check + `account.html` toggle, per CLAUDE.md
+  heuristic — needs a `user_profiles` migration, keep it a dedicated PR),
+  coupling to the LEO-drag forecast (ring-current heating → thermosphere
+  density).
 
 ---
 

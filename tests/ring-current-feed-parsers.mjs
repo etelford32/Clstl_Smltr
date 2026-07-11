@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import {
     noaaNum, noaaTimeMs, mergeDriverSeries, parseKyotoDst, parseLatestKp,
     observedDstAt, computeState, omniToReplay, computeReplayState,
+    parseGoesMag, goesCrossCheck,
 } from '../js/ring-current-feed.js';
 
 let n = 0;
@@ -223,6 +224,71 @@ const tag = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '');
     assert.ok(replay.series.band.length === replay.series.model.length);
     assert.equal(computeReplayState([], observed), null);
     ok('omniToReplay + computeReplayState: hindcast without double propagation');
+}
+
+// ── 9. GOES magnetometer parsing + GEO cross-check ───────────────────────────
+{
+    const rows = [
+        { time_tag: '2026-07-10T00:02:00Z', satellite: 19, Hp: 96.1 },   // out of order
+        { time_tag: '2026-07-10T00:00:00Z', satellite: 19, Hp: 97.4 },
+        { time_tag: '2026-07-10T00:01:00Z', satellite: 19, Hp: 95.0, arcjet_flag: true },  // thruster → dropped
+        { time_tag: '2026-07-10T00:03:00Z', satellite: 19, Hp: -9999 },  // fill → dropped
+        { time_tag: '2026-07-10T00:04:00Z', satellite: 19, hp: 94.2 },   // lowercase drift tolerated
+        { time_tag: 'garbage',              satellite: 19, Hp: 90 },     // bad time → dropped
+    ];
+    const s = parseGoesMag(rows);
+    assert.equal(s.length, 3);
+    assert.deepEqual(s.map(r => r.hp), [97.4, 96.1, 94.2]);   // re-sorted ascending
+    assert.equal(s[0].sat, 19);
+    assert.deepEqual(parseGoesMag(null), []);
+
+    // Cross-check needs ≥120 samples (2 h) — below that, null.
+    assert.equal(goesCrossCheck(s, -50, Date.parse('2026-07-10T00:05:00Z')), null);
+
+    // Storm + depressed field ⇒ consistent-storm. Baseline 100 nT, last 80.
+    const mk = (lastHp) => {
+        const arr = [];
+        for (let m = 0; m < 200; m++) {
+            arr.push({ t: T0 + m * 60_000, hp: 100, sat: 19 });
+        }
+        arr.push({ t: T0 + 200 * 60_000, hp: lastHp, sat: 19 });
+        return arr;
+    };
+    const nowMs = T0 + 205 * 60_000;
+    const storm = goesCrossCheck(mk(80), -60, nowMs);
+    assert.equal(storm.verdict, 'consistent-storm');
+    assert.ok(Math.abs(storm.dHp - (-20)) < 1e-9);
+    assert.equal(storm.medianHp, 100);
+    assert.equal(storm.ageMin, 5);
+
+    // Quiet model + field near baseline ⇒ consistent-quiet.
+    assert.equal(goesCrossCheck(mk(102), -10, nowMs).verdict, 'consistent-quiet');
+    // Storm model but GEO near baseline (dayside compression can mask) ⇒ mixed.
+    assert.equal(goesCrossCheck(mk(101), -80, nowMs).verdict, 'mixed');
+    // Quiet model but depressed GEO field ⇒ mixed.
+    assert.equal(goesCrossCheck(mk(70), -5, nowMs).verdict, 'mixed');
+    // Unknown model Dst: never claims storm consistency.
+    assert.equal(goesCrossCheck(mk(80), null, nowMs).verdict, 'mixed');
+    ok('GOES: arcjet/fill dropped, case drift tolerated, verdict matrix');
+}
+
+// ── 10. computeState exposes the composition split ───────────────────────────
+{
+    const drivers = [], observed = [];
+    for (let m = 0; m <= 6 * 60; m++) {
+        drivers.push({ t: T0 + m * 60_000, v: 600, n: 15, bz: -15 });
+    }
+    for (let h = 0; h <= 7; h++) observed.push({ t: T0 + h * 3.6e6, dst: -20 });
+    const st = computeState(drivers, observed, 4, T0 + 6 * 60 * 60_000);
+    assert.ok(Number.isFinite(st.now.oxygenFraction));
+    assert.ok(st.now.oxygenFraction > 0.2, 'storm drives the O⁺ share up');
+    assert.ok(st.now.oxygenFraction < 0.64);
+    // Live Sun–Earth geometry for the HUD + the twin's accurate Earth:
+    // fixture nowMs = 2026-07-10T06:00Z → subsolar ≈ 22°N, ≈ 90°E.
+    assert.ok(Math.abs(st.now.subsolar.latDeg - 22.2) < 0.5, `subsolar lat ${st.now.subsolar.latDeg}`);
+    assert.ok(Math.abs(st.now.subsolar.lonDeg - 91) < 3, `subsolar lon ${st.now.subsolar.lonDeg}`);
+    assert.ok(Number.isFinite(st.now.dipoleTiltDeg) && Math.abs(st.now.dipoleTiltDeg) < 35);
+    ok('computeState: oxygenFraction + live subsolar/dipole-tilt geometry surfaced');
 }
 
 console.log(`\nring-current-feed-parsers: all ${n} test groups passed`);

@@ -11,6 +11,7 @@
  *   latest-sample append    /api/solar-wind/latest T1 (Supabase cache, 30 s CDN)
  *   observed Kyoto Dst      NOAA browser-direct   T3
  *   Kp (plasmapause)        NOAA browser-direct   T2
+ *   GOES Hp (GEO check)     NOAA browser-direct   T3 (best-effort)
  *
  * IMF (bt/bz/bx/by) lives in rtsw_mag_1m.json, NOT in the plasma wind feed —
  * same split js/swpc-feed.js and api/cron/refresh-solar-wind.js handle.
@@ -30,10 +31,15 @@ import {
     integrateDst, integrateDstEnsemble, propagateToEarth, couplingVBs,
     dynamicPressure, dpsEnergyJ, ringPeakL, asymmetry, plasmapauseL,
     stormClass, toDstStar, obmQ, obmTau, skill, findThresholdCrossing, kpToAp,
+    oxygenFraction, subsolarPoint, dipoleTiltRad, chargeExchangeLifetimeHours,
 } from './ring-current-model.js';
 
 // rtsw_mag_1m is not in config.NOAA — defined locally, same as js/swpc-feed.js.
 const NOAA_MAG_URL   = 'https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json';
+// GOES primary magnetometer at GEO (6.6 R_E) — the in-situ cross-check the
+// plan's Phase 3 asks for. Browser-direct (CORS-enabled), same sanctioned
+// NOAA pattern as the RTSW feeds. Best-effort: page works without it.
+const NOAA_GOES_MAG_URL = 'https://services.swpc.noaa.gov/json/goes/primary/magnetometers-1-day.json';
 const API_LATEST     = '/api/solar-wind/latest';
 const API_DST        = '/api/noaa/dst';
 
@@ -119,6 +125,60 @@ export function parseLatestKp(raw) {
         if (kp != null && kp >= 0 && kp <= 9) return kp;
     }
     return null;
+}
+
+/**
+ * GOES magnetometers-1-day.json → ascending [{t, hp, sat}]. Hp is the field
+ * component parallel to Earth's rotation axis at GEO — the component the ring
+ * current depresses. Rows flagged `arcjet_flag` (thruster firings contaminate
+ * the magnetometer) and fill values are dropped. Field names tolerate NOAA's
+ * historical case drift (Hp / hp), like every other parser in this file.
+ */
+export function parseGoesMag(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const r of raw) {
+        if (r?.arcjet_flag === true || r?.arcjet_flag === 'true') continue;
+        const t = noaaTimeMs(r?.time_tag);
+        const hp = noaaNum(r?.Hp ?? r?.hp);
+        if (t == null || hp == null || Math.abs(hp) > 600) continue;   // |Hp| > 600 nT: fill/garbage at GEO
+        const sat = Number(r?.satellite);
+        out.push({ t, hp, sat: Number.isFinite(sat) ? sat : null });
+    }
+    return out.sort((a, b) => a.t - b.t);
+}
+
+/**
+ * In-situ cross-check of the model against the GOES field at GEO.
+ *
+ * A growing ring current depresses Hp below its daily baseline; quiet times
+ * sit near it. This is an INDEPENDENT NOAA measurement — never an input to
+ * the model — so agreement is evidence, not circularity. It is deliberately
+ * qualitative: Hp at GEO also carries magnetopause-compression and tail
+ * currents and swings with the satellite's local time, so disagreement is
+ * reported as 'mixed', not as an error.
+ *
+ * @param {Array<{t,hp,sat}>} series  ≥ 2 h of samples required (else null)
+ * @param {number|null} dstModel      current model Dst (nT)
+ * @param {number} nowMs
+ * @returns {{hp, dHp, medianHp, sat, ageMin, verdict} | null}
+ */
+export function goesCrossCheck(series, dstModel, nowMs) {
+    if (!Array.isArray(series) || series.length < 120) return null;
+    const last = series[series.length - 1];
+    const sorted = series.map(s => s.hp).sort((a, b) => a - b);
+    const medianHp = sorted[Math.floor(sorted.length / 2)];
+    const dHp = last.hp - medianHp;
+    const ageMin = Math.round((nowMs - last.t) / 60_000);
+
+    const depressed = dHp <= -12;
+    const nearBase  = Math.abs(dHp) < 12;
+    const storming  = Number.isFinite(dstModel) && dstModel <= -30;
+    let verdict;
+    if (storming && depressed)       verdict = 'consistent-storm';   // both see a depressed field
+    else if (!storming && nearBase)  verdict = 'consistent-quiet';   // both quiet
+    else                             verdict = 'mixed';              // local-time / compression effects
+    return { hp: last.hp, dHp, medianHp, sat: last.sat, ageMin, verdict };
 }
 
 /** Linear interpolation of the observed Dst series at time t (ms). */
@@ -208,6 +268,15 @@ export function computeState(driverSeries, observedDst, kp, nowMs, f107 = null) 
             stormModel:   stormClass(nowPt.dst),
             peakL:        ringPeakL(nowPt.dstStar),
             asymmetry:    asym,
+            oxygenFraction: oxygenFraction(nowPt.dstStar),
+            // Charge-exchange lifetimes of a reference 50 keV ion at the
+            // current peak shell — the live "how fast is the ring dying"
+            // number (O⁺ ≪ H⁺ = the two-phase recovery).
+            ceLifetimeH50: chargeExchangeLifetimeHours(50, ringPeakL(nowPt.dstStar), 'ion'),
+            ceLifetimeO50: chargeExchangeLifetimeHours(50, ringPeakL(nowPt.dstStar), 'oxygen'),
+            // Live Sun–Earth geometry (what the 3D twin's Earth/dipole track).
+            subsolar:       subsolarPoint(nowMs),
+            dipoleTiltDeg:  dipoleTiltRad(nowMs) * 180 / Math.PI,
             plasmapauseL: plasmapauseL(kp),
             kp,
             apNow:        kpToAp(kp),
@@ -324,15 +393,20 @@ export class RingCurrentFeed extends EventTarget {
         this._observed = [];      // [{t, dst}]
         this._kp       = null;
         this._f107     = null;    // daily F10.7 (sfu) for the density panel
+        this._goes     = [];      // GOES Hp series (GEO in-situ cross-check)
         this._timers   = {};
         this._mode     = 'full';  // 'full' | 'degraded'
         this._started  = false;
         this._errors   = [];
+        this._worker   = null;    // module worker running computeState
+        this._workerBroken = false;
+        this._reqId    = 0;       // latest-wins token for worker replies
     }
 
     async start() {
         if (this._started) return;
         this._started = true;
+        this._startWorker();
 
         await this._fullSync();
 
@@ -358,6 +432,42 @@ export class RingCurrentFeed extends EventTarget {
         for (const t of Object.values(this._timers)) clearInterval(t);
         this._timers = {};
         this._started = false;
+        this._worker?.terminate();
+        this._worker = null;
+    }
+
+    /**
+     * The 30 s model tick (ballistic propagation + 5-member OBM ensemble
+     * over 24 h of 1-min drivers) runs in js/ring-current-worker.js so the
+     * UI thread never stalls. The worker imports THIS module's computeState,
+     * so the physics cannot drift between threads. Any failure — no Worker
+     * API, module-worker unsupported, runtime error — flips to inline
+     * compute permanently (same function, same result, just on-thread).
+     */
+    _startWorker() {
+        if (this._worker || this._workerBroken) return;
+        try {
+            if (typeof Worker === 'undefined') throw new Error('no Worker API');
+            this._worker = new Worker(
+                new URL('./ring-current-worker.js', import.meta.url), { type: 'module' });
+            this._worker.onmessage = (e) => {
+                const m = e.data;
+                if (m?.id !== this._reqId) return;      // stale — newer request in flight
+                if (!m.ok) { this._workerFail(new Error(m.error)); return; }
+                this._dispatch(m.state);
+            };
+            this._worker.onerror = (e) => this._workerFail(e?.error ?? new Error(e?.message || 'worker error'));
+        } catch (e) {
+            this._workerFail(e);
+        }
+    }
+
+    _workerFail(e) {
+        this._noteError(e);
+        this._worker?.terminate();
+        this._worker = null;
+        this._workerBroken = true;
+        this._emit();   // re-emit inline so the pending tick isn't lost
     }
 
     async _tick(fn) {
@@ -424,6 +534,13 @@ export class RingCurrentFeed extends EventTarget {
             if (Number.isFinite(sfu) && sfu > 40 && sfu < 500) this._f107 = sfu;
         } catch (e) { this._noteError(e); }
 
+        // GOES magnetometer (GEO cross-check). Best-effort: a failure keeps
+        // the previous series; the check panel just goes stale/dashes.
+        try {
+            const goes = parseGoesMag(await getJson(NOAA_GOES_MAG_URL));
+            if (goes.length) this._goes = goes;
+        } catch (e) { this._noteError(e); }
+
         this._emit();
     }
 
@@ -451,10 +568,23 @@ export class RingCurrentFeed extends EventTarget {
     }
 
     _emit() {
-        const state = computeState(this._drivers, this._observed, this._kp, Date.now(), this._f107);
+        if (this._worker && !this._workerBroken) {
+            this._worker.postMessage({
+                id: ++this._reqId, type: 'state',
+                drivers: this._drivers, observed: this._observed,
+                kp: this._kp, nowMs: Date.now(), f107: this._f107,
+            });
+            return;   // _dispatch fires on the worker's reply (latest-wins)
+        }
+        this._dispatch(computeState(this._drivers, this._observed, this._kp, Date.now(), this._f107));
+    }
+
+    _dispatch(state) {
+        const goes = goesCrossCheck(this._goes, state?.now?.dstModel ?? null, Date.now());
+        const compute = this._worker && !this._workerBroken ? 'worker' : 'inline';
         this.dispatchEvent(new CustomEvent('state', {
-            detail: state ? { ...state, mode: this._mode, errors: this._errors.slice(-3) }
-                          : { mode: this._mode, errors: this._errors.slice(-3), updated: Date.now() },
+            detail: state ? { ...state, goes, compute, mode: this._mode, errors: this._errors.slice(-3) }
+                          : { goes, compute, mode: this._mode, errors: this._errors.slice(-3), updated: Date.now() },
         }));
     }
 }
