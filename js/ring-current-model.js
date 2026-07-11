@@ -439,6 +439,51 @@ export function plasmapauseL(kp) {
     return Math.max(1.8, Math.min(6.5, 5.6 - 0.46 * k));
 }
 
+// ── Magnetopause & bow shock (Shue et al. 1998 — the boundary conditions) ────
+
+/**
+ * Shue et al. (1998) subsolar magnetopause standoff distance (R_E):
+ *
+ *   r₀ = (10.22 + 1.29·tanh(0.184·(Bz + 8.14))) · Pdyn^(−1/6.6)
+ *
+ * The two live drivers do exactly what intuition says: dynamic pressure
+ * pushes the nose in (r₀ ∝ Pdyn^−0.152), and southward Bz erodes it further
+ * (reconnection peels flux off the dayside). Nominal wind (2 nPa, Bz 0)
+ * ⇒ ~10.3 R_E; a big storm (30 nPa, −20 nT) ⇒ ~5.4 R_E — INSIDE
+ * geosynchronous orbit, which is why GEO satellites sometimes find
+ * themselves in the solar wind during extreme events.
+ */
+export function shueStandoffRe(pdynNPa, bzNT) {
+    const p = Number.isFinite(pdynNPa) && pdynNPa > 0 ? pdynNPa : 2;
+    const bz = Number.isFinite(bzNT) ? bzNT : 0;
+    return (10.22 + 1.29 * Math.tanh(0.184 * (bz + 8.14))) * Math.pow(p, -1 / 6.6);
+}
+
+/**
+ * Shue (1998) tail-flaring exponent α = (0.58 − 0.007·Bz)·(1 + 0.024·ln Pdyn).
+ * α > 0.5 ⇒ the tail boundary keeps opening; southward Bz flares it more.
+ */
+export function shueAlpha(pdynNPa, bzNT) {
+    const p = Number.isFinite(pdynNPa) && pdynNPa > 0 ? pdynNPa : 2;
+    const bz = Number.isFinite(bzNT) ? bzNT : 0;
+    return (0.58 - 0.007 * bz) * (1 + 0.024 * Math.log(p));
+}
+
+/**
+ * Shue magnetopause radius at solar-zenith angle θ (rad from the +X nose):
+ * r(θ) = r₀·(2/(1+cosθ))^α. Valid to θ ≈ 2 rad; diverges toward the tail.
+ */
+export function shueRadiusRe(thetaRad, r0, alpha) {
+    if (!Number.isFinite(thetaRad) || !Number.isFinite(r0) || !Number.isFinite(alpha)) return null;
+    return r0 * Math.pow(2 / (1 + Math.cos(Math.min(2.0, Math.abs(thetaRad)))), alpha);
+}
+
+/** Bow-shock standoff (R_E) — Farris & Russell (1994)-class ratio ≈ 1.29·r₀
+ *  for typical magnetosonic Mach numbers. Order-of-magnitude for the twin. */
+export function bowShockStandoffRe(pdynNPa, bzNT) {
+    return 1.29 * shueStandoffRe(pdynNPa, bzNT);
+}
+
 // ── Composition (O⁺/H⁺ split — Phase 2b) ─────────────────────────────────────
 
 /**
@@ -573,6 +618,33 @@ export function subsolarPoint(ms) {
     return {
         latDeg: decl * 180 / Math.PI,
         lonDeg: ((lon + 540) % 360) - 180,
+    };
+}
+
+/**
+ * Earth's position in its orbit at a UTC epoch — same Meeus low-precision
+ * ephemeris as dipoleTiltRad, so the twin's orbital readout and its dipole
+ * tilt can never disagree about where the Sun is.
+ *
+ * @returns {{lonDeg:number, rAU:number, dayOfYear:number}|null}
+ *   lonDeg     heliocentric ecliptic longitude of EARTH, [0,360)
+ *              (= geocentric solar longitude + 180°; ~0.9856°/day)
+ *   rAU        Sun–Earth distance (AU): 0.9833 at perihelion (~Jan 3),
+ *              1.0167 at aphelion (~Jul 4) — e = 0.0167
+ *   dayOfYear  1-based UTC day of year
+ */
+export function earthOrbit(ms) {
+    if (!Number.isFinite(ms)) return null;
+    const rad = Math.PI / 180;
+    const n = ms / 86400000 + 2440587.5 - 2451545.0;     // days since J2000.0
+    const L = (280.460 + 0.9856474 * n) % 360;
+    const g = ((357.528 + 0.9856003 * n) % 360) * rad;   // mean anomaly
+    const lamSun = L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g);
+    const d = new Date(ms);
+    return {
+        lonDeg: ((lamSun + 180) % 360 + 360) % 360,
+        rAU: 1.00014 - 0.01671 * Math.cos(g) - 0.00014 * Math.cos(2 * g),
+        dayOfYear: Math.floor((ms - Date.UTC(d.getUTCFullYear(), 0, 1)) / 86400000) + 1,
     };
 }
 
