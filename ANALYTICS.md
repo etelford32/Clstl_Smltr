@@ -159,3 +159,52 @@ Analytics has been around since the original `supabase-bootstrap-fresh.sql`.
 - **Schema drift guard:** the `kind` CHECK constraint and the in-RPC
   whitelist must stay in sync. The migration updates both. If you add
   another kind later, do both edits in the same SQL file.
+
+## 4. Data-pipeline health — `client_telemetry.kind = 'data_pipeline'`
+
+**What it answers:** "Is the live-data plumbing actually working in real
+browsers?" — the class of failure CI can't see: a GIBS layer ID retiring,
+a snapshot endpoint rejecting timestamps, a regional CDN outage, or a
+composite that silently degrades to a fallback.
+
+**Where it lives:** `client_telemetry`, `kind = 'data_pipeline'`.
+Recorded via `telemetry.recordPipeline(name, metadata)` — 100% sampled
+(volume is bounded by feed cadence, not user count). Migration:
+`supabase-cloud-pipeline-telemetry-migration.sql` (constraint + RPC
+whitelist move together, same drift guard as the funnel).
+
+**First consumer — the cloud mosaic** (`js/satellite-feed.js`, name
+`cloud_mosaic`, at most ~6 events/hour/viewer). One event per refresh:
+
+| metadata key      | meaning                                                    |
+|-------------------|------------------------------------------------------------|
+| `ok`, `mode`      | fetch outcome; `mosaic` / `modis` fallback / `none`        |
+| `ms`              | wall time of the whole refresh                             |
+| `regions`         | per-region layer + imagery age, e.g. `GOES-East=…@23m`     |
+| `attempts`, `failures`, `failed` | fallback-ladder depth; first failing URLs   |
+| `coverage`        | fraction of the globe with confident observation           |
+| `mean_cloudiness` | confidence-weighted global cloud fraction                  |
+| `gap_max_deg`, `gap_center_lon` | widest low-coverage longitude arc — a value ≥ ~20° names the exact sector that will render as a procedural-cloud wedge |
+
+`severity` is `warning` whenever the refresh fell back or failed, so
+`select … where kind='data_pipeline' and severity='warning'` is the
+triage query. The full-resolution diagnostics (every URL attempted, per
+region) live on `window.__cloudDiag` in the running page.
+
+**Useful queries:**
+
+```sql
+-- Fallback / failure rate over the last 7 days
+select metadata->>'mode' as mode, count(*)
+  from client_telemetry
+ where kind = 'data_pipeline' and metadata->>'name' = 'cloud_mosaic'
+   and created_at > now() - interval '7 days'
+ group by 1;
+
+-- Which layers are rotting (named in the first-failures list)
+select metadata->'failed' as failed, count(*)
+  from client_telemetry
+ where kind = 'data_pipeline' and severity = 'warning'
+   and created_at > now() - interval '7 days'
+ group by 1 order by 2 desc limit 20;
+```
