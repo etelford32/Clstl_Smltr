@@ -18,6 +18,9 @@
  *      units/s (streams); a ~4.2 km/s ring-ion drift ≈0.8 units/s
  *      (stately); on-screen ratio ≈5–6:1.
  *   8. ETA mapping: 26 real minutes ≈ 5.2 s of viewing at ×300.
+ *   9. Transport: pause freezes now()/dSim, resume continues from the
+ *      frozen instant, setOffset scrubs within [0, windowMs] and bumps
+ *      `wraps`, reset returns to the live present keeping τ.
  *
  * Exits 0 on pass, non-zero on failure.
  */
@@ -175,6 +178,83 @@ function fakeTime(startMs = 1_700_000_000_000) {
     assert.equal(simSecondsForRealMinutes(26, 1), 26 * 60);
     assert.equal(simSecondsForRealMinutes(NaN, 300), null);
     ok('ETA: 26 real minutes ≈ 5.2 s of viewing at ×300');
+}
+
+// ── 9. Transport: pause / resume / scrub / reset ────────────────────────────
+{
+    // Pause freezes now() and dSim; resume continues from the frozen instant.
+    const time = fakeTime();
+    const c = new SimClock({ tau: 300, timeSource: time });
+    assert.equal(c.paused, false, 'starts playing');
+    time.advance(1000);                       // sim now 300 s ahead
+    const frozen = c.now();
+    c.pause();
+    assert.equal(c.paused, true);
+    time.advance(10_000);
+    assert.equal(c.now(), frozen, 'paused: now() is frozen');
+    assert.equal(c.dSim(1000), 0, 'paused: dSim is 0 — integrators hold');
+    assert.equal(c.offsetMs(), frozen - time.now(),
+        'paused: the frozen moment honestly falls behind the wall clock');
+    c.pause();                                // idempotent
+    assert.equal(c.now(), frozen);
+    const w0 = c.wraps;
+    c.resume();
+    assert.equal(c.paused, false);
+    assert.equal(c.wraps, w0, 'resume does not bump wraps — time is continuous');
+    assert.equal(c.now(), frozen, 'resume continues from the frozen instant');
+    time.advance(1000);
+    assert.equal(c.now(), frozen + 300_000, 'and advances at τ× again');
+    ok('pause/resume: freezes now() and dSim, continues from the frozen instant');
+}
+{
+    // Scrub: setOffset places sim at wall + offset, clamped to the window.
+    const time = fakeTime();
+    const windowMs = 75 * 60_000;
+    const c = new SimClock({ tau: 1, windowMs, timeSource: time });
+    const w0 = c.wraps;
+    const applied = c.setOffset(40 * 60_000);
+    assert.equal(applied, 40 * 60_000);
+    assert.equal(c.wraps, w0 + 1, 'setOffset bumps wraps (jump = sweep restart)');
+    assert.equal(c.offsetMs(), 40 * 60_000, 'sim sits 40 min into the forecast window');
+    time.advance(5000);
+    assert.equal(c.offsetMs(), 40 * 60_000, 'at τ=1 a scrubbed offset holds steady');
+    assert.equal(c.setOffset(windowMs * 2), windowMs, 'clamped to windowMs');
+    assert.equal(c.setOffset(-5000), 0, 'clamped to 0 (no scrubbing into the past)');
+    assert.equal(c.setOffset(NaN), 0, 'NaN → 0');
+    // Scrub while paused: stays paused at the new instant.
+    c.pause();
+    c.setOffset(10 * 60_000);
+    assert.equal(c.paused, true, 'scrubbing does not unpause');
+    assert.equal(c.now(), time.now() + 10 * 60_000, 'paused scrub lands on the target');
+    // Scrubbed ahead at τ>1, the sweep continues and wraps at the window end.
+    c.resume();
+    c.setTau(300);
+    c.setOffset(70 * 60_000);
+    const w1 = c.wraps;
+    time.advance(Math.ceil((5 * 60_000) / 300) + 1000);   // 5 min of window left
+    c.now();
+    assert.equal(c.wraps, w1 + 1, 'scrubbed sweep still wraps at the window end');
+    ok('setOffset: scrubs within [0, windowMs], works paused, keeps the wrap');
+}
+{
+    // Reset: back to the live present, τ kept, pause dropped.
+    const time = fakeTime();
+    const c = new SimClock({ tau: 300, timeSource: time });
+    c.setOffset(30 * 60_000);
+    c.pause();
+    time.advance(7000);
+    c.reset();
+    assert.equal(c.paused, false, 'reset unpauses');
+    assert.equal(c.now(), time.now(), 'reset returns to the live present');
+    assert.equal(c.tau, 300, 'reset keeps τ — it is a time action, not a speed action');
+    // setTau while paused: re-anchors to the present, stays paused.
+    const c2 = new SimClock({ tau: 300, timeSource: time });
+    c2.pause();
+    time.advance(3000);
+    c2.setTau(60);
+    assert.equal(c2.paused, true, 'setTau keeps the pause');
+    assert.equal(c2.now(), time.now(), 'setTau re-anchors the paused clock to the present');
+    ok('reset: live present, τ kept, pause dropped; setTau honors a pause');
 }
 
 console.log(`\nsim-clock: all ${n} test groups passed`);

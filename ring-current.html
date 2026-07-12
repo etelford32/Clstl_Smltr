@@ -83,11 +83,38 @@ body {
     position:absolute; left:12px; bottom:10px; font-size:.68rem; color:#5d6684;
     pointer-events:none;
 }
+/* Legend: a draggable, minimizable in-scene panel. The head is the drag
+   handle (touch-action:none so pointer-drag works on touch); the body
+   scrolls when the stage is shorter than the legend. Position + minimized
+   state persist in localStorage and re-clamp to the stage on restore. */
 .rc-legend {
-    position:absolute; right:12px; top:10px; font-size:.68rem; color:#8b94ad;
-    background:rgba(3,1,14,.55); border:1px solid rgba(255,255,255,.08);
-    border-radius:8px; padding:7px 10px; line-height:1.7; pointer-events:none;
+    position:absolute; right:12px; top:10px; z-index:4; font-size:.68rem; color:#8b94ad;
+    background:rgba(3,1,14,.72); border:1px solid rgba(255,255,255,.08);
+    border-radius:8px; line-height:1.7;
+    max-width:min(360px, calc(100% - 24px));
+    max-height:calc(100% - 20px);
+    display:flex; flex-direction:column;
 }
+.rc-legend-head {
+    display:flex; align-items:center; gap:7px; padding:5px 7px 4px 10px;
+    cursor:grab; user-select:none; -webkit-user-select:none; touch-action:none;
+    border-bottom:1px solid rgba(255,255,255,.07);
+}
+.rc-legend.rc-min .rc-legend-head { border-bottom:none; }
+.rc-legend.rc-dragging .rc-legend-head { cursor:grabbing; }
+.rc-legend-grip { color:#5d6684; font-size:.72rem; }
+.rc-legend-title {
+    flex:1; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+    font-size:.62rem; color:#8b94ad;
+}
+.rc-legend-min {
+    cursor:pointer; color:#cdd5e4; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.16); border-radius:5px;
+    width:22px; height:18px; line-height:1; font-size:.72rem; padding:0; flex:none;
+}
+.rc-legend-min:hover { background:rgba(255,255,255,.15); }
+.rc-legend-body { padding:6px 10px 8px; overflow-y:auto; overscroll-behavior:contain; }
+.rc-legend.rc-min .rc-legend-body { display:none; }
 .rc-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:baseline; }
 
 .rc-col { display:flex; flex-direction:column; gap:12px; min-width:0; }
@@ -199,30 +226,54 @@ body {
 
 .rc-ctl { display:flex; align-items:center; gap:10px; font-size:.72rem; color:#8b94ad; flex-wrap:wrap; }
 
-/* One-clock badge: the active τ is visible at all times (SIM ×300 / REAL ×1). */
+/* One-clock HUD (upper-left): the active τ, the EXACT simulation time
+   (UTC + saved-location mean solar), play/pause + reset, and a scrubber
+   over the same 75-min forecast window the τ>1 sweep covers. */
 .rc-simtime {
-    position:absolute; left:12px; top:10px; z-index:4; pointer-events:none;
+    position:absolute; left:12px; top:10px; z-index:4;
     font-size:.72rem; font-weight:800; letter-spacing:.07em; color:#ffd9b0;
-    background:rgba(3,1,14,.6); border:1px solid rgba(255,154,61,.35);
-    border-radius:8px; padding:5px 11px; font-variant-numeric:tabular-nums;
+    background:rgba(3,1,14,.72); border:1px solid rgba(255,154,61,.35);
+    border-radius:10px; padding:7px 11px 8px; font-variant-numeric:tabular-nums;
+    width:226px; user-select:none; -webkit-user-select:none;
 }
 .rc-simtime.rc-real { color:#7fe6c3; border-color:rgba(127,230,195,.35); }
-.rc-simtime .rc-simtime-sub {
-    display:block; font-weight:400; font-size:.64rem; color:#8b94ad; letter-spacing:0;
+.rc-simtime.rc-paused { color:#ffd666; border-color:rgba(255,214,102,.55); }
+.rc-simtime-row { display:flex; align-items:center; gap:5px; }
+.rc-simtime-tau { flex:1; }
+.rc-clock-btn {
+    cursor:pointer; color:inherit; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.18); border-radius:5px;
+    width:26px; height:21px; line-height:1; font-size:.72rem; padding:0; flex:none;
 }
-/* Sweep progress: at ×τ the scene fast-forwards the SAME real forecast
-   window and wraps — the bar + replay flash make the restart legible. */
+.rc-clock-btn:hover { background:rgba(255,255,255,.16); }
+.rc-simtime-utc {
+    font-weight:700; font-size:.8rem; color:#e8edf7; letter-spacing:.03em; margin-top:5px;
+}
+.rc-simtime-local {
+    font-weight:600; font-size:.68rem; color:#cdd5e4; letter-spacing:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.rc-simtime .rc-simtime-sub {
+    display:block; font-weight:400; font-size:.62rem; color:#8b94ad; letter-spacing:0;
+    margin-top:2px;
+}
+.rc-simtime-slider {
+    display:block; width:100%; margin:6px 0 1px; height:14px;
+    accent-color:#ff9a3d; cursor:pointer; background:transparent;
+}
+.rc-simtime.rc-real .rc-simtime-slider { accent-color:#7fe6c3; }
+.rc-simtime.rc-paused .rc-simtime-slider { accent-color:#ffd666; }
+.rc-simtime-scale {
+    display:flex; justify-content:space-between;
+    font-weight:400; font-size:.6rem; color:#5d6684; letter-spacing:0;
+}
+/* Sweep restart: at ×τ the scene fast-forwards the SAME real forecast
+   window and wraps — the replay flash makes the restart legible. */
 .rc-simtime.rc-replay { border-color:rgba(127,230,195,.7); }
 .rc-simtime.rc-replay::after {
     content:'↻ replaying the same real window';
     display:block; font-weight:600; font-size:.6rem; color:#7fe6c3; letter-spacing:0;
 }
-.rc-sweep {
-    position:absolute; left:13px; top:60px; z-index:4; width:148px; height:3px;
-    background:rgba(255,255,255,.08); border-radius:2px; overflow:hidden;
-    pointer-events:none;
-}
-.rc-sweep-bar { height:100%; width:0; background:linear-gradient(90deg,#ffd27a,#ff9a3d); }
 .rc-mode-btn {
     font-size:.68rem; font-weight:650; cursor:pointer; color:#cdd5e4;
     background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13);
@@ -287,10 +338,27 @@ body {
 
 <div class="rc-layout">
     <div class="rc-stage" id="rc-stage">
-        <div class="rc-simtime" id="rc-simtime">SIM TIME &times;300</div>
-        <div class="rc-sweep" id="rc-sweep" hidden><div class="rc-sweep-bar" id="rc-sweep-bar"></div></div>
+        <div class="rc-simtime" id="rc-simtime">
+            <div class="rc-simtime-row">
+                <span class="rc-simtime-tau" id="rc-simtime-tau">SIM TIME &times;300</span>
+                <button class="rc-clock-btn" id="rc-clock-play" title="Pause / resume the simulation clock" aria-label="Pause simulation clock">&#10074;&#10074;</button>
+                <button class="rc-clock-btn" id="rc-clock-reset" title="Reset the clock to live now" aria-label="Reset simulation clock to live now">&#8634;</button>
+            </div>
+            <div class="rc-simtime-utc" id="rc-simtime-utc">&mdash;</div>
+            <div class="rc-simtime-local" id="rc-simtime-local" hidden>&mdash;</div>
+            <span class="rc-simtime-sub" id="rc-simtime-sub">&mdash;</span>
+            <input class="rc-simtime-slider" id="rc-simtime-slider" type="range" min="0" max="4500" step="15" value="0"
+                   aria-label="Scrub the simulation clock through the forecast window">
+            <div class="rc-simtime-scale"><span>live now</span><span id="rc-simtime-max">+75 min</span></div>
+        </div>
         <div class="rc-perf" id="rc-perf" hidden>&mdash;</div>
-        <div class="rc-legend">
+        <div class="rc-legend" id="rc-legend">
+        <div class="rc-legend-head" id="rc-legend-head">
+            <span class="rc-legend-grip" aria-hidden="true">&#10495;</span>
+            <span class="rc-legend-title">Legend &mdash; drag to move</span>
+            <button class="rc-legend-min" id="rc-legend-min" title="Minimize legend" aria-label="Minimize legend" aria-expanded="true">&#8722;</button>
+        </div>
+        <div class="rc-legend-body" id="rc-legend-body">
             <span class="rc-dot" style="background:#ffa040"></span>H&#8314; ions &mdash; drift west, true-rate bounce<br>
             <span class="rc-dot" style="background:#94ff57"></span>O&#8314; ions &mdash; ionospheric, dies ~10&times; sooner (two-phase decay)<br>
             <span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east<br>
@@ -314,7 +382,8 @@ body {
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;southward IMF: flank strands turn gold &mdash; tail return flow &rarr; midnight injection</span><br>
             <span style="color:#5d6684">trail length &prop; speed &middot; flash &prop; VBs on arrival</span>
         </div>
-        <div class="rc-stage-hint">drag to orbit &middot; scroll out for the Sun corridor &middot; one clock drives stream, ring, lifecycle &amp; Earth spin &middot; hover any particle for its data &middot; GSM frame</div>
+        </div>
+        <div class="rc-stage-hint">drag to orbit &middot; scroll out for the Sun corridor &middot; pause / scrub the clock top-left &middot; one clock drives stream, ring, lifecycle &amp; Earth spin &middot; hover any particle for its data &middot; GSM frame</div>
     </div>
 
     <div class="rc-col">
@@ -491,7 +560,9 @@ body {
                 mode &mdash; stillness is integrity, not a bug. Compressed
                 presets fast-forward the same L1 data (relative speeds
                 preserved) and replay the forecast window when the sweep
-                passes it. Bounce is the one disclosed &times;1 exception (it
+                passes it. The clock HUD in the 3D view shows the exact
+                simulation instant (UTC, plus your saved location) and lets
+                you pause, scrub the forecast window, and reset to live. Bounce is the one disclosed &times;1 exception (it
                 would alias above the frame rate). Deaths are physical:
                 charge-exchange lifetimes vs the geocoronal H halo (O&#8314;
                 dies ~10&times; faster &mdash; the two-phase recovery), deep
@@ -547,7 +618,7 @@ import {
     newellCoupling, earthOrbit,
     noaaRScale, noaaSScale, noaaGScale, geoChargingRisk,
 } from './js/ring-current-model.js?v=20260711';
-import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260711';
+import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260712';
 import { loadUserLocation } from './js/user-location.js';
 import { INTERVALS, NOAA } from './js/config.js';
 
@@ -558,15 +629,172 @@ const stage = $('rc-stage');
 //    One τ; apparent speed = physical velocity × τ ÷ local scale. ──────────
 const clock = new SimClock({ tau: TAU_DEFAULT });
 
-function renderSimBadge() {
-    const badge = $('rc-simtime');
-    const t = clock.tau;
-    badge.classList.toggle('rc-real', t === 1);
-    badge.innerHTML = t === 1
-        ? 'REAL TIME ×1<span class="rc-simtime-sub">true physical speeds — watch the leading edge creep</span>'
-        : `SIM TIME ×${t}<span class="rc-simtime-sub">1 s of viewing = ${t >= 60 ? `${Math.round(t / 60)} min` : `${t} s`} of real time</span>`;
+// ── Clock HUD (upper-left, in-canvas): exact sim time + transport ──────────
+// Shows the precise simulation instant (UTC always, saved-location mean
+// solar time when set — the same honest convention as the Earth panel:
+// civil-zone offsets need a tz database; mean solar is what the terminator
+// on the globe actually shows). The slider scrubs the SAME [now, +75 min]
+// forecast window the τ>1 sweep covers; play/pause freezes THE clock (the
+// whole scene holds — dSim = 0), reset returns to the live present.
+const userLoc = loadUserLocation();
+const hud = {
+    box:    $('rc-simtime'),
+    tau:    $('rc-simtime-tau'),
+    utc:    $('rc-simtime-utc'),
+    local:  $('rc-simtime-local'),
+    sub:    $('rc-simtime-sub'),
+    slider: $('rc-simtime-slider'),
+    max:    $('rc-simtime-max'),
+    play:   $('rc-clock-play'),
+    reset:  $('rc-clock-reset'),
+};
+hud.slider.max = String(Math.round(clock.windowMs / 1000));
+hud.max.textContent = `+${Math.round(clock.windowMs / 60_000)} min`;
+if (userLoc && Number.isFinite(userLoc.lon)) hud.local.hidden = false;
+
+// Wrap-flash bookkeeping: UI-initiated clock changes (τ, scrub, reset)
+// update uiSeenWraps immediately, so ONLY natural sweep wraps flash the
+// "replaying" cue — a slider drag must not strobe it.
+let uiSeenWraps = clock.wraps;
+let sliderHeld = false, sliderTouchedAt = 0, flashT = 0;
+
+function fmtClockOffset(ms) {
+    const s = Math.round(ms / 1000);
+    if (Math.abs(s) < 2) return 'at live now';
+    const m = Math.floor(Math.abs(s) / 60), ss = Math.abs(s) % 60;
+    const span = m ? `${m}m ${String(ss).padStart(2, '0')}s` : `${ss}s`;
+    return s > 0 ? `${span} ahead of live` : `${span} behind live`;
 }
-renderSimBadge();
+function renderClockHud() {
+    const wall = Date.now();
+    const simMs = clock.now(wall);
+    const t = clock.tau;
+    hud.box.classList.toggle('rc-real', t === 1 && !clock.paused);
+    hud.box.classList.toggle('rc-paused', clock.paused);
+    hud.tau.textContent = clock.paused ? `PAUSED ×${t}`
+        : t === 1 ? 'REAL TIME ×1' : `SIM TIME ×${t}`;
+    hud.play.innerHTML = clock.paused ? '&#9654;' : '&#10074;&#10074;';
+    hud.play.title = clock.paused ? 'Resume the simulation clock' : 'Pause the simulation clock';
+    hud.play.setAttribute('aria-label', hud.play.title);
+    const iso = new Date(simMs).toISOString();
+    hud.utc.textContent = `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
+    if (!hud.local.hidden) {
+        // Mean solar time at the saved longitude (UTC + 4 min per °E) — the
+        // same honest convention as the Earth panel (civil zones need a tz
+        // database; mean solar is what the globe's terminator shows).
+        const liso = new Date(simMs + userLoc.lon * 240_000).toISOString();
+        hud.local.textContent =
+            `${liso.slice(11, 19)} · ${userLoc.city ?? 'saved location'} (mean solar)`;
+        hud.local.title = `Mean solar time at ${userLoc.city ?? 'your saved location'} — UTC + 4 min per °E of longitude`;
+    }
+    const off = simMs - wall;
+    hud.sub.textContent = clock.paused
+        ? `clock frozen · ${fmtClockOffset(off)}`
+        : t === 1
+            ? (Math.abs(off) < 2000
+                ? 'true physical speeds — this IS the current time'
+                : `true physical speeds · ${fmtClockOffset(off)}`)
+            : `1 s viewing = ${t >= 60 ? `${Math.round(t / 60)} min` : `${t} s`} real · ${fmtClockOffset(off)}`;
+    // Follow the sweep with the slider thumb — unless the user is on it.
+    if (!sliderHeld && wall - sliderTouchedAt > 500) {
+        hud.slider.value = String(Math.max(0, Math.round(off / 1000)));
+    }
+    if (clock.wraps !== uiSeenWraps) {          // natural sweep wrap → flash
+        uiSeenWraps = clock.wraps;
+        hud.box.classList.add('rc-replay');
+        clearTimeout(flashT);
+        flashT = setTimeout(() => hud.box.classList.remove('rc-replay'), 1600);
+    }
+}
+renderClockHud();
+setInterval(() => { if (!document.hidden) renderClockHud(); }, 200);
+
+hud.play.addEventListener('click', () => {
+    clock.paused ? clock.resume() : clock.pause();
+    uiSeenWraps = clock.wraps;
+    renderClockHud();
+    renderEarthClock();
+});
+hud.reset.addEventListener('click', () => {
+    clock.reset();
+    uiSeenWraps = clock.wraps;
+    renderClockHud();
+    renderEarthClock();
+});
+hud.slider.addEventListener('pointerdown', () => { sliderHeld = true; });
+window.addEventListener('pointerup', () => { sliderHeld = false; });
+hud.slider.addEventListener('input', () => {
+    sliderTouchedAt = Date.now();
+    clock.setOffset(Number(hud.slider.value) * 1000);
+    uiSeenWraps = clock.wraps;   // a scrub is not a "replay" — no flash
+    renderClockHud();
+    renderEarthClock();
+});
+
+// ── Legend (in-canvas, right): draggable + minimizable ─────────────────────
+// The head is the drag handle; position and minimized state persist across
+// visits and re-clamp to the stage so a saved spot can't strand off-canvas.
+{
+    const legend = $('rc-legend'), head = $('rc-legend-head'), minBtn = $('rc-legend-min');
+    const LS_KEY = 'pp_rc_legend_ui';
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch { /* fresh */ }
+    const persist = (patch) => {
+        saved = { ...(saved ?? {}), ...patch };
+        try { localStorage.setItem(LS_KEY, JSON.stringify(saved)); } catch { /* quota */ }
+    };
+    const setMin = (min) => {
+        legend.classList.toggle('rc-min', min);
+        minBtn.innerHTML = min ? '+' : '&#8722;';
+        minBtn.title = min ? 'Expand legend' : 'Minimize legend';
+        minBtn.setAttribute('aria-label', minBtn.title);
+        minBtn.setAttribute('aria-expanded', String(!min));
+    };
+    const place = (x, y) => {
+        x = Math.max(0, Math.min(stage.clientWidth - legend.offsetWidth, x));
+        y = Math.max(0, Math.min(stage.clientHeight - legend.offsetHeight, y));
+        legend.style.left = `${x}px`;
+        legend.style.top = `${y}px`;
+        legend.style.right = 'auto';
+        return [x, y];
+    };
+    if (saved?.min) setMin(true);
+    if (Number.isFinite(saved?.x) && Number.isFinite(saved?.y)) place(saved.x, saved.y);
+    minBtn.addEventListener('click', () => {
+        const min = !legend.classList.contains('rc-min');
+        setMin(min);
+        persist({ min });
+        // Regrowing near an edge can poke outside the stage — re-clamp.
+        if (legend.style.left) {
+            const [x, y] = place(parseFloat(legend.style.left), parseFloat(legend.style.top));
+            persist({ x, y });
+        }
+    });
+    head.addEventListener('pointerdown', (e) => {
+        if (e.target === minBtn) return;         // the button is a click, not a drag
+        e.preventDefault();
+        const sr = stage.getBoundingClientRect();
+        const lr = legend.getBoundingClientRect();
+        const grabX = e.clientX - lr.left, grabY = e.clientY - lr.top;
+        legend.classList.add('rc-dragging');
+        head.setPointerCapture(e.pointerId);
+        const onMove = (ev) => place(ev.clientX - sr.left - grabX, ev.clientY - sr.top - grabY);
+        const onUp = (ev) => {
+            head.removeEventListener('pointermove', onMove);
+            head.removeEventListener('pointerup', onUp);
+            head.removeEventListener('pointercancel', onUp);
+            legend.classList.remove('rc-dragging');
+            const [x, y] = place(ev.clientX - sr.left - grabX, ev.clientY - sr.top - grabY);
+            persist({ x, y });
+        };
+        head.addEventListener('pointermove', onMove);
+        head.addEventListener('pointerup', onUp);
+        head.addEventListener('pointercancel', onUp);
+    });
+    window.addEventListener('resize', () => {
+        if (legend.style.left) place(parseFloat(legend.style.left), parseFloat(legend.style.top));
+    });
+}
 
 // ── 3D twin: loaded dynamically so a WebGL/importmap failure degrades to
 //    data panels + chart instead of blanking the page. ─────────────────────
@@ -579,31 +807,6 @@ try {
     console.warn('[ring-current] 3D disabled:', err);
     stage.insertAdjacentHTML('beforeend',
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d6684;font-size:.8rem;">3D view unavailable — data panels remain live</div>');
-}
-
-// ── Sweep progress + replay flash ───────────────────────────────────────────
-// At τ>1 the SimClock fast-forwards the SAME real forecast window and wraps
-// (an honest replay — the data doesn't loop, the sweep does). Without a cue
-// the wrap reads as "the simulation reset itself": the bar shows where in
-// the sweep you are, and the badge flashes the replay message on each wrap
-// (the 3D stream also dips briefly — globe-side).
-{
-    const sweepEl = $('rc-sweep'), barEl = $('rc-sweep-bar'), badgeEl = $('rc-simtime');
-    let seenWraps = clock.wraps, flashT = 0;
-    setInterval(() => {
-        if (document.hidden) return;
-        const on = clock.tau > 1;
-        sweepEl.hidden = !on;
-        if (!on) { badgeEl.classList.remove('rc-replay'); return; }
-        barEl.style.width =
-            `${Math.max(0, Math.min(100, 100 * (clock.now() - Date.now()) / clock.windowMs)).toFixed(1)}%`;
-        if (clock.wraps !== seenWraps) {
-            seenWraps = clock.wraps;
-            badgeEl.classList.add('rc-replay');
-            clearTimeout(flashT);
-            flashT = setTimeout(() => badgeEl.classList.remove('rc-replay'), 1600);
-        }
-    }, 250);
 }
 
 // ── Render-performance HUD + one-shot telemetry ─────────────────────────────
@@ -640,7 +843,8 @@ if (globe) {
 document.querySelectorAll('.rc-mode-btn[data-tau]').forEach(btn => btn.addEventListener('click', () => {
     document.querySelectorAll('.rc-mode-btn[data-tau]').forEach(b => b.classList.toggle('rc-on', b === btn));
     clock.setTau(Number(btn.dataset.tau));
-    renderSimBadge();
+    uiSeenWraps = clock.wraps;             // a speed change is not a "replay"
+    renderClockHud();
     if (lastState) renderHud(lastState);   // refresh the sim-speed ETA sub-label
 }));
 document.querySelectorAll('.rc-mode-btn[data-mode]').forEach(btn => btn.addEventListener('click', () => {
@@ -655,7 +859,7 @@ document.querySelectorAll('.rc-mode-btn[data-dens]').forEach(btn => btn.addEvent
 }));
 
 // ── Earth clock & orbit — the scene's Earth follows the sim clock ──────────
-const userLoc = loadUserLocation();
+// (userLoc is loaded once, above, for the in-canvas clock HUD.)
 if (userLoc && Number.isFinite(userLoc.lon)) {
     $('rc-clock-local-row').hidden = false;
     $('rc-clock-local-k').textContent = `local (mean solar) — ${userLoc.city ?? 'saved location'}`;
@@ -674,7 +878,8 @@ const PERI_LON_DEG = 103;
 function renderEarthClock() {
     const simMs = clock.now();
     $('rc-clock-utc').textContent =
-        new Date(simMs).toISOString().slice(11, 19) + (clock.tau > 1 ? ` (×${clock.tau})` : '');
+        new Date(simMs).toISOString().slice(11, 19)
+        + (clock.paused ? ' · paused' : clock.tau > 1 ? ` (×${clock.tau})` : '');
     if (userLoc && Number.isFinite(userLoc.lon)) {
         // Mean solar time at the saved longitude (UTC + 4 min per °E).
         // Civil-zone offsets need a tz database; mean solar is the honest,
