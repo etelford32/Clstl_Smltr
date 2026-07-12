@@ -10,6 +10,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/sync-dataset",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/cron/refresh-weather-grid",
       "schedule": "0 * * * *"
     },
