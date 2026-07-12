@@ -2390,26 +2390,39 @@ export class RingCurrentGlobe {
             this._pointerPx = null;
             this._tipEl.style.display = 'none';
         };
-        this._onPointerDown = () => { this._dragging = true; this._tipEl.style.display = 'none'; };
-        this._onPointerUp = () => { this._dragging = false; };
+        this._onPointerDown = (e) => {
+            this._dragging = true;
+            this._tipEl.style.display = 'none';
+            this._downPx = { x: e.clientX, y: e.clientY, t: performance.now() };
+        };
+        this._onPointerUp = (e) => {
+            this._dragging = false;
+            const d = this._downPx;
+            this._downPx = null;
+            // Click-to-pin (inspector): a short press that didn't orbit.
+            // pointerup is bound on window — the target check keeps clicks
+            // on overlay panels from unpinning through them.
+            if (!d || performance.now() - d.t > 450) return;
+            if ((e.clientX - d.x) ** 2 + (e.clientY - d.y) ** 2 > 36) return;
+            if (e.target !== this._renderer.domElement) return;
+            const rect = this._renderer.domElement.getBoundingClientRect();
+            const hit = this._pickRingAt(e.clientX - rect.left, e.clientY - rect.top);
+            if (hit) this.pinParticle(hit.key, hit.i);
+            else if (this._pinned) this.unpinParticle();
+        };
+        this._pinned = null;
+        this.onSelect = null;   // page hook: fires with getPinnedInfo() | null
         dom.addEventListener('pointermove', this._onPointerMove);
         dom.addEventListener('pointerleave', this._onPointerLeave);
         dom.addEventListener('pointerdown', this._onPointerDown);
         window.addEventListener('pointerup', this._onPointerUp);
     }
 
-    _updateTooltip(wallNow) {
-        if (!this._pointerDirty || !this._pointerPx || this._dragging) return;
-        // Pose-projection picking is ~4700 trig evals + allocs — cap it at
-        // ~14 Hz (pointerDirty stays set, so the pick lands a frame later;
-        // imperceptible against a 12 px hit radius).
-        if (wallNow - (this._lastPickMs ?? 0) < 70) return;
-        this._lastPickMs = wallNow;
-        this._pointerDirty = false;
+    /** Nearest visible ring particle within 12 px of (px, py) — the same
+     *  pose-projection pick the hover tooltip uses (GPU positions exist
+     *  only in the vertex shader; particlePose is its CPU reference). */
+    _pickRingAt(px, py) {
         const rect = this._renderer.domElement.getBoundingClientRect();
-
-        // Ring populations: pose-project every particle (a few thousand
-        // trig evals, pointer-move-throttled), nearest within 12 px wins.
         let best = null;
         for (const [key, P] of Object.entries(this._popPoints ?? {})) {
             const pop = P.pop;
@@ -2420,9 +2433,9 @@ export class RingCurrentGlobe {
                 this._tmpV.set(q.x, q.y, q.z)
                     .applyMatrix4(this._magGroup.matrixWorld)
                     .project(this._camera);
-                const px = (this._tmpV.x + 1) / 2 * rect.width;
-                const py = (1 - this._tmpV.y) / 2 * rect.height;
-                const d2 = (px - this._pointerPx.x) ** 2 + (py - this._pointerPx.y) ** 2;
+                const sx = (this._tmpV.x + 1) / 2 * rect.width;
+                const sy = (1 - this._tmpV.y) / 2 * rect.height;
+                const d2 = (sx - px) ** 2 + (sy - py) ** 2;
                 if (d2 < 144 && (!best || d2 < best.d2)) {
                     // Copy out of the scratch — later iterations overwrite it.
                     this._pickPose.ph = q.ph;
@@ -2432,6 +2445,93 @@ export class RingCurrentGlobe {
                 }
             }
         }
+        return best;
+    }
+
+    // ── Particle inspector (Phase 1 — RING_CURRENT_ANALYTICS_PLAN.md) ───────
+    // The globe owns only the 3D side: pin/ghost markers in magGroup-local
+    // coordinates (the group's dipole tilt applies to them for free) and a
+    // minimal data API; all physics + card DOM live in
+    // js/ring-current-inspector.js so they stay node-testable.
+
+    _ensurePinSprites() {
+        if (this._pinSprite) return;
+        const mk = (color, dashed) => {
+            const cv = document.createElement('canvas');
+            cv.width = cv.height = 64;
+            const g = cv.getContext('2d');
+            g.strokeStyle = color;
+            g.lineWidth = 5;
+            if (dashed) g.setLineDash([7, 6]);
+            g.beginPath(); g.arc(32, 32, 24, 0, 2 * Math.PI); g.stroke();
+            const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: new THREE.CanvasTexture(cv), transparent: true,
+                depthWrite: false, depthTest: false, opacity: 0.9,
+            }));
+            sp.scale.setScalar(0.55);
+            sp.visible = false;
+            this._magGroup.add(sp);
+            return sp;
+        };
+        this._pinSprite = mk('#ffffff', false);
+        this._ghostSprite = mk('#ffd700', true);   // dashed = a prediction
+    }
+
+    /** Pin particle i of population key; fires onSelect. Returns success. */
+    pinParticle(key, i) {
+        const P = this._popPoints?.[key];
+        if (!P || !(i >= 0 && i < P.pop.count)) return false;
+        this._ensurePinSprites();
+        this._pinned = { key, i, pop: P.pop };
+        this._pinSprite.visible = true;
+        this.clearGhost();
+        this.onSelect?.(this.getPinnedInfo());
+        return true;
+    }
+
+    unpinParticle() {
+        this._pinned = null;
+        if (this._pinSprite) this._pinSprite.visible = false;
+        this.clearGhost();
+        this.onSelect?.(null);
+    }
+
+    /** Live handle for the inspector card (null when nothing pinned).
+     *  simHours/bounceSec are the two clocks particlePose runs on. */
+    getPinnedInfo() {
+        if (!this._pinned) return null;
+        return {
+            key: this._pinned.key,
+            i: this._pinned.i,
+            pop: this._pinned.pop,
+            simHours: this._simHours,
+            bounceSec: this._tView,
+        };
+    }
+
+    /** Dashed ghost marker at a predicted pose (magGroup-local coords). */
+    setGhostLocal(x, y, z) {
+        this._ensurePinSprites();
+        this._ghostSprite.position.set(x, y, z);
+        this._ghostSprite.visible = true;
+    }
+
+    clearGhost() {
+        if (this._ghostSprite) this._ghostSprite.visible = false;
+    }
+
+    _updateTooltip(wallNow) {
+        if (!this._pointerDirty || !this._pointerPx || this._dragging) return;
+        // Pose-projection picking is ~4700 trig evals + allocs — cap it at
+        // ~14 Hz (pointerDirty stays set, so the pick lands a frame later;
+        // imperceptible against a 12 px hit radius).
+        if (wallNow - (this._lastPickMs ?? 0) < 70) return;
+        this._lastPickMs = wallNow;
+        this._pointerDirty = false;
+
+        // Ring populations: the shared pose-projection pick (~4700 trig
+        // evals, pointer-move-throttled) — same helper the click-to-pin uses.
+        let best = this._pickRingAt(this._pointerPx.x, this._pointerPx.y);
         // Transit parcels: their geometry holds REAL positions — raycast.
         this._ray.setFromCamera(this._ndc, this._camera);
         this._ray.params.Points.threshold = 1.0;
@@ -2793,6 +2893,14 @@ export class RingCurrentGlobe {
         tNow = performance.now();
         blend('pools', tMark, tNow); tMark = tNow;
         this._updateTooltip(wallNow);
+        // Pinned-particle marker rides the SAME reference pose the shader
+        // draws (magGroup-local — the group applies the dipole tilt).
+        if (this._pinned) {
+            const q = particlePose(this._pinned.pop, this._pinned.i,
+                this._simHours, this._tView, this._poseScratch);
+            this._pinSprite.position.set(q.x, q.y, q.z);
+            this._pinSprite.scale.setScalar(0.55 * (1 + 0.15 * Math.sin(this._tView * 4)));
+        }
         tNow = performance.now();
         blend('tooltip', tMark, tNow); tMark = tNow;
         // View-preset flight: eased camera + target glide (setView). The
