@@ -137,6 +137,26 @@ export function parseLatestKp(raw) {
  * the magnetometer) and fill values are dropped. Field names tolerate NOAA's
  * historical case drift (Hp / hp), like every other parser in this file.
  */
+/**
+ * Latest reading from a GOES integral-flux feed (xrays / integral-protons /
+ * integral-electrons 1-day JSON): rows carry { time_tag, flux, energy };
+ * pick the newest finite flux whose energy field matches. Returns
+ * { t, flux } or null. Powers the Situation panel's NOAA R/S scales and
+ * the GEO charging tier — parsing kept pure for the node tests.
+ */
+export function parseLatestFlux(raw, energyRe) {
+    if (!Array.isArray(raw)) return null;
+    let best = null;
+    for (const r of raw) {
+        if (!energyRe.test(String(r?.energy ?? ''))) continue;
+        const t = noaaTimeMs(r?.time_tag);
+        const flux = noaaNum(r?.flux);
+        if (t == null || flux == null || flux < 0) continue;
+        if (!best || t > best.t) best = { t, flux };
+    }
+    return best;
+}
+
 export function parseGoesMag(raw) {
     if (!Array.isArray(raw)) return [];
     const out = [];

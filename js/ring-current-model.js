@@ -859,6 +859,50 @@ export function holeWindAssociation(holes, drivers, tolDeg = 15, strideN = 10) {
     });
 }
 
+// ── NOAA space-weather scales (the operational vocabulary) ──────────────────
+// Pure threshold maps, per SWPC's published scale definitions. Level 0 =
+// below scale. These give the dashboard the same R/S/G language operators
+// and SWPC products use, computed from the live feeds.
+
+/** R (radio blackout) from GOES 0.1–0.8 nm X-ray flux (W/m²):
+ *  R1=M1(1e-5), R2=M5, R3=X1(1e-4), R4=X10, R5=X20. */
+export function noaaRScale(xrayWm2) {
+    if (!Number.isFinite(xrayWm2) || xrayWm2 < 1e-5) return { level: 0, label: 'R0' };
+    const level = xrayWm2 >= 2e-3 ? 5 : xrayWm2 >= 1e-3 ? 4
+                : xrayWm2 >= 1e-4 ? 3 : xrayWm2 >= 5e-5 ? 2 : 1;
+    return { level, label: `R${level}` };
+}
+
+/** S (solar radiation storm) from GOES ≥10 MeV integral proton flux (pfu):
+ *  S1=10, S2=100, S3=10³, S4=10⁴, S5=10⁵. */
+export function noaaSScale(p10pfu) {
+    if (!Number.isFinite(p10pfu) || p10pfu < 10) return { level: 0, label: 'S0' };
+    const level = Math.min(5, Math.floor(Math.log10(p10pfu)));
+    return { level, label: `S${level}` };
+}
+
+/** G (geomagnetic storm) from Kp: G1=5 … G5=9. */
+export function noaaGScale(kp) {
+    if (!Number.isFinite(kp) || kp < 5) return { level: 0, label: 'G0' };
+    const level = Math.min(5, Math.floor(kp) - 4);
+    return { level, label: `G${level}` };
+}
+
+/**
+ * GEO internal-charging risk from the GOES ≥2 MeV electron flux (pfu).
+ * The 1 000 pfu NOAA alert threshold anchors the 'high' tier — sustained
+ * ≥2 MeV fluence is the classic deep-dielectric charging driver (the
+ * "killer electrons" of the outer radiation belt, the same population
+ * this page's ring current feeds during storm recovery).
+ */
+export function geoChargingRisk(e2MeVpfu) {
+    if (!Number.isFinite(e2MeVpfu)) return { level: 0, label: 'unknown' };
+    if (e2MeVpfu >= 1e4)  return { level: 3, label: 'severe' };
+    if (e2MeVpfu >= 1000) return { level: 2, label: 'high' };
+    if (e2MeVpfu >= 100)  return { level: 1, label: 'elevated' };
+    return { level: 0, label: 'low' };
+}
+
 /** Synodic solar rotation as seen from Earth (Carrington period 27.2753 d). */
 export const SYNODIC_DEG_PER_DAY = 360 / 27.2753;
 

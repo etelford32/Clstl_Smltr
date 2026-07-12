@@ -37,6 +37,7 @@ import {
     SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
     carringtonL0, attributeWindSource, holeWindAssociation,
     holeArrivalForecast, SYNODIC_DEG_PER_DAY,
+    noaaRScale, noaaSScale, noaaGScale, geoChargingRisk,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -653,6 +654,34 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.equal(list.length, 2);
     assert.equal(list[0].forecast.crossing, 'last');
     ok('recurrence forecast: CM+2.8 d, ongoing-arrival, 27-d rollover, climatology, sorting');
+}
+
+// ── 26. NOAA scales + GEO charging risk ─────────────────────────────────────
+{
+    // R: SWPC flare-class anchors — M1=R1, M5=R2, X1=R3, X10=R4, X20=R5.
+    assert.equal(noaaRScale(5e-6).level, 0);
+    assert.equal(noaaRScale(1.2e-5).label, 'R1');
+    assert.equal(noaaRScale(5e-5).label, 'R2');
+    assert.equal(noaaRScale(1e-4).label, 'R3');
+    assert.equal(noaaRScale(1e-3).label, 'R4');
+    assert.equal(noaaRScale(3e-3).label, 'R5');
+    // S: decade thresholds from 10 pfu (≥10 MeV protons).
+    assert.equal(noaaSScale(5).level, 0);
+    assert.equal(noaaSScale(15).label, 'S1');
+    assert.equal(noaaSScale(1500).label, 'S3');
+    assert.equal(noaaSScale(2e5).label, 'S5');
+    // G: Kp 5→G1 … 9→G5, and Kp 9.33 stays G5.
+    assert.equal(noaaGScale(4.7).level, 0);
+    assert.equal(noaaGScale(5).label, 'G1');
+    assert.equal(noaaGScale(7.3).label, 'G3');
+    assert.equal(noaaGScale(9.33).label, 'G5');
+    // GEO charging: the 1 000 pfu NOAA alert threshold anchors 'high'.
+    assert.equal(geoChargingRisk(40).label, 'low');
+    assert.equal(geoChargingRisk(300).label, 'elevated');
+    assert.equal(geoChargingRisk(1000).label, 'high');
+    assert.equal(geoChargingRisk(2e4).label, 'severe');
+    assert.equal(geoChargingRisk(NaN).label, 'unknown');
+    ok('NOAA R/S/G scales at SWPC anchors; GEO charging tiers at 100/1000/10⁴ pfu');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

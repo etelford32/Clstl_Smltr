@@ -160,6 +160,29 @@ body {
 .rc-sep { border-top:1px solid rgba(255,255,255,.08); margin:8px 0; }
 .rc-bars { display:flex; align-items:flex-end; gap:4px; height:34px; margin-top:8px; }
 .rc-spark { width:100%; height:26px; display:block; margin:2px 0 6px; }
+
+/* Situation panel: NOAA-scale chips + ranked action lines. */
+.rc-chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+.rc-chip {
+    font-size:.72rem; font-weight:800; letter-spacing:.05em; padding:3px 9px;
+    border-radius:6px; background:rgba(255,255,255,.06); color:#8b94ad;
+    border:1px solid rgba(255,255,255,.1); font-variant-numeric:tabular-nums;
+}
+.rc-chip.rc-lvl1 { background:rgba(255,214,102,.15); color:#ffd666; border-color:rgba(255,214,102,.35); }
+.rc-chip.rc-lvl2 { background:rgba(255,176,102,.18); color:#ffb066; border-color:rgba(255,176,102,.4); }
+.rc-chip.rc-lvl3 { background:rgba(255,125,102,.2);  color:#ff7d66; border-color:rgba(255,125,102,.45); }
+.rc-chip.rc-lvl4, .rc-chip.rc-lvl5 { background:rgba(255,46,99,.24); color:#ff4d79; border-color:rgba(255,77,121,.5); }
+.rc-actions { list-style:none; margin:0; padding:0; font-size:.78rem; line-height:1.55; }
+.rc-actions .rc-act { padding:3px 0 3px 15px; position:relative; color:#cdd5e4; }
+.rc-actions .rc-act::before {
+    content:''; position:absolute; left:0; top:.58em; width:7px; height:7px;
+    border-radius:50%; background:#5d6684;
+}
+.rc-act.rc-act-ok::before    { background:#37e0a0; }
+.rc-act.rc-act-info::before  { background:#59baff; }
+.rc-act.rc-act-warn::before  { background:#ffd666; }
+.rc-act.rc-act-alert::before { background:#ff5c47; box-shadow:0 0 6px #ff5c47; }
+.rc-actions b { color:#e8edf7; }
 .rc-bars .rc-bar {
     flex:1; min-height:2px; border-radius:2px 2px 0 0; opacity:.85;
     background:linear-gradient(180deg,#ff9a3d,#8a5420);
@@ -294,6 +317,17 @@ body {
     </div>
 
     <div class="rc-col">
+        <section class="rc-panel" id="rc-situation">
+            <h2>Situation &mdash; act on this</h2>
+            <div class="rc-chips">
+                <span class="rc-chip" id="rc-chip-r" title="Radio blackout scale (GOES X-ray 0.1&ndash;0.8 nm)">R&mdash;</span>
+                <span class="rc-chip" id="rc-chip-s" title="Radiation storm scale (&ge;10 MeV protons)">S&mdash;</span>
+                <span class="rc-chip" id="rc-chip-g" title="Geomagnetic storm scale (Kp)">G&mdash;</span>
+                <span class="rc-chip" id="rc-chip-e" title="GEO internal-charging risk (&ge;2 MeV electrons)">GEO e&#8315; &mdash;</span>
+            </div>
+            <ul class="rc-actions" id="rc-actions"><li class="rc-act rc-act-info">assessing&hellip;</li></ul>
+        </section>
+
         <section class="rc-panel">
             <h2>Ring current state</h2>
             <div class="rc-energy" id="rc-energy">&mdash;</div>
@@ -504,11 +538,14 @@ body {
 </footer>
 
 <script type="module">
-import { RingCurrentFeed, omniToReplay, computeReplayState } from './js/ring-current-feed.js?v=20260711';
-import { newellCoupling, earthOrbit } from './js/ring-current-model.js?v=20260711';
+import { RingCurrentFeed, omniToReplay, computeReplayState, parseLatestFlux } from './js/ring-current-feed.js?v=20260711';
+import {
+    newellCoupling, earthOrbit,
+    noaaRScale, noaaSScale, noaaGScale, geoChargingRisk,
+} from './js/ring-current-model.js?v=20260711';
 import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260711';
 import { loadUserLocation } from './js/user-location.js';
-import { INTERVALS } from './js/config.js';
+import { INTERVALS, NOAA } from './js/config.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('rc-stage');
@@ -840,6 +877,7 @@ function renderHud(s) {
 
     renderDensity(s);
     renderGoes(s.goes);
+    renderSituation();   // re-fuse the action lines on every state tick
 }
 
 // ── GOES GEO cross-check — independent in-situ measurement, model-blind ─────
@@ -941,6 +979,101 @@ async function loadValidationHistory() {
 }
 loadValidationHistory();
 setInterval(() => { if (!document.hidden) loadValidationHistory(); }, INTERVALS.T3);
+
+// ── Situation panel: data → decision ────────────────────────────────────────
+// Fuses every live source on the page (L1 transit, the model's own Dst
+// forecast, Kp, recurrence outlook) with three GOES feeds this page didn't
+// carry before (X-ray, ≥10 MeV protons, ≥2 MeV electrons — browser-direct
+// NOAA, T2 cadence) into the operational R/S/G vocabulary plus ranked
+// action lines with lead times. Severity order: alert > warn > info > ok.
+const aux = { xray: null, p10: null, e2: null };
+const fmtFlux = f => f >= 100 ? Math.round(f).toLocaleString('en-US') : f.toPrecision(2);
+async function loadAuxFluxes() {
+    const grab = async (url, re) => {
+        try {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return parseLatestFlux(await res.json(), re);
+        } catch (err) {
+            console.warn('[ring-current] flux feed unavailable:', url, err);
+            return null;
+        }
+    };
+    [aux.xray, aux.p10, aux.e2] = await Promise.all([
+        grab(NOAA.xray, /0\.1-0\.8/),
+        grab(NOAA.protons, />=\s*10\s*MeV/),
+        grab(NOAA.electrons, />=\s*2(\.0)?\s*MeV/),
+    ]);
+    renderSituation();
+}
+function setChip(id, level, text) {
+    const el = $(id);
+    el.textContent = text;
+    el.className = `rc-chip${level ? ` rc-lvl${level}` : ''}`;
+}
+function renderSituation() {
+    const s = lastState;
+    const acts = [];
+    const push = (sev, html) => acts.push(`<li class="rc-act rc-act-${sev}">${html}</li>`);
+
+    const R = noaaRScale(aux.xray?.flux);
+    const S = noaaSScale(aux.p10?.flux);
+    const G = noaaGScale(s?.now?.kp);
+    const E = geoChargingRisk(aux.e2?.flux);
+    setChip('rc-chip-r', R.level, aux.xray ? R.label : 'R —');
+    setChip('rc-chip-s', S.level, aux.p10 ? S.label : 'S —');
+    setChip('rc-chip-g', G.level, Number.isFinite(s?.now?.kp) ? G.label : 'G —');
+    setChip('rc-chip-e', E.level, aux.e2 ? `GEO e⁻ ${E.label}` : 'GEO e⁻ —');
+
+    // 1 · Incoming southward driver — the page's genuine lead time.
+    const inc = s?.transit?.strongest;
+    if (inc && inc.vbs >= 0.5) {
+        push(inc.vbs >= 3 ? 'alert' : 'warn',
+            `<b>Southward driver arrives in ${inc.etaMin} min</b> — VBs ${inc.vbs.toFixed(1)} mV/m, ` +
+            `Bz ${Number.isFinite(inc.bz) ? inc.bz.toFixed(0) : '—'} nT. Expect injection activity on arrival.`);
+    }
+    // 2 · The model's own Dst threshold crossing.
+    if (s?.alert) {
+        push('alert', `<b>Dst forecast to cross ${s.alert.threshold} nT</b> ` +
+            `≈ ${new Date(s.alert.t).toISOString().slice(11, 16)} UT (in ${s.alert.etaMin} min).`);
+    }
+    // 3 · GEO internal charging (the ring current's own downstream hazard).
+    if (E.level >= 1) {
+        push(E.level >= 2 ? 'alert' : 'warn',
+            `<b>GEO internal-charging ${E.label}</b> — ≥2 MeV flux ${fmtFlux(aux.e2.flux)} pfu` +
+            `${E.level >= 2 ? ' (NOAA alert threshold)' : ''}. Review GEO anomaly posture.`);
+    }
+    // 4 · Radiation storm (SEU + polar HF).
+    if (S.level >= 1) {
+        push(S.level >= 3 ? 'alert' : 'warn',
+            `<b>${S.label} radiation storm</b> — ≥10 MeV ${fmtFlux(aux.p10.flux)} pfu. SEU risk; polar HF degraded.`);
+    }
+    // 5 · Radio blackout in progress.
+    if (R.level >= 1) {
+        push(R.level >= 3 ? 'alert' : 'warn',
+            `<b>${R.label} radio blackout</b> — X-ray ${aux.xray.flux.toExponential(1)} W/m². Dayside HF affected.`);
+    }
+    // 6 · Storm in progress → LEO drag.
+    const storm = s?.now?.storm;
+    if (storm?.level >= 2) {
+        push('warn', `<b>${storm.label}</b> — LEO drag ` +
+            `${['nominal', 'slightly elevated', 'elevated', 'high', 'severe', 'extreme'][storm.level]}; ` +
+            `expect tracking residuals to grow.`);
+    }
+    // 7 · Recurrence heads-up (days of lead time).
+    const rec = s?.now?.sunLag?.recurrence?.find(f =>
+        f.forecast.daysToArrival > 0.5 && f.forecast.daysToArrival < 6);
+    if (rec) {
+        push('info', `Recurrent stream due <b>in ${rec.forecast.daysToArrival.toFixed(1)} d</b> ` +
+            `(CH ${rec.lat_deg >= 0 ? 'N' : 'S'}${Math.round(Math.abs(rec.lat_deg))}, ${rec.forecast.basis}). Plan around it.`);
+    }
+    if (!acts.length) {
+        push('ok', '<b>All quiet.</b> No action items — next scheduled attention: the recurrence outlook.');
+    }
+    $('rc-actions').innerHTML = acts.join('');
+}
+loadAuxFluxes();
+setInterval(() => { if (!document.hidden) loadAuxFluxes(); }, INTERVALS.T2);
 
 // ── Storm drag impact — same engine as the Upper Atmosphere twin ────────────
 let densityFn = null, densityLoading = false;
