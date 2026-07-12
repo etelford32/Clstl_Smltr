@@ -1721,7 +1721,7 @@ nav {
     <!-- ── HELIOSPHERE HERO ────────────────────────────────────────────────── -->
     <!-- 3D inner solar system: real ephemeris orbits, 3D Parker spiral wind,  -->
     <!-- Earth magnetosphere (Shue model), CME shells, flare events.           -->
-    <div class="helio-hero-wrap" data-preview-stage="1" data-lab-panel="helio-hero">
+    <div class="helio-hero-wrap" data-preview-stage="1" data-lab-panel="helio-hero" data-lab-resize="1">
         
         <button class="cv-btn" id="btn-sw-here" title="Current Space Weather" style="top:12px;right:12px;" onclick="document.getElementById('helio-canvas').dispatchEvent(new Event('reset'))">⊙ Reset View</button>
         <!-- Sprint 5 — Hypothetical Mode (badge / dial / watermark / toast) -->
@@ -2324,7 +2324,7 @@ nav {
 
     <!-- ── 3D MAGNETOSPHERE GLOBE ────────────────────────────────────────────── -->
     <!-- Three.js Earth + live magnetosphere, aurora ovals, solar wind particles -->
-    <section class="earth-section globe-section" data-lab-panel="globe">
+    <section class="earth-section globe-section" data-lab-panel="globe" data-lab-resize="#sw-globe-canvas">
         <div class="earth-section-header" style="flex-wrap:wrap;gap:10px">
             <div>
                 <span class="earth-section-title">Sun · Earth · Moon · Magnetosphere</span>

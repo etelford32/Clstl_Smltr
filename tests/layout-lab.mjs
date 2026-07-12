@@ -10,7 +10,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { mergeOrder, normalizeLayout, layoutsEqual, LAYOUT_VERSION }
+import { mergeOrder, normalizeLayout, layoutsEqual, LAYOUT_VERSION,
+         clampSize, SIZE_MIN, SIZE_MAX }
     from '../js/layout-lab.js';
 
 let n = 0;
@@ -82,6 +83,31 @@ test('non-string ids and duplicates are stripped, missing lists default', () => 
 test('unknown extra keys are not preserved (import surface is minimal)', () => {
     const l = normalizeLayout({ v: 1, evil: '<script>', zones: { m: { order: ['a'] } } }, 'p');
     assert.equal('evil' in l, false);
+});
+
+/* ── size map (resizable panels) ────────────────────────────────────── */
+
+test('clampSize bounds and rejects garbage', () => {
+    assert.equal(clampSize(520), 520);
+    assert.equal(clampSize(1), SIZE_MIN);
+    assert.equal(clampSize(99999), SIZE_MAX);
+    assert.equal(clampSize('740'), 740);      // storage round-trips strings
+    assert.equal(clampSize('12px'), null);
+    assert.equal(clampSize(NaN), null);
+    assert.equal(clampSize(undefined), null);
+});
+
+test('normalizeLayout clamps size map and drops invalid entries', () => {
+    const l = normalizeLayout({
+        v: 1,
+        zones: { m: { order: ['a'], size: { a: 700, b: 5, c: 'huge', d: 1e6 } } },
+    }, 'p');
+    assert.deepEqual(l.zones.m.size, { a: 700, b: SIZE_MIN, d: SIZE_MAX });
+});
+
+test('missing size map defaults to empty object', () => {
+    const l = normalizeLayout({ v: 1, zones: { m: { order: ['a'] } } }, 'p');
+    assert.deepEqual(l.zones.m.size, {});
 });
 
 /* ── layoutsEqual ───────────────────────────────────────────────────── */

@@ -182,7 +182,14 @@ Work items, in order of value:
 
 ### Phase 6 — Layout Lab + A/B  ✅ shipped (this branch)
 
-The dashboard's *arrangement* is now owner-driven, not agent-hardcoded:
+The dashboard's *arrangement* is now user-driven, not agent-hardcoded. The
+**🎛 Customize** button shows for every visitor (`?layoutlab=0` hides it);
+personal layouts live in their browser. Panels marked `data-lab-resize`
+(the heliosphere hero and the magnetosphere globe canvas) additionally have
+an always-on bottom-edge drag handle — heights persist per user in a
+separate override store (`pp-layout-size.<page>`) so resizing never pulls a
+visitor out of their A/B arrangement bucket; double-click resets. Resize
+fires the `sw_panel_resize` engagement event.
 
 - `js/layout-lab.js` — apply/design/measure layers. Page opts in via
   `data-lab-zone` / `data-lab-panel` attributes; `space-weather.html` has two
@@ -198,7 +205,7 @@ The dashboard's *arrangement* is now owner-driven, not agent-hardcoded:
   `data/layout-variants/space-weather.json`.
 
 **How you drive it:**
-1. Open `/space-weather.html?layoutlab=1` → click **🎛 Layout Lab**.
+1. Open `/space-weather.html` → click **🎛 Customize**.
 2. Drag panels to reorder (sections vertically, cards within the grid),
    👁 to hide, ⬌ for full-width cards.
 3. **Save mine** = your personal layout (this browser, wins over variants).

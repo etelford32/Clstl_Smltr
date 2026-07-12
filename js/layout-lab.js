@@ -12,14 +12,21 @@
  *        existing elements; it never creates or destroys panel content, so
  *        every getElementById wire-up in the page keeps working.
  *
- *   2. DESIGN MODE ("Layout Lab") — enabled with `?layoutlab=1` (sticky via
- *        localStorage, `?layoutlab=0` to drop). Drag panels to reorder,
- *        hide/show, toggle full-width (in zones marked data-lab-wide="1"),
- *        save as your personal layout, export/import JSON. Publishing a
- *        variant is deliberately a git operation: export the JSON and
- *        commit it into data/layout-variants/<page>.json — the client can
- *        preview any variant but cannot publish one. That keeps the
- *        experiment definition reviewable and the anon surface read-only.
+ *   2. DESIGN MODE ("Layout Lab") — user-facing: the Customize button shows
+ *        for everyone (`?layoutlab=0` hides it, `?layoutlab=1` re-enables).
+ *        Drag panels to reorder, hide/show, toggle full-width (in zones
+ *        marked data-lab-wide="1"), save as your personal layout,
+ *        export/import JSON. Panels marked `data-lab-resize` additionally
+ *        get an ALWAYS-ON bottom-edge drag handle (not gated behind design
+ *        mode) whose height persists per user in a separate override store,
+ *        so resizing the sim canvas never re-buckets an A/B arrangement.
+ *        The attribute value is "1" (resize the panel itself) or a CSS
+ *        selector for the child that owns the height (e.g. a fixed-height
+ *        canvas). Publishing a variant is deliberately a git operation:
+ *        export the JSON and commit it into data/layout-variants/<page>.json
+ *        — the client can preview any variant but cannot publish one. That
+ *        keeps the experiment definition reviewable and the anon surface
+ *        read-only.
  *
  *   3. MEASURE — when an experiment key is configured and assigned,
  *        exposure fires through experiments.assign() (deduped per session)
@@ -60,6 +67,26 @@ const strList = (v) => Array.isArray(v)
     ? v.filter((x, i, a) => typeof x === 'string' && a.indexOf(x) === i)
     : [];
 
+// Height clamp for resizable panels. The floor keeps HUD/scrubber overlays
+// usable; the ceiling keeps a stray import from creating a 50k-px canvas.
+export const SIZE_MIN = 220;
+export const SIZE_MAX = 1600;
+export const clampSize = (h) => {
+    const n = Math.round(Number(h));
+    return Number.isFinite(n) ? Math.min(SIZE_MAX, Math.max(SIZE_MIN, n)) : null;
+};
+
+const sizeMap = (v) => {
+    const out = {};
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+        for (const [id, h] of Object.entries(v)) {
+            const c = clampSize(h);
+            if (typeof id === 'string' && c !== null) out[id] = c;
+        }
+    }
+    return out;
+};
+
 /** Validate/clamp an untrusted layout doc (import paste, fetched variant). */
 export function normalizeLayout(raw, page) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -74,6 +101,7 @@ export function normalizeLayout(raw, page) {
             order: strList(z.order),
             hidden: strList(z.hidden),
             wide: strList(z.wide),
+            size: sizeMap(z.size),
         };
     }
     return { v: LAYOUT_VERSION, page: raw.page || page || '', zones };
@@ -91,13 +119,42 @@ const panelsOf = (zoneEl) =>
     [...zoneEl.children].filter(c => c.hasAttribute?.('data-lab-panel'));
 const pid = (el) => el.getAttribute('data-lab-panel');
 
+// The element whose height a resize actually changes: the panel itself for
+// data-lab-resize="1", else the first match of the selector inside it (a
+// fixed-height canvas like #sw-globe-canvas needs its own height driven —
+// stretching only its wrapper would letterbox it).
+export function resizeTarget(panel) {
+    const spec = panel.getAttribute('data-lab-resize');
+    if (spec == null) return null;
+    if (spec === '' || spec === '1') return panel;
+    try { return panel.querySelector(spec) || panel; } catch { return panel; }
+}
+
+function currentSize(panel) {
+    const t = resizeTarget(panel);
+    const m = t && /^(\d+)px$/.exec(t.style.height || '');
+    return m ? clampSize(m[1]) : null;
+}
+
+function setSize(panel, h) {
+    const t = resizeTarget(panel);
+    if (!t) return;
+    t.style.height = h === null ? '' : clampSize(h) + 'px';
+}
+
 export function captureLayout(root, page) {
     const zones = {};
     for (const z of zoneEls(root)) {
+        const size = {};
+        for (const p of panelsOf(z)) {
+            const h = currentSize(p);
+            if (h !== null) size[pid(p)] = h;
+        }
         zones[z.getAttribute('data-lab-zone')] = {
             order: panelsOf(z).map(pid),
             hidden: panelsOf(z).filter(p => p.classList.contains('lab-hidden')).map(pid),
             wide: panelsOf(z).filter(p => p.classList.contains('lab-wide')).map(pid),
+            size,
         };
     }
     return { v: LAYOUT_VERSION, page, zones };
@@ -124,6 +181,9 @@ export function applyLayout(root, layout) {
             const wide = spec.wide.includes(pid(p)) && z.getAttribute('data-lab-wide') === '1';
             p.classList.toggle('lab-wide', wide);
             p.style.gridColumn = wide ? '1 / -1' : '';
+            if (p.hasAttribute('data-lab-resize')) {
+                setSize(p, spec.size?.[pid(p)] ?? null);
+            }
         }
     }
     return true;
@@ -145,13 +205,42 @@ function clearPersonal(page) {
     try { localStorage.removeItem(personalKey(page)); } catch {}
 }
 
+// The Lab is user-facing: on by default for everyone. `?layoutlab=0`
+// stickily hides the Customize button; `?layoutlab=1` brings it back.
 function labEnabled() {
     try {
         const q = new URLSearchParams(location.search).get('layoutlab');
-        if (q === '1') { localStorage.setItem(LAB_FLAG, '1'); return true; }
-        if (q === '0') { localStorage.removeItem(LAB_FLAG); return false; }
-        return localStorage.getItem(LAB_FLAG) === '1';
-    } catch { return false; }
+        if (q === '1') { localStorage.removeItem(LAB_FLAG); return true; }
+        if (q === '0') { localStorage.setItem(LAB_FLAG, '0'); return false; }
+        return localStorage.getItem(LAB_FLAG) !== '0';
+    } catch { return true; }
+}
+
+// Per-user panel heights live OUTSIDE the layout doc on purpose: dragging
+// the sim canvas taller is an ergonomic tweak, not an arrangement choice —
+// it must survive layout switches and must NOT convert an A/B variant view
+// into a personal layout (which would silently pull the user out of the
+// experiment bucket).
+const sizeStoreKey = (page) => `pp-layout-size.${page}`;
+
+function loadSizes(page) {
+    try { return sizeMap(JSON.parse(localStorage.getItem(sizeStoreKey(page)) || 'null')); }
+    catch { return {}; }
+}
+function saveSizes(page, sizes) {
+    try {
+        const clean = sizeMap(sizes);
+        if (Object.keys(clean).length) localStorage.setItem(sizeStoreKey(page), JSON.stringify(clean));
+        else localStorage.removeItem(sizeStoreKey(page));
+    } catch {}
+}
+
+function applySizeOverrides(root, page) {
+    const sizes = loadSizes(page);
+    for (const p of root.querySelectorAll('[data-lab-panel][data-lab-resize]')) {
+        const h = sizes[pid(p)];
+        if (h != null) setSize(p, h);
+    }
 }
 
 /* ── Entry point ───────────────────────────────────────────────────── */
@@ -200,11 +289,66 @@ export async function initLayoutLab({ page, experimentKey, variantsUrl } = {}) {
         if (v && applyLayout(root, normalizeLayout(v, page))) mode = `variant:${variant}`;
     }
 
+    // User size overrides land last so they win over whatever layout applied.
+    applySizeOverrides(root, page);
+    mountResizeHandles(root, page, exp);
+
     if (exp) wireGoals(root, exp);
 
     const api = { page, mode, authored, applyLayout: (l) => applyLayout(root, l) };
     if (labEnabled()) mountDesigner(root, page, authored, variantsDoc, api, exp);
     return api;
+}
+
+/* ── Always-on resize handles (data-lab-resize panels) ─────────────── */
+
+function mountResizeHandles(root, page, exp) {
+    for (const panel of root.querySelectorAll('[data-lab-panel][data-lab-resize]')) {
+        if (panel.querySelector(':scope > .lab-resize-handle')) continue;
+        const handle = document.createElement('div');
+        handle.className = 'lab-resize-handle';
+        handle.title = 'Drag to resize · double-click to reset';
+        handle.innerHTML = '<span class="lab-resize-pill"></span>';
+        // The handle needs a positioned ancestor; every current target panel
+        // already has position:relative, but don't rely on it.
+        if (getComputedStyle(panel).position === 'static') panel.style.position = 'relative';
+        panel.appendChild(handle);
+
+        let startY = 0, startH = 0, active = false;
+        handle.addEventListener('pointerdown', (e) => {
+            const t = resizeTarget(panel);
+            if (!t) return;
+            active = true;
+            startY = e.clientY;
+            startH = t.getBoundingClientRect().height;
+            handle.setPointerCapture(e.pointerId);
+            handle.classList.add('lab-resizing');
+            e.preventDefault();
+        });
+        handle.addEventListener('pointermove', (e) => {
+            if (!active) return;
+            setSize(panel, startH + (e.clientY - startY));
+        });
+        const finish = (e) => {
+            if (!active) return;
+            active = false;
+            handle.classList.remove('lab-resizing');
+            try { handle.releasePointerCapture(e.pointerId); } catch {}
+            const sizes = loadSizes(page);
+            const h = currentSize(panel);
+            if (h !== null) sizes[pid(panel)] = h;
+            saveSizes(page, sizes);
+            try { exp?.track('sw_panel_resize', { panel: pid(panel), h }); } catch {}
+        };
+        handle.addEventListener('pointerup', finish);
+        handle.addEventListener('pointercancel', finish);
+        handle.addEventListener('dblclick', () => {
+            setSize(panel, null);                    // back to stylesheet height
+            const sizes = loadSizes(page);
+            delete sizes[pid(panel)];
+            saveSizes(page, sizes);
+        });
+    }
 }
 
 /* ── Goal events ───────────────────────────────────────────────────── */
@@ -263,6 +407,12 @@ body.lab-design .lab-chip { display: flex; }
 #lab-open { position: fixed; right: 14px; bottom: 14px; z-index: 1000; font: 700 12px/1 system-ui;
   padding: 9px 12px; border-radius: 10px; border: 1px solid rgba(0,198,255,.5);
   background: rgba(4,10,20,.92); color: #9fdcff; cursor: pointer; }
+.lab-resize-handle { position: absolute; left: 0; right: 0; bottom: 0; height: 10px; z-index: 40;
+  cursor: ns-resize; touch-action: none; display: flex; align-items: center; justify-content: center; }
+.lab-resize-pill { width: 56px; height: 4px; border-radius: 2px; background: rgba(0,198,255,.28);
+  transition: background .15s, width .15s; }
+.lab-resize-handle:hover .lab-resize-pill,
+.lab-resize-handle.lab-resizing .lab-resize-pill { background: rgba(0,198,255,.8); width: 96px; }
 `;
     document.head.appendChild(s);
 }
@@ -270,8 +420,8 @@ body.lab-design .lab-chip { display: flex; }
 function mountDesigner(root, page, authored, variantsDoc, api, exp) {
     const open = document.createElement('button');
     open.id = 'lab-open';
-    open.textContent = '🎛 Layout Lab';
-    open.title = 'Design mode: drag panels, hide, resize, save layouts (?layoutlab=0 to remove this button)';
+    open.textContent = '🎛 Customize';
+    open.title = 'Customize this page: drag panels to rearrange, hide, resize — saved in this browser (?layoutlab=0 hides this button)';
     document.body.appendChild(open);
 
     let bar = null;
