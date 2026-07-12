@@ -370,6 +370,25 @@ const TRANSIT = Object.freeze({
     N_REF:       20,     // density (cm⁻³) that saturates count/trace scaling
 });
 
+// ── Default camera views ─────────────────────────────────────────────────────
+// Three framings of the ONE scene (nothing re-renders differently — a view
+// is just a camera pose, so the physics can never fork per view):
+//   earth — the original near-Earth framing: ring, aurora, boundaries.
+//   sun   — close on the solar disk: coronal holes, the back-mapped source
+//           ring, emission puffs and the Parker-spiral streamline into the
+//           L1 gate. minDistance still applies — users can push right into
+//           the disk to read the emission activity.
+//   river — the full corridor side-on (Sun left, Earth right), far enough
+//           that the LOD boost thickens the stream into the "river" read
+//           and every in-scene stat label is legible in one frame.
+// Positions are hand-framed against the TRANSIT/SCALE geometry above;
+// verified by the view-switcher browser probe (tests/ + scratchpad).
+const CAM_VIEWS = Object.freeze({
+    earth: { pos: [8.5, 6.0, 9.5],  target: [0, 0, 0] },
+    sun:   { pos: [38, 6.5, 15.5],  target: [56, 3.6, 0] },
+    river: { pos: [74, 23, -46],    target: [19, -2, 0] },
+});
+
 // ── Trails are INTEGRATED PATHS, not decorations ─────────────────────────────
 // Every trail spans exactly the trajectory covered in the last TRAIL_VIEW_S
 // seconds of VIEWING: length = apparent speed × TRAIL_VIEW_S for the straight
@@ -769,6 +788,11 @@ export class RingCurrentGlobe {
         this._controls.dampingFactor = 0.06;
         this._controls.minDistance = 2.5;
         this._controls.maxDistance = 140;   // far enough to frame the Sun corridor
+        // Named default views (CAM_VIEWS / setView). Any user grab cancels an
+        // in-progress flight — the presets are starting points, not a cage.
+        this._flight = null;
+        this._activeView = 'earth';
+        this._controls.addEventListener('start', () => { this._flight = null; });
 
         // Lighting: Sun from +X — exactly the GSM Sun line, so the lit
         // hemisphere IS the real dayside once Earth's spin phase is set.
@@ -1364,6 +1388,42 @@ export class RingCurrentGlobe {
         this._sunTex.needsUpdate = true;
     }
 
+    /** The named view last selected via setView ('earth'|'sun'|'river').
+     *  Free orbiting after a preset does NOT clear this — it names the
+     *  starting point, not the live pose (the page dims its buttons on
+     *  user grab instead). */
+    get view() { return this._activeView; }
+
+    /** Preset names, for UIs that want to enumerate them. */
+    static get VIEWS() { return Object.keys(CAM_VIEWS); }
+
+    /**
+     * Fly the camera to a named default view ('earth' | 'sun' | 'river').
+     * Eased flight of position + orbit target over ~1.6 s; instant under
+     * prefers-reduced-motion or {instant:true}. Returns false on an
+     * unknown name so callers can validate persisted values.
+     */
+    setView(name, { instant = false } = {}) {
+        const v = CAM_VIEWS[name];
+        if (!v) return false;
+        this._activeView = name;
+        const p1 = new THREE.Vector3(...v.pos);
+        const t1 = new THREE.Vector3(...v.target);
+        if (instant || this._reducedMotion) {
+            this._flight = null;
+            this._camera.position.copy(p1);
+            this._controls.target.copy(t1);
+            this._controls.update();
+            return true;
+        }
+        this._flight = {
+            t: 0, dur: 1.6,
+            p0: this._camera.position.clone(), p1,
+            t0: this._controls.target.clone(), t1,
+        };
+        return true;
+    }
+
     /** Stream coloring: 'bz' (driver) | 'temp' (heat map) | 'density'. */
     setStreamMode(mode) {
         this._streamMode = mode === 'temp' || mode === 'density' ? mode : 'bz';
@@ -1901,7 +1961,11 @@ export class RingCurrentGlobe {
             slot.mesh.scale.setScalar(r);
             slot.mat.opacity = (0.10 + 0.22 * Math.min(1, (c.speed_km_s ?? 400) / 1200))
                 * (1 - 0.35 * f);
-            slot.lab.sp.position.set(x, r + 2.4 + yOff, zOff);
+            // Label BELOW the corridor axis — the band above is owned by the
+            // emission-state (y≈10) and gate (y≈20) labels; riding r+2.4 on
+            // top used to collide with both as the front grew near the gate.
+            // Shallow enough to stay inside the Sun view's bottom edge.
+            slot.lab.sp.position.set(x, -(3.2 + 0.3 * r) + yOff * 0.3, zOff);
         }
     }
 
@@ -2330,26 +2394,39 @@ export class RingCurrentGlobe {
             this._pointerPx = null;
             this._tipEl.style.display = 'none';
         };
-        this._onPointerDown = () => { this._dragging = true; this._tipEl.style.display = 'none'; };
-        this._onPointerUp = () => { this._dragging = false; };
+        this._onPointerDown = (e) => {
+            this._dragging = true;
+            this._tipEl.style.display = 'none';
+            this._downPx = { x: e.clientX, y: e.clientY, t: performance.now() };
+        };
+        this._onPointerUp = (e) => {
+            this._dragging = false;
+            const d = this._downPx;
+            this._downPx = null;
+            // Click-to-pin (inspector): a short press that didn't orbit.
+            // pointerup is bound on window — the target check keeps clicks
+            // on overlay panels from unpinning through them.
+            if (!d || performance.now() - d.t > 450) return;
+            if ((e.clientX - d.x) ** 2 + (e.clientY - d.y) ** 2 > 36) return;
+            if (e.target !== this._renderer.domElement) return;
+            const rect = this._renderer.domElement.getBoundingClientRect();
+            const hit = this._pickRingAt(e.clientX - rect.left, e.clientY - rect.top);
+            if (hit) this.pinParticle(hit.key, hit.i);
+            else if (this._pinned) this.unpinParticle();
+        };
+        this._pinned = null;
+        this.onSelect = null;   // page hook: fires with getPinnedInfo() | null
         dom.addEventListener('pointermove', this._onPointerMove);
         dom.addEventListener('pointerleave', this._onPointerLeave);
         dom.addEventListener('pointerdown', this._onPointerDown);
         window.addEventListener('pointerup', this._onPointerUp);
     }
 
-    _updateTooltip(wallNow) {
-        if (!this._pointerDirty || !this._pointerPx || this._dragging) return;
-        // Pose-projection picking is ~4700 trig evals + allocs — cap it at
-        // ~14 Hz (pointerDirty stays set, so the pick lands a frame later;
-        // imperceptible against a 12 px hit radius).
-        if (wallNow - (this._lastPickMs ?? 0) < 70) return;
-        this._lastPickMs = wallNow;
-        this._pointerDirty = false;
+    /** Nearest visible ring particle within 12 px of (px, py) — the same
+     *  pose-projection pick the hover tooltip uses (GPU positions exist
+     *  only in the vertex shader; particlePose is its CPU reference). */
+    _pickRingAt(px, py) {
         const rect = this._renderer.domElement.getBoundingClientRect();
-
-        // Ring populations: pose-project every particle (a few thousand
-        // trig evals, pointer-move-throttled), nearest within 12 px wins.
         let best = null;
         for (const [key, P] of Object.entries(this._popPoints ?? {})) {
             const pop = P.pop;
@@ -2360,9 +2437,9 @@ export class RingCurrentGlobe {
                 this._tmpV.set(q.x, q.y, q.z)
                     .applyMatrix4(this._magGroup.matrixWorld)
                     .project(this._camera);
-                const px = (this._tmpV.x + 1) / 2 * rect.width;
-                const py = (1 - this._tmpV.y) / 2 * rect.height;
-                const d2 = (px - this._pointerPx.x) ** 2 + (py - this._pointerPx.y) ** 2;
+                const sx = (this._tmpV.x + 1) / 2 * rect.width;
+                const sy = (1 - this._tmpV.y) / 2 * rect.height;
+                const d2 = (sx - px) ** 2 + (sy - py) ** 2;
                 if (d2 < 144 && (!best || d2 < best.d2)) {
                     // Copy out of the scratch — later iterations overwrite it.
                     this._pickPose.ph = q.ph;
@@ -2372,6 +2449,110 @@ export class RingCurrentGlobe {
                 }
             }
         }
+        return best;
+    }
+
+    // ── Particle inspector (Phase 1 — RING_CURRENT_ANALYTICS_PLAN.md) ───────
+    // The globe owns only the 3D side: pin/ghost markers in magGroup-local
+    // coordinates (the group's dipole tilt applies to them for free) and a
+    // minimal data API; all physics + card DOM live in
+    // js/ring-current-inspector.js so they stay node-testable.
+
+    _ensurePinSprites() {
+        if (this._pinSprite) return;
+        const mk = (color, dashed) => {
+            const cv = document.createElement('canvas');
+            cv.width = cv.height = 64;
+            const g = cv.getContext('2d');
+            g.strokeStyle = color;
+            g.lineWidth = 5;
+            if (dashed) g.setLineDash([7, 6]);
+            g.beginPath(); g.arc(32, 32, 24, 0, 2 * Math.PI); g.stroke();
+            const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: new THREE.CanvasTexture(cv), transparent: true,
+                depthWrite: false, depthTest: false, opacity: 0.9,
+            }));
+            sp.scale.setScalar(0.55);
+            sp.visible = false;
+            this._magGroup.add(sp);
+            return sp;
+        };
+        this._pinSprite = mk('#ffffff', false);
+        this._ghostSprite = mk('#ffd700', true);   // dashed = a prediction
+    }
+
+    /** Pin particle i of population key; fires onSelect. Returns success. */
+    pinParticle(key, i) {
+        const P = this._popPoints?.[key];
+        if (!P || !(i >= 0 && i < P.pop.count)) return false;
+        this._ensurePinSprites();
+        this._pinned = { key, i, pop: P.pop };
+        this._pinSprite.visible = true;
+        this.clearGhost();
+        this.onSelect?.(this.getPinnedInfo());
+        return true;
+    }
+
+    unpinParticle() {
+        this._pinned = null;
+        if (this._pinSprite) this._pinSprite.visible = false;
+        this.clearGhost();
+        this.onSelect?.(null);
+    }
+
+    /** Live handle for the inspector card (null when nothing pinned).
+     *  simHours/bounceSec are the two clocks particlePose runs on. */
+    getPinnedInfo() {
+        if (!this._pinned) return null;
+        return {
+            key: this._pinned.key,
+            i: this._pinned.i,
+            pop: this._pinned.pop,
+            simHours: this._simHours,
+            bounceSec: this._tView,
+        };
+    }
+
+    /** Live handles for the population analytics dock (Phase 2 —
+     *  RING_CURRENT_ANALYTICS_PLAN.md). Populations arrive async from the
+     *  worker, so `populations` is empty until the buffers land — the dock
+     *  shows "warming up" rather than inventing rows. oxygenModelFrac is
+     *  the model share that STEERS BRIGHTNESS (build counts are fixed);
+     *  the dock discloses both numbers side by side. */
+    getAnalyticsSnapshot() {
+        return {
+            simHours: this._simHours,
+            dstStar: this._state.dstStar,
+            oxygenModelFrac: this._pendingMix ?? null,
+            populations: Object.entries(this._popPoints ?? {}).map(([key, P]) => ({
+                key, pop: P.pop, visFrac: P.mat.uniforms.uVisFrac.value,
+            })),
+        };
+    }
+
+    /** Dashed ghost marker at a predicted pose (magGroup-local coords). */
+    setGhostLocal(x, y, z) {
+        this._ensurePinSprites();
+        this._ghostSprite.position.set(x, y, z);
+        this._ghostSprite.visible = true;
+    }
+
+    clearGhost() {
+        if (this._ghostSprite) this._ghostSprite.visible = false;
+    }
+
+    _updateTooltip(wallNow) {
+        if (!this._pointerDirty || !this._pointerPx || this._dragging) return;
+        // Pose-projection picking is ~4700 trig evals + allocs — cap it at
+        // ~14 Hz (pointerDirty stays set, so the pick lands a frame later;
+        // imperceptible against a 12 px hit radius).
+        if (wallNow - (this._lastPickMs ?? 0) < 70) return;
+        this._lastPickMs = wallNow;
+        this._pointerDirty = false;
+
+        // Ring populations: the shared pose-projection pick (~4700 trig
+        // evals, pointer-move-throttled) — same helper the click-to-pin uses.
+        let best = this._pickRingAt(this._pointerPx.x, this._pointerPx.y);
         // Transit parcels: their geometry holds REAL positions — raycast.
         this._ray.setFromCamera(this._ndc, this._camera);
         this._ray.params.Points.threshold = 1.0;
@@ -2435,7 +2616,14 @@ export class RingCurrentGlobe {
             this._windLab = this._makeLabel((TRANSIT.X_MP + TRANSIT.X_SUN) / 2, TRANSIT.WAVE_Y + 6.2, 0, 9);
             this._ringLab = this._makeLabel(0, 7.8, 0, 9);
             this._gateLab = this._makeLabel(TRANSIT.X_SUN, 20.5, 0, 10);
-            this._helioLab = this._makeLabel(TRANSIT.X_SUN + 4, -8.5, 0, 8.5);
+            // Below the CME label band (nearest-front label sits at y≈−5..−8).
+            this._helioLab = this._makeLabel(TRANSIT.X_SUN + 4, -12, 0, 8.5);
+            // Above the corona (sprite half-height ≈6.1 at max), nudged
+            // Earthward off the disk axis so the foreshortened River view
+            // keeps it in frame (dead-center-above leans out of shot there),
+            // and low enough that the Sun view's top edge (where the DOM
+            // view pills float) stays clear of the title.
+            this._sunLab = this._makeLabel(TRANSIT.X_SUN + 3.5, 9.6, 0, 9.5);
         }
         // Gate pulse: a genuinely NEW 1-min sample landed (newest tL1 moved).
         // Wall-clock instrumentation, deliberately independent of τ.
@@ -2499,21 +2687,30 @@ export class RingCurrentGlobe {
             this._spiral.visible = true;
         }
         // In-flight CME fronts: assign pool slots (feed sorts by ETA).
+        // Several fronts share the ≈7-unit compressed Sun→L1 leg, so
+        // per-cone labels pile into an unreadable stack (seen live with 4
+        // CMEs in flight). Only the NEAREST front carries a label — titled
+        // "1 of N" so the others are disclosed, with per-CME detail in the
+        // Situation panel. Every cone is still drawn.
         this._cmesLive = state?.cmes ?? [];
+        const nCmes = this._cmesLive.length;
         for (let ci = 0; ci < this._cmePool.length; ci++) {
             const slot = this._cmePool[ci];
             const c = this._cmesLive[ci] ?? null;
             slot.cme = c;
             slot.mesh.visible = !!c;
-            slot.lab.sp.visible = !!c;
-            if (!c) continue;
+            slot.lab.sp.visible = !!c && ci === 0;
+            if (!c || ci !== 0) continue;
             const etaH = ((c.etaMs ?? c.transit.etaMs) - Date.now()) / 3.6e6;
             const enlil = c.basis === 'enlil';
             const band = enlil ? 10 : Math.round((c.transit.etaLateMs - c.transit.etaMs) / 3.6e6);
             const xchk = Number.isFinite(c.crossCheckHours)
                 ? `ballistic says ${Math.abs(c.crossCheckHours).toFixed(0)} h ${c.crossCheckHours >= 0 ? 'later' : 'earlier'} (cross-check)`
                 : `${Math.min(100, Math.round(c.transit.fraction * 100))}% of Sun→Earth covered`;
-            this._drawLabel(slot.lab, `CME — IN FLIGHT${c.glancing ? ' (FLANK)' : ''}`, [
+            const title = nCmes > 1
+                ? `CMEs IN FLIGHT — 1 of ${nCmes}${c.glancing ? ' (FLANK)' : ''}`
+                : `CME — IN FLIGHT${c.glancing ? ' (FLANK)' : ''}`;
+            this._drawLabel(slot.lab, title, [
                 `v ${Math.round(c.speed_km_s)} km/s · launched ${c.transit.hoursInFlight.toFixed(0)} h ago`,
                 etaH > 0
                     ? `arrives in ≈ ${etaH < 48 ? `${Math.round(etaH)} h` : `${(etaH / 24).toFixed(1)} d`} ±${band} h`
@@ -2528,6 +2725,38 @@ export class RingCurrentGlobe {
                 'plasma is only measured when it crosses the gate',
                 'puff rate & speed ∝ each hole’s own arrival record',
                 'leg drawn ≈2 900× more compressed than near-Earth',
+            ], '#ffd27a');
+        }
+        // Sun emission-state readout — the Sun-side twin of the ring label:
+        // WHAT the disk is releasing right now and where the wind arriving
+        // at Earth traces back to. Pinned above the corona so the Sun and
+        // River views carry a legible solar readout without opening panels.
+        if (this._sunLab) {
+            // Lines stay ≤ ~33 chars — the 512-px label canvas clips longer.
+            const src = sl?.source;
+            const srcLine = !sl ? 'wind now: source pending'
+                : src?.matched
+                    ? `wind now: CH ${(src.hole.lat_deg ?? 0) >= 0 ? 'N' : 'S'}${Math.round(Math.abs(src.hole.lat_deg ?? 0))}` +
+                      `${Number.isFinite(sl.carringtonLon) ? ` · Car ${Math.round(sl.carringtonLon)}°` : ''}`
+                : src?.kind === 'streamer-belt'
+                    ? 'wind now: streamer belt (slow wind)'
+                : src ? 'wind now: fast wind — no CH match'
+                : `wind now: Car ${Number.isFinite(sl.carringtonLon) ? Math.round(sl.carringtonLon) + '°' : '—'}`;
+            const holesVis = (sl?.holes ?? []).filter(h => {
+                if (!Number.isFinite(h?.lon_carrington_deg) || !Number.isFinite(sl?.l0NowDeg)) return false;
+                const lonW = ((h.lon_carrington_deg - sl.l0NowDeg) % 360 + 540) % 360 - 180;
+                return Math.abs(lonW) <= 85 && Math.abs(h.lat_deg ?? 0) <= 80;
+            }).length;
+            const due = (sl?.recurrence ?? []).filter(f => f.forecast?.daysToArrival < 5).length;
+            const flux = Math.min(3, (this._driverN / 6) * (this._driverV / 450));
+            const cmeN = (state?.cmes ?? []).length;
+            this._drawLabel(this._sunLab, 'SUN — EMISSION STATE', [
+                srcLine,
+                `${holesVis} CH on disk · ${due} stream${due === 1 ? '' : 's'} due ≤5 d`,
+                `puffs ${(2 + 2.2 * flux).toFixed(1)}/s ∝ live n·v at L1`,
+                cmeN === 0 ? 'no Earth-directed CMEs in flight'
+                    : cmeN === 1 ? '1 CME in flight — see cone label'
+                    : `${cmeN} CMEs in flight · nearest shown`,
             ], '#ffd27a');
         }
         const d = state?.drivers, nw = state?.now;
@@ -2698,8 +2927,27 @@ export class RingCurrentGlobe {
         tNow = performance.now();
         blend('pools', tMark, tNow); tMark = tNow;
         this._updateTooltip(wallNow);
+        // Pinned-particle marker rides the SAME reference pose the shader
+        // draws (magGroup-local — the group applies the dipole tilt).
+        if (this._pinned) {
+            const q = particlePose(this._pinned.pop, this._pinned.i,
+                this._simHours, this._tView, this._poseScratch);
+            this._pinSprite.position.set(q.x, q.y, q.z);
+            this._pinSprite.scale.setScalar(0.55 * (1 + 0.15 * Math.sin(this._tView * 4)));
+        }
         tNow = performance.now();
         blend('tooltip', tMark, tNow); tMark = tNow;
+        // View-preset flight: eased camera + target glide (setView). The
+        // 'start' listener nulls this the instant the user grabs the scene.
+        if (this._flight) {
+            const f = this._flight;
+            f.t += dt;
+            const k = Math.min(1, f.t / f.dur);
+            const e = k * k * (3 - 2 * k);          // smoothstep — gentle both ends
+            this._camera.position.lerpVectors(f.p0, f.p1, e);
+            this._controls.target.lerpVectors(f.t0, f.t1, e);
+            if (k >= 1) this._flight = null;
+        }
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
         blend('render', tMark, performance.now());

@@ -88,33 +88,110 @@ body {
    scrolls when the stage is shorter than the legend. Position + minimized
    state persist in localStorage and re-clamp to the stage on restore. */
 .rc-legend {
-    position:absolute; right:12px; top:10px; z-index:4; font-size:.68rem; color:#8b94ad;
+    position:absolute; right:12px; top:10px; z-index:4; font-size:.62rem; color:#8b94ad;
     background:rgba(3,1,14,.72); border:1px solid rgba(255,255,255,.08);
-    border-radius:8px; line-height:1.7;
-    max-width:min(360px, calc(100% - 24px));
-    max-height:calc(100% - 20px);
+    border-radius:8px; line-height:1.5;
+    max-width:min(325px, calc(100% - 24px));
+    /* Leave the bottom-right corner to the analytics dock — the body
+       scrolls. Released below when the dock is minimized or absent. */
+    max-height:max(150px, calc(100% - 372px));
     display:flex; flex-direction:column;
 }
+.rc-stage:has(.rc-dock.rc-min) .rc-legend,
+.rc-stage:has(.rc-dock[hidden]) .rc-legend {
+    max-height:calc(100% - 20px);
+}
 .rc-legend-head {
-    display:flex; align-items:center; gap:7px; padding:5px 7px 4px 10px;
+    display:flex; align-items:center; gap:6px; padding:4px 6px 3px 9px;
     cursor:grab; user-select:none; -webkit-user-select:none; touch-action:none;
     border-bottom:1px solid rgba(255,255,255,.07);
 }
 .rc-legend.rc-min .rc-legend-head { border-bottom:none; }
-.rc-legend.rc-dragging .rc-legend-head { cursor:grabbing; }
-.rc-legend-grip { color:#5d6684; font-size:.72rem; }
+.rc-legend.rc-dragging .rc-legend-head,
+.rc-insp.rc-dragging .rc-insp-head { cursor:grabbing; }
+.rc-legend-grip { color:#5d6684; font-size:.66rem; }
 .rc-legend-title {
     flex:1; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
-    font-size:.62rem; color:#8b94ad;
+    font-size:.56rem; color:#8b94ad;
 }
 .rc-legend-min {
     cursor:pointer; color:#cdd5e4; background:rgba(255,255,255,.07);
     border:1px solid rgba(255,255,255,.16); border-radius:5px;
-    width:22px; height:18px; line-height:1; font-size:.72rem; padding:0; flex:none;
+    width:20px; height:16px; line-height:1; font-size:.66rem; padding:0; flex:none;
 }
 .rc-legend-min:hover { background:rgba(255,255,255,.15); }
-.rc-legend-body { padding:6px 10px 8px; overflow-y:auto; overscroll-behavior:contain; }
+.rc-legend-body { padding:5px 9px 6px; overflow-y:auto; overscroll-behavior:contain; }
 .rc-legend.rc-min .rc-legend-body { display:none; }
+
+/* Particle inspector (Phase 1 analytics): click a particle → the sim
+   predicts its future from its own physics, then scores the call when the
+   clock gets there. Compact card, draggable by the head like the legend. */
+.rc-insp {
+    position:absolute; left:12px; bottom:28px; z-index:5; width:238px;
+    background:rgba(3,1,14,.85); border:1px solid rgba(255,255,255,.14);
+    border-radius:10px; font-size:.62rem; color:#cdd5e4; line-height:1.5;
+}
+.rc-insp-head {
+    display:flex; align-items:center; gap:6px; padding:4px 6px 3px 9px;
+    cursor:grab; user-select:none; -webkit-user-select:none; touch-action:none;
+    border-bottom:1px solid rgba(255,255,255,.07);
+}
+.rc-insp-title {
+    flex:1; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+    font-size:.56rem; color:#8b94ad;
+}
+.rc-insp-body { padding:5px 9px 4px; }
+.rc-insp-kv { display:flex; justify-content:space-between; gap:8px; padding:1px 0; }
+.rc-insp-kv span { color:#8b94ad; }
+.rc-insp-kv b { color:#e8edf7; font-weight:650; text-align:right; font-variant-numeric:tabular-nums; }
+.rc-insp-pred {
+    margin-top:4px; padding:3px 7px; background:rgba(255,215,0,.07);
+    border:1px solid rgba(255,215,0,.25); border-radius:6px;
+}
+.rc-insp-ok  { color:#7fe6c3; font-weight:700; }
+.rc-insp-bad { color:#ff7d66; font-weight:700; }
+.rc-insp-wait { color:#8b94ad; }
+.rc-insp-actions {
+    display:flex; align-items:center; gap:4px; padding:3px 9px 7px; color:#8b94ad;
+}
+.rc-insp-btn {
+    font-size:.58rem; font-weight:700; cursor:pointer; color:#ffd9b0;
+    background:rgba(255,154,61,.12); border:1px solid rgba(255,154,61,.4);
+    border-radius:5px; padding:2px 7px;
+}
+.rc-insp-btn:hover { background:rgba(255,154,61,.25); }
+
+/* Population analytics dock (Phase 2): aggregate views of the LIVING drawn
+   populations — spectra, L profile vs model, the two-phase lifetime split,
+   and the recycle (death/rebirth) rate by loss channel. Same compact
+   draggable-panel pattern as the legend/inspector. */
+.rc-dock {
+    position:absolute; right:12px; bottom:26px; z-index:5; width:246px;
+    background:rgba(3,1,14,.85); border:1px solid rgba(255,255,255,.14);
+    border-radius:10px; font-size:.6rem; color:#cdd5e4; line-height:1.45;
+}
+.rc-dock-head {
+    display:flex; align-items:center; gap:6px; padding:4px 6px 3px 9px;
+    cursor:grab; user-select:none; -webkit-user-select:none; touch-action:none;
+    border-bottom:1px solid rgba(255,255,255,.07);
+}
+.rc-dock.rc-min .rc-dock-head { border-bottom:none; }
+.rc-dock.rc-dragging .rc-dock-head { cursor:grabbing; }
+.rc-dock-title {
+    flex:1; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+    font-size:.56rem; color:#8b94ad;
+}
+.rc-dock-body { padding:4px 9px 7px; }
+.rc-dock.rc-min .rc-dock-body { display:none; }
+.rc-dock-counts { color:#8b94ad; padding:1px 0 3px; }
+.rc-dock-counts b { color:#e8edf7; font-weight:650; font-variant-numeric:tabular-nums; }
+.rc-dock-lab {
+    display:flex; align-items:baseline; gap:6px; color:#8b94ad;
+    font-size:.56rem; margin-top:4px;
+}
+.rc-dock-lab .rc-dot { width:6px; height:6px; margin-right:3px; }
+.rc-dock-lab b { color:#cdd5e4; font-weight:650; }
+.rc-dock canvas { display:block; width:100%; height:44px; margin-top:2px; }
 .rc-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:baseline; }
 
 .rc-col { display:flex; flex-direction:column; gap:12px; min-width:0; }
@@ -231,41 +308,41 @@ body {
    over the same 75-min forecast window the τ>1 sweep covers. */
 .rc-simtime {
     position:absolute; left:12px; top:10px; z-index:4;
-    font-size:.72rem; font-weight:800; letter-spacing:.07em; color:#ffd9b0;
+    font-size:.64rem; font-weight:800; letter-spacing:.06em; color:#ffd9b0;
     background:rgba(3,1,14,.72); border:1px solid rgba(255,154,61,.35);
-    border-radius:10px; padding:7px 11px 8px; font-variant-numeric:tabular-nums;
-    width:226px; user-select:none; -webkit-user-select:none;
+    border-radius:9px; padding:6px 9px 6px; font-variant-numeric:tabular-nums;
+    width:196px; user-select:none; -webkit-user-select:none;
 }
 .rc-simtime.rc-real { color:#7fe6c3; border-color:rgba(127,230,195,.35); }
 .rc-simtime.rc-paused { color:#ffd666; border-color:rgba(255,214,102,.55); }
-.rc-simtime-row { display:flex; align-items:center; gap:5px; }
+.rc-simtime-row { display:flex; align-items:center; gap:4px; }
 .rc-simtime-tau { flex:1; }
 .rc-clock-btn {
     cursor:pointer; color:inherit; background:rgba(255,255,255,.07);
     border:1px solid rgba(255,255,255,.18); border-radius:5px;
-    width:26px; height:21px; line-height:1; font-size:.72rem; padding:0; flex:none;
+    width:22px; height:18px; line-height:1; font-size:.62rem; padding:0; flex:none;
 }
 .rc-clock-btn:hover { background:rgba(255,255,255,.16); }
 .rc-simtime-utc {
-    font-weight:700; font-size:.8rem; color:#e8edf7; letter-spacing:.03em; margin-top:5px;
+    font-weight:700; font-size:.72rem; color:#e8edf7; letter-spacing:.02em; margin-top:4px;
 }
 .rc-simtime-local {
-    font-weight:600; font-size:.68rem; color:#cdd5e4; letter-spacing:0;
+    font-weight:600; font-size:.62rem; color:#cdd5e4; letter-spacing:0;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .rc-simtime .rc-simtime-sub {
-    display:block; font-weight:400; font-size:.62rem; color:#8b94ad; letter-spacing:0;
-    margin-top:2px;
+    display:block; font-weight:400; font-size:.56rem; color:#8b94ad; letter-spacing:0;
+    margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .rc-simtime-slider {
-    display:block; width:100%; margin:6px 0 1px; height:14px;
+    display:block; width:100%; margin:4px 0 0; height:12px;
     accent-color:#ff9a3d; cursor:pointer; background:transparent;
 }
 .rc-simtime.rc-real .rc-simtime-slider { accent-color:#7fe6c3; }
 .rc-simtime.rc-paused .rc-simtime-slider { accent-color:#ffd666; }
 .rc-simtime-scale {
     display:flex; justify-content:space-between;
-    font-weight:400; font-size:.6rem; color:#5d6684; letter-spacing:0;
+    font-weight:400; font-size:.54rem; color:#5d6684; letter-spacing:0;
 }
 /* Sweep restart: at ×τ the scene fast-forwards the SAME real forecast
    window and wraps — the replay flash makes the restart legible. */
@@ -279,6 +356,27 @@ body {
     background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13);
     border-radius:6px; padding:3px 8px;
 }
+/* Default camera views: three framings of the one scene (Earth · Sun ·
+   River). A preset is a starting pose — free orbiting dims the highlight. */
+.rc-views {
+    position:absolute; left:50%; transform:translateX(-50%); top:10px; z-index:4;
+    display:flex; gap:3px; background:rgba(3,1,14,.72);
+    border:1px solid rgba(255,255,255,.1); border-radius:999px; padding:3px;
+}
+.rc-view-btn {
+    font-size:.64rem; font-weight:700; cursor:pointer; color:#8b94ad;
+    background:transparent; border:1px solid transparent; border-radius:999px;
+    padding:3px 10px; letter-spacing:.04em; white-space:nowrap;
+}
+.rc-view-btn:hover { color:#e8edf7; background:rgba(255,255,255,.08); }
+.rc-view-btn.rc-on {
+    color:#ffd9b0; background:rgba(255,154,61,.16); border-color:rgba(255,154,61,.45);
+}
+@media (max-width: 900px) {
+    /* Small stages: the top edge is owned by the clock HUD + legend. */
+    .rc-views { top:auto; bottom:34px; }
+}
+
 /* Live render-performance chip (fps · frame ms · dpr · draws · tier). */
 .rc-perf {
     position:absolute; right:10px; bottom:8px; z-index:4; pointer-events:none;
@@ -351,6 +449,57 @@ body {
                    aria-label="Scrub the simulation clock through the forecast window">
             <div class="rc-simtime-scale"><span>live now</span><span id="rc-simtime-max">+75 min</span></div>
         </div>
+        <div class="rc-views" id="rc-views" hidden>
+            <button class="rc-view-btn rc-on" data-view="earth" title="Near-Earth framing &mdash; ring current, aurora, boundaries">&#127757; Earth</button>
+            <button class="rc-view-btn" data-view="sun" title="Solar disk close-up &mdash; coronal holes, emission puffs, the arriving wind&rsquo;s source">&#9728;&#65039; Sun</button>
+            <button class="rc-view-btn" data-view="river" title="The full Sun&rarr;Earth corridor &mdash; every population and readout in one frame">&#127754; River</button>
+        </div>
+        <div class="rc-insp" id="rc-insp" hidden>
+            <div class="rc-insp-head" id="rc-insp-head">
+                <span class="rc-legend-grip" aria-hidden="true">&#10495;</span>
+                <span class="rc-insp-title">Particle inspector</span>
+                <button class="rc-legend-min" id="rc-insp-close" title="Close inspector" aria-label="Close inspector">&times;</button>
+            </div>
+            <div class="rc-insp-body" id="rc-insp-body">&mdash;</div>
+            <div class="rc-insp-actions">
+                <span>predict</span>
+                <button class="rc-insp-btn" data-dt="0.25">+15 m</button>
+                <button class="rc-insp-btn" data-dt="1">+1 h</button>
+                <button class="rc-insp-btn" data-dt="6">+6 h</button>
+                <span style="margin-left:auto" title="Predictions are in SIM time — they resolve sooner at high &tau;">sim &Delta;t</span>
+            </div>
+        </div>
+        <div class="rc-dock" id="rc-dock" hidden>
+            <div class="rc-dock-head" id="rc-dock-head">
+                <span class="rc-legend-grip" aria-hidden="true">&#10495;</span>
+                <span class="rc-dock-title">Population analytics</span>
+                <button class="rc-legend-min" id="rc-dock-min" title="Minimize analytics" aria-label="Minimize analytics" aria-expanded="true">&#8722;</button>
+            </div>
+            <div class="rc-dock-body" id="rc-dock-body">
+                <div class="rc-dock-counts" id="rc-dock-counts">warming up&hellip;</div>
+                <div class="rc-dock-lab"><b>energy spectrum</b> keV, log &middot;
+                    <span><span class="rc-dot" style="background:#ffa040"></span>H&#8314;</span>
+                    <span><span class="rc-dot" style="background:#94ff57"></span>O&#8314;</span>
+                    <span><span class="rc-dot" style="background:#59baff"></span>e&#8315;</span>
+                </div>
+                <canvas id="rc-dock-spec" title="Energy spectrum of the drawn particles, 20–250 keV log bins, by species"></canvas>
+                <div class="rc-dock-lab"><b>L shell</b> R&#7431; &middot;
+                    <span><span class="rc-dot" style="background:#59e0d8"></span>drawn</span>
+                    <span><span class="rc-dot" style="background:#ffd27a"></span>model (Dst*)</span>
+                </div>
+                <canvas id="rc-dock-lprof" title="Drawn L-shell distribution vs the model's radial profile at the current Dst*"></canvas>
+                <div class="rc-dock-lab"><b>lifetimes</b> two-phase decay &middot;
+                    <span><span class="rc-dot" style="background:#ffa040"></span>H&#8314;</span>
+                    <span><span class="rc-dot" style="background:#94ff57"></span>O&#8314;</span>
+                </div>
+                <canvas id="rc-dock-life" title="Charge-exchange lifetime distributions — O⁺ dies ~10× sooner than H⁺ (log-hour bins)"></canvas>
+                <div class="rc-dock-lab"><b>recycles /sim-h</b> &middot;
+                    <span><span class="rc-dot" style="background:#2fd3a8"></span>ENA escape</span>
+                    <span><span class="rc-dot" style="background:#ff5c47"></span>precipitation</span>
+                </div>
+                <canvas id="rc-dock-deaths" title="Deaths (and matching rebirths) per sim-hour by loss channel — sampled as the sim clock advances"></canvas>
+            </div>
+        </div>
         <div class="rc-perf" id="rc-perf" hidden>&mdash;</div>
         <div class="rc-legend" id="rc-legend">
         <div class="rc-legend-head" id="rc-legend-head">
@@ -383,7 +532,7 @@ body {
             <span style="color:#5d6684">trail length &prop; speed &middot; flash &prop; VBs on arrival</span>
         </div>
         </div>
-        <div class="rc-stage-hint">drag to orbit &middot; scroll out for the Sun corridor &middot; pause / scrub the clock top-left &middot; one clock drives stream, ring, lifecycle &amp; Earth spin &middot; hover any particle for its data &middot; GSM frame</div>
+        <div class="rc-stage-hint">views top-center &middot; drag to orbit &middot; <b>click a ring particle to inspect &amp; predict it</b> &middot; pause / scrub the clock top-left &middot; one clock drives everything &middot; GSM frame</div>
     </div>
 
     <div class="rc-col">
@@ -660,10 +809,10 @@ let sliderHeld = false, sliderTouchedAt = 0, flashT = 0;
 
 function fmtClockOffset(ms) {
     const s = Math.round(ms / 1000);
-    if (Math.abs(s) < 2) return 'at live now';
+    if (Math.abs(s) < 2) return 'live';
     const m = Math.floor(Math.abs(s) / 60), ss = Math.abs(s) % 60;
     const span = m ? `${m}m ${String(ss).padStart(2, '0')}s` : `${ss}s`;
-    return s > 0 ? `${span} ahead of live` : `${span} behind live`;
+    return s > 0 ? `${span} ahead` : `${span} behind`;
 }
 function renderClockHud() {
     const wall = Date.now();
@@ -689,12 +838,12 @@ function renderClockHud() {
     }
     const off = simMs - wall;
     hud.sub.textContent = clock.paused
-        ? `clock frozen · ${fmtClockOffset(off)}`
+        ? `frozen · ${fmtClockOffset(off)}`
         : t === 1
             ? (Math.abs(off) < 2000
-                ? 'true physical speeds — this IS the current time'
-                : `true physical speeds · ${fmtClockOffset(off)}`)
-            : `1 s viewing = ${t >= 60 ? `${Math.round(t / 60)} min` : `${t} s`} real · ${fmtClockOffset(off)}`;
+                ? 'real time — this IS now'
+                : `real ×1 · ${fmtClockOffset(off)}`)
+            : `1 s = ${t >= 60 ? `${Math.round(t / 60)} min` : `${t} s`} · ${fmtClockOffset(off)}`;
     // Follow the sweep with the slider thumb — unless the user is on it.
     if (!sliderHeld && wall - sliderTouchedAt > 500) {
         hud.slider.value = String(Math.max(0, Math.round(off / 1000)));
@@ -731,11 +880,52 @@ hud.slider.addEventListener('input', () => {
     renderEarthClock();
 });
 
+// ── Draggable in-canvas panels (legend + inspector share this) ──────────────
+// The handle drags the panel within the stage; positions re-clamp on every
+// place() and on resize so a saved spot can't strand off-canvas. Buttons in
+// the handle stay clicks, never drags.
+function makeStageDraggable(panel, handle, onPlaced) {
+    const place = (x, y) => {
+        x = Math.max(0, Math.min(stage.clientWidth - panel.offsetWidth, x));
+        y = Math.max(0, Math.min(stage.clientHeight - panel.offsetHeight, y));
+        panel.style.left = `${x}px`;
+        panel.style.top = `${y}px`;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        return [x, y];
+    };
+    handle.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('button')) return;
+        e.preventDefault();
+        const sr = stage.getBoundingClientRect();
+        const pr = panel.getBoundingClientRect();
+        const grabX = e.clientX - pr.left, grabY = e.clientY - pr.top;
+        panel.classList.add('rc-dragging');
+        handle.setPointerCapture(e.pointerId);
+        const onMove = (ev) => place(ev.clientX - sr.left - grabX, ev.clientY - sr.top - grabY);
+        const onUp = (ev) => {
+            handle.removeEventListener('pointermove', onMove);
+            handle.removeEventListener('pointerup', onUp);
+            handle.removeEventListener('pointercancel', onUp);
+            panel.classList.remove('rc-dragging');
+            const [x, y] = place(ev.clientX - sr.left - grabX, ev.clientY - sr.top - grabY);
+            onPlaced?.(x, y);
+        };
+        handle.addEventListener('pointermove', onMove);
+        handle.addEventListener('pointerup', onUp);
+        handle.addEventListener('pointercancel', onUp);
+    });
+    window.addEventListener('resize', () => {
+        if (panel.style.left) place(parseFloat(panel.style.left), parseFloat(panel.style.top));
+    });
+    return place;
+}
+
 // ── Legend (in-canvas, right): draggable + minimizable ─────────────────────
-// The head is the drag handle; position and minimized state persist across
-// visits and re-clamp to the stage so a saved spot can't strand off-canvas.
+// Position and minimized state persist across visits; small stages start
+// minimized (the full legend would cover most of the scene).
 {
-    const legend = $('rc-legend'), head = $('rc-legend-head'), minBtn = $('rc-legend-min');
+    const legend = $('rc-legend'), minBtn = $('rc-legend-min');
     const LS_KEY = 'pp_rc_legend_ui';
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch { /* fresh */ }
@@ -750,15 +940,8 @@ hud.slider.addEventListener('input', () => {
         minBtn.setAttribute('aria-label', minBtn.title);
         minBtn.setAttribute('aria-expanded', String(!min));
     };
-    const place = (x, y) => {
-        x = Math.max(0, Math.min(stage.clientWidth - legend.offsetWidth, x));
-        y = Math.max(0, Math.min(stage.clientHeight - legend.offsetHeight, y));
-        legend.style.left = `${x}px`;
-        legend.style.top = `${y}px`;
-        legend.style.right = 'auto';
-        return [x, y];
-    };
-    if (saved?.min) setMin(true);
+    const place = makeStageDraggable(legend, $('rc-legend-head'), (x, y) => persist({ x, y }));
+    if (saved?.min != null ? saved.min : matchMedia('(max-width: 900px)').matches) setMin(true);
     if (Number.isFinite(saved?.x) && Number.isFinite(saved?.y)) place(saved.x, saved.y);
     minBtn.addEventListener('click', () => {
         const min = !legend.classList.contains('rc-min');
@@ -770,43 +953,259 @@ hud.slider.addEventListener('input', () => {
             persist({ x, y });
         }
     });
-    head.addEventListener('pointerdown', (e) => {
-        if (e.target === minBtn) return;         // the button is a click, not a drag
-        e.preventDefault();
-        const sr = stage.getBoundingClientRect();
-        const lr = legend.getBoundingClientRect();
-        const grabX = e.clientX - lr.left, grabY = e.clientY - lr.top;
-        legend.classList.add('rc-dragging');
-        head.setPointerCapture(e.pointerId);
-        const onMove = (ev) => place(ev.clientX - sr.left - grabX, ev.clientY - sr.top - grabY);
-        const onUp = (ev) => {
-            head.removeEventListener('pointermove', onMove);
-            head.removeEventListener('pointerup', onUp);
-            head.removeEventListener('pointercancel', onUp);
-            legend.classList.remove('rc-dragging');
-            const [x, y] = place(ev.clientX - sr.left - grabX, ev.clientY - sr.top - grabY);
-            persist({ x, y });
-        };
-        head.addEventListener('pointermove', onMove);
-        head.addEventListener('pointerup', onUp);
-        head.addEventListener('pointercancel', onUp);
-    });
-    window.addEventListener('resize', () => {
-        if (legend.style.left) place(parseFloat(legend.style.left), parseFloat(legend.style.top));
-    });
 }
 
 // ── 3D twin: loaded dynamically so a WebGL/importmap failure degrades to
 //    data panels + chart instead of blanking the page. ─────────────────────
 let globe = null;
 try {
-    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260711');
+    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260712');
     globe = new RingCurrentGlobe(stage, { clock });
     window.rcGlobe = globe;   // debug/probe handle (tests/ smoke probes)
 } catch (err) {
     console.warn('[ring-current] 3D disabled:', err);
     stage.insertAdjacentHTML('beforeend',
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d6684;font-size:.8rem;">3D view unavailable — data panels remain live</div>');
+}
+
+// ── Default camera views: Earth · Sun · River ──────────────────────────────
+// Three framings of the one scene (globe CAM_VIEWS). The chosen view
+// persists across visits; a free orbit dims the highlight — the preset is
+// a starting pose, not a mode.
+if (globe) {
+    const wrap = $('rc-views');
+    wrap.hidden = false;
+    const btns = [...wrap.querySelectorAll('.rc-view-btn')];
+    const mark = (name) => btns.forEach(b => b.classList.toggle('rc-on', b.dataset.view === name));
+    const VIEW_LS = 'pp_rc_view';
+    btns.forEach(btn => btn.addEventListener('click', () => {
+        globe.setView(btn.dataset.view);
+        mark(btn.dataset.view);
+        try { localStorage.setItem(VIEW_LS, btn.dataset.view); } catch { /* quota */ }
+    }));
+    const canvas = stage.querySelector('canvas');
+    canvas?.addEventListener('pointerdown', () => mark(null));
+    canvas?.addEventListener('wheel', () => mark(null), { passive: true });
+    let savedView = null;
+    try { savedView = localStorage.getItem(VIEW_LS); } catch { /* fresh */ }
+    // Restore with the flight (instant under prefers-reduced-motion) — the
+    // glide from Earth re-orients returning users in the larger scene.
+    if (savedView && savedView !== 'earth' && globe.setView(savedView)) mark(savedView);
+}
+
+// ── Particle inspector (Phase 1 — RING_CURRENT_ANALYTICS_PLAN.md) ──────────
+// Click a particle to pin it: the card shows its state, the physics
+// timescales it lives on, and predict-buttons that forecast it +Δt SIM
+// hours ahead through the sim's own functions (ghost marker = predicted
+// spot). When the clock reaches the target the card scores the call.
+if (globe) {
+    const { inspectParticle, predictParticle, verifyPrediction, renderInspectorHtml } =
+        await import('./js/ring-current-inspector.js?v=20260712');
+    const card = $('rc-insp'), body = $('rc-insp-body');
+    let pred = null, verdict = null;
+    function refresh() {
+        const info = globe.getPinnedInfo();
+        if (!info) { card.hidden = true; return; }
+        card.hidden = false;
+        const d = inspectParticle(info.pop, info.key, info.i, info.simHours, info.bounceSec);
+        if (pred && !verdict) {
+            verdict = verifyPrediction(pred, info.pop, info.simHours, info.bounceSec);
+        }
+        body.innerHTML = renderInspectorHtml(d, pred, verdict);
+    }
+    globe.onSelect = () => { pred = null; verdict = null; refresh(); };
+    setInterval(() => { if (!document.hidden && !card.hidden) refresh(); }, 500);
+    $('rc-insp-close').addEventListener('click', () => globe.unpinParticle());
+    makeStageDraggable(card, $('rc-insp-head'));
+    document.querySelectorAll('.rc-insp-btn').forEach(btn => btn.addEventListener('click', () => {
+        const info = globe.getPinnedInfo();
+        if (!info) return;
+        pred = predictParticle(info.pop, info.key, info.i, info.simHours, info.bounceSec,
+            Number(btn.dataset.dt));
+        verdict = null;
+        if (pred.pose) globe.setGhostLocal(pred.pose.x, pred.pose.y, pred.pose.z);
+        else globe.clearGhost();
+        refresh();
+    }));
+}
+
+// ── Population analytics dock (Phase 2 — RING_CURRENT_ANALYTICS_PLAN.md) ───
+// Aggregate views of the LIVING drawn populations, resampled at 1 Hz from
+// the same attribute buffers the GPU draws (zero per-sample allocations —
+// the samplers fill these arrays in place). Recycle bars only advance while
+// sim time advances: a paused clock honestly freezes the ledger.
+if (globe) {
+    const S = await import('./js/ring-current-population-stats.js?v=20260712');
+    const dock = $('rc-dock'), countsEl = $('rc-dock-counts'), minBtn = $('rc-dock-min');
+    dock.hidden = false;
+    const DOCK_LS = 'pp_rc_dock_ui';
+    let dockSaved = null;
+    try { dockSaved = JSON.parse(localStorage.getItem(DOCK_LS) || 'null'); } catch { /* fresh */ }
+    const dockPersist = (patch) => {
+        dockSaved = { ...(dockSaved ?? {}), ...patch };
+        try { localStorage.setItem(DOCK_LS, JSON.stringify(dockSaved)); } catch { /* quota */ }
+    };
+    const setDockMin = (min) => {
+        dock.classList.toggle('rc-min', min);
+        minBtn.innerHTML = min ? '+' : '&#8722;';
+        minBtn.title = min ? 'Expand analytics' : 'Minimize analytics';
+        minBtn.setAttribute('aria-label', minBtn.title);
+        minBtn.setAttribute('aria-expanded', String(!min));
+    };
+    const placeDock = makeStageDraggable(dock, $('rc-dock-head'), (x, y) => dockPersist({ x, y }));
+    if (dockSaved?.min != null ? dockSaved.min : matchMedia('(max-width: 900px)').matches) setDockMin(true);
+    if (Number.isFinite(dockSaved?.x) && Number.isFinite(dockSaved?.y)) placeDock(dockSaved.x, dockSaved.y);
+    minBtn.addEventListener('click', () => {
+        const min = !dock.classList.contains('rc-min');
+        setDockMin(min);
+        dockPersist({ min });
+        if (dock.style.left) {
+            const [x, y] = placeDock(parseFloat(dock.style.left), parseFloat(dock.style.top));
+            dockPersist({ x, y });
+        }
+    });
+
+    // Buffers, allocated once (plan guardrail: no per-sample allocations).
+    const NB = 16;
+    const spec = { ionsH: new Float32Array(NB), ionsO: new Float32Array(NB), electrons: new Float32Array(NB) };
+    const lBins = new Float32Array(16), lExp = new Float32Array(32);
+    const lifeBins = { ionsH: new Float32Array(14), ionsO: new Float32Array(14) };
+    let lifeDone = false;
+    const cycles = {};                     // key → lastCycles baseline array
+    const tallyOut = { ena: 0, precip: 0 };
+    const samples = [];                    // rolling {dSimH, ena, precip}, ≤40
+    let lastSimH = null;
+    const SPECIES_COLOR = { ionsH: '#ffa040', ionsO: '#94ff57', electrons: '#59baff' };
+
+    function prepChart(id) {
+        const cv = $(id);
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const w = cv.clientWidth || 226, h = cv.clientHeight || 44;
+        if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+        const g = cv.getContext('2d');
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+        g.clearRect(0, 0, w, h);
+        g.strokeStyle = 'rgba(255,255,255,.12)';   // recessive baseline only
+        g.lineWidth = 1;
+        g.beginPath(); g.moveTo(0, h - 0.5); g.lineTo(w, h - 0.5); g.stroke();
+        return { g, w, h };
+    }
+    function stepLine(g, w, h, bins, max, color) {
+        if (!(max > 0)) return;
+        g.strokeStyle = color;
+        g.lineWidth = 1.5;
+        g.beginPath();
+        const bw = w / bins.length;
+        for (let b = 0; b < bins.length; b++) {
+            const y = h - 2 - (bins[b] / max) * (h - 7);
+            if (b === 0) g.moveTo(0, y);
+            g.lineTo(b * bw, y);
+            g.lineTo((b + 1) * bw, y);
+        }
+        g.stroke();
+    }
+    function drawSpec() {
+        const { g, w, h } = prepChart('rc-dock-spec');
+        const max = Math.max(1, ...spec.ionsH, ...spec.ionsO, ...spec.electrons);
+        for (const key of ['ionsH', 'ionsO', 'electrons']) {
+            stepLine(g, w, h, spec[key], max, SPECIES_COLOR[key]);
+        }
+    }
+    function drawLProf() {
+        const { g, w, h } = prepChart('rc-dock-lprof');
+        const max = Math.max(1, ...lBins);
+        const bw = w / lBins.length;
+        g.fillStyle = 'rgba(89,224,216,.55)';                   // drawn (observed)
+        for (let b = 0; b < lBins.length; b++) {
+            const bh = (lBins[b] / max) * (h - 7);
+            if (bh > 0) g.fillRect(b * bw + 1, h - 1 - bh, bw - 2, bh);
+        }
+        g.strokeStyle = '#ffd27a';                              // model expectation
+        g.lineWidth = 1.5;
+        g.setLineDash([4, 3]);
+        g.beginPath();
+        for (let b = 0; b < lExp.length; b++) {
+            const x = ((b + 0.5) / lExp.length) * w;
+            const y = h - 2 - lExp[b] * (h - 7);
+            b === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+        }
+        g.stroke();
+        g.setLineDash([]);
+    }
+    function drawLife() {
+        const { g, w, h } = prepChart('rc-dock-life');
+        // Per-series normalization — this chart compares SHAPE/position
+        // (O⁺ shifted left = the two-phase decay), not head counts.
+        for (const key of ['ionsH', 'ionsO']) {
+            stepLine(g, w, h, lifeBins[key], Math.max(1, ...lifeBins[key]), SPECIES_COLOR[key]);
+        }
+    }
+    function drawDeaths() {
+        const { g, w, h } = prepChart('rc-dock-deaths');
+        const N = 40, bw = w / N;
+        const max = Math.max(1, ...samples.map(s => s.ena + s.precip));
+        samples.forEach((s, idx) => {
+            const x = (N - samples.length + idx) * bw;
+            const he = (s.ena / max) * (h - 7);
+            const hp = (s.precip / max) * (h - 7);
+            g.fillStyle = '#2fd3a8';
+            if (he > 0) g.fillRect(x + 1, h - 1 - he, Math.max(1, bw - 2), he);
+            g.fillStyle = '#ff5c47';
+            if (hp > 0) g.fillRect(x + 1, h - 2 - he - hp, Math.max(1, bw - 2), hp);
+        });
+    }
+
+    function sampleDock() {
+        const snap = globe.getAnalyticsSnapshot();
+        if (!snap.populations.length) return;    // worker buffers not landed yet
+        const byKey = Object.fromEntries(snap.populations.map(p => [p.key, p]));
+        const visN = {};
+        for (const { key, pop, visFrac } of snap.populations) {
+            if (spec[key]) visN[key] = S.energySpectrum(pop, visFrac, spec[key]);
+        }
+        if (byKey.ionsH) S.lDistribution(byKey.ionsH.pop, byKey.ionsH.visFrac, lBins);
+        S.expectedLProfile(snap.dstStar, lExp);
+        if (!lifeDone && byKey.ionsH && byKey.ionsO) {
+            S.lifetimeHistogram(byKey.ionsH.pop, lifeBins.ionsH);
+            S.lifetimeHistogram(byKey.ionsO.pop, lifeBins.ionsO);
+            lifeDone = true;
+        }
+        let ena = 0, precip = 0;
+        for (const { key, pop } of snap.populations) {
+            const lc = cycles[key] ?? (cycles[key] = new Float64Array(pop.count).fill(-1));
+            S.tallyRecycles(pop, lc, snap.simHours, tallyOut);
+            ena += tallyOut.ena;
+            precip += tallyOut.precip;
+        }
+        const dSimH = lastSimH == null ? 0 : Math.max(0, snap.simHours - lastSimH);
+        lastSimH = snap.simHours;
+        if (dSimH > 0) {
+            samples.push({ dSimH, ena, precip });
+            if (samples.length > 40) samples.shift();
+        }
+        const win = samples.reduce((a, s) => {
+            a.h += s.dSimH; a.e += s.ena; a.p += s.precip; return a;
+        }, { h: 0, e: 0, p: 0 });
+        const rate = win.h > 0 ? (win.e + win.p) / win.h : null;
+        const share = byKey.ionsH && byKey.ionsO
+            ? S.builtOxygenEnergyShare(byKey.ionsH.pop, byKey.ionsH.visFrac,
+                                       byKey.ionsO.pop, byKey.ionsO.visFrac)
+            : null;
+        countsEl.innerHTML =
+            `drawn <b>${visN.ionsH ?? 0}</b> H⁺ · <b>${visN.ionsO ?? 0}</b> O⁺ · <b>${visN.electrons ?? 0}</b> e⁻<br>` +
+            `O⁺ energy — model <b>${snap.oxygenModelFrac != null ? Math.round(snap.oxygenModelFrac * 100) + '%' : '—'}</b> (steers brightness) · build <b>${share != null ? Math.round(share * 100) + '%' : '—'}</b><br>` +
+            `recycles <b>${rate != null ? Math.round(rate).toLocaleString('en-US') : '—'}</b>/sim-h` +
+            `${win.e + win.p > 0 ? ` · ENA <b>${Math.round(100 * win.e / (win.e + win.p))}%</b> · precip <b>${Math.round(100 * win.p / (win.e + win.p))}%</b>` : ''}`;
+        drawSpec();
+        drawLProf();
+        if (lifeDone) drawLife();
+        drawDeaths();
+    }
+    sampleDock();
+    setInterval(() => {
+        if (document.hidden || dock.classList.contains('rc-min')) return;
+        sampleDock();
+    }, 1000);
 }
 
 // ── Render-performance HUD + one-shot telemetry ─────────────────────────────
