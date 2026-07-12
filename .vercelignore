@@ -46,6 +46,10 @@ test_*.py
 # DEPLOYMENT.md
 # QUICK_START.md
 
+# Offline validation pipelines — truth pulls and generated SQL are never
+# served; the dashboard reads validated results from Supabase instead
+pipelines/
+
 # SWMF/DSMC workstation artifacts — simulation run dirs, raw data pulls,
 # and host venvs are gigabytes and never served (fixtures ARE deployed)
 swmf/runs/
