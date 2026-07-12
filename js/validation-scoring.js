@@ -165,6 +165,96 @@ export function runHindcast(buckets, holeRows) {
     };
 }
 
+// ── CME arrival verification (predicted ETA vs actual shock) ────────────────
+
+export const CME_SCORE = Object.freeze({
+    SHOCK_RATIO: 2,      // Pdyn step that defines a shock (mirrors the globe)
+    SHOCK_MIN: 2.5,      // nPa floor
+    BASELINE_MIN: 15,    // baseline window: [t−90 min, t−15 min]
+    BASELINE_SPAN: 90,
+    COLLAPSE_H: 3,       // successive detections within 3 h = one shock
+    MATCH_H: 18,         // prediction ↔ shock matching window
+    HIT_H: 12,           // |Δt| for a timing hit (the operational class)
+});
+
+/**
+ * Actual shock arrivals from a dynamic-pressure series [{t, pdyn}] (any
+ * regular cadence ≥ ~15 min): a point is a shock candidate when Pdyn ≥
+ * 2× the median of the preceding [−90, −15] min AND ≥ 2.5 nPa — the same
+ * physics as the scene's arrival trigger, run on wall-clock data.
+ * Candidates within 3 h collapse to the first.
+ */
+export function detectShockArrivals(series) {
+    if (!Array.isArray(series) || series.length < 4) return [];
+    const s = series.filter(p => Number.isFinite(p?.t) && Number.isFinite(p?.pdyn))
+        .sort((a, b) => a.t - b.t);
+    const shocks = [];
+    for (let i = 0; i < s.length; i++) {
+        const t = s[i].t;
+        const base = [];
+        for (let j = i - 1; j >= 0; j--) {
+            const dtMin = (t - s[j].t) / 60000;
+            if (dtMin < CME_SCORE.BASELINE_MIN) continue;
+            if (dtMin > CME_SCORE.BASELINE_SPAN) break;
+            base.push(s[j].pdyn);
+        }
+        if (base.length < 2) continue;
+        base.sort((a, b) => a - b);
+        const med = base[Math.floor(base.length / 2)];
+        if (s[i].pdyn >= CME_SCORE.SHOCK_RATIO * med && s[i].pdyn >= CME_SCORE.SHOCK_MIN) {
+            if (!shocks.length || t - shocks[shocks.length - 1] > CME_SCORE.COLLAPSE_H * 3.6e6) {
+                shocks.push(t);
+            }
+        }
+    }
+    return shocks;
+}
+
+/**
+ * Score CME arrival predictions against detected shocks. Each prediction
+ * carries its preferred ETA (basis 'enlil' when a WSA-ENLIL modeled
+ * arrival exists, else 'ballistic') and, when both exist, the pair — so
+ * the score doubles as the ENLIL-vs-ballistic CROSS-CHECK: which method
+ * was closer to the truth, per event and in aggregate.
+ */
+export function scoreCmeArrivals(preds, shockTimes) {
+    const out = { n: 0, matched: 0, hits: 0, maeHours: null, byBasis: {}, crossCheck: null, details: [] };
+    if (!Array.isArray(preds) || !preds.length) return out;
+    const shocks = Array.isArray(shockTimes) ? shockTimes : [];
+    const errs = [];
+    const basisErrs = { enlil: [], ballistic: [] };
+    let enlilCloser = 0, bothN = 0;
+    for (const p of preds) {
+        if (!Number.isFinite(p?.etaMs)) continue;
+        out.n++;
+        let dtH = null;
+        for (const sh of shocks) {
+            const d = (sh - p.etaMs) / 3.6e6;
+            if (Math.abs(d) <= CME_SCORE.MATCH_H && (dtH === null || Math.abs(d) < Math.abs(dtH))) dtH = d;
+        }
+        const hit = dtH !== null && Math.abs(dtH) <= CME_SCORE.HIT_H;
+        if (dtH !== null) {
+            out.matched++;
+            errs.push(Math.abs(dtH));
+            (basisErrs[p.basis] ?? (basisErrs[p.basis] = [])).push(Math.abs(dtH));
+            // Cross-check when both methods predicted this arrival.
+            if (Number.isFinite(p.enlilEtaMs) && Number.isFinite(p.ballisticEtaMs)) {
+                bothN++;
+                const shockMs = p.etaMs + dtH * 3.6e6;
+                if (Math.abs(p.enlilEtaMs - shockMs) <= Math.abs(p.ballisticEtaMs - shockMs)) enlilCloser++;
+            }
+        }
+        if (hit) out.hits++;
+        out.details.push({ id: p.id ?? null, basis: p.basis, etaMs: p.etaMs, dtHours: dtH, hit });
+    }
+    out.maeHours = errs.length ? errs.reduce((a, b) => a + b, 0) / errs.length : null;
+    for (const [k, v] of Object.entries(basisErrs)) {
+        if (v.length) out.byBasis[k] = { n: v.length, maeHours: v.reduce((a, b) => a + b, 0) / v.length };
+    }
+    if (bothN) out.crossCheck = { n: bothN, enlilCloser, ballisticCloser: bothN - enlilCloser };
+    return out;
+}
+
 // Re-exported so consumers of the scoring module get the constants they
 // need to build inputs without importing the model directly.
 export { SOLAR, PHYS, carringtonL0, sunDepartureMs };

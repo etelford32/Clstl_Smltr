@@ -74,7 +74,17 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   earth_directed OR angular miss ≤ half-angle + 20° (glancing blows,
 >   labeled). Surfaced as: in-scene front + live ETA label, a "CMEs in
 >   flight" bridge row, and a Situation action line ("CME in flight —
->   arrives ≈ … ±N h — prepare for shock + G-storm risk").
+>   arrives ≈ … ±N h — prepare for shock + G-storm risk"). **WSA-ENLIL +
+>   third ledger** (same day): the proxy now dedupes analyses per
+>   physical CME (isMostAccurate preferred) and attaches DONKI WSA-ENLIL
+>   modeled Earth arrivals; the feed PREFERS the ENLIL ETA (basis-tagged,
+>   modeled-Kp shown) with ballistic as the visible cross-check. Third
+>   self-scoring loop: the daily cron verifies predicted ETAs against
+>   ACTUAL shock arrivals (detectShockArrivals — the scene's Pdyn-step
+>   trigger run on wall-clock data via the validation_pdyn_series RPC),
+>   scoring ENLIL vs ballistic per event (scoreCmeArrivals, node-tested;
+>   kind='cme' rows only when something was verifiable). Third sparkline
+>   in the validation panel.
 > - **Solar-origin emission + legible sweep wrap + stutter fixes**
 >   (2026-07-11): the journey now STARTS at the Sun — emission puffs born
 >   at the back-mapped source region (70 % weight) and visible CHs, at a

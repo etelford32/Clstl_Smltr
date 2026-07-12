@@ -31,7 +31,7 @@ export default async function handler(request) {
     url.searchParams.set('select',
         'id,ran_at,kind,window_start,window_end,n_forecasts,hits,hit_rate,mae_days,skill,metrics');
     url.searchParams.set('order', 'ran_at.desc');
-    url.searchParams.set('limit', String(limit * 2));   // two kinds interleaved
+    url.searchParams.set('limit', String(limit * 3));   // three kinds interleaved
 
     let rows;
     try {
@@ -49,7 +49,7 @@ export default async function handler(request) {
         return jsonError('upstream_unavailable', e.message, { source: 'supabase' });
     }
 
-    const byKind = { backmap: [], recurrence: [] };
+    const byKind = { backmap: [], recurrence: [], cme: [] };
     for (const r of rows) {
         if (byKind[r.kind] && byKind[r.kind].length < limit) byKind[r.kind].push(r);
     }
@@ -59,6 +59,7 @@ export default async function handler(request) {
             updated: new Date().toISOString(),
             backmap: byKind.backmap,
             recurrence: byKind.recurrence,
+            cme: byKind.cme,
         },
     }, { maxAge: 600, swr: 120 });
 }

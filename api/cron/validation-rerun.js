@@ -34,7 +34,9 @@
 import { fetchWithTimeout } from '../_lib/responses.js';
 import {
     backmapRows, backmapScore, runHindcast, BACKMAP,
+    detectShockArrivals, scoreCmeArrivals,
 } from '../../js/validation-scoring.js';
+import { cmeTransit } from '../../js/ring-current-model.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -113,6 +115,84 @@ async function fetchHoles(endMs) {
     return { holes, failed };
 }
 
+/** 15-min Pdyn medians (validation_pdyn_series RPC) for shock detection. */
+async function fetchPdynSeries() {
+    const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/rpc/validation_pdyn_series`, {
+        method: 'POST', timeoutMs: 10_000, headers: sbHeaders,
+        body: JSON.stringify({ p_days: 16 }),
+    });
+    if (!res.ok) throw new Error(`pdyn_series ${res.status}`);
+    const rows = await res.json();
+    return rows
+        .map(r => ({ t: Date.parse(r.bucket), pdyn: r.pdyn_med }))
+        .filter(r => Number.isFinite(r.t) && Number.isFinite(r.pdyn))
+        .sort((a, b) => a.t - b.t);
+}
+
+/**
+ * CME arrival predictions with ETAs inside the verification window:
+ * DONKI CMEAnalysis (deduped per cme_id, isMostAccurate preferred) +
+ * WSA-ENLIL modeled arrivals (preferred basis; ballistic cross-check).
+ * Direct NASA calls — the key lives in this runtime's env, same as the
+ * /api/donki/cme proxy.
+ */
+async function fetchCmePredictions(windowStart, windowEnd) {
+    const NASA_KEY = process.env.NASA_API_KEY || 'DEMO_KEY';
+    const fmt = ms => new Date(ms).toISOString().slice(0, 10);
+    const start = fmt(windowStart - 5 * DAY), end = fmt(windowEnd + DAY);
+    const get = async (path) => {
+        const res = await fetchWithTimeout(
+            `https://api.nasa.gov/DONKI/${path}?startDate=${start}&endDate=${end}&api_key=${NASA_KEY}`,
+            { headers: { Accept: 'application/json' }, timeoutMs: 12_000 });
+        if (!res.ok) throw new Error(`DONKI ${path} ${res.status}`);
+        return res.json();
+    };
+    const [analyses, sims] = await Promise.all([get('CMEAnalysis'), get('WSAEnlilSimulations')]);
+    // Newest Earth-arrival simulation per cme id.
+    const enlilByCme = new Map();
+    for (const s of Array.isArray(sims) ? sims : []) {
+        if (!s?.estimatedShockArrivalTime) continue;
+        for (const inp of s.cmeInputs ?? []) {
+            if (!inp?.cmeid) continue;
+            const prev = enlilByCme.get(inp.cmeid);
+            if (!prev || String(s.modelCompletionTime ?? '') > String(prev.modelCompletionTime ?? '')) {
+                enlilByCme.set(inp.cmeid, s);
+            }
+        }
+    }
+    // Dedupe analyses per physical CME, most-accurate preferred.
+    const byId = new Map();
+    for (const c of Array.isArray(analyses) ? analyses : []) {
+        if (!c?.time21_5 || !c?.associatedCMEID) continue;
+        const prev = byId.get(c.associatedCMEID);
+        if (!prev || (c.isMostAccurate === true && prev.isMostAccurate !== true)) {
+            byId.set(c.associatedCMEID, c);
+        }
+    }
+    const preds = [];
+    for (const [id, c] of byId) {
+        const launch = Date.parse(c.time21_5);
+        const v = parseFloat(c.speed);
+        const tr = cmeTransit(launch, v, windowEnd);
+        if (!tr) continue;
+        const miss = Math.hypot(parseFloat(c.latitude) || 0, parseFloat(c.longitude) || 0);
+        const half = parseFloat(c.halfAngle);
+        const sim = enlilByCme.get(id);
+        const enlilMs = sim ? Date.parse(sim.estimatedShockArrivalTime) : NaN;
+        const relevant = (Number.isFinite(half) && miss <= half + 20) || sim?.isEarthGB === true;
+        if (!relevant) continue;
+        const etaMs = Number.isFinite(enlilMs) ? enlilMs : tr.etaMs;
+        if (etaMs < windowStart || etaMs > windowEnd) continue;   // unverifiable here
+        preds.push({
+            id, etaMs,
+            basis: Number.isFinite(enlilMs) ? 'enlil' : 'ballistic',
+            enlilEtaMs: Number.isFinite(enlilMs) ? enlilMs : null,
+            ballisticEtaMs: tr.etaMs,
+        });
+    }
+    return preds;
+}
+
 async function insertRun(row) {
     const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/validation_runs`, {
         method: 'POST', timeoutMs: 8_000,
@@ -186,6 +266,40 @@ async function runValidation(request) {
         },
     });
 
+    // ── Study 3: CME arrival verification (predicted vs actual shock) ──
+    // Only inserts when there was something to verify — CMEs are episodic
+    // and an empty run would poison the sparkline with zeros.
+    let cmeSummary = { n: 0, reason: 'no verifiable predictions in window' };
+    try {
+        const preds = await fetchCmePredictions(windowStart, windowEnd);
+        if (preds.length) {
+            const shocks = detectShockArrivals(await fetchPdynSeries());
+            const sc = scoreCmeArrivals(preds, shocks);
+            await insertRun({
+                kind: 'cme',
+                window_start: new Date(windowStart).toISOString(),
+                window_end: new Date(windowEnd).toISOString(),
+                n_forecasts: sc.n,
+                hits: sc.hits,
+                hit_rate: sc.n ? sc.hits / sc.n : null,
+                mae_days: sc.maeHours != null ? sc.maeHours / 24 : null,
+                skill: sc.n ? sc.hits / sc.n : null,   // sparkline: hit fraction
+                metrics: {
+                    maeHours: sc.maeHours, matched: sc.matched,
+                    byBasis: sc.byBasis, crossCheck: sc.crossCheck,
+                    shocks: shocks.length,
+                },
+                detail: { forecasts: sc.details },
+            });
+            cmeSummary = {
+                n: sc.n, hits: sc.hits, maeHours: sc.maeHours,
+                crossCheck: sc.crossCheck, shocksDetected: shocks.length,
+            };
+        }
+    } catch (e) {
+        cmeSummary = { n: 0, reason: `cme_verification_failed: ${String(e?.message || e)}` };
+    }
+
     return Response.json({
         ok: true,
         window: { start: new Date(windowStart).toISOString(), end: new Date(windowEnd).toISOString() },
@@ -197,6 +311,7 @@ async function runValidation(request) {
             n: rc.n, hits: rc.hits, hitRate: rc.hitRate, maeDays: rc.maeDays,
             timingSkill: rc.timingSkill, independentEvents: rc.independentEvents,
         },
+        cme: cmeSummary,
         dur_ms: Date.now() - started,
     });
 }

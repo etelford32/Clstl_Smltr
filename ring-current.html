@@ -451,6 +451,8 @@ body {
             <svg class="rc-spark" id="rc-spark-bm" viewBox="0 0 120 26" preserveAspectRatio="none" aria-label="attribution skill history"></svg>
             <div class="rc-kv"><span class="rc-k">recurrence timing skill</span><span class="rc-v" id="rc-val-rc">&mdash;</span></div>
             <svg class="rc-spark" id="rc-spark-rc" viewBox="0 0 120 26" preserveAspectRatio="none" aria-label="recurrence skill history"></svg>
+            <div class="rc-kv"><span class="rc-k">CME arrival (hit &le;12 h)</span><span class="rc-v" id="rc-val-cme">&mdash;</span></div>
+            <svg class="rc-spark" id="rc-spark-cme" viewBox="0 0 120 26" preserveAspectRatio="none" aria-label="CME arrival skill history"></svg>
             <div style="font-size:.68rem;color:#5d6684;margin-top:6px;line-height:1.5;">
                 GOES magnetometer is an independent NOAA measurement at GEO
                 &mdash; never an input to the model. The skill ledger is
@@ -791,8 +793,9 @@ function renderHud(s) {
     const cmesInFlight = s.cmes ?? [];
     $('rc-cmes').textContent = cmesInFlight.length
         ? `${cmesInFlight.length} · nearest ETA ${(() => {
-            const h = (cmesInFlight[0].transit.etaMs - Date.now()) / 3.6e6;
-            return h <= 0 ? 'now' : h < 48 ? `in ${Math.round(h)} h` : `in ${(h / 24).toFixed(1)} d`;
+            const h = ((cmesInFlight[0].etaMs ?? cmesInFlight[0].transit.etaMs) - Date.now()) / 3.6e6;
+            const when = h <= 0 ? 'now' : h < 48 ? `in ${Math.round(h)} h` : `in ${(h / 24).toFixed(1)} d`;
+            return `${when} (${cmesInFlight[0].basis === 'enlil' ? 'ENLIL' : 'ballistic'})`;
         })()}`
         : 'none Earth-directed';
     if (tr?.strongest) {
@@ -981,8 +984,17 @@ async function loadValidationHistory() {
         if (rcL) $('rc-val-rc').textContent =
             `MAE ${Number.isFinite(rcL.mae_days) ? rcL.mae_days.toFixed(2) + ' d' : '—'}` +
             ` · skill ${Number.isFinite(rcL.skill) ? rcL.skill.toFixed(2) : '—'} · ${rc.length} run${rc.length === 1 ? '' : 's'}`;
+        // CME arrival verification is episodic — rows exist only when a
+        // prediction was verifiable, so absence reads as 'awaiting events'.
+        const cm = (body?.data?.cme ?? []).slice().reverse();
+        const cmL = cm[cm.length - 1];
+        $('rc-val-cme').textContent = cmL
+            ? `MAE ${Number.isFinite(cmL.mae_days) ? (cmL.mae_days * 24).toFixed(1) + ' h' : '—'}` +
+              ` · ${cmL.hits}/${cmL.n_forecasts} hit · ${cm.length} event run${cm.length === 1 ? '' : 's'}`
+            : 'awaiting verifiable events';
         renderSpark('rc-spark-bm', bm.map(r => r.skill), '#7fe6c3');
         renderSpark('rc-spark-rc', rc.map(r => r.skill), '#ffd27a');
+        renderSpark('rc-spark-cme', cm.map(r => r.skill), '#ffc890');
     } catch (err) {
         console.warn('[ring-current] validation history unavailable:', err);
     }
@@ -1045,14 +1057,18 @@ function renderSituation() {
     // 1.5 · In-flight CME — hours-to-days of genuine lead time (DONKI cone
     // in ballistic transit; the 3D view shows the front crossing the gap).
     const cme = s?.cmes?.[0];
-    if (cme && !cme.transit.arrived) {
-        const etaH = (cme.transit.etaMs - Date.now()) / 3.6e6;
-        const band = Math.round((cme.transit.etaLateMs - cme.transit.etaMs) / 3.6e6);
+    if (cme && (cme.etaMs ?? cme.transit.etaMs) > Date.now() - 6 * 3.6e6) {
+        const eta = cme.etaMs ?? cme.transit.etaMs;
+        const etaH = (eta - Date.now()) / 3.6e6;
+        const enlil = cme.basis === 'enlil';
+        const band = enlil ? 10 : Math.round((cme.transit.etaLateMs - cme.transit.etaMs) / 3.6e6);
+        const kp = cme.enlil?.kp_90 ?? cme.enlil?.kp_135;
         push(etaH < 24 && cme.speed_km_s >= 700 ? 'alert' : 'warn',
-            `<b>CME in flight — arrives ≈ ${new Date(cme.transit.etaMs).toISOString().slice(5, 16).replace('T', ' ')} UT` +
-            ` (in ${etaH < 48 ? `${Math.max(0, Math.round(etaH))} h` : `${(etaH / 24).toFixed(1)} d`} ±${band} h)</b>` +
-            ` — v ${Math.round(cme.speed_km_s)} km/s${cme.glancing ? ' · flank-directed, glancing possible' : ''}.` +
-            ` Prepare for shock arrival${cme.speed_km_s >= 700 ? ' + G-storm risk' : ''}.`);
+            `<b>CME in flight — arrives ≈ ${new Date(eta).toISOString().slice(5, 16).replace('T', ' ')} UT` +
+            ` (in ${etaH < 48 ? `${Math.max(0, Math.round(etaH))} h` : `${(etaH / 24).toFixed(1)} d`} ±${band} h, ${enlil ? 'WSA-ENLIL' : 'ballistic'})</b>` +
+            ` — v ${Math.round(cme.speed_km_s)} km/s${cme.glancing ? ' · flank-directed, glancing possible' : ''}` +
+            `${Number.isFinite(cme.crossCheckHours) ? ` · ballistic cross-check ${cme.crossCheckHours >= 0 ? '+' : '−'}${Math.abs(cme.crossCheckHours).toFixed(0)} h` : ''}.` +
+            ` Prepare for shock arrival${kp != null ? ` — modeled Kp up to ${kp}` : cme.speed_km_s >= 700 ? ' + G-storm risk' : ''}.`);
     }
     // 2 · The model's own Dst threshold crossing.
     if (s?.alert) {

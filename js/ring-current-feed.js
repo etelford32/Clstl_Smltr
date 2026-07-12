@@ -685,17 +685,31 @@ export class RingCurrentFeed extends EventTarget {
         for (const c of this._cmes ?? []) {
             const launch = Date.parse(c?.time ?? '');
             const tr = cmeTransit(launch, c?.speed_km_s, nowMs2);
-            if (!tr || tr.fraction > 1.05) continue;
+            if (!tr) continue;
+            // Preferred ETA: the WSA-ENLIL modeled arrival when DONKI has
+            // one (NOAA-grade), else our ballistic estimate. Both are kept
+            // — their disagreement is the live cross-check, and the daily
+            // cron scores each against the actual shock detection.
+            const enlilMs = Date.parse(c?.enlil?.shock_arrival ?? '');
+            const hasEnlil = Number.isFinite(enlilMs);
+            const etaMs = hasEnlil ? enlilMs : tr.etaMs;
+            // Retire once safely past the PREFERRED arrival.
+            if (nowMs2 > etaMs + 6 * 3.6e6 && tr.fraction > 1.05) continue;
             const miss = Math.hypot(c.latitude_deg ?? 0, c.longitude_deg ?? 0);
-            const relevant = c.earth_directed ||
+            const relevant = c.earth_directed || c.enlil?.earth_gb ||
                 (Number.isFinite(c.half_angle_deg) && miss <= c.half_angle_deg + 20);
             if (!relevant) continue;
             cmes.push({
                 ...c, launchMs: launch, transit: tr,
+                etaMs,
+                basis: hasEnlil ? 'enlil' : 'ballistic',
+                enlilEtaMs: hasEnlil ? enlilMs : null,
+                ballisticEtaMs: tr.etaMs,
+                crossCheckHours: hasEnlil ? (tr.etaMs - enlilMs) / 3.6e6 : null,
                 glancing: !c.earth_directed,
             });
         }
-        cmes.sort((a, b) => a.transit.etaMs - b.transit.etaMs);
+        cmes.sort((a, b) => a.etaMs - b.etaMs);
         if (state) state.cmes = cmes.slice(0, 4);
         this.dispatchEvent(new CustomEvent('state', {
             detail: state ? { ...state, goes, compute, mode: this._mode, errors: this._errors.slice(-3) }

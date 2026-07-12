@@ -2507,15 +2507,19 @@ export class RingCurrentGlobe {
             slot.mesh.visible = !!c;
             slot.lab.sp.visible = !!c;
             if (!c) continue;
-            const etaH = (c.transit.etaMs - Date.now()) / 3.6e6;
-            const band = Math.round((c.transit.etaLateMs - c.transit.etaMs) / 3.6e6);
+            const etaH = ((c.etaMs ?? c.transit.etaMs) - Date.now()) / 3.6e6;
+            const enlil = c.basis === 'enlil';
+            const band = enlil ? 10 : Math.round((c.transit.etaLateMs - c.transit.etaMs) / 3.6e6);
+            const xchk = Number.isFinite(c.crossCheckHours)
+                ? `ballistic says ${Math.abs(c.crossCheckHours).toFixed(0)} h ${c.crossCheckHours >= 0 ? 'later' : 'earlier'} (cross-check)`
+                : `${Math.min(100, Math.round(c.transit.fraction * 100))}% of Sun→Earth covered`;
             this._drawLabel(slot.lab, `CME — IN FLIGHT${c.glancing ? ' (FLANK)' : ''}`, [
                 `v ${Math.round(c.speed_km_s)} km/s · launched ${c.transit.hoursInFlight.toFixed(0)} h ago`,
                 etaH > 0
                     ? `arrives in ≈ ${etaH < 48 ? `${Math.round(etaH)} h` : `${(etaH / 24).toFixed(1)} d`} ±${band} h`
                     : 'arriving NOW',
-                `${Math.min(100, Math.round(c.transit.fraction * 100))}% of Sun→Earth covered`,
-                'ballistic estimate (constant speed)',
+                xchk,
+                enlil ? 'NOAA WSA-ENLIL modeled arrival' : 'ballistic estimate (constant speed)',
             ], '#ffc890');
         }
         if (sl && this._helioLab) {
