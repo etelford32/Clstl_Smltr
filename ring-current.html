@@ -279,6 +279,27 @@ body {
     background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13);
     border-radius:6px; padding:3px 8px;
 }
+/* Default camera views: three framings of the one scene (Earth · Sun ·
+   River). A preset is a starting pose — free orbiting dims the highlight. */
+.rc-views {
+    position:absolute; left:50%; transform:translateX(-50%); top:10px; z-index:4;
+    display:flex; gap:4px; background:rgba(3,1,14,.72);
+    border:1px solid rgba(255,255,255,.1); border-radius:999px; padding:4px;
+}
+.rc-view-btn {
+    font-size:.7rem; font-weight:700; cursor:pointer; color:#8b94ad;
+    background:transparent; border:1px solid transparent; border-radius:999px;
+    padding:4px 12px; letter-spacing:.04em; white-space:nowrap;
+}
+.rc-view-btn:hover { color:#e8edf7; background:rgba(255,255,255,.08); }
+.rc-view-btn.rc-on {
+    color:#ffd9b0; background:rgba(255,154,61,.16); border-color:rgba(255,154,61,.45);
+}
+@media (max-width: 900px) {
+    /* Small stages: the top edge is owned by the clock HUD + legend. */
+    .rc-views { top:auto; bottom:34px; }
+}
+
 /* Live render-performance chip (fps · frame ms · dpr · draws · tier). */
 .rc-perf {
     position:absolute; right:10px; bottom:8px; z-index:4; pointer-events:none;
@@ -351,6 +372,11 @@ body {
                    aria-label="Scrub the simulation clock through the forecast window">
             <div class="rc-simtime-scale"><span>live now</span><span id="rc-simtime-max">+75 min</span></div>
         </div>
+        <div class="rc-views" id="rc-views" hidden>
+            <button class="rc-view-btn rc-on" data-view="earth" title="Near-Earth framing &mdash; ring current, aurora, boundaries">&#127757; Earth</button>
+            <button class="rc-view-btn" data-view="sun" title="Solar disk close-up &mdash; coronal holes, emission puffs, the arriving wind&rsquo;s source">&#9728;&#65039; Sun</button>
+            <button class="rc-view-btn" data-view="river" title="The full Sun&rarr;Earth corridor &mdash; every population and readout in one frame">&#127754; River</button>
+        </div>
         <div class="rc-perf" id="rc-perf" hidden>&mdash;</div>
         <div class="rc-legend" id="rc-legend">
         <div class="rc-legend-head" id="rc-legend-head">
@@ -383,7 +409,7 @@ body {
             <span style="color:#5d6684">trail length &prop; speed &middot; flash &prop; VBs on arrival</span>
         </div>
         </div>
-        <div class="rc-stage-hint">drag to orbit &middot; scroll out for the Sun corridor &middot; pause / scrub the clock top-left &middot; one clock drives stream, ring, lifecycle &amp; Earth spin &middot; hover any particle for its data &middot; GSM frame</div>
+        <div class="rc-stage-hint">views top-center: Earth &middot; Sun &middot; River &middot; drag to orbit &middot; pause / scrub the clock top-left &middot; one clock drives stream, ring, lifecycle &amp; Earth spin &middot; hover any particle for its data &middot; GSM frame</div>
     </div>
 
     <div class="rc-col">
@@ -800,13 +826,38 @@ hud.slider.addEventListener('input', () => {
 //    data panels + chart instead of blanking the page. ─────────────────────
 let globe = null;
 try {
-    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260711');
+    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260712');
     globe = new RingCurrentGlobe(stage, { clock });
     window.rcGlobe = globe;   // debug/probe handle (tests/ smoke probes)
 } catch (err) {
     console.warn('[ring-current] 3D disabled:', err);
     stage.insertAdjacentHTML('beforeend',
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d6684;font-size:.8rem;">3D view unavailable — data panels remain live</div>');
+}
+
+// ── Default camera views: Earth · Sun · River ──────────────────────────────
+// Three framings of the one scene (globe CAM_VIEWS). The chosen view
+// persists across visits; a free orbit dims the highlight — the preset is
+// a starting pose, not a mode.
+if (globe) {
+    const wrap = $('rc-views');
+    wrap.hidden = false;
+    const btns = [...wrap.querySelectorAll('.rc-view-btn')];
+    const mark = (name) => btns.forEach(b => b.classList.toggle('rc-on', b.dataset.view === name));
+    const VIEW_LS = 'pp_rc_view';
+    btns.forEach(btn => btn.addEventListener('click', () => {
+        globe.setView(btn.dataset.view);
+        mark(btn.dataset.view);
+        try { localStorage.setItem(VIEW_LS, btn.dataset.view); } catch { /* quota */ }
+    }));
+    const canvas = stage.querySelector('canvas');
+    canvas?.addEventListener('pointerdown', () => mark(null));
+    canvas?.addEventListener('wheel', () => mark(null), { passive: true });
+    let savedView = null;
+    try { savedView = localStorage.getItem(VIEW_LS); } catch { /* fresh */ }
+    // Restore with the flight (instant under prefers-reduced-motion) — the
+    // glide from Earth re-orients returning users in the larger scene.
+    if (savedView && savedView !== 'earth' && globe.setView(savedView)) mark(savedView);
 }
 
 // ── Render-performance HUD + one-shot telemetry ─────────────────────────────

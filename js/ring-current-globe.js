@@ -370,6 +370,25 @@ const TRANSIT = Object.freeze({
     N_REF:       20,     // density (cm⁻³) that saturates count/trace scaling
 });
 
+// ── Default camera views ─────────────────────────────────────────────────────
+// Three framings of the ONE scene (nothing re-renders differently — a view
+// is just a camera pose, so the physics can never fork per view):
+//   earth — the original near-Earth framing: ring, aurora, boundaries.
+//   sun   — close on the solar disk: coronal holes, the back-mapped source
+//           ring, emission puffs and the Parker-spiral streamline into the
+//           L1 gate. minDistance still applies — users can push right into
+//           the disk to read the emission activity.
+//   river — the full corridor side-on (Sun left, Earth right), far enough
+//           that the LOD boost thickens the stream into the "river" read
+//           and every in-scene stat label is legible in one frame.
+// Positions are hand-framed against the TRANSIT/SCALE geometry above;
+// verified by the view-switcher browser probe (tests/ + scratchpad).
+const CAM_VIEWS = Object.freeze({
+    earth: { pos: [8.5, 6.0, 9.5],  target: [0, 0, 0] },
+    sun:   { pos: [38, 6.5, 15.5],  target: [56, 3, 0] },
+    river: { pos: [74, 23, -46],    target: [19, -2, 0] },
+});
+
 // ── Trails are INTEGRATED PATHS, not decorations ─────────────────────────────
 // Every trail spans exactly the trajectory covered in the last TRAIL_VIEW_S
 // seconds of VIEWING: length = apparent speed × TRAIL_VIEW_S for the straight
@@ -769,6 +788,11 @@ export class RingCurrentGlobe {
         this._controls.dampingFactor = 0.06;
         this._controls.minDistance = 2.5;
         this._controls.maxDistance = 140;   // far enough to frame the Sun corridor
+        // Named default views (CAM_VIEWS / setView). Any user grab cancels an
+        // in-progress flight — the presets are starting points, not a cage.
+        this._flight = null;
+        this._activeView = 'earth';
+        this._controls.addEventListener('start', () => { this._flight = null; });
 
         // Lighting: Sun from +X — exactly the GSM Sun line, so the lit
         // hemisphere IS the real dayside once Earth's spin phase is set.
@@ -1362,6 +1386,42 @@ export class RingCurrentGlobe {
             g.stroke();
         }
         this._sunTex.needsUpdate = true;
+    }
+
+    /** The named view last selected via setView ('earth'|'sun'|'river').
+     *  Free orbiting after a preset does NOT clear this — it names the
+     *  starting point, not the live pose (the page dims its buttons on
+     *  user grab instead). */
+    get view() { return this._activeView; }
+
+    /** Preset names, for UIs that want to enumerate them. */
+    static get VIEWS() { return Object.keys(CAM_VIEWS); }
+
+    /**
+     * Fly the camera to a named default view ('earth' | 'sun' | 'river').
+     * Eased flight of position + orbit target over ~1.6 s; instant under
+     * prefers-reduced-motion or {instant:true}. Returns false on an
+     * unknown name so callers can validate persisted values.
+     */
+    setView(name, { instant = false } = {}) {
+        const v = CAM_VIEWS[name];
+        if (!v) return false;
+        this._activeView = name;
+        const p1 = new THREE.Vector3(...v.pos);
+        const t1 = new THREE.Vector3(...v.target);
+        if (instant || this._reducedMotion) {
+            this._flight = null;
+            this._camera.position.copy(p1);
+            this._controls.target.copy(t1);
+            this._controls.update();
+            return true;
+        }
+        this._flight = {
+            t: 0, dur: 1.6,
+            p0: this._camera.position.clone(), p1,
+            t0: this._controls.target.clone(), t1,
+        };
+        return true;
     }
 
     /** Stream coloring: 'bz' (driver) | 'temp' (heat map) | 'density'. */
@@ -2436,6 +2496,10 @@ export class RingCurrentGlobe {
             this._ringLab = this._makeLabel(0, 7.8, 0, 9);
             this._gateLab = this._makeLabel(TRANSIT.X_SUN, 20.5, 0, 10);
             this._helioLab = this._makeLabel(TRANSIT.X_SUN + 4, -8.5, 0, 8.5);
+            // Above the corona (sprite half-height ≈6.1 at max), nudged
+            // Earthward off the disk axis so the foreshortened River view
+            // keeps it in frame (dead-center-above leans out of shot there).
+            this._sunLab = this._makeLabel(TRANSIT.X_SUN + 3.5, 10.8, 0, 9.5);
         }
         // Gate pulse: a genuinely NEW 1-min sample landed (newest tL1 moved).
         // Wall-clock instrumentation, deliberately independent of τ.
@@ -2528,6 +2592,37 @@ export class RingCurrentGlobe {
                 'plasma is only measured when it crosses the gate',
                 'puff rate & speed ∝ each hole’s own arrival record',
                 'leg drawn ≈2 900× more compressed than near-Earth',
+            ], '#ffd27a');
+        }
+        // Sun emission-state readout — the Sun-side twin of the ring label:
+        // WHAT the disk is releasing right now and where the wind arriving
+        // at Earth traces back to. Pinned above the corona so the Sun and
+        // River views carry a legible solar readout without opening panels.
+        if (this._sunLab) {
+            // Lines stay ≤ ~33 chars — the 512-px label canvas clips longer.
+            const src = sl?.source;
+            const srcLine = !sl ? 'wind now: source pending'
+                : src?.matched
+                    ? `wind now: CH ${(src.hole.lat_deg ?? 0) >= 0 ? 'N' : 'S'}${Math.round(Math.abs(src.hole.lat_deg ?? 0))}` +
+                      `${Number.isFinite(sl.carringtonLon) ? ` · Car ${Math.round(sl.carringtonLon)}°` : ''}`
+                : src?.kind === 'streamer-belt'
+                    ? 'wind now: streamer belt (slow wind)'
+                : src ? 'wind now: fast wind — no CH match'
+                : `wind now: Car ${Number.isFinite(sl.carringtonLon) ? Math.round(sl.carringtonLon) + '°' : '—'}`;
+            const holesVis = (sl?.holes ?? []).filter(h => {
+                if (!Number.isFinite(h?.lon_carrington_deg) || !Number.isFinite(sl?.l0NowDeg)) return false;
+                const lonW = ((h.lon_carrington_deg - sl.l0NowDeg) % 360 + 540) % 360 - 180;
+                return Math.abs(lonW) <= 85 && Math.abs(h.lat_deg ?? 0) <= 80;
+            }).length;
+            const due = (sl?.recurrence ?? []).filter(f => f.forecast?.daysToArrival < 5).length;
+            const flux = Math.min(3, (this._driverN / 6) * (this._driverV / 450));
+            const cmeN = (state?.cmes ?? []).length;
+            this._drawLabel(this._sunLab, 'SUN — EMISSION STATE', [
+                srcLine,
+                `${holesVis} CH on disk · ${due} stream${due === 1 ? '' : 's'} due ≤5 d`,
+                `puffs ${(2 + 2.2 * flux).toFixed(1)}/s ∝ live n·v at L1`,
+                cmeN ? `${cmeN} CME${cmeN === 1 ? '' : 's'} in flight — see cone label${cmeN === 1 ? '' : 's'}`
+                     : 'no Earth-directed CMEs in flight',
             ], '#ffd27a');
         }
         const d = state?.drivers, nw = state?.now;
@@ -2700,6 +2795,17 @@ export class RingCurrentGlobe {
         this._updateTooltip(wallNow);
         tNow = performance.now();
         blend('tooltip', tMark, tNow); tMark = tNow;
+        // View-preset flight: eased camera + target glide (setView). The
+        // 'start' listener nulls this the instant the user grabs the scene.
+        if (this._flight) {
+            const f = this._flight;
+            f.t += dt;
+            const k = Math.min(1, f.t / f.dur);
+            const e = k * k * (3 - 2 * k);          // smoothstep — gentle both ends
+            this._camera.position.lerpVectors(f.p0, f.p1, e);
+            this._controls.target.lerpVectors(f.t0, f.t1, e);
+            if (k >= 1) this._flight = null;
+        }
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
         blend('render', tMark, performance.now());
