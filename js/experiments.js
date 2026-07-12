@@ -76,14 +76,15 @@ export const EXPERIMENTS = Object.freeze({
     },
     // Space-weather dashboard panel arrangement (js/layout-lab.js). Variant
     // layouts live in data/layout-variants/space-weather.json — a null
-    // variant means the as-authored DOM. PAUSED until variant 'b' is
-    // published from the Layout Lab (?layoutlab=1 → Export → commit), then
-    // flip to 'running'. QA-force: ?exp_sw_layout_v1=b.
+    // variant means the as-authored DOM. RUNNING since 2026-07-12:
+    // control = sim-first (as authored), b = forecast-first reorder.
+    // Personal layouts saved from the Customize button always win over the
+    // assigned variant. QA-force: ?exp_sw_layout_v1=b.
     sw_layout_v1: {
-        status: 'paused',
+        status: 'running',
         variants: [
-            { id: 'control', w: 50 },   // as-authored panel order
-            { id: 'b',       w: 50 },   // owner-designed rearrangement
+            { id: 'control', w: 50 },   // as-authored panel order (sim-first)
+            { id: 'b',       w: 50 },   // forecast-first reorder
         ],
     },
     // Hero background renderer. particles = the light drifting field;

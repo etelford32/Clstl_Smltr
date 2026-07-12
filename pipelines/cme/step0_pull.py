@@ -307,6 +307,34 @@ def pull_rc_table(fetcher) -> "pd.DataFrame | None":
 # ---------------------------------------------------------------------------
 # Reconciliation + outputs
 # ---------------------------------------------------------------------------
+def pulled_any_data(truth: dict) -> bool:
+    """True when at least one primary source actually returned data. Guards
+    the report: zero discrepancies because every pull FAILED must never be
+    presented as 'within tolerance' (first live run did exactly that when a
+    network proxy blocked all three hosts)."""
+    omni = truth.get("omni", {}) or {}
+    donki = truth.get("donki", {}) or {}
+    return (omni.get("symh_min_nt") is not None
+            or omni.get("dst_min_nt") is not None
+            or bool(donki.get("cme_analysis"))
+            or bool(donki.get("gst")))
+
+
+def event_report_lines(truth: dict, issues: "list[str]") -> "list[str]":
+    if not pulled_any_data(truth):
+        errs = [e for e in (
+            (truth.get("omni", {}) or {}).get("omni_1min_error"),
+            (truth.get("omni", {}) or {}).get("omni_hourly_error"),
+            (truth.get("donki", {}) or {}).get("error"),
+        ) if e]
+        first = (errs[0][:120] + "…") if errs and len(errs[0]) > 120 else (errs[0] if errs else "no source returned data")
+        return [f"- ✗ NO PRIMARY DATA — all pulls failed or empty; NOT verified ({first})"]
+    lines = [f"- ⚠️ {i}" for i in issues] or ["- ✓ within tolerance"]
+    for n in (truth.get("donki", {}) or {}).get("donki_notes", []):
+        lines.append(f"- ℹ️ {n}")
+    return lines
+
+
 def reconcile(event: dict, truth: dict) -> "list[str]":
     """Compare planning approximations to pulled truth; return discrepancies."""
     issues = []
@@ -352,6 +380,11 @@ def emit_sql(results: dict, path: Path):
         cme = (r["truth"].get("donki", {}) or {}).get("cme_analysis") or {}
         omni = r["truth"].get("omni", {})
         shock = omni.get("shock") or {}
+        if not pulled_any_data(r["truth"]):
+            lines.append(f"-- {eid}: SKIPPED — no primary data pulled; "
+                         "re-run step0 with network access before inserting")
+            lines.append("")
+            continue
         lines.append(
             "INSERT INTO cme_events (event_id, donki_id, launch_time_utc, "
             "source_region, cme_type, speed_kms_3d, half_width_deg, "
@@ -368,23 +401,28 @@ def emit_sql(results: dict, path: Path):
                 "; ".join(r["truth"].get("donki", {}).get("donki_notes", []))
                 or None,
             ]) + ") ON CONFLICT (event_id) DO NOTHING;")
-        lines.append(
-            "INSERT INTO cme_l1_observations (event_id, shock_arrival_utc, "
-            "observed_speed_kms, observed_bz_min_nt, observed_density_max, "
-            "arrived, source) VALUES ("
-            + ", ".join(sql_escape(x) for x in [
-                eid, shock.get("shock_arrival_utc"),
-                omni.get("observed_speed_max_kms"),
-                omni.get("observed_bz_min_nt"),
-                omni.get("observed_density_max"), True, "OMNI",
-            ]) + ") ON CONFLICT (event_id) DO NOTHING;")
-        lines.append(
-            "INSERT INTO cme_geomag_observations (event_id, symh_min_nt, "
-            "symh_min_utc, dst_min_nt, kp_max, source) VALUES ("
-            + ", ".join(sql_escape(x) for x in [
-                eid, omni.get("symh_min_nt"), omni.get("symh_min_utc"),
-                omni.get("dst_min_nt"), omni.get("kp_max"), "OMNI",
-            ]) + ") ON CONFLICT (event_id) DO NOTHING;")
+        if any(omni.get(k) is not None for k in
+               ("observed_speed_max_kms", "observed_bz_min_nt",
+                "observed_density_max")) or shock:
+            lines.append(
+                "INSERT INTO cme_l1_observations (event_id, shock_arrival_utc, "
+                "observed_speed_kms, observed_bz_min_nt, observed_density_max, "
+                "arrived, source) VALUES ("
+                + ", ".join(sql_escape(x) for x in [
+                    eid, shock.get("shock_arrival_utc"),
+                    omni.get("observed_speed_max_kms"),
+                    omni.get("observed_bz_min_nt"),
+                    omni.get("observed_density_max"), True, "OMNI",
+                ]) + ") ON CONFLICT (event_id) DO NOTHING;")
+        if any(omni.get(k) is not None for k in
+               ("symh_min_nt", "dst_min_nt", "kp_max")):
+            lines.append(
+                "INSERT INTO cme_geomag_observations (event_id, symh_min_nt, "
+                "symh_min_utc, dst_min_nt, kp_max, source) VALUES ("
+                + ", ".join(sql_escape(x) for x in [
+                    eid, omni.get("symh_min_nt"), omni.get("symh_min_utc"),
+                    omni.get("dst_min_nt"), omni.get("kp_max"), "OMNI",
+                ]) + ") ON CONFLICT (event_id) DO NOTHING;")
         lines.append("")
     path.write_text("\n".join(lines))
 
@@ -444,7 +482,25 @@ def self_test() -> int:
         print("FAIL: sql_escape")
         failures += 1
 
-    # 5. Per-parameter fill nulling (needs pandas; skipped offline if absent)
+    # 5. Failed pulls must never read as verification
+    no_data = {"omni": {"omni_1min_error": "ProxyError: tunnel 403"},
+               "donki": {"error": "ProxyError: tunnel 403"}}
+    if pulled_any_data(no_data):
+        print("FAIL: pulled_any_data must be False when every source errored")
+        failures += 1
+    lines = event_report_lines(no_data, [])
+    if not (len(lines) == 1 and "NO PRIMARY DATA" in lines[0]):
+        print("FAIL: no-data event must report NO PRIMARY DATA, got", lines)
+        failures += 1
+    got_data = {"omni": {"symh_min_nt": -412.0}, "donki": {"cme_analysis": None}}
+    if not pulled_any_data(got_data):
+        print("FAIL: pulled_any_data must be True with SYM-H present")
+        failures += 1
+    if event_report_lines(got_data, []) != ["- ✓ within tolerance"]:
+        print("FAIL: clean pulled event must read within tolerance")
+        failures += 1
+
+    # 6. Per-parameter fill nulling (needs pandas; skipped offline if absent)
     if pd is not None:
         df = pd.DataFrame({
             "SYM_H": [-120.0, 99999.0], "flow_speed": [740.0, 99999.9],
@@ -505,9 +561,7 @@ def main():
         issues = reconcile(ev, truth)
         results[eid] = {"event": ev, "truth": truth, "discrepancies": issues}
         report.append(f"## {eid}")
-        report.extend([f"- ⚠️ {i}" for i in issues] or ["- ✓ within tolerance"])
-        for n in truth.get("donki", {}).get("donki_notes", []):
-            report.append(f"- ℹ️ {n}")
+        report.extend(event_report_lines(truth, issues))
         report.append("")
 
     (outdir / "truth_pull.json").write_text(json.dumps(results, indent=2, default=str))
@@ -528,7 +582,14 @@ def main():
     df.to_csv(outdir / "phase1_hindcast_events_verified.csv", index=False)
 
     n_flagged = sum(1 for r in results.values() if r["discrepancies"])
-    print(f"\nDone. {len(results)} events pulled, {n_flagged} with discrepancies.")
+    n_nodata = sum(1 for r in results.values()
+                   if not pulled_any_data(r["truth"]))
+    print(f"\nDone. {len(results)} events pulled, {n_flagged} with "
+          f"discrepancies, {n_nodata} with NO primary data.")
+    if n_nodata:
+        print("WARNING: pull failures are not verification — check network/"
+              "proxy access to kauai.ccmc.gsfc.nasa.gov, cdaweb.gsfc.nasa.gov,"
+              " izw1.caltech.edu and re-run (cached raw/ makes re-runs cheap).")
     print(f"Review {outdir}/discrepancy_report.md, confirm shock times, "
           f"then apply {outdir}/inserts.sql")
 

@@ -1,9 +1,51 @@
 {
   "page": "space-weather",
   "experiment": "sw_layout_v1",
-  "_howto": "To publish a variant: open /space-weather.html?layoutlab=1, arrange panels in the Layout Lab, hit Export, paste the JSON as a variant value below, commit. A null variant means 'as-authored DOM'. Flip sw_layout_v1 to status:'running' in js/experiments.js once 'b' is non-null. QA-force with ?exp_sw_layout_v1=b.",
+  "_howto": "Variants are published by committing this file. A null variant means 'as-authored DOM'. Edit arrangements in the Layout Lab (Customize button) and Export to regenerate. QA-force a variant with ?exp_sw_layout_v1=b. Experiment status lives in js/experiments.js.",
+  "_hypothesis": "b = forecast-first: operators land on current conditions + forecasts; the sim canvas and reference material move below. Control = as-authored sim-first. Pure reorder — no panels hidden — so goal deltas (sw_panel_interact, sw_dwell_60s) measure placement, not content removal.",
   "variants": {
     "control": null,
-    "b": null
+    "b": {
+      "v": 1,
+      "page": "space-weather",
+      "zones": {
+        "main": {
+          "order": [
+            "metrics-hero",
+            "cme-forecast",
+            "earth-forecast",
+            "forecast-timeline",
+            "helio-hero",
+            "transit",
+            "globe",
+            "data-grid",
+            "solar-system-info",
+            "imagery",
+            "tables",
+            "sources"
+          ],
+          "hidden": [],
+          "wide": [],
+          "size": {}
+        },
+        "grid": {
+          "order": [
+            "card-cme-donki",
+            "card-wind",
+            "card-storm-scale",
+            "card-ssw",
+            "card-surface",
+            "card-vortex",
+            "card-polar-mag",
+            "card-gravity-wave",
+            "card-upper-atmosphere",
+            "card-earth-orbit"
+          ],
+          "hidden": [],
+          "wide": [],
+          "size": {}
+        }
+      }
+    }
   }
 }

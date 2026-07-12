@@ -94,14 +94,21 @@ Hardening applied relative to the original draft:
 3. Commit `phase1_hindcast_events_verified.csv` back into `pipelines/cme/`.
 4. After Phase 1 is applied, run the reviewed `step0_out/inserts.sql`.
 
-### Phase 1 — Schema  ⏳ drafted, NOT applied
+### Phase 1 — Schema  ✅ applied 2026-07-12 (migration `cme_validation_program`)
 
 `supabase-cme-validation-migration.sql`: `cme_events`,
 `cme_arrival_forecasts` (issue-locked, `inputs` jsonb freezes model inputs
 for exact replay), `cme_l1_observations` (+`arrived=false` rows to score
 false alarms), `cme_geomag_observations`, `cme_model_skill` view.
-Apply via Supabase MCP `apply_migration` after review. No RPCs needed yet —
-cron writes via service role.
+No RPCs needed yet — cron writes via service role. Tables are empty until a
+successful Phase 0 pull is reviewed and its inserts applied.
+
+> **Phase 0 network note:** the step0 pull requires egress to
+> `kauai.ccmc.gsfc.nasa.gov`, `cdaweb.gsfc.nasa.gov`, `izw1.caltech.edu`.
+> Remote Claude sessions with a restricted network policy get a proxy 403 on
+> all three — run the pull locally (or widen the environment's network
+> policy). A failed pull now reports `NO PRIMARY DATA — NOT verified` and
+> emits no inserts, so it can never masquerade as verification.
 
 ### Phase 2 — Issue-time forecast locking (live loop)
 
@@ -209,10 +216,13 @@ fires the `sw_panel_resize` engagement event.
 2. Drag panels to reorder (sections vertically, cards within the grid),
    👁 to hide, ⬌ for full-width cards.
 3. **Save mine** = your personal layout (this browser, wins over variants).
-4. **Export** → paste the JSON as `"b"` in
-   `data/layout-variants/space-weather.json`, commit, flip `sw_layout_v1`
-   to `status:'running'`. Publishing is a git operation on purpose —
-   variants are reviewable, the anon surface stays read-only.
+4. **Export** → paste the JSON as a variant in
+   `data/layout-variants/space-weather.json` and commit. Publishing is a
+   git operation on purpose — variants are reviewable, the anon surface
+   stays read-only. *(`sw_layout_v1` is RUNNING as of 2026-07-12:
+   control = sim-first authored order, b = forecast-first reorder.
+   Re-exporting over `b` updates the running experiment — prefer a new
+   experiment key for a materially different hypothesis.)*
 5. QA a variant with `?exp_sw_layout_v1=b`. Read results in `admin.html`'s
    experiment charts (goals above, segmented by variant automatically).
 6. Kill switch: flip back to `'paused'` (everyone gets control), or

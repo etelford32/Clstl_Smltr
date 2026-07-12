@@ -3,7 +3,9 @@
 -- (design: CME_FORECAST_VALIDATION_PLAN.md; offline truth pull:
 -- pipelines/cme/step0_pull.py).
 --
--- NOT YET APPLIED. Review, then apply via the Supabase MCP apply_migration.
+-- APPLIED 2026-07-12 as migration `cme_validation_program` (project
+-- aijsboodkivnhzfstvdq). Kept at repo root per the supabase-*-migration.sql
+-- convention as the reviewable source of truth.
 --
 -- Motivation: the existing daily CME study (api/cron/validation-rerun.js →
 -- validation_runs kind='cme') recomputes forecasts from the current DONKI
