@@ -9540,6 +9540,17 @@ function updateIsobarPanel() {
 // ═══════════════════════════════════════════════════════════════
 const magnetosphere = new MagnetosphereEngine(scene);
 
+// The engine's built-in auroral-curtain layer is permanently OFF on this
+// page. Those curtains are giant cones (R 1.02 → 2.5 Re — real aurora tops
+// out near 300 km ≈ 1.05 Re) built for the zoomed-out magnetosphere views,
+// and they live in the engine's inertial _eqGroup with a static 11.5° tilt,
+// so they can never align with the IGRF-pole oval shell (auroraMesh) that
+// the Aurora checkbox drives. Leaving them on painted persistent green
+// cones over both poles that ignored the toggle entirely. setLayerVisible
+// also latches _layers.aurora, so the engine's Kp-driven shell rebuilds
+// keep them hidden.
+magnetosphere.setLayerVisible('aurora', false);
+
 // Layer toggles
 document.getElementById('lyr-magnetopause').addEventListener('change', e =>
     magnetosphere.setLayerVisible('magnetopause', e.target.checked));
@@ -11672,7 +11683,16 @@ document.addEventListener('visibilitychange', () => {
 const _layerRegistry = {
     'lyr-clouds':         () => cloudMesh.visible,
     'lyr-atm':            () => atmMat.visible,
-    'lyr-aurora':         () => (earthU.u_aurora_on?.value ?? 0) > 0.5,
+    // Aurora is painted by THREE things: the surface glow (u_aurora_on),
+    // the oval shell (auroraU.u_enabled), and the magnetosphere engine's
+    // curtain layer (permanently off on this page — see the engine init).
+    // OR them all so any one of them staying lit while the checkbox is off
+    // is flagged as drift — the uniform-only predicate used to pass while
+    // the engine's curtain cones sat over both poles ignoring the toggle.
+    'lyr-aurora':         () => (earthU.u_aurora_on?.value ?? 0) > 0.5
+                             || (auroraU.u_enabled?.value ?? 0) > 0.5
+                             || (magnetosphere?._auroraN?.visible ?? false)
+                             || (magnetosphere?._auroraS?.visible ?? false),
     'lyr-lights':         () => (earthU.u_city_lights?.value ?? 0) > 0.5,
     'lyr-grid':           () => gridGroup.visible,
     'lyr-tropic':         () => tropicGroup.visible,
