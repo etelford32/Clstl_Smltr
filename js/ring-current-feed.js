@@ -35,6 +35,7 @@ import {
     shueStandoffRe, shueAlpha,
     SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
     carringtonL0, attributeWindSource, holeWindAssociation, holeArrivalForecast,
+    cmeTransit,
 } from './ring-current-model.js';
 
 // rtsw_mag_1m is not in config.NOAA — defined locally, same as js/swpc-feed.js.
@@ -440,6 +441,7 @@ export class RingCurrentFeed extends EventTarget {
         this._f107     = null;    // daily F10.7 (sfu) for the density panel
         this._goes     = [];      // GOES Hp series (GEO in-situ cross-check)
         this._holes    = [];      // HEK coronal holes (wind source attribution)
+        this._cmes     = [];      // DONKI cone analyses (in-flight CME layer)
         this._timers   = {};
         this._mode     = 'full';  // 'full' | 'degraded'
         this._started  = false;
@@ -596,6 +598,15 @@ export class RingCurrentFeed extends EventTarget {
             if (Array.isArray(ch?.data?.holes)) this._holes = ch.data.holes;
         } catch (e) { this._noteError(e); }
 
+        // DONKI CME cone analyses (NASA key stays server-side) — the raw
+        // material for the IN-FLIGHT layer: matter genuinely between the
+        // Sun and L1 right now, with hours-to-days of real lead time.
+        // Best-effort; _dispatch turns these into live transit states.
+        try {
+            const cm = await getJson('/api/donki/cme?days=5');
+            if (Array.isArray(cm?.data?.cmes)) this._cmes = cm.data.cmes;
+        } catch (e) { this._noteError(e); }
+
         this._emit();
     }
 
@@ -664,6 +675,28 @@ export class RingCurrentFeed extends EventTarget {
             // the hole's own record — the 27-day persistence technique).
             sl.recurrence = holeArrivalForecast(sl.holes, nowMs).slice(0, 4);
         }
+        // In-flight CMEs: Earth-relevant cone analyses currently between
+        // the Sun and Earth (fraction < 1.05 keeps just-arrived fronts on
+        // screen through their impact). 'Earth-relevant' is looser than
+        // strictly earth_directed: cones whose angular miss ≤ half-angle
+        // + 20° can still deliver a flank/glancing blow.
+        const nowMs2 = state?.updated ?? Date.now();
+        const cmes = [];
+        for (const c of this._cmes ?? []) {
+            const launch = Date.parse(c?.time ?? '');
+            const tr = cmeTransit(launch, c?.speed_km_s, nowMs2);
+            if (!tr || tr.fraction > 1.05) continue;
+            const miss = Math.hypot(c.latitude_deg ?? 0, c.longitude_deg ?? 0);
+            const relevant = c.earth_directed ||
+                (Number.isFinite(c.half_angle_deg) && miss <= c.half_angle_deg + 20);
+            if (!relevant) continue;
+            cmes.push({
+                ...c, launchMs: launch, transit: tr,
+                glancing: !c.earth_directed,
+            });
+        }
+        cmes.sort((a, b) => a.transit.etaMs - b.transit.etaMs);
+        if (state) state.cmes = cmes.slice(0, 4);
         this.dispatchEvent(new CustomEvent('state', {
             detail: state ? { ...state, goes, compute, mode: this._mode, errors: this._errors.slice(-3) }
                           : { goes, compute, mode: this._mode, errors: this._errors.slice(-3), updated: Date.now() },

@@ -37,7 +37,7 @@ import {
     SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
     carringtonL0, attributeWindSource, holeWindAssociation,
     holeArrivalForecast, SYNODIC_DEG_PER_DAY,
-    noaaRScale, noaaSScale, noaaGScale, geoChargingRisk,
+    noaaRScale, noaaSScale, noaaGScale, geoChargingRisk, cmeTransit,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -682,6 +682,32 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     assert.equal(geoChargingRisk(2e4).label, 'severe');
     assert.equal(geoChargingRisk(NaN).label, 'unknown');
     ok('NOAA R/S/G scales at SWPC anchors; GEO charging tiers at 100/1000/10⁴ pfu');
+}
+
+// ── 27. CME ballistic transit ───────────────────────────────────────────────
+{
+    const t0 = Date.UTC(2026, 6, 10);
+    // 1000 km/s from 21.5 R☉: (1.496e8 − 21.5·6.957e5) km / 1000 ≈ 37.4 h.
+    const full = cmeTransit(t0, 1000, t0 + 37.5 * 3.6e6);
+    assert.ok(Math.abs(full.fraction - 1) < 0.01, `fraction ${full.fraction}`);
+    assert.ok(full.arrived);
+    // Halfway: 20 h into a 40-h transit at ~935 km/s.
+    const half = cmeTransit(t0, 1000, t0 + 18.7 * 3.6e6);
+    assert.ok(Math.abs(half.fraction - 0.5) < 0.01);
+    assert.ok(!half.arrived);
+    // ETA band: ordered, ≥ the 2 h floor, and shrinking as arrival nears.
+    assert.ok(half.etaEarlyMs < half.etaMs && half.etaMs < half.etaLateMs);
+    const near = cmeTransit(t0, 1000, t0 + 35 * 3.6e6);
+    assert.ok((near.etaLateMs - near.etaMs) < (half.etaLateMs - half.etaMs));
+    assert.ok((near.etaLateMs - near.etaMs) >= 2 * 3.6e6 - 1);
+    // Slow CME takes days: 450 km/s ≈ 83 h.
+    const slow = cmeTransit(t0, 450, t0 + 3.6e6);
+    assert.ok(Math.abs((slow.etaMs - t0) / 3.6e6 - 83.1) < 1);
+    // Null-safety: bad speed, time order, NaN.
+    assert.equal(cmeTransit(t0, 50, t0 + 1e6), null);
+    assert.equal(cmeTransit(t0, 800, t0 - 1e6), null);
+    assert.equal(cmeTransit(NaN, 800, t0), null);
+    ok('cmeTransit: 37.4 h @1000 km/s, halfway fraction, ETA band ordering, null-safety');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

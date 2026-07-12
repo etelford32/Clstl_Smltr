@@ -1216,6 +1216,31 @@ export class RingCurrentGlobe {
         this._spiral.visible = false;   // until the first source fix
         this._scene.add(this._spiral);
 
+        // ── In-flight CME fronts (DONKI cone analyses) ──────────────────────
+        // Matter genuinely between the Sun and Earth RIGHT NOW: each
+        // Earth-relevant cone renders as an expanding annular front
+        // crossing the helio gap at its ballistic fraction (evaluated at
+        // simNow — honest, hence near-motionless: transits take days).
+        // Flank-directed cones slide off-axis; the label carries the
+        // ballistic ETA ± band. Pool of 4 (Earth-directed CMEs in flight
+        // at once are rare above that).
+        this._cmePool = [];
+        for (let i = 0; i < 4; i++) {
+            const mat = new THREE.MeshBasicMaterial({
+                color: 0xffc890, transparent: true, opacity: 0,
+                blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+            });
+            const mesh = new THREE.Mesh(new THREE.RingGeometry(0.78, 1.0, 56), mat);
+            mesh.rotation.y = Math.PI / 2;       // face down the corridor axis
+            mesh.visible = false;
+            mesh.frustumCulled = false;
+            this._scene.add(mesh);
+            const lab = this._makeLabel(0, 0, 0, 6.5);
+            lab.sp.visible = false;
+            this._cmePool.push({ mesh, mat, lab, cme: null });
+        }
+        this._cmesLive = [];
+
         // Barometric trace: n(x) as a polyline riding above the corridor —
         // the pressure-wave shape of the incoming wind, sliding Earthward in
         // real time as the plasma it describes actually approaches.
@@ -1852,6 +1877,34 @@ export class RingCurrentGlobe {
         this._emGeo.attributes.color.needsUpdate = true;
     }
 
+    /** Position the in-flight CME fronts at their ballistic fraction of
+     *  the (compressed) Sun→Earth gap. Evaluated at simNow — honest, so
+     *  near-motionless between feed states; the expansion + off-axis slide
+     *  encode the cone geometry, the label carries the ETA. */
+    _updateCmes(simNow) {
+        const SUN_X = TRANSIT.X_SUN + 8;
+        for (const slot of this._cmePool ?? []) {
+            const c = slot.cme;
+            if (!c) continue;
+            const f = Math.max(0, Math.min(1,
+                (simNow - c.launchMs) / Math.max(1, c.transit.etaMs - c.launchMs)));
+            // The front lives in the Sun→L1 gap (same disclosed compression
+            // as the emission puffs): it is UNMEASURED until it reaches the
+            // gate, where the corridor's real parcels take the story over.
+            // f ≥ 1 holds at the gate until the feed retires it.
+            const gateX = TRANSIT.X_SUN + 0.2;
+            const x = SUN_X - 0.4 - (SUN_X - 0.4 - gateX) * f;
+            const zOff = -((c.longitude_deg ?? 0) / 90) * 3 * f;   // flank slide (west = −z)
+            const yOff = ((c.latitude_deg ?? 0) / 90) * 2.5 * f;
+            slot.mesh.position.set(x, yOff, zOff);
+            const r = 1.2 + 7 * Math.min(1, f * (0.35 + (c.half_angle_deg ?? 35) / 45));
+            slot.mesh.scale.setScalar(r);
+            slot.mat.opacity = (0.10 + 0.22 * Math.min(1, (c.speed_km_s ?? 400) / 1200))
+                * (1 - 0.35 * f);
+            slot.lab.sp.position.set(x, r + 2.4 + yOff, zOff);
+        }
+    }
+
     /** Ease the boundary toward the live Shue target (the real response is
      *  minutes; ~1.5 s of viewing keeps it legible without popping) and
      *  propagate the nose to everything anchored on it. */
@@ -2445,6 +2498,26 @@ export class RingCurrentGlobe {
             this._spiralGeo.attributes.position.needsUpdate = true;
             this._spiral.visible = true;
         }
+        // In-flight CME fronts: assign pool slots (feed sorts by ETA).
+        this._cmesLive = state?.cmes ?? [];
+        for (let ci = 0; ci < this._cmePool.length; ci++) {
+            const slot = this._cmePool[ci];
+            const c = this._cmesLive[ci] ?? null;
+            slot.cme = c;
+            slot.mesh.visible = !!c;
+            slot.lab.sp.visible = !!c;
+            if (!c) continue;
+            const etaH = (c.transit.etaMs - Date.now()) / 3.6e6;
+            const band = Math.round((c.transit.etaLateMs - c.transit.etaMs) / 3.6e6);
+            this._drawLabel(slot.lab, `CME — IN FLIGHT${c.glancing ? ' (FLANK)' : ''}`, [
+                `v ${Math.round(c.speed_km_s)} km/s · launched ${c.transit.hoursInFlight.toFixed(0)} h ago`,
+                etaH > 0
+                    ? `arrives in ≈ ${etaH < 48 ? `${Math.round(etaH)} h` : `${(etaH / 24).toFixed(1)} d`} ±${band} h`
+                    : 'arriving NOW',
+                `${Math.min(100, Math.round(c.transit.fraction * 100))}% of Sun→Earth covered`,
+                'ballistic estimate (constant speed)',
+            ], '#ffc890');
+        }
         if (sl && this._helioLab) {
             this._drawLabel(this._helioLab, 'SUN → L1 — THE UNMEASURED LEG', [
                 `${Number.isFinite(sl.days) ? sl.days.toFixed(1) : '—'} d in flight · light: 8.3 min`,
@@ -2616,6 +2689,7 @@ export class RingCurrentGlobe {
         this._updateInjections(dt, dSimH);
         this._updateSheath(dt);
         this._updateEmission(dt);
+        this._updateCmes(simNow);
         this._updateCinematics(dt);
         tNow = performance.now();
         blend('pools', tMark, tNow); tMark = tNow;

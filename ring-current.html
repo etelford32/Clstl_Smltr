@@ -308,6 +308,7 @@ body {
             <span class="rc-dot" style="background:#9ecbff"></span>L1 plane &mdash; pulse = new 1-min sample &middot; dot = DSCOVR/ACE halo orbit<br>
             <span class="rc-dot" style="background:#ffd27a"></span>Sun disk &mdash; dark = HEK coronal holes &middot; teal ring = source of the wind arriving now<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;amber ring = stream forecast at Earth within 5 d (27-d persistence)</span><br>
+            <span class="rc-dot" style="background:#ffc890"></span>CME front &mdash; DONKI cone in ballistic transit, label = live ETA &plusmn; band<br>
             <span class="rc-dot" style="background:#7fb4ff"></span>Magnetopause (Shue98, live) &middot; <span class="rc-dot" style="background:#59e0d8"></span>bow shock<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;arrivals deflect &mdash; the sheath river parts around the boundary</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;southward IMF: flank strands turn gold &mdash; tail return flow &rarr; midnight injection</span><br>
@@ -366,6 +367,7 @@ body {
         <section class="rc-panel">
             <h2>Sun &rarr; Earth twin bridge</h2>
             <div class="rc-kv"><span class="rc-k">parcels in transit</span><span class="rc-v" id="rc-parcels">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">CMEs in flight</span><span class="rc-v" id="rc-cmes">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">strongest incoming</span><span class="rc-v" id="rc-strongest">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">arrives in</span><span class="rc-v" id="rc-strongest-eta">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">wind left the Sun</span><span class="rc-v" id="rc-sunlag">&mdash;</span></div>
@@ -785,6 +787,14 @@ function renderHud(s) {
     const tr = s.transit;
     $('rc-parcels').textContent = tr?.parcels?.length
         ? `${tr.parcels.length} × 1-min L1 samples` : '—';
+    // In-flight CMEs (DONKI): the days-scale layer of "matter in transit".
+    const cmesInFlight = s.cmes ?? [];
+    $('rc-cmes').textContent = cmesInFlight.length
+        ? `${cmesInFlight.length} · nearest ETA ${(() => {
+            const h = (cmesInFlight[0].transit.etaMs - Date.now()) / 3.6e6;
+            return h <= 0 ? 'now' : h < 48 ? `in ${Math.round(h)} h` : `in ${(h / 24).toFixed(1)} d`;
+        })()}`
+        : 'none Earth-directed';
     if (tr?.strongest) {
         const st2 = tr.strongest;
         $('rc-strongest').textContent = `VBs ${fmt(st2.vbs, 2)} mV/m · Bz ${fmt(st2.bz, 1)} nT`;
@@ -1031,6 +1041,18 @@ function renderSituation() {
         push(inc.vbs >= 3 ? 'alert' : 'warn',
             `<b>Southward driver arrives in ${inc.etaMin} min</b> — VBs ${inc.vbs.toFixed(1)} mV/m, ` +
             `Bz ${Number.isFinite(inc.bz) ? inc.bz.toFixed(0) : '—'} nT. Expect injection activity on arrival.`);
+    }
+    // 1.5 · In-flight CME — hours-to-days of genuine lead time (DONKI cone
+    // in ballistic transit; the 3D view shows the front crossing the gap).
+    const cme = s?.cmes?.[0];
+    if (cme && !cme.transit.arrived) {
+        const etaH = (cme.transit.etaMs - Date.now()) / 3.6e6;
+        const band = Math.round((cme.transit.etaLateMs - cme.transit.etaMs) / 3.6e6);
+        push(etaH < 24 && cme.speed_km_s >= 700 ? 'alert' : 'warn',
+            `<b>CME in flight — arrives ≈ ${new Date(cme.transit.etaMs).toISOString().slice(5, 16).replace('T', ' ')} UT` +
+            ` (in ${etaH < 48 ? `${Math.max(0, Math.round(etaH))} h` : `${(etaH / 24).toFixed(1)} d`} ±${band} h)</b>` +
+            ` — v ${Math.round(cme.speed_km_s)} km/s${cme.glancing ? ' · flank-directed, glancing possible' : ''}.` +
+            ` Prepare for shock arrival${cme.speed_km_s >= 700 ? ' + G-storm risk' : ''}.`);
     }
     // 2 · The model's own Dst threshold crossing.
     if (s?.alert) {

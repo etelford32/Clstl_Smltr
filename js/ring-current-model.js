@@ -735,9 +735,39 @@ export function skill(modelSeries, observedSeries, tolMs = 30 * 60 * 1000) {
 /** Constants for the emission→reception ledger. */
 export const SOLAR = Object.freeze({
     AU_KM:         1.496e8,                        // Sun–Earth distance
+    RSUN_KM:       6.957e5,                        // solar radius
     OMEGA_RAD_S:   2 * Math.PI / (25.38 * 86400),  // sidereal (Carrington) rotation
     LIGHT_LAG_MIN: 1.496e8 / 299792.458 / 60,      // photon travel time ≈ 8.32 min
 });
+
+/**
+ * Ballistic transit state of a CME cone analysis (DONKI: time tagged at
+ * 21.5 R☉, plane-of-sky speed). Constant-speed propagation from 21.5 R☉
+ * to Earth — the same disclosed method as the wind back-mapping. Real
+ * CMEs drag toward the ambient wind speed, so the arrival band is set to
+ * ±15 % of the remaining transit (≈ the ±10 h accuracy floor operational
+ * CME models quote). Fraction can exceed 1 (already arrived).
+ *
+ * @returns { fraction, etaMs, etaEarlyMs, etaLateMs, hoursInFlight,
+ *            arrived } | null
+ */
+export function cmeTransit(launchMs, vKmS, nowMs) {
+    if (!Number.isFinite(launchMs) || !Number.isFinite(vKmS) || vKmS < 100 ||
+        !Number.isFinite(nowMs) || nowMs < launchMs) return null;
+    const distKm = SOLAR.AU_KM - 21.5 * SOLAR.RSUN_KM;
+    const transitMs = (distKm / vKmS) * 1000;
+    const flightMs = nowMs - launchMs;
+    const etaMs = launchMs + transitMs;
+    const band = Math.max(0, etaMs - nowMs) * 0.15 + 2 * 3.6e6;   // ±(15 % + 2 h floor)
+    return {
+        fraction: flightMs / transitMs,
+        etaMs,
+        etaEarlyMs: etaMs - band,
+        etaLateMs:  etaMs + band,
+        hoursInFlight: flightMs / 3.6e6,
+        arrived: flightMs >= transitMs,
+    };
+}
 
 /**
  * Ballistic solar-departure estimate: plasma measured at L1 at tL1Ms with

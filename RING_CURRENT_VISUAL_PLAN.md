@@ -63,6 +63,18 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   time, mean-solar local time at the saved user location (js/user-location
 >   longitude — civil tz needs a tz db), and Earth's true orbital position
 >   (earthOrbit: heliocentric λ, r in AU, Kepler-second-law-tested).
+> - **In-flight CME layer** (2026-07-12): the Sun→L1 gap now carries real
+>   PREDICTION — DONKI cone analyses (via the existing /api/donki/cme
+>   proxy, NASA key server-side) become expanding annular fronts crossing
+>   the gap at their ballistic fraction (`cmeTransit` in the model:
+>   constant speed from 21.5 R☉, ±15 % + 2 h ETA band, node-tested at the
+>   37.4 h @ 1000 km/s anchor). Fronts hold at the L1 gate on arrival —
+>   where the corridor's MEASURED parcels take the story over — and
+>   flank-directed cones slide off-axis. Earth-relevance filter: strict
+>   earth_directed OR angular miss ≤ half-angle + 20° (glancing blows,
+>   labeled). Surfaced as: in-scene front + live ETA label, a "CMEs in
+>   flight" bridge row, and a Situation action line ("CME in flight —
+>   arrives ≈ … ±N h — prepare for shock + G-storm risk").
 > - **Solar-origin emission + legible sweep wrap + stutter fixes**
 >   (2026-07-11): the journey now STARTS at the Sun — emission puffs born
 >   at the back-mapped source region (70 % weight) and visible CHs, at a
