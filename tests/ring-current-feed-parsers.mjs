@@ -291,4 +291,29 @@ const tag = ms => new Date(ms).toISOString().replace('T', ' ').replace('Z', '');
     ok('computeState: oxygenFraction + live subsolar/dipole-tilt geometry surfaced');
 }
 
+// ── 11. parseLatestFlux — GOES integral-flux feeds (Situation panel) ─────────
+{
+    const { parseLatestFlux } = await import('../js/ring-current-feed.js');
+    const rows = [
+        { time_tag: '2026-07-11T10:00:00Z', flux: 2.1e-6, energy: '0.05-0.4nm' },
+        { time_tag: '2026-07-11T10:00:00Z', flux: 3.2e-5, energy: '0.1-0.8nm' },
+        { time_tag: '2026-07-11T10:01:00Z', flux: 4.1e-5, energy: '0.1-0.8nm' },
+        { time_tag: '2026-07-11T09:00:00Z', flux: 9.9e-4, energy: '0.1-0.8nm' },  // older
+        { time_tag: 'garbage', flux: 1, energy: '0.1-0.8nm' },
+        { time_tag: '2026-07-11T10:02:00Z', flux: -5, energy: '0.1-0.8nm' },      // negative fill
+    ];
+    const x = parseLatestFlux(rows, /0\.1-0\.8/);
+    assert.equal(x.flux, 4.1e-5, 'newest matching row wins');
+    // Electron-style energy labels: both ">=2 MeV" and ">=2.0 MeV" match.
+    const e = parseLatestFlux([
+        { time_tag: '2026-07-11T10:00:00Z', flux: 850, energy: '>=2 MeV' },
+        { time_tag: '2026-07-11T10:05:00Z', flux: 1200, energy: '>=2.0 MeV' },
+        { time_tag: '2026-07-11T10:06:00Z', flux: 3e5, energy: '>=0.8 MeV' },
+    ], />=\s*2(\.0)?\s*MeV/);
+    assert.equal(e.flux, 1200);
+    assert.equal(parseLatestFlux(null, /x/), null);
+    assert.equal(parseLatestFlux([], /x/), null);
+    ok('parseLatestFlux: newest matching energy channel, fill/garbage rejected');
+}
+
 console.log(`\nring-current-feed-parsers: all ${n} test groups passed`);

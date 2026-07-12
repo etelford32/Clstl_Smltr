@@ -721,3 +721,300 @@ export function skill(modelSeries, observedSeries, tolMs = 30 * 60 * 1000) {
     if (!n) return { rmse: null, bias: null, n: 0 };
     return { rmse: Math.sqrt(sumSq / n), bias: sum / n, n };
 }
+
+// ── Sun → Earth timing: the emission/reception ledger ───────────────────────
+// The measurable gap the page surfaces as a first-class quantity: photons
+// reach Earth in 8.3 minutes, but the PLASMA arriving now left the corona
+// days ago — and how many days depends on each parcel's own speed, so one
+// solar "moment" arrives smeared over days and what Earth receives at any
+// instant is a mixture of emissions from different solar days (and, because
+// the Sun rotates under the outflow, different source longitudes). That
+// dispersion is the classic ballistic back-mapping question (Nolte & Roelof
+// 1973) and the quantitative hook the UI exposes per parcel and in bulk.
+
+/** Constants for the emission→reception ledger. */
+export const SOLAR = Object.freeze({
+    AU_KM:         1.496e8,                        // Sun–Earth distance
+    RSUN_KM:       6.957e5,                        // solar radius
+    OMEGA_RAD_S:   2 * Math.PI / (25.38 * 86400),  // sidereal (Carrington) rotation
+    LIGHT_LAG_MIN: 1.496e8 / 299792.458 / 60,      // photon travel time ≈ 8.32 min
+});
+
+/**
+ * Ballistic transit state of a CME cone analysis (DONKI: time tagged at
+ * 21.5 R☉, plane-of-sky speed). Constant-speed propagation from 21.5 R☉
+ * to Earth — the same disclosed method as the wind back-mapping. Real
+ * CMEs drag toward the ambient wind speed, so the arrival band is set to
+ * ±15 % of the remaining transit (≈ the ±10 h accuracy floor operational
+ * CME models quote). Fraction can exceed 1 (already arrived).
+ *
+ * @returns { fraction, etaMs, etaEarlyMs, etaLateMs, hoursInFlight,
+ *            arrived } | null
+ */
+export function cmeTransit(launchMs, vKmS, nowMs) {
+    if (!Number.isFinite(launchMs) || !Number.isFinite(vKmS) || vKmS < 100 ||
+        !Number.isFinite(nowMs) || nowMs < launchMs) return null;
+    const distKm = SOLAR.AU_KM - 21.5 * SOLAR.RSUN_KM;
+    const transitMs = (distKm / vKmS) * 1000;
+    const flightMs = nowMs - launchMs;
+    const etaMs = launchMs + transitMs;
+    const band = Math.max(0, etaMs - nowMs) * 0.15 + 2 * 3.6e6;   // ±(15 % + 2 h floor)
+    return {
+        fraction: flightMs / transitMs,
+        etaMs,
+        etaEarlyMs: etaMs - band,
+        etaLateMs:  etaMs + band,
+        hoursInFlight: flightMs / 3.6e6,
+        arrived: flightMs >= transitMs,
+    };
+}
+
+/**
+ * Ballistic solar-departure estimate: plasma measured at L1 at tL1Ms with
+ * speed v left the corona (AU − L1)/v seconds earlier. Constant-speed
+ * assumption — the real wind still accelerates inside ~0.1 AU and stream
+ * interactions rearrange arrivals, so treat as ±½ day (the solar radius,
+ * 0.5% of the leg, is ignored). ≈2.8 d at 620 km/s, ≈4.3 d at 400 km/s.
+ */
+export function sunDepartureMs(tL1Ms, vKmS) {
+    if (!Number.isFinite(tL1Ms) || !Number.isFinite(vKmS) || vKmS < 100) return null;
+    return tL1Ms - ((SOLAR.AU_KM - PHYS.L1_KM) / vKmS) * 1000;
+}
+
+/** Parker-spiral garden-hose angle at 1 AU: atan(Ω·r/v) — ≈45° at 430 km/s
+ *  (Ω·1 AU ≈ 429 km/s, the classic coincidence). */
+export function parkerSpiralDeg(vKmS) {
+    if (!Number.isFinite(vKmS) || vKmS < 100) return null;
+    return Math.atan2(SOLAR.OMEGA_RAD_S * SOLAR.AU_KM, vKmS) * 180 / Math.PI;
+}
+
+/** Solar rotation swept during the Sun→Earth transit, Ω·(AU/v): the wind
+ *  arriving now left a source this many degrees east of the current
+ *  sub-Earth longitude (the Sun turned under the outflow while it flew). */
+export function sourceRotationDeg(vKmS) {
+    if (!Number.isFinite(vKmS) || vKmS < 100) return null;
+    return SOLAR.OMEGA_RAD_S * (SOLAR.AU_KM / vKmS) * 180 / Math.PI;
+}
+
+/**
+ * Carrington coordinates of the solar disk center as seen from Earth
+ * (Meeus, Astronomical Algorithms ch. 29): L0 = heliographic longitude of
+ * the central meridian in the Carrington frame (decreases ~13.2°/day —
+ * the SYNODIC rate, because Earth orbits while the Sun rotates), B0 = the
+ * ±7.25° heliographic latitude tilt of the disk center. Apparent solar
+ * longitude comes from earthOrbit (aberration ~0.006° ignored); good to
+ * ~0.1°, far inside ballistic back-mapping's ±½-day (±6°) uncertainty.
+ *
+ * This is the bridge between the timing ledger and REAL solar imagery:
+ * the wind arriving now was on the Earth-facing central meridian at
+ * departure, so its source Carrington longitude is simply L0(departure) —
+ * directly comparable with HEK coronal-hole detections (hgc_x).
+ */
+export function carringtonL0(ms) {
+    const jd = ms / 86400000 + 2440587.5;
+    const d2r = Math.PI / 180;
+    // Sidereal rotation phase from the Carrington epoch (JD 2398220.0).
+    const theta = (((jd - 2398220.0) * 360 / 25.38) % 360 + 360) % 360;
+    // Ascending node of the solar equator on the ecliptic.
+    const K = (73.6667 + 1.3958333 * (jd - 2396758.0) / 36525) * d2r;
+    const I = 7.25 * d2r;                        // solar equator inclination
+    // Apparent geocentric solar longitude = Earth's heliocentric + 180°.
+    const lam = ((earthOrbit(ms).lonDeg + 180) % 360) * d2r;
+    const lamK = lam - K;
+    const eta = Math.atan2(Math.sin(lamK) * Math.cos(I), Math.cos(lamK)) / d2r;
+    // +180: the (JD − 2398220)·360/25.38 phase convention lands the prime
+    // meridian half a rotation off the operational (HEK/SDO) Carrington
+    // frame. EMPIRICALLY PINNED against HEK hgc_x − hgs_x pairs: offset
+    // was 180.00° exactly at 2026-07-07T20:02 and 2026-07-08T00:02 UT
+    // (L0 = 339.96° / 337.75°) — found by the back-mapping validation
+    // study BEFORE the constant shipped anywhere. Tests anchor these.
+    const L0 = ((eta - theta + 180) % 360 + 360) % 360;
+    const B0 = Math.asin(Math.sin(lamK) * Math.sin(I)) / d2r;
+    return { L0, B0 };
+}
+
+/**
+ * Match a back-mapped source Carrington longitude against the HEK
+ * coronal-hole catalog (api/hek/coronal-holes rows: { lat_deg,
+ * lon_carrington_deg, frm_name, ... }). Scoring favors low/mid-latitude
+ * holes — polar-hole wind mostly misses the ecliptic — via a latitude
+ * penalty above ±45°. Attribution rules follow the standard solar-wind
+ * taxonomy: fast wind (≥480 km/s) traces to a CH within 20° of longitude;
+ * slow wind needs a tight (≤12°) match, otherwise it is streamer-belt
+ * wind by default. Returns null when there is nothing to match against.
+ */
+/**
+ * Per-hole historical wind association — the INVERSE of attributeWindSource.
+ * Every 1-min driver sample back-maps to its own source longitude (its own
+ * measured speed at its own L1 time); a sample "belongs" to a hole when
+ * within tolDeg of Carrington longitude. Each hole's association is then
+ * the count + median speed of ITS samples: a measured record of what Earth
+ * actually received from that hole's longitude. Holes with no arrivals in
+ * the driver window (e.g. east of the central meridian — their wind hasn't
+ * arrived yet) return assoc: null; consumers treat that as "no record this
+ * rotation", not zero. Same validated mapping the back-mapping study
+ * scored (82 % fast-wind hit at ±20° vs 37 % chance).
+ *
+ * @param {Array} holes    HEK rows ({ lat_deg, lon_carrington_deg, ... })
+ * @param {Array} drivers  [{ t, v }] 1-min series (24 h typical); strided
+ *                         internally to ~10-min samples
+ * @param {number} strideN sample stride (default 10 — right for 1-min
+ *                         series; pass 1 for pre-bucketed data, e.g. the
+ *                         validation scripts' 6-h medians)
+ * @returns holes decorated with assoc: { n, vMed } | null
+ */
+export function holeWindAssociation(holes, drivers, tolDeg = 15, strideN = 10) {
+    if (!Array.isArray(holes) || !holes.length) return [];
+    const src = [];
+    if (Array.isArray(drivers)) {
+        for (let i = 0; i < drivers.length; i += Math.max(1, strideN)) {
+            const d = drivers[i];
+            if (!d || !Number.isFinite(d.v) || d.v < 100 || !Number.isFinite(d.t)) continue;
+            const dep = sunDepartureMs(d.t, d.v);
+            if (dep == null) continue;
+            src.push({ lon: carringtonL0(dep).L0, v: d.v });
+        }
+    }
+    return holes.map(h => {
+        const lon = h?.lon_carrington_deg;
+        if (!Number.isFinite(lon) || !src.length) return { ...h, assoc: null };
+        const vs = [];
+        for (const s of src) {
+            const dd = Math.abs((((s.lon - lon) % 360) + 540) % 360 - 180);
+            if (dd <= tolDeg) vs.push(s.v);
+        }
+        if (!vs.length) return { ...h, assoc: null };
+        vs.sort((a, b) => a - b);
+        return { ...h, assoc: { n: vs.length, vMed: vs[Math.floor(vs.length / 2)] } };
+    });
+}
+
+// ── NOAA space-weather scales (the operational vocabulary) ──────────────────
+// Pure threshold maps, per SWPC's published scale definitions. Level 0 =
+// below scale. These give the dashboard the same R/S/G language operators
+// and SWPC products use, computed from the live feeds.
+
+/** R (radio blackout) from GOES 0.1–0.8 nm X-ray flux (W/m²):
+ *  R1=M1(1e-5), R2=M5, R3=X1(1e-4), R4=X10, R5=X20. */
+export function noaaRScale(xrayWm2) {
+    if (!Number.isFinite(xrayWm2) || xrayWm2 < 1e-5) return { level: 0, label: 'R0' };
+    const level = xrayWm2 >= 2e-3 ? 5 : xrayWm2 >= 1e-3 ? 4
+                : xrayWm2 >= 1e-4 ? 3 : xrayWm2 >= 5e-5 ? 2 : 1;
+    return { level, label: `R${level}` };
+}
+
+/** S (solar radiation storm) from GOES ≥10 MeV integral proton flux (pfu):
+ *  S1=10, S2=100, S3=10³, S4=10⁴, S5=10⁵. */
+export function noaaSScale(p10pfu) {
+    if (!Number.isFinite(p10pfu) || p10pfu < 10) return { level: 0, label: 'S0' };
+    const level = Math.min(5, Math.floor(Math.log10(p10pfu)));
+    return { level, label: `S${level}` };
+}
+
+/** G (geomagnetic storm) from Kp: G1=5 … G5=9. */
+export function noaaGScale(kp) {
+    if (!Number.isFinite(kp) || kp < 5) return { level: 0, label: 'G0' };
+    const level = Math.min(5, Math.floor(kp) - 4);
+    return { level, label: `G${level}` };
+}
+
+/**
+ * GEO internal-charging risk from the GOES ≥2 MeV electron flux (pfu).
+ * The 1 000 pfu NOAA alert threshold anchors the 'high' tier — sustained
+ * ≥2 MeV fluence is the classic deep-dielectric charging driver (the
+ * "killer electrons" of the outer radiation belt, the same population
+ * this page's ring current feeds during storm recovery).
+ */
+export function geoChargingRisk(e2MeVpfu) {
+    if (!Number.isFinite(e2MeVpfu)) return { level: 0, label: 'unknown' };
+    if (e2MeVpfu >= 1e4)  return { level: 3, label: 'severe' };
+    if (e2MeVpfu >= 1000) return { level: 2, label: 'high' };
+    if (e2MeVpfu >= 100)  return { level: 1, label: 'elevated' };
+    return { level: 0, label: 'low' };
+}
+
+/** Synodic solar rotation as seen from Earth (Carrington period 27.2753 d). */
+export const SYNODIC_DEG_PER_DAY = 360 / 27.2753;
+
+/**
+ * Recurrence (persistence) forecast — NOAA's operational technique for
+ * recurrent high-speed streams, run over the HEK catalog: a hole's wind
+ * record from one central-meridian crossing is the prediction for its
+ * next one.
+ *
+ * For each non-polar hole, both the LAST and NEXT meridian crossings are
+ * considered (a hole that crossed 2 days ago has its stream arriving
+ * ~now — the most actionable case); arrival = crossing + ballistic
+ * transit. Speed: the hole's own measured record (holeWindAssociation)
+ * with a ±60 km/s band — for west holes this projects THIS rotation's
+ * record to the next crossing, the classic 27-day recurrence — or, for
+ * holes with no record yet, a coronal-hole fast-wind climatology band
+ * [450, 650] km/s, labeled as such (basis: 'climatology'). Once the
+ * driver archive exceeds one rotation, east holes inherit last-rotation
+ * records through holeWindAssociation automatically — no new code.
+ *
+ * Returns holes decorated with .forecast, sorted by soonest arrival:
+ *   { lonWDeg, crossing:'last'|'next', crossMs, arriveMs,
+ *     arriveEarlyMs, arriveLateMs, vUsed|null, basis, daysToArrival }
+ */
+export function holeArrivalForecast(holes, nowMs, opts = {}) {
+    const latMax = opts.latMax ?? 65;
+    const [vClimLo, vClimHi] = opts.climatology ?? [450, 650];
+    if (!Array.isArray(holes) || !Number.isFinite(nowMs)) return [];
+    const DAY = 86.4e6;
+    const L0 = carringtonL0(nowMs).L0;
+    const transitDays = v => (SOLAR.AU_KM - PHYS.L1_KM) / v / 86400;
+    const out = [];
+    for (const h of holes) {
+        const lonCar = h?.lon_carrington_deg;
+        if (!Number.isFinite(lonCar) || Math.abs(h?.lat_deg ?? 90) > latMax) continue;
+        const lonW = ((lonCar - L0) % 360 + 540) % 360 - 180;   // + = west of CM
+        const sinceCross = (lonW >= 0 ? lonW : 360 + lonW) / SYNODIC_DEG_PER_DAY;
+        const untilCross = (lonW >= 0 ? 360 - lonW : -lonW) / SYNODIC_DEG_PER_DAY;
+        const rec = Number.isFinite(h?.assoc?.vMed) ? h.assoc.vMed : null;
+        const vLo = rec ? Math.max(250, rec - 60) : vClimLo;
+        const vHi = rec ? rec + 60 : vClimHi;
+        const vMid = rec ?? (vClimLo + vClimHi) / 2;
+        let best = null;
+        for (const [crossing, dDays] of [['last', -sinceCross], ['next', untilCross]]) {
+            const crossMs = nowMs + dDays * DAY;
+            const arriveLateMs = crossMs + transitDays(vLo) * DAY;
+            // +1 d grace: streams persist beyond onset — an arrival window
+            // that ended less than a day ago is spent, older ones expired.
+            if (arriveLateMs + DAY < nowMs) continue;
+            const f = {
+                lonWDeg: lonW, crossing, crossMs,
+                arriveMs:      crossMs + transitDays(vMid) * DAY,
+                arriveEarlyMs: crossMs + transitDays(vHi) * DAY,
+                arriveLateMs,
+                vUsed: rec, basis: rec ? 'record' : 'climatology',
+            };
+            f.daysToArrival = (f.arriveMs - nowMs) / DAY;
+            if (!best || f.arriveMs < best.arriveMs) best = f;
+        }
+        if (best) out.push({ ...h, forecast: best });
+    }
+    return out.sort((a, b) => a.forecast.arriveMs - b.forecast.arriveMs);
+}
+
+export function attributeWindSource(holes, srcCarringtonLon, vKmS) {
+    if (!Array.isArray(holes) || !holes.length || !Number.isFinite(srcCarringtonLon)) return null;
+    let best = null;
+    for (const h of holes) {
+        const lon = h?.lon_carrington_deg;
+        if (!Number.isFinite(lon)) continue;
+        const dLon = Math.abs((((lon - srcCarringtonLon) % 360) + 540) % 360 - 180);
+        const latPen = Math.max(0, Math.abs(h.lat_deg ?? 90) - 45) * 0.8;
+        const score = dLon + latPen;
+        if (!best || score < best.score) best = { hole: h, dLon, score };
+    }
+    if (!best) return null;
+    const fast = Number.isFinite(vKmS) && vKmS >= 480;
+    const matched = best.dLon <= (fast ? 20 : 12);
+    return {
+        matched,
+        kind: matched ? 'coronal-hole' : (fast ? 'unattributed-fast' : 'streamer-belt'),
+        dLonDeg: best.dLon,
+        hole: matched ? best.hole : null,
+    };
+}

@@ -97,7 +97,7 @@ export default async function handler(request) {
         return jsonError('parse_error', 'Unexpected DONKI CMEAnalysis format', { source: 'NASA DONKI' });
     }
 
-    const cmes = raw
+    let cmes = raw
         .filter(c => c?.time21_5)
         .map(c => {
             const lat       = c.latitude   != null ? parseFloat(c.latitude)   : null;
@@ -106,6 +106,8 @@ export default async function handler(request) {
             const speed     = c.speed      != null ? parseFloat(c.speed)      : null;
             return {
                 time:           isoTag(c.time21_5),
+                cme_id:         c.associatedCMEID ?? null,
+                most_accurate:  c.isMostAccurate === true,
                 speed_km_s:     speed,
                 latitude_deg:   lat,
                 longitude_deg:  lon,
@@ -116,6 +118,62 @@ export default async function handler(request) {
             };
         })
         .sort((a, b) => (b.time ?? '').localeCompare(a.time ?? ''));
+
+    // One row per PHYSICAL CME: DONKI publishes several analyses per event
+    // (different fits/instruments). Keep isMostAccurate when present, else
+    // the newest analysis; un-IDed rows pass through untouched. Without
+    // this the in-flight layer rendered the same CME two or three times.
+    {
+        const byId = new Map();
+        const unIded = [];
+        for (const c of cmes) {
+            if (!c.cme_id) { unIded.push(c); continue; }
+            const prev = byId.get(c.cme_id);
+            if (!prev || (c.most_accurate && !prev.most_accurate)) byId.set(c.cme_id, c);
+        }
+        cmes = [...byId.values(), ...unIded]
+            .sort((a, b) => (b.time ?? '').localeCompare(a.time ?? ''));
+    }
+
+    // WSA-ENLIL modeled Earth arrivals for the same window — NOAA-grade
+    // ETAs the client PREFERS over ballistic (which stays visible as the
+    // cross-check). Best-effort: any failure degrades to ballistic-only.
+    try {
+        const enlilURL = `https://api.nasa.gov/DONKI/WSAEnlilSimulations?startDate=${fmt(start)}&endDate=${fmt(end)}&api_key=${nasaKey}`;
+        const eres = await fetchWithTimeout(enlilURL, {
+            headers: { Accept: 'application/json' }, timeoutMs: 12_000,
+        });
+        if (eres.ok) {
+            const sims = await eres.json();
+            if (Array.isArray(sims)) {
+                // cme_id → the newest simulation carrying an Earth shock arrival.
+                const byCme = new Map();
+                for (const s of sims) {
+                    if (!s?.estimatedShockArrivalTime) continue;
+                    for (const inp of s.cmeInputs ?? []) {
+                        if (!inp?.cmeid) continue;
+                        const prev = byCme.get(inp.cmeid);
+                        if (!prev || String(s.modelCompletionTime ?? '') > String(prev.modelCompletionTime ?? '')) {
+                            byCme.set(inp.cmeid, s);
+                        }
+                    }
+                }
+                for (const c of cmes) {
+                    const s = c.cme_id ? byCme.get(c.cme_id) : null;
+                    if (!s) continue;
+                    c.enlil = {
+                        shock_arrival: isoTag(s.estimatedShockArrivalTime),
+                        duration_h:    s.estimatedDuration != null ? parseFloat(s.estimatedDuration) : null,
+                        kp_90:         s.kp_90  ?? null,
+                        kp_135:        s.kp_135 ?? null,
+                        kp_180:        s.kp_180 ?? null,
+                        earth_gb:      s.isEarthGB === true,
+                        completed:     isoTag(s.modelCompletionTime),
+                    };
+                }
+            }
+        }
+    } catch { /* ballistic-only fallback */ }
 
     const earthCme = cmes.find(c => c.earth_directed) ?? null;
     const isHistorical = !!(explicitStart && explicitEnd);

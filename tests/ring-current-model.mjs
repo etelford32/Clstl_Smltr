@@ -34,6 +34,10 @@ import {
     bouncePeriodSeconds, subsolarPoint, dipoleTiltRad,
     geocoronalDensity, chargeExchangeCrossSection, chargeExchangeLifetimeHours,
     earthOrbit, shueStandoffRe, shueAlpha, shueRadiusRe, bowShockStandoffRe,
+    SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
+    carringtonL0, attributeWindSource, holeWindAssociation,
+    holeArrivalForecast, SYNODIC_DEG_PER_DAY,
+    noaaRScale, noaaSScale, noaaGScale, geoChargingRisk, cmeTransit,
 } from '../js/ring-current-model.js';
 
 let n = 0;
@@ -497,6 +501,213 @@ const ok = (msg) => { n++; console.log(`  ✓ ${msg}`); };
     // Null-safety: defaults, no throws.
     assert.ok(Number.isFinite(shueStandoffRe(null, null)));
     ok('Shue: nominal ~10.3 Rᴇ, Pdyn^-1/6.6, Bz erosion, sub-GEO extremes, flaring');
+}
+
+// ── 22. Sun→Earth timing: ballistic back-mapping + Parker spiral ────────────
+{
+    // Photon lag ≈ 8.32 min (1 AU / c).
+    assert.ok(Math.abs(SOLAR.LIGHT_LAG_MIN - 8.317) < 0.01, `light lag ${SOLAR.LIGHT_LAG_MIN}`);
+    // 400 km/s wind: (AU − L1)/v ≈ 4.28 days before its L1 measurement.
+    const t0 = 1.7e12;
+    const dep400 = sunDepartureMs(t0, 400);
+    const days400 = (t0 - dep400) / 86.4e6;
+    assert.ok(Math.abs(days400 - 4.28) < 0.05, `400 km/s → ${days400} d`);
+    // Fast wind arrives sooner — the dispersion that smears one solar
+    // "moment" over days of reception (the paper question).
+    const days620 = (t0 - sunDepartureMs(t0, 620)) / 86.4e6;
+    assert.ok(days620 < days400 && Math.abs(days620 - 2.76) < 0.05, `620 → ${days620} d`);
+    // Reception window between the two speeds is a MEASURABLE ~1.5 days.
+    assert.ok(days400 - days620 > 1.4 && days400 - days620 < 1.7);
+    // Parker garden-hose angle: ≈45° near 430 km/s, tighter for fast wind.
+    assert.ok(Math.abs(parkerSpiralDeg(429) - 45) < 1.0, `spiral ${parkerSpiralDeg(429)}`);
+    assert.ok(parkerSpiralDeg(700) < parkerSpiralDeg(350));
+    // Source-longitude sweep: Ω·AU/v — ~61° at 400 km/s, less when fast;
+    // consistency: tan(spiral) = rotation (radians) by construction.
+    const rot = sourceRotationDeg(400);
+    assert.ok(Math.abs(rot - 61.4) < 1.0, `rotation ${rot}`);
+    assert.ok(Math.abs(Math.tan(parkerSpiralDeg(400) * Math.PI / 180) - rot * Math.PI / 180) < 1e-9);
+    // Null-safety: garbage in ⇒ null out, no throws.
+    assert.equal(sunDepartureMs(t0, NaN), null);
+    assert.equal(parkerSpiralDeg(0), null);
+    assert.equal(sourceRotationDeg(undefined), null);
+    ok('Sun→Earth ledger: 8.3 light-min, 4.3 d @ 400 km/s, ~1.5 d dispersion, 45° spiral');
+}
+
+// ── 23. Carrington coordinates + coronal-hole attribution ───────────────────
+{
+    const DAY = 86.4e6;
+    const t0 = Date.UTC(2026, 6, 11);   // 2026-07-11
+    const { L0, B0 } = carringtonL0(t0);
+    assert.ok(L0 >= 0 && L0 < 360 && Number.isFinite(B0));
+    // Synodic retrograde rate ≈ 13.2°/day (varies slightly with Earth's
+    // orbital speed): check over 10 days.
+    const dL = ((L0 - carringtonL0(t0 + 10 * DAY).L0) % 360 + 360) % 360;
+    assert.ok(Math.abs(dL / 10 - 13.2) < 0.5, `synodic rate ${(dL / 10).toFixed(2)}°/d`);
+    // One Carrington rotation (27.2753 d synodic) returns L0 to ~itself.
+    const dRot = ((L0 - carringtonL0(t0 + 27.2753 * DAY).L0) % 360 + 360) % 360;
+    assert.ok(dRot < 4 || dRot > 356, `CR period residual ${dRot.toFixed(1)}°`);
+    // B0 bounded by the 7.25° solar-equator tilt; known seasonal anchors:
+    // ~0° in early June, max ≈ +7.2° early September, min ≈ −7.2° early March.
+    for (let k = 0; k < 12; k++) assert.ok(Math.abs(carringtonL0(t0 + k * 30 * DAY).B0) < 7.26);
+    assert.ok(Math.abs(carringtonL0(Date.UTC(2026, 5, 6)).B0) < 0.6, 'B0 ≈ 0 near Jun 6');
+    assert.ok(carringtonL0(Date.UTC(2026, 8, 8)).B0 > 6.9, 'B0 max near Sep 8');
+    assert.ok(carringtonL0(Date.UTC(2026, 2, 5)).B0 < -6.9, 'B0 min near Mar 5');
+    // ABSOLUTE zero-point pinned against the HEK/SDO operational frame
+    // (L0 = hgc_x − hgs_x from catalogued CH detections). These anchors
+    // caught a 180° phase error — do not relax them.
+    const a1 = carringtonL0(Date.parse('2026-07-08T00:02:41Z')).L0;
+    const a2 = carringtonL0(Date.parse('2026-07-07T20:02:41Z')).L0;
+    assert.ok(Math.abs(a1 - 337.75) < 0.35, `HEK anchor 1: ${a1.toFixed(2)} vs 337.75`);
+    assert.ok(Math.abs(a2 - 339.96) < 0.35, `HEK anchor 2: ${a2.toFixed(2)} vs 339.96`);
+    // Attribution: fast wind matches a CH within 20° (with wraparound)…
+    const holes = [
+        { lat_deg: 15, lon_carrington_deg: 358, frm_name: 'SPoCA-CH' },
+        { lat_deg: -72, lon_carrington_deg: 3, frm_name: 'SPoCA-CH' },   // polar
+    ];
+    const hit = attributeWindSource(holes, 2, 600);
+    assert.ok(hit.matched && hit.kind === 'coronal-hole');
+    // …and the latitude penalty prefers the mid-lat hole over the closer
+    // polar one (polar-hole wind mostly misses the ecliptic).
+    assert.equal(hit.hole.lat_deg, 15);
+    assert.ok(Math.abs(hit.dLonDeg - 4) < 1e-9, `wrap dLon ${hit.dLonDeg}`);
+    // Slow wind far from any hole = streamer belt; fast unmatched flagged.
+    assert.equal(attributeWindSource(holes, 120, 380).kind, 'streamer-belt');
+    assert.equal(attributeWindSource(holes, 120, 650).kind, 'unattributed-fast');
+    // Null-safety.
+    assert.equal(attributeWindSource([], 10, 500), null);
+    assert.equal(attributeWindSource(holes, NaN, 500), null);
+    ok('Carrington L0/B0: 13.2°/d synodic, 27.28 d period, B0 seasonal anchors; CH attribution');
+}
+
+// ── 24. Per-hole historical wind association (inverse back-mapping) ─────────
+{
+    const now = Date.UTC(2026, 6, 11);
+    // 24 h of constant 600 km/s drivers: every sample back-maps near ONE
+    // source longitude arc (L0 sweeps ~13.2° over the day of departures).
+    const drivers = Array.from({ length: 1440 }, (_, i) => ({
+        t: now - (1440 - i) * 60_000, v: 600,
+    }));
+    const arcLon = carringtonL0(sunDepartureMs(now - 12 * 3.6e6, 600)).L0;
+    const holes = [
+        { lat_deg: 10, lon_carrington_deg: arcLon },                    // on the arc
+        { lat_deg: 10, lon_carrington_deg: (arcLon + 90) % 360 },       // far away
+    ];
+    const out = holeWindAssociation(holes, drivers);
+    assert.ok(out[0].assoc && out[0].assoc.n > 50, `on-arc n = ${out[0].assoc?.n}`);
+    assert.equal(out[0].assoc.vMed, 600);
+    // The hole Earth's wind never traced to has NO record — null, not zero.
+    assert.equal(out[1].assoc, null);
+    // Mixed speeds attribute separately: slow samples map ~20° further
+    // back in longitude than fast ones from the same arrival day.
+    // (10-min blocks — the associator strides by 10 samples, so per-sample
+    // alternation would only ever land on one speed.)
+    const mixed = drivers.map((d, i) => ({ ...d, v: Math.floor(i / 10) % 2 ? 380 : 640 }));
+    const lonSlow = carringtonL0(sunDepartureMs(now - 12 * 3.6e6, 380)).L0;
+    const out2 = holeWindAssociation(
+        [{ lat_deg: 0, lon_carrington_deg: lonSlow }], mixed, 10);
+    assert.ok(out2[0].assoc && Math.abs(out2[0].assoc.vMed - 380) < 30,
+        `slow hole vMed = ${out2[0].assoc?.vMed}`);
+    // Null-safety: empty inputs.
+    assert.deepEqual(holeWindAssociation([], drivers), []);
+    assert.equal(holeWindAssociation(holes, [])[0].assoc, null);
+    ok('hole↔wind association: on-arc record (v=600), off-arc null, speed-resolved');
+}
+
+// ── 25. Recurrence (27-day persistence) forecast ────────────────────────────
+{
+    const now = Date.UTC(2026, 6, 11);
+    const L0 = carringtonL0(now).L0;
+    const atW = w => (L0 + w + 360) % 360;   // Carrington lon of a hole at w° west
+    // Hole ON the meridian with a 600 km/s record: its stream arrives one
+    // ballistic transit from now (~2.84 d), from the LAST (=now) crossing.
+    const [cm] = holeArrivalForecast(
+        [{ lat_deg: 10, lon_carrington_deg: atW(0), assoc: { n: 80, vMed: 600 } }], now);
+    assert.equal(cm.forecast.basis, 'record');
+    assert.equal(cm.forecast.crossing, 'last');
+    assert.ok(Math.abs(cm.forecast.daysToArrival - 2.85) < 0.1, `CM arrival ${cm.forecast.daysToArrival}`);
+    // Hole 20°W (crossed 1.5 d ago): arrival imminent — still the last crossing.
+    const [w20] = holeArrivalForecast(
+        [{ lat_deg: -20, lon_carrington_deg: atW(20), assoc: { n: 40, vMed: 500 } }], now);
+    assert.equal(w20.forecast.crossing, 'last');
+    assert.ok(w20.forecast.daysToArrival > 1 && w20.forecast.daysToArrival < 3);
+    // Hole 70°W (its stream already passed): forecast rolls to the NEXT
+    // rotation — the classic 27-day recurrence.
+    const [w70] = holeArrivalForecast(
+        [{ lat_deg: 5, lon_carrington_deg: atW(70), assoc: { n: 90, vMed: 620 } }], now);
+    assert.equal(w70.forecast.crossing, 'next');
+    assert.ok(w70.forecast.daysToArrival > 22 && w70.forecast.daysToArrival < 28,
+        `27-d recurrence ${w70.forecast.daysToArrival}`);
+    // East hole, no record: climatology band, early < mid < late.
+    const [e30] = holeArrivalForecast(
+        [{ lat_deg: 0, lon_carrington_deg: atW(-30) }], now);
+    assert.equal(e30.forecast.basis, 'climatology');
+    assert.ok(e30.forecast.arriveEarlyMs < e30.forecast.arriveMs &&
+              e30.forecast.arriveMs < e30.forecast.arriveLateMs);
+    assert.ok(Math.abs(e30.forecast.daysToArrival - (30 / SYNODIC_DEG_PER_DAY + 3.1)) < 0.5);
+    // Polar holes are excluded (their wind misses the ecliptic); sorting
+    // puts the soonest arrival first.
+    const list = holeArrivalForecast([
+        { lat_deg: 80, lon_carrington_deg: atW(0) },
+        { lat_deg: 0, lon_carrington_deg: atW(-60) },
+        { lat_deg: 0, lon_carrington_deg: atW(5), assoc: { n: 50, vMed: 550 } },
+    ], now);
+    assert.equal(list.length, 2);
+    assert.equal(list[0].forecast.crossing, 'last');
+    ok('recurrence forecast: CM+2.8 d, ongoing-arrival, 27-d rollover, climatology, sorting');
+}
+
+// ── 26. NOAA scales + GEO charging risk ─────────────────────────────────────
+{
+    // R: SWPC flare-class anchors — M1=R1, M5=R2, X1=R3, X10=R4, X20=R5.
+    assert.equal(noaaRScale(5e-6).level, 0);
+    assert.equal(noaaRScale(1.2e-5).label, 'R1');
+    assert.equal(noaaRScale(5e-5).label, 'R2');
+    assert.equal(noaaRScale(1e-4).label, 'R3');
+    assert.equal(noaaRScale(1e-3).label, 'R4');
+    assert.equal(noaaRScale(3e-3).label, 'R5');
+    // S: decade thresholds from 10 pfu (≥10 MeV protons).
+    assert.equal(noaaSScale(5).level, 0);
+    assert.equal(noaaSScale(15).label, 'S1');
+    assert.equal(noaaSScale(1500).label, 'S3');
+    assert.equal(noaaSScale(2e5).label, 'S5');
+    // G: Kp 5→G1 … 9→G5, and Kp 9.33 stays G5.
+    assert.equal(noaaGScale(4.7).level, 0);
+    assert.equal(noaaGScale(5).label, 'G1');
+    assert.equal(noaaGScale(7.3).label, 'G3');
+    assert.equal(noaaGScale(9.33).label, 'G5');
+    // GEO charging: the 1 000 pfu NOAA alert threshold anchors 'high'.
+    assert.equal(geoChargingRisk(40).label, 'low');
+    assert.equal(geoChargingRisk(300).label, 'elevated');
+    assert.equal(geoChargingRisk(1000).label, 'high');
+    assert.equal(geoChargingRisk(2e4).label, 'severe');
+    assert.equal(geoChargingRisk(NaN).label, 'unknown');
+    ok('NOAA R/S/G scales at SWPC anchors; GEO charging tiers at 100/1000/10⁴ pfu');
+}
+
+// ── 27. CME ballistic transit ───────────────────────────────────────────────
+{
+    const t0 = Date.UTC(2026, 6, 10);
+    // 1000 km/s from 21.5 R☉: (1.496e8 − 21.5·6.957e5) km / 1000 ≈ 37.4 h.
+    const full = cmeTransit(t0, 1000, t0 + 37.5 * 3.6e6);
+    assert.ok(Math.abs(full.fraction - 1) < 0.01, `fraction ${full.fraction}`);
+    assert.ok(full.arrived);
+    // Halfway: 20 h into a 40-h transit at ~935 km/s.
+    const half = cmeTransit(t0, 1000, t0 + 18.7 * 3.6e6);
+    assert.ok(Math.abs(half.fraction - 0.5) < 0.01);
+    assert.ok(!half.arrived);
+    // ETA band: ordered, ≥ the 2 h floor, and shrinking as arrival nears.
+    assert.ok(half.etaEarlyMs < half.etaMs && half.etaMs < half.etaLateMs);
+    const near = cmeTransit(t0, 1000, t0 + 35 * 3.6e6);
+    assert.ok((near.etaLateMs - near.etaMs) < (half.etaLateMs - half.etaMs));
+    assert.ok((near.etaLateMs - near.etaMs) >= 2 * 3.6e6 - 1);
+    // Slow CME takes days: 450 km/s ≈ 83 h.
+    const slow = cmeTransit(t0, 450, t0 + 3.6e6);
+    assert.ok(Math.abs((slow.etaMs - t0) / 3.6e6 - 83.1) < 1);
+    // Null-safety: bad speed, time order, NaN.
+    assert.equal(cmeTransit(t0, 50, t0 + 1e6), null);
+    assert.equal(cmeTransit(t0, 800, t0 - 1e6), null);
+    assert.equal(cmeTransit(NaN, 800, t0), null);
+    ok('cmeTransit: 37.4 h @1000 km/s, halfway fraction, ETA band ordering, null-safety');
 }
 
 console.log(`\nring-current-model: all ${n} test groups passed`);

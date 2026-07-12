@@ -63,6 +63,88 @@ Implementation status is marked per phase. Code: `js/sim-clock.js` (clock + scal
 >   time, mean-solar local time at the saved user location (js/user-location
 >   longitude — civil tz needs a tz db), and Earth's true orbital position
 >   (earthOrbit: heliocentric λ, r in AU, Kepler-second-law-tested).
+> - **In-flight CME layer** (2026-07-12): the Sun→L1 gap now carries real
+>   PREDICTION — DONKI cone analyses (via the existing /api/donki/cme
+>   proxy, NASA key server-side) become expanding annular fronts crossing
+>   the gap at their ballistic fraction (`cmeTransit` in the model:
+>   constant speed from 21.5 R☉, ±15 % + 2 h ETA band, node-tested at the
+>   37.4 h @ 1000 km/s anchor). Fronts hold at the L1 gate on arrival —
+>   where the corridor's MEASURED parcels take the story over — and
+>   flank-directed cones slide off-axis. Earth-relevance filter: strict
+>   earth_directed OR angular miss ≤ half-angle + 20° (glancing blows,
+>   labeled). Surfaced as: in-scene front + live ETA label, a "CMEs in
+>   flight" bridge row, and a Situation action line ("CME in flight —
+>   arrives ≈ … ±N h — prepare for shock + G-storm risk"). **WSA-ENLIL +
+>   third ledger** (same day): the proxy now dedupes analyses per
+>   physical CME (isMostAccurate preferred) and attaches DONKI WSA-ENLIL
+>   modeled Earth arrivals; the feed PREFERS the ENLIL ETA (basis-tagged,
+>   modeled-Kp shown) with ballistic as the visible cross-check. Third
+>   self-scoring loop: the daily cron verifies predicted ETAs against
+>   ACTUAL shock arrivals (detectShockArrivals — the scene's Pdyn-step
+>   trigger run on wall-clock data via the validation_pdyn_series RPC),
+>   scoring ENLIL vs ballistic per event (scoreCmeArrivals, node-tested;
+>   kind='cme' rows only when something was verifiable). Third sparkline
+>   in the validation panel.
+> - **Solar-origin emission + legible sweep wrap + stutter fixes**
+>   (2026-07-11): the journey now STARTS at the Sun — emission puffs born
+>   at the back-mapped source region (70 % weight) and visible CHs, at a
+>   cadence tied to the live measured flux (n·v of the arriving wind =
+>   what the source emitted when that plasma left); bulk drift is the
+>   honest crawl (the Sun→L1 leg is ≈2 900× more compressed than
+>   near-Earth — disclosed in the SUN→L1 label), swell/fade is a labeled
+>   rendering cue. A schematic Parker-spiral streamline (live garden-hose
+>   angle) ties the source to the L1 gate. Per-hole emission (same day):
+>   `holeWindAssociation` (model, tested) inverse-back-maps the 24 h
+>   driver series — every sample knows its own source longitude — giving
+>   each visible hole a measured arrival record { n, vMed }. Puff rate is
+>   weighted by that record and each puff crawls at ITS hole's recorded
+>   speed; holes with no record yet (east of the meridian) idle at a
+>   floor rather than being invented. **Recurrence forecast** (same day):
+>   `holeArrivalForecast` (model, tested) turns each hole's record into
+>   its next Earth-arrival window — crossing from solar rotation, transit
+>   ballistic, speed from the hole's own record (±60 km/s) or a labeled
+>   450–650 climatology band; considers both the LAST crossing (ongoing
+>   arrivals) and the NEXT (the classic 27-day recurrence — NOAA's
+>   operational technique for recurrent streams). Surfaced as two HUD
+>   rows ("next stream (27-d persistence)" / "then") and amber rings on
+>   disk holes with streams due within 5 days. Once the driver archive
+>   exceeds one rotation, east holes inherit last-rotation records
+>   through holeWindAssociation automatically. The τ-sweep wrap — which read
+>   as "the simulation reset itself" — is now legible: a sweep-progress
+>   bar under the SIM TIME badge, a "↻ replaying the same real window"
+>   flash on wrap, and an ~0.8 s transit-stream opacity dip (uFade)
+>   instead of a teleport. Stutter: per-frame GC eliminated on the hot
+>   paths (pooled wind-profile samples + in-place insertion sort, cached
+>   population list, particlePose scratch object for the pick loop) and
+>   the wind sheet went BackSide (the volumetric flare had the default
+>   camera INSIDE it — DoubleSide rasterized every pixel twice).
+> - **Wind source coordinates + live solar disk** (2026-07-11): the ledger
+>   now carries COORDINATES. Model: `carringtonL0(ms)` (Meeus ch. 29 disk-
+>   center L0/B0, property-tested: 13.2°/d synodic, 27.28 d period, B0
+>   seasonal anchors) and `attributeWindSource(holes, lon, v)` (fast wind
+>   → CH within 20°, slow → ≤12° else streamer belt; polar-lat penalty).
+>   Feed `_dispatch` back-maps the arriving wind to its source Carrington
+>   longitude (= L0 at departure), computes where that source sits on
+>   TODAY's disk (Stonyhurst W = L0(dep) − L0(now)), and matches it against
+>   the HEK coronal-hole catalog (existing /api/hek/coronal-holes edge
+>   route, now also served by dev-server). The Sun sprite became a live
+>   disk: limb-darkened photosphere + HEK holes rotated to current disk
+>   positions + a teal ring at the back-mapped source (dashed once behind
+>   the west limb). HUD "traces to" row names the structure — e.g.
+>   "coronal hole (SPoCA) S25 · Car 145° · now W37" — and the L1 gate
+>   label carries the same coordinates.
+> - **L1 measurement plane + emission→reception ledger** (2026-07-11): L1
+>   is rendered as the instrument it is — a translucent aperture disc (the
+>   "3D sheet") at the corridor start with a range-ring graticule, pulsing
+>   an expanding ring on each NEW 1-min sample (wall-clock: it is live
+>   instrumentation, like the parcel heartbeat), plus a DSCOVR/ACE dot on
+>   a real-amplitude (~4-unit), period-compressed Lissajous. The ledger
+>   (model: `SOLAR`, `sunDepartureMs` — Nolte–Roelof ballistic back-mapping
+>   — `parkerSpiralDeg`, `sourceRotationDeg`; feed: `now.sunLag`) quantifies
+>   emission vs reception: photons 8.3 min, plasma 2.8–4.3 d by speed
+>   (≈1.5 d dispersion across 400–620 km/s — the paper question), source
+>   longitude swept 40–60°. Surfaced in the bridge HUD panel, the in-scene
+>   L1 label, and per-parcel tooltips (each parcel dates its OWN departure).
 > - **Volumetric stream + shock front + perf instrumentation** (2026-07-11):
 >   the incoming stream is FULLY 3D — each parcel renders as a dense core
 >   plus an envelope filling a 15 Rᴇ-radius cross-section (wider than the

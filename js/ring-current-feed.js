@@ -33,6 +33,9 @@ import {
     stormClass, toDstStar, obmQ, obmTau, skill, findThresholdCrossing, kpToAp,
     oxygenFraction, subsolarPoint, dipoleTiltRad, chargeExchangeLifetimeHours,
     shueStandoffRe, shueAlpha,
+    SOLAR, sunDepartureMs, parkerSpiralDeg, sourceRotationDeg,
+    carringtonL0, attributeWindSource, holeWindAssociation, holeArrivalForecast,
+    cmeTransit,
 } from './ring-current-model.js';
 
 // rtsw_mag_1m is not in config.NOAA — defined locally, same as js/swpc-feed.js.
@@ -135,6 +138,26 @@ export function parseLatestKp(raw) {
  * the magnetometer) and fill values are dropped. Field names tolerate NOAA's
  * historical case drift (Hp / hp), like every other parser in this file.
  */
+/**
+ * Latest reading from a GOES integral-flux feed (xrays / integral-protons /
+ * integral-electrons 1-day JSON): rows carry { time_tag, flux, energy };
+ * pick the newest finite flux whose energy field matches. Returns
+ * { t, flux } or null. Powers the Situation panel's NOAA R/S scales and
+ * the GEO charging tier — parsing kept pure for the node tests.
+ */
+export function parseLatestFlux(raw, energyRe) {
+    if (!Array.isArray(raw)) return null;
+    let best = null;
+    for (const r of raw) {
+        if (!energyRe.test(String(r?.energy ?? ''))) continue;
+        const t = noaaTimeMs(r?.time_tag);
+        const flux = noaaNum(r?.flux);
+        if (t == null || flux == null || flux < 0) continue;
+        if (!best || t > best.t) best = { t, flux };
+    }
+    return best;
+}
+
 export function parseGoesMag(raw) {
     if (!Array.isArray(raw)) return [];
     const out = [];
@@ -288,6 +311,22 @@ export function computeState(driverSeries, observedDst, kp, nowMs, f107 = null) 
             kp,
             apNow:        kpToAp(kp),
             f107,
+            // Emission→reception ledger: ballistic back-mapping of the wind
+            // Earth is receiving NOW to its solar departure. Photons take
+            // 8.3 min; this plasma took days — and the lag disperses with
+            // speed, so one solar moment arrives smeared over ~1.5 days
+            // (the paper question the HUD + L1 gate label surface).
+            sunLag: (() => {
+                const v = latestValid(driverSeries, 'v');
+                const dep = sunDepartureMs(nowMs, v);
+                return {
+                    departureMs:  dep,
+                    days:         dep != null ? (nowMs - dep) / 86.4e6 : null,
+                    lightMin:     SOLAR.LIGHT_LAG_MIN,
+                    spiralDeg:    parkerSpiralDeg(v),
+                    sourceRotDeg: sourceRotationDeg(v),
+                };
+            })(),
         },
         // Predictive alert: first forecast crossing of the next storm-class
         // threshold — genuine lead time (the driver is already measured at L1).
@@ -401,6 +440,8 @@ export class RingCurrentFeed extends EventTarget {
         this._kp       = null;
         this._f107     = null;    // daily F10.7 (sfu) for the density panel
         this._goes     = [];      // GOES Hp series (GEO in-situ cross-check)
+        this._holes    = [];      // HEK coronal holes (wind source attribution)
+        this._cmes     = [];      // DONKI cone analyses (in-flight CME layer)
         this._timers   = {};
         this._mode     = 'full';  // 'full' | 'degraded'
         this._started  = false;
@@ -548,6 +589,24 @@ export class RingCurrentFeed extends EventTarget {
             if (goes.length) this._goes = goes;
         } catch (e) { this._noteError(e); }
 
+        // HEK coronal-hole catalog (30-min upstream cache) — the real solar
+        // imagery the back-mapped wind source is matched against. Best-
+        // effort: on failure the ledger still carries coordinates, just no
+        // structure attribution.
+        try {
+            const ch = await getJson('/api/hek/coronal-holes');
+            if (Array.isArray(ch?.data?.holes)) this._holes = ch.data.holes;
+        } catch (e) { this._noteError(e); }
+
+        // DONKI CME cone analyses (NASA key stays server-side) — the raw
+        // material for the IN-FLIGHT layer: matter genuinely between the
+        // Sun and L1 right now, with hours-to-days of real lead time.
+        // Best-effort; _dispatch turns these into live transit states.
+        try {
+            const cm = await getJson('/api/donki/cme?days=5');
+            if (Array.isArray(cm?.data?.cmes)) this._cmes = cm.data.cmes;
+        } catch (e) { this._noteError(e); }
+
         this._emit();
     }
 
@@ -589,6 +648,69 @@ export class RingCurrentFeed extends EventTarget {
     _dispatch(state) {
         const goes = goesCrossCheck(this._goes, state?.now?.dstModel ?? null, Date.now());
         const compute = this._worker && !this._workerBroken ? 'worker' : 'inline';
+        // Source mapping (main thread — needs this._holes, which the worker
+        // doesn't carry): the wind arriving now was on the Earth-facing
+        // central meridian at departure, so its source Carrington longitude
+        // is L0(departure); its Stonyhurst position TODAY is how far the
+        // Sun has since carried it toward the west limb. Then match against
+        // the HEK coronal-hole catalog.
+        const sl = state?.now?.sunLag;
+        if (sl && Number.isFinite(sl.departureMs)) {
+            const nowMs = state.updated ?? Date.now();
+            const dep = carringtonL0(sl.departureMs);
+            const cur = carringtonL0(nowMs);
+            sl.carringtonLon    = dep.L0;
+            sl.stonyhurstNowDeg = ((dep.L0 - cur.L0) % 360 + 360) % 360;
+            sl.l0NowDeg         = cur.L0;
+            sl.b0NowDeg         = cur.B0;
+            sl.source = attributeWindSource(this._holes, dep.L0, state?.drivers?.v);
+            // Each hole decorated with its own measured arrival record
+            // (inverse back-mapping over the 24 h driver series): the twin
+            // scales each hole's emission activity by what Earth actually
+            // received from that hole's longitude. Holes east of the
+            // meridian carry assoc: null — their wind hasn't arrived yet.
+            sl.holes = holeWindAssociation(this._holes, this._drivers);
+            // Recurrence outlook: each hole's next Earth-arrival window
+            // (crossing from solar rotation, transit ballistic, speed from
+            // the hole's own record — the 27-day persistence technique).
+            sl.recurrence = holeArrivalForecast(sl.holes, nowMs).slice(0, 4);
+        }
+        // In-flight CMEs: Earth-relevant cone analyses currently between
+        // the Sun and Earth (fraction < 1.05 keeps just-arrived fronts on
+        // screen through their impact). 'Earth-relevant' is looser than
+        // strictly earth_directed: cones whose angular miss ≤ half-angle
+        // + 20° can still deliver a flank/glancing blow.
+        const nowMs2 = state?.updated ?? Date.now();
+        const cmes = [];
+        for (const c of this._cmes ?? []) {
+            const launch = Date.parse(c?.time ?? '');
+            const tr = cmeTransit(launch, c?.speed_km_s, nowMs2);
+            if (!tr) continue;
+            // Preferred ETA: the WSA-ENLIL modeled arrival when DONKI has
+            // one (NOAA-grade), else our ballistic estimate. Both are kept
+            // — their disagreement is the live cross-check, and the daily
+            // cron scores each against the actual shock detection.
+            const enlilMs = Date.parse(c?.enlil?.shock_arrival ?? '');
+            const hasEnlil = Number.isFinite(enlilMs);
+            const etaMs = hasEnlil ? enlilMs : tr.etaMs;
+            // Retire once safely past the PREFERRED arrival.
+            if (nowMs2 > etaMs + 6 * 3.6e6 && tr.fraction > 1.05) continue;
+            const miss = Math.hypot(c.latitude_deg ?? 0, c.longitude_deg ?? 0);
+            const relevant = c.earth_directed || c.enlil?.earth_gb ||
+                (Number.isFinite(c.half_angle_deg) && miss <= c.half_angle_deg + 20);
+            if (!relevant) continue;
+            cmes.push({
+                ...c, launchMs: launch, transit: tr,
+                etaMs,
+                basis: hasEnlil ? 'enlil' : 'ballistic',
+                enlilEtaMs: hasEnlil ? enlilMs : null,
+                ballisticEtaMs: tr.etaMs,
+                crossCheckHours: hasEnlil ? (tr.etaMs - enlilMs) / 3.6e6 : null,
+                glancing: !c.earth_directed,
+            });
+        }
+        cmes.sort((a, b) => a.etaMs - b.etaMs);
+        if (state) state.cmes = cmes.slice(0, 4);
         this.dispatchEvent(new CustomEvent('state', {
             detail: state ? { ...state, goes, compute, mode: this._mode, errors: this._errors.slice(-3) }
                           : { goes, compute, mode: this._mode, errors: this._errors.slice(-3), updated: Date.now() },

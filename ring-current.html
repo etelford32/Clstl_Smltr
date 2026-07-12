@@ -159,6 +159,30 @@ body {
 
 .rc-sep { border-top:1px solid rgba(255,255,255,.08); margin:8px 0; }
 .rc-bars { display:flex; align-items:flex-end; gap:4px; height:34px; margin-top:8px; }
+.rc-spark { width:100%; height:26px; display:block; margin:2px 0 6px; }
+
+/* Situation panel: NOAA-scale chips + ranked action lines. */
+.rc-chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+.rc-chip {
+    font-size:.72rem; font-weight:800; letter-spacing:.05em; padding:3px 9px;
+    border-radius:6px; background:rgba(255,255,255,.06); color:#8b94ad;
+    border:1px solid rgba(255,255,255,.1); font-variant-numeric:tabular-nums;
+}
+.rc-chip.rc-lvl1 { background:rgba(255,214,102,.15); color:#ffd666; border-color:rgba(255,214,102,.35); }
+.rc-chip.rc-lvl2 { background:rgba(255,176,102,.18); color:#ffb066; border-color:rgba(255,176,102,.4); }
+.rc-chip.rc-lvl3 { background:rgba(255,125,102,.2);  color:#ff7d66; border-color:rgba(255,125,102,.45); }
+.rc-chip.rc-lvl4, .rc-chip.rc-lvl5 { background:rgba(255,46,99,.24); color:#ff4d79; border-color:rgba(255,77,121,.5); }
+.rc-actions { list-style:none; margin:0; padding:0; font-size:.78rem; line-height:1.55; }
+.rc-actions .rc-act { padding:3px 0 3px 15px; position:relative; color:#cdd5e4; }
+.rc-actions .rc-act::before {
+    content:''; position:absolute; left:0; top:.58em; width:7px; height:7px;
+    border-radius:50%; background:#5d6684;
+}
+.rc-act.rc-act-ok::before    { background:#37e0a0; }
+.rc-act.rc-act-info::before  { background:#59baff; }
+.rc-act.rc-act-warn::before  { background:#ffd666; }
+.rc-act.rc-act-alert::before { background:#ff5c47; box-shadow:0 0 6px #ff5c47; }
+.rc-actions b { color:#e8edf7; }
 .rc-bars .rc-bar {
     flex:1; min-height:2px; border-radius:2px 2px 0 0; opacity:.85;
     background:linear-gradient(180deg,#ff9a3d,#8a5420);
@@ -186,6 +210,19 @@ body {
 .rc-simtime .rc-simtime-sub {
     display:block; font-weight:400; font-size:.64rem; color:#8b94ad; letter-spacing:0;
 }
+/* Sweep progress: at ×τ the scene fast-forwards the SAME real forecast
+   window and wraps — the bar + replay flash make the restart legible. */
+.rc-simtime.rc-replay { border-color:rgba(127,230,195,.7); }
+.rc-simtime.rc-replay::after {
+    content:'↻ replaying the same real window';
+    display:block; font-weight:600; font-size:.6rem; color:#7fe6c3; letter-spacing:0;
+}
+.rc-sweep {
+    position:absolute; left:13px; top:60px; z-index:4; width:148px; height:3px;
+    background:rgba(255,255,255,.08); border-radius:2px; overflow:hidden;
+    pointer-events:none;
+}
+.rc-sweep-bar { height:100%; width:0; background:linear-gradient(90deg,#ffd27a,#ff9a3d); }
 .rc-mode-btn {
     font-size:.68rem; font-weight:650; cursor:pointer; color:#cdd5e4;
     background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.13);
@@ -251,6 +288,7 @@ body {
 <div class="rc-layout">
     <div class="rc-stage" id="rc-stage">
         <div class="rc-simtime" id="rc-simtime">SIM TIME &times;300</div>
+        <div class="rc-sweep" id="rc-sweep" hidden><div class="rc-sweep-bar" id="rc-sweep-bar"></div></div>
         <div class="rc-perf" id="rc-perf" hidden>&mdash;</div>
         <div class="rc-legend">
             <span class="rc-dot" style="background:#ffa040"></span>H&#8314; ions &mdash; drift west, true-rate bounce<br>
@@ -258,7 +296,8 @@ body {
             <span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;opposite drifts = one westward current</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;tint = energy: pale ≈250 keV laps deep ≈20 keV (dispersion)</span><br>
-            <span class="rc-dot" style="background:#fff3a0"></span>Injection &mdash; tail burst forks: ions &rarr; dusk &middot; e&#8315; &rarr; dawn<br>
+            <span class="rc-dot" style="background:#fff3a0"></span>Injection &mdash; ion&ndash;e&#8315; pairs born together, split by drift: ions &rarr; dusk &middot; e&#8315; &rarr; dawn<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;stretching tether = the charge separation that IS the current</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;deaths: fade-out = ENA escape &middot; surface streak = precipitation</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;faint equatorial haze = ENA glow (how imagers see the ring)</span><br>
             <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause (Kp)<br>
@@ -266,6 +305,10 @@ body {
             <span class="rc-dot" style="background:#37e0a0"></span>Aurora oval &mdash; live Kp/Bz at the magnetic pole<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
             <span class="rc-dot" style="background:#4db8ff"></span>Incoming wind &mdash; northward Bz<br>
+            <span class="rc-dot" style="background:#9ecbff"></span>L1 plane &mdash; pulse = new 1-min sample &middot; dot = DSCOVR/ACE halo orbit<br>
+            <span class="rc-dot" style="background:#ffd27a"></span>Sun disk &mdash; dark = HEK coronal holes &middot; teal ring = source of the wind arriving now<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;amber ring = stream forecast at Earth within 5 d (27-d persistence)</span><br>
+            <span class="rc-dot" style="background:#ffc890"></span>CME front &mdash; DONKI cone in ballistic transit, label = live ETA &plusmn; band<br>
             <span class="rc-dot" style="background:#7fb4ff"></span>Magnetopause (Shue98, live) &middot; <span class="rc-dot" style="background:#59e0d8"></span>bow shock<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;arrivals deflect &mdash; the sheath river parts around the boundary</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;southward IMF: flank strands turn gold &mdash; tail return flow &rarr; midnight injection</span><br>
@@ -275,6 +318,17 @@ body {
     </div>
 
     <div class="rc-col">
+        <section class="rc-panel" id="rc-situation">
+            <h2>Situation &mdash; act on this</h2>
+            <div class="rc-chips">
+                <span class="rc-chip" id="rc-chip-r" title="Radio blackout scale (GOES X-ray 0.1&ndash;0.8 nm)">R&mdash;</span>
+                <span class="rc-chip" id="rc-chip-s" title="Radiation storm scale (&ge;10 MeV protons)">S&mdash;</span>
+                <span class="rc-chip" id="rc-chip-g" title="Geomagnetic storm scale (Kp)">G&mdash;</span>
+                <span class="rc-chip" id="rc-chip-e" title="GEO internal-charging risk (&ge;2 MeV electrons)">GEO e&#8315; &mdash;</span>
+            </div>
+            <ul class="rc-actions" id="rc-actions"><li class="rc-act rc-act-info">assessing&hellip;</li></ul>
+        </section>
+
         <section class="rc-panel">
             <h2>Ring current state</h2>
             <div class="rc-energy" id="rc-energy">&mdash;</div>
@@ -313,8 +367,15 @@ body {
         <section class="rc-panel">
             <h2>Sun &rarr; Earth twin bridge</h2>
             <div class="rc-kv"><span class="rc-k">parcels in transit</span><span class="rc-v" id="rc-parcels">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">CMEs in flight</span><span class="rc-v" id="rc-cmes">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">strongest incoming</span><span class="rc-v" id="rc-strongest">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">arrives in</span><span class="rc-v" id="rc-strongest-eta">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">wind left the Sun</span><span class="rc-v" id="rc-sunlag">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">emission &rarr; reception</span><span class="rc-v" id="rc-sunlag-cmp">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">Sun rotated in transit</span><span class="rc-v" id="rc-sunrot">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">traces to</span><span class="rc-v" id="rc-sunsrc">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">next stream (27-d persistence)</span><span class="rc-v" id="rc-recur-1">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k">then</span><span class="rc-v" id="rc-recur-2">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">thermosphere drag risk</span><span class="rc-v" id="rc-drag">&mdash;</span></div>
             <div class="rc-bridge-links">
                 <a href="/sun.html" title="Solar surface twin — where this wind left the Sun">&#9728;&#65039; Sun twin</a>
@@ -385,11 +446,20 @@ body {
             <div class="rc-kv"><span class="rc-k">ledger skill &mdash; 7 d</span><span class="rc-v" id="rc-lg-7d">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">server ledger</span><span class="rc-v" id="rc-lg-meta">&mdash;</span></div>
             <div class="rc-bars" id="rc-lg-bars" title="daily RMSE, last 7 days"></div>
+            <div class="rc-sep"></div>
+            <div class="rc-kv"><span class="rc-k">Sun-attribution skill (&plusmn;20&deg;)</span><span class="rc-v" id="rc-val-bm">&mdash;</span></div>
+            <svg class="rc-spark" id="rc-spark-bm" viewBox="0 0 120 26" preserveAspectRatio="none" aria-label="attribution skill history"></svg>
+            <div class="rc-kv"><span class="rc-k">recurrence timing skill</span><span class="rc-v" id="rc-val-rc">&mdash;</span></div>
+            <svg class="rc-spark" id="rc-spark-rc" viewBox="0 0 120 26" preserveAspectRatio="none" aria-label="recurrence skill history"></svg>
+            <div class="rc-kv"><span class="rc-k">CME arrival (hit &le;12 h)</span><span class="rc-v" id="rc-val-cme">&mdash;</span></div>
+            <svg class="rc-spark" id="rc-spark-cme" viewBox="0 0 120 26" preserveAspectRatio="none" aria-label="CME arrival skill history"></svg>
             <div style="font-size:.68rem;color:#5d6684;margin-top:6px;line-height:1.5;">
                 GOES magnetometer is an independent NOAA measurement at GEO
                 &mdash; never an input to the model. The skill ledger is
-                computed server-side every 15 min against Kyoto Dst, whether
-                or not anyone is watching. Skill shown, not claimed.
+                computed server-side every 15 min against Kyoto Dst; the two
+                Sun-side skills are re-scored daily over the rolling archive
+                (back-mapping attribution &middot; 27-d recurrence hindcast).
+                Skill shown, not claimed.
             </div>
         </section>
 
@@ -472,11 +542,14 @@ body {
 </footer>
 
 <script type="module">
-import { RingCurrentFeed, omniToReplay, computeReplayState } from './js/ring-current-feed.js?v=20260711';
-import { newellCoupling, earthOrbit } from './js/ring-current-model.js?v=20260711';
+import { RingCurrentFeed, omniToReplay, computeReplayState, parseLatestFlux } from './js/ring-current-feed.js?v=20260711';
+import {
+    newellCoupling, earthOrbit,
+    noaaRScale, noaaSScale, noaaGScale, geoChargingRisk,
+} from './js/ring-current-model.js?v=20260711';
 import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260711';
 import { loadUserLocation } from './js/user-location.js';
-import { INTERVALS } from './js/config.js';
+import { INTERVALS, NOAA } from './js/config.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('rc-stage');
@@ -506,6 +579,31 @@ try {
     console.warn('[ring-current] 3D disabled:', err);
     stage.insertAdjacentHTML('beforeend',
         '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#5d6684;font-size:.8rem;">3D view unavailable — data panels remain live</div>');
+}
+
+// ── Sweep progress + replay flash ───────────────────────────────────────────
+// At τ>1 the SimClock fast-forwards the SAME real forecast window and wraps
+// (an honest replay — the data doesn't loop, the sweep does). Without a cue
+// the wrap reads as "the simulation reset itself": the bar shows where in
+// the sweep you are, and the badge flashes the replay message on each wrap
+// (the 3D stream also dips briefly — globe-side).
+{
+    const sweepEl = $('rc-sweep'), barEl = $('rc-sweep-bar'), badgeEl = $('rc-simtime');
+    let seenWraps = clock.wraps, flashT = 0;
+    setInterval(() => {
+        if (document.hidden) return;
+        const on = clock.tau > 1;
+        sweepEl.hidden = !on;
+        if (!on) { badgeEl.classList.remove('rc-replay'); return; }
+        barEl.style.width =
+            `${Math.max(0, Math.min(100, 100 * (clock.now() - Date.now()) / clock.windowMs)).toFixed(1)}%`;
+        if (clock.wraps !== seenWraps) {
+            seenWraps = clock.wraps;
+            badgeEl.classList.add('rc-replay');
+            clearTimeout(flashT);
+            flashT = setTimeout(() => badgeEl.classList.remove('rc-replay'), 1600);
+        }
+    }, 250);
 }
 
 // ── Render-performance HUD + one-shot telemetry ─────────────────────────────
@@ -691,6 +789,15 @@ function renderHud(s) {
     const tr = s.transit;
     $('rc-parcels').textContent = tr?.parcels?.length
         ? `${tr.parcels.length} × 1-min L1 samples` : '—';
+    // In-flight CMEs (DONKI): the days-scale layer of "matter in transit".
+    const cmesInFlight = s.cmes ?? [];
+    $('rc-cmes').textContent = cmesInFlight.length
+        ? `${cmesInFlight.length} · nearest ETA ${(() => {
+            const h = ((cmesInFlight[0].etaMs ?? cmesInFlight[0].transit.etaMs) - Date.now()) / 3.6e6;
+            const when = h <= 0 ? 'now' : h < 48 ? `in ${Math.round(h)} h` : `in ${(h / 24).toFixed(1)} d`;
+            return `${when} (${cmesInFlight[0].basis === 'enlil' ? 'ENLIL' : 'ballistic'})`;
+        })()}`
+        : 'none Earth-directed';
     if (tr?.strongest) {
         const st2 = tr.strongest;
         $('rc-strongest').textContent = `VBs ${fmt(st2.vbs, 2)} mV/m · Bz ${fmt(st2.bz, 1)} nT`;
@@ -703,6 +810,60 @@ function renderHud(s) {
     } else {
         $('rc-strongest').textContent = tr?.parcels?.length ? 'all northward (no driver)' : '—';
         $('rc-strongest-eta').textContent = '—';
+    }
+    // Emission→reception ledger (ballistic back-mapping, model sunLag):
+    // photons 8.3 min vs plasma days — and the plasma lag disperses with
+    // speed, so "now" at Earth mixes several solar days. Hover any parcel
+    // in the 3D view for ITS departure date.
+    const sl = s.now?.sunLag;
+    if (sl && Number.isFinite(sl.days)) {
+        const d = new Date(sl.departureMs);
+        $('rc-sunlag').textContent =
+            `${d.toISOString().slice(5, 16).replace('T', ' ')} UT · ${sl.days.toFixed(1)} d ago`;
+        $('rc-sunlag-cmp').textContent = `light 8.3 min · plasma ${sl.days.toFixed(1)} d (ballistic)`;
+        $('rc-sunrot').textContent =
+            `${Math.round(sl.sourceRotDeg)}° of longitude · Parker spiral ${Math.round(sl.spiralDeg)}°`;
+        // Source coordinates + structure attribution (HEK coronal holes):
+        // the wind's birthplace in Carrington coordinates, where it sits on
+        // TODAY's disk, and which catalogued structure it traces to.
+        const src = sl.source;
+        const car = Number.isFinite(sl.carringtonLon) ? `Car ${Math.round(sl.carringtonLon)}°` : null;
+        const stw = Number.isFinite(sl.stonyhurstNowDeg)
+            ? (sl.stonyhurstNowDeg <= 90 ? `now W${Math.round(sl.stonyhurstNowDeg)}` : 'now behind W limb')
+            : '';
+        if (!car) {
+            $('rc-sunsrc').textContent = '—';
+        } else if (src?.matched) {
+            const frm = (src.hole.frm_name || 'HEK').split(/[-_ ]/)[0];
+            const latL = `${src.hole.lat_deg >= 0 ? 'N' : 'S'}${Math.round(Math.abs(src.hole.lat_deg))}`;
+            $('rc-sunsrc').textContent = `coronal hole (${frm}) ${latL} · ${car} · ${stw}`;
+        } else if (src) {
+            $('rc-sunsrc').textContent = src.kind === 'streamer-belt'
+                ? `streamer belt (slow wind) · ${car} · ${stw}`
+                : `fast wind — no CH within Δ${Math.round(src.dLonDeg)}° · ${car} · ${stw}`;
+        } else {
+            $('rc-sunsrc').textContent = `${car} · ${stw} · CH catalog unavailable`;
+        }
+        // Recurrence outlook (27-d persistence): each hole's next arrival
+        // window — crossing from rotation, transit ballistic, speed from
+        // the hole's OWN record when it has one (else labeled climatology).
+        const fmtRec = f => {
+            if (!f) return '—';
+            const fc = f.forecast;
+            const lat = `${(f.lat_deg ?? 0) >= 0 ? 'N' : 'S'}${Math.round(Math.abs(f.lat_deg ?? 0))}`;
+            const when = fc.daysToArrival < 0.5 ? 'arriving now'
+                : fc.daysToArrival < 1.5 ? `in ${(fc.daysToArrival * 24).toFixed(0)} h`
+                : `in ${fc.daysToArrival.toFixed(1)} d`;
+            const v = fc.basis === 'record'
+                ? `~${Math.round(fc.vUsed)} km/s (its record)`
+                : '450–650 km/s (climatology)';
+            return `CH ${lat} · ${when} · ${v}`;
+        };
+        $('rc-recur-1').textContent = fmtRec(sl.recurrence?.[0]);
+        // "then" = the first genuinely FUTURE arrival (several holes can be
+        // "arriving now" at once — one such row is enough).
+        $('rc-recur-2').textContent =
+            fmtRec(sl.recurrence?.find(f => f.forecast.daysToArrival > 0.5));
     }
     // Qualitative thermosphere handoff: storm-time ring current heating ⇒
     // density enhancement ⇒ drag. Tier follows the Dst storm class.
@@ -729,6 +890,7 @@ function renderHud(s) {
 
     renderDensity(s);
     renderGoes(s.goes);
+    renderSituation();   // re-fuse the action lines on every state tick
 }
 
 // ── GOES GEO cross-check — independent in-situ measurement, model-blind ─────
@@ -784,6 +946,172 @@ async function loadSkillLedger() {
 loadSkillLedger();
 // T3 cadence matches the endpoint's 10-min CDN TTL; no polling while hidden.
 setInterval(() => { if (!document.hidden) loadSkillLedger(); }, INTERVALS.T3);
+
+// ── Sun-side skill history: daily validation re-runs as sparklines ──────────
+// /api/ring-current/validation serves the cron's daily re-scores of the
+// back-mapping attribution and the recurrence hindcast (validation_runs).
+// Both skills are 0..1 (0 = chance/random, 1 = perfect), so one shared
+// sparkline scale is honest.
+function renderSpark(svgId, values, color) {
+    const svg = $(svgId);
+    if (!svg) return;
+    const vals = values.filter(Number.isFinite);
+    if (!vals.length) { svg.innerHTML = ''; return; }
+    const w = 120, h = 26, pad = 2, n = vals.length;
+    const pt = (v, i) => {
+        const x = n === 1 ? w / 2 : pad + (w - 2 * pad) * i / (n - 1);
+        const y = h - pad - Math.max(0, Math.min(1, v)) * (h - 2 * pad);
+        return [x.toFixed(1), y.toFixed(1)];
+    };
+    const pts = vals.map(pt);
+    const last = pts[pts.length - 1];
+    svg.innerHTML =
+        `<line x1="0" y1="${h - pad}" x2="${w}" y2="${h - pad}" stroke="rgba(255,255,255,.12)" stroke-width="1"/>` +
+        `<polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>` +
+        `<circle cx="${last[0]}" cy="${last[1]}" r="2" fill="${color}"/>`;
+}
+async function loadValidationHistory() {
+    try {
+        const res = await fetch('/api/ring-current/validation?limit=20');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json();
+        const bm = (body?.data?.backmap ?? []).slice().reverse();     // oldest → newest
+        const rc = (body?.data?.recurrence ?? []).slice().reverse();
+        const bmL = bm[bm.length - 1], rcL = rc[rc.length - 1];
+        if (bmL) $('rc-val-bm').textContent =
+            `${Number.isFinite(bmL.hit_rate) ? Math.round(bmL.hit_rate * 100) + '% hit' : '—'}` +
+            ` · skill ${Number.isFinite(bmL.skill) ? bmL.skill.toFixed(2) : '—'} · ${bm.length} run${bm.length === 1 ? '' : 's'}`;
+        if (rcL) $('rc-val-rc').textContent =
+            `MAE ${Number.isFinite(rcL.mae_days) ? rcL.mae_days.toFixed(2) + ' d' : '—'}` +
+            ` · skill ${Number.isFinite(rcL.skill) ? rcL.skill.toFixed(2) : '—'} · ${rc.length} run${rc.length === 1 ? '' : 's'}`;
+        // CME arrival verification is episodic — rows exist only when a
+        // prediction was verifiable, so absence reads as 'awaiting events'.
+        const cm = (body?.data?.cme ?? []).slice().reverse();
+        const cmL = cm[cm.length - 1];
+        $('rc-val-cme').textContent = cmL
+            ? `MAE ${Number.isFinite(cmL.mae_days) ? (cmL.mae_days * 24).toFixed(1) + ' h' : '—'}` +
+              ` · ${cmL.hits}/${cmL.n_forecasts} hit · ${cm.length} event run${cm.length === 1 ? '' : 's'}`
+            : 'awaiting verifiable events';
+        renderSpark('rc-spark-bm', bm.map(r => r.skill), '#7fe6c3');
+        renderSpark('rc-spark-rc', rc.map(r => r.skill), '#ffd27a');
+        renderSpark('rc-spark-cme', cm.map(r => r.skill), '#ffc890');
+    } catch (err) {
+        console.warn('[ring-current] validation history unavailable:', err);
+    }
+}
+loadValidationHistory();
+setInterval(() => { if (!document.hidden) loadValidationHistory(); }, INTERVALS.T3);
+
+// ── Situation panel: data → decision ────────────────────────────────────────
+// Fuses every live source on the page (L1 transit, the model's own Dst
+// forecast, Kp, recurrence outlook) with three GOES feeds this page didn't
+// carry before (X-ray, ≥10 MeV protons, ≥2 MeV electrons — browser-direct
+// NOAA, T2 cadence) into the operational R/S/G vocabulary plus ranked
+// action lines with lead times. Severity order: alert > warn > info > ok.
+const aux = { xray: null, p10: null, e2: null };
+const fmtFlux = f => f >= 100 ? Math.round(f).toLocaleString('en-US') : f.toPrecision(2);
+async function loadAuxFluxes() {
+    const grab = async (url, re) => {
+        try {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return parseLatestFlux(await res.json(), re);
+        } catch (err) {
+            console.warn('[ring-current] flux feed unavailable:', url, err);
+            return null;
+        }
+    };
+    [aux.xray, aux.p10, aux.e2] = await Promise.all([
+        grab(NOAA.xray, /0\.1-0\.8/),
+        grab(NOAA.protons, />=\s*10\s*MeV/),
+        grab(NOAA.electrons, />=\s*2(\.0)?\s*MeV/),
+    ]);
+    renderSituation();
+}
+function setChip(id, level, text) {
+    const el = $(id);
+    el.textContent = text;
+    el.className = `rc-chip${level ? ` rc-lvl${level}` : ''}`;
+}
+function renderSituation() {
+    const s = lastState;
+    const acts = [];
+    const push = (sev, html) => acts.push(`<li class="rc-act rc-act-${sev}">${html}</li>`);
+
+    const R = noaaRScale(aux.xray?.flux);
+    const S = noaaSScale(aux.p10?.flux);
+    const G = noaaGScale(s?.now?.kp);
+    const E = geoChargingRisk(aux.e2?.flux);
+    setChip('rc-chip-r', R.level, aux.xray ? R.label : 'R —');
+    setChip('rc-chip-s', S.level, aux.p10 ? S.label : 'S —');
+    setChip('rc-chip-g', G.level, Number.isFinite(s?.now?.kp) ? G.label : 'G —');
+    setChip('rc-chip-e', E.level, aux.e2 ? `GEO e⁻ ${E.label}` : 'GEO e⁻ —');
+
+    // 1 · Incoming southward driver — the page's genuine lead time.
+    const inc = s?.transit?.strongest;
+    if (inc && inc.vbs >= 0.5) {
+        push(inc.vbs >= 3 ? 'alert' : 'warn',
+            `<b>Southward driver arrives in ${inc.etaMin} min</b> — VBs ${inc.vbs.toFixed(1)} mV/m, ` +
+            `Bz ${Number.isFinite(inc.bz) ? inc.bz.toFixed(0) : '—'} nT. Expect injection activity on arrival.`);
+    }
+    // 1.5 · In-flight CME — hours-to-days of genuine lead time (DONKI cone
+    // in ballistic transit; the 3D view shows the front crossing the gap).
+    const cme = s?.cmes?.[0];
+    if (cme && (cme.etaMs ?? cme.transit.etaMs) > Date.now() - 6 * 3.6e6) {
+        const eta = cme.etaMs ?? cme.transit.etaMs;
+        const etaH = (eta - Date.now()) / 3.6e6;
+        const enlil = cme.basis === 'enlil';
+        const band = enlil ? 10 : Math.round((cme.transit.etaLateMs - cme.transit.etaMs) / 3.6e6);
+        const kp = cme.enlil?.kp_90 ?? cme.enlil?.kp_135;
+        push(etaH < 24 && cme.speed_km_s >= 700 ? 'alert' : 'warn',
+            `<b>CME in flight — arrives ≈ ${new Date(eta).toISOString().slice(5, 16).replace('T', ' ')} UT` +
+            ` (in ${etaH < 48 ? `${Math.max(0, Math.round(etaH))} h` : `${(etaH / 24).toFixed(1)} d`} ±${band} h, ${enlil ? 'WSA-ENLIL' : 'ballistic'})</b>` +
+            ` — v ${Math.round(cme.speed_km_s)} km/s${cme.glancing ? ' · flank-directed, glancing possible' : ''}` +
+            `${Number.isFinite(cme.crossCheckHours) ? ` · ballistic cross-check ${cme.crossCheckHours >= 0 ? '+' : '−'}${Math.abs(cme.crossCheckHours).toFixed(0)} h` : ''}.` +
+            ` Prepare for shock arrival${kp != null ? ` — modeled Kp up to ${kp}` : cme.speed_km_s >= 700 ? ' + G-storm risk' : ''}.`);
+    }
+    // 2 · The model's own Dst threshold crossing.
+    if (s?.alert) {
+        push('alert', `<b>Dst forecast to cross ${s.alert.threshold} nT</b> ` +
+            `≈ ${new Date(s.alert.t).toISOString().slice(11, 16)} UT (in ${s.alert.etaMin} min).`);
+    }
+    // 3 · GEO internal charging (the ring current's own downstream hazard).
+    if (E.level >= 1) {
+        push(E.level >= 2 ? 'alert' : 'warn',
+            `<b>GEO internal-charging ${E.label}</b> — ≥2 MeV flux ${fmtFlux(aux.e2.flux)} pfu` +
+            `${E.level >= 2 ? ' (NOAA alert threshold)' : ''}. Review GEO anomaly posture.`);
+    }
+    // 4 · Radiation storm (SEU + polar HF).
+    if (S.level >= 1) {
+        push(S.level >= 3 ? 'alert' : 'warn',
+            `<b>${S.label} radiation storm</b> — ≥10 MeV ${fmtFlux(aux.p10.flux)} pfu. SEU risk; polar HF degraded.`);
+    }
+    // 5 · Radio blackout in progress.
+    if (R.level >= 1) {
+        push(R.level >= 3 ? 'alert' : 'warn',
+            `<b>${R.label} radio blackout</b> — X-ray ${aux.xray.flux.toExponential(1)} W/m². Dayside HF affected.`);
+    }
+    // 6 · Storm in progress → LEO drag.
+    const storm = s?.now?.storm;
+    if (storm?.level >= 2) {
+        push('warn', `<b>${storm.label}</b> — LEO drag ` +
+            `${['nominal', 'slightly elevated', 'elevated', 'high', 'severe', 'extreme'][storm.level]}; ` +
+            `expect tracking residuals to grow.`);
+    }
+    // 7 · Recurrence heads-up (days of lead time).
+    const rec = s?.now?.sunLag?.recurrence?.find(f =>
+        f.forecast.daysToArrival > 0.5 && f.forecast.daysToArrival < 6);
+    if (rec) {
+        push('info', `Recurrent stream due <b>in ${rec.forecast.daysToArrival.toFixed(1)} d</b> ` +
+            `(CH ${rec.lat_deg >= 0 ? 'N' : 'S'}${Math.round(Math.abs(rec.lat_deg))}, ${rec.forecast.basis}). Plan around it.`);
+    }
+    if (!acts.length) {
+        push('ok', '<b>All quiet.</b> No action items — next scheduled attention: the recurrence outlook.');
+    }
+    $('rc-actions').innerHTML = acts.join('');
+}
+loadAuxFluxes();
+setInterval(() => { if (!document.hidden) loadAuxFluxes(); }, INTERVALS.T2);
 
 // ── Storm drag impact — same engine as the Upper Atmosphere twin ────────────
 let densityFn = null, densityLoading = false;
