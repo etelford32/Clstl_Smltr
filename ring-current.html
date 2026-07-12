@@ -92,8 +92,14 @@ body {
     background:rgba(3,1,14,.72); border:1px solid rgba(255,255,255,.08);
     border-radius:8px; line-height:1.5;
     max-width:min(325px, calc(100% - 24px));
-    max-height:calc(100% - 20px);
+    /* Leave the bottom-right corner to the analytics dock — the body
+       scrolls. Released below when the dock is minimized or absent. */
+    max-height:max(150px, calc(100% - 372px));
     display:flex; flex-direction:column;
+}
+.rc-stage:has(.rc-dock.rc-min) .rc-legend,
+.rc-stage:has(.rc-dock[hidden]) .rc-legend {
+    max-height:calc(100% - 20px);
 }
 .rc-legend-head {
     display:flex; align-items:center; gap:6px; padding:4px 6px 3px 9px;
@@ -154,6 +160,38 @@ body {
     border-radius:5px; padding:2px 7px;
 }
 .rc-insp-btn:hover { background:rgba(255,154,61,.25); }
+
+/* Population analytics dock (Phase 2): aggregate views of the LIVING drawn
+   populations — spectra, L profile vs model, the two-phase lifetime split,
+   and the recycle (death/rebirth) rate by loss channel. Same compact
+   draggable-panel pattern as the legend/inspector. */
+.rc-dock {
+    position:absolute; right:12px; bottom:26px; z-index:5; width:246px;
+    background:rgba(3,1,14,.85); border:1px solid rgba(255,255,255,.14);
+    border-radius:10px; font-size:.6rem; color:#cdd5e4; line-height:1.45;
+}
+.rc-dock-head {
+    display:flex; align-items:center; gap:6px; padding:4px 6px 3px 9px;
+    cursor:grab; user-select:none; -webkit-user-select:none; touch-action:none;
+    border-bottom:1px solid rgba(255,255,255,.07);
+}
+.rc-dock.rc-min .rc-dock-head { border-bottom:none; }
+.rc-dock.rc-dragging .rc-dock-head { cursor:grabbing; }
+.rc-dock-title {
+    flex:1; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+    font-size:.56rem; color:#8b94ad;
+}
+.rc-dock-body { padding:4px 9px 7px; }
+.rc-dock.rc-min .rc-dock-body { display:none; }
+.rc-dock-counts { color:#8b94ad; padding:1px 0 3px; }
+.rc-dock-counts b { color:#e8edf7; font-weight:650; font-variant-numeric:tabular-nums; }
+.rc-dock-lab {
+    display:flex; align-items:baseline; gap:6px; color:#8b94ad;
+    font-size:.56rem; margin-top:4px;
+}
+.rc-dock-lab .rc-dot { width:6px; height:6px; margin-right:3px; }
+.rc-dock-lab b { color:#cdd5e4; font-weight:650; }
+.rc-dock canvas { display:block; width:100%; height:44px; margin-top:2px; }
 .rc-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:baseline; }
 
 .rc-col { display:flex; flex-direction:column; gap:12px; min-width:0; }
@@ -429,6 +467,37 @@ body {
                 <button class="rc-insp-btn" data-dt="1">+1 h</button>
                 <button class="rc-insp-btn" data-dt="6">+6 h</button>
                 <span style="margin-left:auto" title="Predictions are in SIM time — they resolve sooner at high &tau;">sim &Delta;t</span>
+            </div>
+        </div>
+        <div class="rc-dock" id="rc-dock" hidden>
+            <div class="rc-dock-head" id="rc-dock-head">
+                <span class="rc-legend-grip" aria-hidden="true">&#10495;</span>
+                <span class="rc-dock-title">Population analytics</span>
+                <button class="rc-legend-min" id="rc-dock-min" title="Minimize analytics" aria-label="Minimize analytics" aria-expanded="true">&#8722;</button>
+            </div>
+            <div class="rc-dock-body" id="rc-dock-body">
+                <div class="rc-dock-counts" id="rc-dock-counts">warming up&hellip;</div>
+                <div class="rc-dock-lab"><b>energy spectrum</b> keV, log &middot;
+                    <span><span class="rc-dot" style="background:#ffa040"></span>H&#8314;</span>
+                    <span><span class="rc-dot" style="background:#94ff57"></span>O&#8314;</span>
+                    <span><span class="rc-dot" style="background:#59baff"></span>e&#8315;</span>
+                </div>
+                <canvas id="rc-dock-spec" title="Energy spectrum of the drawn particles, 20–250 keV log bins, by species"></canvas>
+                <div class="rc-dock-lab"><b>L shell</b> R&#7431; &middot;
+                    <span><span class="rc-dot" style="background:#59e0d8"></span>drawn</span>
+                    <span><span class="rc-dot" style="background:#ffd27a"></span>model (Dst*)</span>
+                </div>
+                <canvas id="rc-dock-lprof" title="Drawn L-shell distribution vs the model's radial profile at the current Dst*"></canvas>
+                <div class="rc-dock-lab"><b>lifetimes</b> two-phase decay &middot;
+                    <span><span class="rc-dot" style="background:#ffa040"></span>H&#8314;</span>
+                    <span><span class="rc-dot" style="background:#94ff57"></span>O&#8314;</span>
+                </div>
+                <canvas id="rc-dock-life" title="Charge-exchange lifetime distributions — O⁺ dies ~10× sooner than H⁺ (log-hour bins)"></canvas>
+                <div class="rc-dock-lab"><b>recycles /sim-h</b> &middot;
+                    <span><span class="rc-dot" style="background:#2fd3a8"></span>ENA escape</span>
+                    <span><span class="rc-dot" style="background:#ff5c47"></span>precipitation</span>
+                </div>
+                <canvas id="rc-dock-deaths" title="Deaths (and matching rebirths) per sim-hour by loss channel — sampled as the sim clock advances"></canvas>
             </div>
         </div>
         <div class="rc-perf" id="rc-perf" hidden>&mdash;</div>
@@ -958,6 +1027,185 @@ if (globe) {
         else globe.clearGhost();
         refresh();
     }));
+}
+
+// ── Population analytics dock (Phase 2 — RING_CURRENT_ANALYTICS_PLAN.md) ───
+// Aggregate views of the LIVING drawn populations, resampled at 1 Hz from
+// the same attribute buffers the GPU draws (zero per-sample allocations —
+// the samplers fill these arrays in place). Recycle bars only advance while
+// sim time advances: a paused clock honestly freezes the ledger.
+if (globe) {
+    const S = await import('./js/ring-current-population-stats.js?v=20260712');
+    const dock = $('rc-dock'), countsEl = $('rc-dock-counts'), minBtn = $('rc-dock-min');
+    dock.hidden = false;
+    const DOCK_LS = 'pp_rc_dock_ui';
+    let dockSaved = null;
+    try { dockSaved = JSON.parse(localStorage.getItem(DOCK_LS) || 'null'); } catch { /* fresh */ }
+    const dockPersist = (patch) => {
+        dockSaved = { ...(dockSaved ?? {}), ...patch };
+        try { localStorage.setItem(DOCK_LS, JSON.stringify(dockSaved)); } catch { /* quota */ }
+    };
+    const setDockMin = (min) => {
+        dock.classList.toggle('rc-min', min);
+        minBtn.innerHTML = min ? '+' : '&#8722;';
+        minBtn.title = min ? 'Expand analytics' : 'Minimize analytics';
+        minBtn.setAttribute('aria-label', minBtn.title);
+        minBtn.setAttribute('aria-expanded', String(!min));
+    };
+    const placeDock = makeStageDraggable(dock, $('rc-dock-head'), (x, y) => dockPersist({ x, y }));
+    if (dockSaved?.min != null ? dockSaved.min : matchMedia('(max-width: 900px)').matches) setDockMin(true);
+    if (Number.isFinite(dockSaved?.x) && Number.isFinite(dockSaved?.y)) placeDock(dockSaved.x, dockSaved.y);
+    minBtn.addEventListener('click', () => {
+        const min = !dock.classList.contains('rc-min');
+        setDockMin(min);
+        dockPersist({ min });
+        if (dock.style.left) {
+            const [x, y] = placeDock(parseFloat(dock.style.left), parseFloat(dock.style.top));
+            dockPersist({ x, y });
+        }
+    });
+
+    // Buffers, allocated once (plan guardrail: no per-sample allocations).
+    const NB = 16;
+    const spec = { ionsH: new Float32Array(NB), ionsO: new Float32Array(NB), electrons: new Float32Array(NB) };
+    const lBins = new Float32Array(16), lExp = new Float32Array(32);
+    const lifeBins = { ionsH: new Float32Array(14), ionsO: new Float32Array(14) };
+    let lifeDone = false;
+    const cycles = {};                     // key → lastCycles baseline array
+    const tallyOut = { ena: 0, precip: 0 };
+    const samples = [];                    // rolling {dSimH, ena, precip}, ≤40
+    let lastSimH = null;
+    const SPECIES_COLOR = { ionsH: '#ffa040', ionsO: '#94ff57', electrons: '#59baff' };
+
+    function prepChart(id) {
+        const cv = $(id);
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const w = cv.clientWidth || 226, h = cv.clientHeight || 44;
+        if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+        const g = cv.getContext('2d');
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+        g.clearRect(0, 0, w, h);
+        g.strokeStyle = 'rgba(255,255,255,.12)';   // recessive baseline only
+        g.lineWidth = 1;
+        g.beginPath(); g.moveTo(0, h - 0.5); g.lineTo(w, h - 0.5); g.stroke();
+        return { g, w, h };
+    }
+    function stepLine(g, w, h, bins, max, color) {
+        if (!(max > 0)) return;
+        g.strokeStyle = color;
+        g.lineWidth = 1.5;
+        g.beginPath();
+        const bw = w / bins.length;
+        for (let b = 0; b < bins.length; b++) {
+            const y = h - 2 - (bins[b] / max) * (h - 7);
+            if (b === 0) g.moveTo(0, y);
+            g.lineTo(b * bw, y);
+            g.lineTo((b + 1) * bw, y);
+        }
+        g.stroke();
+    }
+    function drawSpec() {
+        const { g, w, h } = prepChart('rc-dock-spec');
+        const max = Math.max(1, ...spec.ionsH, ...spec.ionsO, ...spec.electrons);
+        for (const key of ['ionsH', 'ionsO', 'electrons']) {
+            stepLine(g, w, h, spec[key], max, SPECIES_COLOR[key]);
+        }
+    }
+    function drawLProf() {
+        const { g, w, h } = prepChart('rc-dock-lprof');
+        const max = Math.max(1, ...lBins);
+        const bw = w / lBins.length;
+        g.fillStyle = 'rgba(89,224,216,.55)';                   // drawn (observed)
+        for (let b = 0; b < lBins.length; b++) {
+            const bh = (lBins[b] / max) * (h - 7);
+            if (bh > 0) g.fillRect(b * bw + 1, h - 1 - bh, bw - 2, bh);
+        }
+        g.strokeStyle = '#ffd27a';                              // model expectation
+        g.lineWidth = 1.5;
+        g.setLineDash([4, 3]);
+        g.beginPath();
+        for (let b = 0; b < lExp.length; b++) {
+            const x = ((b + 0.5) / lExp.length) * w;
+            const y = h - 2 - lExp[b] * (h - 7);
+            b === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+        }
+        g.stroke();
+        g.setLineDash([]);
+    }
+    function drawLife() {
+        const { g, w, h } = prepChart('rc-dock-life');
+        // Per-series normalization — this chart compares SHAPE/position
+        // (O⁺ shifted left = the two-phase decay), not head counts.
+        for (const key of ['ionsH', 'ionsO']) {
+            stepLine(g, w, h, lifeBins[key], Math.max(1, ...lifeBins[key]), SPECIES_COLOR[key]);
+        }
+    }
+    function drawDeaths() {
+        const { g, w, h } = prepChart('rc-dock-deaths');
+        const N = 40, bw = w / N;
+        const max = Math.max(1, ...samples.map(s => s.ena + s.precip));
+        samples.forEach((s, idx) => {
+            const x = (N - samples.length + idx) * bw;
+            const he = (s.ena / max) * (h - 7);
+            const hp = (s.precip / max) * (h - 7);
+            g.fillStyle = '#2fd3a8';
+            if (he > 0) g.fillRect(x + 1, h - 1 - he, Math.max(1, bw - 2), he);
+            g.fillStyle = '#ff5c47';
+            if (hp > 0) g.fillRect(x + 1, h - 2 - he - hp, Math.max(1, bw - 2), hp);
+        });
+    }
+
+    function sampleDock() {
+        const snap = globe.getAnalyticsSnapshot();
+        if (!snap.populations.length) return;    // worker buffers not landed yet
+        const byKey = Object.fromEntries(snap.populations.map(p => [p.key, p]));
+        const visN = {};
+        for (const { key, pop, visFrac } of snap.populations) {
+            if (spec[key]) visN[key] = S.energySpectrum(pop, visFrac, spec[key]);
+        }
+        if (byKey.ionsH) S.lDistribution(byKey.ionsH.pop, byKey.ionsH.visFrac, lBins);
+        S.expectedLProfile(snap.dstStar, lExp);
+        if (!lifeDone && byKey.ionsH && byKey.ionsO) {
+            S.lifetimeHistogram(byKey.ionsH.pop, lifeBins.ionsH);
+            S.lifetimeHistogram(byKey.ionsO.pop, lifeBins.ionsO);
+            lifeDone = true;
+        }
+        let ena = 0, precip = 0;
+        for (const { key, pop } of snap.populations) {
+            const lc = cycles[key] ?? (cycles[key] = new Float64Array(pop.count).fill(-1));
+            S.tallyRecycles(pop, lc, snap.simHours, tallyOut);
+            ena += tallyOut.ena;
+            precip += tallyOut.precip;
+        }
+        const dSimH = lastSimH == null ? 0 : Math.max(0, snap.simHours - lastSimH);
+        lastSimH = snap.simHours;
+        if (dSimH > 0) {
+            samples.push({ dSimH, ena, precip });
+            if (samples.length > 40) samples.shift();
+        }
+        const win = samples.reduce((a, s) => {
+            a.h += s.dSimH; a.e += s.ena; a.p += s.precip; return a;
+        }, { h: 0, e: 0, p: 0 });
+        const rate = win.h > 0 ? (win.e + win.p) / win.h : null;
+        const share = byKey.ionsH && byKey.ionsO
+            ? S.builtOxygenEnergyShare(byKey.ionsH.pop, byKey.ionsH.visFrac,
+                                       byKey.ionsO.pop, byKey.ionsO.visFrac)
+            : null;
+        countsEl.innerHTML =
+            `drawn <b>${visN.ionsH ?? 0}</b> H⁺ · <b>${visN.ionsO ?? 0}</b> O⁺ · <b>${visN.electrons ?? 0}</b> e⁻<br>` +
+            `O⁺ energy — model <b>${snap.oxygenModelFrac != null ? Math.round(snap.oxygenModelFrac * 100) + '%' : '—'}</b> (steers brightness) · build <b>${share != null ? Math.round(share * 100) + '%' : '—'}</b><br>` +
+            `recycles <b>${rate != null ? Math.round(rate).toLocaleString('en-US') : '—'}</b>/sim-h` +
+            `${win.e + win.p > 0 ? ` · ENA <b>${Math.round(100 * win.e / (win.e + win.p))}%</b> · precip <b>${Math.round(100 * win.p / (win.e + win.p))}%</b>` : ''}`;
+        drawSpec();
+        drawLProf();
+        if (lifeDone) drawLife();
+        drawDeaths();
+    }
+    sampleDock();
+    setInterval(() => {
+        if (document.hidden || dock.classList.contains('rc-min')) return;
+        sampleDock();
+    }, 1000);
 }
 
 // ── Render-performance HUD + one-shot telemetry ─────────────────────────────

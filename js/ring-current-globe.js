@@ -2509,6 +2509,23 @@ export class RingCurrentGlobe {
         };
     }
 
+    /** Live handles for the population analytics dock (Phase 2 —
+     *  RING_CURRENT_ANALYTICS_PLAN.md). Populations arrive async from the
+     *  worker, so `populations` is empty until the buffers land — the dock
+     *  shows "warming up" rather than inventing rows. oxygenModelFrac is
+     *  the model share that STEERS BRIGHTNESS (build counts are fixed);
+     *  the dock discloses both numbers side by side. */
+    getAnalyticsSnapshot() {
+        return {
+            simHours: this._simHours,
+            dstStar: this._state.dstStar,
+            oxygenModelFrac: this._pendingMix ?? null,
+            populations: Object.entries(this._popPoints ?? {}).map(([key, P]) => ({
+                key, pop: P.pop, visFrac: P.mat.uniforms.uVisFrac.value,
+            })),
+        };
+    }
+
     /** Dashed ghost marker at a predicted pose (magGroup-local coords). */
     setGhostLocal(x, y, z) {
         this._ensurePinSprites();
