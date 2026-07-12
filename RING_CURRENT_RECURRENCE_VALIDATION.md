@@ -78,6 +78,13 @@ node scripts/recurrence-validation.mjs --data <file>     # any window
 node scripts/recurrence-validation.mjs --selftest        # planted truth
 ```
 
+**Daily re-run.** `api/cron/validation-rerun.js` (06:30 UT, vercel.json
+crons) re-runs this hindcast every day over the rolling
+`solar_wind_samples` window with the SAME engine
+(`js/validation-scoring.js`), appending to `validation_runs`; history is
+served at `/api/ring-current/validation`. Past one Carrington rotation
+the record-basis branch enters the daily score automatically.
+
 *First run 2026-07-11, alongside RING_CURRENT_BACKMAP_VALIDATION.md — the
 two halves of the same loop: back-mapping attributes what arrived;
 recurrence predicts what will.*

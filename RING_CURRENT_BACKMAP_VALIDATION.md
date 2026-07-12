@@ -87,5 +87,13 @@ HEK through the Supabase `http` extension and wind from
 `solar_wind_samples` accumulate. `--selftest` verifies the scorer on
 planted ground truth (100% hit) and displaced holes (0% hit).
 
+**Daily re-run.** `api/cron/validation-rerun.js` (06:30 UT, vercel.json
+crons) re-scores this study every day over the rolling
+`solar_wind_samples` window with the SAME engine
+(`js/validation-scoring.js`) the CLI runs, appending to
+`validation_runs`; history is served at `/api/ring-current/validation`.
+The skill numbers become a time-series automatically as the archive
+grows.
+
 *First run 2026-07-11. Extend the window before quoting the skill numbers
 anywhere formal.*

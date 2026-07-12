@@ -108,6 +108,8 @@ const API_ROUTES = {
     '/api/aurora/outlook':         'api/aurora/outlook.js',
     '/api/aurora/skill':           'api/aurora/skill.js',
     '/api/ring-current/skill':     'api/ring-current/skill.js',
+    '/api/ring-current/validation': 'api/ring-current/validation.js',
+    '/api/cron/validation-rerun':  'api/cron/validation-rerun.js',
     '/api/hek/coronal-holes':      'api/hek/coronal-holes.js',
     '/api/lightning/strikes':      'api/lightning/strikes.js',
     '/api/nws/convective':         'api/nws/convective.js',
