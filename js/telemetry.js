@@ -13,6 +13,7 @@
  *   │ telemetry.recordRedirect(from,to)  → kind: 'redirect'   │
  *   │ telemetry.recordVital(name, val)   → kind: 'web_vital'  │
  *   │ telemetry.recordPerf(name, ms)     → kind: 'app_perf'   │
+ *   │ telemetry.recordPipeline(name, m)  → kind: 'data_pipeline'│
  *   └─────────────────────────────────────────────────────────┘
  *
  * Autocapture (no caller required):
@@ -26,7 +27,7 @@
  *   * No cookies, no IP (the edge function logs IP separately if needed)
  *
  * Sampling:
- *   * Errors / auth_failure / not_found / redirect: 100%
+ *   * Errors / auth_failure / not_found / redirect / data_pipeline: 100%
  *   * web_vital / app_perf: 25% (controlled by VITAL_SAMPLE_RATE)
  *
  * Usage from any page:
@@ -264,6 +265,51 @@ class Telemetry {
         this._enqueue({
             kind:     'auth_funnel',
             severity: 'info',
+            metadata: payload,
+        });
+    }
+
+    /**
+     * Record a client-side data-pipeline outcome (cloud mosaic refresh,
+     * feed fallback chains, etc.).
+     *
+     * 100% sampled, NOT 25% like recordPerf — these events exist to debug
+     * intermittent upstream failures (a GIBS layer retiring, a snapshot
+     * endpoint rejecting timestamps), and a sampled stream hides exactly
+     * the sessions that hit them. Volume is bounded by feed cadence, not
+     * user activity (the cloud mosaic emits at most ~6/hour/viewer).
+     *
+     * Requires the 'data_pipeline' kind — added to client_telemetry's kind
+     * CHECK + the log_client_telemetry whitelist by
+     * supabase-cloud-pipeline-telemetry-migration.sql. Events sent before
+     * that migration runs are silently skipped by the RPC (by design).
+     *
+     * @param {string} name  Pipeline id, e.g. 'cloud_mosaic'.
+     * @param {object} [metadata] Outcome payload. Pass severity:'warning'
+     *                            for degraded runs; stripped into the
+     *                            event's severity field. Keep it small —
+     *                            the RPC truncates metadata above 4 KB.
+     */
+    recordPipeline(name, metadata = {}) {
+        if (!name || typeof name !== 'string') return;
+        const { severity, ...meta } = metadata;
+        const payload = { name: name.slice(0, 80), ...meta };
+        try {
+            // Same size guard as recordFunnel: never let a fat payload get
+            // RPC-truncated into a shape that loses the pipeline name.
+            const s = JSON.stringify(payload);
+            if (s.length > 3500) {
+                this._enqueue({
+                    kind:     'data_pipeline',
+                    severity: severity === 'warning' || severity === 'error' ? severity : 'info',
+                    metadata: { name: payload.name, truncated: true, original_size: s.length },
+                });
+                return;
+            }
+        } catch { /* fall through with raw payload */ }
+        this._enqueue({
+            kind:     'data_pipeline',
+            severity: severity === 'warning' || severity === 'error' ? severity : 'info',
             metadata: payload,
         });
     }

@@ -7939,8 +7939,17 @@ function _updateObsStatusPanel(meta) {
     el.innerHTML = html;
 }
 
+// Live cloud-pipeline diagnostics, always available from the console —
+// including when the fetch failed outright and no satellite-update ever
+// fired (that's precisely when you need the evidence). The telemetry event
+// (kind 'data_pipeline', name 'cloud_mosaic') carries a summary of the
+// same object — this is the full-resolution version: per-URL attempts,
+// per-region imagery age, composite coverage, widest coverage gap (the
+// longitude of any residual cloud wedge).
+window.addEventListener('cloud-mosaic-diag', e => { window.__cloudDiag = e.detail; });
+
 window.addEventListener('satellite-update', e => {
-    const { compositeTex, goesTex, modisTex, source, goesTime, modisDate } = e.detail;
+    const { compositeTex, goesTex, modisTex, source, goesTime, modisDate, diag } = e.detail;
     // Prefer composite (GOES+MODIS merged), then individual sources
     const tex = compositeTex ?? goesTex ?? modisTex ?? null;
     if (tex) {
@@ -8144,9 +8153,10 @@ document.addEventListener('weather-status', e => {
 });
 
 // Cloud-imagery provenance — driven by satellite-update events from
-// SatelliteFeed. Composite mode shows the headline source; the full layer
-// list lives in the title attribute so research-mode users can audit which
-// satellite contributed which region of the globe.
+// SatelliteFeed. Composite mode shows the headline source; the title
+// attribute carries the audit trail (layers used, imagery age, coverage,
+// widest residual gap) so research-mode users can see which satellite
+// contributed which region of the globe and how fresh/complete it is.
 function renderSatelliteProvenance(detail) {
     const el = document.getElementById('wx-sat');
     if (!el) return;
@@ -8155,14 +8165,35 @@ function renderSatelliteProvenance(detail) {
         el.removeAttribute('title');
         return;
     }
-    const dateStr = detail.modisDate
-        ?? (detail.time instanceof Date ? detail.time.toISOString().slice(0, 10) : '—');
+    const diag = detail.diag ?? null;
     const regions = Array.isArray(detail.regions) ? detail.regions : [];
+    // Freshness: real acquisition timestamp when the mosaic carried one,
+    // date-only for daily composites.
+    let whenStr = '—';
+    if (detail.time instanceof Date) {
+        const ageMin = Math.round((Date.now() - detail.time.getTime()) / 60000);
+        whenStr = (detail.mosaic && ageMin >= 0 && ageMin < 6 * 60)
+            ? `${ageMin} min old`
+            : detail.time.toISOString().slice(0, 10);
+    }
+    const covStr = diag?.composite
+        ? ` · cov ${(diag.composite.coverage * 100).toFixed(0)}%`
+        : '';
     const headline = detail.mosaic
-        ? `mosaic · ${regions.join('+')} · ${dateStr}`
-        : `${detail.source ?? 'satellite'} · ${dateStr}`;
+        ? `mosaic · ${regions.length}/4 sat${diag?.polar ? '+polar' : ''} · ${whenStr}${covStr}`
+        : `${detail.source ?? 'satellite'} · ${whenStr}${covStr}`;
     el.textContent = headline;
-    el.title       = Array.isArray(detail.layers) ? detail.layers.join('\n') : '';
+
+    const titleLines = Array.isArray(detail.layers) ? [...detail.layers] : [];
+    if (diag?.composite) {
+        titleLines.push(`coverage ${(diag.composite.coverage * 100).toFixed(1)}% · mean cloud ${(diag.composite.meanCloudiness * 100).toFixed(0)}%`);
+        if (diag.composite.gapMaxDeg >= 15) {
+            titleLines.push(`⚠ widest coverage gap ${diag.composite.gapMaxDeg.toFixed(0)}° of longitude centred at ${diag.composite.gapCenterLon}°`);
+        }
+        const failed = diag.attempts?.filter(a => !a.ok).length ?? 0;
+        if (failed) titleLines.push(`${failed} fetch attempt(s) failed — details: window.__cloudDiag`);
+    }
+    el.title = titleLines.join('\n');
 }
 window.addEventListener('satellite-update', e => renderSatelliteProvenance(e.detail));
 

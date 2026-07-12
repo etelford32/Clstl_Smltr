@@ -3,36 +3,38 @@
  *
  * Polling wrapper around js/cloud-imagery.js. The mosaic compositor stitches
  * four geostationary satellites (GOES-East, GOES-West, Himawari, Meteosat)
- * with MODIS Cloud_Optical_Thickness as polar fill, all reprojected by GIBS
- * to equirectangular and merged on a single canvas with alpha-encoded no-
- * data masking.
+ * with MODIS Cloud_Optical_Thickness as polar/gap fill. Every product is
+ * normalized to cloudiness+confidence BEFORE compositing and disc edges are
+ * feathered (see cloud-imagery.js header for the seam post-mortem), so the
+ * texture handed to the shader has one physical meaning everywhere.
  *
- * Why this replaced the legacy implementation:
- *   - The legacy feed pulled GOES-East alone over MODIS, which left visible
- *     west-Pacific / Indian-Ocean strips on the globe whenever GOES couldn't
- *     see those regions (always — they're outside its disc).
- *   - The mosaic gives full inter-tropical coverage at ~10-min cadence; the
- *     polar caps are honestly marked alpha = 0 so the cloud shader paints
- *     either procedural / data-driven cover (default) or a hatched no-data
- *     overlay (research mode) instead of synthesising plausible cloud.
+ * Telemetry: each refresh emits one 'data_pipeline' event (name
+ * 'cloud_mosaic') carrying which layers loaded, fallback depth, imagery
+ * age, composite coverage, and the widest residual coverage gap. This is
+ * the evidence trail for diagnosing seam/staleness reports from the field
+ * — the pipeline's failure modes (layer-ID rot, snapshot endpoint changes,
+ * regional CDN issues) only manifest in real browsers, not in CI.
  *
  * Event API (unchanged for back-compat with earth.html):
  *   window dispatches 'satellite-update' with detail {
  *     compositeTex: THREE.Texture,    // the mosaic
  *     goesTex:      null,             // legacy fields kept for the
  *     modisTex:     null,             //   shape-stable consumer at
- *     source:       string,           // earth.html:3356
- *     time:         Date,
+ *     source:       string,           // earth.html
+ *     time:         Date,             // acquisition time (real timestamp
+ *                                     //   when known, else composite date)
  *     goesTime:     Date | null,      // mosaic acquisition time
  *     modisDate:    string | null,    // YYYY-MM-DD of polar fill
- *     mosaic:       boolean,          // new: false = MODIS fallback
- *     regions:      string[],         // new: ['GOES-East','Himawari',...]
- *     layers:       string[],         // new: full GIBS layer IDs used
+ *     mosaic:       boolean,          // false = MODIS fallback
+ *     regions:      string[],         // ['GOES-East','Himawari',...]
+ *     layers:       string[],         // full GIBS layer IDs used
+ *     diag:         object,           // fetch/composite diagnostics (v2)
  *   }
  */
 
 import * as THREE from 'three';
 import { fetchCloudImagery } from './cloud-imagery.js';
+import { telemetry } from './telemetry.js';
 
 // Refresh cadence — GOES, Himawari and Meteosat all publish ~10-min frames,
 // so polling more often wastes bytes; less often risks stale clouds during
@@ -43,11 +45,35 @@ const REFRESH_MS = 10 * 60_000;
 // reprojection limits.
 const SAT_W = 2048;
 
+/** Squeeze a diag object into a telemetry-safe summary (<4 KB, no URLs). */
+function diagToTelemetry(diag, gotTexture) {
+    const failures = diag.attempts.filter(a => !a.ok);
+    return {
+        severity: gotTexture && diag.mode === 'mosaic' ? 'info' : 'warning',
+        ok:       gotTexture,
+        mode:     diag.mode,
+        ms:       diag.ms,
+        regions:  diag.regions.map(r =>
+            `${r.name}=${r.layer}@${r.ageMin != null ? r.ageMin + 'm' : r.time}`),
+        polar:    diag.polar ? `${diag.polar.layer}@${diag.polar.date}` : null,
+        attempts: diag.attempts.length,
+        failures: failures.length,
+        // First few failures name the rotting layer/time directly; the
+        // full list stays on window.__cloudDiag for interactive debugging.
+        failed:   failures.slice(0, 5).map(a => `${a.region}:${a.layer}@${a.time}`),
+        coverage:        diag.composite?.coverage ?? null,
+        mean_cloudiness: diag.composite?.meanCloudiness ?? null,
+        gap_max_deg:     diag.composite?.gapMaxDeg ?? null,
+        gap_center_lon:  diag.composite?.gapCenterLon ?? null,
+    };
+}
+
 export class SatelliteFeed {
     constructor() {
         this._timer        = null;
         this._compositeTex = null;
         this._lastHit      = null;   // metadata from the most recent fetch
+        this.lastDiag      = null;   // full diagnostics, refreshed every poll
     }
 
     start() {
@@ -68,12 +94,31 @@ export class SatelliteFeed {
     get compositeTex() { return this._compositeTex; }
 
     async _refresh() {
-        // fetchCloudImagery handles the date/layer fallback chain internally
-        // and returns null only when EVERY source fails. On null we keep the
-        // previous texture (if any) — stale beats a black globe.
-        const hit = await fetchCloudImagery(THREE, { width: SAT_W });
+        // fetchCloudImagery handles the timestamp/layer fallback chain
+        // internally and returns null only when EVERY source fails. On null
+        // we keep the previous texture (if any) — stale beats a black globe.
+        // onDiag fires even on total failure, so the telemetry event and
+        // window.__cloudDiag exist precisely when things break.
+        let diag = null;
+        const hit = await fetchCloudImagery(THREE, {
+            width: SAT_W,
+            onDiag: d => { diag = d; },
+        });
+
+        this.lastDiag = diag;
+        if (diag) {
+            try {
+                telemetry.recordPipeline('cloud_mosaic', diagToTelemetry(diag, !!hit));
+            } catch { /* telemetry must never break the feed */ }
+            // Fires on EVERY refresh, success or total failure — unlike
+            // 'satellite-update', which only fires when there's a texture.
+            // earth.html mirrors this onto window.__cloudDiag so a viewer
+            // with a broken feed still has the evidence in the console.
+            window.dispatchEvent(new CustomEvent('cloud-mosaic-diag', { detail: diag }));
+        }
+
         if (!hit) {
-            console.debug('[SatelliteFeed] mosaic + MODIS fallback both failed; retaining previous');
+            console.warn('[SatelliteFeed] mosaic + MODIS fallback both failed; retaining previous texture', diag);
             return;
         }
 
@@ -83,10 +128,11 @@ export class SatelliteFeed {
         this._compositeTex = hit.texture;
         this._lastHit      = hit;
 
+        const cov   = diag?.composite ? ` cov ${(diag.composite.coverage * 100).toFixed(0)}%` : '';
         const label = hit.mosaic
             ? `mosaic · ${hit.regions.join('+')}${hit.polar ? '+polar' : ''}`
             : `MODIS · ${hit.layers[0]?.replace(/^MODIS=/, '') ?? 'fallback'}`;
-        console.info(`[SatelliteFeed] cloud texture refreshed — ${label} ${hit.date}`);
+        console.info(`[SatelliteFeed] cloud texture refreshed — ${label} ${hit.date}${cov}`);
 
         this._dispatch();
     }
@@ -97,8 +143,12 @@ export class SatelliteFeed {
         const source = hit.mosaic
             ? `Mosaic: ${hit.regions.join(' + ')}${hit.polar ? ' + polar' : ''}`
             : 'MODIS Terra GIBS';
-        // ISO date → real Date for downstream "minutes ago" formatters.
-        const time = hit.date ? new Date(`${hit.date}T00:00:00Z`) : new Date();
+        // Real acquisition timestamp when the snapshot carried one; date
+        // midnight otherwise (daily composites) — downstream "minutes ago"
+        // formatters need a Date either way.
+        const time = hit.timestampMs != null
+            ? new Date(hit.timestampMs)
+            : hit.date ? new Date(`${hit.date}T00:00:00Z`) : new Date();
 
         window.dispatchEvent(new CustomEvent('satellite-update', {
             detail: {
@@ -112,6 +162,7 @@ export class SatelliteFeed {
                 mosaic:       hit.mosaic,
                 regions:      hit.regions,
                 layers:       hit.layers,
+                diag:         hit.diag ?? this.lastDiag,
             },
         }));
     }

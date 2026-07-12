@@ -419,7 +419,11 @@ ${GEO_GLSL}
 
 uniform sampler2D u_weather;       // R=temp, G=pressure, B=humidity, A=wind
 uniform sampler2D u_cloud_layers;  // R=cl_low, G=cl_mid, B=cl_high, A=precip [0-1]
-uniform sampler2D u_satellite;     // GOES/MODIS cloud image (grayscale brightness)
+uniform sampler2D u_satellite;     // normalized cloud mosaic: r = cloud fraction
+                                   // (LINEAR, cloud-imagery.js pre-decodes every
+                                   // GIBS product), a = observation confidence
+                                   // (feathered at disc edges — fractional values
+                                   // are expected, not just 0/1)
 uniform vec3  u_sun_dir;
 uniform float u_time;
 uniform float u_weather_on;
@@ -825,13 +829,17 @@ void main() {
     }
 
     // Satellite observation: when a real cloud-imagery texture is supplied
-    // (NASA GIBS, GOES, etc.), use its brightness as the dominant coverage
-    // signal and fold the procedural noise in as fine-scale detail + motion.
+    // (NASA GIBS mosaic), use its red channel — pre-normalized to linear
+    // cloud fraction by cloud-imagery.js — as the dominant coverage signal
+    // and fold the procedural noise in as fine-scale detail + motion.
     //
-    // The texture's alpha channel is a NO-DATA mask set by GIBS. Regions
-    // the satellite didn't see (polar winter darkness, MODIS orbit gaps,
-    // coastline masks) arrive with alpha = 0 and we route them back to
-    // procedural clouds, so the globe never shows a permanent fake cap.
+    // The texture's alpha channel is an observation-CONFIDENCE mask.
+    // Regions no satellite saw arrive with alpha = 0 and route back to
+    // procedural clouds; geostationary disc edges arrive FEATHERED
+    // (alpha easing 1 → 0 across ~16° of view angle), so the
+    // measured→procedural handoff below is a gradient. That feather is
+    // what keeps disc boundaries from rendering as a hard line of
+    // cloud-density change — don't quantize or threshold satData here.
     float satNoDataMask = 0.0;   // research-mode hatch flag (set below)
     if (u_satellite_on > 0.5) {
         vec4  sat      = texture2D(u_satellite, vUv);
