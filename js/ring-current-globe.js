@@ -385,7 +385,7 @@ const TRANSIT = Object.freeze({
 // verified by the view-switcher browser probe (tests/ + scratchpad).
 const CAM_VIEWS = Object.freeze({
     earth: { pos: [8.5, 6.0, 9.5],  target: [0, 0, 0] },
-    sun:   { pos: [38, 6.5, 15.5],  target: [56, 3, 0] },
+    sun:   { pos: [38, 6.5, 15.5],  target: [56, 3.6, 0] },
     river: { pos: [74, 23, -46],    target: [19, -2, 0] },
 });
 
@@ -1961,7 +1961,11 @@ export class RingCurrentGlobe {
             slot.mesh.scale.setScalar(r);
             slot.mat.opacity = (0.10 + 0.22 * Math.min(1, (c.speed_km_s ?? 400) / 1200))
                 * (1 - 0.35 * f);
-            slot.lab.sp.position.set(x, r + 2.4 + yOff, zOff);
+            // Label BELOW the corridor axis — the band above is owned by the
+            // emission-state (y≈10) and gate (y≈20) labels; riding r+2.4 on
+            // top used to collide with both as the front grew near the gate.
+            // Shallow enough to stay inside the Sun view's bottom edge.
+            slot.lab.sp.position.set(x, -(3.2 + 0.3 * r) + yOff * 0.3, zOff);
         }
     }
 
@@ -2612,11 +2616,14 @@ export class RingCurrentGlobe {
             this._windLab = this._makeLabel((TRANSIT.X_MP + TRANSIT.X_SUN) / 2, TRANSIT.WAVE_Y + 6.2, 0, 9);
             this._ringLab = this._makeLabel(0, 7.8, 0, 9);
             this._gateLab = this._makeLabel(TRANSIT.X_SUN, 20.5, 0, 10);
-            this._helioLab = this._makeLabel(TRANSIT.X_SUN + 4, -8.5, 0, 8.5);
+            // Below the CME label band (nearest-front label sits at y≈−5..−8).
+            this._helioLab = this._makeLabel(TRANSIT.X_SUN + 4, -12, 0, 8.5);
             // Above the corona (sprite half-height ≈6.1 at max), nudged
             // Earthward off the disk axis so the foreshortened River view
-            // keeps it in frame (dead-center-above leans out of shot there).
-            this._sunLab = this._makeLabel(TRANSIT.X_SUN + 3.5, 10.8, 0, 9.5);
+            // keeps it in frame (dead-center-above leans out of shot there),
+            // and low enough that the Sun view's top edge (where the DOM
+            // view pills float) stays clear of the title.
+            this._sunLab = this._makeLabel(TRANSIT.X_SUN + 3.5, 9.6, 0, 9.5);
         }
         // Gate pulse: a genuinely NEW 1-min sample landed (newest tL1 moved).
         // Wall-clock instrumentation, deliberately independent of τ.
@@ -2680,21 +2687,30 @@ export class RingCurrentGlobe {
             this._spiral.visible = true;
         }
         // In-flight CME fronts: assign pool slots (feed sorts by ETA).
+        // Several fronts share the ≈7-unit compressed Sun→L1 leg, so
+        // per-cone labels pile into an unreadable stack (seen live with 4
+        // CMEs in flight). Only the NEAREST front carries a label — titled
+        // "1 of N" so the others are disclosed, with per-CME detail in the
+        // Situation panel. Every cone is still drawn.
         this._cmesLive = state?.cmes ?? [];
+        const nCmes = this._cmesLive.length;
         for (let ci = 0; ci < this._cmePool.length; ci++) {
             const slot = this._cmePool[ci];
             const c = this._cmesLive[ci] ?? null;
             slot.cme = c;
             slot.mesh.visible = !!c;
-            slot.lab.sp.visible = !!c;
-            if (!c) continue;
+            slot.lab.sp.visible = !!c && ci === 0;
+            if (!c || ci !== 0) continue;
             const etaH = ((c.etaMs ?? c.transit.etaMs) - Date.now()) / 3.6e6;
             const enlil = c.basis === 'enlil';
             const band = enlil ? 10 : Math.round((c.transit.etaLateMs - c.transit.etaMs) / 3.6e6);
             const xchk = Number.isFinite(c.crossCheckHours)
                 ? `ballistic says ${Math.abs(c.crossCheckHours).toFixed(0)} h ${c.crossCheckHours >= 0 ? 'later' : 'earlier'} (cross-check)`
                 : `${Math.min(100, Math.round(c.transit.fraction * 100))}% of Sun→Earth covered`;
-            this._drawLabel(slot.lab, `CME — IN FLIGHT${c.glancing ? ' (FLANK)' : ''}`, [
+            const title = nCmes > 1
+                ? `CMEs IN FLIGHT — 1 of ${nCmes}${c.glancing ? ' (FLANK)' : ''}`
+                : `CME — IN FLIGHT${c.glancing ? ' (FLANK)' : ''}`;
+            this._drawLabel(slot.lab, title, [
                 `v ${Math.round(c.speed_km_s)} km/s · launched ${c.transit.hoursInFlight.toFixed(0)} h ago`,
                 etaH > 0
                     ? `arrives in ≈ ${etaH < 48 ? `${Math.round(etaH)} h` : `${(etaH / 24).toFixed(1)} d`} ±${band} h`
@@ -2738,8 +2754,9 @@ export class RingCurrentGlobe {
                 srcLine,
                 `${holesVis} CH on disk · ${due} stream${due === 1 ? '' : 's'} due ≤5 d`,
                 `puffs ${(2 + 2.2 * flux).toFixed(1)}/s ∝ live n·v at L1`,
-                cmeN ? `${cmeN} CME${cmeN === 1 ? '' : 's'} in flight — see cone label${cmeN === 1 ? '' : 's'}`
-                     : 'no Earth-directed CMEs in flight',
+                cmeN === 0 ? 'no Earth-directed CMEs in flight'
+                    : cmeN === 1 ? '1 CME in flight — see cone label'
+                    : `${cmeN} CMEs in flight · nearest shown`,
             ], '#ffd27a');
         }
         const d = state?.drivers, nw = state?.now;
