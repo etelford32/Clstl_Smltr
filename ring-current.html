@@ -159,6 +159,7 @@ body {
 
 .rc-sep { border-top:1px solid rgba(255,255,255,.08); margin:8px 0; }
 .rc-bars { display:flex; align-items:flex-end; gap:4px; height:34px; margin-top:8px; }
+.rc-spark { width:100%; height:26px; display:block; margin:2px 0 6px; }
 .rc-bars .rc-bar {
     flex:1; min-height:2px; border-radius:2px 2px 0 0; opacity:.85;
     background:linear-gradient(180deg,#ff9a3d,#8a5420);
@@ -409,11 +410,18 @@ body {
             <div class="rc-kv"><span class="rc-k">ledger skill &mdash; 7 d</span><span class="rc-v" id="rc-lg-7d">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">server ledger</span><span class="rc-v" id="rc-lg-meta">&mdash;</span></div>
             <div class="rc-bars" id="rc-lg-bars" title="daily RMSE, last 7 days"></div>
+            <div class="rc-sep"></div>
+            <div class="rc-kv"><span class="rc-k">Sun-attribution skill (&plusmn;20&deg;)</span><span class="rc-v" id="rc-val-bm">&mdash;</span></div>
+            <svg class="rc-spark" id="rc-spark-bm" viewBox="0 0 120 26" preserveAspectRatio="none" aria-label="attribution skill history"></svg>
+            <div class="rc-kv"><span class="rc-k">recurrence timing skill</span><span class="rc-v" id="rc-val-rc">&mdash;</span></div>
+            <svg class="rc-spark" id="rc-spark-rc" viewBox="0 0 120 26" preserveAspectRatio="none" aria-label="recurrence skill history"></svg>
             <div style="font-size:.68rem;color:#5d6684;margin-top:6px;line-height:1.5;">
                 GOES magnetometer is an independent NOAA measurement at GEO
                 &mdash; never an input to the model. The skill ledger is
-                computed server-side every 15 min against Kyoto Dst, whether
-                or not anyone is watching. Skill shown, not claimed.
+                computed server-side every 15 min against Kyoto Dst; the two
+                Sun-side skills are re-scored daily over the rolling archive
+                (back-mapping attribution &middot; 27-d recurrence hindcast).
+                Skill shown, not claimed.
             </div>
         </section>
 
@@ -887,6 +895,52 @@ async function loadSkillLedger() {
 loadSkillLedger();
 // T3 cadence matches the endpoint's 10-min CDN TTL; no polling while hidden.
 setInterval(() => { if (!document.hidden) loadSkillLedger(); }, INTERVALS.T3);
+
+// ── Sun-side skill history: daily validation re-runs as sparklines ──────────
+// /api/ring-current/validation serves the cron's daily re-scores of the
+// back-mapping attribution and the recurrence hindcast (validation_runs).
+// Both skills are 0..1 (0 = chance/random, 1 = perfect), so one shared
+// sparkline scale is honest.
+function renderSpark(svgId, values, color) {
+    const svg = $(svgId);
+    if (!svg) return;
+    const vals = values.filter(Number.isFinite);
+    if (!vals.length) { svg.innerHTML = ''; return; }
+    const w = 120, h = 26, pad = 2, n = vals.length;
+    const pt = (v, i) => {
+        const x = n === 1 ? w / 2 : pad + (w - 2 * pad) * i / (n - 1);
+        const y = h - pad - Math.max(0, Math.min(1, v)) * (h - 2 * pad);
+        return [x.toFixed(1), y.toFixed(1)];
+    };
+    const pts = vals.map(pt);
+    const last = pts[pts.length - 1];
+    svg.innerHTML =
+        `<line x1="0" y1="${h - pad}" x2="${w}" y2="${h - pad}" stroke="rgba(255,255,255,.12)" stroke-width="1"/>` +
+        `<polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>` +
+        `<circle cx="${last[0]}" cy="${last[1]}" r="2" fill="${color}"/>`;
+}
+async function loadValidationHistory() {
+    try {
+        const res = await fetch('/api/ring-current/validation?limit=20');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json();
+        const bm = (body?.data?.backmap ?? []).slice().reverse();     // oldest → newest
+        const rc = (body?.data?.recurrence ?? []).slice().reverse();
+        const bmL = bm[bm.length - 1], rcL = rc[rc.length - 1];
+        if (bmL) $('rc-val-bm').textContent =
+            `${Number.isFinite(bmL.hit_rate) ? Math.round(bmL.hit_rate * 100) + '% hit' : '—'}` +
+            ` · skill ${Number.isFinite(bmL.skill) ? bmL.skill.toFixed(2) : '—'} · ${bm.length} run${bm.length === 1 ? '' : 's'}`;
+        if (rcL) $('rc-val-rc').textContent =
+            `MAE ${Number.isFinite(rcL.mae_days) ? rcL.mae_days.toFixed(2) + ' d' : '—'}` +
+            ` · skill ${Number.isFinite(rcL.skill) ? rcL.skill.toFixed(2) : '—'} · ${rc.length} run${rc.length === 1 ? '' : 's'}`;
+        renderSpark('rc-spark-bm', bm.map(r => r.skill), '#7fe6c3');
+        renderSpark('rc-spark-rc', rc.map(r => r.skill), '#ffd27a');
+    } catch (err) {
+        console.warn('[ring-current] validation history unavailable:', err);
+    }
+}
+loadValidationHistory();
+setInterval(() => { if (!document.hidden) loadValidationHistory(); }, INTERVALS.T3);
 
 // ── Storm drag impact — same engine as the Upper Atmosphere twin ────────────
 let densityFn = null, densityLoading = false;
