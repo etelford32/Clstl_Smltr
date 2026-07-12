@@ -155,7 +155,7 @@ const smooth01 = (a, b, x) => {
  *          mode: 0 ENA channel, ±1 precipitation; ph ∈ [0,1) life phase;
  *          dying ∈ [0,1] death-window progress.
  */
-export function particlePose(pop, i, driftHours, bounceSec) {
+export function particlePose(pop, i, driftHours, bounceSec, out) {
     const j = i * 3, k = i * 4;
     const L    = pop.seed[j];
     const lamM = pop.seed[j + 2];
@@ -189,6 +189,13 @@ export function particlePose(pop, i, driftHours, bounceSec) {
         // outward as an ENA while fading.
         const s = 1 + dying * 2.2;
         x *= s; y *= s; z *= s;
+    }
+    // Optional scratch object: hot callers (the tooltip pose-projection
+    // scans thousands of particles per pick) pass one to avoid GC churn.
+    if (out) {
+        out.x = x; out.y = y; out.z = z; out.theta = theta;
+        out.ph = ph; out.dying = dying; out.mode = mode; out.cycle = cycle;
+        return out;
     }
     return { x, y, z, theta, ph, dying, mode, cycle };
 }

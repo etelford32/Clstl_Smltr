@@ -103,6 +103,10 @@ export class SimClock {
     /** UI label, e.g. "×300". */
     get label() { return `×${this._tau}`; }
 
+    /** Sweep window length (ms) — the page shows live sweep progress so
+     *  the wrap reads as "replaying the same real window", not a glitch. */
+    get windowMs() { return this._windowMs; }
+
     /** Change τ and restart the sweep from the wall present. */
     setTau(tau) {
         const t = Number.isFinite(tau) ? Math.max(1, tau) : 1;
