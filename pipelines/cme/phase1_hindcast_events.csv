@@ -1,0 +1,14 @@
+event_id,label,tier,launch_time_utc_approx,l1_arrival_utc_approx,cme_speed_kms_approx,dst_min_nt_approx,source_region,verified_against_primary,donki_id,notes
+PP-HC-2000-0714,Bastille Day storm,A,2000-07-14T10:54Z,2000-07-15T14:30Z,1674,-301,AR9077 N17W02,false,,pre-DONKI; kinematics from LASCO CDAW
+PP-HC-2003-1028,Halloween storm I,A,2003-10-28T11:30Z,2003-10-29T06:00Z,2459,-353,AR10486 S16E08,false,,pre-DONKI; X17 flare; extreme transit ~19h
+PP-HC-2003-1029,Halloween storm II,A,2003-10-29T20:54Z,2003-10-30T16:20Z,2029,-383,AR10486 S15W02,false,,pre-DONKI; X10 flare
+PP-HC-2004-1107,November 2004 superstorm,A,2004-11-07T16:54Z,2004-11-09T18:30Z,1759,-374,AR10696 N09W17,false,,pre-DONKI; multi-CME complex ejecta — arrival attribution ambiguous
+PP-HC-2005-0513,May 2005 storm,A,2005-05-13T17:12Z,2005-05-15T02:30Z,1689,-247,AR10759 N12E11,false,,pre-DONKI; M8 flare; strong magnetic cloud
+PP-HC-2012-0307,March 2012 X5.4 pair,B,2012-03-07T00:24Z,2012-03-08T11:00Z,2684,-143,AR11429 N17E27,false,,DONKI era begins; two near-simultaneous CMEs
+PP-HC-2015-0317,St. Patrick's Day storm,B,2015-03-15T01:48Z,2015-03-17T04:45Z,719,-223,AR12297 S22W25,false,,slow CME with unexpectedly severe response — tests impact scoring
+PP-HC-2015-0622,June 2015 solstice storm,B,2015-06-21T02:36Z,2015-06-22T18:30Z,1366,-204,AR12371 N12E13,false,,
+PP-HC-2017-0906,September 2017 X9.3,B,2017-09-06T12:24Z,2017-09-07T23:00Z,1571,-142,AR12673 S08W33,false,,fast transit ~34h; preceded by Sep 4 CME preconditioning
+PP-HC-2022-0203,Starlink drag event,B,2022-01-29T23:36Z,2022-02-02T22:00Z,662,-66,AR12936 N18W65,false,,canonical proof point: moderate storm; 38 satellites lost to drag — weak-Dst does NOT mean no impact
+PP-HC-2023-0423,April 2023 storm,B,2023-04-21T18:12Z,2023-04-23T17:35Z,1400,-213,AR13283 S22W12,false,,
+PP-HC-2024-0510,Gannon superstorm,B,2024-05-08T05:36Z,2024-05-10T16:37Z,1600,-412,AR13664 S17W27,false,,G5; existing hindcast: data/hindcast/gannon_may_2024_replay.json + api/hindcast/gannon.js flare catalog
+PP-HC-2024-1010,October 2024 storm,B,2024-10-09T01:48Z,2024-10-10T15:15Z,1500,-335,AR13848 S13W05,false,,

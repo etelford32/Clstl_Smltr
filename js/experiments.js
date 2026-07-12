@@ -74,6 +74,19 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'urgency', w: 50 },   // persona-specific stronger verb
         ],
     },
+    // Space-weather dashboard panel arrangement (js/layout-lab.js). Variant
+    // layouts live in data/layout-variants/space-weather.json — a null
+    // variant means the as-authored DOM. RUNNING since 2026-07-12:
+    // control = sim-first (as authored), b = forecast-first reorder.
+    // Personal layouts saved from the Customize button always win over the
+    // assigned variant. QA-force: ?exp_sw_layout_v1=b.
+    sw_layout_v1: {
+        status: 'running',
+        variants: [
+            { id: 'control', w: 50 },   // as-authored panel order (sim-first)
+            { id: 'b',       w: 50 },   // forecast-first reorder
+        ],
+    },
     // Hero background renderer. particles = the light drifting field;
     // constellation = the 3D operational-fleet globe (real Walker shells
     // from constellation-catalog.js + a storm-drag control).
@@ -142,6 +155,10 @@ export const EXPERIMENT_GOALS = Object.freeze({
     home_redesign: [
         { stage: 'landing_cta_click',  label: 'CTA click (primary)' },
         { stage: 'signup_succeeded',   label: 'Signup' },
+    ],
+    sw_layout_v1: [
+        { stage: 'sw_panel_interact',  label: 'Panel interaction (primary)' },
+        { stage: 'sw_dwell_60s',       label: 'Dwelled 60 s' },
     ],
 });
 
