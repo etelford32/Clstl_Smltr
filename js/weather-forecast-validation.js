@@ -317,6 +317,10 @@ export class WeatherForecastValidator {
         const matchedIds = [];
         const droppedIds = [];
         let dirtySummary = false;
+        // Matched pairs kept for the map-space residual layer (Phase 4.3):
+        // per model, the SHORTEST verified horizon this ingest — the tightest
+        // grading of the physics we can show against this observation.
+        const residualPicks = {};
 
         for (const p of pending) {
             const dt = Math.abs(p.target_ms - tNew);
@@ -330,6 +334,8 @@ export class WeatherForecastValidator {
                     continue;
                 }
                 this._foldOne(p, frame);
+                const cur = residualPicks[p.model_id];
+                if (!cur || p.horizon_h < cur.horizon_h) residualPicks[p.model_id] = p;
                 matchedIds.push(p.id);
                 dirtySummary = true;
             } else if (tNew - p.target_ms > MATCH_GRACE_MS) {
@@ -348,7 +354,48 @@ export class WeatherForecastValidator {
             document.dispatchEvent(new CustomEvent('weather-forecast-validation-update', {
                 detail: { summary: this.summary() },
             }));
+            this._dispatchResidual(residualPicks, frame);
         }
+    }
+
+    /**
+     * Map-space residual event (Phase 4.3). Emits the precip channel of the
+     * best verified physics forecast alongside the verifying observation —
+     * and the persistence forecast for the SAME (target, horizon) when one
+     * matched — so earth.html can paint model−observed residuals with the
+     * skill strip's "physics vs persistence" framing. Fires only when a
+     * physics model actually verified this ingest; consumers treat it as a
+     * fresh full replacement, not a delta.
+     */
+    _dispatchResidual(picks, observed) {
+        const PHYSICS_PREFERENCE = [
+            'multilevel-advection-v1', 'wind-advection-rk2-v1', 'wind-advection-v1',
+        ];
+        const modelId = PHYSICS_PREFERENCE.find(id => picks[id]);
+        if (!modelId) return;
+        const p = picks[modelId];
+        const N = p.gridW * p.gridH;
+        const CH_PRECIP = 8;
+        const slice = (fr) => Float32Array.from(
+            fr.subarray(CH_PRECIP * N, (CH_PRECIP + 1) * N));
+
+        const pers = picks['persistence-v1'];
+        const persUsable = pers && pers.horizon_h === p.horizon_h
+            && Math.abs(pers.target_ms - p.target_ms) < 60_000;
+
+        document.dispatchEvent(new CustomEvent('weather-validation-residual', {
+            detail: {
+                model_id:   modelId,
+                horizon_h:  p.horizon_h,
+                issued_ms:  p.issued_ms,
+                target_ms:  p.target_ms,
+                verified_ms: observed.t,
+                gridW: p.gridW, gridH: p.gridH,
+                forecastPrecip:    slice(p.frame),
+                truthPrecip:       slice(observed.coarse),
+                persistencePrecip: persUsable ? slice(pers.frame) : null,
+            },
+        }));
     }
 
     /** Per-channel pooled MAE + MSE between forecast and observation. */

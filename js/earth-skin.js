@@ -247,6 +247,20 @@ uniform float u_dst_norm;
 uniform float u_bump_strength;  // 0 = flat, ~1 = pronounced relief
 uniform vec3  u_mag_pole;       // geomagnetic dipole pole (unit normal)
 
+// ── Cloud-shadow inputs (Phase 2.4 of the wind+cloud depth plan) ─────────
+// The same cloud DataTexture the cloud shells sample, plus the satellite
+// mosaic for its confidence channel. u_cloud_shadow is flipped by the
+// quality governor at the same tier that enables cloud relief/self-shadow
+// (u_quality > 0.83) — consumers that never wire it (space-weather-globe,
+// heliosphere3d) stay on the 0 default and skip the whole branch.
+uniform sampler2D u_cloud_layers;  // R=cl_low, G=cl_mid, B=cl_high, A=precip
+uniform sampler2D u_satellite;     // r = mosaic cloudiness, a = confidence
+uniform float u_satellite_on;
+uniform float u_cloud_shadow;
+uniform vec3  u_sun_dir_obj;       // sun dir in the mesh's OBJECT space —
+                                   // the shadow offset feeds normalToUV,
+                                   // which lives in object space.
+
 varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
@@ -347,6 +361,35 @@ void main() {
     vec3  H    = normalize(u_sun_dir + V);
     float spec = pow(max(dot(N_base, H), 0.0), 90.0) * oceanMsk * dayMix * 0.60;
     base += vec3(spec * 0.7, spec * 0.85, spec);
+
+    // ── Cloud shadows on the ground (Phase 2.4) ──────────────────────────
+    // Sample the cloud field OFFSET toward the sun along the local tangent
+    // plane: where a deck hangs between this ground point and the sun, the
+    // ground darkens. The offset scales with 1/sin(elevation), so decks
+    // throw long shadows near the terminator and none at local noon. All
+    // math in object space (u_sun_dir_obj) because the lookup feeds
+    // normalToUV. Feathered by the mosaic's confidence channel so regions
+    // only the procedural fill "covers" cast nothing hard; with no mosaic
+    // at all, Open-Meteo decks cast at reduced strength (real data, just
+    // coarser). Governor-gated — off below the relief/self-shadow tier.
+    if (u_cloud_shadow > 0.5) {
+        float sunElev = dot(N_sphere, u_sun_dir_obj);
+        if (sunElev > 0.03) {
+            const float H_SHADOW = 0.0012;        // ~7.5 km mean deck height, in globe radii
+            vec3  LtS = u_sun_dir_obj - N_sphere * sunElev;
+            vec3  NcS = normalize(N_sphere + LtS * (H_SHADOW / max(sunElev, 0.20)));
+            vec2  uvS = normalToUV(NcS);
+            vec4  clS  = texture2D(u_cloud_layers, uvS);
+            vec4  satS = texture2D(u_satellite, uvS);
+            // Low decks shade hardest; cirrus barely. The mosaic cloudiness
+            // reinforces where it saw cloud the model grid missed.
+            float cover = clamp(clS.r * 0.55 + clS.g * 0.35 + clS.b * 0.15, 0.0, 1.0);
+            cover = max(cover, satS.r * 0.75);
+            float conf  = (u_satellite_on > 0.5) ? satS.a : 0.65;
+            float shade = cover * conf * smoothstep(0.03, 0.30, sunElev);
+            base *= 1.0 - 0.34 * shade;
+        }
+    }
 
     // Weather temperature overlay
     if (u_weather_on > 0.5) {
@@ -456,6 +499,20 @@ uniform float u_quality;             // adaptive ALU budget [0..1], default 1.
                                      // Octave REDUCTION only — never re-gate
                                      // coverage zonally (that's the banding
                                      // regression this shader already fixed).
+uniform float u_shell_lift;          // altitude terminator bias (Phase 2.2).
+                                     // Added to NdotL so high cirrus stays
+                                     // sunlit after the surface terminator
+                                     // passes (alpenglow) and low decks darken
+                                     // first. 0 on the composite shell → the
+                                     // classic render is bit-identical.
+
+// ── Split-shell compilation (Phase 2.1) ──────────────────────────────────────
+// The same source compiles four ways. With no defines (the composite shell,
+// ALSO the floor-quality tier and research mode) the preprocessor emits
+// byte-identical GLSL to the single-shell era. With SHELL_SPLIT + SHELL_LAYER
+// ∈ {0,1,2} the material renders exactly one deck: the other two layers'
+// noise stacks compile out (so three split shells cost ≈ one composite shell
+// in ALU) and their alphas are pinned to 0 after the data blends.
 
 // Storm systems: .xy = UV position, .z = intensity [0-1], .w = spin (+1 CCW/-1 CW)
 uniform vec4 u_storms[8];
@@ -665,7 +722,9 @@ void main() {
     vec2 vUv      = normalToUV(N_sphere);
 
     vec3  N     = normalize(vWorldNormal);
-    float NdotL = dot(N, u_sun_dir);
+    // u_shell_lift biases the terminator per shell altitude: cirrus keeps
+    // catching sun the surface no longer sees; low decks fall dark first.
+    float NdotL = dot(N, u_sun_dir) + u_shell_lift;
 
     // View direction + the tangent-plane component of it. The tangential
     // part is what drives inter-layer PARALLAX: when you orbit toward the
@@ -717,14 +776,39 @@ void main() {
     int octMid  = u_quality > 0.83 ? 4 : (u_quality > 0.45 ? 3 : 2);
     int octWarp = u_quality > 0.45 ? 3 : 2;
 
+    // Split shells compile only their own layer's noise stack — the other
+    // two collapse to constants (and their shapes to 0), so the per-shell
+    // ALU is ≈ one-third of the composite pass.
     // Low cumulus: defined puffy cells
+#if defined(SHELL_SPLIT) && SHELL_LAYER != 0
+    float nLow  = 0.0;
+#else
     float nLow  = warpedFbm3(N_low  * 14.0 + vec3(0.0, 0.0, tLow),  octLow, octWarp);
+#endif
     // Mid altostratus: smoother, broader
+#if defined(SHELL_SPLIT) && SHELL_LAYER != 1
+    float nMid  = 0.0;
+#else
     float nMid  = warpedFbm3(N_mid  *  9.5 + vec3(3.7, 0.0, tMid),  octMid, octWarp);
+#endif
     // High cirrus: higher frequency for thinner strands. ISOTROPIC — the
     // wispy elongation will come back later from wind-driven flow advection
     // (step 6 in the plan), not from a hard-coded frequency ratio.
+#if defined(SHELL_SPLIT) && SHELL_LAYER != 2
+    float nHigh = 0.0;
+#else
     float nHigh = warpedFbm3(N_high * 22.0 + vec3(7.3, 7.3, tHigh), octLow, octWarp);
+#endif
+
+    // Relief/self-shadow sample normal: each split shell lights its own
+    // deck's form field; the composite keeps the classic low-deck relief.
+#if defined(SHELL_SPLIT) && SHELL_LAYER == 1
+    vec3 N_form = N_mid;
+#elif defined(SHELL_SPLIT) && SHELL_LAYER == 2
+    vec3 N_form = N_high;
+#else
+    vec3 N_form = N_low;
+#endif
 
     float alphaLow = 0.0, alphaMid = 0.0, alphaHigh = 0.0;
     float precip   = 0.0;
@@ -863,6 +947,37 @@ void main() {
         satNoDataMask = (1.0 - satData) * u_research_mode;
     }
 
+#ifdef SHELL_SPLIT
+    // Per-shell isolation: this material renders exactly one deck. Done
+    // AFTER the data/satellite blends so every coverage source still routes
+    // through the shared code path above.
+    #if SHELL_LAYER == 0
+    alphaMid = 0.0; alphaHigh = 0.0;
+    #elif SHELL_LAYER == 1
+    alphaLow = 0.0; alphaHigh = 0.0;
+    #else
+    alphaLow = 0.0; alphaMid = 0.0;
+    // Cloud-top height (Phase 2.3): the mosaic's B channel carries IR
+    // brightness-temperature "top coldness" (0 → ~300 K, 1 → ~195 K; see
+    // IR_BT_WARM_K/IR_BT_COLD_K in cloud-mosaic-core.js — keep the 26.85 −
+    // b·105 ramp below in lockstep). Against the 2 m surface temperature
+    // and a 6.5 K/km lapse, cold tops decode to height; deep convection
+    // (tops punching past ~7 km) thickens and seeds the high shell so
+    // towers visibly rise. Confidence-feathered — procedural-fill regions
+    // grow no fake anvils. B = 0 means "no IR estimate" and is skipped.
+    if (u_satellite_on > 0.5) {
+        vec4 satC = texture2D(u_satellite, vUv);
+        if (satC.b > 0.02) {
+            float t2mC  = sampleWeatherField(vUv).r * 110.0 - 60.0;
+            float btC   = 26.85 - satC.b * 105.0;
+            float cthKm = clamp((t2mC - btC) / 6.5, 0.0, 18.0);
+            float tower = smoothstep(7.0, 13.0, cthKm) * satC.a;
+            alphaHigh   = clamp(alphaHigh * (1.0 + 0.9 * tower) + 0.12 * tower, 0.0, 1.0);
+        }
+    }
+    #endif
+#endif
+
     // Composite layers: opaque low clouds dominate, cirrus adds on top
     float alpha = max(alphaLow, alphaMid);
     alpha = clamp(alpha + alphaHigh * (1.0 - alpha * 0.55), 0.0, 0.95);
@@ -893,9 +1008,9 @@ void main() {
     float selfSh = 0.0;
     if (u_quality > 0.45) {
         const float EPS = 0.02;
-        float fC   = cloudForm(N_low);
-        float fE   = cloudForm(normalize(N_low + tE * EPS));
-        float fN   = cloudForm(normalize(N_low + tN * EPS));
+        float fC   = cloudForm(N_form);
+        float fE   = cloudForm(normalize(N_form + tE * EPS));
+        float fN   = cloudForm(normalize(N_form + tN * EPS));
         float relAmp = clamp(alpha * 1.6, 0.0, 1.0);
         Nb = normalize(N - (tE * (fE - fC) + tN * (fN - fC)) * 8.0 * relAmp);
 
@@ -903,11 +1018,11 @@ void main() {
         // the sun in the tangent plane. If the cloud is thicker there, this point
         // sits in its shadow. Cheap one-tap approximation of a sun-march.
         vec3  Lt   = u_sun_dir - N_sphere * dot(u_sun_dir, N_sphere);
-        float fSun = cloudForm(normalize(N_low + normalize(Lt + 1e-4) * 0.045));
+        float fSun = cloudForm(normalize(N_form + normalize(Lt + 1e-4) * 0.045));
         selfSh = clamp((fSun - fC) * 3.2, 0.0, 1.0) * relAmp;
     }
 
-    float NdotLb = dot(Nb, u_sun_dir);
+    float NdotLb = dot(Nb, u_sun_dir) + u_shell_lift;
     float dayMix = smoothstep(-0.18, 0.20, NdotL);
     float sun    = clamp(NdotLb * 0.5 + 0.5, 0.0, 1.0);
     sun          = sun * sun;
@@ -958,6 +1073,9 @@ void main() {
     //   • Phase (rain↔snow) comes from the weather grid's TEMPERATURE, not
     //     latitude — snow falls in a winter mid-latitude storm and not over a
     //     warm tropical highland, which the old abs(lat) test got backwards.
+    // Split shells: the rain/snow veil hangs under the LOW deck only — the
+    // mid/high shells must not repeat it at altitude.
+#if !defined(SHELL_SPLIT) || SHELL_LAYER == 0
     if (u_weather_on > 0.5 && precip > 0.004) {
         float precipI = clamp(sqrt(precip * 1.7), 0.0, 1.0);
 
@@ -989,6 +1107,7 @@ void main() {
         col   = mix(col, pcol * mix(0.80, 1.30, snowFrac), shaft * veil * 0.50);
         alpha = clamp(alpha + (0.10 + shaft * 0.20) * veil, 0.0, 0.98);
     }
+#endif
 
     // Thin cloud edges stay translucent so they don't read as hard cut-outs
     alpha *= mix(0.55, 1.0, smoothstep(0.0, 0.30, alpha));
@@ -1461,6 +1580,15 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_topo_detail_on:     { value: 0 },
         u_topo_detail_texel:  { value: new THREE.Vector2(1 / 512, 1 / 512) },
         u_sun_dir:      { value: sunDir.clone() },
+        // Cloud-shadow inputs (see EARTH_FRAG). Defaults keep every
+        // consumer that doesn't wire them (space-weather-globe,
+        // heliosphere3d) on the zero-cost branch: shadow off, black
+        // cloud texture, object-space sun equal to world sun.
+        u_cloud_layers: { value: _blackTex() },
+        u_satellite:    { value: _blackTex() },
+        u_satellite_on: { value: 0 },
+        u_cloud_shadow: { value: 0 },
+        u_sun_dir_obj:  { value: sunDir.clone() },
         u_time:         { value: 0 },
         u_kp:           { value: 0 },
         u_xray:         { value: 0 },
@@ -1518,6 +1646,9 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         // Research / measured-only mode (see CLOUD_FRAG): 0 = composite (default),
         // 1 = data-only with hatched no-data overlay. UI toggle in earth.html.
         u_research_mode: { value: 0 },
+        // Altitude terminator bias (Phase 2.2). 0 on the composite shell;
+        // the split shells override per altitude via their own uniform entry.
+        u_shell_lift:    { value: 0 },
         u_storms:        { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 1)) },
         u_storm_count:   { value: 0 },
     };

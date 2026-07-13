@@ -38,8 +38,14 @@
  * silently show "now" data over a past or forecast globe.
  *
  * Events (document):
- *   'weather-patch-update'  { weatherRGBA, cloudRGBA, w, h, bounds,
+ *   'weather-patch-update'  { weatherRGBA, cloudRGBA, coarse, w, h, bounds,
  *                             stepDeg, t, source }
+ *                           coarse = the 9-channel CHW frame the RGBA pair
+ *                           was packed from (m/s winds in ch 3/4) — CPU
+ *                           consumers (patch-aware wind advection, the
+ *                           column probe) sample it directly so the
+ *                           particles read the same sub-synoptic field the
+ *                           shaders blend in.
  *   'weather-patch-clear'   {}                — hide the patch
  *   'weather-patch-status'  { status, ... }   — fetching / ok / error
  */
@@ -411,6 +417,7 @@ export class WeatherPatchFeed {
         this._visibleT = frame.t;
         this._dispatch('weather-patch-update', {
             weatherRGBA, cloudRGBA,
+            coarse: frame.coarse,
             w: frame.w, h: frame.h,
             bounds: {
                 latMin: grid.latMin, lonMin: grid.lonMin,
