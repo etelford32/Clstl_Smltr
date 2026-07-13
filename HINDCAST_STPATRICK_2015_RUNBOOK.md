@@ -159,37 +159,54 @@ load-bearing "Solver stability" section of the Gannon runbook — the
 cold-start ladder, Boris-from-session-1, and CflExpl ≤ 0.65 rules all apply
 verbatim).
 
+`swmf/run-hindcast.sh` is the generalized (env-parameterized) successor to
+the Gannon-only driver: IMF gates (incl. coverage) → `gen_param` →
+`run_forecast --launch-run-dir` → `hindcast_runner`, one command per run.
+The `-v` mounts overlay the repo's current script + pipeline + templates
+onto the already-built image, so **no image rebuild is needed** for the new
+event registry.
+
 ```sh
-cd swmf
+# From the repo root on the workstation. Stage the driver first:
+cp swmf/fixtures/hindcast/st_patrick_mar_2015/imf_l1.dat swmf/data/imf/imf_l1.dat
+
 # Baseline — GM+IE only, the controlled comparison against Gannon run 1:
-python3 -m pipeline.gen_param gm_ie --no-im \
-  --start 2015-03-16T12:00:00 --hours 72 \
-  --event st_patrick_mar_2015 --f107 114.3 --nproc 4 --imf imf_l1.dat
-python3 -m pipeline.run_forecast --launch-run-dir <RUN_DIR> \
-  --nproc 4 --timeout-hours 24
+docker compose -f docker-compose.swmf.yml run --rm \
+  -v "$PWD/swmf/run-hindcast.sh:/app/run-hindcast.sh:ro" \
+  -v "$PWD/swmf/pipeline:/app/pipeline:ro" \
+  -v "$PWD/swmf/config:/app/config:ro" \
+  -e EVENT=st_patrick_mar_2015 -e START=2015-03-16T12:00:00 \
+  -e HOURS=72 -e F107=114.3 -e NO_IM=1 \
+  --entrypoint /bin/bash swmf-hindcast /app/run-hindcast.sh
 
-# Coupled — GM+IE+IM(RCM2), same image that ran Gannon run 2:
-python3 -m pipeline.gen_param gm_ie \
-  --start 2015-03-16T12:00:00 --hours 72 \
-  --event st_patrick_mar_2015 --f107 114.3 --nproc 10 --imf imf_l1.dat
-python3 -m pipeline.run_forecast --launch-run-dir <RUN_DIR> \
-  --nproc 10 --timeout-hours 24
+# Coupled — GM+IE+IM(RCM2): same command with NO_IM dropped and more ranks:
+docker compose -f docker-compose.swmf.yml run --rm \
+  -v "$PWD/swmf/run-hindcast.sh:/app/run-hindcast.sh:ro" \
+  -v "$PWD/swmf/pipeline:/app/pipeline:ro" \
+  -v "$PWD/swmf/config:/app/config:ro" \
+  -e EVENT=st_patrick_mar_2015 -e START=2015-03-16T12:00:00 \
+  -e HOURS=72 -e F107=114.3 -e NPROC=10 \
+  --entrypoint /bin/bash swmf-hindcast /app/run-hindcast.sh
 ```
 
-(`swmf/run-gannon-hindcast.sh` chains these steps but is Gannon-specific;
-run the steps individually, or generalize the script — optional, not
-blocking.)
+To drive the steps by hand instead (`gen_param gm_ie [--no-im] …` →
+`run_forecast --launch-run-dir …`), follow the Gannon runbook's Day-2
+blocks with this event's window and F10.7 = 114.3.
 
-Extract Φ_PC/HPI after each run — for this event the runner key and the
-run-dir label are the **same string**, no reversal trap:
+`run-hindcast.sh` already runs the Φ_PC/HPI extraction as its step 3 —
+output lands host-side at `data/hindcast/st_patrick_mar_2015_hindcast.json`
+(for this event the runner key and the fixture dirs are the **same
+string**, no reversal trap). The one manual step: archive per-variant
+before the next run overwrites (standard §4.2):
 
 ```sh
-python3 -m pipeline.hindcast_runner --event st_patrick_mar_2015 \
-  --run-dir <RUN_DIR> --out ../data/hindcast -v
-# archive per-variant before the next run overwrites (standard §4.2):
-cp ../data/hindcast/st_patrick_mar_2015_hindcast.json \
-   ../data/hindcast/st_patrick_mar_2015_hindcast.gm_ie.json
+cp data/hindcast/st_patrick_mar_2015_hindcast.json \
+   data/hindcast/st_patrick_mar_2015_hindcast.gm_ie.json
 ```
+
+(Driving extraction by hand instead:
+`python3 -m pipeline.hindcast_runner --event st_patrick_mar_2015
+--run-dir <RUN_DIR> --out ../data/hindcast -v`.)
 
 **Model Dst:** resolve standard §3.1 (session-3 `#GEOMAGINDICES` block vs
 workstation Biot–Savart post-processing) **before the coupled run**, so both
