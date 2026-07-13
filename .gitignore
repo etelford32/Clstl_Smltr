@@ -91,3 +91,4 @@ dsmc/raw/
 # CME validation pipeline — raw pulls and generated outputs stay local;
 # only the reviewed, verified CSV gets committed back into pipelines/cme/
 pipelines/cme/step0_out/
+rust-gravity/target/

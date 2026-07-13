@@ -70,13 +70,18 @@ function _accelerations(bodies, opts) {
     const acc = new Array(N);
     for (let i = 0; i < N; i++) acc[i] = [0, 0, 0];
 
+    // Plummer softening (sandbox-only, P2.1): r² → r² + ε². The softened
+    // force is the exact gradient of the softened potential used in
+    // totalEnergy, so the conservation ledger stays a true Hamiltonian.
+    const soft2 = (opts && opts.soft2) || 0;
+
     // Pairwise Newtonian gravity. Newton's third law => one pass over (i<j).
     for (let i = 0; i < N; i++) {
         for (let j = i + 1; j < N; j++) {
             const dx = bodies[j].r[0] - bodies[i].r[0];
             const dy = bodies[j].r[1] - bodies[i].r[1];
             const dz = bodies[j].r[2] - bodies[i].r[2];
-            const r2 = dx*dx + dy*dy + dz*dz;
+            const r2 = dx*dx + dy*dy + dz*dz + soft2;
             const r  = Math.sqrt(r2);
             const inv_r3 = 1 / (r2 * r);
             const Gi = G_SI * inv_r3;
@@ -123,6 +128,364 @@ function _accelerations(bodies, opts) {
     return acc;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Adaptive RKF7(8) integrator (P0.4) — the close-encounter path.
+//
+// Runge-Kutta-Fehlberg 7(8): 13 stages, embedded 7th/8th-order pair
+// (Fehlberg 1968, NASA TR R-287). The tableau below was checksum-verified
+// against the row-sum consistency condition Σ_j β_ij = α_i for every
+// stage, and the harness verifies 8th-order convergence empirically
+// (halving h shrinks the one-step error ~2⁸) plus end-to-end accuracy on
+// an e = 0.9 Kepler orbit — a wrong coefficient cannot survive either.
+//
+// This path is NOT symplectic. It exists for the regime where fixed-step
+// Yoshida-4 is invalid anyway (close encounters). Energy drift accrued
+// during adaptive segments is expected and is honestly reported against
+// the original E₀ — nothing is re-baselined.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const RK_S = 13;
+
+const RK_BETA = [
+    [],
+    [2/27],
+    [1/36, 1/12],
+    [1/24, 0, 1/8],
+    [5/12, 0, -25/16, 25/16],
+    [1/20, 0, 0, 1/4, 1/5],
+    [-25/108, 0, 0, 125/108, -65/27, 125/54],
+    [31/300, 0, 0, 0, 61/225, -2/9, 13/900],
+    [2, 0, 0, -53/6, 704/45, -107/9, 67/90, 3],
+    [-91/108, 0, 0, 23/108, -976/135, 311/54, -19/60, 17/6, -1/12],
+    [2383/4100, 0, 0, -341/164, 4496/1025, -301/82, 2133/4100, 45/82, 45/164, 18/41],
+    [3/205, 0, 0, 0, 0, -6/41, -3/205, -3/41, 3/41, 6/41, 0],
+    [-1777/4100, 0, 0, -341/164, 4496/1025, -289/82, 2193/4100, 51/82, 33/164, 12/41, 0, 1],
+];
+
+// 8th-order solution weights (local extrapolation): stages 6-10 + 12,13.
+const RK_C8 = [0, 0, 0, 0, 0, 34/105, 9/35, 9/35, 9/280, 9/280, 0, 41/840, 41/840];
+
+// Embedded error estimate: e = h · (41/840) · (k1 + k11 − k12 − k13).
+const RK_ERR_W = 41/840;
+
+// Scratch buffers, grown on demand — the adaptive path allocates nothing
+// in steady state.
+let _rk = null;
+function _rkScratch(N) {
+    if (_rk && _rk.N === N) return _rk;
+    const n6 = N * 6;
+    _rk = {
+        N,
+        y0:   new Float64Array(n6),
+        ytmp: new Float64Array(n6),
+        y1:   new Float64Array(n6),
+        acc:  new Float64Array(N * 3),
+        k:    Array.from({ length: RK_S }, () => new Float64Array(n6)),
+    };
+    return _rk;
+}
+
+/** Pairwise gravity (+ optional J2/softening) from a packed [r,v]×N state. */
+function _accelFromY(y, bodies, opts, acc) {
+    const N = bodies.length;
+    acc.fill(0);
+    const soft2 = (opts && opts.soft2) || 0;
+    for (let i = 0; i < N; i++) {
+        const i6 = i * 6, i3 = i * 3;
+        for (let j = i + 1; j < N; j++) {
+            const j6 = j * 6, j3 = j * 3;
+            const dx = y[j6]     - y[i6];
+            const dy = y[j6 + 1] - y[i6 + 1];
+            const dz = y[j6 + 2] - y[i6 + 2];
+            const r2 = dx*dx + dy*dy + dz*dz + soft2;
+            const inv_r3 = 1 / (r2 * Math.sqrt(r2));
+            const Gi = G_SI * inv_r3;
+            const aij = Gi * bodies[j].m;
+            const aji = Gi * bodies[i].m;
+            acc[i3]     += aij * dx; acc[i3 + 1] += aij * dy; acc[i3 + 2] += aij * dz;
+            acc[j3]     -= aji * dx; acc[j3 + 1] -= aji * dy; acc[j3 + 2] -= aji * dz;
+        }
+    }
+    if (opts && opts.J2) {
+        const { centerIdx, J2, R_eq, mu } = opts.J2;
+        const c6 = centerIdx * 6, c3 = centerIdx * 3;
+        const mC = bodies[centerIdx].m;
+        for (let i = 0; i < N; i++) {
+            if (i === centerIdx) continue;
+            const i6 = i * 6, i3 = i * 3;
+            const dx = y[i6]     - y[c6];
+            const dy = y[i6 + 1] - y[c6 + 1];
+            const dz = y[i6 + 2] - y[c6 + 2];
+            const r2 = dx*dx + dy*dy + dz*dz;
+            const r  = Math.sqrt(r2);
+            const r5 = r2 * r2 * r;
+            const zr = dz / r;
+            const kf = -1.5 * J2 * mu * R_eq * R_eq / r5;
+            const kx = kf * (1 - 5 * zr * zr);
+            const kz = kf * (3 - 5 * zr * zr);
+            acc[i3]     += kx * dx; acc[i3 + 1] += kx * dy; acc[i3 + 2] += kz * dz;
+            const wt = bodies[i].m / mC;
+            acc[c3]     -= kx * dx * wt; acc[c3 + 1] -= kx * dy * wt; acc[c3 + 2] -= kz * dz * wt;
+        }
+    }
+}
+
+function _deriv(y, out, bodies, opts, acc) {
+    _accelFromY(y, bodies, opts, acc);
+    for (let i = 0; i < bodies.length; i++) {
+        const i6 = i * 6, i3 = i * 3;
+        out[i6]     = y[i6 + 3];
+        out[i6 + 1] = y[i6 + 4];
+        out[i6 + 2] = y[i6 + 5];
+        out[i6 + 3] = acc[i3];
+        out[i6 + 4] = acc[i3 + 1];
+        out[i6 + 5] = acc[i3 + 2];
+    }
+}
+
+/**
+ * One ACCEPTED RKF7(8) step (rejected trials retry internally with a
+ * smaller h). Mutates bodies. Signed h supported.
+ *
+ * @param {Array}  bodies  {m, r, v} array (SI), mutated on success.
+ * @param {number} hTry    Requested step (s, signed).
+ * @param {number} tol     Relative error tolerance per step (default 1e-12,
+ *                         scaled against the system's position/velocity
+ *                         extents so planar zeros can't poison the norm).
+ * @param {object} [opts]  { J2, ctrl } — ctrl carries {errPrev} across
+ *                         steps for the PI controller.
+ * @returns {{h: number, hNext: number, errNorm: number}}
+ *          h = 0 signals an unresolvable step (h collapsed below hMin).
+ */
+export function rkf78Step(bodies, hTry, tol = 1e-12, opts = {}) {
+    const N = bodies.length;
+    const s = _rkScratch(N);
+    const { y0, ytmp, y1, acc, k } = s;
+    const ctrl = opts.ctrl || { errPrev: 1 };
+    const sign = hTry < 0 ? -1 : 1;
+    const hMin = opts.hMin ?? 1e-3;
+
+    for (let i = 0; i < N; i++) {
+        const b = bodies[i], i6 = i * 6;
+        y0[i6]     = b.r[0]; y0[i6 + 1] = b.r[1]; y0[i6 + 2] = b.r[2];
+        y0[i6 + 3] = b.v[0]; y0[i6 + 4] = b.v[1]; y0[i6 + 5] = b.v[2];
+    }
+
+    // System-extent error scales (max over bodies) — robust to bodies
+    // sitting near the barycenter or moving in a plane.
+    let rScale = 0, vScale = 0;
+    for (let i = 0; i < N; i++) {
+        const i6 = i * 6;
+        rScale = Math.max(rScale, Math.hypot(y0[i6], y0[i6 + 1], y0[i6 + 2]));
+        vScale = Math.max(vScale, Math.hypot(y0[i6 + 3], y0[i6 + 4], y0[i6 + 5]));
+    }
+    const scR = tol * Math.max(rScale, 1e-6);
+    const scV = tol * Math.max(vScale, 1e-9);
+
+    let h = hTry;
+    const n6 = N * 6;
+    for (let attempt = 0; attempt < 30; attempt++) {
+        // Stages.
+        _deriv(y0, k[0], bodies, opts, acc);
+        for (let st = 1; st < RK_S; st++) {
+            ytmp.set(y0);
+            const row = RK_BETA[st];
+            for (let j = 0; j < row.length; j++) {
+                const b = row[j];
+                if (b === 0) continue;
+                const hb = h * b;
+                const kj = k[j];
+                for (let c = 0; c < n6; c++) ytmp[c] += hb * kj[c];
+            }
+            _deriv(ytmp, k[st], bodies, opts, acc);
+        }
+
+        // 8th-order solution + embedded error norm.
+        y1.set(y0);
+        for (let st = 0; st < RK_S; st++) {
+            const w = RK_C8[st];
+            if (w === 0) continue;
+            const hw = h * w;
+            const ks = k[st];
+            for (let c = 0; c < n6; c++) y1[c] += hw * ks[c];
+        }
+        let errNorm = 0;
+        const k0 = k[0], k10 = k[10], k11 = k[11], k12 = k[12];
+        for (let c = 0; c < n6; c++) {
+            const e = Math.abs(h * RK_ERR_W * (k0[c] + k10[c] - k11[c] - k12[c]));
+            const sc = (c % 6) < 3 ? scR : scV;
+            const r = e / sc;
+            if (r > errNorm) errNorm = r;
+        }
+
+        if (errNorm <= 1) {
+            for (let i = 0; i < N; i++) {
+                const b = bodies[i], i6 = i * 6;
+                b.r[0] = y1[i6];     b.r[1] = y1[i6 + 1]; b.r[2] = y1[i6 + 2];
+                b.v[0] = y1[i6 + 3]; b.v[1] = y1[i6 + 4]; b.v[2] = y1[i6 + 5];
+            }
+            // PI step-size controller (Hairer II.4): order p = 7 embedded,
+            // exponents 0.7/(p+1) and 0.4/(p+1).
+            const e1 = Math.max(errNorm, 1e-10);
+            const e0 = Math.max(ctrl.errPrev, 1e-10);
+            const fac = Math.min(5, Math.max(0.2,
+                0.9 * Math.pow(e1, -0.7 / 8) * Math.pow(e0, 0.4 / 8)));
+            ctrl.errPrev = e1;
+            return { h, hNext: h * fac, errNorm };
+        }
+
+        // Rejected: shrink (plain I-control on rejection) and retry.
+        const fac = Math.min(0.5, Math.max(0.1, 0.9 * Math.pow(errNorm, -1 / 8)));
+        h *= fac;
+        if (Math.abs(h) < hMin) return { h: 0, hNext: sign * hMin, errNorm };
+    }
+    return { h: 0, hNext: h, errNorm: Infinity };
+}
+
+/**
+ * Advance up to dtRequested (signed seconds) with adaptive RKF7(8).
+ * Returns the time actually integrated — may be less than requested if a
+ * step collapses (true singularity) or opts.maxSteps is exhausted.
+ */
+export function adaptiveStep(bodies, dtRequested, tol = 1e-12, opts = {}) {
+    const sign = dtRequested < 0 ? -1 : 1;
+    const ctrl = opts.ctrl || { errPrev: 1 };
+    const maxSteps = opts.maxSteps ?? 1e6;
+    let advanced = 0;
+    let h = opts.h0 ?? dtRequested / 64;
+    if (h === 0 || (h < 0) !== (dtRequested < 0)) h = dtRequested / 64;
+    for (let n = 0; n < maxSteps; n++) {
+        const remaining = dtRequested - advanced;
+        if (Math.abs(remaining) <= 1e-9 * Math.abs(dtRequested)) break;
+        const hTry = sign * Math.min(Math.abs(h), Math.abs(remaining));
+        const r = rkf78Step(bodies, hTry, tol, { ...opts, ctrl });
+        if (r.h === 0) break;
+        advanced += r.h;
+        h = r.hNext;
+        if (opts.onStep) opts.onStep(bodies, r.h);
+    }
+    return advanced;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Variational (tangent-vector) dynamics for MEGNO (P2.3).
+//
+// The tangent vector δ = (δr, δv) obeys δr' = δv, δv' = T·δr where T is
+// the tidal tensor ∂a/∂r of the pairwise field:
+//
+//   δa_i = Σ_{j≠i} G m_j [ δu/|u|³ − 3 (u·δu) u/|u|⁵ ],  u = r_j − r_i,
+//                                                        δu = δr_j − δr_i
+//
+// δ is propagated with a DKD leapfrog along the integrated trajectory —
+// 2nd order is ample for a chaos INDICATOR (we measure exponential
+// divergence rates, not trajectories), and it works unchanged along both
+// the symplectic and the adaptive close-encounter paths.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Create a variational state for N bodies. The initial tangent direction
+ * is a fixed, generic unit vector — MEGNO's asymptotics are independent
+ * of the choice, and determinism matters more than randomness here.
+ */
+export function createVariational(N) {
+    const dr = new Float64Array(N * 3);
+    const dv = new Float64Array(N * 3);
+    let norm2 = 0;
+    for (let k = 0; k < N * 3; k++) {
+        dr[k] = Math.sin(k + 1);
+        dv[k] = Math.cos(2 * k + 1);
+        norm2 += dr[k] * dr[k] + dv[k] * dv[k];
+    }
+    const inv = 1 / Math.sqrt(norm2);
+    for (let k = 0; k < N * 3; k++) { dr[k] *= inv; dv[k] *= inv; }
+    return { dr, dv, da: new Float64Array(N * 3) };
+}
+
+/** Tidal-tensor application: da ← T(bodies) · dr. */
+function _variationalAccel(bodies, dr, da, soft2) {
+    const N = bodies.length;
+    da.fill(0);
+    for (let i = 0; i < N; i++) {
+        const i3 = i * 3;
+        for (let j = i + 1; j < N; j++) {
+            const j3 = j * 3;
+            const ux = bodies[j].r[0] - bodies[i].r[0];
+            const uy = bodies[j].r[1] - bodies[i].r[1];
+            const uz = bodies[j].r[2] - bodies[i].r[2];
+            const dux = dr[j3]     - dr[i3];
+            const duy = dr[j3 + 1] - dr[i3 + 1];
+            const duz = dr[j3 + 2] - dr[i3 + 2];
+            const r2 = ux*ux + uy*uy + uz*uz + soft2;
+            const r  = Math.sqrt(r2);
+            const inv_r3 = 1 / (r2 * r);
+            const inv_r5 = inv_r3 / r2;
+            const udot = ux*dux + uy*duy + uz*duz;
+            const gx = G_SI * (dux * inv_r3 - 3 * udot * ux * inv_r5);
+            const gy = G_SI * (duy * inv_r3 - 3 * udot * uy * inv_r5);
+            const gz = G_SI * (duz * inv_r3 - 3 * udot * uz * inv_r5);
+            da[i3]     += bodies[j].m * gx;
+            da[i3 + 1] += bodies[j].m * gy;
+            da[i3 + 2] += bodies[j].m * gz;
+            da[j3]     -= bodies[i].m * gx;
+            da[j3 + 1] -= bodies[i].m * gy;
+            da[j3 + 2] -= bodies[i].m * gz;
+        }
+    }
+}
+
+/**
+ * One DKD leapfrog step of the tangent vector along the current bodies
+ * state. Used ONLY along adaptive RK close-encounter segments, where the
+ * discrete tangent map isn't available — a documented approximation.
+ * Leaves vs.da holding the latest variational acceleration so the caller
+ * can form δ̇ = (δv, δa) for the MEGNO integrand.
+ */
+export function variationalStep(bodies, dt, opts, vs) {
+    const { dr, dv, da } = vs;
+    const n = dr.length;
+    const h = dt / 2;
+    for (let k = 0; k < n; k++) dr[k] += dv[k] * h;
+    _variationalAccel(bodies, dr, da, (opts && opts.soft2) || 0);
+    for (let k = 0; k < n; k++) dv[k] += da[k] * dt;
+    for (let k = 0; k < n; k++) dr[k] += dv[k] * h;
+}
+
+/**
+ * Yoshida-4 step of bodies AND tangent vector together — the exact
+ * tangent map of the discrete integrator: every drift also drifts δr,
+ * every kick applies the tidal tensor AT THE SAME intermediate positions
+ * as the force. This matters: propagating δ by a side-along leapfrog
+ * instead injects per-step inconsistency that pumps δ exponentially and
+ * makes MEGNO read regular orbits as chaotic (measured: Y ∝ t on a pure
+ * Kepler orbit; with the tangent map, ⟨Y⟩ → 2 as theory demands).
+ *
+ * The J2 term's Jacobian is not included in the variational kick — with
+ * J2 enabled the indicator ignores the oblateness contribution to the
+ * tangent flow (point-mass dominated systems: second-order effect).
+ */
+export function yoshida4StepVar(bodies, dt, opts, vs) {
+    _driftVar(bodies, C_COEF[0] * dt, vs);
+    _kickVar (bodies, D_COEF[0] * dt, opts, vs);
+    _driftVar(bodies, C_COEF[1] * dt, vs);
+    _kickVar (bodies, D_COEF[1] * dt, opts, vs);
+    _driftVar(bodies, C_COEF[2] * dt, vs);
+    _kickVar (bodies, D_COEF[2] * dt, opts, vs);
+    _driftVar(bodies, C_COEF[3] * dt, vs);
+}
+
+function _driftVar(bodies, dt, vs) {
+    _drift(bodies, dt);
+    const { dr, dv } = vs;
+    for (let k = 0; k < dr.length; k++) dr[k] += dv[k] * dt;
+}
+
+function _kickVar(bodies, dt, opts, vs) {
+    _variationalAccel(bodies, vs.dr, vs.da, (opts && opts.soft2) || 0);
+    _kick(bodies, dt, opts);
+    const { dv, da } = vs;
+    for (let k = 0; k < dv.length; k++) dv[k] += da[k] * dt;
+}
+
 /**
  * Central-body J2 potential energy summed over all satellites (J).
  * Includes only the oblateness term — pairwise PE comes from totalEnergy().
@@ -156,8 +519,13 @@ export function totalJ2PotentialEnergy(bodies, j2Opts) {
     return PE;
 }
 
-/** Total kinetic + potential energy (J). For long-run integrator diagnostics. */
-export function totalEnergy(bodies) {
+/**
+ * Total kinetic + potential energy (J). For long-run integrator
+ * diagnostics. `soft2` = ε² of the Plummer softening (sandbox-only) —
+ * the potential −Gmm/√(r²+ε²) is what the softened force is the gradient
+ * of, so pass the SAME ε² used in stepping or the ledger lies.
+ */
+export function totalEnergy(bodies, soft2 = 0) {
     let KE = 0;
     for (const b of bodies) {
         const v2 = b.v[0]*b.v[0] + b.v[1]*b.v[1] + b.v[2]*b.v[2];
@@ -170,7 +538,7 @@ export function totalEnergy(bodies) {
             const dx = bodies[j].r[0] - bodies[i].r[0];
             const dy = bodies[j].r[1] - bodies[i].r[1];
             const dz = bodies[j].r[2] - bodies[i].r[2];
-            const r  = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            const r  = Math.sqrt(dx*dx + dy*dy + dz*dz + soft2);
             PE -= G_SI * bodies[i].m * bodies[j].m / r;
         }
     }
