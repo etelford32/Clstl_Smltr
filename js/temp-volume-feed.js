@@ -26,7 +26,7 @@
  * them to IDB; every forecaster, the validator, the worker protocol, and the
  * server cache share that contract. Adding two channels would invalidate
  * stored rings and touch a dozen modules. This feed keeps its own in-memory
- * ring (8 ch × ~10 KB × 96 h ≈ 8 MB) and hands consumers views into it. The
+ * ring (10 ch × ~10 KB × 96 h ≈ 10 MB) and hands consumers views into it. The
  * multi-level forecaster consumes these levels through levelWindSnapshot()
  * rather than through the 9-channel contract precisely so the durable ring,
  * the validator schema, and the worker protocol stay untouched.
@@ -70,6 +70,10 @@ const HOURLY_VARS = [
     'wind_speed_850hPa', 'wind_direction_850hPa',
     'wind_speed_500hPa', 'wind_direction_500hPa',
     'cape', 'freezing_level_height',
+    // 250 hPa u/v — the real jet-stream level. Rides the same fetch (+25%
+    // payload, still one lazy pull per 3 h) so the jet particle layer on
+    // earth.html shares this ring instead of opening a second fetch path.
+    'wind_speed_250hPa', 'wind_direction_250hPa',
 ].join(',');
 
 // Per-frame channel layout (CHW over N cells). Winds are stored decomposed
@@ -78,11 +82,14 @@ const HOURLY_VARS = [
 // height (m) are NWP diagnostics — they ride the ring for the scrub but are
 // NOT advected by the multi-level model (CAPE is a column integral of the
 // very profile advection would deform; transporting the diagnostic instead
-// of re-deriving it would be pseudo-physics).
+// of re-deriving it would be pseudo-physics). U250/V250 sit AFTER the
+// diagnostics so the pre-existing channel indices stay stable for any
+// stored frames / older consumers.
 export const LVL = Object.freeze({
     T850: 0, T500: 1, U850: 2, V850: 3, U500: 4, V500: 5, CAPE: 6, FLH: 7,
+    U250: 8, V250: 9,
 });
-const LVL_CHANNELS = 8;
+const LVL_CHANNELS = 10;
 
 // Aux-texture encodings (sampleAux): CAPE normalised against the top of the
 // operational scale (4000 J/kg ≈ "extreme instability"), freezing level
@@ -158,12 +165,17 @@ export function pivotLevelResponses(merged) {
             const d850 = loc?.wind_direction_850hPa?.[h];
             const s500 = loc?.wind_speed_500hPa?.[h];
             const d500 = loc?.wind_direction_500hPa?.[h];
+            const s250 = loc?.wind_speed_250hPa?.[h];
+            const d250 = loc?.wind_direction_250hPa?.[h];
             const ok850 = Number.isFinite(s850) && Number.isFinite(d850);
             const ok500 = Number.isFinite(s500) && Number.isFinite(d500);
+            const ok250 = Number.isFinite(s250) && Number.isFinite(d250);
             data[LVL.U850 * GRID_N + cell] = ok850 ? -Math.sin(d850 * DEG2RAD) * s850 : NaN;
             data[LVL.V850 * GRID_N + cell] = ok850 ? -Math.cos(d850 * DEG2RAD) * s850 : NaN;
             data[LVL.U500 * GRID_N + cell] = ok500 ? -Math.sin(d500 * DEG2RAD) * s500 : NaN;
             data[LVL.V500 * GRID_N + cell] = ok500 ? -Math.cos(d500 * DEG2RAD) * s500 : NaN;
+            data[LVL.U250 * GRID_N + cell] = ok250 ? -Math.sin(d250 * DEG2RAD) * s250 : NaN;
+            data[LVL.V250 * GRID_N + cell] = ok250 ? -Math.cos(d250 * DEG2RAD) * s250 : NaN;
             data[LVL.CAPE * GRID_N + cell] = loc?.cape?.[h] ?? NaN;
             data[LVL.FLH  * GRID_N + cell] = loc?.freezing_level_height?.[h] ?? NaN;
         }
@@ -223,11 +235,17 @@ export class TempVolumeFeed {
             for (let k = 0; k < GRID_N; k++) d[k] = (c[k] - p[k]) / dtH;
             return d;
         };
+        // Guard for frames pivoted before the 250 hPa channels existed
+        // (in-memory rings never persist, but a hot-reload mid-session can
+        // hand an old-shape frame to a new-code consumer).
+        const has250 = cur.data.length >= (LVL.V250 + 1) * GRID_N;
         return {
             t: cur.t, gridW: GRID_W, gridH: GRID_H,
             t850: view(cur, LVL.T850), t500: view(cur, LVL.T500),
             u850: view(cur, LVL.U850), v850: view(cur, LVL.V850),
             u500: view(cur, LVL.U500), v500: view(cur, LVL.V500),
+            u250: has250 ? view(cur, LVL.U250) : null,
+            v250: has250 ? view(cur, LVL.V250) : null,
             tendU850: tend(LVL.U850), tendV850: tend(LVL.V850),
             tendU500: tend(LVL.U500), tendV500: tend(LVL.V500),
         };

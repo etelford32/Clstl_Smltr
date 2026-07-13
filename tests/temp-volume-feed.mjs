@@ -40,7 +40,8 @@ function check(name, fn) {
 
 // Synthetic merged response: T850 = cellIndex mod 50 − 20 at hour 0, +2 °C
 // at hour 1; T500 = T850 − 25. Winds: 10 m/s from the west (dir=270°) at
-// 850; 20 m/s from the south (dir=180°) at 500.
+// 850; 20 m/s from the south (dir=180°) at 500; 45 m/s from the west at
+// 250 (the jet level).
 const T0 = '2026-07-03T00:00';
 const T1 = '2026-07-03T01:00';
 const mkMerged = () => Array.from({ length: GRID_N }, (_, k) => ({
@@ -54,17 +55,19 @@ const mkMerged = () => Array.from({ length: GRID_N }, (_, k) => ({
         wind_direction_500hPa: [180, 180],
         cape:                  [800, 1200],
         freezing_level_height: [3500, 3700],
+        wind_speed_250hPa:     [45, 50],
+        wind_direction_250hPa: [270, 270],
     },
 }));
 
 console.log('temp-volume-feed.mjs');
 console.log('─────────────────────');
 
-check('pivot: 8-channel frames with correct t, layout, wind decompose', () => {
+check('pivot: 10-channel frames with correct t, layout, wind decompose', () => {
     const frames = pivotLevelResponses(mkMerged());
     assert.equal(frames.length, 2);
     assert.equal(frames[0].t, Date.parse(T0 + 'Z'));
-    assert.equal(frames[0].data.length, GRID_N * 8);
+    assert.equal(frames[0].data.length, GRID_N * 10);
     assert.equal(frames[0].data[LVL.CAPE * GRID_N + 7], 800);
     assert.equal(frames[1].data[LVL.FLH * GRID_N + 7], 3700);
     // cell 7: T850 = -13, T500 = -38 at hour 0
@@ -76,6 +79,26 @@ check('pivot: 8-channel frames with correct t, layout, wind decompose', () => {
     // dir 180° ("from the south") → northward V = +20, U ≈ 0
     assert.ok(Math.abs(frames[0].data[LVL.V500 * GRID_N + 7] - 20) < 1e-4);
     assert.ok(Math.abs(frames[0].data[LVL.U500 * GRID_N + 7]) < 1e-4);
+    // 250 hPa jet: dir 270° at 45 m/s → eastward U = +45, V ≈ 0
+    assert.ok(Math.abs(frames[0].data[LVL.U250 * GRID_N + 7] - 45) < 1e-4);
+    assert.ok(Math.abs(frames[0].data[LVL.V250 * GRID_N + 7]) < 1e-4);
+});
+
+check('pivot: missing 250 hPa arrays pivot to NaN, snapshot exposes null-safe views', () => {
+    const merged = mkMerged();
+    for (const loc of merged) {
+        delete loc.hourly.wind_speed_250hPa;
+        delete loc.hourly.wind_direction_250hPa;
+    }
+    const frames = pivotLevelResponses(merged);
+    assert.ok(Number.isNaN(frames[0].data[LVL.U250 * GRID_N + 7]));
+    const feed = new TempVolumeFeed();
+    feed._frames = frames;
+    const snap = feed.levelWindSnapshot(Date.parse(T1 + 'Z'));
+    // Views exist (frame carries the channels) — the cells are NaN, which
+    // consumers treat as "no jet data at this cell".
+    assert.ok(snap.u250 instanceof Float32Array);
+    assert.ok(Number.isNaN(snap.u250[7]));
 });
 
 check('sample: midpoint lerp + shader encoding', () => {
@@ -121,6 +144,7 @@ check('levelWindSnapshot: newest ≤ t, per-hour tendencies from predecessor', (
     assert.equal(snap.t, t1, 'snapshot anchors on the newest frame ≤ t');
     assert.equal(snap.gridW * snap.gridH, GRID_N);
     assert.ok(Math.abs(snap.u850[7] - 12) < 1e-4, 'hour-1 850 wind');
+    assert.ok(Math.abs(snap.u250[7] - 50) < 1e-4, 'hour-1 250 wind');
     // tendency: (12 − 10) m/s over 1 h = 2
     assert.ok(Math.abs(snap.tendU850[7] - 2) < 1e-4, `tendency got ${snap.tendU850[7]}`);
     // Oldest frame → no predecessor → null tendencies

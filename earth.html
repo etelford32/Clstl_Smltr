@@ -2572,8 +2572,14 @@ import './js/telemetry.js';
                 <div class="lyr"><input type="checkbox" id="lyr-weather"><span class="lyr-status" data-layer="weather-temp" title="waiting"></span><label for="lyr-weather">Weather (temp)</label><label class="lyr-rd" for="rd-temp" title="Show temperature (°C) on cursor hover"><input type="checkbox" id="rd-temp"><span class="lyr-rd-badge">#</span></label></div>
                 <div class="lyr" title="Ray-marched 3-D temperature volume: surface 2 m + real 850/500 hPa anchors (Open-Meteo pressure levels), lapse-extrapolated to the tropopause. The bright sheet is the 0 °C freezing level. Vertical scale exaggerated for visibility; temperatures are real. Scrub the timeline — the next 24 h evolve via the in-browser multi-level advection model (each level advected by its own steering wind), blending into NWP out to +72 h."><input type="checkbox" id="lyr-tempvol"><span class="lyr-status" data-layer="tempvol" title="waiting"></span><label for="lyr-tempvol">Temp Volume (3D)</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-wind"    checked><span class="lyr-status" data-layer="wind" title="waiting"></span><label for="lyr-wind">Wind Particles</label><label class="lyr-rd" for="rd-wind" title="Show surface wind (10 m, m/s + km/h + bearing) on cursor hover"><input type="checkbox" id="rd-wind"><span class="lyr-rd-badge">#</span></label></div>
-                <div class="lyr" title="Highlight wind &gt; 18 m/s (65 km/h) — surface-wind proxy for the polar/subtropical jet (Open-Meteo only delivers 10 m winds)">
-                    <input type="checkbox" id="lyr-jet"><span class="lyr-status" data-layer="jet" title="waiting"></span><label for="lyr-jet">Jet Stream</label>
+                <div class="lyr" title="850 hPa winds (~1.5 km) — the boundary-layer steering flow that carries low cloud decks. Real Open-Meteo pressure-level data on the 5° grid, same feed the multi-level advection model steers with. Rendered as particle trails on its own shell above the surface streaks.">
+                    <input type="checkbox" id="lyr-wind-850"><span class="lyr-status" data-layer="wind-850" title="waiting"></span><label for="lyr-wind-850">Wind 850 hPa</label>
+                </div>
+                <div class="lyr" title="500 hPa winds (~5.6 km) — the mid-troposphere steering flow that drives mid/high cloud and storm motion. Real Open-Meteo pressure-level data, shared with the advection forecaster.">
+                    <input type="checkbox" id="lyr-wind-500"><span class="lyr-status" data-layer="wind-500" title="waiting"></span><label for="lyr-wind-500">Wind 500 hPa</label>
+                </div>
+                <div class="lyr" title="Real 250 hPa winds (~10.4 km) — the actual polar/subtropical jet stream from Open-Meteo pressure levels, replacing the old &gt;18 m/s surface-wind proxy. Long fast trails on the highest wind shell; the wx-panel 'Jet peak' row reads this level.">
+                    <input type="checkbox" id="lyr-jet"><span class="lyr-status" data-layer="jet" title="waiting"></span><label for="lyr-jet">Jet Stream (250 hPa)</label>
                 </div>
                 <div class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label><label class="lyr-rd" for="rd-pressure" title="Show surface pressure (hPa) on cursor hover"><input type="checkbox" id="rd-pressure"><span class="lyr-rd-badge">#</span></label></div>
                 <div class="lyr" title="Synoptic fronts detected from the temperature gradient and wind. Blue = cold front (cold air advancing into warm), red = warm front (warm air advancing into cold), grey = stationary. Mid-latitudes only (|lat| < 75°)."><input type="checkbox" id="lyr-fronts"><span class="lyr-status" data-layer="fronts" title="waiting"></span><label for="lyr-fronts">Fronts</label></div>
@@ -3102,6 +3108,12 @@ import './js/telemetry.js';
         <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
             <span>0</span><span>30</span><span>60 m/s</span>
         </div>
+        <!-- Per-level wind legends (850 / 500 / 250 hPa). Populated by
+             _mountWindLevelLegends() from the SAME ramp functions the
+             per-level particle trails use, so each swatch is an exact key.
+             Each row follows the dead-chrome rule: visible only while its
+             layer checkbox is on. -->
+        <div id="wx-windlvl-legends"></div>
         <!-- Convergence / uplift legend. Hidden until the "Convergence / Uplift"
              layer is toggled on (see the lyr-convergence listener). The canvas
              mirrors the overlay shader's convergenceColor() exactly, so the
@@ -3146,7 +3158,7 @@ import './js/telemetry.js';
             <span class="wx-k">Geo wind</span>
             <span class="wx-v" id="wx-geo">—</span>
         </div>
-        <div class="wx-row" title="Peak sampled 10 m wind &gt; 18 m/s (gale-force floor used for surface-data jet proxy). Dash when nothing in the current field clears the threshold.">
+        <div class="wx-row" title="Fastest 250 hPa wind in the current pressure-level frame — the real jet-stream core. Dash until the Jet Stream layer (or any pressure-level layer) has fetched its first frame.">
             <span class="wx-k">Jet peak</span>
             <span class="wx-v" id="wx-jet">—</span>
         </div>
@@ -3513,7 +3525,6 @@ import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius,
          eqPulseFreq, eqPulseAmp, eqAgeFactor } from './js/earth-feeds.js';
 import { CmePropagator } from './js/cme-propagation.js';
-import { JetstreamOverlay } from './js/jetstream-overlay.js';
 import { OceanCurrentsOverlay } from './js/ocean-currents-overlay.js';
 import { oceanCurrentsMeta } from './js/ocean-currents-feed.js';
 import { auth } from './js/auth.js';
@@ -4917,6 +4928,10 @@ document.getElementById('lyr-weather').addEventListener('change', e => {
 document.getElementById('lyr-wind').addEventListener('change', e => {
     windParticles.setVisible(e.target.checked);
     windArrows.setVisible(e.target.checked);
+    // Surface owns the first governor slot — toggling it frees (or claims)
+    // a slot for the pressure-level layers. Hoisted function declaration,
+    // defined in the WIND LEVELS section below.
+    _applyWindLevelCap();
 });
 // Temperature volume (3-D). Lazy by design: the pressure-level feed fetches
 // nothing until the first enable, so sessions that never open the layer add
@@ -4966,9 +4981,17 @@ document.addEventListener('temp-volume-update', () => {
     _setVolPip('loaded', '850/500 hPa anchors + CAPE · Open-Meteo pressure levels · −24 h → +72 h');
     if (tempVolMesh.visible) _refreshVolLevels();
     if (_weatherOverlays.cape?.mesh.visible) _refreshCapeAux();
+    // Pressure-level wind layers ride the same ring — re-point their data
+    // views and the jet-peak readout at the fresh frames.
+    _refreshWindLevelData();
 });
 document.addEventListener('temp-volume-error', () => {
     _setVolPip('error', 'pressure-level fetch failed — rendering standard-lapse fallback');
+    for (const st of Object.values(_windLevels)) {
+        if (st.desired && !st.inst?.hasData()) {
+            _setLayerPipById(st.def.pip, 'error', 'pressure-level fetch failed — will retry on the next refresh');
+        }
+    }
 });
 // Derived weather overlays — share the existing weather DataTextures, no
 // new fetches. The shader's u_has_data uniform keeps them blank until a
@@ -5357,11 +5380,60 @@ const WIND_LOD_FAR  = 2.50;
 // Reused scratch vector for camera→local-space conversions. Avoids one
 // allocation per frame inside the wind LOD path.
 const _windFocusV = new THREE.Vector3();
+// Reused spawn-candidate scratch (avoids per-respawn allocation in _reset).
+const _windSpawnA = { lat: 0, lon: 0 };
+const _windSpawnB = { lat: 0, lon: 0 };
 
 class WindParticles {
-    constructor(parent, N = 6000) {
+    /**
+     * @param {THREE.Object3D} parent
+     * @param {number} N  particle budget
+     * @param {object} [opts]  per-level configuration (Phase-1 wind stack):
+     *   radius     — shell radius the trails render at (default = the
+     *                classic surface shell, R⊕·1.003)
+     *   trailLen   — ring-buffer length. The number of segments DRAWN
+     *                scales with zoom between baseSegs and trailLen−1, so
+     *                a longer ring buys close-up streak length without
+     *                changing the far view.
+     *   baseSegs   — segments drawn at zoom 0 (defaults to the classic
+     *                WIND_TRAIL_LEN−1 = 19 so the surface instance's far
+     *                view is unchanged from the single-level era).
+     *   maxWindMs  — speed-normalisation ceiling for THIS level's data +
+     *                colour ramp (surface = MAX_WIND_MS; jet levels are
+     *                faster and get a higher ceiling).
+     *   speedColor — optional (s01, out[3]) ramp override so each pressure
+     *                level has a distinct visual identity.
+     */
+    constructor(parent, N = 6000, opts = {}) {
         this.N       = N;
         this.windBuf = null;       // set on first weather-update
+        this._radius    = opts.radius    ?? R_EARTH * 1.003;
+        this._trailLen  = opts.trailLen  ?? WIND_TRAIL_LEN;
+        this._baseSegs  = Math.max(2, Math.min(this._trailLen - 1,
+                              opts.baseSegs ?? (WIND_TRAIL_LEN - 1)));
+        this._maxWindMs = opts.maxWindMs ?? MAX_WIND_MS;
+        // Fraction of the particle budget advected at zoom 0, easing to the
+        // full budget at zoom 1. The surface instance keeps 1.0 (its far
+        // view predates the LOD and must not thin out); pressure-level
+        // instances run leaner from orbit where per-level density reads as
+        // clutter anyway.
+        this._farFrac   = Math.max(0.05, Math.min(1, opts.farFrac ?? 1));
+        this._liveN     = N;
+        this._colWrittenN = N;
+        if (opts.speedColor) this._speedColor = opts.speedColor;
+        // Pressure-level coarse grid (m/s U/V on the 72×36 lattice from
+        // temp-volume-feed). When set, _lookupWind samples THIS instead of
+        // the surface windBuf — one instance per level, one data path each.
+        this._lvlU = null; this._lvlV = null;
+        this._lvlW = 0;    this._lvlH = 0;
+        // High-res patch wind (surface level only): m/s U/V views over the
+        // active weather-patch bounds. Mixed over the global lookup inside
+        // the patch footprint with the same 12% soft edge the shaders use.
+        this._patch = null;
+        // Optional convergence sampler ((lat, lon) → signed [-1,1] or null).
+        // Spawn candidates are importance-resampled toward convergence so
+        // particles visibly collect along fronts and storm-genesis lines.
+        this._upliftSample = null;
         this.lat     = new Float32Array(N);
         this.lon     = new Float32Array(N);
         this.spd     = new Float32Array(N);
@@ -5376,11 +5448,11 @@ class WindParticles {
         this.focusLon = 0;
         this.zoom01   = 0;
 
-        // Trail history: TRAIL_LEN past (lat, lon, speed) samples per particle.
+        // Trail history: trailLen past (lat, lon, speed) samples per particle.
         // `head` is the index of the newest sample in each ring buffer.
-        this._histLat = new Float32Array(N * WIND_TRAIL_LEN);
-        this._histLon = new Float32Array(N * WIND_TRAIL_LEN);
-        this._histSpd = new Float32Array(N * WIND_TRAIL_LEN);
+        this._histLat = new Float32Array(N * this._trailLen);
+        this._histLon = new Float32Array(N * this._trailLen);
+        this._histSpd = new Float32Array(N * this._trailLen);
         this._head    = new Int16Array(N);
 
         // Time accumulator for history pushes. Each accumulated TRAIL_STEP_S
@@ -5390,9 +5462,9 @@ class WindParticles {
 
         for (let i = 0; i < N; i++) this._reset(i, true);
 
-        // Each trail gives TRAIL_LEN-1 line segments, each segment is two
-        // vertices, so the buffer is N * (TRAIL_LEN-1) * 2 entries.
-        const vertCount = N * (WIND_TRAIL_LEN - 1) * 2;
+        // Each trail gives trailLen-1 line segments, each segment is two
+        // vertices, so the buffer is N * (trailLen-1) * 2 entries.
+        const vertCount = N * (this._trailLen - 1) * 2;
         this._pos = new Float32Array(vertCount * 3);
         this._col = new Float32Array(vertCount * 3);
 
@@ -5414,17 +5486,51 @@ class WindParticles {
     setVisible(v) { this.mesh.visible = v; }
     setWindData(buf) { this.windBuf = buf; }
 
-    _reset(i, randomAge = false) {
-        // Spawn within ±76°. The advection step divides by cos(lat) so
-        // near the poles 1° lon cells shrink faster than particles can
-        // handle and they streak wildly. A tighter lat clamp than the
-        // old ±84° keeps polar trails clean without noticeable loss.
-        //
-        // LOD: when zoomed in, route a fraction of respawns into a tangent-
-        // plane disc around (focusLat, focusLon). Disc radius shrinks with
-        // zoom (60° hemisphere → 18° regional) and the biased fraction
-        // grows. Net effect: same particle budget, dense flow in the
-        // visible cap, sparse outside — so detail emerges where you look.
+    /** True when this instance has any wind field to advect against. */
+    hasData() { return this._lvlU != null || this.windBuf != null; }
+
+    /**
+     * Point this instance at a pressure-level coarse grid (m/s U/V views
+     * from temp-volume-feed's levelWindSnapshot — the SAME buffers the
+     * multi-level advection forecaster steers with, so the rendered flow
+     * and the forecast physics can never disagree). Pass nulls to clear.
+     */
+    setLevelWindData(u, v, gridW, gridH) {
+        if (u && v && gridW > 0 && gridH > 0) {
+            this._lvlU = u; this._lvlV = v;
+            this._lvlW = gridW; this._lvlH = gridH;
+        } else {
+            this._lvlU = null; this._lvlV = null;
+            this._lvlW = 0; this._lvlH = 0;
+        }
+    }
+
+    /**
+     * Surface-level only: install the high-res weather-patch wind so
+     * close-zoom advection reads sub-synoptic structure (orographic
+     * channeling, sea breezes) instead of the 5° global field.
+     * @param {?{u:Float32Array, v:Float32Array, w:number, h:number,
+     *           latMin:number, lonMin:number, latSpan:number, lonSpan:number}} p
+     */
+    setPatchWind(p) { this._patch = p || null; }
+
+    /** ((lat, lon) → signed convergence [-1,1] | null) for spawn biasing. */
+    setUpliftSampler(fn) { this._upliftSample = fn || null; }
+
+    /**
+     * One spawn candidate honouring the camera-focus LOD bias.
+     * Spawn within ±76°. The advection step divides by cos(lat) so
+     * near the poles 1° lon cells shrink faster than particles can
+     * handle and they streak wildly. A tighter lat clamp than the
+     * old ±84° keeps polar trails clean without noticeable loss.
+     *
+     * LOD: when zoomed in, route a fraction of respawns into a tangent-
+     * plane disc around (focusLat, focusLon). Disc radius shrinks with
+     * zoom (60° hemisphere → 18° regional) and the biased fraction
+     * grows. Net effect: same particle budget, dense flow in the
+     * visible cap, sparse outside — so detail emerges where you look.
+     */
+    _spawnCandidate(out) {
         const z       = this.zoom01;
         const biasP   = 0.85 * z;                 // P(spawn in cap) ∈ [0, 0.85]
         const capDeg  = 60 - 42 * z;              // cap angular radius in °
@@ -5448,6 +5554,29 @@ class WindParticles {
             lat = (Math.random() - 0.5) * 152;
             lon = (Math.random() - 0.5) * 360;
         }
+        out.lat = lat;
+        out.lon = lon;
+        return out;
+    }
+
+    _reset(i, randomAge = false) {
+        const cand = this._spawnCandidate(_windSpawnA);
+        let lat = cand.lat, lon = cand.lon;
+        // Convergence-weighted spawning: the uplift field already tells us
+        // where air is gathering (fronts, storm-genesis lines). Importance
+        // resample: draw a second candidate and keep the one with stronger
+        // convergence, 70% of the time. Statistically this concentrates
+        // spawns along convergence lines without ever forbidding spawns in
+        // subsidence — flow in clear-sky regions stays legible. Costs at
+        // most one extra field sample per respawn (~200/s), negligible.
+        if (this._upliftSample) {
+            const cA = this._upliftSample(lat, lon);
+            if (cA !== null && Math.random() < 0.70) {
+                const b  = this._spawnCandidate(_windSpawnB);
+                const cB = this._upliftSample(b.lat, b.lon);
+                if (cB !== null && cB > cA) { lat = b.lat; lon = b.lon; }
+            }
+        }
         this.lat[i]    = Math.max(-76, Math.min(76, lat));
         this.lon[i]    = lon;
         this.age[i]    = randomAge ? Math.random() * 20 : 0;
@@ -5456,8 +5585,9 @@ class WindParticles {
         this._head[i]  = 0;
         // Fill history with the spawn point so the trail starts invisible
         // (all segments collapse to zero length until real motion happens).
-        const base = i * WIND_TRAIL_LEN;
-        for (let k = 0; k < WIND_TRAIL_LEN; k++) {
+        const TL = this._trailLen;
+        const base = i * TL;
+        for (let k = 0; k < TL; k++) {
             this._histLat[base + k] = this.lat[i];
             this._histLon[base + k] = this.lon[i];
             this._histSpd[base + k] = 0;
@@ -5475,11 +5605,11 @@ class WindParticles {
      * pay for allocations + angle math 6 000 times a frame.
      */
     lookupWind(lat, lon) {
-        if (!this.windBuf) return null;
+        if (!this.hasData()) return null;
         const out = { u: 0, v: 0, s: 0 };
         this._lookupWind(lat, lon, out);
-        const uMs = out.u * MAX_WIND_MS;
-        const vMs = out.v * MAX_WIND_MS;
+        const uMs = out.u * this._maxWindMs;
+        const vMs = out.v * this._maxWindMs;
         const speedMs = Math.hypot(uMs, vMs);
         if (speedMs < 0.05) return { uMs, vMs, speedMs: 0, dirFromDeg: null };
         // Velocity (u, v) points WHERE the wind is going. Meteorological
@@ -5489,9 +5619,21 @@ class WindParticles {
         return { uMs, vMs, speedMs, dirFromDeg };
     }
 
-    /** Bilinear lookup of (U, V, speed) from the 360×180 wind buffer. */
+    /**
+     * Bilinear lookup of normalised (U, V, speed) at (lat, lon).
+     * Pressure-level instances sample their coarse m/s grid; the surface
+     * instance samples the 360×180 windBuf and, inside the active
+     * weather-patch footprint, cross-fades to the patch's m/s field.
+     */
     _lookupWind(lat, lon, out) {
+        if (this._lvlU) { this._lookupLevelWind(lat, lon, out); return; }
         if (!this.windBuf) { out.u = 0; out.v = 0; out.s = 0; return; }
+        this._lookupGlobalWind(lat, lon, out);
+        if (this._patch) this._mixPatchWind(lat, lon, out);
+    }
+
+    /** Bilinear lookup of (U, V, speed) from the 360×180 wind buffer. */
+    _lookupGlobalWind(lat, lon, out) {
         const fx = (lon / 360 + 0.5) * TEX_W;
         // WeatherFeed lays out its grid south-first: buffer row 0 is ≈90°S and
         // row TEX_H-1 is ≈90°N (see _gridLats in weather-feed.js and the
@@ -5518,6 +5660,80 @@ class WindParticles {
         out.u = b[i00]   * w00 + b[i10]   * w10 + b[i01]   * w01 + b[i11]   * w11;
         out.v = b[i00+1] * w00 + b[i10+1] * w10 + b[i01+1] * w01 + b[i11+1] * w11;
         out.s = b[i00+2] * w00 + b[i10+2] * w10 + b[i01+2] * w01 + b[i11+2] * w11;
+    }
+
+    /**
+     * Bilinear lookup on a pressure-level coarse grid (m/s), normalised by
+     * this._maxWindMs. Cell-centred lattice, lat ascending south → north,
+     * lon wraps — the temp-volume-feed / weather-flow.js convention
+     * (latOfRow(j) = −90 + (j+0.5)·(180/gridH)). NaN cells (upstream gaps
+     * the thermal-wind fill only patches inside the forecaster) sample as
+     * 0 so a hole reads "no data", not a streak explosion.
+     */
+    _lookupLevelWind(lat, lon, out) {
+        const W = this._lvlW, H = this._lvlH;
+        const U = this._lvlU, V = this._lvlV;
+        const fx = (lon + 180) / 360 * W - 0.5;
+        const fy = (lat + 90)  / 180 * H - 0.5;
+        let x0 = Math.floor(fx);
+        const y0 = Math.max(0, Math.min(H - 2, Math.floor(fy)));
+        const tx = fx - x0;
+        const ty = Math.max(0, Math.min(1, fy - y0));
+        x0 = ((x0 % W) + W) % W;
+        const x1 = (x0 + 1) % W;
+        const y1 = y0 + 1;
+        const i00 = y0 * W + x0, i10 = y0 * W + x1;
+        const i01 = y1 * W + x0, i11 = y1 * W + x1;
+        const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty);
+        const w01 = (1 - tx) * ty,       w11 = tx * ty;
+        const f = (x) => (x === x ? x : 0);   // NaN → 0 (self-inequality test)
+        const uMs = f(U[i00]) * w00 + f(U[i10]) * w10 + f(U[i01]) * w01 + f(U[i11]) * w11;
+        const vMs = f(V[i00]) * w00 + f(V[i10]) * w10 + f(V[i01]) * w01 + f(V[i11]) * w11;
+        const inv = 1 / this._maxWindMs;
+        out.u = Math.max(-1, Math.min(1, uMs * inv));
+        out.v = Math.max(-1, Math.min(1, vMs * inv));
+        out.s = Math.min(1, Math.hypot(uMs, vMs) * inv);
+    }
+
+    /**
+     * Cross-fade the surface lookup toward the high-res patch wind inside
+     * the patch footprint. Weight eases 0 → 1 across the outer 12% of the
+     * window — the same soft edge PATCH_GLSL uses — so the particle field
+     * and the shader imagery hand off at the identical boundary.
+     */
+    _mixPatchWind(lat, lon, out) {
+        const p = this._patch;
+        // Longitude offset into the window, wrapped the same way insetUV
+        // does (window may straddle the antimeridian).
+        const dLon = ((lon - p.lonMin) % 360 + 360) % 360;
+        const ux = dLon / Math.max(1e-3, p.lonSpan);
+        const uy = (lat - p.latMin) / Math.max(1e-3, p.latSpan);
+        if (ux <= 0 || ux >= 1 || uy <= 0 || uy >= 1) return;
+        const edge = Math.min(ux, 1 - ux, uy, 1 - uy);
+        let wgt = Math.min(1, edge / 0.12);
+        wgt = wgt * wgt * (3 - 2 * wgt);          // smoothstep, matches GLSL
+        if (wgt < 0.001) return;
+        // Bilinear on the patch grid (cell-centred, clamped — a regional
+        // window is not lon-periodic).
+        const W = p.w, H = p.h;
+        const fx = Math.max(0, Math.min(W - 1.001, ux * W - 0.5));
+        const fy = Math.max(0, Math.min(H - 1.001, uy * H - 0.5));
+        const x0 = Math.floor(fx), y0 = Math.floor(fy);
+        const x1 = Math.min(W - 1, x0 + 1), y1 = Math.min(H - 1, y0 + 1);
+        const tx = fx - x0, ty = fy - y0;
+        const i00 = y0 * W + x0, i10 = y0 * W + x1;
+        const i01 = y1 * W + x0, i11 = y1 * W + x1;
+        const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty);
+        const w01 = (1 - tx) * ty,       w11 = tx * ty;
+        const uMs = p.u[i00] * w00 + p.u[i10] * w10 + p.u[i01] * w01 + p.u[i11] * w11;
+        const vMs = p.v[i00] * w00 + p.v[i10] * w10 + p.v[i01] * w01 + p.v[i11] * w11;
+        const inv = 1 / this._maxWindMs;
+        const pu = Math.max(-1, Math.min(1, uMs * inv));
+        const pv = Math.max(-1, Math.min(1, vMs * inv));
+        const ps = Math.min(1, Math.hypot(uMs, vMs) * inv);
+        out.u += (pu - out.u) * wgt;
+        out.v += (pv - out.v) * wgt;
+        out.s += (ps - out.s) * wgt;
     }
 
     /**
@@ -5577,6 +5793,11 @@ class WindParticles {
 
         this._setFocusFromCamera(camera, parent);
 
+        // Hidden layer → keep the focus/zoom state fresh (WindArrows reads
+        // it) but skip the advection + vertex rebuild entirely. With four
+        // level instances live this is what keeps disabled levels free.
+        if (!this.mesh.visible) return;
+
         // Visual speed: degrees traversed per second at full wind (scaled
         // so a jet stream reading sails roughly 1/3 of a continent in a
         // 20-frame trail — the nullschool "streaks" aesthetic).
@@ -5594,13 +5815,26 @@ class WindParticles {
         // Decide whether this frame pushes a new history sample. At 60 fps
         // this gates to every frame; at 144 fps to every 2–3 frames; at
         // 30 fps to every frame but doubled step. The ring buffer always
-        // represents ~WIND_TRAIL_LEN × WIND_TRAIL_STEP_S seconds of motion.
+        // represents ~trailLen × WIND_TRAIL_STEP_S seconds of motion.
         this._histAccum += dt;
         const pushHistory = this._histAccum >= WIND_TRAIL_STEP_S;
         if (pushHistory) this._histAccum -= WIND_TRAIL_STEP_S;
 
+        const TL = this._trailLen;
+
+        // Zoom-scaled live budget: advect only liveN particles. Newly
+        // re-activated indices (window grew on dolly-in) respawn fresh so
+        // they don't materialise with stale mid-air state; when the window
+        // shrinks, the orphaned tail gets its colours zeroed once below.
+        const liveN = Math.max(1, Math.round(
+            this.N * (this._farFrac + (1 - this._farFrac) * this.zoom01)));
+        if (liveN > this._liveN) {
+            for (let i = this._liveN; i < liveN; i++) this._reset(i);
+        }
+        this._liveN = liveN;
+
         // ── Step 1: advect each particle + push a new history sample ────
-        for (let i = 0; i < this.N; i++) {
+        for (let i = 0; i < liveN; i++) {
             this.age[i] += dt;
             if (this.age[i] > this.maxAge[i]) { this._reset(i); continue; }
 
@@ -5617,9 +5851,9 @@ class WindParticles {
 
             if (pushHistory) {
                 // Push current into ring buffer. head advances; oldest is
-                // overwritten, creating a FIFO of length TRAIL_LEN.
-                const nh  = (this._head[i] + 1) % WIND_TRAIL_LEN;
-                const idx = i * WIND_TRAIL_LEN + nh;
+                // overwritten, creating a FIFO of length trailLen.
+                const nh  = (this._head[i] + 1) % TL;
+                const idx = i * TL + nh;
                 this._histLat[idx] = this.lat[i];
                 this._histLon[idx] = this.lon[i];
                 this._histSpd[idx] = tmp.s;
@@ -5628,15 +5862,31 @@ class WindParticles {
         }
 
         // ── Step 2: build LineSegments vertex buffers from history ──────
-        const R = R_EARTH * 1.003;
+        const R = this._radius;
         const pos = this._pos;
         const col = this._col;
         const rgb = [0, 0, 0];
         let  seg = 0;   // vertex write cursor
 
-        for (let i = 0; i < this.N; i++) {
+        // Zoom-scaled trail length: draw the newest drawSegs segments of
+        // each ring. At zoom 0 this is baseSegs (the classic far-view
+        // streak length); dollying in eases toward the full ring so
+        // close-up flow reads long and deliberate. Ring slots older than
+        // the draw window still exist — they just render black (invisible
+        // under additive blending), so the window can grow or shrink
+        // per-frame without touching the ring itself.
+        const drawSegs = Math.max(2, Math.min(TL - 1, Math.round(
+            this._baseSegs + (TL - 1 - this._baseSegs) * this.zoom01)));
+        const skip = (TL - 1) - drawSegs;
+
+        // Orphaned tail after a live-budget shrink: their last-written
+        // colours would otherwise keep glowing. One fill, only on change.
+        if (liveN < this._colWrittenN) col.fill(0, liveN * (TL - 1) * 6);
+        this._colWrittenN = liveN;
+
+        for (let i = 0; i < liveN; i++) {
             const headIdx = this._head[i];
-            const base    = i * WIND_TRAIL_LEN;
+            const base    = i * TL;
 
             // Birth/death envelope for the whole trail.
             const a = this.age[i] / this.maxAge[i];
@@ -5646,11 +5896,19 @@ class WindParticles {
 
             // Walk the ring buffer from oldest (head+1) through newest (head).
             // Consecutive pairs become segments. Segment age in [0, 1]:
-            //   j = 0            → oldest pair → most faded
-            //   j = TRAIL_LEN-2  → newest pair → full brightness
-            for (let j = 0; j < WIND_TRAIL_LEN - 1; j++) {
-                const idxA = base + ((headIdx + 1 + j)     % WIND_TRAIL_LEN);
-                const idxB = base + ((headIdx + 1 + j + 1) % WIND_TRAIL_LEN);
+            //   j = skip      → oldest drawn pair → most faded
+            //   j = TL-2      → newest pair → full brightness
+            for (let j = 0; j < TL - 1; j++) {
+                const p0 = seg * 3;
+                seg += 2;
+                if (j < skip) {
+                    // Outside the zoom-scaled draw window — invisible.
+                    col[p0] = col[p0 + 1] = col[p0 + 2] = 0;
+                    col[p0 + 3] = col[p0 + 4] = col[p0 + 5] = 0;
+                    continue;
+                }
+                const idxA = base + ((headIdx + 1 + j)     % TL);
+                const idxB = base + ((headIdx + 1 + j + 1) % TL);
                 const latA = this._histLat[idxA], lonA = this._histLon[idxA];
                 const latB = this._histLat[idxB], lonB = this._histLon[idxB];
                 const spdMid = (this._histSpd[idxA] + this._histSpd[idxB]) * 0.5;
@@ -5670,12 +5928,11 @@ class WindParticles {
                 const byp =  R * Math.sin(phiB);
                 const bzp = -R * Math.cos(phiB) * Math.sin(lamB);
 
-                const p0 = seg * 3;
                 pos[p0]     = axp; pos[p0 + 1] = ayp; pos[p0 + 2] = azp;
                 pos[p0 + 3] = bxp; pos[p0 + 4] = byp; pos[p0 + 5] = bzp;
 
                 // Trail-tail fade: oldest=0, newest=1 (ease-in for smoother head glow)
-                const tailU  = (j + 1) / (WIND_TRAIL_LEN - 1);
+                const tailU  = (j + 1 - skip) / drawSegs;
                 const tailF  = tailU * tailU;         // ease-in
                 // Wrap segments output zero color so they're invisible under additive blending
                 const strength = wrapped ? 0 : tailF * envelope * trailBoost;
@@ -5686,8 +5943,6 @@ class WindParticles {
                 col[p0 + 3] = rgb[0] * strength;
                 col[p0 + 4] = rgb[1] * strength;
                 col[p0 + 5] = rgb[2] * strength;
-
-                seg += 2;
             }
         }
 
@@ -5958,7 +6213,12 @@ class WindArrows {
     }
 }
 
-const windParticles    = new WindParticles(earthMesh, 6000);
+// Surface (10 m) instance — the classic layer, on by default. trailLen 28
+// with the default baseSegs (19) keeps the zoom-0 view identical to the
+// single-level era while giving the zoom LOD nine extra segments of streak
+// to grow into. Pressure-level instances live in the WIND LEVELS section
+// below and are created lazily on first enable.
+const windParticles    = new WindParticles(earthMesh, 6000, { trailLen: 28 });
 const windArrows       = new WindArrows(earthMesh, (lat, lon, out) =>
     windParticles._lookupWind(lat, lon, out));
 const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
@@ -5971,12 +6231,11 @@ const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
 let _lastWeatherBuf = null;   // R=T-norm, G=P-norm, B=RH-norm, A=speed-norm
 let _lastCloudBuf   = null;   // R=cl_low, G=cl_mid, B=cl_high, A=precip/10
 let _lastUpliftBuf  = null;   // R=signed convergence [-1,1], A=|magnitude|
-// Hidden-layer staleness flags. The weather-update handler skips the
-// isobar / jet-stream geometry rebuilds while their layers are hidden;
-// these mark that frames were missed so the layer toggles can catch up
-// from _lastWeatherBuf / the wind sampler on re-enable.
+// Hidden-layer staleness flag. The weather-update handler skips the
+// isobar geometry rebuild while the layer is hidden; this marks that
+// frames were missed so the layer toggle can catch up from
+// _lastWeatherBuf on re-enable.
 let _isobarStale = false;
-let _jetStale    = false;
 
 // Bilinear-sample a 4-channel Float32 buffer at (lat,lon). Same row/col
 // convention as WindParticles._lookupWind: longitude wraps, row 0 = 90°S.
@@ -6206,28 +6465,247 @@ function _sampleUpliftAt(lat, lon) {
     }
 })();
 
-// ── Jet-stream overlay — highlights wind > 30 m/s on the globe ─────────
-// Parented to earthMesh (rides with the globe), driven by windParticles'
-// public sampler so lookups stay consistent with the streamlines. The
-// overlay starts hidden; toggled on via the lyr-jet checkbox. Updated
-// only when new weather data lands — the field doesn't change between
-// refreshes, so per-frame rebuilds would be wasted work.
-const jetstreamOverlay = new JetstreamOverlay(
-    earthMesh,
-    (lat, lon) => windParticles.lookupWind(lat, lon),
-);
-jetstreamOverlay.setVisible(false);
+// ═══════════════════════════════════════════════════════════════
+//  PRESSURE-LEVEL WIND LAYERS  (850 / 500 / 250 hPa particle trails)
+//
+//  Phase 1 of the wind+cloud depth plan: the pressure-level winds the
+//  multi-level advection forecaster already steers with (see
+//  temp-volume-feed.js levelWindSnapshot) rendered as their own particle
+//  shells. One WindParticles instance per level, created lazily on first
+//  enable so sessions that never open a level pay nothing; data views come
+//  straight from the SAME feed ring — no second fetch path.
+//
+//  The old "Jet Stream" checkbox — a >18 m/s surface-wind proxy drawn by
+//  JetstreamOverlay — is retired: lyr-jet now drives the real 250 hPa
+//  particle layer, and the wx-panel "Jet peak" row reads the fastest
+//  250 hPa cell instead of the fastest surface cell.
+//
+//  Shell radii sit just above the cloud deck each level steers
+//  (low 1.006 / mid 1.011 / high 1.016 — see the Phase-2 shell stack):
+//  surface trails 1.003, 850 → 1.008, 500 → 1.013, 250 → 1.018.
+// ═══════════════════════════════════════════════════════════════
+const WIND_LEVEL_DEFS = {
+    w850: {
+        checkbox: 'lyr-wind-850', pip: 'wind-850', label: '850 hPa wind',
+        radius: R_EARTH * 1.008, n: 4000, trailLen: 24, baseSegs: 14,
+        maxWind: 60, farFrac: 0.6, uKey: 'u850', vKey: 'v850',
+        // Sage → mint → amber: reads "warm boundary-layer flow" against the
+        // surface layer's blue→white→magenta.
+        ramp: (s, out) => {
+            const sc = Math.max(0, Math.min(1, s));
+            if (sc < 0.5) {
+                const t = sc / 0.5;
+                out[0] = 0.20 + 0.62 * t;
+                out[1] = 0.62 + 0.35 * t;
+                out[2] = 0.45 + 0.43 * t;
+            } else {
+                const t = (sc - 0.5) / 0.5;
+                out[0] = 0.82 + 0.18 * t;
+                out[1] = 0.97 - 0.35 * t;
+                out[2] = 0.88 - 0.68 * t;
+            }
+        },
+    },
+    w500: {
+        checkbox: 'lyr-wind-500', pip: 'wind-500', label: '500 hPa wind',
+        radius: R_EARTH * 1.013, n: 4000, trailLen: 24, baseSegs: 14,
+        maxWind: 80, farFrac: 0.6, uKey: 'u500', vKey: 'v500',
+        // Violet → lavender → cyan: the cool mid-troposphere identity.
+        ramp: (s, out) => {
+            const sc = Math.max(0, Math.min(1, s));
+            if (sc < 0.5) {
+                const t = sc / 0.5;
+                out[0] = 0.52 + 0.41 * t;
+                out[1] = 0.38 + 0.52 * t;
+                out[2] = 0.95 + 0.05 * t;
+            } else {
+                const t = (sc - 0.5) / 0.5;
+                out[0] = 0.93 - 0.68 * t;
+                out[1] = 0.90 + 0.02 * t;
+                out[2] = 1.00;
+            }
+        },
+    },
+    jet: {
+        checkbox: 'lyr-jet', pip: 'jet', label: '250 hPa jet',
+        radius: R_EARTH * 1.018, n: 3500, trailLen: 34, baseSegs: 22,
+        maxWind: 100, farFrac: 0.7, uKey: 'u250', vKey: 'v250',
+        // Crimson → gold → white-hot, longest trails + fastest ramp: the
+        // jet should read as the most energetic thing on the globe.
+        ramp: (s, out) => {
+            const sc = Math.max(0, Math.min(1, s));
+            if (sc < 0.5) {
+                const t = sc / 0.5;
+                out[0] = 0.85 + 0.15 * t;
+                out[1] = 0.20 + 0.58 * t;
+                out[2] = 0.25;
+            } else {
+                const t = (sc - 0.5) / 0.5;
+                out[0] = 1.00;
+                out[1] = 0.78 + 0.22 * t;
+                out[2] = 0.25 + 0.70 * t;
+            }
+        },
+    },
+};
 
-document.getElementById('lyr-jet')?.addEventListener('change', e => {
-    jetstreamOverlay.setVisible(e.target.checked);
-    // Catch up on frames that arrived while hidden (weather-update skips
-    // the ribbon rebuild for invisible overlays).
-    if (e.target.checked && _jetStale) {
-        jetstreamOverlay.update();
-        _jetStale = false;
-        _updateJetReadout();
+// key → { def, inst: WindParticles|null, desired: bool }
+const _windLevels = Object.fromEntries(
+    Object.entries(WIND_LEVEL_DEFS).map(([k, def]) => [k, { def, inst: null, desired: false }]));
+
+// Fastest 250 hPa cell in the current level frame — feeds the wx-panel
+// "Jet peak" row. null until the pressure-level feed delivers.
+let _jetPeak = null;
+
+// Concurrent-level cap by governor tier (u_quality tier index _cloudQIdx):
+// full quality → all 4 levels (surface + 3), mid → 2, floor → 1. Keeps the
+// floor-tier frame budget identical to the single-level baseline.
+let _windCapTierApplied = _cloudQIdx;
+function _windLevelCap() { return [4, 2, 1][Math.min(_cloudQIdx, 2)]; }
+
+function _windLayerVisible() {
+    return windParticles.mesh.visible
+        || Object.values(_windLevels).some(st => st.inst?.mesh.visible);
+}
+
+function _ensureWindLevel(key) {
+    const st = _windLevels[key];
+    if (st.inst) return st.inst;
+    const d = st.def;
+    st.inst = new WindParticles(earthMesh, d.n, {
+        radius: d.radius, trailLen: d.trailLen, baseSegs: d.baseSegs,
+        maxWindMs: d.maxWind, speedColor: d.ramp, farFrac: d.farFrac,
+    });
+    st.inst.setVisible(false);
+    st.inst.setUpliftSampler(_windUpliftSample);
+    _windLevelAppliedT = null;   // new consumer — bust the frame memo
+    _refreshWindLevelData();
+    return st.inst;
+}
+
+// Re-point every live level instance at the freshest snapshot for the
+// current sim instant. Views into the feed ring — no copies. Also refreshes
+// the jet-peak readout, which exists independent of the jet layer toggle.
+// Memoised on the snapshot's frame time so scrub-driven weather-update
+// bursts (many per second, same bracketing hour) don't re-do the work.
+let _windLevelAppliedT = null;
+function _refreshWindLevelData() {
+    const anyLive = Object.values(_windLevels).some(st => st.inst);
+    if (!anyLive && !tempVolFeed.hasData) return;
+    const snap = tempVolFeed.levelWindSnapshot(_volLastSimT ?? Date.now());
+    if (snap && snap.t === _windLevelAppliedT) return;
+    _windLevelAppliedT = snap?.t ?? null;
+    for (const st of Object.values(_windLevels)) {
+        if (!st.inst) continue;
+        const u = snap?.[st.def.uKey] ?? null;
+        const v = snap?.[st.def.vKey] ?? null;
+        st.inst.setLevelWindData(u, v, snap?.gridW ?? 0, snap?.gridH ?? 0);
+        if (st.desired && u) {
+            _setLayerPipById(st.def.pip, 'loaded',
+                `${st.def.label} · Open-Meteo pressure levels · frame ${new Date(snap.t).toUTCString().slice(17, 22)}Z`);
+        }
     }
-});
+    _jetPeak = _computeJetPeak(snap);
+    _updateJetReadout();
+}
+
+// Scan the 250 hPa field for its fastest cell. Grid convention matches
+// weather-flow.js latOfRow/lonOfColumn (cell-centred, lat ascending).
+function _computeJetPeak(snap) {
+    if (!snap?.u250 || !snap?.v250) return null;
+    const { gridW, gridH, u250, v250 } = snap;
+    let best = 0, bestK = -1;
+    for (let k = 0; k < u250.length; k++) {
+        const u = u250[k], v = v250[k];
+        if (u !== u || v !== v) continue;          // NaN gap
+        const s2 = u * u + v * v;
+        if (s2 > best) { best = s2; bestK = k; }
+    }
+    if (bestK < 0) return null;
+    return {
+        speedMs: Math.sqrt(best),
+        lat: -90 + (Math.floor(bestK / gridW) + 0.5) * (180 / gridH),
+        lon: -180 + ((bestK % gridW) + 0.5) * (360 / gridW),
+    };
+}
+
+// Apply the governor cap: surface always claims the first slot (it is the
+// default layer), then jet / 850 / 500 in fixed priority. Governor-hidden
+// levels keep their checkbox state and get an explanatory pip.
+function _applyWindLevelCap() {
+    const cap = _windLevelCap();
+    let used = document.getElementById('lyr-wind')?.checked ? 1 : 0;
+    for (const key of ['jet', 'w850', 'w500']) {
+        const st = _windLevels[key];
+        if (!st.inst) continue;
+        const show = st.desired && used < cap;
+        if (show) used++;
+        else if (st.desired) {
+            _setLayerPipById(st.def.pip, 'idle',
+                'hidden by the performance governor (GPU at reduced tier) — disable another wind level to free a slot');
+        }
+        st.inst.setVisible(show);
+    }
+}
+
+// Per-level legend rows — painted from the SAME ramp the trails use, shown
+// only while the level is on (dead-chrome rule, like every other key).
+function _mountWindLevelLegends() {
+    const host = document.getElementById('wx-windlvl-legends');
+    if (!host) return;
+    for (const [key, st] of Object.entries(_windLevels)) {
+        const d = st.def;
+        const row = document.createElement('div');
+        row.id = `wx-windlvl-legend-${key}`;
+        row.style.display = 'none';
+        row.innerHTML =
+            `<div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">${d.label}</div>` +
+            `<canvas width="180" height="8" style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>` +
+            `<div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">` +
+            `<span>0</span><span>${Math.round(d.maxWind / 2)}</span><span>${d.maxWind} m/s</span></div>`;
+        host.appendChild(row);
+        const cv  = row.querySelector('canvas');
+        const ctx = cv.getContext('2d');
+        const rgb = [0, 0, 0];
+        for (let x = 0; x < cv.width; x++) {
+            d.ramp(x / (cv.width - 1), rgb);
+            ctx.fillStyle = `rgb(${(rgb[0] * 255) | 0}, ${(rgb[1] * 255) | 0}, ${(rgb[2] * 255) | 0})`;
+            ctx.fillRect(x, 0, 1, cv.height);
+        }
+    }
+}
+_mountWindLevelLegends();
+
+function _refreshWindLevelLegend(key) {
+    const row = document.getElementById(`wx-windlvl-legend-${key}`);
+    if (row) row.style.display = _windLevels[key].desired ? '' : 'none';
+}
+
+for (const [key, st] of Object.entries(_windLevels)) {
+    document.getElementById(st.def.checkbox)?.addEventListener('change', (e) => {
+        st.desired = e.target.checked;
+        if (e.target.checked) {
+            _ensureWindLevel(key);
+            if (!tempVolFeed.hasData && !tempVolFeed.isFetching) {
+                _setLayerPipById(st.def.pip, 'fetching', 'loading Open-Meteo pressure-level winds…');
+            }
+            // Lazy feed start — same ring the temp volume / CAPE layers use,
+            // so whichever layer is enabled first pays the one fetch.
+            tempVolFeed.start();
+            _refreshWindLevelData();
+        }
+        _applyWindLevelCap();
+        _refreshWindLevelLegend(key);
+    });
+}
+
+// Governor tier changes re-apply the cap (checked once per frame from the
+// animate loop — a single int compare when nothing changed).
+function _applyWindLevelCapIfTierChanged() {
+    if (_windCapTierApplied === _cloudQIdx) return;
+    _windCapTierApplied = _cloudQIdx;
+    _applyWindLevelCap();
+}
 
 // ── Ocean surface currents ──────────────────────────────────────────
 // CPU-advected particles riding the climatological surface-current vector
@@ -6257,13 +6735,14 @@ queueMicrotask(() => {
         `${m.source} · climatology`);
 });
 
-// Format the "Jet peak" readout. "228 km/h · 42.0°N 75.0°W" when a jet
-// is present; em-dash when the field is calm / no data. Called from the
-// weather-update handler where jetstreamOverlay.update() runs.
+// Format the "Jet peak" readout. "228 km/h · 42.0°N 75.0°W" when the
+// pressure-level feed has delivered a 250 hPa frame; em-dash before the
+// first fetch (the feed is lazy — enabling any pressure-level layer
+// starts it). Refreshed by _refreshWindLevelData().
 function _updateJetReadout() {
     const el = document.getElementById('wx-jet');
     if (!el) return;
-    const p = jetstreamOverlay.peak;
+    const p = _jetPeak;
     if (!p) { el.textContent = '—'; return; }
     const kmh = (p.speedMs * 3.6).toFixed(0);
     const lat = `${Math.abs(p.lat).toFixed(1)}°${p.lat >= 0 ? 'N' : 'S'}`;
@@ -6434,7 +6913,7 @@ function _refreshGridReadout() {
     };
 
     document.addEventListener('weather-patch-update', (ev) => {
-        const { weatherRGBA, cloudRGBA, w, h, bounds, stepDeg } = ev.detail;
+        const { weatherRGBA, cloudRGBA, coarse, w, h, bounds, stepDeg } = ev.detail;
         _setPatch(earthU.u_patch_weather, weatherRGBA, w, h);
         // _setPatch may have recreated the texture — re-share the reference
         // with the cloud shader (same pattern as u_weather above).
@@ -6444,6 +6923,20 @@ function _refreshGridReadout() {
         cloudU.u_patch_bounds.value.copy(earthU.u_patch_bounds.value);
         earthU.u_patch_on.value = 1;
         cloudU.u_patch_on.value = 1;
+        // Patch-aware advection: hand the surface particle layer the m/s
+        // U/V channels of the same coarse frame the shaders blend, so
+        // close-zoom flow picks up sub-synoptic structure (sea breezes,
+        // orographic channeling) inside the footprint.
+        if (coarse) {
+            const N = w * h;
+            windParticles.setPatchWind({
+                u: coarse.subarray(3 * N, 4 * N),
+                v: coarse.subarray(4 * N, 5 * N),
+                w, h,
+                latMin: bounds.latMin, lonMin: bounds.lonMin,
+                latSpan: bounds.latSpan, lonSpan: bounds.lonSpan,
+            });
+        }
         const degStr = Number.isInteger(stepDeg) ? `${stepDeg}°` : `${stepDeg.toFixed(2)}°`;
         _patchGridStr = `+ patch ${w}×${h} · ${degStr}`;
         _refreshGridReadout();
@@ -6451,6 +6944,7 @@ function _refreshGridReadout() {
     document.addEventListener('weather-patch-clear', () => {
         earthU.u_patch_on.value = 0;
         cloudU.u_patch_on.value = 0;
+        windParticles.setPatchWind(null);
         _patchGridStr = '';
         _refreshGridReadout();
     });
@@ -8013,18 +8507,43 @@ function updateWeatherTextures(weatherBuf, wBuf, cloudBuf) {
 // Uplift laziness: recompute from the stashed wind buffer only while
 // something can actually see the result. Toggle handlers call this on
 // enable so the first painted frame is current, not stale.
+//
+// Two consumer classes with different freshness needs:
+//   • Visual (convergence overlay / hover readout) — wants every frame,
+//     including scrub bursts.
+//   • Spawn bias (wind particles collect along convergence lines) — spawn
+//     statistics don't care about scrub bursts, so this consumer accepts a
+//     30 s-stale field. Without the throttle, wind-on-by-default would put
+//     the full-grid pass back into every scrub repaint — exactly the cost
+//     the laziness here was built to avoid.
 let _pendingUpliftWindBuf = null;
+let _upliftComputedAtMs   = 0;
 function _upliftConsumed() {
     return (_weatherOverlays.convergence?.mesh.visible)
         || document.getElementById('rd-convergence')?.checked;
 }
 function _refreshUpliftIfConsumed() {
-    if (!_pendingUpliftWindBuf || !_upliftConsumed()) return;
+    if (!_pendingUpliftWindBuf) return;
+    const spawnNeed = _windLayerVisible()
+        && (Date.now() - _upliftComputedAtMs > 30_000);
+    if (!_upliftConsumed() && !spawnNeed) return;
     computeUpliftField(_pendingUpliftWindBuf, TEX_W, TEX_H, MAX_WIND_MS, upliftTex.image.data);
     upliftTex.needsUpdate = true;
     _lastUpliftBuf = upliftTex.image.data;
+    _upliftComputedAtMs = Date.now();
     _pendingUpliftWindBuf = null;
 }
+
+// Spawn-bias sampler for WindParticles._reset — signed convergence [-1, 1]
+// at (lat, lon), or null before the first uplift compute. Reuses the hover
+// readout's bilinear sampler + buffer.
+const _windUpliftTmp = new Float32Array(4);
+function _windUpliftSample(lat, lon) {
+    if (!_lastUpliftBuf) return null;
+    if (!_sampleRGBA4(_lastUpliftBuf, lat, lon, _windUpliftTmp)) return null;
+    return _windUpliftTmp[0];
+}
+windParticles.setUpliftSampler(_windUpliftSample);
 
 document.addEventListener('weather-update', e => {
     const { weatherBuffer, windBuffer, cloudBuffer, meta } = e.detail;
@@ -8087,16 +8606,10 @@ document.addEventListener('weather-update', e => {
     frontLayer.update(weatherBuffer, windBuffer);
     _refreshFrontsReadout();
 
-    // Rebuild the jet-stream ribbons from the fresh wind field and refresh
-    // the wx-panel peak readout — same visibility gate + stale/catch-up
-    // pattern as the isobars (full-globe sweep + geometry rebuild per call).
-    if (jetstreamOverlay.visible) {
-        jetstreamOverlay.update();
-        _jetStale = false;
-    } else {
-        _jetStale = true;
-    }
-    _updateJetReadout();
+    // Re-point the pressure-level wind layers at the snapshot for the new
+    // sim instant (views into the feed ring — cheap) and refresh the
+    // 250 hPa jet-peak readout.
+    _refreshWindLevelData();
     updateIsobarPanel();
 
     // Track data recency for layer tooltips
@@ -10596,6 +11109,14 @@ function animate() {
     // are passed so the LOD path can derive sub-camera lat/lon and zoom01.
     windParticles.update(dt, camera, earthMesh);
 
+    // ── Pressure-level wind layers (850/500/250). Hidden instances return
+    // after the focus refresh, so disabled levels stay ~free; the cap check
+    // is one int compare per frame unless the governor stepped tiers.
+    _applyWindLevelCapIfTierChanged();
+    for (const _st of Object.values(_windLevels)) {
+        if (_st.inst) _st.inst.update(dt, camera, earthMesh);
+    }
+
     // ── Ocean surface currents (oceanographic). Static climatological
     // field, but particles re-advect every frame so streaks animate.
     oceanCurrentsOverlay.update(dt);
@@ -11746,12 +12267,12 @@ const _layerRegistry = {
     'lyr-tropic':         () => tropicGroup.visible,
     'lyr-subsolar':       () => subsolarMarker.group.visible,
     'lyr-weather':        () => (earthU.u_weather_on?.value ?? 0) > 0.5,
-    // Jet-stream ribbons live on a private group inside JetstreamOverlay;
-    // the only public surface is the boolean we drive in setVisible(). Read
-    // it back through the group reference so the integrity check can spot
-    // drift (e.g. checkbox flipped but setVisible never ran). Falls through
-    // to the checkbox state when the overlay hasn't been constructed yet.
-    'lyr-jet':            () => jetstreamOverlay?.visible
+    // The jet layer is a lazily-created 250 hPa WindParticles instance.
+    // While the mesh doesn't exist yet, OR while the perf governor has
+    // capped it away, the checkbox can legitimately be checked with no
+    // visible mesh — fall through to the checkbox state in those windows
+    // so the drift check doesn't false-positive.
+    'lyr-jet':            () => _windLevels.jet.inst?.mesh.visible
                                ?? document.getElementById('lyr-jet')?.checked ?? false,
     // NASA Earth Observations — each id maps to the dynamically-created
     // overlay mesh. _obsOverlays is populated lazily by _createObsOverlay,
