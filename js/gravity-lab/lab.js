@@ -23,6 +23,8 @@ import {
     createStarfield,
     createTrailRing,
     enableLogDepth,
+    createReferenceGrid,
+    createOrbitPlaneDisc,
 } from './visuals.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -73,6 +75,10 @@ const state = {
     // Out-of-plane (scene z) exaggeration ×1/×5/×20 (P1.2). Render-only:
     // roots scale z by E, body groups counter-scale so spheres stay round.
     zExag:          1,
+    // Depth-cue toggles (P1.2).
+    gridOn:         true,
+    planesOn:       true,
+    extentUnits:    10,      // cached system extent for label fade math
     // Central-body J2 perturbation. Toggleable per system.
     j2Enabled:      false,
     j2Opts:         null,    // {centerIdx, J2, R_eq, mu} consumed by integrator
@@ -131,6 +137,11 @@ const hud = {
     j2Toggle:    null,    // checkbox / button for central-body J2
     j2Wrap:      null,    // wrapper that hides the toggle when system has no J2
     j2Note:      null,    // small descriptor of what J2 does for the active system
+    // View toggles (P1.2)
+    gridToggle:   null,
+    planesToggle: null,
+    exagBtns:     null,   // ×1 / ×5 / ×20 segmented buttons
+    exagBadge:    null,   // "INCLINATIONS ×N — VISUAL ONLY" stage badge
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -392,6 +403,14 @@ export function loadSystem(systemId) {
     // Saturn major-moons system (~60 R but much busier).
     const systemExtentUnits = _systemExtentUnits();
     state.labelScale = Math.max(0.5, Math.min(3.0, systemExtentUnits / 30));
+    state.extentUnits = systemExtentUnits;
+
+    // Reference grid (P1.2) — round-distance rings + spokes in the system
+    // plane. Lives in gridRoot (rebased, never z-exaggerated: it IS the
+    // invariable plane the exaggeration is measured against).
+    const grid = createReferenceGrid(systemExtentUnits, state.sceneScaleKm);
+    grid.visible = state.gridOn;
+    gridRoot.add(grid);
 
     // Trail sampling config (P0.3): one point per 1/256 of each body's own
     // orbital period, ring capped at trail_periods visible orbits.
@@ -475,6 +494,12 @@ export function loadSystem(systemId) {
                 // the z-exaggeration — unlike body groups, guides WANT the
                 // exaggeration (they depict orbits, not spheres).
                 guideAnchor.add(guide);
+
+                // Orbit-plane disc (P1.2) — inclination made visible.
+                const disc = createOrbitPlaneDisc(
+                    b.elements_j2000, state.sceneScaleKm, b.color ?? 0xffffff);
+                disc.visible = state.planesOn;
+                guideAnchor.add(disc);
             }
         } else {
             state.trails.push(null);
@@ -492,6 +517,7 @@ export function loadSystem(systemId) {
     _renderHUDChrome();
     _renderBodyChips();
     _renderJ2Widget();
+    _syncViewUI();
     if (hud.focusLabel) hud.focusLabel.textContent = 'Free orbit · click a body to focus';
 
     // Hand the physics to the driver LAST — its first snapshot needs the
@@ -635,6 +661,25 @@ function _systemExtentUnits() {
 // currentEnergy() / rebaselineEnergy(). The fault guard uses the same
 // baseline, so HUD and guard can never disagree.
 
+// Keep the View section's controls and the honesty badge in sync with
+// state. The badge is prominent by design: exaggerated inclinations are a
+// reading aid, and the lab never lets that pass as physics.
+function _syncViewUI() {
+    if (hud.exagBtns) {
+        for (const btn of hud.exagBtns) {
+            btn.classList.toggle('on', (parseFloat(btn.dataset.exag) || 1) === state.zExag);
+        }
+    }
+    if (hud.exagBadge) {
+        hud.exagBadge.hidden = state.zExag === 1;
+        if (state.zExag !== 1) {
+            hud.exagBadge.textContent = `INCLINATIONS ×${state.zExag} — VISUAL ONLY`;
+        }
+    }
+    if (hud.gridToggle)   hud.gridToggle.checked   = state.gridOn;
+    if (hud.planesToggle) hud.planesToggle.checked = state.planesOn;
+}
+
 function _renderJ2Widget() {
     if (!hud.j2Wrap) return;
     const has = !!state.j2Opts;
@@ -755,6 +800,53 @@ function _syncTrails(sourceTrails) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Label fade (P1.2) — labels dim with distance, vanish when you're at the
+// surface, and duck behind occluding bodies. Analytic ray-sphere tests,
+// allocation-free, opacity eased so nothing pops.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _lfDir = new THREE.Vector3();
+const _lfC   = new THREE.Vector3();
+
+function _updateLabelFade() {
+    if (!camera) return;
+    const camP = camera.position;   // rebased frame — same space as labels
+    for (let i = 0; i < state.labels.length; i++) {
+        const lbl = state.labels[i];
+        if (!lbl) continue;
+        _lfDir.copy(lbl.position).sub(camP);
+        const dist = _lfDir.length();
+        if (dist <= 1e-9) continue;
+        _lfDir.multiplyScalar(1 / dist);
+        const rOwn = state.meshes[i]?.geometry?.parameters?.radius ?? 0.05;
+        // Gone when the body fills the screen; the tag is just clutter there.
+        const near = Math.min(1, Math.max(0, (dist - rOwn * 2.0) / (rOwn * 2.5)));
+        // Distant labels keep a reduced presence rather than disappearing.
+        const farStart = state.extentUnits * 3;
+        const far = dist < farStart
+            ? 1
+            : Math.max(0.25, 1 - (dist - farStart) / (state.extentUnits * 6));
+        // Occlusion: is another body's sphere across the sight line?
+        let occ = 1;
+        for (let j = 0; j < state.meshes.length; j++) {
+            if (j === i) continue;
+            const m = state.meshes[j];
+            if (!m) continue;
+            m.getWorldPosition(_lfC);
+            const R = m.geometry?.parameters?.radius ?? 0;
+            _lfC.sub(camP);
+            const t = _lfC.dot(_lfDir);
+            if (t > 0 && t < dist) {
+                const d2 = _lfC.lengthSq() - t * t;
+                if (d2 < R * R) { occ = 0.12; break; }
+            }
+        }
+        const target = 0.95 * near * far * occ;
+        lbl.material.opacity += (target - lbl.material.opacity) * 0.25;
+    }
+}
+
 function _tickVisuals(tSec) {
     for (const skin of state.skins) {
         if (!skin) continue;
@@ -813,6 +905,7 @@ function _tick(t) {
         }
     }
     _updateMeshes();
+    _updateLabelFade();
 
     // Drive skin shader uniforms each frame (animations / time-driven
     // band drift / GRS rotation still tick when the integrator is paused).
@@ -1143,6 +1236,32 @@ export function attachUI(refs) {
         hud.faultDismiss.addEventListener('click', () => {
             if (hud.faultBanner) hud.faultBanner.hidden = true;
         });
+    }
+
+    // ── View toggles (P1.2) ─────────────────────────────────────────────
+    if (hud.gridToggle) {
+        hud.gridToggle.addEventListener('change', () => {
+            state.gridOn = !!hud.gridToggle.checked;
+            gridRoot.visible = state.gridOn;
+        });
+    }
+    if (hud.planesToggle) {
+        hud.planesToggle.addEventListener('change', () => {
+            state.planesOn = !!hud.planesToggle.checked;
+            if (guideAnchor) {
+                for (const c of guideAnchor.children) {
+                    if (c.userData.kind === 'orbit-plane') c.visible = state.planesOn;
+                }
+            }
+        });
+    }
+    if (hud.exagBtns) {
+        for (const btn of hud.exagBtns) {
+            btn.addEventListener('click', () => {
+                _setZExag(parseFloat(btn.dataset.exag) || 1);
+                _syncViewUI();
+            });
+        }
     }
 }
 

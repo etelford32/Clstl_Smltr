@@ -131,6 +131,11 @@ body {
     transition:all .15s;
 }
 .gl-btn:hover { border-color:rgba(180,140,255,.45); color:#fff; }
+.gl-btn.on {
+    background:rgba(180,140,255,.20);
+    border-color:#b78cff;
+    color:#fff;
+}
 .gl-btn-primary {
     background:linear-gradient(120deg,#b78cff 0%,#7a4dff 100%);
     border-color:transparent; color:#fff;
@@ -340,6 +345,21 @@ canvas.gl-resonance-canvas {
     border-radius:6px; display:block;
 }
 
+/* ─── Exaggeration honesty badge (overlay on stage) ─────────── */
+#gl-exag-badge {
+    position:absolute; left:14px; top:14px;
+    z-index:3;
+    font-family:monospace; font-size:.68rem; font-weight:700;
+    letter-spacing:.08em;
+    color:#ffb830;
+    background:rgba(48,32,8,.82);
+    border:1px solid rgba(255,184,48,.45);
+    border-radius:8px;
+    padding:7px 11px;
+    pointer-events:none;
+}
+#gl-exag-badge[hidden] { display:none; }
+
 /* ─── Integration-fault banner (overlay on stage) ───────────── */
 #gl-fault-banner {
     position:absolute; left:50%; top:16px;
@@ -507,6 +527,24 @@ canvas.gl-resonance-canvas {
             <p class="gl-camera-hint">Click any body — in the scene or below — to follow it. Click again or the fit button to return.</p>
         </div>
 
+        <div class="gl-label">View</div>
+        <div class="gl-controls">
+            <label class="gl-j2-row">
+                <input type="checkbox" id="gl-grid" checked />
+                <span class="gl-j2-name">Reference grid</span>
+            </label>
+            <label class="gl-j2-row">
+                <input type="checkbox" id="gl-planes" checked />
+                <span class="gl-j2-name">Orbit-plane discs</span>
+            </label>
+            <div class="gl-btn-row" role="group" aria-label="Inclination exaggeration (visual only)">
+                <button type="button" class="gl-btn gl-exag on" data-exag="1">i ×1</button>
+                <button type="button" class="gl-btn gl-exag" data-exag="5">i ×5</button>
+                <button type="button" class="gl-btn gl-exag" data-exag="20">i ×20</button>
+            </div>
+            <p class="gl-camera-hint">Inclination exaggeration stretches out-of-plane motion for readability — rendering only, never the physics.</p>
+        </div>
+
         <div id="gl-j2-wrap" style="display:none;">
             <div class="gl-label">Perturbations</div>
             <label class="gl-j2-row">
@@ -521,6 +559,7 @@ canvas.gl-resonance-canvas {
     <!-- ─── 3D STAGE ────────────────────────────────────────────────── -->
     <main id="gl-stage">
         <canvas id="gl-canvas"></canvas>
+        <div id="gl-exag-badge" hidden></div>
         <div id="gl-fault-banner" hidden>
             <span id="gl-fault-text"></span>
             <button type="button" id="gl-fault-dismiss" aria-label="Dismiss">✕</button>
@@ -615,6 +654,12 @@ const ui = {
     j2Toggle:   document.getElementById('gl-j2'),
     j2Wrap:     document.getElementById('gl-j2-wrap'),
     j2Note:     document.getElementById('gl-j2-note'),
+
+    // View toggles (P1.2)
+    gridToggle:   document.getElementById('gl-grid'),
+    planesToggle: document.getElementById('gl-planes'),
+    exagBtns:     Array.from(document.querySelectorAll('.gl-exag')),
+    exagBadge:    document.getElementById('gl-exag-badge'),
 };
 
 boot({ canvas, ui, defaultSystem: 'jupiter-galileans' });

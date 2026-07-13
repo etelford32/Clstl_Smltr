@@ -303,6 +303,130 @@ export function createTrailRing(capacity, color) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Reference grid (P1.2) — translucent polar grid in the system plane
+// (scene XY): concentric rings at round physical distances with km/AU
+// labels, plus faint radial spokes. This is the depth cue that makes
+// "how far out is that moon" legible at a glance.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _roundStepKm(extentKm) {
+    // 1-2-5 ladder such that 3-5 rings cover the system.
+    const raw = extentKm / 4;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (const m of [1, 2, 5, 10]) {
+        if (raw <= m * mag) return m * mag;
+    }
+    return 10 * mag;
+}
+
+function _fmtDistanceKm(km) {
+    const AU = 1.495978707e8;
+    if (km >= 0.01 * AU) {
+        const au = km / AU;
+        return `${au >= 10 ? au.toFixed(1) : au.toFixed(2)} AU`;
+    }
+    if (km >= 1e6) return `${(km / 1e6).toPrecision(3).replace(/\.?0+$/, '')}M km`;
+    return `${Math.round(km).toLocaleString('en-US')} km`;
+}
+
+export function createReferenceGrid(extentUnits, scaleKmPerUnit) {
+    const group = new THREE.Group();
+    group.name = 'reference-grid';
+
+    const extentKm = extentUnits * scaleKmPerUnit;
+    const stepKm = _roundStepKm(extentKm);
+    const radiiKm = [];
+    for (let r = stepKm; r <= extentKm * 1.15 && radiiKm.length < 6; r += stepKm) {
+        radiiKm.push(r);
+    }
+
+    const ringMat = new THREE.LineBasicMaterial({
+        color: 0x8a86b8, transparent: true, opacity: 0.13, depthWrite: false,
+    });
+    const SEG = 128;
+    for (const rKm of radiiKm) {
+        const r = rKm / scaleKmPerUnit;
+        const pts = new Float32Array(SEG * 3);
+        for (let k = 0; k < SEG; k++) {
+            const a = (k / SEG) * 2 * Math.PI;
+            pts[k * 3]     = r * Math.cos(a);
+            pts[k * 3 + 1] = r * Math.sin(a);
+            pts[k * 3 + 2] = 0;
+        }
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+        group.add(new THREE.LineLoop(geom, ringMat));
+
+        // Distance tag on the +X axis, nudged off the ring line.
+        const tag = createLabelSprite(_fmtDistanceKm(rKm), '#9a96c8', '#7a78a4');
+        const s = Math.max(0.5, Math.min(3.0, extentUnits / 30));
+        tag.scale.set(s * 1.6, s * 0.4, 1);
+        tag.position.set(r, s * 0.28, 0);
+        tag.material.opacity = 0.75;
+        group.add(tag);
+    }
+
+    // Radial spokes every 30°, out to the last ring.
+    const outer = (radiiKm[radiiKm.length - 1] ?? extentKm) / scaleKmPerUnit;
+    const inner = outer * 0.02;
+    const spokes = new Float32Array(12 * 2 * 3);
+    for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * 2 * Math.PI;
+        const o = k * 6;
+        spokes[o]     = inner * Math.cos(a);
+        spokes[o + 1] = inner * Math.sin(a);
+        spokes[o + 3] = outer * Math.cos(a);
+        spokes[o + 4] = outer * Math.sin(a);
+    }
+    const spokeGeom = new THREE.BufferGeometry();
+    spokeGeom.setAttribute('position', new THREE.BufferAttribute(spokes, 3));
+    group.add(new THREE.LineSegments(spokeGeom, new THREE.LineBasicMaterial({
+        color: 0x8a86b8, transparent: true, opacity: 0.06, depthWrite: false,
+    })));
+
+    return group;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orbit-plane disc (P1.2) — a barely-there translucent disc spanning a
+// body's osculating orbit plane. Inclination becomes VISIBLE as the angle
+// between discs; with z-exaggeration the discs shear with the orbits.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _Z_HAT = new THREE.Vector3(0, 0, 1);
+
+export function createOrbitPlaneDisc(elements, scaleKmPerUnit, color) {
+    const KM_PER_M = 1e-3;
+    const a = elements.a * KM_PER_M / scaleKmPerUnit;
+    const e = elements.e ?? 0;
+    const r = a * (1 + e) * 1.04;
+
+    const geom = new THREE.CircleGeometry(r, 72);
+    const mat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.04,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    });
+    const disc = new THREE.Mesh(geom, mat);
+
+    // Orbit normal ĥ = (sin i sin Ω, −sin i cos Ω, cos i) — matches the
+    // rotation convention in physics.elementsToState / createOrbitGuide.
+    const i = (elements.i_deg ?? 0) * D2R;
+    const O = (elements.raan_deg ?? 0) * D2R;
+    const h = new THREE.Vector3(
+        Math.sin(i) * Math.sin(O),
+        -Math.sin(i) * Math.cos(O),
+        Math.cos(i),
+    );
+    disc.quaternion.setFromUnitVectors(_Z_HAT, h);
+    disc.userData.kind = 'orbit-plane';
+    return disc;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Logarithmic-depth retrofit (P1.1).
 //
 // gravity-lab renders with renderer.logarithmicDepthBuffer = true. Three's
