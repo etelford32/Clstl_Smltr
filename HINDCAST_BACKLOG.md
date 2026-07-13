@@ -55,11 +55,12 @@ SWMF/BATS-R-US, LFM, and OpenGGCM results.
 
 ### Backlog tasks
 
-- [ ] Pull OMNI 1-min + Wind/ACE level-2 for 16–19 Mar 2015; cross-check gaps
-      *(workstation path — SPDF is 403-blocked from the sandbox, re-confirmed
-      2026-07-13; exact commands in the runbook. Tooling ready:
-      `dsmc/pipeline/extract_omni_indices.py` turns the OMNI monthly file
-      into the ground-mag + PC(N) inputs with sentinel/column-order gates)*
+- [~] Pull OMNI 1-min + Wind/ACE level-2 for 16–19 Mar 2015; cross-check gaps
+      *(fixtures landed 2026-07-13: `imf_l1.dat` + `ground_mag.csv`
+      committed and gate-verified — SYM-H min −234 nT @ 22:47 UT exact,
+      shock 04:48 UT vs 04:45 SSC, main-phase gaps ≤ 23 min. Remaining:
+      re-pull driver with `--end 2015-03-20` to cover the final 12 h of
+      the window, and the optional Wind/ACE direct cross-check)*
 - [x] Adapt Gannon runbook: interval boundaries, F10.7, dipole tilt for March
       equinox → `HINDCAST_STPATRICK_2015_RUNBOOK.md`
 - [x] Ap + F10.7 fixture staged

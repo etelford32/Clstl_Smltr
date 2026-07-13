@@ -80,9 +80,13 @@ the Gannon runbook). Pull from a workstation:
 curl -fSL --create-dirs -o swmf/raw/omni/omni_min201503.asc \
   'https://spdf.gsfc.nasa.gov/pub/data/omni/high_res_omni/monthly_1min/omni_min201503.asc'
 
-# 2) SWMF driver file
+# 2) SWMF driver file. --end is EXCLUSIVE — take a full day of margin past
+#    the window close (2015-03-19T12:00Z) so the driver outlives the run;
+#    a driver that ends early leaves BATS-R-US holding the last row constant
+#    through the tail. (First pull used --end 2015-03-19 and stopped at
+#    Mar 18 23:59 — caught by the coverage gate, 2026-07-13.)
 cd swmf && python3 -m pipeline.fetch_omni_imf \
-  --start 2015-03-16 --end 2015-03-19 \
+  --start 2015-03-16 --end 2015-03-20 \
   --out fixtures/hindcast/st_patrick_mar_2015/imf_l1.dat
 
 # 3) Ground-mag fixture — AE/AU/AL/SYM-H from the same OMNI monthly file.
@@ -109,10 +113,15 @@ SYM-H min must read **−234 ± a few nT** or the file/window is wrong.
 **Data gate (do not launch without it):**
 
 ```sh
-grep -c '9999' swmf/fixtures/hindcast/st_patrick_mar_2015/imf_l1.dat   # → 0
+# sentinel gate — the pattern is anchored on a leading space because bare
+# '9999' false-positives on real storm-time temperatures (e.g. 189999.0 K,
+# seen in this very window):
+grep -c ' 9999\.9\| 99999\.9' swmf/fixtures/hindcast/st_patrick_mar_2015/imf_l1.dat  # → 0
 head -6 swmf/fixtures/hindcast/st_patrick_mar_2015/imf_l1.dat          # density col 14, Bz col 10
-awk '$1 ~ /^[0-9]/{print $14}' …/imf_l1.dat | sort -n | sed -n '1p;$p' # strictly positive, ~1 → 40 /cc
+awk '$1 ~ /^[0-9]/{print $14}' …/imf_l1.dat | sort -n | sed -n '1p;$p' # strictly positive, ~2 → 60 /cc
 awk '$1 ~ /^[0-9]/{print $10}' …/imf_l1.dat | sort -n | sed -n '1p;$p' # Bz within ± ~35 nT
+# coverage gate — last data row must be AT or AFTER the window close:
+tail -1 swmf/fixtures/hindcast/st_patrick_mar_2015/imf_l1.dat          # ≥ 2015-03-19 12:00
 ```
 
 **Watch-outs specific to this event:**
@@ -131,6 +140,14 @@ awk '$1 ~ /^[0-9]/{print $10}' …/imf_l1.dat | sort -n | sed -n '1p;$p' # Bz wi
 * The staged `historical_ap.csv` peaks at ap 179 — **not** pinned at 400.
   If a fetch refresh shows different values, GFZ definitive has been
   re-issued; note it, don't average.
+* **Verified on the committed fixtures (2026-07-13):** shock arrival in
+  `imf_l1.dat` at 04:48–04:49 UT Mar 17 (Vx −401 → −503 km/s, Bz +9 →
+  +26 nT), 3–4 min after the 04:45 ground SSC — within L1-propagation
+  uncertainty. `ground_mag.csv` SYM-H min **−234 nT at 22:47 UT Mar 17**,
+  matching the published value exactly; AE max 2298 nT at 13:58 UT. OMNI
+  plasma gaps: main phase clean (largest gap 23 min), Mar 18 recovery has
+  gaps up to ~2 h — BATS-R-US interpolates linearly across them; note the
+  gap windows in the results write-up when scoring recovery-phase metrics.
 
 **Day 1 done when:** `imf_l1.dat` + `ground_mag.csv` + `kyoto_dst.csv`
 present, gates pass, fingerprints match.
