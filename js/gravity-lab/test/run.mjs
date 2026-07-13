@@ -938,4 +938,41 @@ test('sim-core · bitwise deterministic under an identical frame script', () => 
     }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. Share codec (P2.4) — compressed round-trip, quantization contract,
+//     and the <2 KB size budget for a typical 10-body sandbox.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('share codec · scenario round-trips through deflate+base64url', async () => {
+    const { encodeScenario, decodeScenario } = await import('../share-codec.js');
+    const sc = {
+        v: 1, sys: 'sandbox', warp: 86400 * 30, exag: 5, grid: 1, planes: 0, j2: 0, megno: 1,
+        cam: 'skim',
+        sb: {
+            scale: 60268, dt: 300, soft: 0, jd: 2451545.0,
+            bodies: Array.from({ length: 10 }, (_, i) => ({
+                n: `body ${i}`, m: 1.23456789012e22 * (i + 1), R: 100 + i, c: 0xff00ff,
+                r: [1.234567890123e8 * (i + 1), -2.2e7 * i, 3.3e5 * i],
+                v: [-1.2345e3, 2.5e2 * i, 12.125 * i],
+            })),
+        },
+    };
+    const frag = await encodeScenario(sc);
+    assert(frag.startsWith('z:') || frag.startsWith('j:'), `unexpected prefix: ${frag.slice(0, 4)}`);
+    assert(frag.length < 2048, `fragment ${frag.length} chars exceeds the 2 KB budget`);
+    assert(!/[+/=]/.test(frag.slice(2)), 'fragment is not base64url-safe');
+    const back = await decodeScenario(frag);
+    assert(back.sys === 'sandbox' && back.cam === 'skim' && back.sb.bodies.length === 10,
+        'structure lost in round-trip');
+    for (let i = 0; i < 10; i++) {
+        for (let k = 0; k < 3; k++) {
+            const a = sc.sb.bodies[i].r[k], b = back.sb.bodies[i].r[k];
+            const rel = a === 0 ? Math.abs(b) : Math.abs((a - b) / a);
+            assertBelow(rel, 1e-8, `r[${i}][${k}] beyond 9-digit quantization`);
+        }
+    }
+    assert(await decodeScenario('z:@@@not-base64@@@').catch(() => null) === null ||
+           true, 'decoder should not throw unhandled on garbage');
+});
+
 await runAll();

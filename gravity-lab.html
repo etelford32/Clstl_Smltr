@@ -462,6 +462,23 @@ canvas.gl-resonance-canvas {
     pointer-events:none;
 }
 
+/* ─── Toast (P2.4) ──────────────────────────────────────────── */
+#gl-toast {
+    position:absolute; left:50%; top:52px;
+    transform:translateX(-50%) translateY(-6px);
+    z-index:5;
+    max-width:min(480px, calc(100% - 32px));
+    font-family:monospace; font-size:.7rem;
+    color:#d8ffe4;
+    background:rgba(10,40,20,.9); backdrop-filter:blur(10px);
+    border:1px solid rgba(111,228,139,.4);
+    border-radius:8px;
+    padding:8px 12px;
+    opacity:0; pointer-events:none;
+    transition:opacity .3s ease, transform .3s ease;
+}
+#gl-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
 /* ─── Zoom / camera controls tooltip (P1.3) ─────────────────── */
 #gl-hint {
     position:absolute; left:14px; bottom:16px;
@@ -665,6 +682,7 @@ canvas.gl-resonance-canvas {
                 <button type="button" class="gl-btn" id="gl-rewind" title="Step back ~0.5 s of history per press (pauses the sim)">⏪ Rewind</button>
                 <button type="button" class="gl-btn" id="gl-reset">Reset to J2000.0</button>
             </div>
+            <button type="button" class="gl-btn" id="gl-share" title="Copy a URL that reproduces this scenario — system or sandbox state, epoch, warp, camera, and view toggles">🔗 Share scenario</button>
         </div>
 
         <div class="gl-label">Camera</div>
@@ -725,6 +743,7 @@ canvas.gl-resonance-canvas {
         <div id="gl-stage-watermark">Yoshida-4 · symplectic · live</div>
         <div id="gl-hint" role="note" aria-live="polite"></div>
         <button type="button" id="gl-hint-btn" aria-label="Show camera controls help" title="Camera controls">?</button>
+        <div id="gl-toast" role="status"></div>
     </main>
 
     <!-- ─── RIGHT SIDEBAR — HUD ─────────────────────────────────────── -->
@@ -801,7 +820,7 @@ canvas.gl-resonance-canvas {
 </div>
 
 <script type="module">
-import { boot } from './js/gravity-lab/lab.js?v=20260713a';
+import { boot } from './js/gravity-lab/lab.js?v=20260713b';
 
 const canvas = document.getElementById('gl-canvas');
 const ui = {
@@ -876,6 +895,10 @@ const ui = {
     resVal:      document.getElementById('gl-res-val'),
     exportCsv:   document.getElementById('gl-export-csv'),
     exportJson:  document.getElementById('gl-export-json'),
+
+    // Share (P2.4)
+    shareBtn:    document.getElementById('gl-share'),
+    toast:       document.getElementById('gl-toast'),
 
     // Sandbox (P2.1)
     sandboxWrap:  document.getElementById('gl-sandbox-wrap'),

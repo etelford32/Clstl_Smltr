@@ -17,6 +17,7 @@ import {
 } from './physics.js';
 import { createDriver } from './sim-driver.js';
 import { EPOCHS } from './epochs.js';
+import { encodeScenario, decodeScenario } from './share-codec.js';
 import { SYSTEMS, SYSTEM_ORDER, J2000_JD } from './systems.js';
 import {
     createBodyVisual,
@@ -96,6 +97,7 @@ const state = {
     resCoeffs:      [],      // per-body integers kᵢ for φ = Σ kᵢλᵢ
     trailIntervals: [],      // per-body sim-time sampling interval (s), for export
     exportPending:  null,    // 'csv' → next snapshot builds the download
+    lastPreset:     null,    // most recent camera preset (for share URLs)
     // Central-body J2 perturbation. Toggleable per system.
     j2Enabled:      false,
     j2Opts:         null,    // {centerIdx, J2, R_eq, mu} consumed by integrator
@@ -181,6 +183,9 @@ const hud = {
     resVal:      null,
     exportCsv:   null,
     exportJson:  null,
+    // Share (P2.4)
+    shareBtn:    null,
+    toast:       null,
     // Sandbox (P2.1)
     sandboxWrap:  null,
     sbAdd:        null,
@@ -840,6 +845,7 @@ function _flyTo(pos, target, ms = 1200) {
 }
 
 export function applyCameraPreset(name, instant = false) {
+    state.lastPreset = name;
     const d = Math.max(state.extentUnits * 2.4, 5);
     let pos, target;
 
@@ -2141,6 +2147,7 @@ export function attachUI(refs) {
         state.driver.ping();   // next snapshot carries the trail rings
     });
     if (hud.exportJson) hud.exportJson.addEventListener('click', _exportJSON);
+    if (hud.shareBtn) hud.shareBtn.addEventListener('click', _shareScenario);
 
     // ── Epoch picker (P2.2) ─────────────────────────────────────────────
     if (hud.epochSelect) {
@@ -2222,6 +2229,145 @@ function _renderBodyChips() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Shareable scenarios (P2.4) — {systemId or sandbox state, epoch, warp,
+// camera preset, view toggles} ⇄ compressed base64url URL fragment.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const WARP_LOG_MAX = Math.log(1e8);
+const _warpToSlider = w => 1000 * Math.log(Math.max(1, w)) / WARP_LOG_MAX;
+
+function _buildScenario() {
+    const sc = {
+        v: 1,
+        sys: state.sandbox ? 'sandbox' : state.systemId,
+        warp: state.warp,
+        exag: state.zExag,
+        grid: state.gridOn ? 1 : 0,
+        planes: state.planesOn ? 1 : 0,
+        j2: state.j2Enabled ? 1 : 0,
+        megno: state.megnoOn ? 1 : 0,
+        cam: state.lastPreset,
+    };
+    if (state.sandbox) {
+        sc.sb = {
+            scale: state.sceneScaleKm,
+            dt: state.targetStep,
+            soft: state.softeningKm,
+            jd: state.epochJD,
+            bodies: state.bodies.map(b => ({
+                n: b.name, m: b.m,
+                R: b.radius_km || 100,
+                c: b.color ?? 0xaaaaaa,
+                r: [...b.r], v: [...b.v],
+            })),
+        };
+    } else if (state.epochJD !== J2000_JD) {
+        sc.jd = state.epochJD;
+    }
+    return sc;
+}
+
+function _applyScenario(sc) {
+    if (sc.sys === 'sandbox' && sc.sb?.bodies?.length >= 2) {
+        const bodies = sc.sb.bodies.map(b => ({
+            name: String(b.n ?? 'body'), m: b.m,
+            r: [...b.r], v: [...b.v],
+            radius_km: b.R, color: b.c,
+        }));
+        const pIdx = _primaryIdxOf(bodies);
+        bodies.forEach((b, i) => { b.is_parent = i === pIdx; });
+        state.softeningKm = sc.sb.soft || 0;
+        _loadDescriptor({
+            id: 'sandbox',
+            name: 'Sandbox (shared)',
+            blurb: 'Reconstructed from a shared link.',
+            marketing: {
+                headline: 'Shared sandbox scenario',
+                callout: 'This system arrived via URL. State is quantized to 9 significant digits for sharing; from here it integrates in full double precision.',
+                physics: 'Same engine, same honest ledger as every curated system.',
+            },
+            bodies,
+            parent_name: bodies[pIdx].name,
+            mu_parent: G_SI * bodies[pIdx].m,
+            scale_km_per_unit: sc.sb.scale,
+            suggested_dt_s: sc.sb.dt,
+            suggested_warp: sc.warp || 86400,
+            oblateness: null,
+            j2_default: false,
+            rings: null,
+            show_barycenter: true,
+            default_view: null,
+            trail_periods: 0,
+            epoch_jd: sc.sb.jd || J2000_JD,
+        }, null);
+        if (state.softeningKm > 0) state.driver.setSoftening(state.softeningKm * 1000);
+    } else if (sc.sys && SYSTEMS[sc.sys]) {
+        const entry = sc.jd && EPOCHS[sc.sys]?.find(e => Math.abs(e.jd - sc.jd) < 1e-4);
+        if (entry) _loadEpoch(sc.sys, entry);
+        else loadSystem(sc.sys);
+    } else {
+        return false;
+    }
+
+    if (sc.warp > 0) {
+        state.warp = sc.warp;
+        if (hud.warpSlider) hud.warpSlider.value = _warpToSlider(sc.warp);
+        if (hud.warpVal) hud.warpVal.textContent = _humaniseWarp(sc.warp);
+    }
+    if (sc.exag && sc.exag !== state.zExag) _setZExag(sc.exag);
+    state.gridOn = !!sc.grid;
+    gridRoot.visible = state.gridOn;
+    state.planesOn = !!sc.planes;
+    if (guideAnchor) {
+        for (const c of guideAnchor.children) {
+            if (c.userData.kind === 'orbit-plane') c.visible = state.planesOn;
+        }
+    }
+    _syncViewUI();
+    if (state.j2Opts && !!sc.j2 !== state.j2Enabled) {
+        state.j2Enabled = !!sc.j2;
+        state.L0Pending = true;
+        state.driver.setJ2(state.j2Enabled);
+        _renderJ2Widget();
+    }
+    if (sc.megno) {
+        state.megnoOn = true;
+        if (hud.megnoToggle) hud.megnoToggle.checked = true;
+        if (hud.megnoPanel) hud.megnoPanel.style.display = '';
+        state.driver.setMegno(true);
+    }
+    if (sc.cam) applyCameraPreset(sc.cam, true);
+    return true;
+}
+
+let _toastTimer = null;
+function _toast(text) {
+    if (!hud.toast) return;
+    hud.toast.textContent = text;
+    hud.toast.classList.add('show');
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => hud.toast.classList.remove('show'), 3500);
+}
+
+async function _shareScenario() {
+    try {
+        const frag = await encodeScenario(_buildScenario());
+        const url = `${location.origin}${location.pathname}#s=${frag}`;
+        if (typeof window !== 'undefined' && window.__glLab) window.__glLab.lastShareUrl = url;
+        history.replaceState(null, '', `#s=${frag}`);
+        try {
+            await navigator.clipboard.writeText(url);
+            _toast(`Link copied (${url.length} chars) — this URL reproduces the scenario exactly`);
+        } catch {
+            _toast('Link is in the address bar — copy it from there');
+        }
+    } catch (err) {
+        console.warn('[gravity-lab] share failed:', err);
+        _toast('Could not build the share link');
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Formatting helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2267,6 +2413,15 @@ export function boot({ canvas, ui, defaultSystem = 'jupiter-galileans' }) {
     state.driverMode = state.driver.mode;
     loadSystem(SYSTEM_ORDER.includes(defaultSystem) ? defaultSystem : SYSTEM_ORDER[0]);
     start();
+    // Shared scenario (P2.4): reconstruct over the default load. Async
+    // because decoding uses DecompressionStream; failures fall back to the
+    // default system already showing.
+    const shareMatch = typeof location !== 'undefined' && location.hash.match(/[#&]s=([^&]+)/);
+    if (shareMatch) {
+        decodeScenario(decodeURIComponent(shareMatch[1]))
+            .then(sc => { if (sc) _applyScenario(sc); })
+            .catch(err => console.warn('[gravity-lab] bad share link:', err));
+    }
     // Debug/test handle only — the smoke tests read trail buffers and sim
     // state through this. Not a public API; do not build features on it.
     if (typeof window !== 'undefined') {

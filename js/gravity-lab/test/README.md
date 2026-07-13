@@ -29,6 +29,10 @@ lab.js must keep it green.
 | Trails (P0.3) | ~256 points/orbit at any warp; geometry warp-independent; ring capacity respected |
 | RKF7(8) + hybrid (P0.4) | One-step 8th-order convergence (tableau checksum); e=0.9 period at tol 1e-12 lands 1e-9 of analytic; hot triple SURVIVES via adaptive segment (\|ΔE/E₀\| < 1e-6) and returns to Yoshida; all six curated systems provably never leave the symplectic path; radial singularity faults as `unresolvable` |
 | Determinism (P0.5) | Bitwise-identical state after an identical frame script — the parity guarantee between the Worker and inline drivers, which both drive this same core |
+| Softening (P2.1) | Softened force/potential pair conserves the softened Hamiltonian (< 1e-8 at ε = 50,000 km); ε provably reaches the force law |
+| Circumbinary + epochs (P1.4/P2.2) | Circumbinary ICs match published a and periods; every baked epoch entry is bound with a preserved within 3% |
+| MEGNO (P2.3) | ⟨Y⟩ → 2 ± 0.15 over 400 Kepler periods (discrete tangent map — a side-along leapfrog falsely reads chaos); chaotic triple ⟨Y⟩ ≫ 2 |
+| Share codec (P2.4) | deflate+base64url round-trip, 9-digit quantization contract, < 2 KB for a 10-body sandbox |
 
 Browser-level acceptance lives in `tests/gravity-lab-smoke.mjs` (Playwright):
 frame-budget compliance, throttle honesty (never silently slower than the
