@@ -609,6 +609,14 @@ canvas.gl-resonance-canvas {
                 <div class="gl-tab-name">Algol — Hierarchical Triple</div>
                 <div class="gl-tab-sub">stellar triple · orbits mutually inclined 86°</div>
             </button>
+            <button type="button" class="gl-tab" data-system="kirkwood-gaps">
+                <div class="gl-tab-name">Kirkwood Gaps</div>
+                <div class="gl-tab-sub">Sun + Jupiter + 16,000 asteroids · resonances carve the belt</div>
+            </button>
+            <button type="button" class="gl-tab" data-system="jupiter-trojans">
+                <div class="gl-tab-name">Jupiter Trojans</div>
+                <div class="gl-tab-sub">8,000 bodies librating around L4 &amp; L5</div>
+            </button>
             <button type="button" class="gl-tab gl-tab-sandbox" data-system="sandbox">
                 <div class="gl-tab-name">⚗ Sandbox</div>
                 <div class="gl-tab-sub">fork the current system · add bodies · drag orbits &amp; velocities</div>
@@ -798,6 +806,13 @@ canvas.gl-resonance-canvas {
             <canvas class="gl-instr-canvas" id="gl-ch-res" width="280" height="60"></canvas>
             <p class="gl-instr-note">Set integer kᵢ per body (mean longitudes λᵢ). The Galilean Laplace angle (1, −3, 2) is one preset of this tool.</p>
 
+            <div id="gl-hist-wrap" style="display:none;">
+                <div class="gl-instr-label" style="margin-top:10px;">Particle census — semi-major axis</div>
+                <div class="gl-instr-value" id="gl-part-count">—</div>
+                <canvas class="gl-instr-canvas" id="gl-ch-hist" width="280" height="84"></canvas>
+                <p class="gl-instr-note">Live distribution of osculating <em>a</em> across the massless cloud. Dashed lines mark mean-motion resonances with the perturber — resonant orbits pump their eccentricity within thousands of years, and over long runs the bins beneath the lines thin out. Ejected (unbound) particles are counted, not hidden.</p>
+            </div>
+
             <div class="gl-btn-row" style="margin-top:10px;">
                 <button type="button" class="gl-btn" id="gl-export-csv">⬇ Trails CSV</button>
                 <button type="button" class="gl-btn" id="gl-export-json">⬇ State JSON</button>
@@ -820,7 +835,7 @@ canvas.gl-resonance-canvas {
 </div>
 
 <script type="module">
-import { boot } from './js/gravity-lab/lab.js?v=20260713b';
+import { boot } from './js/gravity-lab/lab.js?v=20260713c';
 
 const canvas = document.getElementById('gl-canvas');
 const ui = {
@@ -895,6 +910,11 @@ const ui = {
     resVal:      document.getElementById('gl-res-val'),
     exportCsv:   document.getElementById('gl-export-csv'),
     exportJson:  document.getElementById('gl-export-json'),
+
+    // Test-particle census (P3.2)
+    histWrap:    document.getElementById('gl-hist-wrap'),
+    chHist:      document.getElementById('gl-ch-hist'),
+    partCount:   document.getElementById('gl-part-count'),
 
     // Share (P2.4)
     shareBtn:    document.getElementById('gl-share'),

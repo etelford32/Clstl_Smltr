@@ -28,6 +28,7 @@ import { elementsToState, shiftToBarycenter, G_SI } from './physics.js';
 
 // Standard gravitational parameters (m^3 s^-2).
 const MU = {
+    sun:        1.32712440018e20,  // DE440 heliocentric GM
     earth:      3.986004418e14,
     moon:       4.9028000e12,
     neptune:    6.835100e15,   // Jacobson (2009), Neptune alone (no moons)
@@ -81,7 +82,7 @@ const M = Object.fromEntries(
  * Keplerian elements relative to the parent.  Returns the full body list
  * with the system shifted into its own barycentric frame.
  */
-function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, suggested_dt_s, suggested_warp, marketing, oblateness, j2_default, rings, show_barycenter, default_view, trail_periods }) {
+function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, suggested_dt_s, suggested_warp, marketing, oblateness, j2_default, rings, show_barycenter, default_view, trail_periods, particles }) {
     const bodies = [{
         name: parent.name,
         m: parent.m,
@@ -153,6 +154,7 @@ function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, sugges
         show_barycenter: !!show_barycenter,  // draw the COM reticle
         default_view: default_view || null,  // camera preset applied on load (P1.3)
         trail_periods: trail_periods || 0,   // visible orbits per trail (0 = default)
+        particles: particles || null,        // massless test-particle cloud (P3.2)
     };
 }
 
@@ -566,6 +568,25 @@ const SATURN_COORBITALS = _build({
         opacity:  0.72,
         gaps: [{ r: 1.99, half_w: 0.04, opacity: 0.10 }],
     },
+    // Massless ring of co-orbital debris sharing the Janus-Epimetheus lane
+    // (P3.2): the horseshoe exchange stirs it visibly at every swap.
+    particles: {
+        n: 6000,
+        label: 'co-orbital debris',
+        spec: {
+            kind: 'annulus', seed: 0xC00B17A1,
+            a_min_m: 150_800_000, a_max_m: 152_100_000,
+            e_max: 0.002, i_max_deg: 0.05,
+        },
+        hist: {
+            a_min_m: 150_500_000, a_max_m: 152_400_000, bins: 96,
+            unit: 'km', axis: 'a (thousand km)',
+            marks: [
+                { a_m: 151_461_000, label: 'Janus' },
+                { a_m: 151_411_000, label: 'Epimetheus' },
+            ],
+        },
+    },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -804,6 +825,153 @@ const ALGOL_TRIPLE = _build({
     default_view:      'skim',
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Kirkwood gaps — Sun + Jupiter + a massless main belt (P3.2)
+// ─────────────────────────────────────────────────────────────────────────────
+// The flagship test-particle showcase. 16,000 massless asteroids seeded
+// uniformly in a ∈ [2.0, 3.6] AU feel the Sun and Jupiter; at the
+// mean-motion resonances (3:1 at 2.502 AU, 5:2 at 2.825, 7:3 at 2.958,
+// 2:1 at 3.279) Jupiter pumps their eccentricities until they leave —
+// exactly how the real belt carved its gaps (Kirkwood, 1866; Wisdom,
+// 1983 explained the 3:1 via chaotic e-pumping). Timescale honesty
+// (measured, kernel soak at this exact dt): e at the 3:1 pumps visibly
+// within ~10 kyr of sim time (minutes of wall time at the suggested
+// warp), but a-band DEPLETION — the visible gap — is a 10⁵⁺-yr affair
+// even in the real belt. The histogram is the instrument for a long
+// leave-it-running exhibit, not a 60-second reveal.
+//
+// Jupiter's heliocentric elements: Standish (1992) J2000 mean elements,
+// ecliptic frame — the same auditable-source convention as the moons.
+const AU_M = 1.495978707e11;
+
+const KIRKWOOD_GAPS = _build({
+    id:    'kirkwood-gaps',
+    name:  'Kirkwood Gaps — Sun + Jupiter + belt',
+    blurb: 'Sixteen thousand massless asteroids vs. one Jupiter. Watch the resonances carve the belt\'s famous gaps.',
+    marketing: {
+        headline: 'The belt, carving itself',
+        callout:  'Every asteroid whose period is a neat fraction of Jupiter\'s (3:1, 5:2, 7:3, 2:1) gets a rhythmic gravitational kick and pumps up its eccentricity — the mechanism behind the gaps Daniel Kirkwood spotted in 1866. Crank the warp and watch the census under the dashed resonance lines churn; carving the gaps clean took the real belt hundreds of millennia, and it will take this one too.',
+        physics:  'Massless test particles: they feel the Sun and Jupiter, exert nothing, ignore each other — the standard restricted-problem tool (REBOUND\'s test particles, Wisdom\'s 1983 3:1 chaos study). Leapfrog in the time-varying two-body field; the massive pair stays on the symplectic Yoshida-4 rail.',
+    },
+    parent: {
+        name: 'sun',
+        m: M.sun,
+        radius_km: 696_340,
+        color: 0xffd76e,
+        glow:  0xffe9a8,
+        surface: 'star',
+    },
+    satellites: [
+        {
+            name: 'jupiter',
+            m: M.jupiter,
+            radius_km: 71_492,
+            color: 0xd5a76b,
+            skin:  'jupiter',
+            highlight: 'the perturber — 11.86 yr period sets the resonance grid',
+            elements: {
+                a:        5.20336301 * AU_M,
+                e:        0.04839266,
+                i_deg:    1.30530,
+                raan_deg: 100.55615,
+                argp_deg: 274.19770,   // ϖ − Ω = 14.75385 − 100.55615
+                M_deg:    19.65053,    // λ − ϖ at J2000
+            },
+        },
+    ],
+    scale_km_per_unit: 1.495978707e8,    // 1 scene unit = 1 AU
+    // ≈11.6 d: 374 steps/Jupiter-orbit, 89 at the belt's inner edge. At
+    // 1.5e6 s the Sun-Jupiter energy envelope measured 2.8e-8 — above the
+    // HUD's stated 1e-8 convergence bar (test/run.mjs enforces it); at
+    // 1.0e6 s it is ~5e-9.
+    suggested_dt_s:    1.0e6,
+    suggested_warp:    86400 * 365.25 * 25,  // 25 yr/s — ~10 kyr in 7 min
+    default_view:      'polar',          // the belt reads face-on
+    particles: {
+        n: 16000,
+        label: 'asteroids',
+        spec: {
+            kind: 'belt', seed: 0x314159,
+            a_min_m: 2.0 * AU_M, a_max_m: 3.6 * AU_M,
+            e_max: 0.15, i_max_deg: 4,
+        },
+        hist: {
+            a_min_m: 1.8 * AU_M, a_max_m: 3.8 * AU_M, bins: 96,
+            unit: 'au', axis: 'a (AU)',
+            marks: [
+                { a_m: 2.5019 * AU_M, label: '3:1' },
+                { a_m: 2.8254 * AU_M, label: '5:2' },
+                { a_m: 2.9575 * AU_M, label: '7:3' },
+                { a_m: 3.2785 * AU_M, label: '2:1' },
+            ],
+        },
+    },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Jupiter Trojans — L4 & L5 clouds (P3.2)
+// ─────────────────────────────────────────────────────────────────────────────
+// Same Sun + Jupiter pair; 8,000 massless bodies seeded ±60° from Jupiter
+// with a ±14° libration spread. Lagrange (1772) predicted them 134 years
+// before Wolf found 588 Achilles (1906). The tadpole libration around L4
+// and L5 emerges from gravity alone — and particles seeded too deep in
+// the spread drift into horseshoe orbits, exactly as theory says.
+
+const JUPITER_TROJANS = _build({
+    id:    'jupiter-trojans',
+    name:  'Jupiter Trojans — L4 & L5',
+    blurb: 'Two clouds of massless bodies riding 60° ahead of and behind Jupiter, librating around the Lagrange points.',
+    marketing: {
+        headline: 'Lagrange\'s 1772 prediction, populated',
+        callout:  'The Greeks lead, the Trojans trail. Each cloud librates around its triangular Lagrange point in slow tadpole loops — watch a few thousand orbits and the clouds breathe without dispersing. Lagrange worked this out 134 years before the first Trojan was discovered.',
+        physics:  'The circular restricted three-body problem\'s stable triangular equilibria (stable because m_Jupiter/M_sun ≈ 0.00095 < the Routh criterion 0.0385). Test particles seeded ±60° from Jupiter with ±14° spread; the libration is pure Newton.',
+    },
+    parent: {
+        name: 'sun',
+        m: M.sun,
+        radius_km: 696_340,
+        color: 0xffd76e,
+        glow:  0xffe9a8,
+        surface: 'star',
+    },
+    satellites: [
+        {
+            name: 'jupiter',
+            m: M.jupiter,
+            radius_km: 71_492,
+            color: 0xd5a76b,
+            skin:  'jupiter',
+            highlight: 'its L4/L5 points hold ~10,000 known Trojans',
+            elements: {
+                a:        5.20336301 * AU_M,
+                e:        0.04839266,
+                i_deg:    1.30530,
+                raan_deg: 100.55615,
+                argp_deg: 274.19770,
+                M_deg:    19.65053,
+            },
+        },
+    ],
+    scale_km_per_unit: 1.495978707e8,    // 1 scene unit = 1 AU
+    suggested_dt_s:    1.0e6,            // same convergence bar as kirkwood-gaps
+    suggested_warp:    86400 * 365.25 * 25,
+    default_view:      'polar',
+    particles: {
+        n: 8000,
+        label: 'trojans',
+        spec: {
+            kind: 'trojan', seed: 0x77207A4, anchor: 'jupiter',
+            spread_deg: 14, a_jitter: 0.004,
+            e_max: 0.05, i_max_deg: 3,
+        },
+        hist: {
+            a_min_m: 5.02 * AU_M, a_max_m: 5.39 * AU_M, bins: 96,
+            unit: 'au', axis: 'a (AU)',
+            marks: [{ a_m: 5.20336301 * AU_M, label: '1:1' }],
+        },
+    },
+});
+
 export const SYSTEMS = {
     'earth-moon':        EARTH_MOON,
     'mars-system':       MARS_SYSTEM,
@@ -813,6 +981,8 @@ export const SYSTEMS = {
     'neptune-triton':    NEPTUNE_TRITON,
     'pluto-charon':      PLUTO_CHARON,
     'algol-triple':      ALGOL_TRIPLE,
+    'kirkwood-gaps':     KIRKWOOD_GAPS,
+    'jupiter-trojans':   JUPITER_TROJANS,
 };
 
 export const SYSTEM_ORDER = [
@@ -824,6 +994,8 @@ export const SYSTEM_ORDER = [
     'neptune-triton',
     'pluto-charon',
     'algol-triple',
+    'kirkwood-gaps',
+    'jupiter-trojans',
 ];
 
 // J2000.0 epoch (TT ~= TDB) as Julian Date.

@@ -107,6 +107,10 @@ export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false
         _lastCkptMs: null,
         // Sim-time trail sampling (P0.3) — configured via configureTrails().
         trails: null,
+        // Massless test particles (P3.2) — configureParticles(). NOT part
+        // of checkpoints: a rewind restores the massive bodies only (the
+        // cloud is 20k×6 doubles; Reset regenerates it deterministically).
+        particles: null,
         // WASM kernel (P3.1) — null runs the JS reference implementation.
         // Same physics either way; the harness parity-gates them at 1e-12.
         kernel,
@@ -223,18 +227,25 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
                 // integrator's exact tangent map (see yoshida4StepVar) —
                 // JS-only: the tangent map interleaves with the composition.
                 if (sim.megno) {
+                    if (sim.particles) _particlesPre(sim);
                     yoshida4StepVar(sim.bodies, sub, opts, sim.megno.vs);
+                    if (sim.particles) _particlesPost(sim, sub);
                     _megnoAccumulate(sim, absSub);
                 } else if (sim.kernel) {
                     // WASM kernel path (P3.1): copy in, step, copy out —
                     // ~1 µs round-trip for N ≤ 16, and trails/encounter
-                    // scans below read sim.bodies as usual.
+                    // scans below read sim.bodies as usual. Any resident
+                    // particle cloud (P3.2) KDKs inside the same call, so
+                    // no pre/post bracketing here.
                     writeBodies(sim.kernel, sim.bodies);
-                    sim.kernel.stepSystem(sim.bodies.length, 0, 1, sub,
+                    sim.kernel.stepSystem(sim.bodies.length,
+                        sim.particles ? sim.particles.n : 0, 1, sub,
                         sim.soft2, opts ? opts.J2 : null);
                     readBodies(sim.kernel, sim.bodies);
                 } else {
+                    if (sim.particles) _particlesPre(sim);
                     yoshida4Step(sim.bodies, sub, opts);
+                    if (sim.particles) _particlesPost(sim, sub);
                 }
                 stepsDone++;
                 advancedSec += sub;
@@ -269,8 +280,12 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
             while (Math.abs(remaining) > 1e-9) {
                 const sgn = remaining < 0 ? -1 : 1;
                 const hTry = sgn * Math.min(Math.abs(h), Math.abs(remaining), sim.targetStep);
+                if (sim.particles) _particlesPre(sim);
                 const r = rkf78Step(sim.bodies, hTry, ADAPTIVE_TOL, rkOpts);
                 if (r.h === 0) { sim._stepFail = true; break; }
+                // The cloud rides the ACCEPTED step size r.h (which may be
+                // shorter than hTry); a rejected step leaves it untouched.
+                if (sim.particles) _particlesPost(sim, r.h);
                 stepsDone++;
                 advancedSec += r.h;
                 remaining = total - advancedSec;
@@ -717,6 +732,98 @@ export function clearTrailBuffers(sim) {
         tr.total = 0;
         tr.acc = 0;
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Massless test particles (P3.2) — feel gravity from every massive body,
+// exert none, ignore each other. KDK leapfrog in the bodies' time-varying
+// field: kick with the field at t, drift, kick with the field at t+dt.
+// Kernel-backed when the WASM kernel is present (the cloud lives in
+// kernel memory); pure-JS fallback otherwise, same math, same layout.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function configureParticles(sim, n, srcBuf) {
+    if (!n || !srcBuf) {
+        sim.particles = null;
+        return;
+    }
+    if (sim.kernel) {
+        const cap = Math.min(n, sim.kernel.maxParticles);
+        sim.kernel.particlesView.set(srcBuf.subarray(0, cap * 6));
+        sim.particles = {
+            n: cap,
+            buf: sim.kernel.particlesView.subarray(0, cap * 6),
+            kernelBacked: true,
+        };
+    } else {
+        sim.particles = {
+            n,
+            buf: srcBuf,
+            kernelBacked: false,
+            oldPos: new Float64Array(sim.bodies.length * 3),
+        };
+    }
+}
+
+/** Snapshot body positions (field at t) before the bodies step. */
+function _particlesPre(sim) {
+    if (sim.kernel) {
+        writeBodies(sim.kernel, sim.bodies);
+        sim.kernel.savePositions(sim.bodies.length);
+    } else {
+        const old = sim.particles.oldPos;
+        for (let i = 0; i < sim.bodies.length; i++) {
+            const r = sim.bodies[i].r;
+            old[i * 3] = r[0]; old[i * 3 + 1] = r[1]; old[i * 3 + 2] = r[2];
+        }
+    }
+}
+
+/** KDK the cloud across the step the bodies just took. */
+function _particlesPost(sim, dt) {
+    if (sim.kernel) {
+        writeBodies(sim.kernel, sim.bodies);
+        sim.kernel.stepParticles(sim.bodies.length, sim.particles.n, dt, sim.soft2);
+    } else {
+        _jsStepParticles(sim, dt);
+    }
+}
+
+function _jsKickParticles(sim, dt, useOld) {
+    const P = sim.particles;
+    const buf = P.buf, n = P.n, old = P.oldPos;
+    const bodies = sim.bodies, nb = bodies.length;
+    const soft2 = sim.soft2;
+    for (let k = 0; k < n; k++) {
+        const o = k * 6;
+        const px = buf[o], py = buf[o + 1], pz = buf[o + 2];
+        let ax = 0, ay = 0, az = 0;
+        for (let i = 0; i < nb; i++) {
+            let bx, by, bz;
+            if (useOld) { bx = old[i * 3]; by = old[i * 3 + 1]; bz = old[i * 3 + 2]; }
+            else { const r = bodies[i].r; bx = r[0]; by = r[1]; bz = r[2]; }
+            const dx = bx - px, dy = by - py, dz = bz - pz;
+            const r2 = dx * dx + dy * dy + dz * dz + soft2;
+            const gm = G_SI * bodies[i].m / (r2 * Math.sqrt(r2));
+            ax += gm * dx; ay += gm * dy; az += gm * dz;
+        }
+        buf[o + 3] += ax * dt;
+        buf[o + 4] += ay * dt;
+        buf[o + 5] += az * dt;
+    }
+}
+
+function _jsStepParticles(sim, dt) {
+    const P = sim.particles;
+    _jsKickParticles(sim, dt * 0.5, true);
+    const buf = P.buf, n = P.n;
+    for (let k = 0; k < n; k++) {
+        const o = k * 6;
+        buf[o]     += buf[o + 3] * dt;
+        buf[o + 1] += buf[o + 4] * dt;
+        buf[o + 2] += buf[o + 5] * dt;
+    }
+    _jsKickParticles(sim, dt * 0.5, false);
 }
 
 function _sampleTrails(sim, absDt) {

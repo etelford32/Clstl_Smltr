@@ -31,8 +31,9 @@ import {
 import { SYSTEMS, SYSTEM_ORDER } from '../systems.js';
 import {
     createSim, advanceFrame, clearDebt, rewind, currentEnergy,
-    configureTrails, enableMegno,
+    configureTrails, configureParticles, enableMegno,
 } from '../sim-core.js';
+import { generateParticles, binHistogram, computeOrbitsJS } from '../particles.js';
 
 const FAST = process.argv.includes('--fast');
 
@@ -1066,6 +1067,155 @@ test('wasm kernel · test particle on circular orbit conserves energy', async ()
     const a = kernel.orbitsView[0], e = kernel.orbitsView[1];
     assertBelow(Math.abs(a - ap) / ap, 0.02, 'particle semi-major axis');
     assertBelow(e, 0.05, 'particle eccentricity stays near-circular');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 14. Massless test particles (P3.2) — generation, sim-core wiring, and
+//     the histogram instrumentation behind the Kirkwood panel.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('particles · generation is deterministic and honors the belt spec', () => {
+    const sys = SYSTEMS['kirkwood-gaps'];
+    const bodies = systemBodies('kirkwood-gaps');
+    const n = 2000;
+    const c1 = generateParticles(sys.particles.spec, bodies, 0, n);
+    const c2 = generateParticles(sys.particles.spec, bodies, 0, n);
+    for (let i = 0; i < n * 6; i++) {
+        assert(c1.buf[i] === c2.buf[i], 'same spec + seed must be bit-identical');
+    }
+    // Seeded elements are heliocentric about the primary, so at t=0 the
+    // osculating a/e recovered from state vectors must match the spec.
+    const orbits = computeOrbitsJS(c1.buf, n, bodies[0], new Float64Array(n * 2));
+    const s = sys.particles.spec;
+    for (let k = 0; k < n; k++) {
+        const a = orbits[k * 2], e = orbits[k * 2 + 1];
+        assert(a >= s.a_min_m * 0.999 && a <= s.a_max_m * 1.001,
+            `particle ${k}: a = ${fmt(a)} outside [${fmt(s.a_min_m)}, ${fmt(s.a_max_m)}]`);
+        assertBelow(e, s.e_max * 1.001 + 1e-12, `particle ${k} eccentricity`);
+    }
+    const h = binHistogram(orbits, n, sys.particles.hist.a_min_m,
+        sys.particles.hist.a_max_m, 96);
+    assert(h.unbound === 0, `${h.unbound} unbound particles at t=0`);
+    assert(h.bins.reduce((x, y) => x + y, 0) === n, 'every particle binned at t=0');
+});
+
+test('particles · trojan clouds straddle ±60° of the anchor', () => {
+    const sys = SYSTEMS['jupiter-trojans'];
+    const bodies = systemBodies('jupiter-trojans');
+    const n = 400;
+    const { buf } = generateParticles(sys.particles.spec, bodies, 0, n);
+    const sunR = bodies[0].r, jupR = bodies[1].r;
+    const anchorLon = Math.atan2(jupR[1] - sunR[1], jupR[0] - sunR[0]) * 180 / Math.PI;
+    // Spread is in MEAN longitude; the true longitude adds the equation of
+    // center, ≤ 2e rad ≈ 5.8° at e_max = 0.05. Bound: spread + 6°.
+    const tol = sys.particles.spec.spread_deg + 6;
+    for (let k = 0; k < n; k++) {
+        const lon = Math.atan2(buf[k * 6 + 1] - sunR[1], buf[k * 6] - sunR[0]) * 180 / Math.PI;
+        const side = k % 2 === 0 ? 60 : -60;
+        let d = lon - anchorLon - side;
+        d = ((d + 540) % 360) - 180;   // wrap to [-180, 180)
+        assertBelow(Math.abs(d), tol, `particle ${k} longitude offset from L${side > 0 ? 4 : 5}`);
+    }
+    // The regression that actually shipped once: anchoring on Jupiter's
+    // current DISTANCE (4.97 AU at J2000) instead of its osculating a
+    // (5.203 AU) put the cloud on 7%-fast orbits that circulate out of
+    // the Lagrange regions at ~2°/yr. Pin the seeded a to Jupiter's.
+    const aJup = 5.20336301 * 1.495978707e11;
+    const orbits = computeOrbitsJS(buf, n, bodies[0], new Float64Array(n * 2));
+    for (let k = 0; k < n; k++) {
+        assertBelow(Math.abs(orbits[k * 2] - aJup) / aJup, 0.006,
+            `particle ${k} semi-major axis vs Jupiter's osculating a`);
+    }
+});
+
+test('particles · kernel and JS clouds agree ≤ 1e-10 through sim-core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { loadKernel } = await import('../wasm/kernel.js');
+    const bytes = readFileSync(new URL('../wasm/gravity_kernel.wasm', import.meta.url));
+    const kernel = await loadKernel(bytes);
+
+    const sys = SYSTEMS['kirkwood-gaps'];
+    const n = 64;
+    const mkSim = (kern) => {
+        const bodies = systemBodies('kirkwood-gaps');
+        const sim = createSim({ bodies, targetStep: sys.suggested_dt_s, kernel: kern });
+        const cloud = generateParticles(sys.particles.spec, bodies, 0, n);
+        configureParticles(sim, n, cloud.buf);
+        return sim;
+    };
+    const sK = mkSim(kernel);   // kernel: particles ride inside stepSystem
+    const sJ = mkSim(null);     // JS: _particlesPre/Post bracket yoshida4Step
+    assert(sK.particles.kernelBacked && !sJ.particles.kernelBacked, 'backing split');
+
+    // Fixed injected clock → the budget never expires → exact step counts.
+    const frame = { dtRealSec: 1, warp: sys.suggested_dt_s * 200, direction: 1, budgetMs: 1e12 };
+    const clock = () => 0;
+    for (let i = 0; i < 10; i++) {          // 2000 steps ≈ 63 yr
+        advanceFrame(sK, frame, clock);
+        advanceFrame(sJ, frame, clock);
+    }
+    assert(sK.integrator === 'yoshida4' && sJ.integrator === 'yoshida4',
+        'both runs must stay symplectic for a like-for-like comparison');
+
+    const { dR, dV } = maxStateDeviation(sK.bodies, sJ.bodies);
+    assertBelow(dR, 1e-12, 'massive-body parity');
+    let scale = 0;
+    for (let k = 0; k < n * 6; k += 6) {
+        scale = Math.max(scale, Math.hypot(sJ.particles.buf[k], sJ.particles.buf[k + 1], sJ.particles.buf[k + 2]));
+    }
+    let dP = 0;
+    for (let k = 0; k < n; k++) {
+        const o = k * 6;
+        dP = Math.max(dP, Math.hypot(
+            sK.particles.buf[o]     - sJ.particles.buf[o],
+            sK.particles.buf[o + 1] - sJ.particles.buf[o + 1],
+            sK.particles.buf[o + 2] - sJ.particles.buf[o + 2]));
+    }
+    assertBelow(dP / scale, 1e-10, 'particle cloud parity (kernel vs JS)');
+    assertBelow(dV, 1e-12, 'velocity parity');
+});
+
+test('particles · cloud rides the MEGNO stepping path too', () => {
+    // MEGNO switches the bodies to yoshida4StepVar (JS tangent map) — the
+    // pre/post bracketing must keep the cloud stepping there as well.
+    const sys = SYSTEMS['kirkwood-gaps'];
+    const bodies = systemBodies('kirkwood-gaps');
+    const sim = createSim({ bodies, targetStep: sys.suggested_dt_s });
+    const n = 16;
+    const cloud = generateParticles(sys.particles.spec, bodies, 0, n);
+    const before = Float64Array.from(cloud.buf.subarray(0, n * 6));
+    configureParticles(sim, n, cloud.buf);
+    enableMegno(sim, true);
+    const frame = { dtRealSec: 1, warp: sys.suggested_dt_s * 100, direction: 1, budgetMs: 1e12 };
+    for (let i = 0; i < 5; i++) advanceFrame(sim, frame, () => 0);
+    let moved = 0;
+    for (let k = 0; k < n; k++) {
+        const o = k * 6;
+        assert(Number.isFinite(sim.particles.buf[o]), `particle ${k} went non-finite`);
+        moved = Math.max(moved, Math.abs(sim.particles.buf[o] - before[o]));
+    }
+    assert(moved > 1e9, 'cloud failed to advance under MEGNO stepping');
+    assert(sim.megno.t > 0, 'MEGNO clock must be running');
+});
+
+test('particles · histogram bins bound orbits and counts ejections', () => {
+    // Synthetic orbits: [a, e] pairs. Range [2, 4), 4 bins. a < 0 is
+    // unbound; bound orbits OUTSIDE the range are dropped silently (they
+    // are off-chart, not ejected).
+    const orbits = new Float64Array([
+        2.1, 0.0,    // bin 0
+        2.6, 0.1,    // bin 1
+        3.1, 0.0,    // bin 2
+        3.6, 0.2,    // bin 3
+        3.99, 0.0,   // bin 3
+        -1,  0.0,    // unbound
+        4.5, 0.0,    // off-chart high — dropped
+        0.5, 0.0,    // off-chart low — dropped
+    ]);
+    const h = binHistogram(orbits, 8, 2, 4, 4);
+    assert(JSON.stringify(h.bins) === JSON.stringify([1, 1, 1, 2]),
+        `bins = ${JSON.stringify(h.bins)}`);
+    assert(h.unbound === 1, `unbound = ${h.unbound}`);
 });
 
 await runAll();

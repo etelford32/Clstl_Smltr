@@ -28,6 +28,7 @@ import {
     clearDebt,
     clearTrailBuffers,
     configureTrails,
+    configureParticles,
     currentEnergy,
     rebaselineEnergy,
     setBodyState,
@@ -37,6 +38,7 @@ import {
 import { totalAngularMomentum } from './physics.js';
 import { packSnapshot, snapshotBytes } from './snapshot-codec.js';
 import { loadKernel } from './wasm/kernel.js';
+import { generateParticles, binHistogram, computeOrbitsJS } from './particles.js';
 
 // WASM kernel (P3.1): loaded once, lazily; failure means the JS path in
 // sim-core carries on — same physics, parity-gated by the harness.
@@ -58,6 +60,30 @@ let bufBytes = 0;
 let gen = 0;      // echoed in every snapshot so the driver can drop stale ones
 const pool = [];
 
+// Test-particle bookkeeping (P3.2). The cloud itself lives in the sim
+// (kernel memory or a JS Float64Array); the worker owns the histogram
+// cadence and the JS-fallback orbits scratch buffer.
+const HIST_INTERVAL_MS = 600;
+let particleCfg = null;   // { scale, hist: {a_min_m, a_max_m, bins} }
+let orbitsScratch = null; // JS fallback for kernel.orbitsView
+let lastHistMs = 0;
+
+function _histogram() {
+    const P = sim.particles;
+    const h = particleCfg.hist;
+    let orbits;
+    if (P.kernelBacked) {
+        sim.kernel.computeOrbits(P.n, sim._primaryIdx);
+        orbits = sim.kernel.orbitsView;
+    } else {
+        if (!orbitsScratch || orbitsScratch.length < P.n * 2) {
+            orbitsScratch = new Float64Array(P.n * 2);
+        }
+        orbits = computeOrbitsJS(P.buf, P.n, sim.bodies[sim._primaryIdx], orbitsScratch);
+    }
+    return binHistogram(orbits, P.n, h.a_min_m, h.a_max_m, h.bins ?? 96);
+}
+
 function _snapshot(meta, res) {
     if (!sim) return;
     const buffer = pool.pop() ?? new ArrayBuffer(bufBytes);
@@ -68,7 +94,15 @@ function _snapshot(meta, res) {
         Lmag: Math.hypot(L[0], L[1], L[2]),
         stepsDone:   res?.stepsDone ?? 0,
         advancedSec: res?.advancedSec ?? 0,
+        particleScale: particleCfg?.scale ?? 1,
     });
+    if (sim.particles && particleCfg?.hist) {
+        const t = performance.now();
+        if (t - lastHistMs >= HIST_INTERVAL_MS) {
+            lastHistMs = t;
+            meta.hist = _histogram();
+        }
+    }
     meta.gen = gen;
     meta.kernel = !!sim.kernel;
     meta.encounter = sim.encounter ? { ...sim.encounter } : null;
@@ -98,10 +132,24 @@ async function _load(m) {
         kernel:     bodies.length <= (kernel?.maxBodies ?? 0) ? kernel : null,
     });
     configureTrails(sim, m.trailSpecs, m.trailCap);
+    // Test particles (P3.2): generated HERE, deterministically, from the
+    // spec — 20k×6 doubles never cross the thread boundary.
+    particleCfg = null;
+    let bins = null;
+    if (m.particles?.n > 0) {
+        const cloud = generateParticles(m.particles.spec, bodies, sim._primaryIdx, m.particles.n);
+        configureParticles(sim, m.particles.n, cloud.buf);
+        if (sim.particles) {
+            bins = cloud.bins.length === sim.particles.n
+                ? cloud.bins : cloud.bins.subarray(0, sim.particles.n);
+            particleCfg = { scale: m.particles.scale, hist: m.particles.hist ?? null };
+            lastHistMs = 0;
+        }
+    }
     const nTrails = m.trailSpecs.filter(Boolean).length;
-    bufBytes = snapshotBytes(bodies.length, nTrails, m.trailCap);
+    bufBytes = snapshotBytes(bodies.length, nTrails, m.trailCap, sim.particles?.n ?? 0);
     pool.length = 0;
-    _snapshot({ loaded: true });
+    _snapshot(bins ? { loaded: true, particleBins: bins } : { loaded: true });
 }
 
 onmessage = ev => {

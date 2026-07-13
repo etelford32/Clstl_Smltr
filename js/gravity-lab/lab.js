@@ -104,12 +104,16 @@ const state = {
     // Sun direction for skin shaders — pulled from the directional light.
     sunDir:         new THREE.Vector3(1, 0, 0),
     labelScale:     1,       // per-system scaling for label sprites
+    // Massless test-particle cloud (P3.2): {cfg, n, points, posAttr,
+    // lastHist, unbound} while the active system carries one, else null.
+    particles:      null,
 };
 
 // Three.js singletons — initialised once in init().
 let scene, camera, renderer, controls;
 const sceneRoot      = new THREE.Group();  // contains current system bodies
 const trailRoot      = new THREE.Group();  // contains current system trails
+const particleRoot   = new THREE.Group();  // massless test-particle cloud (P3.2)
 const overlayRoot    = new THREE.Group();  // labels / accents (e.g. barycenter)
 const guidesRoot     = new THREE.Group();  // Kepler guides + orbit-plane discs
 const gridRoot       = new THREE.Group();  // reference grid (P1.2)
@@ -183,6 +187,10 @@ const hud = {
     resVal:      null,
     exportCsv:   null,
     exportJson:  null,
+    // Test-particle census (P3.2)
+    histWrap:    null,   // wrapper shown only when the system carries a cloud
+    chHist:      null,   // the a-histogram canvas (Kirkwood panel)
+    partCount:   null,   // "16,000 asteroids · 132 ejected" readout
     // Share (P2.4)
     shareBtn:    null,
     toast:       null,
@@ -220,7 +228,7 @@ export function initScene(canvasEl) {
     _resize();
 
     scene = new THREE.Scene();
-    scene.add(sceneRoot, trailRoot, overlayRoot, guidesRoot, gridRoot);
+    scene.add(sceneRoot, trailRoot, particleRoot, overlayRoot, guidesRoot, gridRoot);
 
     camera = new THREE.PerspectiveCamera(45, _aspect(), 1e-5, 50000);
     // The system plane is scene XY (physics z = out-of-plane), so the
@@ -342,6 +350,7 @@ function _setZExag(E) {
     state.zExag = E;
     sceneRoot.scale.z  = E;
     trailRoot.scale.z  = E;
+    particleRoot.scale.z = E;   // particles depict trajectories — exaggerate
     guidesRoot.scale.z = E;
     for (const g of state.bodyGroups) {
         if (g) g.scale.z = 1 / E;
@@ -437,9 +446,11 @@ export function loadSystem(systemId) {
 function _loadDescriptor(src, systemId) {
     _disposeGroup(sceneRoot);
     _disposeGroup(trailRoot);
+    _disposeGroup(particleRoot);
     _disposeGroup(overlayRoot);
     _disposeGroup(guidesRoot);
     _disposeGroup(gridRoot);
+    state.particles = null;
 
     // Fresh floating origin + exaggeration for the incoming system.
     state.origin[0] = state.origin[1] = state.origin[2] = 0;
@@ -611,6 +622,42 @@ function _loadDescriptor(src, systemId) {
     // for this system (planet skins, procedural surfaces) — see visuals.js.
     enableLogDepth(sceneRoot);
 
+    // Massless test-particle cloud (P3.2). The physics runs where the
+    // driver runs; the render side is one THREE.Points whose position
+    // attribute is overwritten from each snapshot (scene units, scaled at
+    // the source). Count scales down where the stepping budget is tighter:
+    // coarse-pointer devices ÷4, and the inline (no-worker) fallback is
+    // capped — 16k×2-body kicks per substep on the MAIN thread would eat
+    // the whole 6 ms budget and throttle the warp into the ground.
+    if (src.particles) {
+        let n = src.particles.n;
+        if (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches) {
+            n >>= 2;
+        }
+        if (state.driver?.mode === 'inline') n = Math.min(n, 2000);
+        const geo = new THREE.BufferGeometry();
+        const posAttr = new THREE.BufferAttribute(new Float32Array(n * 3), 3);
+        posAttr.setUsage(THREE.DynamicDrawUsage);
+        geo.setAttribute('position', posAttr);
+        geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+        geo.setDrawRange(0, 0);   // nothing until the first snapshot lands
+        const mat = new THREE.PointsMaterial({
+            size: 1.7, sizeAttenuation: false, vertexColors: true,
+            transparent: true, opacity: 0.85, depthWrite: false,
+        });
+        const points = new THREE.Points(geo, mat);
+        points.frustumCulled = false;   // cloud spans the system — always draw
+        particleRoot.add(points);
+        state.particles = {
+            cfg: src.particles,
+            n,
+            points,
+            posAttr,
+            lastHist: null,
+            unbound: 0,
+        };
+    }
+
     state.focusIdx = null;
     _buildBarycenterMarker(src.show_barycenter);
     _frameSystem();
@@ -648,6 +695,12 @@ function _loadDescriptor(src, systemId) {
         softening:  state.sandbox ? state.softeningKm * 1000 : 0,
         trailSpecs,
         trailCap,
+        particles:  state.particles ? {
+            n:     state.particles.n,
+            spec:  src.particles.spec,
+            scale: metersToScene,
+            hist:  src.particles.hist ?? null,
+        } : null,
     });
     _syncSandboxUI();
 }
@@ -713,6 +766,22 @@ function _onSnapshot(view) {
     if (state.exportPending === 'csv' && view.trails) {
         state.exportPending = null;
         _exportCSVFromTrails(view.trails);
+    }
+    // Test-particle cloud (P3.2). view.particles.pos aliases the
+    // transferable buffer — copy into the GPU attribute synchronously.
+    if (state.particles) {
+        if (view.particleBins) _applyParticleBins(view.particleBins);
+        if (view.particles) {
+            const P = state.particles;
+            const m = Math.min(view.particles.n, P.n) * 3;
+            P.posAttr.array.set(view.particles.pos.subarray(0, m));
+            P.posAttr.needsUpdate = true;
+            P.points.geometry.setDrawRange(0, m / 3);
+        }
+        if (view.hist) {
+            state.particles.lastHist = view.hist;
+            _drawHistogram();
+        }
     }
     // Rewind/undo and edits change body state — the sandbox editor fields
     // must follow the authoritative snapshot.
@@ -915,6 +984,7 @@ function _updateMeshes() {
     // JS doubles, so world translations near the focus cancel exactly.
     sceneRoot.position.set(-ox, -oy, -oz);
     trailRoot.position.set(-ox, -oy, -oz);
+    particleRoot.position.set(-ox, -oy, -oz);
     guidesRoot.position.set(-ox, -oy, -oz);
     gridRoot.position.set(-ox, -oy, -oz);
     if (barycenterGroup) barycenterGroup.position.set(-ox, -oy, -oz);
@@ -1877,8 +1947,92 @@ function _drawInstruments() {
     }
 }
 
+// ── Test-particle cloud visuals (P3.2) ──────────────────────────────────────
+
+// 16-step palette keyed by INITIAL semi-major axis: inner = warm, outer =
+// cool. Color is assigned once at load, so radial mixing and resonant
+// depletion stay readable as the cloud evolves.
+const PARTICLE_PALETTE = (() => {
+    const p = [];
+    for (let i = 0; i < 16; i++) {
+        const c = new THREE.Color().setHSL(0.07 + 0.51 * (i / 15), 0.85, 0.62);
+        p.push([c.r, c.g, c.b]);
+    }
+    return p;
+})();
+
+function _applyParticleBins(bins) {
+    const P = state.particles;
+    const col = P.points.geometry.getAttribute('color');
+    const n = Math.min(bins.length, P.n);
+    for (let k = 0; k < n; k++) {
+        const c = PARTICLE_PALETTE[bins[k] & 15];
+        col.array[k * 3]     = c[0];
+        col.array[k * 3 + 1] = c[1];
+        col.array[k * 3 + 2] = c[2];
+    }
+    col.needsUpdate = true;
+}
+
+/**
+ * The a-histogram panel — the Kirkwood instrument. Bars are the live
+ * distribution of osculating semi-major axes (computed where the physics
+ * runs, ~0.6 s cadence); dashed marks are the system's declared
+ * mean-motion resonances. Ejections (E ≥ 0) are counted, not hidden.
+ */
+function _drawHistogram() {
+    const P = state.particles;
+    const cv = hud.chHist;
+    if (!cv || !P?.lastHist) return;
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+    const { bins, unbound } = P.lastHist;
+    const hist = P.cfg.hist;
+    const max = Math.max(1, ...bins);
+    const bw = W / bins.length;
+    ctx.fillStyle = '#9fb4ff';
+    for (let i = 0; i < bins.length; i++) {
+        const h = (bins[i] / max) * (H - 14);
+        ctx.fillRect(i * bw, H - h, Math.max(bw - 1, 1), h);
+    }
+    if (hist.marks) {
+        ctx.strokeStyle = 'rgba(255,120,120,.7)';
+        ctx.fillStyle = 'rgba(255,170,170,.95)';
+        ctx.font = '9px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.setLineDash([3, 3]);
+        for (const mk of hist.marks) {
+            const t = (mk.a_m - hist.a_min_m) / (hist.a_max_m - hist.a_min_m);
+            if (t < 0 || t > 1) continue;
+            const x = t * W;
+            ctx.beginPath(); ctx.moveTo(x, 12); ctx.lineTo(x, H); ctx.stroke();
+            ctx.fillText(mk.label, x, 9);
+        }
+        ctx.setLineDash([]);
+    }
+    P.unbound = unbound;
+    if (hud.partCount) {
+        hud.partCount.textContent =
+            `${P.n.toLocaleString()} ${P.cfg.label ?? 'particles'} · ${unbound.toLocaleString()} ejected`;
+    }
+}
+
 // Populate the pair selects + resonance coefficient editor per system.
 function _renderInstrumentControls() {
+    if (hud.histWrap) {
+        hud.histWrap.style.display = state.particles ? '' : 'none';
+        if (state.particles) {
+            if (hud.chHist) {
+                const ctx = hud.chHist.getContext('2d');
+                ctx.clearRect(0, 0, hud.chHist.width, hud.chHist.height);
+            }
+            if (hud.partCount) {
+                hud.partCount.textContent =
+                    `${state.particles.n.toLocaleString()} ${state.particles.cfg.label ?? 'particles'}`;
+            }
+        }
+    }
     if (hud.sepA && hud.sepB) {
         const opts = state.bodies.map((b, i) =>
             `<option value="${i}">${_capitalize(b.name)}</option>`).join('');
@@ -2050,9 +2204,11 @@ export function attachUI(refs) {
         });
     }
     if (hud.warpSlider) {
-        // Slider 0..1000 mapped log-scale to 1 .. 1e8.
-        const map = v => Math.exp(Math.log(1) + (v / 1000) * (Math.log(1e8) - Math.log(1)));
-        const inv = w => 1000 * (Math.log(w) - Math.log(1)) / (Math.log(1e8) - Math.log(1));
+        // Slider 0..1000 mapped log-scale to 1 .. 1e9. The top decade
+        // exists for the heliocentric particle systems (Kirkwood runs at
+        // 25 yr/s ≈ 7.9e8); the throttle keeps any over-ask honest.
+        const map = v => Math.exp((v / 1000) * WARP_LOG_MAX);
+        const inv = _warpToSlider;
         hud.warpSlider.value = inv(state.warp);
         hud.warpSlider.addEventListener('input', () => {
             state.warp = map(parseFloat(hud.warpSlider.value));
@@ -2234,7 +2390,7 @@ function _renderBodyChips() {
 // camera preset, view toggles} ⇄ compressed base64url URL fragment.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const WARP_LOG_MAX = Math.log(1e8);
+const WARP_LOG_MAX = Math.log(1e9);
 const _warpToSlider = w => 1000 * Math.log(Math.max(1, w)) / WARP_LOG_MAX;
 
 function _buildScenario() {

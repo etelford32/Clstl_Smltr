@@ -28,6 +28,7 @@ import {
     clearDebt,
     clearTrailBuffers,
     configureTrails,
+    configureParticles,
     currentEnergy,
     rebaselineEnergy,
     setBodyState,
@@ -38,6 +39,7 @@ import {
 } from './sim-core.js';
 import { totalAngularMomentum } from './physics.js';
 import { parseSnapshot } from './snapshot-codec.js';
+import { generateParticles, binHistogram, computeOrbitsJS } from './particles.js';
 
 const WORKER_BUDGET_MS_DESKTOP = 12;
 const WORKER_BUDGET_MS_MOBILE  = 8;
@@ -55,9 +57,25 @@ class InlineDriver {
         this.sim = null;
     }
 
-    load({ bodies, targetStep, j2Opts, j2Enabled, trailSpecs, trailCap, softening = 0 }) {
+    load({ bodies, targetStep, j2Opts, j2Enabled, trailSpecs, trailCap, softening = 0, particles = null }) {
         this.sim = createSim({ bodies, targetStep, j2Opts, j2Enabled, softening });
         configureTrails(this.sim, trailSpecs, trailCap);
+        // Test particles (P3.2): no kernel inline, so the cloud steps in
+        // pure JS on the main thread — lab.js sends a reduced n here.
+        this._pCfg = null;
+        this._pBins = null;
+        if (particles?.n > 0) {
+            const cloud = generateParticles(particles.spec, bodies, this.sim._primaryIdx, particles.n);
+            configureParticles(this.sim, particles.n, cloud.buf);
+            this._pBins = cloud.bins;
+            this._pCfg = {
+                scale: particles.scale,
+                hist:  particles.hist ?? null,
+                pos:   new Float32Array(particles.n * 3),   // reused per emit
+                orbits: null,
+                lastHistMs: 0,
+            };
+        }
         this._emit({ loaded: true }, null);
     }
 
@@ -115,6 +133,28 @@ class InlineDriver {
     _emit(meta, res) {
         const sim = this.sim;
         const L = totalAngularMomentum(sim.bodies);
+        // Particle cloud → reused scene-unit f32 view + periodic histogram.
+        let particles = null, hist = null;
+        if (sim.particles && this._pCfg) {
+            const P = sim.particles, C = this._pCfg;
+            const s = C.scale, pos = C.pos;
+            for (let k = 0; k < P.n; k++) {
+                const src = k * 6, dst = k * 3;
+                pos[dst]     = P.buf[src]     * s;
+                pos[dst + 1] = P.buf[src + 1] * s;
+                pos[dst + 2] = P.buf[src + 2] * s;
+            }
+            particles = { n: P.n, pos };
+            if (C.hist) {
+                const t = performance.now();
+                if (t - C.lastHistMs >= 600) {
+                    C.lastHistMs = t;
+                    if (!C.orbits) C.orbits = new Float64Array(P.n * 2);
+                    computeOrbitsJS(P.buf, P.n, sim.bodies[sim._primaryIdx], C.orbits);
+                    hist = binHistogram(C.orbits, P.n, C.hist.a_min_m, C.hist.a_max_m, C.hist.bins ?? 96);
+                }
+            }
+        }
         this.onSnapshot({
             elapsedSec:  sim.elapsedSec,
             debtSec:     sim.debtSec,
@@ -131,10 +171,14 @@ class InlineDriver {
             kernelActive: !!sim.kernel,   // inline stays on the JS reference path
             bodies:      sim.bodies,      // live reference — zero copy
             trails:      sim.trails,      // live reference — zero copy
+            particles,
+            particleBins: meta.loaded ? this._pBins : null,
+            hist,
             encounter:   sim.encounter,
             fault:       res?.fault ?? null,
             loaded:      !!meta.loaded,
             rewound:     !!meta.rewound,
+            edited:      !!meta.edited,
         });
     }
 }
@@ -176,6 +220,7 @@ class WorkerDriver {
             softening:  cfg.softening ?? 0,
             trailSpecs: cfg.trailSpecs,
             trailCap:   cfg.trailCap,
+            particles:  cfg.particles ?? null,
         });
     }
 

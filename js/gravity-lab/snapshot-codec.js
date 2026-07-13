@@ -9,6 +9,10 @@
  *   f64[.. +3N)        trail meta: [head, count, total] × N (head = -2 ⇒ no trail)
  *   f32[..]            trail rings: cap×3 floats per trailed body, in body order
  *                      (scene units, matching sim-core's trail buffers)
+ *   f32[..]            particle positions (P3.2): [x,y,z] × nParticles in
+ *                      SCENE units — the worker scales SI → scene once so
+ *                      the main thread can .set() straight into the GPU
+ *                      attribute. Velocities never cross the boundary.
  */
 
 export const HDR = 16;
@@ -28,17 +32,26 @@ export const H_NBODIES   = 10;
 export const H_TRAILCAP  = 11;
 export const H_MEGNO     = 12;   // ⟨Y⟩; NaN = indicator off
 export const H_MEGNO_T   = 13;   // seconds on the MEGNO clock
+export const H_NPARTICLES = 14;  // test-particle count (0 = no cloud)
 
-export function snapshotBytes(nBodies, nTrails, trailCap) {
-    return 8 * (HDR + nBodies * 6 + nBodies * 3) + 4 * (nTrails * trailCap * 3);
+export function snapshotBytes(nBodies, nTrails, trailCap, nParticles = 0) {
+    return 8 * (HDR + nBodies * 6 + nBodies * 3)
+        + 4 * (nTrails * trailCap * 3)
+        + 4 * (nParticles * 3);
 }
 
-/** Worker side: serialize sim state + per-tick results into `buffer`. */
+/**
+ * Worker side: serialize sim state + per-tick results into `buffer`.
+ * `extra.particleScale` (SI meters → scene units) must be set when the
+ * sim carries a particle cloud — positions are scaled here, once, so the
+ * main thread copies them straight into the GPU attribute.
+ */
 export function packSnapshot(buffer, sim, extra) {
     const bodies = sim.bodies;
     const N = bodies.length;
     const trails = sim.trails || [];
     const trailCap = trails.find(t => t)?.cap ?? 0;
+    const nParticles = sim.particles?.n ?? 0;
 
     const f64 = new Float64Array(buffer, 0, HDR + N * 9);
     f64[H_ELAPSED]  = sim.elapsedSec;
@@ -55,6 +68,7 @@ export function packSnapshot(buffer, sim, extra) {
     f64[H_TRAILCAP] = trailCap;
     f64[H_MEGNO]    = sim.megno ? sim.megno.meanY : NaN;
     f64[H_MEGNO_T]  = sim.megno ? sim.megno.t : 0;
+    f64[H_NPARTICLES] = nParticles;
 
     let o = HDR;
     for (let i = 0; i < N; i++) {
@@ -70,14 +84,24 @@ export function packSnapshot(buffer, sim, extra) {
         f64[o + 2] = tr ? tr.total : 0;
         o += 3;
     }
-    if (trailCap > 0) {
-        let f32o = 0;
+    let f32o = 0;
+    if (trailCap > 0 || nParticles > 0) {
         const f32 = new Float32Array(buffer, 8 * (HDR + N * 9));
         for (let i = 0; i < N; i++) {
             const tr = trails[i];
             if (!tr) continue;
             f32.set(tr.buf, f32o);
             f32o += tr.buf.length;
+        }
+        if (nParticles > 0) {
+            const s = extra.particleScale ?? 1;
+            const pb = sim.particles.buf;
+            for (let k = 0; k < nParticles; k++) {
+                const src = k * 6, dst = f32o + k * 3;
+                f32[dst]     = pb[src]     * s;
+                f32[dst + 1] = pb[src + 1] * s;
+                f32[dst + 2] = pb[src + 2] * s;
+            }
         }
     }
 }
@@ -101,8 +125,10 @@ export function parseSnapshot(buffer, meta, outBodies) {
         b.v[0] = f64[o + 3]; b.v[1] = f64[o + 4]; b.v[2] = f64[o + 5];
         o += 6;
     }
+    const nParticles = head[H_NPARTICLES];
     const trails = new Array(N);
-    const f32 = trailCap > 0 ? new Float32Array(buffer, 8 * (HDR + N * 9)) : null;
+    const f32 = (trailCap > 0 || nParticles > 0)
+        ? new Float32Array(buffer, 8 * (HDR + N * 9)) : null;
     let f32o = 0;
     for (let i = 0; i < N; i++) {
         const h = f64[o];
@@ -120,6 +146,11 @@ export function parseSnapshot(buffer, meta, outBodies) {
         }
         o += 3;
     }
+    // Particle positions alias the buffer like the trails do — consume
+    // (copy into the GPU attribute) before recycling.
+    const particles = nParticles > 0
+        ? { n: nParticles, pos: f32.subarray(f32o, f32o + nParticles * 3) }
+        : null;
 
     return {
         elapsedSec:  head[H_ELAPSED],
@@ -137,6 +168,9 @@ export function parseSnapshot(buffer, meta, outBodies) {
                      : { meanY: head[H_MEGNO], t: head[H_MEGNO_T] },
         bodies:      outBodies,
         trails,
+        particles,
+        particleBins: meta.particleBins ?? null,   // once, on the loaded snap
+        hist:        meta.hist ?? null,            // periodic a-histogram
         encounter:   meta.encounter ?? null,
         kernelActive: !!meta.kernel,
         fault:       meta.fault ?? null,
