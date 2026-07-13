@@ -126,6 +126,34 @@ export function cloudinessFromPixel(r, g, b, a, kind, out) {
     return out;
 }
 
+// ── IR brightness temperature → cloud-top height (Phase 2.3) ─────────────────
+// IR display palettes map luminance linearly cold=bright; the decode's
+// (lum − lumClear)/(lumOvercast − lumClear) normalisation is therefore also a
+// "top coldness" axis. These constants anchor that axis in Kelvin so the
+// client can convert coldness → brightness temperature → height via a
+// standard-lapse assumption against the 2 m surface temperature it already
+// holds in the weather grid. Keep in lockstep with the 26.85 − b·105 ramp in
+// CLOUD_FRAG (js/earth-skin.js).
+export const IR_BT_WARM_K = 300;   // coldness 0 → warm surface / low top
+export const IR_BT_COLD_K = 195;   // coldness 1 → overshooting deep convection
+
+/**
+ * Estimated cloud-top height (km) from a mosaic B-channel coldness sample
+ * and the co-located 2 m temperature. Returns null when there is no IR
+ * estimate (coldness ≤ 0 — the accumulator writes 0 for "no IR saw this
+ * pixel", and a genuinely ~300 K top is below any interesting height
+ * anyway). Clamped to [0, 18] km.
+ *
+ * @param {number} coldness01     mosaic B channel, 0..1
+ * @param {number} surfaceTempC   2 m temperature at the same point, °C
+ * @param {number} [lapseKPerKm]  assumed environmental lapse rate
+ */
+export function cloudTopHeightKm(coldness01, surfaceTempC, lapseKPerKm = 6.5) {
+    if (!(coldness01 > 0) || !Number.isFinite(surfaceTempC)) return null;
+    const btC = (IR_BT_WARM_K - coldness01 * (IR_BT_WARM_K - IR_BT_COLD_K)) - 273.15;
+    return Math.max(0, Math.min(18, (surfaceTempC - btC) / lapseKPerKm));
+}
+
 // ── Geostationary disc feather ───────────────────────────────────────────────
 // View angle θ from the sub-satellite point: cosθ = cos(lat)·cos(Δlon).
 // Full weight inside 60°, eased to zero by 76° — past ~70° the pixels are
@@ -168,6 +196,12 @@ export class MosaicAccumulator {
         this._pw  = new Float32Array(n);   // primary Σw
         this._fcw = new Float32Array(n);   // fill Σ(cloudiness·w)
         this._fw  = new Float32Array(n);   // fill Σw
+        // IR top-coldness accumulation (Phase 2.3) — only 'ir' products
+        // contribute, tier-agnostic (a weighted mean across every IR disc
+        // that saw the pixel). Feeds the output's B channel as the
+        // cloud-top-height proxy; see IR_BT_WARM_K / cloudTopHeightKm.
+        this._bcw = new Float32Array(n);   // Σ(coldness·w), IR only
+        this._bw  = new Float32Array(n);   // Σw, IR only
         // Row/col geometry caches shared by every addRegionRows call.
         this._cosLat = new Float32Array(height);
         for (let j = 0; j < height; j++) {
@@ -196,6 +230,11 @@ export class MosaicAccumulator {
         const { width } = this;
         const cw = tier === 'primary' ? this._pcw : this._fcw;
         const w  = tier === 'primary' ? this._pw  : this._fw;
+        // IR luminance IS a brightness-temperature axis, so the decoded
+        // cloudiness doubles as the top-coldness sample (see the CTH block
+        // in the constructor). Other product families carry no BT signal.
+        const isIR = kind === 'ir';
+        const bcw = this._bcw, bw = this._bw;
         const px = [0, 0];
         for (let j = rowStart; j < rowEnd; j++) {
             const cosLat = this._cosLat[j];
@@ -213,6 +252,10 @@ export class MosaicAccumulator {
                 }
                 cw[idx] += px[0] * weight;
                 w[idx]  += weight;
+                if (isIR) {
+                    bcw[idx] += px[0] * weight;
+                    bw[idx]  += weight;
+                }
             }
         }
     }
@@ -224,9 +267,14 @@ export class MosaicAccumulator {
 
     /**
      * Resolve the two tiers into an RGBA texture buffer:
-     *   R = G = B = cloudiness·255  (LINEAR — the texture must be sampled
-     *                                with no sRGB decode; see makeTexture)
-     *   A         = observation confidence·255 (the shader's satData mask)
+     *   R = G = cloudiness·255  (LINEAR — the texture must be sampled
+     *                            with no sRGB decode; see makeTexture)
+     *   B = IR top-coldness·255 (cloud-top-height proxy — 0 where no IR
+     *                            product saw the pixel OR the top is warm;
+     *                            decode via cloudTopHeightKm / the ramp in
+     *                            CLOUD_FRAG. Shaders reading cloudiness must
+     *                            keep using .r)
+     *   A = observation confidence·255 (the shader's satData mask)
      *
      * Returns { data, stats } where stats feeds the telemetry event:
      *   coverage      fraction of pixels with confidence > 0.15
@@ -260,7 +308,10 @@ export class MosaicAccumulator {
                 conf = Math.min(1, pw + fw * (1 - t));
             }
             const v = Math.round(c * 255);
-            data[o] = v; data[o + 1] = v; data[o + 2] = v;
+            const bwSum = this._bw[idx];
+            const bt = bwSum > 0 ? this._bcw[idx] / bwSum : 0;
+            data[o] = v; data[o + 1] = v;
+            data[o + 2] = Math.round(bt * 255);
             data[o + 3] = Math.round(conf * 255);
 
             if (conf > 0.15) covered++;

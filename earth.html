@@ -3562,9 +3562,25 @@ initScaleNav('earth');
 //  CONSTANTS
 // ═══════════════════════════════════════════════════════════════
 const R_EARTH  = 1.0;
-const R_CLOUDS = 1.009;   // cloud shell just above surface
-const R_AURORA = 1.013;   // aurora oval shell (above clouds, below stratosphere)
-const R_STRAT  = 1.015;   // stratosphere haze (between clouds and outer atm)
+// ── Shell stack (Phase-2.5 radius audit) ──────────────────────────────────
+// Every translucent shell above the surface, bottom → top. Kept in ONE
+// place because z-order between depthWrite:false shells is renderOrder,
+// but radius still drives parallax, ray hits, and the camera floor:
+//   1.0015  lat/lon grid          1.002   SST overlay
+//   1.0024  ocean currents        1.0028–1.0050 derived weather overlays
+//   1.003   surface wind trails   1.006   LOW cloud deck
+//   1.007   wind arrows           1.008   850 hPa wind trails
+//   1.009   composite cloud shell (floor tier + research mode)
+//   1.011   MID cloud deck        1.013   500 hPa wind trails
+//   1.016   HIGH cloud deck       1.018   250 hPa jet trails
+//   1.019   aurora oval           1.022   stratosphere haze
+//   1.026   atmosphere rim        1.06    temp-volume slab top
+const R_CLOUDS     = 1.009;   // composite cloud shell (single-pass tiers)
+const R_CLOUD_LOW  = 1.006;   // split low deck (~2 km, exaggerated)
+const R_CLOUD_MID  = 1.011;   // split mid deck (~6 km)
+const R_CLOUD_HIGH = 1.016;   // split high deck / cirrus (~10 km)
+const R_AURORA = 1.019;   // aurora oval shell (above the high deck)
+const R_STRAT  = 1.022;   // stratosphere haze (between aurora and outer atm)
 const R_ATM    = 1.026;   // atmosphere rim sphere
 const R_TEMPVOL = 1.06;   // temperature volume slab top — vertically
                           // exaggerated troposphere (~11 km real ≈ 0.0017 R);
@@ -3715,6 +3731,14 @@ let   _cloudQIdx     = 0;
 let   _cloudQForced  = false;   // URL/console override pins the tier
 function _setCloudQuality(q) {
     cloudU.u_quality.value = q;
+    // Cloud shadows on the ground ride the same tier gate as the cloud
+    // relief/self-shadow pass — they're embellishment, and the tier where
+    // pixels are already being sacrificed is not where to spend 6 taps.
+    earthU.u_cloud_shadow.value = q > 0.83 ? 1 : 0;
+    // Split cloud shells collapse to the composite below the full tier
+    // (hoisted fn, guarded against the init-time call before the meshes
+    // exist — see its definition next to the shell construction).
+    _updateCloudShellMode();
 }
 function _governResolution(frameMs) {
     // Ignore intervals that don't reflect GPU load: a backgrounded tab pauses
@@ -3901,6 +3925,70 @@ const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
 cloudMesh.renderOrder = 3;   // after atmosphere glow, so clouds alpha-blend on top
 scene.add(cloudMesh);
 
+// ── Split cloud shells (Phase 2.1/2.2) ─────────────────────────────────
+// Three single-deck shells at exaggerated deck altitudes — real limb
+// parallax, per-altitude drift and terminator response — compiled from the
+// SAME CLOUD_FRAG via SHELL_SPLIT/SHELL_LAYER defines, so each shell runs
+// one deck's noise stack (≈⅓ of the composite ALU each). They SHARE the
+// composite's uniform entry objects (Object.assign copies references), so
+// every existing `cloudU.u_x.value = …` update reaches all four materials;
+// only u_shell_lift (altitude terminator bias) is per-shell.
+//
+// Visibility contract (_updateCloudShellMode): split shells render only at
+// the full-quality governor tier with research mode OFF; every other state
+// uses the classic composite shell — the floor tier renders exactly as it
+// always has, and research mode never implies vertical structure the
+// measured fields didn't supply (shell assignment comes only from the
+// Open-Meteo low/mid/high channels even here — but collapsing to one shell
+// keeps the hatch + measured-only contract visually unambiguous).
+// `var` on purpose: _setCloudQuality runs during module init (URL override)
+// before this section evaluates — var hoists as undefined, so the guard in
+// _updateCloudShellMode stays TDZ-safe.
+var cloudShellMeshes = null;
+{
+    const mkShell = (radius, layer, lift, order) => {
+        const geo = new THREE.IcosahedronGeometry(radius, ICO_LEVEL);
+        const mat = new THREE.ShaderMaterial({
+            vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
+            uniforms: Object.assign({}, cloudU, { u_shell_lift: { value: lift } }),
+            transparent: true, depthWrite: false,
+            defines: { SHELL_SPLIT: 1, SHELL_LAYER: layer },
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.renderOrder = order;
+        mesh.visible = false;
+        scene.add(mesh);
+        return mesh;
+    };
+    cloudShellMeshes = [
+        mkShell(R_CLOUD_LOW,  0, -0.04, 3.0),   // low decks darken first…
+        mkShell(R_CLOUD_MID,  1,  0.04, 3.1),
+        mkShell(R_CLOUD_HIGH, 2,  0.14, 3.2),   // …cirrus keeps the alpenglow
+    ];
+}
+
+// Pick composite vs split per (clouds toggle × research mode × governor
+// tier). Called from the lyr-clouds toggle, applyResearchMode, and
+// _setCloudQuality — all post-init callers; the guard covers the one
+// init-time call _setCloudQuality can make before the meshes exist.
+function _updateCloudShellMode() {
+    if (!cloudShellMeshes) return;
+    const cloudsOn  = document.getElementById('lyr-clouds')?.checked ?? true;
+    const research  = cloudU.u_research_mode.value > 0.5;
+    const split     = cloudsOn && !research && cloudU.u_quality.value > 0.83;
+    cloudMesh.visible = cloudsOn && !split;
+    for (const m of cloudShellMeshes) m.visible = split;
+}
+// Initial pick — re-applying the current quality also arms the ground-
+// shadow gate (earthU.u_cloud_shadow), which defaults to 0 in the factory.
+_setCloudQuality(cloudU.u_quality.value);
+
+// Debug/console probe (same family as window.setCloudQuality): which cloud
+// render path is live right now. Used by tests/cloud-shells-smoke.spec.js.
+window.__evCloudMode = () =>
+    cloudMesh.visible ? 'composite'
+    : (cloudShellMeshes?.some(m => m.visible) ? 'split' : 'off');
+
 // ── Aurora oval overlay ────────────────────────────────────────────────
 // A thin icosphere sitting above the cloud shell with a shader that paints
 // an undulating band near the auroral oval boundary. Shares SUN_EQ so
@@ -4064,6 +4152,9 @@ earthU.u_weather.value.flipY = true;
 earthU.u_weather.value.needsUpdate = true;
 // Share the same DataTexture with cloud shader for pressure-modulated clouds
 cloudU.u_weather.value = earthU.u_weather.value;
+// …and the cloud-layer texture back to the surface shader, which offsets it
+// along the sun direction to cast ground shadows (Phase 2.4). Assigned after
+// the u_cloud_layers DataTexture below is created.
 
 // Cloud-layer DataTexture (R=cl_low, G=cl_mid, B=cl_high, A=precip)
 // Populated by WeatherFeed on each weather-update event.
@@ -4080,6 +4171,10 @@ cloudU.u_cloud_layers.value.wrapT     = THREE.ClampToEdgeWrapping;
 // shader's "north" clamped to buffer row 0 (which was Antarctic data).
 cloudU.u_cloud_layers.value.flipY = true;
 cloudU.u_cloud_layers.value.needsUpdate = true;
+// Ground-shadow cross-feed (Phase 2.4): the surface shader samples the same
+// cloud texture, offset toward the sun. Shared reference — every rewrite in
+// updateWeatherTextures reaches both shaders.
+earthU.u_cloud_layers.value = cloudU.u_cloud_layers.value;
 
 // Convergence / uplift DataTexture (R=signed convergence [-1,1], A=|magnitude|).
 // Not consumed by the surface/cloud shaders — only the convergence overlay
@@ -4865,8 +4960,8 @@ window.addEventListener('swpc-update', e => {
 // ═══════════════════════════════════════════════════════════════
 //  LAYER TOGGLES
 // ═══════════════════════════════════════════════════════════════
-document.getElementById('lyr-clouds').addEventListener('change', e => {
-    cloudMesh.visible = e.target.checked;
+document.getElementById('lyr-clouds').addEventListener('change', () => {
+    _updateCloudShellMode();   // routes to composite OR split shells
 });
 // Research mode: disable procedural fill, show measured cloud cover only
 // with hatched no-data regions. Persists across reloads via URL param so
@@ -4875,6 +4970,10 @@ document.getElementById('lyr-clouds').addEventListener('change', e => {
     const researchToggle = document.getElementById('lyr-research-mode');
     function applyResearchMode(on) {
         cloudU.u_research_mode.value = on ? 1.0 : 0.0;
+        // Research mode collapses to the single composite shell (2.6): the
+        // three-shell render is a presentation tier, and measured-only mode
+        // must stay visually unambiguous about what was observed.
+        _updateCloudShellMode();
         document.body.classList.toggle('research-mode', on);
         // The provenance panel highlights itself in research mode so the
         // user can see at a glance which feed they're looking at.
@@ -5479,7 +5578,10 @@ class WindParticles {
             blending: THREE.AdditiveBlending, depthWrite: false,
         });
         this.mesh = new THREE.LineSegments(geo, mat);
-        this.mesh.renderOrder = 2;
+        // Surface default (2) predates the split cloud shells; pressure-
+        // level instances pass a renderOrder above their deck so trails
+        // aren't dimmed by cloud alpha drawn later.
+        this.mesh.renderOrder = opts.renderOrder ?? 2;
         parent.add(this.mesh);
     }
 
@@ -5997,7 +6099,7 @@ class WindArrows {
             blending: THREE.AdditiveBlending, depthWrite: false,
         });
         this.mesh = new THREE.LineSegments(geo, mat);
-        this.mesh.renderOrder = 3;     // above trails so heads aren't masked
+        this.mesh.renderOrder = 3.35;  // above trails + split cloud shells (3.0–3.2)
         this.mesh.visible = false;
         parent.add(this.mesh);
     }
@@ -6043,7 +6145,7 @@ class WindArrows {
         this._lastBuildKey = key;
 
         const pos = this._pos, col = this._col;
-        const R   = R_EARTH * 1.006;                     // hover slightly above clouds
+        const R   = R_EARTH * 1.007;                     // just above the split low deck (1.006)
         const tmp = { u: 0, v: 0, s: 0 };
         const rgb = [0, 0, 0];
         let slot = 0;
@@ -6488,7 +6590,7 @@ const WIND_LEVEL_DEFS = {
     w850: {
         checkbox: 'lyr-wind-850', pip: 'wind-850', label: '850 hPa wind',
         radius: R_EARTH * 1.008, n: 4000, trailLen: 24, baseSegs: 14,
-        maxWind: 60, farFrac: 0.6, uKey: 'u850', vKey: 'v850',
+        maxWind: 60, farFrac: 0.6, renderOrder: 3.05, uKey: 'u850', vKey: 'v850',
         // Sage → mint → amber: reads "warm boundary-layer flow" against the
         // surface layer's blue→white→magenta.
         ramp: (s, out) => {
@@ -6509,7 +6611,7 @@ const WIND_LEVEL_DEFS = {
     w500: {
         checkbox: 'lyr-wind-500', pip: 'wind-500', label: '500 hPa wind',
         radius: R_EARTH * 1.013, n: 4000, trailLen: 24, baseSegs: 14,
-        maxWind: 80, farFrac: 0.6, uKey: 'u500', vKey: 'v500',
+        maxWind: 80, farFrac: 0.6, renderOrder: 3.15, uKey: 'u500', vKey: 'v500',
         // Violet → lavender → cyan: the cool mid-troposphere identity.
         ramp: (s, out) => {
             const sc = Math.max(0, Math.min(1, s));
@@ -6529,7 +6631,7 @@ const WIND_LEVEL_DEFS = {
     jet: {
         checkbox: 'lyr-jet', pip: 'jet', label: '250 hPa jet',
         radius: R_EARTH * 1.018, n: 3500, trailLen: 34, baseSegs: 22,
-        maxWind: 100, farFrac: 0.7, uKey: 'u250', vKey: 'v250',
+        maxWind: 100, farFrac: 0.7, renderOrder: 3.3, uKey: 'u250', vKey: 'v250',
         // Crimson → gold → white-hot, longest trails + fastest ramp: the
         // jet should read as the most energetic thing on the globe.
         ramp: (s, out) => {
@@ -6575,6 +6677,7 @@ function _ensureWindLevel(key) {
     st.inst = new WindParticles(earthMesh, d.n, {
         radius: d.radius, trailLen: d.trailLen, baseSegs: d.baseSegs,
         maxWindMs: d.maxWind, speedColor: d.ramp, farFrac: d.farFrac,
+        renderOrder: d.renderOrder,
     });
     st.inst.setVisible(false);
     st.inst.setUpliftSampler(_windUpliftSample);
@@ -8466,6 +8569,10 @@ window.addEventListener('satellite-update', e => {
     if (tex) {
         cloudU.u_satellite.value    = tex;
         cloudU.u_satellite_on.value = 1.0;
+        // Surface shader shares the mosaic for shadow confidence feathering
+        // and the mosaic-reinforced shadow cover (Phase 2.4).
+        earthU.u_satellite.value    = tex;
+        earthU.u_satellite_on.value = 1.0;
         console.info(`[Satellite] cloud texture updated — ${source}`);
     }
     // Update data recency tracker
@@ -11037,6 +11144,9 @@ function animate() {
         earthMesh.rotation.y = _pageLoadEarthRot;
     }
     cloudMesh.rotation.y = earthMesh.rotation.y;   // clouds locked to ground
+    if (cloudShellMeshes) {                        // split decks ride the same lock
+        for (const m of cloudShellMeshes) m.rotation.y = earthMesh.rotation.y;
+    }
 
     // ── Sun direction (still tied to simTimeMs) ─────────────────────────
     // Computed from simTimeMs's JD so the slider scrubs the day-night
@@ -11050,6 +11160,11 @@ function animate() {
     auroraU.u_sun_dir.value.copy(_sunDirScratch);
     atmU.u_sun_dir.value.copy(_sunDirScratch);
     stratU.u_sun_dir.value.copy(_sunDirScratch);
+    // Object-space sun for the ground cloud-shadow offset (EARTH_FRAG
+    // computes the offset in the frame normalToUV lives in). Same inverse
+    // GMST spin the temp volume uses; one axis-angle per frame.
+    earthU.u_sun_dir_obj.value.copy(_sunDirScratch)
+        .applyAxisAngle(_Y_AXIS, -earthMesh.rotation.y);
 
     // Temperature volume marches in earthMesh object space — feed it the
     // camera + sun transformed by the inverse of the globe's GMST spin.
@@ -12250,7 +12365,8 @@ document.addEventListener('visibilitychange', () => {
 // visibility, so the overlay can flag checkbox↔mesh drift the second
 // it appears.  New layers should be added here as the scene grows.
 const _layerRegistry = {
-    'lyr-clouds':         () => cloudMesh.visible,
+    'lyr-clouds':         () => cloudMesh.visible
+                             || (cloudShellMeshes?.some(m => m.visible) ?? false),
     'lyr-atm':            () => atmMat.visible,
     // Aurora is painted by THREE things: the surface glow (u_aurora_on),
     // the oval shell (auroraU.u_enabled), and the magnetosphere engine's
