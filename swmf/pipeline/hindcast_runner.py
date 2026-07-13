@@ -17,6 +17,8 @@ job is to fit it against historical Ap on the events below.
 
 Event registry
 --------------
+  st_patrick_mar_2015 2015-03-16 → 2015-03-19  G4, community benchmark
+  september_2017      2017-09-06 → 2017-09-09  G4, X9.3 + double ICME
   feb_2022_starlink   2022-02-03 → 2022-02-05  G2/G3, 38-of-49 LOC
   may_2024_gannon     2024-05-10 → 2024-05-12  G5, Ap pinned at 400
   oct_2024_x9         2024-10-03 → 2024-10-05  X9.0 flare + CME
@@ -87,6 +89,33 @@ def _utc(y: int, m: int, d: int) -> datetime:
 
 
 EVENTS: dict[str, Event] = {
+    # Hindcast-database events (HINDCAST_BACKLOG.md) use ONE canonical id
+    # everywhere — runner key == swmf fixture dir == dsmc fixture dir — per
+    # HINDCAST_DATABASE_STANDARD.md §4.1. (may_2024_gannon predates that rule
+    # and keeps its reversed fixture-dir spelling; see gen_param.py.)
+    "st_patrick_mar_2015": Event(
+        event_id="st_patrick_mar_2015",
+        label="Mar 2015 St. Patrick's Day storm (G4)",
+        # 72 h standard window: opens 16 h before the 2015-03-17 04:45 UT
+        # SSC, closes 37 h after the ~23 UT SYM-H minimum (−234 nT).
+        # Two-step main phase — see HINDCAST_STPATRICK_2015_RUNBOOK.md.
+        window_start=datetime(2015, 3, 16, 12, tzinfo=timezone.utc),
+        window_end=datetime(2015, 3, 19, 12, tzinfo=timezone.utc),
+        storm_class="G4",
+        notes="Community benchmark — most-modeled storm in the literature.",
+    ),
+    "september_2017": Event(
+        event_id="september_2017",
+        label="Sep 2017 double storm (G4, X9.3 + two ICMEs)",
+        # 72 h window: opens just after the Sep 6 12:02 UT X9.3 flare,
+        # covers both ICME arrivals (Sep 6 ~23:43 UT, Sep 7 ~23 UT) and the
+        # double SYM-H minimum (−146 nT early Sep 8, second dip that
+        # afternoon), closes 36+ h into recovery.
+        window_start=datetime(2017, 9, 6, 12, tzinfo=timezone.utc),
+        window_end=datetime(2017, 9, 9, 12, tzinfo=timezone.utc),
+        storm_class="G4",
+        notes="HF blackouts during Hurricane Irma response. B2G narrative.",
+    ),
     "feb_2022_starlink": Event(
         event_id="feb_2022_starlink",
         label="Feb 2022 Starlink-4 LOC (G2/G3)",
