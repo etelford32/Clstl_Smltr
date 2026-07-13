@@ -18,8 +18,16 @@
  * Drag & touch: the card header is a drag handle via the same
  * makePanelDraggable used by every other earth.html panel (pointer events →
  * works for mouse + touch, position persisted per viewport, dblclick
- * resets). The header is a STABLE element — only the card body re-renders —
- * so drag wiring survives data refreshes.
+ * resets position AND size). The header is a STABLE element — only the card
+ * body re-renders — so drag wiring survives data refreshes. The collapsed
+ * pill is ALSO draggable (own pointer wiring, same storage key), and the
+ * card is resizable via native CSS resize + makePanelResizable persistence.
+ *
+ * Location: the card hosts THE location input for the page (the loc-panel's
+ * search row is hidden while the card is active — body.ev-verdict-on). It
+ * geocodes through deps.geocode and persists via deps.saveLocation, so the
+ * resulting 'user-location-changed' event fans out to the loc panel, globe
+ * marker, alert engine, and this card exactly like the old input did.
  *
  * Degradation: any dep in error state renders its chip/row as '--' with
  * muted color; one dead feed never blanks the card (see verdict-engine's
@@ -27,7 +35,7 @@
  */
 
 import { computeVerdict, sunAltitudeDeg, issMagEstimate, fmtClock } from './verdict-engine.js';
-import { makePanelDraggable, resetPanelPosition } from './draggable-panel.js';
+import { makePanelDraggable, makePanelResizable, resetPanelPosition, resetPanelSize } from './draggable-panel.js';
 import { compass16 } from './sun-altitude.js';
 import { telemetry } from './telemetry.js';
 
@@ -47,9 +55,12 @@ const DAY_MS = 86_400_000;
 const CSS = `
 /* z-index 70: above the other chrome panels (loc 51, storm watch 60) —
    this is the default dashboard — and below modals/toasts (120+). Panels
-   stack-and-drag by design; anything underneath drags out from under. */
-.ev-verdict-card{position:absolute;top:110px;left:10px;z-index:70;width:min(400px,calc(100vw - 20px));
-  max-height:calc(100vh - 170px);display:flex;flex-direction:column;
+   stack-and-drag by design; anything underneath drags out from under.
+   Sits at top:10 left:10 because it REPLACES the legacy #hud block there
+   (earth.html hides #hud via body.ev-verdict-on when the card is active). */
+.ev-verdict-card{position:absolute;top:10px;left:10px;z-index:70;width:min(400px,calc(100vw - 20px));
+  max-height:calc(100vh - 60px);display:flex;flex-direction:column;
+  resize:both;min-width:320px;min-height:220px;max-width:min(620px,calc(100vw - 20px));
   background:linear-gradient(180deg,rgba(7,27,48,.82),rgba(4,16,30,.95));
   border:1px solid rgba(77,219,255,.22);border-radius:18px;overflow:hidden;
   backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
@@ -57,44 +68,68 @@ const CSS = `
   box-shadow:0 10px 40px rgba(0,0,0,.45)}
 .ev-verdict-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;z-index:1;
   background:linear-gradient(100deg,#4ddbff 0%,#1f8fff 34%,#bfe3ff 52%,#2eff9e 80%,#a8e63c 100%);opacity:.85}
-.ev-verdict-scroll{overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+/* resize-grip cue over the native handle (mirrors #wx-panel::after) */
+.ev-verdict-card::after{content:'';position:absolute;right:3px;bottom:3px;width:10px;height:10px;
+  border-right:2px solid rgba(77,219,255,.4);border-bottom:2px solid rgba(77,219,255,.4);
+  border-radius:2px;pointer-events:none;opacity:.7}
+.ev-verdict-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;scrollbar-width:thin}
 .ev-verdict-card button{font-family:inherit;cursor:pointer;touch-action:manipulation}
 
 /* head = drag handle (stable element; body re-renders under it) */
-.ev-verdict-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
-  padding:14px 14px 0 20px;cursor:grab;user-select:none;-webkit-user-select:none}
-.ev-verdict-loc{font-family:var(--font-display,'Orbitron',system-ui,sans-serif);font-size:.78rem;font-weight:700;
-  letter-spacing:.1em;text-transform:uppercase;color:#f0f6ff;line-height:1.3}
-.ev-verdict-loc small{display:block;font-family:var(--font-mono,'JetBrains Mono',ui-monospace,monospace);
-  font-weight:400;font-size:.6rem;letter-spacing:.06em;color:#5f7597;text-transform:none;margin-top:3px}
-.ev-verdict-headright{display:flex;align-items:flex-start;gap:8px;flex-shrink:0}
-.ev-verdict-time{font-family:var(--font-mono,'JetBrains Mono',ui-monospace,monospace);
-  font-size:.62rem;color:#5f7597;text-align:right;line-height:1.5;margin-top:2px}
+.ev-verdict-head{display:flex;justify-content:space-between;align-items:center;gap:10px;
+  padding:10px 12px 0 16px;cursor:grab;user-select:none;-webkit-user-select:none}
+.ev-verdict-brand{font-family:var(--font-display,'Orbitron',system-ui,sans-serif);font-weight:900;
+  font-size:.95rem;letter-spacing:.08em;text-transform:uppercase;line-height:1.2;
+  background:linear-gradient(100deg,#4ddbff 0%,#1f8fff 34%,#bfe3ff 52%,#2eff9e 80%,#a8e63c 100%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+  filter:drop-shadow(0 0 10px rgba(31,143,255,.45))}
+.ev-verdict-headright{display:flex;align-items:center;gap:8px;flex-shrink:0}
 .ev-verdict-min{min-width:34px;min-height:34px;border-radius:9px;border:1px solid rgba(77,219,255,.25);
   background:rgba(1,4,9,.5);color:#8ba3c7;font-size:.85rem;line-height:1}
 .ev-verdict-min:hover{border-color:rgba(77,219,255,.6);color:#f0f6ff}
 
+/* the ONE location input (replaces the loc-panel's search when card is on) */
+.ev-verdict-locrow{display:flex;align-items:center;gap:8px;padding:8px 16px 0}
+.ev-verdict-locpin{flex-shrink:0;font-size:.9rem}
+.ev-verdict-locinput{flex:1;min-width:0;min-height:38px;padding:8px 10px;border-radius:9px;
+  border:1px solid rgba(77,219,255,.25);background:rgba(1,4,9,.55);color:#f0f6ff;
+  font-family:inherit;font-size:.85rem}
+.ev-verdict-locinput::placeholder{color:#5f7597}
+.ev-verdict-locinput:focus{outline:none;border-color:rgba(77,219,255,.6);
+  box-shadow:0 0 0 3px rgba(31,143,255,.18)}
+.ev-verdict-locgo{min-width:38px;min-height:38px;border-radius:9px;border:1px solid rgba(77,219,255,.35);
+  background:linear-gradient(135deg,rgba(31,143,255,.25),rgba(46,255,158,.2));color:#8ff0ff;font-size:.9rem}
+.ev-verdict-locgo:disabled{opacity:.6;cursor:wait}
+.ev-verdict-locerr{padding:4px 16px 0;font-size:.7rem;color:#ff8095}
+
+/* compact date · time · current-conditions strip (above the fold) */
+.ev-verdict-strip{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+  padding:7px 16px 0;font-family:var(--font-mono,'JetBrains Mono',ui-monospace,monospace);
+  font-size:.64rem;color:#8ba3c7;white-space:nowrap;overflow:hidden}
+.ev-verdict-stripnow{color:#8ff0ff;text-shadow:0 0 8px rgba(143,240,255,.35);flex-shrink:0}
+
 /* verdict */
-.ev-verdict-verdict{padding:14px 20px 4px}
+.ev-verdict-verdict{padding:10px 16px 2px}
 .ev-verdict-vrow{display:flex;align-items:center;gap:14px}
-.ev-verdict-lamp{width:50px;height:50px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;
-  justify-content:center;font-size:1.45rem;border:1px solid rgba(46,255,158,.5);background:rgba(46,255,158,.09);
+.ev-verdict-lamp{width:42px;height:42px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;
+  justify-content:center;font-size:1.2rem;border:1px solid rgba(46,255,158,.5);background:rgba(46,255,158,.09);
   box-shadow:0 0 14px rgba(46,255,158,.55),0 0 40px rgba(46,255,158,.22)}
 .ev-verdict-lamp.warn{border-color:rgba(255,210,63,.55);background:rgba(255,210,63,.09);
   box-shadow:0 0 14px rgba(255,210,63,.4),0 0 40px rgba(255,210,63,.15)}
 .ev-verdict-lamp.danger{border-color:rgba(255,48,80,.55);background:rgba(255,48,80,.1);
   box-shadow:0 0 14px rgba(255,48,80,.45),0 0 40px rgba(255,48,80,.18)}
-.ev-verdict-word{font-family:var(--font-display,'Orbitron',sans-serif);font-weight:800;font-size:1.22rem;
+.ev-verdict-word{font-family:var(--font-display,'Orbitron',sans-serif);font-weight:800;font-size:1.08rem;
   letter-spacing:.05em;text-transform:uppercase;line-height:1.1;color:#2eff9e;
   text-shadow:0 0 14px rgba(46,255,158,.55)}
 .ev-verdict-word.warn{color:#ffd23f;text-shadow:0 0 14px rgba(255,210,63,.5)}
 .ev-verdict-word.danger{color:#ff3050;text-shadow:0 0 14px rgba(255,48,80,.5)}
-.ev-verdict-sub{font-size:.78rem;color:#8ba3c7;margin-top:2px}
-.ev-verdict-sentence{margin:12px 0 4px;font-size:.98rem;line-height:1.55;color:#f0f6ff}
+.ev-verdict-sub{font-size:.74rem;color:#8ba3c7;margin-top:2px}
+.ev-verdict-sentence{margin:8px 0 2px;font-size:.88rem;line-height:1.5;color:#f0f6ff}
 .ev-verdict-sentence strong{color:#8ff0ff;font-weight:600;text-shadow:0 0 8px rgba(143,240,255,.4)}
 
 /* factor chips */
-.ev-verdict-factors{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;padding:12px 20px 2px}
+.ev-verdict-factors{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;padding:10px 16px 2px}
 .ev-verdict-factor{background:rgba(1,4,9,.55);border:1px solid rgba(77,219,255,.13);border-radius:10px;
   padding:8px 3px;text-align:center;color:inherit;min-height:64px}
 .ev-verdict-factor.help{border-color:rgba(46,255,158,.35)}
@@ -110,7 +145,7 @@ const CSS = `
 .ev-verdict-fcat{font-family:var(--font-mono,'JetBrains Mono',monospace);font-size:.5rem;color:#5f7597;margin-top:1px}
 
 /* temp graph */
-.ev-verdict-tgraph{padding:12px 20px 0}
+.ev-verdict-tgraph{padding:10px 16px 0}
 .ev-verdict-thead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
 .ev-verdict-mini{font-family:var(--font-display,'Orbitron',sans-serif);font-size:.56rem;letter-spacing:.18em;
   text-transform:uppercase;color:#4ddbff;text-shadow:0 0 12px rgba(31,143,255,.5)}
@@ -120,10 +155,10 @@ const CSS = `
 .ev-verdict-tgaxis{font-family:var(--font-mono,'JetBrains Mono',monospace);font-size:8.5px;fill:#3d4f6b}
 .ev-verdict-tglab{font-family:var(--font-mono,'JetBrains Mono',monospace);font-size:9px;font-weight:600;fill:#c2d4ee}
 
-.ev-verdict-divider{margin:14px 20px 0;border:none;border-top:1px solid rgba(77,219,255,.13)}
+.ev-verdict-divider{margin:12px 16px 0;border:none;border-top:1px solid rgba(77,219,255,.13)}
 
 /* week */
-.ev-verdict-week{padding:12px 20px 0}
+.ev-verdict-week{padding:10px 16px 0}
 .ev-verdict-wgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:8px}
 .ev-verdict-day{background:rgba(1,4,9,.5);border:1px solid rgba(77,219,255,.11);border-radius:11px;
   padding:9px 2px 8px;text-align:center;transition:border-color .2s,transform .15s;color:inherit}
@@ -144,7 +179,7 @@ const CSS = `
 .ev-verdict-best strong{color:#2eff9e}
 
 /* moon strip */
-.ev-verdict-moonseq{display:flex;justify-content:space-between;align-items:center;padding:9px 26px 0;opacity:.85}
+.ev-verdict-moonseq{display:flex;justify-content:space-between;align-items:center;padding:8px 22px 0;opacity:.85}
 .ev-verdict-moon{display:flex;flex-direction:column;align-items:center;gap:2px}
 .ev-verdict-mglyph{font-size:.72rem;line-height:1;filter:grayscale(.2) drop-shadow(0 0 3px rgba(143,240,255,.3))}
 .ev-verdict-mday{font-family:var(--font-mono,'JetBrains Mono',monospace);font-size:.44rem;color:#3d4f6b;letter-spacing:.05em}
@@ -153,7 +188,7 @@ const CSS = `
 .ev-verdict-moon.mark .ev-verdict-mday{color:#8ba3c7}
 
 /* tonight's sky */
-.ev-verdict-sky{padding:12px 20px 2px}
+.ev-verdict-sky{padding:10px 16px 2px}
 .ev-verdict-skyrows{display:flex;flex-direction:column;gap:9px;margin-top:8px}
 .ev-verdict-skyrow{display:flex;align-items:center;gap:12px;background:rgba(1,4,9,.45);
   border:1px solid rgba(77,219,255,.11);border-radius:12px;padding:10px 14px}
@@ -166,7 +201,7 @@ const CSS = `
 .ev-verdict-skywhen{font-family:var(--font-mono,'JetBrains Mono',monospace);font-size:.66rem;color:#8ff0ff;white-space:nowrap}
 
 /* actions + provenance */
-.ev-verdict-actions{display:flex;gap:10px;padding:16px 20px 12px}
+.ev-verdict-actions{display:flex;gap:10px;padding:12px 16px 10px}
 .ev-verdict-cta{flex:1;min-height:44px;padding:12px 16px;border:none;border-radius:10px;
   background:linear-gradient(135deg,#1f8fff,#2eff9e);color:#01131a;
   font-family:var(--font-display,'Orbitron',sans-serif);font-weight:800;font-size:.7rem;letter-spacing:.12em;
@@ -175,7 +210,7 @@ const CSS = `
 .ev-verdict-explore{min-height:44px;padding:12px 16px;border-radius:10px;background:rgba(255,255,255,.05);
   border:1px solid rgba(255,255,255,.18);color:#c2d4ee;font-size:.76rem;font-weight:600;transition:background .2s}
 .ev-verdict-explore:hover{background:rgba(255,255,255,.11)}
-.ev-verdict-prov{padding:0 20px 15px;font-family:var(--font-mono,'JetBrains Mono',monospace);font-size:.56rem;
+.ev-verdict-prov{padding:0 16px 12px;font-family:var(--font-mono,'JetBrains Mono',monospace);font-size:.56rem;
   color:#3d4f6b;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ev-verdict-live{width:6px;height:6px;border-radius:50%;background:#2eff9e;box-shadow:0 0 6px #2eff9e;
   animation:ev-verdict-pulse 1.8s ease-in-out infinite;flex-shrink:0}
@@ -183,7 +218,7 @@ const CSS = `
 @keyframes ev-verdict-pulse{0%,100%{opacity:1}50%{opacity:.3}}
 
 /* empty-location prompt */
-.ev-verdict-setloc{margin:12px 20px 4px;padding:12px 14px;border-radius:12px;border:1px dashed rgba(77,219,255,.35);
+.ev-verdict-setloc{margin:10px 16px 2px;padding:12px 14px;border-radius:12px;border:1px dashed rgba(77,219,255,.35);
   background:rgba(31,143,255,.06);font-size:.8rem;line-height:1.5;color:#c2d4ee}
 .ev-verdict-setloc button{margin-top:8px;min-height:40px;padding:8px 14px;border-radius:9px;border:1px solid rgba(77,219,255,.4);
   background:rgba(1,4,9,.5);color:#4ddbff;font-size:.74rem;font-weight:600}
@@ -196,14 +231,20 @@ const CSS = `
   text-transform:uppercase;font-size:.72rem;
   background:linear-gradient(100deg,#4ddbff 0%,#1f8fff 34%,#bfe3ff 52%,#2eff9e 80%,#a8e63c 100%);
   -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-.ev-verdict-card.ev-collapsed{background:none;border:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;overflow:visible}
-.ev-verdict-card.ev-collapsed::before{display:none}
+.ev-verdict-card.ev-collapsed{background:none;border:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;overflow:visible;
+  resize:none;width:auto!important;height:auto!important;min-width:0;min-height:0}
+.ev-verdict-card.ev-collapsed::before,
+.ev-verdict-card.ev-collapsed::after{display:none}
 .ev-verdict-card.ev-collapsed .ev-verdict-head,
+.ev-verdict-card.ev-collapsed .ev-verdict-locrow,
+.ev-verdict-card.ev-collapsed .ev-verdict-locerr,
+.ev-verdict-card.ev-collapsed .ev-verdict-strip,
 .ev-verdict-card.ev-collapsed .ev-verdict-scroll{display:none}
 .ev-verdict-card.ev-collapsed .ev-verdict-pill{display:inline-flex}
 
 @media(max-width:640px){
-  .ev-verdict-card{top:64px;left:10px;right:10px;width:auto;max-height:calc(100dvh - 120px)}
+  .ev-verdict-card{top:64px;left:10px;right:10px;width:auto;max-height:calc(100dvh - 120px);resize:none;min-width:0}
+  .ev-verdict-card::after{display:none}
   .ev-verdict-factors{grid-template-columns:repeat(3,1fr)}
   .ev-verdict-factor{min-height:70px;padding:10px 4px}
 }
@@ -293,17 +334,27 @@ export class VerdictCard {
         card.setAttribute('aria-label', 'EarthView verdict for your location');
         card.innerHTML = `
             <div class="ev-verdict-head panel-header">
-                <div class="ev-verdict-loc">📍 <span data-ev="loc-name">EarthView</span>
-                    <small data-ev="loc-coords">set a location to personalise</small>
-                </div>
+                <div class="ev-verdict-brand">EarthView</div>
                 <div class="ev-verdict-headright">
-                    <div class="ev-verdict-time" data-ev="time">—</div>
                     <button class="ev-verdict-min panel-btn" data-ev="collapse"
                             title="Collapse card" aria-label="Collapse card">▾</button>
                 </div>
             </div>
+            <div class="ev-verdict-locrow">
+                <span class="ev-verdict-locpin">📍</span>
+                <input class="ev-verdict-locinput" data-ev="loc-input" type="text"
+                       placeholder="City, zip, or address…" maxlength="80"
+                       autocomplete="off" aria-label="Set your location">
+                <button class="ev-verdict-locgo panel-btn" data-ev="loc-go"
+                        title="Set location" aria-label="Set location">↵</button>
+            </div>
+            <div class="ev-verdict-locerr" data-ev="loc-err" hidden></div>
+            <div class="ev-verdict-strip">
+                <span data-ev="strip-when">—</span>
+                <span class="ev-verdict-stripnow" data-ev="strip-now"></span>
+            </div>
             <div class="ev-verdict-scroll" data-ev="body"></div>
-            <button class="ev-verdict-pill" data-ev="pill" title="Open EarthView card">
+            <button class="ev-verdict-pill" data-ev="pill" title="Open EarthView card — drag to move">
                 🌍 <b>EarthView</b> <span data-ev="pill-word">—</span> ▸
             </button>`;
         this._host.appendChild(card);
@@ -312,12 +363,23 @@ export class VerdictCard {
 
         // Drag: same machinery as every other panel (pointer events → touch
         // included; position persisted under earth-panel-pos-ev-verdict-card).
+        // Resize: native CSS resize handle + persisted dimensions.
         makePanelDraggable(card);
+        makePanelResizable(card);
         const head = card.querySelector('.ev-verdict-head');
         head.addEventListener('dblclick', (ev) => {
             if (ev.target.closest('.panel-btn')) return;
             resetPanelPosition(card);
+            resetPanelSize(card);
         });
+
+        // The one location input. Enter or ↵ geocodes + persists via the
+        // page-provided deps; 'user-location-changed' then fans out to the
+        // loc panel, globe marker, air feed, and this card.
+        const locInput = card.querySelector('[data-ev="loc-input"]');
+        locInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') this._submitLocation(); });
+        locInput.addEventListener('focus', () => locInput.select());
+        card.querySelector('[data-ev="loc-go"]').addEventListener('click', () => this._submitLocation());
 
         // Track pointer activity so a data refresh never replaces DOM
         // mid-gesture (would break pointer capture / scrolling).
@@ -330,7 +392,11 @@ export class VerdictCard {
         card.addEventListener('pointercancel', release);
 
         card.querySelector('[data-ev="collapse"]').addEventListener('click', () => this._setCollapsed(true, 'collapse_btn'));
-        card.querySelector('[data-ev="pill"]').addEventListener('click', () => this._setCollapsed(false, 'pill'));
+        card.querySelector('[data-ev="pill"]').addEventListener('click', () => {
+            if (this._pillDragged) return;   // drop the click that ends a drag
+            this._setCollapsed(false, 'pill');
+        });
+        this._wirePillDrag(card.querySelector('[data-ev="pill"]'));
 
         // One delegated listener for everything inside the re-rendered body.
         this._body.addEventListener('click', (e) => this._onBodyClick(e));
@@ -354,6 +420,79 @@ export class VerdictCard {
             this._ensureIssPasses();
             this.refresh(true);
         });
+    }
+
+    /**
+     * Drag support for the COLLAPSED state: the pill is its own drag handle
+     * (makePanelDraggable only wires the .panel-header, which is hidden
+     * while collapsed). Same 4 px click-vs-drag threshold and the same
+     * localStorage key, so pill-drags and header-drags share one persisted
+     * position.
+     */
+    _wirePillDrag(pill) {
+        pill.style.touchAction = 'none';
+        let pid = null, sx = 0, sy = 0, sl = 0, st = 0, moved = 0;
+        pill.addEventListener('pointerdown', (e) => {
+            if (e.button !== undefined && e.button !== 0) return;
+            const r = this._card.getBoundingClientRect();
+            pid = e.pointerId; sx = e.clientX; sy = e.clientY;
+            sl = r.left; st = r.top; moved = 0;
+            try { pill.setPointerCapture(pid); } catch { /* older browsers */ }
+        });
+        pill.addEventListener('pointermove', (e) => {
+            if (pid === null || e.pointerId !== pid) return;
+            const dx = e.clientX - sx, dy = e.clientY - sy;
+            moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+            if (moved <= 4) return;
+            const left = Math.min(Math.max(sl + dx, 0), window.innerWidth - 60);
+            const top = Math.min(Math.max(st + dy, 0), window.innerHeight - 44);
+            const s = this._card.style;
+            s.left = `${left}px`; s.top = `${top}px`; s.right = 'auto'; s.bottom = 'auto';
+            e.preventDefault();
+        });
+        const up = (e) => {
+            if (pid === null || e.pointerId !== pid) return;
+            try { pill.releasePointerCapture(pid); } catch { /* ignore */ }
+            pid = null;
+            if (moved > 4) {
+                this._pillDragged = true;
+                setTimeout(() => { this._pillDragged = false; }, 60);
+                const r = this._card.getBoundingClientRect();
+                try {
+                    localStorage.setItem('earth-panel-pos-ev-verdict-card',
+                        JSON.stringify({ left: r.left, top: r.top }));
+                } catch { /* session-only then */ }
+            }
+        };
+        pill.addEventListener('pointerup', up);
+        pill.addEventListener('pointercancel', up);
+    }
+
+    /** Geocode the in-card input and persist as THE user location. */
+    async _submitLocation() {
+        const input = this._card.querySelector('[data-ev="loc-input"]');
+        const go = this._card.querySelector('[data-ev="loc-go"]');
+        const err = this._card.querySelector('[data-ev="loc-err"]');
+        const q = (input?.value || '').trim();
+        if (!q || typeof this._deps.geocode !== 'function') return;
+        err.hidden = true;
+        go.disabled = true;
+        go.textContent = '…';
+        try {
+            const loc = await this._deps.geocode(q);
+            // Blur BEFORE saving: saveLocation dispatches synchronously and
+            // the re-render skips a focused input to avoid clobbering typing.
+            input.blur();
+            this._deps.saveLocation?.(loc);
+            record('set_location', { source: 'card' });
+        } catch (e) {
+            err.textContent = e?.message || 'Location not found — try a city name or zip.';
+            err.hidden = false;
+            record('set_location_error');
+        } finally {
+            go.disabled = false;
+            go.textContent = '↵';
+        }
     }
 
     destroy() {
@@ -483,12 +622,11 @@ export class VerdictCard {
         const card = this._card;
         const tz = inputs.loc?.tz;
 
-        // Stable header fields.
-        card.querySelector('[data-ev="loc-name"]').textContent =
-            inputs.loc ? inputs.loc.name : 'EarthView';
-        card.querySelector('[data-ev="loc-coords"]').textContent = inputs.loc
-            ? `${fmtCoord(inputs.loc.lat, 'N', 'S')} · ${fmtCoord(inputs.loc.lon, 'E', 'W')} · saved location`
-            : 'set a location to personalise';
+        // Stable header fields. Don't clobber the input mid-typing.
+        const locInput = card.querySelector('[data-ev="loc-input"]');
+        if (locInput && document.activeElement !== locInput) {
+            locInput.value = inputs.loc ? inputs.loc.name : '';
+        }
         this._tickClock();
         card.querySelector('[data-ev="pill-word"]').textContent =
             this._pillWord(model, inputs);
@@ -714,8 +852,19 @@ export class VerdictCard {
             const now = new Date();
             const date = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(tz ? { timeZone: tz } : {}) }).format(now);
             const time = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short', ...(tz ? { timeZone: tz } : {}) }).format(now);
-            this._card.querySelector('[data-ev="time"]').innerHTML = `${esc(date)}<br>${esc(time)}`;
+            this._card.querySelector('[data-ev="strip-when"]').textContent = `${date} · ${time}`;
         } catch { /* clock is cosmetic */ }
+        // Current conditions, very compact: "72° · clear · Kp 2.3".
+        try {
+            const wx = this._inputs?.wx;
+            const bits = [];
+            if (wx && Number.isFinite(wx.tempF)) bits.push(`${Math.round(wx.tempF)}°`);
+            const cloudCat = this._model?.factors?.find(f => f.id === 'clouds')?.cat;
+            if (cloudCat && cloudCat !== '--') bits.push(cloudCat);
+            const kp = this._inputs?.swpc?.kp;
+            if (Number.isFinite(kp)) bits.push(`Kp ${kp.toFixed(1)}`);
+            this._card.querySelector('[data-ev="strip-now"]').textContent = bits.join(' · ');
+        } catch { /* strip is cosmetic */ }
         const prov = this._card.querySelector('[data-ev="prov"]');
         if (prov && this._inputs) prov.textContent = this._provenanceText(this._inputs);
         const live = this._card.querySelector('[data-ev="live"]');
@@ -756,10 +905,8 @@ export class VerdictCard {
                 this._setCollapsed(true, 'explore');
                 break;
             case 'setloc': {
-                const locInput = document.getElementById('loc-input');
-                const locPanel = document.getElementById('loc-panel');
-                locPanel?.classList.remove('panel-minimized');
-                locInput?.focus();
+                // The one location input lives in this card now.
+                this._card.querySelector('[data-ev="loc-input"]')?.focus();
                 record('set_location_prompt');
                 break;
             }
@@ -770,9 +917,16 @@ export class VerdictCard {
         this._collapsed = collapsed;
         this._card.classList.toggle('ev-collapsed', collapsed);
         try { localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0'); } catch { /* session-only then */ }
-        if (collapsed) record('explore', { source });
-        else record('expand', { source });
-        if (!collapsed) this.refresh(true);
+        if (collapsed) {
+            record('explore', { source });
+            // The card is absolutely positioned, so if the page is scrolled
+            // the pill can land outside the viewport — the user would "lose"
+            // the card with no way back. Bring it into view on collapse.
+            try { this._card.scrollIntoView({ block: 'nearest' }); } catch { /* cosmetic */ }
+        } else {
+            record('expand', { source });
+            this.refresh(true);
+        }
     }
 
     _emitTelemetry(model, inputs) {
@@ -811,10 +965,6 @@ function safe(fn) {
 
 function safeTz() {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; }
-}
-
-function fmtCoord(v, pos, neg) {
-    return `${Math.abs(v).toFixed(2)}°${v >= 0 ? pos : neg}`;
 }
 
 export default VerdictCard;

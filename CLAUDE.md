@@ -100,11 +100,23 @@ These advisor warnings will fire on every `get_advisors` call. They are **intent
 
 ### 4.4 The EarthView verdict card (earth.html)
 
-`earth.html` is branded **EarthView** (title / meta / HUD wordmark). Its default
-dashboard is the **verdict card** — a draggable, touch-optimized answer card
-mounted at `#verdict-host` (first left-panel element; z-index 70 so it sits
-above loc-panel 51 / storm-watch 60 — panels stack-and-drag by design, that
-overlap is not a bug).
+`earth.html` is branded **EarthView** (title / meta / nav label). Its default
+dashboard is the **verdict card** — a draggable (header AND collapsed pill),
+resizable, touch-optimized answer card mounted at `#verdict-host`, top-left
+at z-index 70 above loc-panel 51 / storm-watch 60 (panels stack-and-drag by
+design; that overlap is not a bug).
+
+- **The card REPLACES chrome when active** (`body.ev-verdict-on`): the legacy
+  `#hud` block is hidden (cursor readouts survive via `#coord-tip`), and the
+  loc-panel's search row is hidden because **the card hosts THE location
+  input** (geocodes via `user-location.js`; the resulting
+  `user-location-changed` event fans out exactly like the old input).
+  `?verdict=0` removes the card and restores both. Don't re-show a second
+  location input.
+- **`AirQualityFeed` runs unconditionally** (not gated on the card flag) —
+  the Weather Analysis panel's location section (`#wx-loc-section`) reads it
+  too. `#wx-panel` is right-docked next to the layer panel (`top:10;
+  right:212px`); users with a stored drag position keep their own placement.
 
 - **Modules:** `js/verdict-engine.js` (PURE fusion logic — no DOM, no fetch,
   no ambient time; unit-tested by `tests/verdict-engine.mjs`),

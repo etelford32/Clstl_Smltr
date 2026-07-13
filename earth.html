@@ -341,6 +341,14 @@ nav {
 }
 #hud .hv { color:#a0d8f0; font-weight:600; }
 #hud .hk { color:#4a6a80; }
+/* When the EarthView verdict card is active (default) it REPLACES the
+   legacy top-left HUD block, and the card hosts THE location input — the
+   loc-panel's search row is hidden so there is exactly one. ?verdict=0
+   removes the card and restores both. Cursor lat/lon readouts survive via
+   the #coord-tip tooltip that follows the pointer. */
+body.ev-verdict-on #hud { display:none; }
+body.ev-verdict-on #loc-panel .loc-row { display:none; }
+body.ev-verdict-on #loc-empty-hint { display:none !important; }
 
 /* ─── Coord tooltip ──────────────────────────────────────────── */
 #coord-tip {
@@ -1140,7 +1148,12 @@ nav {
 
 /* ─── Weather analysis panel ─────────────────────────────────── */
 #wx-panel {
-    position:absolute; bottom:52px; left:10px; z-index:50;
+    /* Docked top-right, immediately left of the layer panel (190px wide +
+       10px inset + 12px gap = right:212px) — the analysis card lives with
+       the other research chrome so the left edge belongs to the EarthView
+       verdict card. Was bottom-left before 2026-07; users with a stored
+       drag position keep their own placement. */
+    position:absolute; top:10px; right:212px; z-index:50;
     /* Layered glassy fill — subtle cyan in the top-left fading to a
        deeper navy elsewhere so the panel reads as a 3D card pulling
        light from above-left. Matches the storm-watch + featured-row
@@ -3055,6 +3068,18 @@ import './js/telemetry.js';
             </div>
         </div>
         <div class="panel-body">
+        <!-- Location conditions — populated from the per-location
+             AirQualityFeed ('ev-air-update') so the analysis panel answers
+             for YOUR sky first, then documents the global grid below.
+             Hidden until a location is set. -->
+        <div id="wx-loc-section" style="display:none">
+            <div class="wx-row"><span class="wx-k">📍 Location</span><span class="wx-v" id="wx-loc-name" style="color:#8ff0ff">—</span></div>
+            <div class="wx-row"><span class="wx-k">Now</span>      <span class="wx-v" id="wx-loc-now">—</span></div>
+            <div class="wx-row"><span class="wx-k">Today</span>    <span class="wx-v" id="wx-loc-today">—</span></div>
+            <div class="wx-row"><span class="wx-k">Rain 24h</span> <span class="wx-v" id="wx-loc-rain">—</span></div>
+            <div class="wx-row"><span class="wx-k">Air · UV</span> <span class="wx-v" id="wx-loc-air">—</span></div>
+            <hr class="ir-sep">
+        </div>
         <div class="wx-row"><span class="wx-k">Source</span>   <span class="wx-v" id="wx-src">procedural</span></div>
         <div class="wx-row"><span class="wx-k">Updated</span>  <span class="wx-v" id="wx-upd">—</span></div>
         <div class="wx-row"><span class="wx-k">Data age</span> <span class="wx-v" id="wx-age">—</span></div>
@@ -11789,18 +11814,63 @@ initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
     let verdictLs = null;
     try { verdictLs = localStorage.getItem('ev_verdict'); } catch {}
     const VERDICT_ON = verdictParam !== '0' && !(verdictParam === null && verdictLs === '0');
+
+    // Per-location Open-Meteo feed runs regardless of the card flag — the
+    // Weather Analysis panel's location section (below) reads it too.
+    const evAirFeed = new AirQualityFeed();
+    evAirFeed.start(loadUserLocation() || undefined);
+    window.addEventListener('user-location-changed', (e) => {
+        if (e.detail) evAirFeed.setLocation(e.detail);
+        _updateWxLocSection(evAirFeed.state);
+    });
+
+    // ── Weather Analysis panel: location conditions section ─────────
+    // Answers for the user's sky first (now / today / rain risk / air+UV),
+    // then the global-grid provenance rows below it.
+    function _updateWxLocSection(state) {
+        const sec = document.getElementById('wx-loc-section');
+        if (!sec) return;
+        const loc = loadUserLocation();
+        if (!loc || !state || !(state.hourly?.length)) { sec.style.display = 'none'; return; }
+        sec.style.display = '';
+        const nowMs = Date.now();
+        document.getElementById('wx-loc-name').textContent =
+            loc.city || `${(+loc.lat).toFixed(2)}, ${(+loc.lon).toFixed(2)}`;
+        const cur = state.hourly.find(r => r.time <= nowMs && nowMs - r.time < 3_600_000)
+                 || state.hourly[0];
+        const sky = cur.cloudPct == null ? ''
+            : cur.cloudPct < 25 ? 'clear' : cur.cloudPct <= 70 ? 'partly cloudy' : 'overcast';
+        document.getElementById('wx-loc-now').textContent =
+            cur.tempF != null ? `${Math.round(cur.tempF)}°F${sky ? ' · ' + sky : ''}` : '—';
+        const d0 = state.daily?.[0];
+        document.getElementById('wx-loc-today').textContent =
+            d0 && d0.hiF != null ? `hi ${Math.round(d0.hiF)}° / lo ${Math.round(d0.loF)}°` : '—';
+        const next24 = state.hourly.filter(r =>
+            r.time >= nowMs && r.time <= nowMs + 86_400_000 && r.precipProb != null);
+        const maxP = next24.length ? Math.max(...next24.map(r => r.precipProb)) : null;
+        document.getElementById('wx-loc-rain').textContent =
+            maxP == null ? '—' : maxP < 5 ? 'none expected' : `${Math.round(maxP)}% peak chance`;
+        document.getElementById('wx-loc-air').textContent =
+            `${state.aqi != null ? 'AQI ' + Math.round(state.aqi) : 'AQI —'}`
+            + ` · ${state.uvPeak != null ? 'UV pk ' + Math.round(state.uvPeak) : 'UV —'}`;
+    }
+    window.addEventListener('ev-air-update', (e) => _updateWxLocSection(e.detail));
+
     if (VERDICT_ON) {
+        // The card replaces the legacy HUD block + the loc-panel search row
+        // (see the body.ev-verdict-on CSS next to the #hud rules).
+        document.body.classList.add('ev-verdict-on');
         const startVerdict = () => {
             try {
-                const evAirFeed = new AirQualityFeed();
-                const loc0 = loadUserLocation();
-                evAirFeed.start(loc0 || undefined);
                 window.__verdictCard = new VerdictCard(document.getElementById('verdict-host'), {
                     swpc:   swFeed,
                     alerts: nwsAlerts,
                     air:    evAirFeed,
                     getLocation: loadUserLocation,
                     sunTimes,
+                    // The card hosts THE location input; these two make it work.
+                    geocode: geocodeQuery,
+                    saveLocation: saveUserLocation,
                     // ISS TLE comes from the 'stations' group satTracker already
                     // loads for the globe; pass search runs off the first-paint
                     // path (the card defers it to idle time internally).
@@ -11813,8 +11883,10 @@ initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
                     flagSource: verdictParam === '1' ? 'query' : verdictLs === '1' ? 'ls' : 'default',
                 });
             } catch (err) {
-                // The card must never take the globe down with it.
+                // The card must never take the globe down with it — and if it
+                // fails, give the classic chrome back.
                 console.error('[EarthView] verdict card failed to start:', err);
+                document.body.classList.remove('ev-verdict-on');
             }
         };
         // Lazy-init after first paint so the globe's LCP is unaffected.
