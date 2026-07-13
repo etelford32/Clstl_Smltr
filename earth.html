@@ -1139,6 +1139,26 @@ nav {
 }
 
 /* ─── Weather analysis panel ─────────────────────────────────── */
+#probe-panel {
+    position:absolute; z-index:65; width:246px;
+    background:
+        radial-gradient(120% 90% at 0% 0%, var(--c-accent-bg-overlay), transparent 55%),
+        linear-gradient(180deg, var(--c-surface-1), var(--c-surface-2));
+    backdrop-filter: var(--blur-glass);
+    -webkit-backdrop-filter: var(--blur-glass);
+    border:1px solid var(--c-accent-border); border-radius: var(--r-xl);
+    padding: var(--sp-4) var(--sp-5) var(--sp-5); font-size:11px;
+}
+#probe-panel .panel-body { max-height:52vh; overflow-y:auto; }
+#probe-panel .wx-row { display:flex; justify-content:space-between; gap:8px; margin:2px 0; }
+#probe-panel .wx-k { color:#78a; }
+#probe-panel .wx-v { color:#cde; text-align:right; }
+#probe-panel .probe-sec {
+    margin:7px 0 3px; font-size:9px; color:#456; letter-spacing:.08em;
+    text-transform:uppercase; border-top:1px dashed rgba(255,255,255,.06); padding-top:5px;
+}
+#probe-panel .probe-foot { margin-top:7px; font-size:9px; color:#567; line-height:1.5; }
+
 #wx-panel {
     position:absolute; bottom:52px; left:10px; z-index:50;
     /* Layered glassy fill — subtle cyan in the top-left fading to a
@@ -2583,6 +2603,7 @@ import './js/telemetry.js';
                 </div>
                 <div class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label><label class="lyr-rd" for="rd-pressure" title="Show surface pressure (hPa) on cursor hover"><input type="checkbox" id="rd-pressure"><span class="lyr-rd-badge">#</span></label></div>
                 <div class="lyr" title="Synoptic fronts detected from the temperature gradient and wind. Blue = cold front (cold air advancing into warm), red = warm front (warm air advancing into cold), grey = stationary. Mid-latitudes only (|lat| < 75°)."><input type="checkbox" id="lyr-fronts"><span class="lyr-status" data-layer="fronts" title="waiting"></span><label for="lyr-fronts">Fronts</label></div>
+                <div class="lyr" title="Column probe — click anywhere on the globe to pin a vertical-profile card for that point: wind at 10 m / 850 / 500 / 250 hPa, temperatures, cloud decks + estimated cloud-top height (IR), CAPE, and 850→500 shear. Every value is assembled from buffers already on this page (no new fetches), with per-source data ages in the footer."><input type="checkbox" id="lyr-probe"><label for="lyr-probe">Column Probe (click globe)</label></div>
                 <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
                 <label class="lyr" title="5-day kinematic extrapolation cone for every active tropical cyclone. NOT NHC's official forecast — this is a great-circle projection of current motion with NHC's published average track-error radii applied for the cone width. Click a storm card to focus its cone."><input type="checkbox" id="lyr-storm-tracks"><span class="lyr-status" data-layer="storm-tracks" title="waiting"></span><label for="lyr-storm-tracks">Storm Tracks (5-day)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
@@ -2613,6 +2634,18 @@ import './js/telemetry.js';
                     </div>
                     <div class="lyr" title="CAPE — convective available potential energy (J/kg), the thunderstorm fuel gauge. Sage = marginal (100–1000), yellow→orange = moderate (1000–2500, organised storms possible), red→magenta = strong-to-extreme (2500+, severe potential). NWP diagnostic on the pressure-level feed; scrub the timeline to watch instability build and release out to +72 h. Pair with Convergence/Uplift: fuel here, trigger there.">
                         <input type="checkbox" id="lyr-cape"><span class="lyr-status" data-layer="tempvol" title="waiting"></span><label for="lyr-cape">Convective Energy (CAPE)</label>
+                    </div>
+                    <div class="lyr" title="Relative vorticity ζ — is the air spinning? Warm = cyclonic (storm centres, jet-streak flanks; sign folded so cyclonic reads + in BOTH hemispheres), cool = anticyclonic. Same finite-difference stencil as Convergence/Uplift, rotated. Pick the level: 250 hPa traces the jet streaks and cutoff lows that make the Jet Stream layer analytically useful.">
+                        <input type="checkbox" id="lyr-vorticity"><span class="lyr-status" data-layer="vorticity" title="waiting"></span><label for="lyr-vorticity">Vorticity (ζ)</label>
+                        <select id="vort-level" title="Analysis level" style="margin-left:auto;background:#0b1322;color:#9ab;border:1px solid rgba(255,255,255,.12);border-radius:4px;font-size:10px;padding:1px 2px;">
+                            <option value="sfc" selected>10 m</option>
+                            <option value="850">850</option>
+                            <option value="500">500</option>
+                            <option value="250">250</option>
+                        </select>
+                    </div>
+                    <div class="lyr" title="Forecast vs truth — the in-browser physics forecast graded on the map. Every time a forecast horizon verifies against a fresh observation, this layer paints the precipitation residual: rose = the model called rain that didn't verify (too wet), teal = rain arrived that the model missed (too dry). Transparent = the model was right. Same 'trust the physics vs persistence' framing as the skill strip; provenance row in the Weather Analysis panel names the model, horizon, and how often it beat persistence.">
+                        <input type="checkbox" id="lyr-verify"><span class="lyr-status" data-layer="verify" title="waiting for the first verified forecast (≥1 cron cycle after load)"></span><label for="lyr-verify">Forecast vs Truth (precip)</label>
                     </div>
                 </div>
             </div>
@@ -3051,6 +3084,21 @@ import './js/telemetry.js';
         </div><!-- /panel-body -->
     </div><!-- /loc-panel -->
 
+    <!-- Column probe (Phase 4.1) — click-pinned vertical profile. Hidden
+         until the Column Probe layer is armed and the globe is clicked;
+         positioned at the click, draggable by its header (no persistence —
+         it belongs to the point, not the viewport). All values assembled
+         client-side from buffers this page already holds. -->
+    <div id="probe-panel" style="display:none">
+        <div class="panel-header">
+            <h3>📍 Column Probe</h3>
+            <div class="panel-actions">
+                <button class="panel-btn panel-close" id="probe-close" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="panel-body" id="probe-body"></div>
+    </div>
+
     <!-- Weather analysis panel -->
     <div id="wx-panel">
         <div class="panel-header" data-minimize="wx-panel">
@@ -3066,6 +3114,11 @@ import './js/telemetry.js';
         <div class="wx-row"><span class="wx-k">Data age</span> <span class="wx-v" id="wx-age">—</span></div>
         <div class="wx-row" title="Coarse-grid resolution from the cron pull. Lower number = finer grid (5° is current; 10° was the legacy)."><span class="wx-k">Grid</span>     <span class="wx-v" id="wx-grid">—</span></div>
         <div class="wx-row" title="Live satellite imagery layer feeding the cloud mosaic. Geostationary mosaic = ~10-min cadence, no orbiter swath gaps in the tropics."><span class="wx-k">Satellite</span><span class="wx-v" id="wx-sat">—</span></div>
+        <!-- Per-level / per-product provenance rows (Phase 4.4): one "data
+             age · source" line per ACTIVE pressure level, plus cloud-top
+             height and forecast-verification rows when those products are
+             live. Populated by _refreshProvRows(); empty divs collapse. -->
+        <div id="wx-prov-levels"></div>
         <div class="wx-row" id="wx-research-row" style="display:none;color:#6cf;font-weight:600"><span class="wx-k">Mode</span>     <span class="wx-v">Research (measured-only)</span></div>
         <hr class="ir-sep">
         <div class="wx-row"><span class="wx-k">T° min</span>   <span class="wx-v" id="wx-tmin">—</span></div>
@@ -3142,6 +3195,28 @@ import './js/telemetry.js';
                 <span style="position:absolute;left:25%;transform:translateX(-50%);">1k</span>
                 <span style="position:absolute;left:62.5%;transform:translateX(-50%);">2.5k</span>
                 <span style="position:absolute;right:0;">4k J/kg</span>
+            </div>
+        </div>
+        <!-- Vorticity legend. Mirrors the overlay shader's vorticityColor()
+             exactly; cyclonic is + in BOTH hemispheres (folded at compute
+             time). Ends anchor at ±VORT_FULL_SCALE (1.5×10⁻⁴ s⁻¹). -->
+        <div id="wx-vorticity-legend-box" style="display:none;">
+            <div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Vorticity ζ (<span id="wx-vort-level-lbl">10 m</span>)</div>
+            <canvas id="wx-vorticity-legend" width="200" height="8"
+                    style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+                <span>anticyclonic</span><span>0</span><span>cyclonic +</span>
+            </div>
+        </div>
+        <!-- Forecast-vs-truth residual legend. Mirrors residualColor().
+             Transparent centre = the model was right; that emptiness is the
+             point of the layer. -->
+        <div id="wx-residual-legend-box" style="display:none;">
+            <div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Forecast − observed (precip)</div>
+            <canvas id="wx-residual-legend" width="200" height="8"
+                    style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+                <span>model too dry</span><span>0</span><span>too wet</span>
             </div>
         </div>
         <hr class="ir-sep">
@@ -3463,7 +3538,12 @@ import {
     clearSavedLocations, formatLocalClock, dayNightBadge,
 } from './js/earth-saved-locations.js';
 import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
-import { computeUpliftField, UPLIFT_FULL_SCALE } from './js/weather-uplift.js';
+import { computeUpliftField, UPLIFT_FULL_SCALE,
+         computeVorticityField, VORT_FULL_SCALE } from './js/weather-uplift.js';
+import { cloudTopHeightKm } from './js/cloud-mosaic-core.js';
+// Module singleton — already booted by the early telemetry side-effect
+// import in <head>; the named binding just gives this module a handle.
+import { telemetry } from './js/telemetry.js';
 import { WeatherHistory }        from './js/weather-history.js';
 import { WeatherFrameResolver }  from './js/weather-frame-resolver.js';
 import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
@@ -4235,6 +4315,37 @@ capeTex.wrapT     = THREE.ClampToEdgeWrapping;
 capeTex.flipY     = true;
 capeTex.needsUpdate = true;
 
+// Relative-vorticity texture (R = signed cyclonic ζ/VORT_FULL_SCALE, A=|R|)
+// — computed on the 5° lattice by computeVorticityField from whichever
+// level the #vort-level select points at (see _refreshVorticity). Grid
+// resolution on purpose: vorticity is a derivative; differencing the
+// upsampled texture would just measure the interpolator.
+const vortTex = new THREE.DataTexture(
+    new Float32Array(72 * 36 * 4), 72, 36,
+    THREE.RGBAFormat, THREE.FloatType
+);
+vortTex.magFilter = THREE.LinearFilter;
+vortTex.minFilter = THREE.LinearFilter;
+vortTex.wrapS     = THREE.RepeatWrapping;
+vortTex.wrapT     = THREE.ClampToEdgeWrapping;
+vortTex.flipY     = true;
+vortTex.needsUpdate = true;
+
+// Forecast-vs-truth residual texture (R = signed model−observed precip /
+// ±5 mm/hr, G = physics-vs-persistence advantage, A = |R|). Painted by the
+// 'weather-validation-residual' handler each time a physics forecast
+// verifies against a fresh observation.
+const residTex = new THREE.DataTexture(
+    new Float32Array(72 * 36 * 4), 72, 36,
+    THREE.RGBAFormat, THREE.FloatType
+);
+residTex.magFilter = THREE.LinearFilter;
+residTex.minFilter = THREE.LinearFilter;
+residTex.wrapS     = THREE.RepeatWrapping;
+residTex.wrapT     = THREE.ClampToEdgeWrapping;
+residTex.flipY     = true;
+residTex.needsUpdate = true;
+
 // ── Derived weather overlays — humidity / precip / mist / convergence ──────
 // Three thin shells parented to earthMesh, each reading the same
 // u_weather + u_cloud_layers DataTextures the surface/cloud shaders use.
@@ -4283,6 +4394,25 @@ const _weatherOverlays = {
         cloudTexture:   cloudU.u_cloud_layers.value,
         upliftTexture:  upliftTex,
         auxTexture:     capeTex,
+    }),
+    // Relative vorticity ζ (Phase 4.2) — spin to the convergence layer's
+    // pile-up, per selectable level. Above CAPE so jet-streak ribbons read
+    // over the broad instability wash.
+    vorticity: createWeatherOverlay({
+        THREE, radius: R_EARTH * 1.0052, icoLevel: ICO_LEVEL, mode: 'vorticity',
+        weatherTexture: earthU.u_weather.value,
+        cloudTexture:   cloudU.u_cloud_layers.value,
+        upliftTexture:  upliftTex,
+        auxTexture:     vortTex,
+    }),
+    // Forecast-vs-truth precip residual (Phase 4.3). Topmost derived shell:
+    // the grade sheet reads over everything it grades.
+    residual: createWeatherOverlay({
+        THREE, radius: R_EARTH * 1.0055, icoLevel: ICO_LEVEL, mode: 'residual',
+        weatherTexture: earthU.u_weather.value,
+        cloudTexture:   cloudU.u_cloud_layers.value,
+        upliftTexture:  upliftTex,
+        auxTexture:     residTex,
     }),
 };
 for (const ov of Object.values(_weatherOverlays)) earthMesh.add(ov.mesh);
@@ -5091,6 +5221,9 @@ document.addEventListener('temp-volume-update', () => {
     // Pressure-level wind layers ride the same ring — re-point their data
     // views and the jet-peak readout at the fresh frames.
     _refreshWindLevelData();
+    _refreshVorticity();
+    _refreshColumnProbe();
+    _refreshProvRows();
 });
 document.addEventListener('temp-volume-error', () => {
     _setVolPip('error', 'pressure-level fetch failed — rendering standard-lapse fallback');
@@ -6721,6 +6854,7 @@ function _refreshWindLevelData() {
     }
     _jetPeak = _computeJetPeak(snap);
     _updateJetReadout();
+    _refreshProvRows();
 }
 
 // Scan the 250 hPa field for its fastest cell. Grid convention matches
@@ -6819,6 +6953,362 @@ function _applyWindLevelCapIfTierChanged() {
     if (_windCapTierApplied === _cloudQIdx) return;
     _windCapTierApplied = _cloudQIdx;
     _applyWindLevelCap();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PHASE-4 ANALYTICS — vorticity layer, forecast-vs-truth residual,
+//  per-level provenance rows, and the click-pinned column probe.
+//  Everything here is assembly of buffers the page already holds:
+//  no new fetches.
+// ═══════════════════════════════════════════════════════════════
+
+// CPU view of the satellite mosaic (set by the satellite-update handler):
+// { data: Uint8Array RGBA row0=90°N, w, h, hasIR, updated }.
+let _satMosaicCPU = null;
+
+// ── Vorticity (Phase 4.2) ───────────────────────────────────────────────
+let _vortLevel = 'sfc';
+const _vortScratchU = new Float32Array(72 * 36);
+const _vortScratchV = new Float32Array(72 * 36);
+const _VORT_LEVEL_LABEL = { sfc: '10 m', 850: '850 hPa', 500: '500 hPa', 250: '250 hPa' };
+
+function _refreshVorticity() {
+    const ov = _weatherOverlays.vorticity;
+    if (!ov?.mesh.visible) return;
+    let u = null, v = null;
+    if (_vortLevel === 'sfc') {
+        const buf = windParticles.windBuf;
+        if (!buf) return;
+        // Resample the decoded 360×180 wind texture back onto the 5°
+        // lattice it came from — differencing at native grid pitch keeps
+        // the stencil honest (see computeVorticityField's header).
+        for (let j = 0; j < 36; j++) {
+            const lat = -90 + (j + 0.5) * 5;
+            const y = Math.max(0, Math.min(TEX_H - 1, Math.round((lat + 90) / 180 * (TEX_H - 1))));
+            for (let i = 0; i < 72; i++) {
+                const lon = -180 + (i + 0.5) * 5;
+                const x = ((Math.round((lon / 360 + 0.5) * TEX_W) % TEX_W) + TEX_W) % TEX_W;
+                const o = (y * TEX_W + x) * 4;
+                _vortScratchU[j * 72 + i] = buf[o]     * MAX_WIND_MS;
+                _vortScratchV[j * 72 + i] = buf[o + 1] * MAX_WIND_MS;
+            }
+        }
+        u = _vortScratchU; v = _vortScratchV;
+    } else {
+        const snap = tempVolFeed.levelWindSnapshot(_volLastSimT ?? Date.now());
+        const keys = { 850: ['u850', 'v850'], 500: ['u500', 'v500'], 250: ['u250', 'v250'] }[_vortLevel];
+        u = snap?.[keys[0]] ?? null;
+        v = snap?.[keys[1]] ?? null;
+        if (!u || !v) {
+            _setLayerPipById('vorticity', 'fetching', 'waiting for Open-Meteo pressure-level winds…');
+            return;
+        }
+    }
+    computeVorticityField(u, v, 72, 36, vortTex.image.data);
+    vortTex.needsUpdate = true;
+    ov.setHasData(true);
+    _setLayerPipById('vorticity', 'loaded',
+        `ζ @ ${_VORT_LEVEL_LABEL[_vortLevel]} · cyclonic-positive (hemisphere-folded) · full scale ±${VORT_FULL_SCALE.toExponential(1)} s⁻¹`);
+}
+
+{
+    const box = () => document.getElementById('wx-vorticity-legend-box');
+    document.getElementById('lyr-vorticity')?.addEventListener('change', (e) => {
+        const ov = _weatherOverlays.vorticity;
+        if (ov) ov.mesh.visible = e.target.checked;
+        const b = box();
+        if (b) b.style.display = e.target.checked ? '' : 'none';
+        if (e.target.checked) {
+            if (_vortLevel !== 'sfc') tempVolFeed.start();   // lazy PL feed
+            _refreshVorticity();
+        }
+    });
+    document.getElementById('vort-level')?.addEventListener('change', (e) => {
+        _vortLevel = e.target.value;
+        const lbl = document.getElementById('wx-vort-level-lbl');
+        if (lbl) lbl.textContent = _VORT_LEVEL_LABEL[_vortLevel];
+        if (_vortLevel !== 'sfc') tempVolFeed.start();
+        _refreshVorticity();
+        _refreshProvRows();
+    });
+    // Clicking the select shouldn't toggle the checkbox row.
+    document.getElementById('vort-level')?.addEventListener('click', (e) => e.stopPropagation());
+}
+
+// ── Forecast-vs-truth residual (Phase 4.3) ──────────────────────────────
+// Painted every time the validator verifies a physics forecast against a
+// fresh observation (see _dispatchResidual in weather-forecast-validation).
+let _residMeta = null;
+document.addEventListener('weather-validation-residual', (ev) => {
+    const d = ev.detail;
+    const N = d.gridW * d.gridH;
+    if (N !== 72 * 36) return;   // grid resize mid-flight — skip this cycle
+    const out = residTex.image.data;
+    let beat = 0, graded = 0;
+    for (let k = 0; k < N; k++) {
+        const f = d.forecastPrecip[k], t = d.truthPrecip[k];
+        const okFT = Number.isFinite(f) && Number.isFinite(t);
+        const r  = okFT ? f - t : 0;
+        const rn = Math.max(-1, Math.min(1, r / 5));         // ±5 mm/hr full scale
+        let adv = 0;
+        if (okFT && d.persistencePrecip) {
+            const pr = d.persistencePrecip[k];
+            // Grade only cells where SOMETHING was wrong — counting the
+            // (vast) mutually-correct dry cells would inflate the score.
+            if (Number.isFinite(pr) && (Math.abs(f - t) > 0.05 || Math.abs(pr - t) > 0.05)) {
+                graded++;
+                if (Math.abs(f - t) < Math.abs(pr - t)) beat++;
+                adv = Math.max(-1, Math.min(1, (Math.abs(pr - t) - Math.abs(f - t)) / 2));
+            }
+        }
+        const o = k * 4;
+        out[o] = rn; out[o + 1] = adv; out[o + 2] = 0; out[o + 3] = Math.abs(rn);
+    }
+    residTex.needsUpdate = true;
+    _residMeta = {
+        model: d.model_id, h: d.horizon_h,
+        verified: d.verified_ms, target: d.target_ms,
+        beatPct: graded ? Math.round((100 * beat) / graded) : null,
+        graded,
+    };
+    _weatherOverlays.residual?.setHasData(true);
+    _setLayerPipById('verify', 'loaded',
+        `${d.model_id} +${d.horizon_h} h verified against the ${new Date(d.verified_ms).toUTCString().slice(17, 22)}Z analysis`
+        + (_residMeta.beatPct != null
+            ? ` · beat persistence in ${_residMeta.beatPct}% of ${_residMeta.graded} graded cells` : ''));
+    _refreshProvRows();
+});
+
+document.getElementById('lyr-verify')?.addEventListener('change', (e) => {
+    const ov = _weatherOverlays.residual;
+    if (ov) ov.mesh.visible = e.target.checked;
+    const b = document.getElementById('wx-residual-legend-box');
+    if (b) b.style.display = e.target.checked ? '' : 'none';
+    if (e.target.checked && !_residMeta) {
+        _setLayerPipById('verify', 'fetching',
+            'waiting for the first verified forecast — a horizon must come due against a fresh observation (≥1 cron cycle)');
+    }
+});
+
+// ── Legend painters — exact mirrors of the overlay shader ramps ─────────
+(function _paintVorticityLegend() {
+    const cv = document.getElementById('wx-vorticity-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const mix = (a, b, t) => a + (b - a) * t;
+    const ss  = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+    for (let x = 0; x < cv.width; x++) {
+        const signed = (x / (cv.width - 1)) * 2 - 1;
+        let r, g, b;
+        if (Math.abs(signed) < 0.05) { r = 0.20; g = 0.22; b = 0.26; }
+        else if (signed >= 0) {
+            let t = ss(0, 0.8, signed);
+            r = mix(0.85, 0.92, t); g = mix(0.68, 0.18, t); b = mix(0.25, 0.35, t);
+            t = ss(0.8, 1.0, signed);
+            r = mix(r, 0.90, t); g = mix(g, 0.20, t); b = mix(b, 0.85, t);
+        } else {
+            const t = ss(0, 1, -signed);
+            r = mix(0.45, 0.25, t); g = mix(0.52, 0.55, t); b = mix(0.62, 0.95, t);
+        }
+        ctx.fillStyle = `rgb(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0})`;
+        ctx.fillRect(x, 0, 1, cv.height);
+    }
+})();
+
+(function _paintResidualLegend() {
+    const cv = document.getElementById('wx-residual-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const mix = (a, b, t) => a + (b - a) * t;
+    const ss  = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+    for (let x = 0; x < cv.width; x++) {
+        const signed = (x / (cv.width - 1)) * 2 - 1;
+        let r, g, b;
+        if (Math.abs(signed) < 0.04) { r = 0.16; g = 0.20; b = 0.24; }
+        else if (signed >= 0) {
+            const t = ss(0, 1, signed);
+            r = mix(0.75, 0.95, t); g = mix(0.45, 0.15, t); b = mix(0.60, 0.55, t);
+        } else {
+            const t = ss(0, 1, -signed);
+            r = mix(0.35, 0.10, t); g = mix(0.65, 0.90, t); b = mix(0.60, 0.80, t);
+        }
+        ctx.fillStyle = `rgb(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0})`;
+        ctx.fillRect(x, 0, 1, cv.height);
+    }
+})();
+
+// ── Provenance rows (Phase 4.4) ─────────────────────────────────────────
+// One "data age · source" line per ACTIVE pressure-level product, plus
+// cloud-top height + verification when those are live — the ticker-style
+// provenance the rest of the site leads with, per level.
+function _provAge(ms) {
+    if (!Number.isFinite(ms)) return '—';
+    const min = Math.max(0, Math.round((Date.now() - ms) / 60_000));
+    return min < 1 ? 'just now' : min < 60 ? `${min}m ago` : `${Math.floor(min / 60)}h ${min % 60}m ago`;
+}
+function _refreshProvRows() {
+    const host = document.getElementById('wx-prov-levels');
+    if (!host) return;
+    const rows = [];
+    const snap = tempVolFeed.hasData
+        ? tempVolFeed.levelWindSnapshot(_volLastSimT ?? Date.now()) : null;
+    const levelsWanted = new Set();
+    for (const st of Object.values(_windLevels)) {
+        if (st.desired) levelsWanted.add(st.def.uKey.replace('u', ''));
+    }
+    if (_vortLevel !== 'sfc' && _weatherOverlays.vorticity?.mesh.visible) levelsWanted.add(_vortLevel);
+    for (const lvl of ['850', '500', '250']) {
+        if (!levelsWanted.has(lvl)) continue;
+        const have = snap && snap[`u${lvl}`];
+        rows.push(`<div class="wx-row" title="Open-Meteo pressure-level winds, 5° grid — the same buffers the multi-level advection forecaster steers with.">`
+            + `<span class="wx-k">${lvl} hPa</span><span class="wx-v">${have ? `Open-Meteo PL · ${_provAge(snap.t)}` : 'awaiting fetch…'}</span></div>`);
+    }
+    if (_satMosaicCPU) {
+        rows.push(`<div class="wx-row" title="Cloud-top height estimate: geostationary IR brightness temperature vs the 2 m field, 6.5 K/km lapse. 'no IR' means no IR product contributed to the current mosaic.">`
+            + `<span class="wx-k">Cloud-top hgt</span><span class="wx-v">${_satMosaicCPU.hasIR ? `GEO IR · ${_provAge(_satMosaicCPU.updated)}` : 'no IR in mosaic'}</span></div>`);
+    }
+    if (_residMeta) {
+        rows.push(`<div class="wx-row" title="Latest map-space verification: the in-browser physics forecast graded against the verifying Open-Meteo analysis. Toggle 'Forecast vs Truth' to see the residual on the globe.">`
+            + `<span class="wx-k">Verified</span><span class="wx-v">${_residMeta.model.replace('-v1', '')} +${_residMeta.h}h · ${_provAge(_residMeta.verified)}`
+            + (_residMeta.beatPct != null ? ` · beat pers. ${_residMeta.beatPct}%` : '') + `</span></div>`);
+    }
+    host.innerHTML = rows.join('');
+}
+
+// ── Column probe (Phase 4.1) ────────────────────────────────────────────
+// Click-pinned vertical profile. Distinct from the hover rd-* readouts:
+// hover follows the cursor, the probe stays pinned to a geographic point
+// and re-samples as frames land, so it can be read against the timeline.
+const _probeState = { pinned: false, lat: 0, lon: 0 };
+
+// Nearest-cell sample on a 5° coarse view (lat ascending, lon wraps).
+// Nearest, not bilinear, on purpose: the probe quotes a number and the
+// honest quote at 5° pitch is the cell the point falls in.
+function _probeLevelSample(arr, lat, lon) {
+    if (!arr) return null;
+    const j = Math.max(0, Math.min(35, Math.floor((lat + 90) / 5)));
+    const i = ((Math.floor((lon + 180) / 5) % 72) + 72) % 72;
+    const v = arr[j * 72 + i];
+    return Number.isFinite(v) ? v : null;
+}
+function _probeWind(u, v, lat, lon) {
+    const uu = _probeLevelSample(u, lat, lon);
+    const vv = _probeLevelSample(v, lat, lon);
+    if (uu === null || vv === null) return null;
+    const speed = Math.hypot(uu, vv);
+    const dir   = speed < 0.05 ? null : (Math.atan2(-uu, -vv) * 180 / Math.PI + 360) % 360;
+    return { speed, dir };
+}
+const _fmtWind = (w) => w === null ? '—'
+    : `${w.speed.toFixed(1)} m/s${w.dir === null ? '' : ` · ${Math.round(w.dir)}°`}`;
+const _fmtC = (v) => v === null || !Number.isFinite(v) ? '—' : `${v.toFixed(1)} °C`;
+
+function _showColumnProbe(lat, lon, clientX, clientY) {
+    _probeState.pinned = true;
+    _probeState.lat = lat;
+    _probeState.lon = lon;
+    const panel = document.getElementById('probe-panel');
+    if (!panel) return;
+    panel.style.display = 'block';
+    // Land near the click, clamped to the viewport; draggable afterwards.
+    if (Number.isFinite(clientX)) {
+        const w = panel.offsetWidth || 246, h = panel.offsetHeight || 300;
+        panel.style.left  = `${Math.max(6, Math.min(window.innerWidth  - w - 6, clientX + 16))}px`;
+        panel.style.top   = `${Math.max(6, Math.min(window.innerHeight - h - 6, clientY - 24))}px`;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+    }
+    _refreshColumnProbe();
+    telemetry?.recordFeature?.('earth-column-probe', 'pin', { lat: +lat.toFixed(1), lon: +lon.toFixed(1) });
+}
+
+function _refreshColumnProbe() {
+    if (!_probeState.pinned) return;
+    const body = document.getElementById('probe-body');
+    if (!body) return;
+    const { lat, lon } = _probeState;
+    const snap = tempVolFeed.hasData
+        ? tempVolFeed.levelWindSnapshot(_volLastSimT ?? Date.now()) : null;
+    const wx  = _sampleWeatherAt(lat, lon);
+    const cl  = _sampleCloudAt(lat, lon);
+    const up  = _sampleUpliftAt(lat, lon);
+    const w10 = windParticles.lookupWind(lat, lon);
+    const w850 = snap ? _probeWind(snap.u850, snap.v850, lat, lon) : null;
+    const w500 = snap ? _probeWind(snap.u500, snap.v500, lat, lon) : null;
+    const w250 = snap ? _probeWind(snap.u250, snap.v250, lat, lon) : null;
+    const t850 = snap ? _probeLevelSample(snap.t850, lat, lon) : null;
+    const t500 = snap ? _probeLevelSample(snap.t500, lat, lon) : null;
+    const cape = snap ? _probeLevelSample(snap.cape, lat, lon) : null;
+    // 850→500 bulk shear — the same quantity the forecaster's steadiness
+    // proxy integrates globally, quoted for this column.
+    let shear = null;
+    if (w850 && w500) {
+        const du = _probeLevelSample(snap.u500, lat, lon) - _probeLevelSample(snap.u850, lat, lon);
+        const dv = _probeLevelSample(snap.v500, lat, lon) - _probeLevelSample(snap.v850, lat, lon);
+        shear = Math.hypot(du, dv);
+    }
+    // Cloud-top height: mosaic IR coldness (B) vs the 2 m field.
+    let cth = null, cthConf = 0;
+    if (_satMosaicCPU?.hasIR && wx) {
+        const m = _satMosaicCPU;
+        const y = Math.max(0, Math.min(m.h - 1, Math.round((90 - lat) / 180 * (m.h - 1))));
+        const x = ((Math.round((lon + 180) / 360 * m.w) % m.w) + m.w) % m.w;
+        const o = (y * m.w + x) * 4;
+        cth = cloudTopHeightKm(m.data[o + 2] / 255, wx.tempC);
+        cthConf = m.data[o + 3] / 255;
+    }
+
+    const row = (k, v, title = '') =>
+        `<div class="wx-row"${title ? ` title="${title}"` : ''}><span class="wx-k">${k}</span><span class="wx-v">${v}</span></div>`;
+    const sec = (t) => `<div class="probe-sec">${t}</div>`;
+    const latS = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}`;
+    const lonS = `${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`;
+
+    body.innerHTML =
+        row('Point', `${latS} ${lonS}`)
+        + sec('Wind profile')
+        + row('10 m',    w10 ? `${w10.speedMs.toFixed(1)} m/s${w10.dirFromDeg === null ? '' : ` · ${Math.round(w10.dirFromDeg)}°`}` : '—')
+        + row('850 hPa', _fmtWind(w850))
+        + row('500 hPa', _fmtWind(w500))
+        + row('250 hPa', _fmtWind(w250), 'the jet level — enable a pressure-level layer once to start the feed')
+        + row('Shear 850→500', shear === null ? '—' : `${shear.toFixed(1)} m/s`,
+              'bulk vector shear between the steering levels — the per-column version of the forecaster\'s steadiness input')
+        + sec('Temperature')
+        + row('2 m',     _fmtC(wx?.tempC ?? null))
+        + row('850 hPa', _fmtC(t850))
+        + row('500 hPa', _fmtC(t500))
+        + sec('Cloud & moisture')
+        + row('Low / Mid / High', cl ? `${Math.round(cl.clLow)} / ${Math.round(cl.clMid)} / ${Math.round(cl.clHigh)} %` : '—')
+        + row('Cloud-top hgt', cth === null ? (_satMosaicCPU?.hasIR ? 'no IR estimate here' : '—')
+              : `≈${cth.toFixed(1)} km`,
+              'IR brightness-temperature estimate vs the 2 m field, 6.5 K/km lapse'
+              + (cth !== null ? ` — confidence ${(cthConf * 100).toFixed(0)}%` : ''))
+        + row('Precip', cl ? `${cl.precipMmHr.toFixed(1)} mm/hr` : '—')
+        + row('RH', wx ? `${Math.round(wx.rhPct)} %` : '—')
+        + row('Convergence', up ? `${(up.convPerS * 1e5).toFixed(1)}×10⁻⁵ s⁻¹` : '—')
+        + row('CAPE', cape === null ? '—' : `${Math.round(cape)} J/kg`)
+        + `<div class="probe-foot">Surface: Open-Meteo grid · ${_dataRecency.weather ? _timeAgo(_dataRecency.weather.fetchTime) : 'not loaded'}<br>`
+        + `Pressure levels: ${snap ? `Open-Meteo PL · frame ${new Date(snap.t).toUTCString().slice(17, 22)}Z` : 'not fetched — enable a wind level / CAPE / volume layer'}<br>`
+        + `Cloud-top: ${_satMosaicCPU?.hasIR ? `GEO IR mosaic · ${_provAge(_satMosaicCPU.updated)}` : 'no IR mosaic yet'}</div>`;
+}
+
+{
+    const panel = document.getElementById('probe-panel');
+    if (panel) makePanelDraggable(panel, { persist: false });
+    document.getElementById('probe-close')?.addEventListener('click', () => {
+        _probeState.pinned = false;
+        const p = document.getElementById('probe-panel');
+        if (p) p.style.display = 'none';
+    });
+    // Un-arming the probe layer also unpins — a hidden armed probe that
+    // reappears on a stray click later would feel haunted.
+    document.getElementById('lyr-probe')?.addEventListener('change', (e) => {
+        if (!e.target.checked) {
+            _probeState.pinned = false;
+            const p = document.getElementById('probe-panel');
+            if (p) p.style.display = 'none';
+        }
+    });
 }
 
 // ── Ocean surface currents ──────────────────────────────────────────
@@ -8584,6 +9074,20 @@ window.addEventListener('satellite-update', e => {
         // and the mosaic-reinforced shadow cover (Phase 2.4).
         earthU.u_satellite.value    = tex;
         earthU.u_satellite_on.value = 1.0;
+        // CPU-side view for the column probe's cloud-top-height readout
+        // (Phase 4.1/4.4): the mosaic B channel carries IR top-coldness.
+        // A strided scan flags whether ANY IR product contributed, so the
+        // provenance row and probe can say "no IR estimate" honestly.
+        const img = tex.image;
+        if (img?.data && img.width) {
+            let hasIR = false;
+            for (let o = 2; o < img.data.length; o += 4 * 64) {
+                if (img.data[o] > 0) { hasIR = true; break; }
+            }
+            _satMosaicCPU = { data: img.data, w: img.width, h: img.height, hasIR, updated: Date.now() };
+        }
+        _refreshProvRows();
+        _refreshColumnProbe();
         console.info(`[Satellite] cloud texture updated — ${source}`);
     }
     // Update data recency tracker
@@ -8702,7 +9206,13 @@ document.addEventListener('weather-update', e => {
     // as the procedural demo — those buffers carry uniform fake values
     // that would render as a featureless globe-wide haze.
     if (!meta?.demo) {
-        for (const ov of Object.values(_weatherOverlays)) ov.setHasData(true);
+        for (const [ovKey, ov] of Object.entries(_weatherOverlays)) {
+            // The residual layer's source of truth is the validation event
+            // (a verified forecast), not the weather frame — same pattern
+            // as the CAPE layer's pressure-level gate.
+            if (ovKey === 'residual') continue;
+            ov.setHasData(true);
+        }
     }
 
     // Rebuild isobar contours from the fresh pressure field — but only while
@@ -8728,6 +9238,10 @@ document.addEventListener('weather-update', e => {
     // sim instant (views into the feed ring — cheap) and refresh the
     // 250 hPa jet-peak readout.
     _refreshWindLevelData();
+    // Phase-4 consumers of the same frame: the vorticity layer recomputes
+    // its 5° stencil (visible only), the pinned column probe re-samples.
+    _refreshVorticity();
+    _refreshColumnProbe();
     updateIsobarPanel();
 
     // Track data recency for layer tooltips
@@ -10708,6 +11222,19 @@ renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hide
 
         const a = alertMarkers.getHovered(ray);
         if (a) { _pinEvent('alert', a, clientX, clientY); return true; }
+
+        // Column probe (Phase 4.1): with the probe layer armed, a bare-
+        // globe tap pins the vertical-profile card for that point instead
+        // of falling through to the dismiss branch. Event markers keep
+        // priority above so quake/alert pins are never shadowed.
+        if (document.getElementById('lyr-probe')?.checked) {
+            const hit = ray.intersectObject(earthMesh)[0];
+            if (hit?.uv) {
+                const ll = geo.deg.uvToLatLon(hit.uv.x, hit.uv.y);
+                _showColumnProbe(ll.lat, ll.lon, clientX, clientY);
+                return true;
+            }
+        }
 
         // Empty globe — dismiss any pinned card
         if (_ed.card.classList.contains('show')) _hideEventDetail();

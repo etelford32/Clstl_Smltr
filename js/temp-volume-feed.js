@@ -246,6 +246,9 @@ export class TempVolumeFeed {
             u500: view(cur, LVL.U500), v500: view(cur, LVL.V500),
             u250: has250 ? view(cur, LVL.U250) : null,
             v250: has250 ? view(cur, LVL.V250) : null,
+            // Column diagnostics for the point probe (earth.html). Views,
+            // not copies — same zero-cost contract as the wind channels.
+            cape: view(cur, LVL.CAPE), flh: view(cur, LVL.FLH),
             tendU850: tend(LVL.U850), tendV850: tend(LVL.V850),
             tendU500: tend(LVL.U500), tendV500: tend(LVL.V500),
         };
