@@ -57,7 +57,9 @@ SWMF/BATS-R-US, LFM, and OpenGGCM results.
 
 - [ ] Pull OMNI 1-min + Wind/ACE level-2 for 16–19 Mar 2015; cross-check gaps
       *(workstation path — SPDF is 403-blocked from the sandbox, re-confirmed
-      2026-07-13; exact commands in the runbook)*
+      2026-07-13; exact commands in the runbook. Tooling ready:
+      `dsmc/pipeline/extract_omni_indices.py` turns the OMNI monthly file
+      into the ground-mag + PC(N) inputs with sentinel/column-order gates)*
 - [x] Adapt Gannon runbook: interval boundaries, F10.7, dipole tilt for March
       equinox → `HINDCAST_STPATRICK_2015_RUNBOOK.md`
 - [x] Ap + F10.7 fixture staged

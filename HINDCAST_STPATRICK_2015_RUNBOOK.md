@@ -85,14 +85,26 @@ cd swmf && python3 -m pipeline.fetch_omni_imf \
   --start 2015-03-16 --end 2015-03-19 \
   --out fixtures/hindcast/st_patrick_mar_2015/imf_l1.dat
 
-# 3) Ground-mag fixture — AE/SYM-H from the same OMNI monthly file,
-#    canonicalised exactly as done for Gannon (AE↦sme, AU↦smu, AL↦sml,
-#    SYM-H↦h_comp_mean; knipp Joule proxy):
-cd dsmc && python3 -m pipeline.import_ground_mag \
-  --in raw/omni/st_patrick_mar_2015.csv \
+# 3) Ground-mag fixture — AE/AU/AL/SYM-H from the same OMNI monthly file.
+#    extract_omni_indices formalises the extraction step that was ad-hoc
+#    for Gannon; it gates on AE ≈ AU − AL (column-order guard), prints the
+#    SYM-H/AE fingerprints, and its output chains into import_ground_mag
+#    with no --columns flag. --pc-out also captures PC(N), the raw
+#    ingredient for a CPCP reference series (Day 3).
+cd ../dsmc
+python3 -m pipeline.extract_omni_indices \
+  --in ../swmf/raw/omni/omni_min201503.asc \
+  --start 2015-03-16T12:00:00Z --end 2015-03-19T12:00:00Z \
+  --out raw/omni/st_patrick_mar_2015_indices.csv \
+  --pc-out raw/omni/st_patrick_mar_2015_pc_n.csv -v
+python3 -m pipeline.import_ground_mag \
+  --in raw/omni/st_patrick_mar_2015_indices.csv \
   --out fixtures/hindcast/st_patrick_mar_2015/ground_mag.csv \
   --start 2015-03-16T12:00:00Z --end 2015-03-19T12:00:00Z -v
 ```
+
+The extractor prints the fingerprint line (`SYM-H min … ; AE max …`) —
+SYM-H min must read **−234 ± a few nT** or the file/window is wrong.
 
 **Data gate (do not launch without it):**
 
