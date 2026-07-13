@@ -59,6 +59,7 @@ This is **parkersphysics.com** — a physics-first space weather forecasting pla
 | Gannon hindcast | `GANNON_SIMULATION_DESIGN.md`, `MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md` |
 | Hindcast database (new events, scorecards) | `HINDCAST_BACKLOG.md`, `HINDCAST_DATABASE_STANDARD.md`, then the per-event runbook |
 | Earth / weather forecast | `WEATHER_FORECAST_PLAN.md`, `EARTH_LOD_NASA_PRECIP_PLAN.md` |
+| EarthView verdict card (earth.html dashboard) | §4.4 below, then `js/verdict-engine.js` + `js/verdict-card.js` headers; run `node tests/verdict-engine.mjs` after engine edits |
 | Navigation across pages | Run `node scripts/lint-nav.mjs`. There is a structural CI gate. |
 | Design system / tokens | `DESIGN_TOKENS.md` |
 | Deploy procedure | `DEPLOYMENT.md`, `VERCEL_SETUP.md`, `WEB_DEPLOYMENT.md` |
@@ -97,7 +98,42 @@ These advisor warnings will fire on every `get_advisors` call. They are **intent
 - **`build-wasm.sh` checks BOTH `~/.cargo/bin` and `/rust/bin`** for rustc. Vercel's build image uses `/rust/bin`; local dev typically uses `~/.cargo/env`. Don't pick one and remove the other.
 - **The `crons` array in `vercel.json` is the source of truth for scheduled jobs.** If you add a function to `api/cron/`, you MUST add it to `crons` or it won't run. Conversely, an entry in `crons` for a missing function will surface as a deploy warning, not a hard error — easy to overlook.
 
-### 4.4 In `js/nav.js` and friends
+### 4.4 The EarthView verdict card (earth.html)
+
+`earth.html` is branded **EarthView** (title / meta / HUD wordmark). Its default
+dashboard is the **verdict card** — a draggable, touch-optimized answer card
+mounted at `#verdict-host` (first left-panel element; z-index 70 so it sits
+above loc-panel 51 / storm-watch 60 — panels stack-and-drag by design, that
+overlap is not a bug).
+
+- **Modules:** `js/verdict-engine.js` (PURE fusion logic — no DOM, no fetch,
+  no ambient time; unit-tested by `tests/verdict-engine.mjs`),
+  `js/verdict-card.js` (DOM / styles / drag / telemetry, all CSS namespaced
+  `.ev-verdict-*`), `js/air-quality-feed.js` (per-location Open-Meteo:
+  AQI + UV + hourly/daily — intentionally per-location because the page's
+  `WeatherFeed` grid is global 5° cells; it duplicates no existing fetch).
+- **Flag:** default ON. Opt out with `?verdict=0` (one visit) or
+  `localStorage ev_verdict='0'` (sticky). "Explore ›" collapses the card to
+  a pill — it does NOT destroy it.
+- **The card is additive chrome.** Do not remove the layer system, the
+  research panels, the forecast-validation suite, or any existing panel in
+  its favor — and do not remove the card in theirs. `verdict-card.js`'s
+  header documents the stable-header / re-rendered-body split that keeps
+  drag wiring alive across data refreshes; don't "simplify" it into a full
+  innerHTML re-render.
+- **Telemetry:** `telemetry.recordFeature(feature, action, meta)` → kind
+  `'feature'`, 100% sampled. The kind exists in the DB via
+  `supabase-feature-telemetry-migration.sql` (applied 2026-07-13). The CHECK
+  constraint and the RPC whitelist must move together — see that file.
+- **The aurora GO threshold in `auroraVerdict` is margin ≤ 5°**, not the 2°
+  "overhead-only" figure from the NOAA table. Deliberate — the May 2024
+  Gannon storm put overhead aurora well equatorward of the table boundary,
+  and the acceptance tests encode Kp 9 @ 44° mlat → GO. Don't tighten it
+  back without reading the function comment.
+- **Playwright smoke:** `tests/verdict-card-smoke.spec.js` (Open-Meteo
+  routes are mocked; runs without live network).
+
+### 4.5 In `js/nav.js` and friends
 
 - There is a **CI gate** (`scripts/lint-nav.mjs`, workflow `nav-lint.yml`) that runs on every PR. It checks that every page uses the canonical navigation structure. The workflow comment explicitly states: "so parallel sessions cannot merge new nav drift." Respect the gate. If you must edit `js/nav.js` or any page's `<nav>` block, run `node scripts/lint-nav.mjs` locally before opening a PR.
 - The lint-baseline is `scripts/nav-lint-baseline.json`. Adding pages to it is a deliberate choice, not a default.

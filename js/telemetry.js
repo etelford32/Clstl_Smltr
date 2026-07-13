@@ -315,6 +315,59 @@ class Telemetry {
     }
 
     /**
+     * Record a product-feature interaction (impressions, CTA clicks,
+     * chip taps…). First consumer: the EarthView verdict card on
+     * earth.html (feature 'verdict_card' — see EARTHVIEW spec §6).
+     *
+     * 100% sampled, NOT 25% like vitals/perf — these are the success
+     * metrics for feature launches (CTR per impression), and volume is
+     * bounded by explicit user interactions, not render loops. Callers
+     * must NOT put PII in meta.
+     *
+     * Requires the 'feature' kind in client_telemetry's CHECK + the
+     * log_client_telemetry whitelist — added by
+     * supabase-feature-telemetry-migration.sql. Events sent before that
+     * migration runs are silently skipped by the RPC (by design; same
+     * roll-forward story as recordPipeline).
+     *
+     * @param {string} feature  Feature id, e.g. 'verdict_card'.
+     * @param {string} action   Interaction, e.g. 'impression', 'cta_alert'.
+     * @param {object} [meta]   Small action-specific payload.
+     */
+    recordFeature(feature, action, meta = {}) {
+        if (!feature || typeof feature !== 'string') return;
+        if (!action || typeof action !== 'string') return;
+        const payload = {
+            feature: feature.slice(0, 80),
+            action:  action.slice(0, 80),
+            ...meta,
+        };
+        try {
+            // Same size guard as recordFunnel: never let a fat payload get
+            // RPC-truncated into a shape that loses the feature/action.
+            const s = JSON.stringify(payload);
+            if (s.length > 1500) {
+                this._enqueue({
+                    kind:     'feature',
+                    severity: 'info',
+                    metadata: {
+                        feature: payload.feature,
+                        action:  payload.action,
+                        truncated: true,
+                        original_size: s.length,
+                    },
+                });
+                return;
+            }
+        } catch { /* fall through with raw payload */ }
+        this._enqueue({
+            kind:     'feature',
+            severity: 'info',
+            metadata: payload,
+        });
+    }
+
+    /**
      * Record a cookie-consent prompt impression or decision.
      *
      * Anonymous-safe and 100% sampled, exactly like recordFunnel: the
