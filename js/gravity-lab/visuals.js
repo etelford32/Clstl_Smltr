@@ -242,6 +242,8 @@ export function createOrbitGuide(elements, scaleKmPerUnit, color, opacity = 0.20
 // ─────────────────────────────────────────────────────────────────────────────
 
 const TRAIL_VERT = /* glsl */`
+    bool isPerspectiveMatrix( mat4 m ) { return m[ 2 ][ 3 ] == - 1.0; }
+    #include <logdepthbuf_pars_vertex>
     attribute float aSlot;
     uniform float uHead;
     uniform float uCount;
@@ -253,14 +255,17 @@ const TRAIL_VERT = /* glsl */`
         float t = 1.0 - age / max(uCount, 1.0);
         vAlpha = visible * t * t;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        #include <logdepthbuf_vertex>
     }
 `;
 
 const TRAIL_FRAG = /* glsl */`
     precision mediump float;
+    #include <logdepthbuf_pars_fragment>
     uniform vec3 uColor;
     varying float vAlpha;
     void main() {
+        #include <logdepthbuf_fragment>
         gl_FragColor = vec4(uColor * vAlpha, vAlpha);
     }
 `;
@@ -295,6 +300,50 @@ export function createTrailRing(capacity, color) {
     // camera cull live trails, so skip frustum culling outright.
     line.frustumCulled = false;
     return { line, geom, posAttr: geom.getAttribute('position'), uniforms };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Logarithmic-depth retrofit (P1.1).
+//
+// gravity-lab renders with renderer.logarithmicDepthBuffer = true. Three's
+// built-in materials handle that automatically, but raw ShaderMaterials
+// (the planet skins, Mars/Saturn surfaces) write LINEAR depth unless they
+// include the logdepthbuf chunks — producing wrong occlusion against
+// everything else. The skins are shared with other pages, so instead of
+// editing those files we patch the material INSTANCES created for this
+// page at load time. String surgery is anchored on the one thing every
+// vertex shader has (the gl_Position assignment) and the fragment main
+// opening; a material that doesn't match is left untouched and warned
+// about — cosmetic depth error only, contained to gravity-lab.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function enableLogDepth(root) {
+    root.traverse(obj => {
+        const mats = Array.isArray(obj.material) ? obj.material : (obj.material ? [obj.material] : []);
+        for (const mat of mats) {
+            if (!mat.isShaderMaterial || mat.userData.__logDepthPatched) continue;
+            mat.userData.__logDepthPatched = true;
+            if (mat.vertexShader.includes('logdepthbuf')) continue;   // already handled
+            const vsAnchor = /gl_Position[^;]*;/;
+            const fsAnchor = /void\s+main\s*\(\s*(void)?\s*\)\s*{/;
+            if (!vsAnchor.test(mat.vertexShader) || !fsAnchor.test(mat.fragmentShader)) {
+                console.warn('[gravity-lab] could not log-depth-patch material on', obj.name || obj.type);
+                continue;
+            }
+            // logdepthbuf_vertex calls isPerspectiveMatrix(), which built-in
+            // materials get from <common>. Prepending all of <common> risks
+            // symbol collisions with the skins' own helpers (PI etc.), so
+            // supply just that one function when the shader lacks it.
+            const helper = mat.vertexShader.includes('isPerspectiveMatrix')
+                ? ''
+                : 'bool isPerspectiveMatrix( mat4 m ) { return m[ 2 ][ 3 ] == - 1.0; }\n';
+            mat.vertexShader = helper + '#include <logdepthbuf_pars_vertex>\n' +
+                mat.vertexShader.replace(vsAnchor, m => `${m}\n    #include <logdepthbuf_vertex>`);
+            mat.fragmentShader = '#include <logdepthbuf_pars_fragment>\n' +
+                mat.fragmentShader.replace(fsAnchor, m => `${m}\n    #include <logdepthbuf_fragment>`);
+            mat.needsUpdate = true;
+        }
+    });
 }
 
 export function createLabelSprite(text, color = '#ffffff', accent = '#cba9ff') {

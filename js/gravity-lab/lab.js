@@ -22,6 +22,7 @@ import {
     createLabelSprite,
     createStarfield,
     createTrailRing,
+    enableLogDepth,
 } from './visuals.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,6 +63,16 @@ const state = {
     // Camera focus state — null = free orbit; integer = index into bodies[].
     focusIdx:       null,
     focusOffset:    new THREE.Vector3(),  // camera position relative to focus target
+    // Floating origin (P1.1, fixes D6): all roots are translated by −origin
+    // (world = z-exaggerated scene units) each frame, so rendered
+    // coordinates near the focus are small and float32-exact. Matrix
+    // composition happens in JS doubles, so body world translations cancel
+    // to full precision before the GPU ever sees them. When following, the
+    // origin IS the body — camera-follow becomes "do nothing".
+    origin:         new Float64Array(3),
+    // Out-of-plane (scene z) exaggeration ×1/×5/×20 (P1.2). Render-only:
+    // roots scale z by E, body groups counter-scale so spheres stay round.
+    zExag:          1,
     // Central-body J2 perturbation. Toggleable per system.
     j2Enabled:      false,
     j2Opts:         null,    // {centerIdx, J2, R_eq, mu} consumed by integrator
@@ -75,6 +86,9 @@ let scene, camera, renderer, controls;
 const sceneRoot      = new THREE.Group();  // contains current system bodies
 const trailRoot      = new THREE.Group();  // contains current system trails
 const overlayRoot    = new THREE.Group();  // labels / accents (e.g. barycenter)
+const guidesRoot     = new THREE.Group();  // Kepler guides + orbit-plane discs
+const gridRoot       = new THREE.Group();  // reference grid (P1.2)
+let guideAnchor      = null;               // subgroup tracking the parent body
 let barycenterGroup  = null;               // marker for visible binaries
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -128,15 +142,19 @@ export function initScene(canvasEl) {
         canvas: canvasEl,
         antialias: true,
         alpha: true,
+        // P1.1: the dynamic range from a 58 km moon to a 200-unit stellar
+        // system needs logarithmic depth. ShaderMaterials created for this
+        // page are retrofitted via enableLogDepth() at system load.
+        logarithmicDepthBuffer: true,
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(0x05030f, 1);
     _resize();
 
     scene = new THREE.Scene();
-    scene.add(sceneRoot, trailRoot, overlayRoot);
+    scene.add(sceneRoot, trailRoot, overlayRoot, guidesRoot, gridRoot);
 
-    camera = new THREE.PerspectiveCamera(45, _aspect(), 0.01, 5000);
+    camera = new THREE.PerspectiveCamera(45, _aspect(), 1e-5, 50000);
     camera.position.set(0, 25, 75);
 
     controls = new OrbitControls(camera, renderer.domElement);
@@ -205,25 +223,75 @@ function _pickAtScreen(clientX, clientY) {
     }
 }
 
+/**
+ * Move the floating origin to a new world-space point (P1.1). Camera and
+ * controls live in rebased (origin-relative) coordinates: shifting them by
+ * −Δ preserves their absolute pose across the jump. Per-frame follow
+ * updates skip the shift — the camera riding along WITH the origin is
+ * exactly what "follow" means, in pure double precision.
+ */
+function _setOrigin(x, y, z, preserveCameraWorldPose) {
+    const dx = x - state.origin[0];
+    const dy = y - state.origin[1];
+    const dz = z - state.origin[2];
+    if (dx === 0 && dy === 0 && dz === 0) return;
+    if (preserveCameraWorldPose) {
+        camera.position.x -= dx; camera.position.y -= dy; camera.position.z -= dz;
+        controls.target.x -= dx; controls.target.y -= dy; controls.target.z -= dz;
+    }
+    state.origin[0] = x;
+    state.origin[1] = y;
+    state.origin[2] = z;
+}
+
+/**
+ * Out-of-plane exaggeration (P1.2): render-only. Roots that depict
+ * TRAJECTORIES (bodies' positions, trails, guides, discs) scale z by E;
+ * each body group counter-scales so the spheres/rings stay undistorted.
+ * Physics never sees any of this.
+ */
+function _setZExag(E) {
+    state.zExag = E;
+    sceneRoot.scale.z  = E;
+    trailRoot.scale.z  = E;
+    guidesRoot.scale.z = E;
+    for (const g of state.bodyGroups) {
+        if (g) g.scale.z = 1 / E;
+    }
+}
+
+function _bodyWorld(idx) {
+    const b = state.bodies[idx];
+    return [
+        _toScene(b.r[0]),
+        _toScene(b.r[1]),
+        _toScene(b.r[2]) * state.zExag,
+    ];
+}
+
 export function setFocus(idx) {
     state.focusIdx = idx;
     if (idx == null) {
-        controls.target.set(0, 0, 0);
+        // Free orbit: freeze the origin where it is and aim at the system
+        // center (absolute 0 → rebased −origin).
+        controls.target.set(-state.origin[0], -state.origin[1], -state.origin[2]);
+        controls.minDistance = 1.5;
         if (hud.focusLabel) hud.focusLabel.textContent = 'Free orbit · click a body to focus';
     } else {
-        const grp = state.bodyGroups[idx];
         const mesh = state.meshes[idx];
-        if (!grp || !mesh) return;
-        const target = grp.position;       // body groups are positioned each frame
-        controls.target.copy(target);
-        // If the camera is far from the body, dolly in to a sensible distance.
+        if (!mesh) return;
+        // Origin jumps to the body (preserving the camera's world pose);
+        // from here on the body IS (0,0,0) and following is free.
+        const [bx, by, bz] = _bodyWorld(idx);
+        _setOrigin(bx, by, bz, true);
+        controls.target.set(0, 0, 0);
         const r = mesh.geometry?.parameters?.radius ?? 0.1;
-        const dist = camera.position.distanceTo(target);
+        // Let the user dolly right down to the surface of even a 58 km
+        // moon — the floating origin keeps it rock-steady (P1.1).
+        controls.minDistance = Math.max(r * 1.6, 2e-4);
+        const dist = camera.position.length();
         const want = Math.max(r * 8, 1.0);
-        if (dist > want * 4) {
-            const dir = camera.position.clone().sub(target).normalize();
-            camera.position.copy(target).addScaledVector(dir, want);
-        }
+        if (dist > want * 4) camera.position.setLength(want);
         if (hud.focusLabel) {
             const name = state.bodies[idx]?.name ?? '?';
             hud.focusLabel.textContent = `Following: ${_capitalize(name)}`;
@@ -272,6 +340,15 @@ export function loadSystem(systemId) {
     _disposeGroup(sceneRoot);
     _disposeGroup(trailRoot);
     _disposeGroup(overlayRoot);
+    _disposeGroup(guidesRoot);
+    _disposeGroup(gridRoot);
+
+    // Fresh floating origin + exaggeration for the incoming system.
+    state.origin[0] = state.origin[1] = state.origin[2] = 0;
+    _setZExag(1);
+    guideAnchor = new THREE.Group();
+    guideAnchor.name = 'guide-anchor';
+    guidesRoot.add(guideAnchor);
     state.bodies = src.bodies.map(b => ({
         ...b,
         r: [b.r[0], b.r[1], b.r[2]],
@@ -393,14 +470,20 @@ export function loadSystem(systemId) {
                     b.color ?? 0xffffff,
                     0.18,
                 );
-                // Anchor the guide at the parent body's group so it follows
-                // the parent's barycentric wobble.
-                state.bodyGroups[0].add(guide);
+                // Anchored at guideAnchor (tracks the parent's barycentric
+                // wobble) inside guidesRoot, which carries the rebase and
+                // the z-exaggeration — unlike body groups, guides WANT the
+                // exaggeration (they depict orbits, not spheres).
+                guideAnchor.add(guide);
             }
         } else {
             state.trails.push(null);
         }
     }
+
+    // Retrofit log-depth support onto every ShaderMaterial instance built
+    // for this system (planet skins, procedural surfaces) — see visuals.js.
+    enableLogDepth(sceneRoot);
 
     state.focusIdx = null;
     _buildBarycenterMarker(src.show_barycenter);
@@ -591,6 +674,24 @@ function _toScene(rMeters) {
 }
 
 function _updateMeshes() {
+    const E = state.zExag;
+    // Follow: the origin tracks the focused body every frame. The camera
+    // is NOT shifted — riding with the origin is what following means.
+    if (state.focusIdx != null) {
+        const [bx, by, bz] = _bodyWorld(state.focusIdx);
+        _setOrigin(bx, by, bz, false);
+    }
+    const ox = state.origin[0], oy = state.origin[1], oz = state.origin[2];
+
+    // Roots carry the rebase (and the z-exaggeration scale). Body groups
+    // keep plain absolute scene coordinates — the root matrices compose in
+    // JS doubles, so world translations near the focus cancel exactly.
+    sceneRoot.position.set(-ox, -oy, -oz);
+    trailRoot.position.set(-ox, -oy, -oz);
+    guidesRoot.position.set(-ox, -oy, -oz);
+    gridRoot.position.set(-ox, -oy, -oz);
+    if (barycenterGroup) barycenterGroup.position.set(-ox, -oy, -oz);
+
     const labelLift = 0.40 * state.labelScale;
     for (let i = 0; i < state.bodies.length; i++) {
         const b = state.bodies[i];
@@ -599,14 +700,15 @@ function _updateMeshes() {
         const z = _toScene(b.r[2]);
         const g = state.bodyGroups[i];
         if (g) g.position.set(x, y, z);
-        // Surface mesh kept in sync (raycaster uses world matrices, but
-        // belt-and-braces: also translate the standalone mesh in case a body
-        // ever has no group).
-        const m = state.meshes[i];
-        if (m && m.parent === sceneRoot) m.position.set(x, y, z);
-        // Label rides above the body in scene-space.
+        // Label rides above the body — positioned directly in rebased
+        // world space (sprites must not inherit the z-exaggeration scale).
         const lbl = state.labels[i];
-        if (lbl) lbl.position.set(x, y + labelLift, z);
+        if (lbl) lbl.position.set(x - ox, y - oy + labelLift, z * E - oz);
+    }
+    // The Kepler guides / orbit-plane discs follow the parent body's wobble.
+    if (guideAnchor) {
+        const p = state.bodyGroups[0];
+        if (p) guideAnchor.position.copy(p.position);
     }
 }
 
@@ -716,18 +818,10 @@ function _tick(t) {
     // band drift / GRS rotation still tick when the integrator is paused).
     _tickVisuals(t / 1000);
 
-    // Camera follow: keep target locked to focused body. The OrbitControls
-    // user input continues to work — the user orbits around the moving body.
-    if (state.focusIdx != null) {
-        const g = state.bodyGroups[state.focusIdx];
-        if (g) {
-            // Translate camera by the body's frame-to-frame motion so the
-            // viewer stays at the same relative offset.
-            const delta = g.position.clone().sub(controls.target);
-            camera.position.add(delta);
-            controls.target.copy(g.position);
-        }
-    }
+    // Camera follow is free under the floating origin (P1.1): the origin
+    // tracks the focused body inside _updateMeshes, so the body sits at
+    // (0,0,0) in camera space every frame — no per-frame float32 delta
+    // translation, no jitter (D6 fixed).
 
     controls.update();
     renderer.render(scene, camera);
@@ -1122,5 +1216,5 @@ export function boot({ canvas, ui, defaultSystem = 'jupiter-galileans' }) {
     start();
     // Debug/test handle only — the smoke tests read trail buffers and sim
     // state through this. Not a public API; do not build features on it.
-    if (typeof window !== 'undefined') window.__glLab = { state };
+    if (typeof window !== 'undefined') window.__glLab = { state, setFocus, loadSystem };
 }
