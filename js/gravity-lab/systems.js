@@ -72,7 +72,7 @@ const M = Object.fromEntries(
  * Keplerian elements relative to the parent.  Returns the full body list
  * with the system shifted into its own barycentric frame.
  */
-function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, suggested_dt_s, suggested_warp, marketing, oblateness, j2_default, rings }) {
+function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, suggested_dt_s, suggested_warp, marketing, oblateness, j2_default, rings, show_barycenter, default_view, trail_periods }) {
     const bodies = [{
         name: parent.name,
         m: parent.m,
@@ -114,6 +114,9 @@ function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, sugges
         oblateness:  oblateness || null,    // {J2, R_eq_m} or null
         j2_default:  !!j2_default,          // start with J2 enabled?
         rings:       rings || null,          // {inner_R, outer_R, tilt_deg, color, opacity, gaps?}
+        show_barycenter: !!show_barycenter,  // draw the COM reticle
+        default_view: default_view || null,  // camera preset applied on load (P1.3)
+        trail_periods: trail_periods || 0,   // visible orbits per trail (0 = default)
     };
 }
 
@@ -345,6 +348,7 @@ const JUPITER_GALILEANS = _build({
     // At 900 s the measured envelope is 5.9e-9 (test/run.mjs enforces it).
     suggested_dt_s:    900,
     suggested_warp:    86400 * 0.5,      // half day per real second
+    default_view:      'skim',           // land on the cinematic plane-skim (P1.3)
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

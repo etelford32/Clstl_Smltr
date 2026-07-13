@@ -409,6 +409,47 @@ canvas.gl-resonance-canvas {
     pointer-events:none;
 }
 
+/* ─── Zoom / camera controls tooltip (P1.3) ─────────────────── */
+#gl-hint {
+    position:absolute; left:14px; bottom:16px;
+    z-index:3;
+    max-width:min(420px, calc(100% - 76px));
+    font-family:monospace; font-size:.7rem; line-height:1.5;
+    color:#cba9ff;
+    background:rgba(10,6,28,.85); backdrop-filter:blur(10px);
+    border:1px solid rgba(180,140,255,.30);
+    border-radius:8px;
+    padding:8px 12px;
+    pointer-events:none;
+    opacity:0; transform:translateY(6px);
+    transition:opacity .45s ease, transform .45s ease;
+}
+#gl-hint.show { opacity:1; transform:translateY(0); }
+#gl-hint-btn {
+    position:absolute; left:14px; bottom:16px;
+    z-index:4;
+    width:34px; height:34px; border-radius:50%;
+    background:rgba(10,6,28,.85); backdrop-filter:blur(10px);
+    border:1px solid rgba(180,140,255,.30);
+    color:#cba9ff; font-family:monospace; font-size:.95rem; font-weight:700;
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition:border-color .15s, color .15s;
+}
+#gl-hint-btn:hover { border-color:#b78cff; color:#fff; }
+#gl-hint.show + #gl-hint-btn { opacity:0; pointer-events:none; }
+@media (max-width:768px) {
+    #gl-hint { font-size:.66rem; left:10px; bottom:12px; }
+    #gl-hint-btn { left:10px; bottom:12px; width:40px; height:40px; }
+}
+/* Touch targets: chips/buttons grow to ≥40px on coarse pointers. */
+@media (pointer: coarse) {
+    .gl-chip { padding:11px 15px; font-size:.8rem; }
+    .gl-btn  { padding:12px 12px; }
+    .gl-warp-wrap input::-webkit-slider-thumb { width:22px; height:22px; }
+    .gl-warp-wrap input::-moz-range-thumb { width:22px; height:22px; }
+}
+
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 <script type="importmap">
@@ -523,6 +564,12 @@ canvas.gl-resonance-canvas {
         <div class="gl-camera">
             <div class="gl-focus-label" id="gl-focus-label">Free orbit · click a body to focus</div>
             <div class="gl-chips" id="gl-chips"></div>
+            <div class="gl-chips" id="gl-cam-presets">
+                <button type="button" class="gl-chip gl-preset" data-preset="overview">⌾ Overview</button>
+                <button type="button" class="gl-chip gl-preset" data-preset="polar">◉ Polar</button>
+                <button type="button" class="gl-chip gl-preset" data-preset="skim">✈ Plane skim</button>
+                <button type="button" class="gl-chip gl-preset" data-preset="ride">◈ Ride along</button>
+            </div>
             <button type="button" class="gl-btn" id="gl-fit">⌖ Fit System View</button>
             <p class="gl-camera-hint">Click any body — in the scene or below — to follow it. Click again or the fit button to return.</p>
         </div>
@@ -569,6 +616,8 @@ canvas.gl-resonance-canvas {
             <span class="gl-stage-jd"   id="gl-jd">JD —</span>
         </div>
         <div id="gl-stage-watermark">Yoshida-4 · symplectic · live</div>
+        <div id="gl-hint" role="note" aria-live="polite"></div>
+        <button type="button" id="gl-hint-btn" aria-label="Show camera controls help" title="Camera controls">?</button>
     </main>
 
     <!-- ─── RIGHT SIDEBAR — HUD ─────────────────────────────────────── -->
@@ -660,6 +709,11 @@ const ui = {
     planesToggle: document.getElementById('gl-planes'),
     exagBtns:     Array.from(document.querySelectorAll('.gl-exag')),
     exagBadge:    document.getElementById('gl-exag-badge'),
+
+    // Camera presets + controls tooltip (P1.3)
+    presetBtns:   Array.from(document.querySelectorAll('.gl-preset')),
+    hint:         document.getElementById('gl-hint'),
+    hintBtn:      document.getElementById('gl-hint-btn'),
 };
 
 boot({ canvas, ui, defaultSystem: 'jupiter-galileans' });

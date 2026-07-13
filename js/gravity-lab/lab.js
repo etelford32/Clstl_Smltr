@@ -142,6 +142,10 @@ const hud = {
     planesToggle: null,
     exagBtns:     null,   // ×1 / ×5 / ×20 segmented buttons
     exagBadge:    null,   // "INCLINATIONS ×N — VISUAL ONLY" stage badge
+    // Cinematic cameras + controls hint (P1.3)
+    presetBtns:   null,   // overview / polar / plane-skim / ride chips
+    hint:         null,   // zoom & camera controls tooltip on the stage
+    hintBtn:      null,   // "?" button that re-shows the tooltip
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,13 +170,23 @@ export function initScene(canvasEl) {
     scene.add(sceneRoot, trailRoot, overlayRoot, guidesRoot, gridRoot);
 
     camera = new THREE.PerspectiveCamera(45, _aspect(), 1e-5, 50000);
-    camera.position.set(0, 25, 75);
+    // The system plane is scene XY (physics z = out-of-plane), so the
+    // camera's up is the plane NORMAL (+Z): the ecliptic reads as the
+    // ground plane, inclination as vertical lift, and OrbitControls
+    // orbits azimuthally around the pole — the natural frame for an
+    // orbital-mechanics lab (P1.3).
+    camera.up.set(0, 0, 1);
+    camera.position.set(7.5, -60, 33);
 
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.minDistance = 1.5;
     controls.maxDistance = 600;
+
+    // Any direct user input takes the wheel back from a preset tween.
+    canvasEl.addEventListener('pointerdown', () => { _fly = null; });
+    canvasEl.addEventListener('wheel', () => { _fly = null; }, { passive: true });
 
     // Lighting — soft fill + a directional "sun" so spheres show shading.
     // The directional light direction is also fed into every skin's
@@ -513,6 +527,8 @@ export function loadSystem(systemId) {
     state.focusIdx = null;
     _buildBarycenterMarker(src.show_barycenter);
     _frameSystem();
+    // Systems built to showcase 3D land on the cinematic pose directly.
+    if (src.default_view) applyCameraPreset(src.default_view, true);
     _updateMeshes();
     _renderHUDChrome();
     _renderBodyChips();
@@ -621,20 +637,19 @@ function _buildBarycenterMarker(show) {
     const g = new THREE.Group();
     g.name = 'barycenter';
 
-    // Inner reticle ring lying in the XZ plane (matches our ecliptic).
+    // Inner reticle ring in the system plane (scene XY — RingGeometry's
+    // native plane; the old π/2 twist put it edge-on to the orbits).
     const ringGeo = new THREE.RingGeometry(0.10, 0.14, 48);
     const ringMat = new THREE.MeshBasicMaterial({
         color: 0xffffff, transparent: true, opacity: 0.55,
         side: THREE.DoubleSide, depthWrite: false,
     });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = Math.PI / 2;
-    g.add(ring);
+    g.add(new THREE.Mesh(ringGeo, ringMat));
 
-    // Tiny cross of two perpendicular lines.
+    // Tiny cross of two perpendicular lines, also in-plane.
     const crossPos = new Float32Array([
         -0.28, 0, 0,   0.28, 0, 0,
-         0, 0, -0.28,  0, 0,  0.28,
+         0, -0.28, 0,  0, 0.28, 0,
     ]);
     const crossGeo = new THREE.BufferGeometry();
     crossGeo.setAttribute('position', new THREE.BufferAttribute(crossPos, 3));
@@ -694,19 +709,77 @@ function _renderJ2Widget() {
 }
 
 function _frameSystem() {
-    // Auto-fit camera to system extent.
-    let maxR = 0;
-    for (const b of state.bodies) {
-        const rkm = Math.hypot(b.r[0], b.r[1], b.r[2]) * KM_PER_M;
-        const u = rkm / state.sceneScaleKm;
-        if (u > maxR) maxR = u;
-    }
-    const dist = Math.max(maxR * 2.4, 5);
-    camera.position.set(dist * 0.1, dist * 0.55, dist * 1.15);
+    // Auto-fit camera to system extent (up = +Z: plane reads horizontal).
+    const dist = Math.max(state.extentUnits * 2.4, 5);
+    camera.position.set(dist * 0.10, dist * -1.05, dist * 0.62);
     controls.target.set(0, 0, 0);
     controls.minDistance = 1.5;
     controls.maxDistance = Math.max(dist * 6, 300);
     controls.update();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cinematic camera presets (P1.3) — computed from system geometry, tweened
+// over ~1.2 s with ease-in-out, interruptible by any user input.
+// ─────────────────────────────────────────────────────────────────────────────
+
+let _fly = null;
+
+function _flyTo(pos, target, ms = 1200) {
+    _fly = {
+        p0: camera.position.clone(),
+        t0: controls.target.clone(),
+        p1: pos,
+        t1: target,
+        start: performance.now(),
+        ms,
+    };
+}
+
+export function applyCameraPreset(name, instant = false) {
+    const d = Math.max(state.extentUnits * 2.4, 5);
+    let pos, target;
+
+    if (name === 'ride') {
+        // Lock onto a body with the primary in view: camera sits on the
+        // far side of the rider so the primary hangs behind it.
+        const idx = state.bodies.findIndex(b => !b.is_parent);
+        if (idx < 0) return;
+        setFocus(idx);                       // origin jumps → body is (0,0,0)
+        const b = state.bodies[idx];
+        const p = state.bodies[0];
+        const away = new THREE.Vector3(
+            _toScene(b.r[0] - p.r[0]),
+            _toScene(b.r[1] - p.r[1]),
+            _toScene(b.r[2] - p.r[2]),
+        ).normalize();
+        const r = state.meshes[idx]?.geometry?.parameters?.radius ?? 0.1;
+        pos = away.multiplyScalar(r * 7).add(new THREE.Vector3(0, 0, r * 2.5));
+        target = new THREE.Vector3(0, 0, 0);
+    } else {
+        setFocus(null);                      // freeze origin, free orbit
+        const c = new THREE.Vector3(-state.origin[0], -state.origin[1], -state.origin[2]);
+        target = c;
+        if (name === 'polar') {
+            pos = c.clone().add(new THREE.Vector3(d * 0.001, d * -0.03, d * 1.8));
+        } else if (name === 'skim') {
+            // The money shot: 1.2° above the plane, looking along it.
+            const az = 25 * Math.PI / 180;
+            const R = d * 1.30;
+            pos = c.clone().add(new THREE.Vector3(
+                R * Math.cos(az), -R * Math.sin(az), R * Math.sin(1.2 * Math.PI / 180)));
+        } else {   // overview
+            pos = c.clone().add(new THREE.Vector3(d * 0.10, d * -1.05, d * 0.62));
+        }
+    }
+
+    if (instant) {
+        camera.position.copy(pos);
+        controls.target.copy(target);
+        controls.update();
+    } else {
+        _flyTo(pos, target);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -915,6 +988,15 @@ function _tick(t) {
     // tracks the focused body inside _updateMeshes, so the body sits at
     // (0,0,0) in camera space every frame — no per-frame float32 delta
     // translation, no jitter (D6 fixed).
+
+    // Preset tween (P1.3) — ease-in-out, killed by any pointer input.
+    if (_fly) {
+        const k = Math.min(1, (t - _fly.start) / _fly.ms);
+        const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+        camera.position.lerpVectors(_fly.p0, _fly.p1, e);
+        controls.target.lerpVectors(_fly.t0, _fly.t1, e);
+        if (k >= 1) _fly = null;
+    }
 
     controls.update();
     renderer.render(scene, camera);
@@ -1260,6 +1342,30 @@ export function attachUI(refs) {
             btn.addEventListener('click', () => {
                 _setZExag(parseFloat(btn.dataset.exag) || 1);
                 _syncViewUI();
+            });
+        }
+    }
+
+    // ── Camera presets + controls tooltip (P1.3) ────────────────────────
+    if (hud.presetBtns) {
+        for (const btn of hud.presetBtns) {
+            btn.addEventListener('click', () => applyCameraPreset(btn.dataset.preset));
+        }
+    }
+    if (hud.hint) {
+        const coarse = typeof matchMedia === 'function' &&
+            matchMedia('(pointer: coarse)').matches;
+        hud.hint.textContent = coarse
+            ? '1 finger orbit · pinch zoom · 2 fingers pan · tap a body to follow'
+            : 'drag to orbit · scroll to zoom · right-drag to pan · click a body to follow';
+        hud.hint.classList.add('show');
+        const dismiss = () => hud.hint.classList.remove('show');
+        setTimeout(dismiss, 9000);
+        renderer?.domElement.addEventListener('pointerdown', dismiss, { once: true });
+        if (hud.hintBtn) {
+            hud.hintBtn.addEventListener('click', e => {
+                e.stopPropagation();
+                hud.hint.classList.toggle('show');
             });
         }
     }
