@@ -98,9 +98,12 @@ export function createBodyVisual(body, parent, opts) {
             // Unskinned body — pick a procedural surface based on `surface` hint.
             surfaceMesh = _makeProcedural(body, radiusUnits, segmentsLow);
             group.add(surfaceMesh);
-            // Faint glow for parents.
-            if (body.is_parent && body.glow !== undefined) {
-                _addRimGlow(group, radiusUnits * 1.15, body.glow, 0.10);
+            // Faint glow for any body that declares one (parents, and the
+            // stars of the Algol system — satellites without a glow field
+            // are unaffected).
+            if (body.glow !== undefined) {
+                _addRimGlow(group, radiusUnits * 1.15, body.glow,
+                    body.surface === 'star' ? 0.22 : 0.10);
             }
         }
     }
@@ -223,6 +226,252 @@ export function createOrbitGuide(elements, scaleKmPerUnit, color, opacity = 0.20
 // ─────────────────────────────────────────────────────────────────────────────
 // Label sprite — small text tag that rides above each body in screen space.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orbit trail ring (P0.3) — zero-allocation GPU ring buffer.
+//
+// Geometry is a fixed pool of `capacity` line segments used as a circular
+// buffer: lab.js writes each new sample as one segment (previous point →
+// new point) at the advancing head slot. Because segments are independent
+// primitives there is no seam artifact when the ring wraps — the slot
+// being overwritten simply becomes the newest segment.
+//
+// Fade is computed in the vertex shader from the static per-segment slot
+// index and a `uHead` uniform: age = (head − slot) mod cap, newest = 1 →
+// alpha t², matching the old CPU-side quadratic fade. This replaces the
+// per-frame Float32Array rotation + full color rewrite (D4): steady-state
+// per-frame work is 6 floats per new point and two uniform updates —
+// zero allocations.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TRAIL_VERT = /* glsl */`
+    bool isPerspectiveMatrix( mat4 m ) { return m[ 2 ][ 3 ] == - 1.0; }
+    #include <logdepthbuf_pars_vertex>
+    attribute float aSlot;
+    uniform float uHead;
+    uniform float uCount;
+    uniform float uCap;
+    varying float vAlpha;
+    void main() {
+        float age = mod(uHead - aSlot + uCap, uCap);
+        float visible = 1.0 - step(uCount - 0.5, age);   // age < count
+        float t = 1.0 - age / max(uCount, 1.0);
+        vAlpha = visible * t * t;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        #include <logdepthbuf_vertex>
+    }
+`;
+
+const TRAIL_FRAG = /* glsl */`
+    precision mediump float;
+    #include <logdepthbuf_pars_fragment>
+    uniform vec3 uColor;
+    varying float vAlpha;
+    void main() {
+        #include <logdepthbuf_fragment>
+        gl_FragColor = vec4(uColor * vAlpha, vAlpha);
+    }
+`;
+
+export function createTrailRing(capacity, color) {
+    const positions = new Float32Array(capacity * 2 * 3);   // zeros: degenerate, invisible
+    const slots = new Float32Array(capacity * 2);
+    for (let s = 0; s < capacity; s++) {
+        slots[2 * s] = s;
+        slots[2 * s + 1] = s;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('aSlot',    new THREE.BufferAttribute(slots, 1));
+
+    const uniforms = {
+        uHead:  { value: 0 },
+        uCount: { value: 0 },
+        uCap:   { value: capacity },
+        uColor: { value: new THREE.Color(color) },
+    };
+    const mat = new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader:   TRAIL_VERT,
+        fragmentShader: TRAIL_FRAG,
+        transparent:    true,
+        depthWrite:     false,
+        blending:       THREE.AdditiveBlending,
+    });
+    const line = new THREE.LineSegments(geom, mat);
+    // Ring contents move every frame; a stale bounding sphere would let the
+    // camera cull live trails, so skip frustum culling outright.
+    line.frustumCulled = false;
+    return { line, geom, posAttr: geom.getAttribute('position'), uniforms };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reference grid (P1.2) — translucent polar grid in the system plane
+// (scene XY): concentric rings at round physical distances with km/AU
+// labels, plus faint radial spokes. This is the depth cue that makes
+// "how far out is that moon" legible at a glance.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _roundStepKm(extentKm) {
+    // 1-2-5 ladder such that 3-5 rings cover the system.
+    const raw = extentKm / 4;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (const m of [1, 2, 5, 10]) {
+        if (raw <= m * mag) return m * mag;
+    }
+    return 10 * mag;
+}
+
+function _fmtDistanceKm(km) {
+    const AU = 1.495978707e8;
+    if (km >= 0.01 * AU) {
+        const au = km / AU;
+        return `${au >= 10 ? au.toFixed(1) : au.toFixed(2)} AU`;
+    }
+    if (km >= 1e6) return `${(km / 1e6).toPrecision(3).replace(/\.?0+$/, '')}M km`;
+    return `${Math.round(km).toLocaleString('en-US')} km`;
+}
+
+export function createReferenceGrid(extentUnits, scaleKmPerUnit) {
+    const group = new THREE.Group();
+    group.name = 'reference-grid';
+
+    const extentKm = extentUnits * scaleKmPerUnit;
+    const stepKm = _roundStepKm(extentKm);
+    const radiiKm = [];
+    for (let r = stepKm; r <= extentKm * 1.15 && radiiKm.length < 6; r += stepKm) {
+        radiiKm.push(r);
+    }
+
+    const ringMat = new THREE.LineBasicMaterial({
+        color: 0x8a86b8, transparent: true, opacity: 0.13, depthWrite: false,
+    });
+    const SEG = 128;
+    for (const rKm of radiiKm) {
+        const r = rKm / scaleKmPerUnit;
+        const pts = new Float32Array(SEG * 3);
+        for (let k = 0; k < SEG; k++) {
+            const a = (k / SEG) * 2 * Math.PI;
+            pts[k * 3]     = r * Math.cos(a);
+            pts[k * 3 + 1] = r * Math.sin(a);
+            pts[k * 3 + 2] = 0;
+        }
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+        group.add(new THREE.LineLoop(geom, ringMat));
+
+        // Distance tag on the +X axis, nudged off the ring line.
+        const tag = createLabelSprite(_fmtDistanceKm(rKm), '#9a96c8', '#7a78a4');
+        const s = Math.max(0.5, Math.min(3.0, extentUnits / 30));
+        tag.scale.set(s * 1.6, s * 0.4, 1);
+        tag.position.set(r, s * 0.28, 0);
+        tag.material.opacity = 0.75;
+        group.add(tag);
+    }
+
+    // Radial spokes every 30°, out to the last ring.
+    const outer = (radiiKm[radiiKm.length - 1] ?? extentKm) / scaleKmPerUnit;
+    const inner = outer * 0.02;
+    const spokes = new Float32Array(12 * 2 * 3);
+    for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * 2 * Math.PI;
+        const o = k * 6;
+        spokes[o]     = inner * Math.cos(a);
+        spokes[o + 1] = inner * Math.sin(a);
+        spokes[o + 3] = outer * Math.cos(a);
+        spokes[o + 4] = outer * Math.sin(a);
+    }
+    const spokeGeom = new THREE.BufferGeometry();
+    spokeGeom.setAttribute('position', new THREE.BufferAttribute(spokes, 3));
+    group.add(new THREE.LineSegments(spokeGeom, new THREE.LineBasicMaterial({
+        color: 0x8a86b8, transparent: true, opacity: 0.06, depthWrite: false,
+    })));
+
+    return group;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orbit-plane disc (P1.2) — a barely-there translucent disc spanning a
+// body's osculating orbit plane. Inclination becomes VISIBLE as the angle
+// between discs; with z-exaggeration the discs shear with the orbits.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _Z_HAT = new THREE.Vector3(0, 0, 1);
+
+export function createOrbitPlaneDisc(elements, scaleKmPerUnit, color) {
+    const KM_PER_M = 1e-3;
+    const a = elements.a * KM_PER_M / scaleKmPerUnit;
+    const e = elements.e ?? 0;
+    const r = a * (1 + e) * 1.04;
+
+    const geom = new THREE.CircleGeometry(r, 72);
+    const mat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.04,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    });
+    const disc = new THREE.Mesh(geom, mat);
+
+    // Orbit normal ĥ = (sin i sin Ω, −sin i cos Ω, cos i) — matches the
+    // rotation convention in physics.elementsToState / createOrbitGuide.
+    const i = (elements.i_deg ?? 0) * D2R;
+    const O = (elements.raan_deg ?? 0) * D2R;
+    const h = new THREE.Vector3(
+        Math.sin(i) * Math.sin(O),
+        -Math.sin(i) * Math.cos(O),
+        Math.cos(i),
+    );
+    disc.quaternion.setFromUnitVectors(_Z_HAT, h);
+    disc.userData.kind = 'orbit-plane';
+    return disc;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Logarithmic-depth retrofit (P1.1).
+//
+// gravity-lab renders with renderer.logarithmicDepthBuffer = true. Three's
+// built-in materials handle that automatically, but raw ShaderMaterials
+// (the planet skins, Mars/Saturn surfaces) write LINEAR depth unless they
+// include the logdepthbuf chunks — producing wrong occlusion against
+// everything else. The skins are shared with other pages, so instead of
+// editing those files we patch the material INSTANCES created for this
+// page at load time. String surgery is anchored on the one thing every
+// vertex shader has (the gl_Position assignment) and the fragment main
+// opening; a material that doesn't match is left untouched and warned
+// about — cosmetic depth error only, contained to gravity-lab.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function enableLogDepth(root) {
+    root.traverse(obj => {
+        const mats = Array.isArray(obj.material) ? obj.material : (obj.material ? [obj.material] : []);
+        for (const mat of mats) {
+            if (!mat.isShaderMaterial || mat.userData.__logDepthPatched) continue;
+            mat.userData.__logDepthPatched = true;
+            if (mat.vertexShader.includes('logdepthbuf')) continue;   // already handled
+            const vsAnchor = /gl_Position[^;]*;/;
+            const fsAnchor = /void\s+main\s*\(\s*(void)?\s*\)\s*{/;
+            if (!vsAnchor.test(mat.vertexShader) || !fsAnchor.test(mat.fragmentShader)) {
+                console.warn('[gravity-lab] could not log-depth-patch material on', obj.name || obj.type);
+                continue;
+            }
+            // logdepthbuf_vertex calls isPerspectiveMatrix(), which built-in
+            // materials get from <common>. Prepending all of <common> risks
+            // symbol collisions with the skins' own helpers (PI etc.), so
+            // supply just that one function when the shader lacks it.
+            const helper = mat.vertexShader.includes('isPerspectiveMatrix')
+                ? ''
+                : 'bool isPerspectiveMatrix( mat4 m ) { return m[ 2 ][ 3 ] == - 1.0; }\n';
+            mat.vertexShader = helper + '#include <logdepthbuf_pars_vertex>\n' +
+                mat.vertexShader.replace(vsAnchor, m => `${m}\n    #include <logdepthbuf_vertex>`);
+            mat.fragmentShader = '#include <logdepthbuf_pars_fragment>\n' +
+                mat.fragmentShader.replace(fsAnchor, m => `${m}\n    #include <logdepthbuf_fragment>`);
+            mat.needsUpdate = true;
+        }
+    });
+}
 
 export function createLabelSprite(text, color = '#ffffff', accent = '#cba9ff') {
     const cv = document.createElement('canvas');
@@ -536,6 +785,8 @@ function _makeProcedural(body, radiusUnits, segments) {
         'rocky-warm':  { roughness: 0.80, metalness: 0.0,  emissive: 0x110000, emissiveIntensity: 0.05 },
         'asteroid':    { roughness: 1.00, metalness: 0.05, emissive: 0x000000, emissiveIntensity: 0.0  },
         'gas-giant':   { roughness: 0.55, metalness: 0.0,  emissive: base,    emissiveIntensity: 0.18 },
+        // Self-luminous — stars don't take scene lighting.
+        'star':        { roughness: 1.0,  metalness: 0.0,  emissive: base,    emissiveIntensity: 1.0  },
     }[surface] ?? { roughness: 0.85, metalness: 0.0, emissive: 0x000000, emissiveIntensity: 0.0 };
 
     const mat = new THREE.MeshStandardMaterial({ color: base, ...params });

@@ -10,6 +10,7 @@
     "data:snapshots": "node scripts/heliochronicles/build-snapshots.mjs",
     "data:verify": "node scripts/heliochronicles/verify.mjs",
     "test": "npx playwright test",
+    "test:gravity": "node js/gravity-lab/test/run.mjs",
     "test:headed": "npx playwright test --headed",
     "test:debug": "npx playwright test --headed --debug",
     "test:ui": "npx playwright test --ui",
