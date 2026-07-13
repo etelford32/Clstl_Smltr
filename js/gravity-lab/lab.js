@@ -660,9 +660,18 @@ function _loadDescriptor(src, systemId) {
 
     state.focusIdx = null;
     _buildBarycenterMarker(src.show_barycenter);
+    // A tween from the PREVIOUS system may still be live — left running it
+    // would drag the camera toward a destination computed for a different
+    // scene. Kill it before posing the new one.
+    _fly = null;
     _frameSystem();
-    // Systems built to showcase 3D land on the cinematic pose directly.
-    if (src.default_view) applyCameraPreset(src.default_view, true);
+    // Systems with a cinematic default land via a FLIGHT from the
+    // three-quarter overview, never an instant snap. The first thing the
+    // user sees is the unmistakably-3D oblique pose, and the descent
+    // itself supplies motion parallax — snapping straight to a low-
+    // elevation pose is how the page used to open looking 2D. The tween
+    // is killed by any pointer/wheel input (P1.3).
+    if (src.default_view) applyCameraPreset(src.default_view, false, 2600);
     _updateMeshes();
     _renderHUDChrome();
     _renderBodyChips();
@@ -913,7 +922,7 @@ function _flyTo(pos, target, ms = 1200) {
     };
 }
 
-export function applyCameraPreset(name, instant = false) {
+export function applyCameraPreset(name, instant = false, ms = 1200) {
     state.lastPreset = name;
     const d = Math.max(state.extentUnits * 2.4, 5);
     let pos, target;
@@ -941,22 +950,28 @@ export function applyCameraPreset(name, instant = false) {
         if (name === 'polar') {
             pos = c.clone().add(new THREE.Vector3(d * 0.001, d * -0.03, d * 1.8));
         } else if (name === 'skim') {
-            // The money shot: 1.2° above the plane, looking along it.
+            // The money shot: low over the plane, looking along it. 7°
+            // elevation, NOT lower — at the original 1.2° the settled
+            // frame collapsed into a horizontal line and the whole page
+            // read as 2D (the recurring complaint). 7° keeps the
+            // along-the-plane drama while the orbits still resolve as
+            // ellipses in perspective.
             const az = 25 * Math.PI / 180;
             const R = d * 1.30;
             pos = c.clone().add(new THREE.Vector3(
-                R * Math.cos(az), -R * Math.sin(az), R * Math.sin(1.2 * Math.PI / 180)));
+                R * Math.cos(az), -R * Math.sin(az), R * Math.sin(7 * Math.PI / 180)));
         } else {   // overview
             pos = c.clone().add(new THREE.Vector3(d * 0.10, d * -1.05, d * 0.62));
         }
     }
 
     if (instant) {
+        _fly = null;   // a live tween would drag the camera off this pose
         camera.position.copy(pos);
         controls.target.copy(target);
         controls.update();
     } else {
-        _flyTo(pos, target);
+        _flyTo(pos, target, ms);
     }
 }
 
@@ -2583,7 +2598,7 @@ export function boot({ canvas, ui, defaultSystem = 'jupiter-galileans' }) {
     // state through this. Not a public API; do not build features on it.
     if (typeof window !== 'undefined') {
         window.__glLab = {
-            state, setFocus, loadSystem,
+            state, setFocus, loadSystem, camera, controls,
             enterSandbox: _enterSandbox,
             addBody: _sandboxAddBody,
             commitBodyEdit: _commitBodyEdit,
