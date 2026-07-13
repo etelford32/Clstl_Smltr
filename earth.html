@@ -3680,10 +3680,18 @@ const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 0.001, 200);
 camera.position.set(0, 0.4, 3.0);
 
+// Dolly floor (Phase 3.1): just above the whole translucent shell stack —
+// high cloud deck 1.016, jet trails 1.018, aurora 1.019, stratosphere 1.022
+// (see the shell-stack table at the R_* constants). The old 1.06 floor was
+// "just above cloud layer" when the single shell sat at 1.009; the split
+// decks exist precisely to be flown over. Dynamic near-plane + proximity-
+// scaled zoomSpeed + the radial floor clamp in animate() make the last
+// 0.035 of dolly usable instead of a z-fighting cliff.
+const CAM_FLOOR = 1.025;
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
-controls.minDistance   = 1.06;   // just above cloud layer
+controls.minDistance   = CAM_FLOOR;
 controls.maxDistance   = 10.0;
 controls.autoRotate      = true;
 // 1.5 → ~9°/s, ≈40 s per revolution at 60 fps. The previous 0.25 setting
@@ -5468,12 +5476,15 @@ const WIND_TRAIL_LEN   = 20;
 const WIND_TRAIL_STEP_S = 1 / 60;   // one history push per ~16 ms of simulated time
 const WIND_DT_MAX_S     = 0.05;     // clamp against backgrounded-tab spikes
 
-// LOD tuning — tied to OrbitControls (minDistance=1.06, maxDistance=10).
-// zoom01: 0 at WIND_LOD_FAR or beyond, 1 at WIND_LOD_NEAR or closer. Used by
-// _reset() to bias spawns toward the sub-camera point and by update() to
-// dim/slow advection when the eye is far. Picked so that "the camera is
-// clearly framing a region" (≈1.5 R⊕, half-globe in view) lands around 0.7.
-const WIND_LOD_NEAR = 1.10;
+// LOD tuning — tied to OrbitControls (minDistance=CAM_FLOOR≈1.025,
+// maxDistance=10). zoom01: 0 at WIND_LOD_FAR or beyond, 1 at WIND_LOD_NEAR
+// or closer. Used by _reset() to bias spawns toward the sub-camera point
+// and by update() to dim/slow advection when the eye is far. Picked so that
+// "the camera is clearly framing a region" (≈1.5 R⊕, half-globe in view)
+// lands around 0.7. NEAR retuned 1.10 → 1.06 with the Phase-3 floor drop so
+// the final approach (1.06 → 1.025) holds full density instead of saturating
+// far above the deck.
+const WIND_LOD_NEAR = 1.06;
 const WIND_LOD_FAR  = 2.50;
 
 // Reused scratch vector for camera→local-space conversions. Avoids one
@@ -10743,6 +10754,24 @@ renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hide
         _resolveTap(t.clientX, t.clientY);
     }, { passive: true });
 
+    // Double-click on the ground → fly there, landing inside the horizon-
+    // tilt band (Phase 3.3) so the flight ends in the low-oblique view over
+    // the cloud decks. A separate listener with its own raycast: the
+    // single-tap pin logic above is untouched (its 400 ms dedup window
+    // absorbs the two click echoes a dblclick produces), and OrbitControls
+    // doesn't bind dblclick at all.
+    renderer.domElement.addEventListener('dblclick', (e) => {
+        const r    = renderer.domElement.getBoundingClientRect();
+        const ndcX = ((e.clientX - r.left) / r.width)  * 2 - 1;
+        const ndcY = -((e.clientY - r.top)  / r.height) * 2 + 1;
+        const ray  = new THREE.Raycaster();
+        ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+        const hits = ray.intersectObject(earthMesh);
+        if (!hits.length || !hits[0].uv) return;
+        const { lat, lon } = geo.deg.uvToLatLon(hits[0].uv.x, hits[0].uv.y);
+        flyToLatLon(lat, lon, 1.10);
+    });
+
     // Touch interactions should suppress the mouse-style hover popups,
     // which iOS otherwise fires as synthetic mousemove after a tap and
     // flashes a tooltip under the finger.
@@ -11308,9 +11337,24 @@ function animate() {
 
     // ── Fly-to animation
     if (_flyTarget && _flyProgress < 1) {
-        _flyProgress = Math.min(1, _flyProgress + 0.018);
+        // Wall-clock-paced (≈0.93 s, the classic 0.018/frame at 60 fps) so
+        // a slow GPU gets the same flight duration, just fewer keyframes.
+        _flyProgress = Math.min(1, _flyProgress + Math.min(0.1, dt || 0.016) * 1.08);
         const ease = 1 - Math.pow(1 - _flyProgress, 3);
-        camera.position.lerpVectors(_flyFrom, _flyTarget, ease);
+        // Great-circle path: nlerp the radial direction, lerp the radius.
+        // The old straight positional lerp chords through the globe on
+        // long hops — with the Phase-3 close arrivals it ground the camera
+        // against the radial floor mid-flight. Direction × radius keeps
+        // the altitude profile monotone between the endpoints.
+        _flyDirScratch.copy(_flyFrom).normalize()
+            .lerp(_flyDirTo.copy(_flyTarget).normalize(), ease);
+        if (_flyDirScratch.lengthSq() > 1e-6) {
+            const r = _flyFrom.length() + (_flyTarget.length() - _flyFrom.length()) * ease;
+            camera.position.copy(_flyDirScratch.normalize().multiplyScalar(r));
+        } else {
+            // Near-antipodal degenerate — fall back to the classic chord.
+            camera.position.lerpVectors(_flyFrom, _flyTarget, ease);
+        }
         controls.target.lerp(_flyAimAt, ease);
         if (_flyProgress >= 1) {
             _flyTarget = null;
@@ -11350,9 +11394,119 @@ function animate() {
         }
     }
 
+    // ── Camera depth pipeline (Phase 3) — near plane, dolly feel, tilt ──
+    _updateCameraDepth(dt);
+
     controls.update();
+
+    // Hard radial floor. With the orbit pivot eased off-centre at high zoom
+    // (horizon tilt), OrbitControls' radius clamp bounds distance-to-TARGET,
+    // not distance-to-globe — pitching down could tunnel through the cloud
+    // decks. Clamping the camera's radius instead turns pitch-down at the
+    // floor into "skim along the cloud tops", which is exactly the
+    // low-oblique view the split shells exist for.
+    {
+        const camR = camera.position.length();
+        if (camR < CAM_FLOOR) camera.position.multiplyScalar(CAM_FLOOR / camR);
+    }
+
     renderer.render(scene, camera);
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  CAMERA DEPTH PIPELINE  (Phase 3 of the wind+cloud depth plan)
+//
+//  Three coupled behaviours, all keyed to distance-above-surface:
+//    • Dynamic near plane — the fixed 0.001 near wastes depth precision
+//      from orbit and still z-fights at the new 1.025 floor; scale it
+//      with altitude instead.
+//    • Proximity-scaled zoomSpeed — OrbitControls dollying is
+//      multiplicative on distance-to-target, which turns the last few
+//      hundredths of approach into one wheel tick; slow it as the
+//      surface nears so the approach eases in.
+//    • Horizon tilt — the orbit target eases from the globe centre
+//      toward the sub-camera surface point as the camera drops. Moving
+//      the pivot doesn't snap the view (the target slides along the view
+//      ray); it changes what a DRAG does: orbiting a surface pivot
+//      pitches toward the horizon, giving the low-oblique view across
+//      the cloud decks toward the terminator. Fully reversible — dolly
+//      out and the pivot eases home to the centre.
+//
+//  The fly-to tween owns controls.target while it runs; the tilt blend
+//  re-seeds from wherever the flight parked the target so the handoff is
+//  seamless. Note the tilt override also owns controls.target at close
+//  zoom, so right-drag panning is effectively ceded to the tilt inside
+//  the low band — an accepted trade documented here on purpose.
+// ═══════════════════════════════════════════════════════════════
+const _tiltDir = new THREE.Vector3();
+let _tiltBlend = 0;
+const TILT_NEAR_D = 0.035;   // dSurf where tilt saturates (≈ the floor)
+const TILT_FAR_D  = 0.16;    // dSurf where tilt begins
+function _updateCameraDepth(dt) {
+    const camR  = camera.position.length();
+    const dSurf = Math.max(1e-4, camR - R_EARTH);
+
+    // Dynamic near plane: ~22% of the height above the surface, clamped.
+    // At orbit (dSurf 2) it rests at the 0.05 cap; at the 1.025 floor it
+    // reaches 0.0055 — in front of every shell yet fine enough that the
+    // depth buffer stops shimmering against the ground at close range.
+    const near = Math.min(0.05, Math.max(0.0005, dSurf * 0.22));
+    if (Math.abs(near - camera.near) > camera.near * 0.15) {
+        camera.near = near;
+        camera.updateProjectionMatrix();
+    }
+
+    // Dolly feel: full speed from orbit, easing toward ~quarter speed at
+    // the floor so the last 0.035 R⊕ is a glide, not a cliff.
+    controls.zoomSpeed = Math.max(0.25, Math.min(1.0, dSurf * 2.4));
+
+    // Altitude band for progressive UI density (Phase 3.4): CSS/JS
+    // consumers key off body[data-ev-alt] instead of re-deriving camera
+    // maths (orbit = synoptic overlays; low = probe/patch affordances).
+    const band = dSurf > 1.5 ? 'orbit' : (dSurf > TILT_FAR_D ? 'regional' : 'low');
+    if (document.body.dataset.evAlt !== band) document.body.dataset.evAlt = band;
+
+    if (_flyTarget) {
+        // Flight in progress — the tween owns the target. Track its radius
+        // as our blend state so the post-arrival ease starts from there,
+        // and keep the radius floor tracking the moving pivot (a close
+        // arrival puts the camera-to-target radius far below CAM_FLOOR;
+        // without this OrbitControls would clamp it and yank the camera).
+        _tiltBlend = Math.min(1, controls.target.length() / (R_EARTH * 0.995));
+        controls.minDistance = Math.max(0.012, CAM_FLOOR - controls.target.length());
+        return;
+    }
+
+    // Horizon tilt: 0 above TILT_FAR_D, saturating at the floor.
+    const tRaw = 1 - Math.max(0, Math.min(1, (dSurf - TILT_NEAR_D) / (TILT_FAR_D - TILT_NEAR_D)));
+    const tiltGoal = tRaw * tRaw * (3 - 2 * tRaw);
+    _tiltBlend += (tiltGoal - _tiltBlend) * Math.min(1, (dt || 0.016) * 5);
+    if (_tiltBlend < 0.002) _tiltBlend = 0;
+
+    if (_tiltBlend > 0) {
+        _tiltDir.copy(camera.position).normalize();
+        controls.target.copy(_tiltDir.multiplyScalar(R_EARTH * 0.995 * _tiltBlend));
+    } else if (controls.target.lengthSq() > 1e-10) {
+        // Fully dollied out — pivot returns home (this also retires the
+        // old fly-to quirk that parked the target at 0.1·R forever).
+        controls.target.set(0, 0, 0);
+    }
+
+    // OrbitControls clamps radius FROM THE TARGET — keep the effective
+    // globe-distance floor constant as the pivot slides outward.
+    controls.minDistance = Math.max(0.012, CAM_FLOOR - controls.target.length());
+}
+
+// Debug/console probe (same family as window.__evCloudMode). Used by
+// tests/camera-depth-smoke.spec.js.
+window.__evCamera = () => ({
+    dist:    camera.position.length(),
+    near:    camera.near,
+    targetR: controls.target.length(),
+    tilt:    _tiltBlend,
+    flying:  _flyTarget != null,
+    band:    document.body.dataset.evAlt ?? null,
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  USER LOCATION PIN  (must be declared before animate() runs)
@@ -11371,6 +11525,9 @@ let _flyTarget   = null;
 let _flyFrom     = new THREE.Vector3();
 let _flyAimAt    = new THREE.Vector3();
 let _flyProgress = 0;
+// Scratch vectors for the great-circle flight path (no per-frame allocs).
+const _flyDirScratch = new THREE.Vector3();
+const _flyDirTo      = new THREE.Vector3();
 
 // ── First HUD update immediately (simTimeMs is initialised to Date.now()
 // at module load, so this matches the scrubber's starting position).
@@ -11537,7 +11694,10 @@ function _setUserPin(lat, lon) {
 
 function _flyToUserLocation() {
     if (_userLat == null) return;
-    flyToLatLon(_userLat, _userLon);
+    // Land inside the horizon-tilt band (Phase 3.3): the saved-location /
+    // "Fly here" flow ends low over the pin with the pivot pre-tilted,
+    // not staring straight down from continental altitude.
+    flyToLatLon(_userLat, _userLon, 1.12);
 }
 
 /**
@@ -11545,14 +11705,25 @@ function _flyToUserLocation() {
  * this; the StormWatchPanel uses it via window.flyToLatLon (exposed
  * below). Both go through the same animation state so a click while
  * a previous fly is still resolving overrides smoothly.
+ *
+ * @param {number} [arriveDist=4.2]  camera distance (globe radii) on
+ *   arrival. The classic 4.2 frames a continent; pass ~1.10 to land
+ *   inside the horizon-tilt band (Phase 3.3), where the camera-depth
+ *   pipeline eases the orbit pivot to the surface so the flight ends in
+ *   the low-oblique view instead of staring straight down.
  */
-function flyToLatLon(lat, lon) {
+function flyToLatLon(lat, lon, arriveDist = 4.2) {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const dist = Math.max(CAM_FLOOR + 0.01, arriveDist);
     const localPos = geoToXYZ(lat, lon);
     const worldPos = localPos.clone().applyEuler(earthMesh.rotation);
     _flyFrom.copy(camera.position);
-    _flyAimAt.copy(worldPos).multiplyScalar(0.1);
-    _flyTarget   = worldPos.clone().multiplyScalar(4.2);
+    // Aim depth scales with how close we land: continental arrivals keep
+    // the shallow 0.1·R aim (classic feel); tilt-band arrivals park the
+    // pivot near the surface point so the tilt handoff starts pre-loaded.
+    const aimR = dist < 1.5 ? 0.90 : 0.1;
+    _flyAimAt.copy(worldPos).multiplyScalar(aimR);
+    _flyTarget   = worldPos.clone().multiplyScalar(dist);
     _flyProgress = 0;
 }
 // Surface as a global so the StormWatchPanel (and any future module
