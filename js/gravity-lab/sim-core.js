@@ -23,7 +23,9 @@
  */
 
 import {
-    yoshida4Step, rkf78Step, totalEnergy, totalJ2PotentialEnergy, G_SI,
+    yoshida4Step, yoshida4StepVar, rkf78Step,
+    totalEnergy, totalJ2PotentialEnergy, G_SI,
+    createVariational, variationalStep,
 } from './physics.js';
 
 export const PHYSICS_BUDGET_MS_DESKTOP = 6;
@@ -104,6 +106,8 @@ export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false
         _lastCkptMs: null,
         // Sim-time trail sampling (P0.3) — configured via configureTrails().
         trails: null,
+        // MEGNO chaos indicator (P2.3) — null when off; see enableMegno().
+        megno: null,
         // Hybrid stepping state (P0.4).
         hybridEnabled: hybrid,    // false = strict fixed-dt (tests, A/B runs)
         integrator: 'yoshida4',   // 'yoshida4' | 'rkf78'
@@ -211,7 +215,14 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
         if (sim.integrator === 'yoshida4') {
             const absSub = Math.abs(sub);
             for (let k = 0; k < stepsWanted; k++) {
-                yoshida4Step(sim.bodies, sub, opts);
+                // With MEGNO on, step bodies + tangent vector through the
+                // integrator's exact tangent map (see yoshida4StepVar).
+                if (sim.megno) {
+                    yoshida4StepVar(sim.bodies, sub, opts, sim.megno.vs);
+                    _megnoAccumulate(sim, absSub);
+                } else {
+                    yoshida4Step(sim.bodies, sub, opts);
+                }
                 stepsDone++;
                 advancedSec += sub;
                 // Sim-time trail sampling (P0.3) happens INSIDE the substep
@@ -251,6 +262,12 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
                 advancedSec += r.h;
                 remaining = total - advancedSec;
                 h = r.hNext;
+                // Along adaptive segments the tangent rides a leapfrog
+                // approximation (no discrete tangent map for RK here).
+                if (sim.megno) {
+                    variationalStep(sim.bodies, r.h, rkOpts, sim.megno.vs);
+                    _megnoAccumulate(sim, Math.abs(r.h));
+                }
                 if (sim.trails) _sampleTrails(sim, Math.abs(r.h));
                 if (onStep) onStep(sim.bodies, r.h);
                 if (_scanEncounterExit(sim)) {
@@ -604,6 +621,49 @@ export function setBodyState(sim, idx, r, v, pre = null) {
 export function setSoftening(sim, epsMeters) {
     sim.soft2 = epsMeters * epsMeters;
     rebaselineEnergy(sim);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MEGNO chaos indicator (P2.3) — Cincotta, Giordano & Simó.
+//
+//   Y(t)  = (2/t) ∫₀ᵗ (δ̇·δ)/(δ·δ) s ds        (phase-space dot products)
+//   ⟨Y⟩(t) = (1/t) ∫₀ᵗ Y(s) ds
+//
+// ⟨Y⟩ → 2 for quasi-periodic motion; grows linearly (≈ λt/2) for chaos.
+// The tangent vector rides the integrated trajectory (variationalStep);
+// during adaptive close-encounter segments it follows the RK steps — a
+// documented approximation that preserves the growth-rate signal. The
+// MEGNO clock starts at enable time.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function enableMegno(sim, on) {
+    sim.megno = on ? {
+        vs: createVariational(sim.bodies.length),
+        t: 0, s1: 0, s2: 0, Y: 0, meanY: 0,
+    } : null;
+}
+
+function _megnoAccumulate(sim, dtAbs) {
+    const m = sim.megno;
+    m.t += dtAbs;
+    const { dr, dv, da } = m.vs;
+    let num = 0, den = 0;
+    for (let k = 0; k < dr.length; k++) {
+        num += dr[k] * dv[k] + dv[k] * da[k];
+        den += dr[k] * dr[k] + dv[k] * dv[k];
+    }
+    if (den > 0) {
+        m.s1 += dtAbs * m.t * (num / den);
+        m.Y = 2 * m.s1 / m.t;
+        m.s2 += m.Y * dtAbs;
+        m.meanY = m.s2 / m.t;
+    }
+    // Renormalize before the exponential growth of a chaotic δ overflows;
+    // MEGNO's integrands are scale-invariant, so this is loss-free.
+    if (den > 1e100) {
+        const inv = 1 / Math.sqrt(den);
+        for (let k = 0; k < dr.length; k++) { dr[k] *= inv; dv[k] *= inv; }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

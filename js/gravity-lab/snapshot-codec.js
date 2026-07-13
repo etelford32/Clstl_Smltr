@@ -26,6 +26,8 @@ export const H_STEPS     = 8;
 export const H_ADVANCED  = 9;
 export const H_NBODIES   = 10;
 export const H_TRAILCAP  = 11;
+export const H_MEGNO     = 12;   // ⟨Y⟩; NaN = indicator off
+export const H_MEGNO_T   = 13;   // seconds on the MEGNO clock
 
 export function snapshotBytes(nBodies, nTrails, trailCap) {
     return 8 * (HDR + nBodies * 6 + nBodies * 3) + 4 * (nTrails * trailCap * 3);
@@ -51,6 +53,8 @@ export function packSnapshot(buffer, sim, extra) {
     f64[H_ADVANCED] = extra.advancedSec ?? 0;
     f64[H_NBODIES]  = N;
     f64[H_TRAILCAP] = trailCap;
+    f64[H_MEGNO]    = sim.megno ? sim.megno.meanY : NaN;
+    f64[H_MEGNO_T]  = sim.megno ? sim.megno.t : 0;
 
     let o = HDR;
     for (let i = 0; i < N; i++) {
@@ -129,6 +133,8 @@ export function parseSnapshot(buffer, meta, outBodies) {
         integrator:  (head[H_FLAGS] & 2) !== 0 ? 'rkf78' : 'yoshida4',
         stepsDone:   head[H_STEPS],
         advancedSec: head[H_ADVANCED],
+        megno:       Number.isNaN(head[H_MEGNO]) ? null
+                     : { meanY: head[H_MEGNO], t: head[H_MEGNO_T] },
         bodies:      outBodies,
         trails,
         encounter:   meta.encounter ?? null,

@@ -32,6 +32,7 @@ import {
     rebaselineEnergy,
     setBodyState,
     setSoftening,
+    enableMegno,
     PHYSICS_BUDGET_MS_DESKTOP,
     PHYSICS_BUDGET_MS_MOBILE,
 } from './sim-core.js';
@@ -101,6 +102,16 @@ class InlineDriver {
         this._emit({}, null);
     }
 
+    setMegno(on) {
+        if (!this.sim) return;
+        enableMegno(this.sim, on);
+        this._emit({}, null);
+    }
+
+    ping() {
+        if (this.sim) this._emit({}, null);
+    }
+
     _emit(meta, res) {
         const sim = this.sim;
         const L = totalAngularMomentum(sim.bodies);
@@ -116,6 +127,7 @@ class InlineDriver {
             integrator:  sim.integrator,
             stepsDone:   res?.stepsDone ?? 0,
             advancedSec: res?.advancedSec ?? 0,
+            megno:       sim.megno ? { meanY: sim.megno.meanY, t: sim.megno.t } : null,
             bodies:      sim.bodies,      // live reference — zero copy
             trails:      sim.trails,      // live reference — zero copy
             encounter:   sim.encounter,
@@ -185,6 +197,8 @@ class WorkerDriver {
     rewind()      { this.worker.postMessage({ type: 'rewind' }); }
     setBody(idx, r, v, pre = null) { this.worker.postMessage({ type: 'setBody', idx, r, v, pre }); }
     setSoftening(eps)  { this.worker.postMessage({ type: 'setSoftening', eps }); }
+    setMegno(on)       { this.worker.postMessage({ type: 'setMegno', on: !!on }); }
+    ping()             { this.worker.postMessage({ type: 'ping' }); }
 
     _onMsg(ev) {
         const { type, buffer, meta } = ev.data;

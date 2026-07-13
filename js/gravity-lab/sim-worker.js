@@ -32,6 +32,7 @@ import {
     rebaselineEnergy,
     setBodyState,
     setSoftening,
+    enableMegno,
 } from './sim-core.js';
 import { totalAngularMomentum } from './physics.js';
 import { packSnapshot, snapshotBytes } from './snapshot-codec.js';
@@ -134,6 +135,15 @@ onmessage = ev => {
                 setSoftening(sim, m.eps);
                 _snapshot({});
             }
+            break;
+        case 'setMegno':
+            if (sim) {
+                enableMegno(sim, !!m.on);
+                _snapshot({});
+            }
+            break;
+        case 'ping':
+            if (sim) _snapshot({});
             break;
         case 'recycle':
             if (m.buffer && m.buffer.byteLength === bufBytes && pool.length < 3) {

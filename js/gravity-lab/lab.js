@@ -89,6 +89,13 @@ const state = {
     gizmoTau:       1,       // seconds of travel an arrow depicts
     // Epoch base for the JD readout (P2.2) — J2000 unless an epoch loaded.
     epochJD:        J2000_JD,
+    // Instruments (P2.3).
+    megnoOn:        false,
+    sepA:           1,       // pair-separation chart body indices
+    sepB:           2,
+    resCoeffs:      [],      // per-body integers kᵢ for φ = Σ kᵢλᵢ
+    trailIntervals: [],      // per-body sim-time sampling interval (s), for export
+    exportPending:  null,    // 'csv' → next snapshot builds the download
     // Central-body J2 perturbation. Toggleable per system.
     j2Enabled:      false,
     j2Opts:         null,    // {centerIdx, J2, R_eq, mu} consumed by integrator
@@ -160,6 +167,20 @@ const hud = {
     epochWrap:    null,
     epochSelect:  null,
     epochNote:    null,
+    // Instruments (P2.3)
+    chCons:      null,
+    chMegno:     null,
+    chSep:       null,
+    chRes:       null,
+    megnoToggle: null,
+    megnoPanel:  null,
+    megnoVal:    null,
+    sepA:        null,
+    sepB:        null,
+    resCoeffs:   null,
+    resVal:      null,
+    exportCsv:   null,
+    exportJson:  null,
     // Sandbox (P2.1)
     sandboxWrap:  null,
     sbAdd:        null,
@@ -502,6 +523,7 @@ function _loadDescriptor(src, systemId) {
         }
         return { interval, scale: metersToScene };
     });
+    state.trailIntervals = trailSpecs.map(s => s ? s.interval : 0);
 
     for (let bi = 0; bi < state.bodies.length; bi++) {
         const b = state.bodies[bi];
@@ -676,7 +698,17 @@ function _onSnapshot(view) {
         _showFaultBanner(view.fault);
         _syncGizmos(true);
     }
-    if (view.fault || view.rewound || view.loaded || view.edited) _resetTrailVisuals();
+    if (view.fault || view.rewound || view.loaded || view.edited) {
+        _resetTrailVisuals();
+        _instrClear();   // charts depict a trajectory that just changed
+    }
+
+    // Deferred CSV export (P2.3): trail views alias the transferable
+    // buffer, so the file must be built HERE, before the recycle.
+    if (state.exportPending === 'csv' && view.trails) {
+        state.exportPending = null;
+        _exportCSVFromTrails(view.trails);
+    }
     // Rewind/undo and edits change body state — the sandbox editor fields
     // must follow the authoritative snapshot.
     if (state.sandbox && (view.rewound || view.edited)) _syncSandboxUI();
@@ -1524,6 +1556,7 @@ function _renderHUDChrome() {
     if (hud.physics)  hud.physics.textContent  = s.marketing.physics;
     _renderTabs();
     _renderEpochPicker();
+    _renderInstrumentControls();
 
     // Build the body table once per system load.
     if (hud.bodyTable) {
@@ -1626,7 +1659,11 @@ function _renderHUDLive() {
             row.querySelector('[data-cell="incl"]').textContent   = `${el.i_deg.toFixed(2)}°`;
         }
         longitudes[b.name] = el.mean_lon_deg;
+        _instr.lam[i] = el.mean_lon_deg;
     }
+
+    // Instruments sampling (P2.3) — throttled internally.
+    _instrSample(dE, dL);
 
     // Galilean Laplace argument.
     if (state.systemId === 'jupiter-galileans' &&
@@ -1720,6 +1757,210 @@ function _renderThrottleChip() {
         hud.throttleChip.hidden = true;
         _lastThrottleText = null;
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Instruments (P2.3) — strip charts, MEGNO display, trajectory export.
+//
+// Sampling rides the snapshot stream (throttled to INSTR_SAMPLE_MS wall
+// time); each chart owns a small ring so switching a pair selection or
+// resetting the sim clears only what it invalidates.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const INSTR_SAMPLE_MS = 150;
+const INSTR_CAP = 360;
+
+function _mkRing() { return { t: [], a: [], b: [] }; }
+const _instr = {
+    lastMs: 0,
+    cons:  _mkRing(),   // a = log10|dE/E0|, b = log10|dL/L0|
+    megno: _mkRing(),   // a = ⟨Y⟩
+    sep:   _mkRing(),   // a = separation km
+    res:   _mkRing(),   // a = φ deg
+    lam:   [],          // per-body mean longitudes, refreshed each HUD pass
+};
+
+function _instrClear(which = null) {
+    for (const k of which ?? ['cons', 'megno', 'sep', 'res']) {
+        _instr[k].t.length = 0;
+        _instr[k].a.length = 0;
+        _instr[k].b.length = 0;
+    }
+}
+
+function _ringPush(ring, t, a, b = 0) {
+    ring.t.push(t); ring.a.push(a); ring.b.push(b);
+    if (ring.t.length > INSTR_CAP) { ring.t.shift(); ring.a.shift(); ring.b.shift(); }
+}
+
+function _instrSample(dE, dL) {
+    const nowMs = performance.now();
+    if (nowMs - _instr.lastMs < INSTR_SAMPLE_MS) return;
+    _instr.lastMs = nowMs;
+    const t = state.elapsedSec;
+
+    _ringPush(_instr.cons, t,
+        Math.log10(Math.max(dE, 1e-16)),
+        Math.log10(Math.max(dL, 1e-16)));
+
+    if (state.simView?.megno) _ringPush(_instr.megno, t, state.simView.megno.meanY);
+
+    const A = state.bodies[state.sepA], B = state.bodies[state.sepB];
+    if (A && B && A !== B) {
+        _ringPush(_instr.sep, t, Math.hypot(
+            A.r[0]-B.r[0], A.r[1]-B.r[1], A.r[2]-B.r[2]) / 1000);
+    }
+
+    if (state.resCoeffs.some(k => k !== 0)) {
+        let phi = 0;
+        for (let i = 0; i < state.resCoeffs.length; i++) {
+            const k = state.resCoeffs[i];
+            if (k && _instr.lam[i] != null) phi += k * _instr.lam[i];
+        }
+        phi = ((phi % 360) + 540) % 360 - 180;
+        _ringPush(_instr.res, t, phi);
+        if (hud.resVal) hud.resVal.textContent = `${phi.toFixed(2)}°`;
+    }
+    _drawInstruments();
+}
+
+function _plotRing(cvRef, ring, opts = {}) {
+    const cv = cvRef;
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+    if (ring.t.length < 2) return;
+    let lo = opts.yMin ?? Infinity, hi = opts.yMax ?? -Infinity;
+    if (opts.yMin == null || opts.yMax == null) {
+        for (const v of ring.a) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+        if (opts.twoSeries) for (const v of ring.b) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+        const pad = (hi - lo) * 0.1 || 1;
+        lo -= pad; hi += pad;
+    }
+    const Y = v => H * (1 - (v - lo) / (hi - lo));
+    if (opts.refY != null && opts.refY > lo && opts.refY < hi) {
+        ctx.strokeStyle = 'rgba(111,228,139,.4)';
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(0, Y(opts.refY)); ctx.lineTo(W, Y(opts.refY)); ctx.stroke();
+        ctx.setLineDash([]);
+    }
+    const trace = (vals, color) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        for (let i = 0; i < vals.length; i++) {
+            const x = (i / (vals.length - 1)) * W;
+            const y = Math.max(1, Math.min(H - 1, Y(vals[i])));
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    };
+    trace(ring.a, opts.colorA ?? '#6fe48b');
+    if (opts.twoSeries) trace(ring.b, opts.colorB ?? '#5ab8ff');
+}
+
+function _drawInstruments() {
+    _plotRing(hud.chCons, _instr.cons, { twoSeries: true, yMin: -16, yMax: -2, refY: -8 });
+    _plotRing(hud.chMegno, _instr.megno, { refY: 2 });
+    _plotRing(hud.chSep, _instr.sep, {});
+    _plotRing(hud.chRes, _instr.res, { yMin: -180, yMax: 180, refY: 0, colorA: '#c792ea' });
+    if (hud.megnoVal && state.simView?.megno) {
+        hud.megnoVal.textContent = state.simView.megno.meanY.toFixed(2);
+    }
+}
+
+// Populate the pair selects + resonance coefficient editor per system.
+function _renderInstrumentControls() {
+    if (hud.sepA && hud.sepB) {
+        const opts = state.bodies.map((b, i) =>
+            `<option value="${i}">${_capitalize(b.name)}</option>`).join('');
+        hud.sepA.innerHTML = opts;
+        hud.sepB.innerHTML = opts;
+        state.sepA = state.bodies.length > 1 ? 1 : 0;
+        state.sepB = Math.min(2, state.bodies.length - 1);
+        hud.sepA.value = String(state.sepA);
+        hud.sepB.value = String(state.sepB);
+    }
+    if (hud.resCoeffs) {
+        // The Laplace angle is one preset of this general tool: seed
+        // jupiter with (1, −3, 2, 0); everything else starts at zeros.
+        state.resCoeffs = state.bodies.map((b) => {
+            if (state.systemId !== 'jupiter-galileans') return 0;
+            return { io: 1, europa: -3, ganymede: 2 }[b.name] ?? 0;
+        });
+        hud.resCoeffs.innerHTML = state.bodies.map((b, i) => {
+            if (b.is_parent) return '';
+            const colorHex = '#' + (b.color ?? 0xaaaaaa).toString(16).padStart(6, '0');
+            return `<label class="gl-res-k" title="${_capitalize(b.name)}">
+                <span class="gl-dot" style="background:${colorHex}"></span>
+                <input type="number" class="gl-input" data-res-idx="${i}" step="1" value="${state.resCoeffs[i]}">
+            </label>`;
+        }).join('');
+        for (const inp of hud.resCoeffs.querySelectorAll('[data-res-idx]')) {
+            inp.addEventListener('change', () => {
+                state.resCoeffs[parseInt(inp.dataset.resIdx, 10)] = parseInt(inp.value, 10) || 0;
+                _instrClear(['res']);
+            });
+        }
+    }
+    if (hud.megnoToggle) {
+        state.megnoOn = false;
+        hud.megnoToggle.checked = false;
+        if (hud.megnoPanel) hud.megnoPanel.style.display = 'none';
+    }
+    _instrClear();
+}
+
+// ── Trajectory export (P2.3) ─────────────────────────────────────────────────
+// CSV at the trail sampling cadence (the honest record of what the trails
+// depict: last N orbits per body, timestamps reconstructed from the
+// per-body interval — emission is quantized to substeps, so times are
+// accurate to one substep). JSON is the full current state, suitable for
+// re-import via the share codec. Cadence gating (free coarse / SUPER
+// full) is a product decision deferred with the auth wiring.
+
+function _download(name, mime, text) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: mime }));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+function _exportCSVFromTrails(trails) {
+    const rows = ['body,t_s,x_km,y_km,z_km'];
+    for (let i = 0; i < state.bodies.length; i++) {
+        const tr = trails[i];
+        if (!tr || tr.count < 1) continue;
+        const name = state.bodies[i].name;
+        const interval = state.trailIntervals[i] || 0;
+        for (let k = tr.count - 1; k >= 0; k--) {
+            const slot = (((tr.head - k) % tr.cap) + tr.cap) % tr.cap;
+            const o = slot * 3;
+            const t = state.elapsedSec - k * interval;
+            rows.push(`${name},${t.toFixed(1)},` +
+                `${(tr.buf[o]     * state.sceneScaleKm).toFixed(3)},` +
+                `${(tr.buf[o + 1] * state.sceneScaleKm).toFixed(3)},` +
+                `${(tr.buf[o + 2] * state.sceneScaleKm).toFixed(3)}`);
+        }
+    }
+    _download(`gravity-lab-${state.systemId}-trails.csv`, 'text/csv', rows.join('\n'));
+}
+
+function _exportJSON() {
+    _download(`gravity-lab-${state.systemId}-state.json`, 'application/json', JSON.stringify({
+        generator: 'parkersphysics.com gravity-lab',
+        system: state.systemId,
+        epoch_jd: state.epochJD,
+        elapsed_s: state.elapsedSec,
+        softening_km: state.softeningKm,
+        units: { r: 'm', v: 'm/s', m: 'kg' },
+        bodies: state.bodies.map(b => ({
+            name: b.name, m: b.m, r: [...b.r], v: [...b.v],
+            radius_km: b.radius_km, color: b.color,
+        })),
+    }, null, 1));
 }
 
 function _drawResonanceTrace(phi) {
@@ -1877,6 +2118,29 @@ export function attachUI(refs) {
             });
         }
     }
+
+    // ── Instruments (P2.3) ──────────────────────────────────────────────
+    if (hud.megnoToggle) {
+        hud.megnoToggle.addEventListener('change', () => {
+            state.megnoOn = hud.megnoToggle.checked;
+            if (hud.megnoPanel) hud.megnoPanel.style.display = state.megnoOn ? '' : 'none';
+            state.driver.setMegno(state.megnoOn);
+            _instrClear(['megno']);
+        });
+    }
+    if (hud.sepA) hud.sepA.addEventListener('change', () => {
+        state.sepA = parseInt(hud.sepA.value, 10) || 0;
+        _instrClear(['sep']);
+    });
+    if (hud.sepB) hud.sepB.addEventListener('change', () => {
+        state.sepB = parseInt(hud.sepB.value, 10) || 0;
+        _instrClear(['sep']);
+    });
+    if (hud.exportCsv) hud.exportCsv.addEventListener('click', () => {
+        state.exportPending = 'csv';
+        state.driver.ping();   // next snapshot carries the trail rings
+    });
+    if (hud.exportJson) hud.exportJson.addEventListener('click', _exportJSON);
 
     // ── Epoch picker (P2.2) ─────────────────────────────────────────────
     if (hud.epochSelect) {

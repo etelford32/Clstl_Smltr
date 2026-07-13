@@ -31,7 +31,7 @@ import {
 import { SYSTEMS, SYSTEM_ORDER } from '../systems.js';
 import {
     createSim, advanceFrame, clearDebt, rewind, currentEnergy,
-    configureTrails,
+    configureTrails, enableMegno,
 } from '../sim-core.js';
 
 const FAST = process.argv.includes('--fast');
@@ -859,6 +859,50 @@ test('epochs · baked vectors assemble into bound, a-preserving systems', async 
     }
     assert(checked > 100, `only ${checked} epoch vectors checked — bake incomplete?`);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10d. MEGNO (P2.3) — the flagship instrument must read the textbook
+//      values: ⟨Y⟩ → 2 for quasi-periodic motion (tangent map of the
+//      discrete integrator — a side-along leapfrog pumps δ exponentially
+//      and falsely reads chaos), and ⟨Y⟩ growing far past 2 for a
+//      genuinely chaotic three-body configuration.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('MEGNO · quasi-periodic Kepler orbit converges to 2', () => {
+    const { bodies, P } = twoBodySetup(0.2);
+    const sim = createSim({ bodies, targetStep: P / 400 });
+    enableMegno(sim, true);
+    const now = () => 0;
+    let remaining = 400 * P;
+    while (remaining > 1) {
+        advanceFrame(sim, { dtRealSec: Math.min(1 / 60, remaining / 1e7),
+            warp: 1e7, direction: +1, budgetMs: 1e9 }, now);
+        remaining = 400 * P - sim.elapsedSec;
+    }
+    assert(Math.abs(sim.megno.meanY - 2) < 0.15,
+        `Kepler ⟨Y⟩ = ${sim.megno.meanY.toFixed(3)}, expected 2 ± 0.15`);
+});
+
+test('MEGNO · chaotic three-body grows far past 2', () => {
+    const m = 1e26;
+    const bodies = [
+        { name: 'a', m, r: [-4e8, 0, 0], v: [0, -900, 120] },
+        { name: 'b', m, r: [ 4e8, 0, 0], v: [0,  900, -120] },
+        { name: 'c', m, r: [0, 6e8, 0],  v: [1000, 0, 0] },
+    ];
+    const sim = createSim({ bodies, targetStep: 200 });
+    enableMegno(sim, true);
+    const now = () => 0;
+    let frames = 0;
+    while (sim.elapsedSec < 2e7 && frames < 100000) {
+        const res = advanceFrame(sim,
+            { dtRealSec: 1 / 60, warp: 3e6, direction: +1, budgetMs: 1e9 }, now);
+        if (res.fault) break;
+        frames++;
+    }
+    assert(sim.megno.meanY > 10,
+        `chaotic ⟨Y⟩ = ${sim.megno.meanY.toFixed(2)}, expected ≫ 2`);
+}, { slow: true });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 11. Determinism (P0.5) — the Worker and inline drivers both drive this

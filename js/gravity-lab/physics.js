@@ -367,6 +367,125 @@ export function adaptiveStep(bodies, dtRequested, tol = 1e-12, opts = {}) {
     return advanced;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Variational (tangent-vector) dynamics for MEGNO (P2.3).
+//
+// The tangent vector δ = (δr, δv) obeys δr' = δv, δv' = T·δr where T is
+// the tidal tensor ∂a/∂r of the pairwise field:
+//
+//   δa_i = Σ_{j≠i} G m_j [ δu/|u|³ − 3 (u·δu) u/|u|⁵ ],  u = r_j − r_i,
+//                                                        δu = δr_j − δr_i
+//
+// δ is propagated with a DKD leapfrog along the integrated trajectory —
+// 2nd order is ample for a chaos INDICATOR (we measure exponential
+// divergence rates, not trajectories), and it works unchanged along both
+// the symplectic and the adaptive close-encounter paths.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Create a variational state for N bodies. The initial tangent direction
+ * is a fixed, generic unit vector — MEGNO's asymptotics are independent
+ * of the choice, and determinism matters more than randomness here.
+ */
+export function createVariational(N) {
+    const dr = new Float64Array(N * 3);
+    const dv = new Float64Array(N * 3);
+    let norm2 = 0;
+    for (let k = 0; k < N * 3; k++) {
+        dr[k] = Math.sin(k + 1);
+        dv[k] = Math.cos(2 * k + 1);
+        norm2 += dr[k] * dr[k] + dv[k] * dv[k];
+    }
+    const inv = 1 / Math.sqrt(norm2);
+    for (let k = 0; k < N * 3; k++) { dr[k] *= inv; dv[k] *= inv; }
+    return { dr, dv, da: new Float64Array(N * 3) };
+}
+
+/** Tidal-tensor application: da ← T(bodies) · dr. */
+function _variationalAccel(bodies, dr, da, soft2) {
+    const N = bodies.length;
+    da.fill(0);
+    for (let i = 0; i < N; i++) {
+        const i3 = i * 3;
+        for (let j = i + 1; j < N; j++) {
+            const j3 = j * 3;
+            const ux = bodies[j].r[0] - bodies[i].r[0];
+            const uy = bodies[j].r[1] - bodies[i].r[1];
+            const uz = bodies[j].r[2] - bodies[i].r[2];
+            const dux = dr[j3]     - dr[i3];
+            const duy = dr[j3 + 1] - dr[i3 + 1];
+            const duz = dr[j3 + 2] - dr[i3 + 2];
+            const r2 = ux*ux + uy*uy + uz*uz + soft2;
+            const r  = Math.sqrt(r2);
+            const inv_r3 = 1 / (r2 * r);
+            const inv_r5 = inv_r3 / r2;
+            const udot = ux*dux + uy*duy + uz*duz;
+            const gx = G_SI * (dux * inv_r3 - 3 * udot * ux * inv_r5);
+            const gy = G_SI * (duy * inv_r3 - 3 * udot * uy * inv_r5);
+            const gz = G_SI * (duz * inv_r3 - 3 * udot * uz * inv_r5);
+            da[i3]     += bodies[j].m * gx;
+            da[i3 + 1] += bodies[j].m * gy;
+            da[i3 + 2] += bodies[j].m * gz;
+            da[j3]     -= bodies[i].m * gx;
+            da[j3 + 1] -= bodies[i].m * gy;
+            da[j3 + 2] -= bodies[i].m * gz;
+        }
+    }
+}
+
+/**
+ * One DKD leapfrog step of the tangent vector along the current bodies
+ * state. Used ONLY along adaptive RK close-encounter segments, where the
+ * discrete tangent map isn't available — a documented approximation.
+ * Leaves vs.da holding the latest variational acceleration so the caller
+ * can form δ̇ = (δv, δa) for the MEGNO integrand.
+ */
+export function variationalStep(bodies, dt, opts, vs) {
+    const { dr, dv, da } = vs;
+    const n = dr.length;
+    const h = dt / 2;
+    for (let k = 0; k < n; k++) dr[k] += dv[k] * h;
+    _variationalAccel(bodies, dr, da, (opts && opts.soft2) || 0);
+    for (let k = 0; k < n; k++) dv[k] += da[k] * dt;
+    for (let k = 0; k < n; k++) dr[k] += dv[k] * h;
+}
+
+/**
+ * Yoshida-4 step of bodies AND tangent vector together — the exact
+ * tangent map of the discrete integrator: every drift also drifts δr,
+ * every kick applies the tidal tensor AT THE SAME intermediate positions
+ * as the force. This matters: propagating δ by a side-along leapfrog
+ * instead injects per-step inconsistency that pumps δ exponentially and
+ * makes MEGNO read regular orbits as chaotic (measured: Y ∝ t on a pure
+ * Kepler orbit; with the tangent map, ⟨Y⟩ → 2 as theory demands).
+ *
+ * The J2 term's Jacobian is not included in the variational kick — with
+ * J2 enabled the indicator ignores the oblateness contribution to the
+ * tangent flow (point-mass dominated systems: second-order effect).
+ */
+export function yoshida4StepVar(bodies, dt, opts, vs) {
+    _driftVar(bodies, C_COEF[0] * dt, vs);
+    _kickVar (bodies, D_COEF[0] * dt, opts, vs);
+    _driftVar(bodies, C_COEF[1] * dt, vs);
+    _kickVar (bodies, D_COEF[1] * dt, opts, vs);
+    _driftVar(bodies, C_COEF[2] * dt, vs);
+    _kickVar (bodies, D_COEF[2] * dt, opts, vs);
+    _driftVar(bodies, C_COEF[3] * dt, vs);
+}
+
+function _driftVar(bodies, dt, vs) {
+    _drift(bodies, dt);
+    const { dr, dv } = vs;
+    for (let k = 0; k < dr.length; k++) dr[k] += dv[k] * dt;
+}
+
+function _kickVar(bodies, dt, opts, vs) {
+    _variationalAccel(bodies, vs.dr, vs.da, (opts && opts.soft2) || 0);
+    _kick(bodies, dt, opts);
+    const { dv, da } = vs;
+    for (let k = 0; k < dv.length; k++) dv[k] += da[k] * dt;
+}
+
 /**
  * Central-body J2 potential energy summed over all satellites (J).
  * Includes only the oblateness term — pairwise PE comes from totalEnergy().
