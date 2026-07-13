@@ -40,6 +40,8 @@ const MODE_CODE = Object.freeze({
     'mist':        2,
     'convergence': 3,
     'cape':        4,
+    'vorticity':   5,
+    'residual':    6,
 });
 
 // Per-mode default opacity. Picked so the overlay reads as a hint about
@@ -51,6 +53,8 @@ const DEFAULT_OPACITY = Object.freeze({
     'mist':        0.55,
     'convergence': 0.60,
     'cape':        0.62,
+    'vorticity':   0.62,
+    'residual':    0.72,
 });
 
 const VERT = /* glsl */`
@@ -70,7 +74,8 @@ uniform sampler2D u_weather;        // R=T G=P B=RH A=wind
 uniform sampler2D u_cloud_layers;   // R=low G=mid B=high A=precip
 uniform sampler2D u_uplift;         // R=signed convergence [-1,1] A=|magnitude|
 uniform sampler2D u_aux;            // R=CAPE/4000 J/kg  G=freezing level/10 km
-uniform int       u_mode;           // 0=humidity 1=precip 2=mist 3=convergence 4=cape
+uniform int       u_mode;           // 0=humidity 1=precip 2=mist 3=convergence
+                                    // 4=cape 5=vorticity 6=residual
 uniform float     u_opacity;
 uniform float     u_has_data;       // 0 until first weather frame ingested
 
@@ -165,6 +170,44 @@ vec4 capeColor(float norm) {
     return vec4(col, a);
 }
 
+// Relative vorticity ζ (Phase 4.2). Input is cyclonic-positive (the
+// hemisphere fold happens at compute time — see computeVorticityField in
+// weather-uplift.js), normalised by VORT_FULL_SCALE. Cyclonic spin paints
+// warm (gold → red → magenta at the extremes — storm centres, jet-streak
+// flanks); anticyclonic paints cool (steel → azure). Calm air stays
+// transparent so the layer reads as ribbons, not a wash.
+vec4 vorticityColor(float signed, float mag) {
+    if (mag < 0.05) return vec4(0.0);
+    vec3 col;
+    if (signed >= 0.0) {
+        col = mix(vec3(0.85, 0.68, 0.25), vec3(0.92, 0.18, 0.35), smoothstep(0.0, 0.8, signed));
+        col = mix(col, vec3(0.90, 0.20, 0.85), smoothstep(0.8, 1.0, signed));
+    } else {
+        col = mix(vec3(0.45, 0.52, 0.62), vec3(0.25, 0.55, 0.95), smoothstep(0.0, 1.0, -signed));
+    }
+    float a = smoothstep(0.05, 0.55, mag) * 0.85 + 0.15;
+    return vec4(col, a);
+}
+
+// Forecast-vs-truth precip residual (Phase 4.3). Input R is the signed
+// model−observed rate normalised by ±5 mm/hr: the model called rain that
+// didn't verify → rose/magenta ("too wet"); rain arrived that the model
+// missed → teal ("too dry"). Near-zero residual — the model was right —
+// stays transparent, so a good forecast renders as an empty layer and
+// error pops. Same "grade the physics in public" framing as the skill
+// strip, just in map space.
+vec4 residualColor(float signed, float mag) {
+    if (mag < 0.04) return vec4(0.0);
+    vec3 col;
+    if (signed >= 0.0) {
+        col = mix(vec3(0.75, 0.45, 0.60), vec3(0.95, 0.15, 0.55), smoothstep(0.0, 1.0, signed));
+    } else {
+        col = mix(vec3(0.35, 0.65, 0.60), vec3(0.10, 0.90, 0.80), smoothstep(0.0, 1.0, -signed));
+    }
+    float a = smoothstep(0.04, 0.50, mag) * 0.85 + 0.15;
+    return vec4(col, a);
+}
+
 vec4 mistColor(float rh, float cloudLow) {
     float gate = smoothstep(0.85, 1.0, rh) * smoothstep(0.30, 0.90, cloudLow);
     if (gate < 0.05) return vec4(0.0);
@@ -204,6 +247,12 @@ void main() {
         col = convergenceColor(up.r, up.a);
     } else if (u_mode == 4) {
         col = capeColor(texture2D(u_aux, uv).r);
+    } else if (u_mode == 5) {
+        vec4 z = texture2D(u_aux, uv);
+        col = vorticityColor(z.r, z.a);
+    } else if (u_mode == 6) {
+        vec4 rres = texture2D(u_aux, uv);
+        col = residualColor(rres.r, rres.a);
     } else {
         col = vec4(0.0);
     }
