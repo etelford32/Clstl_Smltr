@@ -339,7 +339,11 @@ const JUPITER_GALILEANS = _build({
         },
     ],
     scale_km_per_unit: 71_492,           // 1 scene unit = Jupiter radius
-    suggested_dt_s:    1800,             // 30-minute step
+    // 15-minute step. Was 1800 s, but at 1800 s Io only gets ~85 steps per
+    // orbit and the bounded energy oscillation reaches 9.5e-8 — above the
+    // "drift below ~1e-8 means well-converged" bar the HUD itself states.
+    // At 900 s the measured envelope is 5.9e-9 (test/run.mjs enforces it).
+    suggested_dt_s:    900,
     suggested_warp:    86400 * 0.5,      // half day per real second
 });
 
