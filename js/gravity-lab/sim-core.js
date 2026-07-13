@@ -22,7 +22,9 @@
  *   busy render) don't permanently degrade the warp.
  */
 
-import { yoshida4Step, totalEnergy, totalJ2PotentialEnergy } from './physics.js';
+import {
+    yoshida4Step, rkf78Step, totalEnergy, totalJ2PotentialEnergy, G_SI,
+} from './physics.js';
 
 export const PHYSICS_BUDGET_MS_DESKTOP = 6;
 export const PHYSICS_BUDGET_MS_MOBILE  = 4;
@@ -37,11 +39,46 @@ const FAULT_ENERGY_REL   = 1e-3;  // |ΔE| beyond this fraction of the energy sc
 const CKPT_CAPACITY      = 120;   // ~1 minute of history at one per 0.5 s
 const CKPT_INTERVAL_MS   = 500;   // wall-clock spacing between checkpoints
 
+// Hybrid close-encounter stepping (P0.4, fixes D2 part 2).
+//
+// Detection is per-pair, with different physics for the two pair classes:
+//
+//  A. Pairs NOT involving the most-massive body ("satellite-satellite"):
+//     1. MERCURIUS-style Hill criterion (the plan's scheme):
+//        d ≤ K · max(R_Hill) with R_Hill,i = d_i0 · (m_i/3 m_0)^(1/3), K = 3.
+//     2. Pair-resolution backstop: τ_pair = sqrt(d³/G(m_i+m_j)) <
+//        RESOLVE · targetStep — covers comparable-mass non-primary pairs
+//        where Hill radii lose meaning.
+//
+//  B. Pairs involving the primary. Hill radii are undefined here, and a
+//     bare timescale test misclassifies REGULAR tight orbits (Mimas runs
+//     at ~11 substeps per radian and is perfectly healthy — bounded
+//     symplectic oscillation). What actually kills fixed-dt is a plunge,
+//     so the criteria are:
+//     1. Closing-time: the pair could close its separation within
+//        CLOSE_STEPS substeps (d < |ṙ| · CLOSE_STEPS · dt while
+//        approaching). Zero for circular orbits (ṙ ≈ e·v), large during
+//        infall — and symmetric on the way out, so the outgoing leg stays
+//        adaptive until the fixed step is comfortable again.
+//     2. Hard τ backstop: τ_pair < TAU_HARD · targetStep — catches
+//        tangential flybys whose radial rate crosses zero at pericenter.
+//
+// Exit applies 1.5× hysteresis to every threshold. Margins at defaults
+// (harness-enforced): all six curated systems stay symplectic — tightest
+// are Mimas (τ backstop margin ~2.7×, closing margin ~7×) and
+// Pluto–Charon (τ margin ~12×).
+const ENC_HILL_K      = 3;
+const ENC_RESOLVE     = 16;    // substeps per τ, satellite-satellite backstop
+const ENC_CLOSE_STEPS = 48;    // primary pairs: time-to-close window
+const ENC_TAU_HARD    = 4;     // primary pairs: hard under-resolution limit
+const ENC_EXIT_FACTOR = 1.5;
+const ADAPTIVE_TOL    = 1e-12; // per-step relative tolerance for RKF7(8)
+
 /**
  * Create a simulation-core state object.
  * `bodies` is the live array the integrator mutates ({m, r, v, name, …}).
  */
-export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false }) {
+export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false, hybrid = true }) {
     const sim = {
         bodies,
         targetStep,
@@ -60,7 +97,40 @@ export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false
         _lastCkptMs: null,
         // Sim-time trail sampling (P0.3) — configured via configureTrails().
         trails: null,
+        // Hybrid stepping state (P0.4).
+        hybridEnabled: hybrid,    // false = strict fixed-dt (tests, A/B runs)
+        integrator: 'yoshida4',   // 'yoshida4' | 'rkf78'
+        encounter: null,          // {bodyA, bodyB, separationM} while adaptive
+        hAdaptive: null,          // persisted RK step size across frames
+        rkCtrl: { errPrev: 1 },   // PI-controller memory
+        _primaryIdx: 0,
+        _stepFail: false,
+        // Per-pair squared threshold radii, refreshed once per frame so the
+        // per-substep encounter scan is multiply-compare only (no sqrt).
+        _encPairI: null,
+        _encPairJ: null,
+        _encR2Enter: null,
+        _encR2Exit: null,
     };
+    let mMax = -Infinity;
+    for (let i = 0; i < bodies.length; i++) {
+        if (bodies[i].m > mMax) { mMax = bodies[i].m; sim._primaryIdx = i; }
+    }
+    const nPairs = bodies.length * (bodies.length - 1) / 2;
+    sim._encPairI = new Int16Array(nPairs);
+    sim._encPairJ = new Int16Array(nPairs);
+    sim._encPrimary = new Uint8Array(nPairs);   // 1 = pair involves the primary
+    sim._encR2Enter = new Float64Array(nPairs);
+    sim._encR2Exit  = new Float64Array(nPairs);
+    let p = 0;
+    for (let i = 0; i < bodies.length; i++) {
+        for (let j = i + 1; j < bodies.length; j++) {
+            sim._encPairI[p] = i;
+            sim._encPairJ[p] = j;
+            sim._encPrimary[p] = (i === sim._primaryIdx || j === sim._primaryIdx) ? 1 : 0;
+            p++;
+        }
+    }
     rebaselineEnergy(sim);
     _recordCheckpoint(sim);   // slot 0 = the initial state, always rewindable
     return sim;
@@ -116,28 +186,73 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
 
     const deadline = now() + budgetMs;
     let stepsDone = 0;
+    let advancedSec = 0;
     if (total !== 0) {
-        const absSub = Math.abs(sub);
-        for (let k = 0; k < stepsWanted; k++) {
-            yoshida4Step(sim.bodies, sub, opts);
-            stepsDone++;
-            // Sim-time trail sampling (P0.3) happens INSIDE the substep
-            // loop so high warp produces the same trail geometry as low
-            // warp — sampling density is a function of simulated time,
-            // never of frame rate.
-            if (sim.trails) _sampleTrails(sim, absSub);
-            if (onStep) onStep(sim.bodies, sub);
-            if ((stepsDone % BUDGET_CHECK_EVERY === 0) && now() > deadline) break;
+        const hybrid = sim.hybridEnabled;
+        if (hybrid) _refreshEncounterRadii(sim);
+
+        if (sim.integrator === 'yoshida4') {
+            const absSub = Math.abs(sub);
+            for (let k = 0; k < stepsWanted; k++) {
+                yoshida4Step(sim.bodies, sub, opts);
+                stepsDone++;
+                advancedSec += sub;
+                // Sim-time trail sampling (P0.3) happens INSIDE the substep
+                // loop so high warp produces the same trail geometry as low
+                // warp — sampling density is a function of simulated time,
+                // never of frame rate.
+                if (sim.trails) _sampleTrails(sim, absSub);
+                if (onStep) onStep(sim.bodies, sub);
+                // Encounter entry scan runs EVERY substep: at high warp a
+                // pair can close faster than any coarser cadence — checking
+                // only every N steps can jump clean past the entry window.
+                // The scan is multiply-compare per pair (radii precomputed
+                // above), so its cost is a few % of the force pass.
+                if (hybrid && _scanEncounterEnter(sim) >= 0) {
+                    _enterAdaptive(sim);
+                    break;   // remainder of the frame becomes debt; next
+                             // frame (or the block below) continues adaptive
+                }
+                if ((stepsDone % BUDGET_CHECK_EVERY === 0) && now() > deadline) break;
+            }
+        }
+
+        if (sim.integrator === 'rkf78') {
+            // Close-encounter regime: adaptive RKF7(8) with PI control.
+            // NOT symplectic — energy drift accrued here is expected and is
+            // reported honestly against the original E₀ (never re-baselined).
+            const rkOpts = { J2: opts ? opts.J2 : null, ctrl: sim.rkCtrl };
+            let remaining = total - advancedSec;
+            let h = sim.hAdaptive;
+            if (!h || (h < 0) !== (remaining < 0)) h = remaining / 8;
+            while (Math.abs(remaining) > 1e-9) {
+                const sgn = remaining < 0 ? -1 : 1;
+                const hTry = sgn * Math.min(Math.abs(h), Math.abs(remaining), sim.targetStep);
+                const r = rkf78Step(sim.bodies, hTry, ADAPTIVE_TOL, rkOpts);
+                if (r.h === 0) { sim._stepFail = true; break; }
+                stepsDone++;
+                advancedSec += r.h;
+                remaining = total - advancedSec;
+                h = r.hNext;
+                if (sim.trails) _sampleTrails(sim, Math.abs(r.h));
+                if (onStep) onStep(sim.bodies, r.h);
+                if (_scanEncounterExit(sim)) {
+                    _exitAdaptive(sim);
+                    break;   // remainder becomes debt; next frame is symplectic
+                }
+                if (now() > deadline) break;
+            }
+            sim.hAdaptive = h;
         }
     }
 
-    const advancedSec = sub * stepsDone;
     sim.debtSec = total - advancedSec;
     sim.elapsedSec += advancedSec;
 
     // ── Throttle bookkeeping ────────────────────────────────────────────
     const t = now();
-    if (stepsDone < stepsWanted) {
+    const frameShort = Math.abs(sim.debtSec) > 1e-9 * Math.max(1, Math.abs(total));
+    if (frameShort) {
         // Budget exhausted this frame — debt is growing.
         if (sim._overBudgetSinceMs === null) sim._overBudgetSinceMs = t;
         if (t - sim._overBudgetSinceMs > THROTTLE_AFTER_MS) {
@@ -169,14 +284,17 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
     // per-frame granularity is enough — and it keeps the guard out of the
     // hot substep loop.
     let fault = null;
-    if (stepsDone > 0) {
-        const kind = _guardKind(sim);
+    if (stepsDone > 0 || sim._stepFail) {
+        const kind = sim._stepFail ? 'unresolvable' : _guardKind(sim);
+        sim._stepFail = false;
         if (kind) {
             const pair = _closestPair(sim.bodies);
             const atElapsedSec = sim.elapsedSec;
+            // _restoreSlot also resets the integrator to symplectic so the
+            // restored state re-detects encounters cleanly on resume.
             const cp = _restoreNewestCheckpoint(sim);
             fault = {
-                kind,                              // 'nonfinite' | 'energy'
+                kind,        // 'nonfinite' | 'energy' | 'unresolvable'
                 bodyA: pair.a, bodyB: pair.b,
                 separationM: pair.d,
                 atElapsedSec,
@@ -195,8 +313,122 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
         stepsWanted,
         effWarp,
         throttled: sim.throttled,
+        integrator: sim.integrator,
+        encounter: sim.encounter,
         fault,
     };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Close-encounter detection (P0.4) — see the criteria discussion at the
+// ENC_* constants above.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Precompute, once per frame, each pair's squared distance thresholds so
+ * the per-substep scans stay cheap. For satellite-satellite pairs the
+ * threshold combines the Hill criterion (from the bodies' CURRENT
+ * distances to the primary — slowly varying, safe to freeze per frame)
+ * with the τ-resolution radius d = (τ²·G(mᵢ+mⱼ))^(1/3). For primary
+ * pairs it is the hard-τ backstop radius; the closing-time criterion is
+ * velocity-dependent and evaluated live in the scans.
+ */
+function _refreshEncounterRadii(sim) {
+    const bodies = sim.bodies;
+    const p = sim._primaryIdx;
+    const rp = bodies[p].r;
+    const mp = bodies[p].m;
+    const nPairs = sim._encPairI.length;
+    for (let k = 0; k < nPairs; k++) {
+        const i = sim._encPairI[k], j = sim._encPairJ[k];
+        const bi = bodies[i], bj = bodies[j];
+        const gm = G_SI * (bi.m + bj.m);
+        let rEnter, rExit;
+        if (sim._encPrimary[k]) {
+            const tauEnter = ENC_TAU_HARD * sim.targetStep;
+            const tauExit  = tauEnter * ENC_EXIT_FACTOR;
+            rEnter = Math.cbrt(tauEnter * tauEnter * gm);
+            rExit  = Math.cbrt(tauExit  * tauExit  * gm);
+        } else {
+            const tauEnter = ENC_RESOLVE * sim.targetStep;
+            const tauExit  = tauEnter * ENC_EXIT_FACTOR;
+            rEnter = Math.cbrt(tauEnter * tauEnter * gm);
+            rExit  = Math.cbrt(tauExit  * tauExit  * gm);
+            const di = Math.hypot(bi.r[0]-rp[0], bi.r[1]-rp[1], bi.r[2]-rp[2]);
+            const dj = Math.hypot(bj.r[0]-rp[0], bj.r[1]-rp[1], bj.r[2]-rp[2]);
+            const rHill = Math.max(
+                di * Math.cbrt(bi.m / (3 * mp)),
+                dj * Math.cbrt(bj.m / (3 * mp)));
+            rEnter = Math.max(rEnter, ENC_HILL_K * rHill);
+            rExit  = Math.max(rExit,  ENC_HILL_K * rHill * ENC_EXIT_FACTOR);
+        }
+        sim._encR2Enter[k] = rEnter * rEnter;
+        sim._encR2Exit[k]  = rExit * rExit;
+    }
+}
+
+/**
+ * Does pair k trip its criteria at `window` seconds of closing time and
+ * the given distance thresholds? Shared by the enter and exit scans.
+ */
+function _pairHot(sim, k, r2Limit, closeWindowSec) {
+    const bi = sim.bodies[sim._encPairI[k]];
+    const bj = sim.bodies[sim._encPairJ[k]];
+    const dx = bj.r[0] - bi.r[0];
+    const dy = bj.r[1] - bi.r[1];
+    const dz = bj.r[2] - bi.r[2];
+    const d2 = dx*dx + dy*dy + dz*dz;
+    if (d2 <= r2Limit) return true;
+    if (sim._encPrimary[k]) {
+        // Closing-time criterion, symmetric in |ṙ| so the outgoing leg of
+        // a flyby stays adaptive until the fixed step is comfortable.
+        const dvx = bj.v[0] - bi.v[0];
+        const dvy = bj.v[1] - bi.v[1];
+        const dvz = bj.v[2] - bi.v[2];
+        const rdot = Math.abs(dx*dvx + dy*dvy + dz*dvz) / Math.sqrt(d2);
+        if (d2 < (rdot * closeWindowSec) ** 2) return true;
+    }
+    return false;
+}
+
+/** Any pair hot at ENTRY thresholds? Returns the pair index or -1. */
+function _scanEncounterEnter(sim) {
+    const win = ENC_CLOSE_STEPS * sim.targetStep;
+    for (let k = 0; k < sim._encPairI.length; k++) {
+        if (_pairHot(sim, k, sim._encR2Enter[k], win)) return k;
+    }
+    return -1;
+}
+
+/** True when every pair has cleared the EXIT thresholds (1.5× hysteresis). */
+function _scanEncounterExit(sim) {
+    const win = ENC_CLOSE_STEPS * sim.targetStep * ENC_EXIT_FACTOR;
+    for (let k = 0; k < sim._encPairI.length; k++) {
+        if (_pairHot(sim, k, sim._encR2Exit[k], win)) return false;
+    }
+    return true;
+}
+
+function _enterAdaptive(sim) {
+    const k = _scanEncounterEnter(sim);
+    const i = k >= 0 ? sim._encPairI[k] : 0;
+    const j = k >= 0 ? sim._encPairJ[k] : 1;
+    const bi = sim.bodies[i], bj = sim.bodies[j];
+    sim.integrator = 'rkf78';
+    sim.hAdaptive = null;
+    sim.rkCtrl.errPrev = 1;
+    sim.encounter = {
+        bodyA: bi.name ?? `body ${i}`,
+        bodyB: bj.name ?? `body ${j}`,
+        separationM: Math.hypot(
+            bj.r[0]-bi.r[0], bj.r[1]-bi.r[1], bj.r[2]-bi.r[2]),
+    };
+}
+
+function _exitAdaptive(sim) {
+    sim.integrator = 'yoshida4';
+    sim.encounter = null;
+    sim.hAdaptive = null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -259,6 +491,10 @@ function _restoreSlot(sim, slot) {
     }
     sim.elapsedSec = slot.t;
     sim.debtSec = 0;
+    // Restored states re-detect encounters from scratch on resume.
+    sim.integrator = 'yoshida4';
+    sim.encounter = null;
+    sim.hAdaptive = null;
     return slot;
 }
 

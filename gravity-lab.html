@@ -538,6 +538,7 @@ canvas.gl-resonance-canvas {
         <div class="gl-hud-section">
             <div class="gl-hud-title">Integrator Health</div>
             <dl class="gl-hud-grid">
+                <dt>Scheme</dt><dd id="gl-scheme">Yoshida-4 · symplectic</dd>
                 <dt>|ΔE / E₀|</dt><dd id="gl-de">—</dd>
                 <dt>|ΔL / L₀|</dt><dd id="gl-dl">—</dd>
             </dl>
@@ -586,6 +587,8 @@ const ui = {
 
     energyDrift: document.getElementById('gl-de'),
     angMomDrift: document.getElementById('gl-dl'),
+    scheme:      document.getElementById('gl-scheme'),
+    watermark:   document.getElementById('gl-stage-watermark'),
 
     bodyTable: document.getElementById('gl-bodies'),
 

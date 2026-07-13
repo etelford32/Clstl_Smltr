@@ -18,6 +18,8 @@
 
 import {
     yoshida4Step,
+    rkf78Step,
+    adaptiveStep,
     totalEnergy,
     totalAngularMomentum,
     totalJ2PotentialEnergy,
@@ -480,7 +482,10 @@ function runToFault(sim, { warp = 2e6, maxFrames = 5000 } = {}) {
 }
 
 test('sim-core · hot three-body faults cleanly and rewinds (no NaN escapes)', () => {
-    const sim = createSim({ bodies: hotTriple(), targetStep: 600 });
+    // hybrid:false = strict fixed-dt. This test exercises the FAULT
+    // machinery; with hybrid stepping on (the default) this same config
+    // survives the encounter — that's the P0.4 test further down.
+    const sim = createSim({ bodies: hotTriple(), targetStep: 600, hybrid: false });
     const fault = runToFault(sim);
     assert(fault, 'expected an integration fault from the unresolved encounter');
     assert(fault.kind === 'energy' || fault.kind === 'nonfinite',
@@ -615,6 +620,133 @@ test('trails · ring respects capacity and ages out old orbits', () => {
     assert(trail.total > trail.cap, 'total must keep counting past capacity');
     for (let k = 0; k < trail.cap * 3; k++) {
         assert(Number.isFinite(trail.buf[k]), 'trail buffer has non-finite entries');
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10. Adaptive RKF7(8) + hybrid stepping (P0.4).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function twoBodySetup(e, aM = 3.844e8) {
+    const M1 = 5.972e24, M2 = 7.342e22;
+    const mu = G_SI * (M1 + M2);
+    const el = { a: aM, e, i_deg: 12, raan_deg: 40, argp_deg: 70, M_deg: 10, mu };
+    const { r, v } = elementsToState(el);
+    const f2 = M1 / (M1 + M2), f1 = M2 / (M1 + M2);
+    const bodies = [
+        { m: M1, r: [-f1*r[0], -f1*r[1], -f1*r[2]], v: [-f1*v[0], -f1*v[1], -f1*v[2]] },
+        { m: M2, r: [ f2*r[0],  f2*r[1],  f2*r[2]], v: [ f2*v[0],  f2*v[1],  f2*v[2]] },
+    ];
+    const P = 2 * Math.PI * Math.sqrt(aM ** 3 / mu);
+    return { el, bodies, P, n: 2 * Math.PI / P, mu };
+}
+
+function relErrVsAnalytic(bodies, el, n, t, aM) {
+    const an = elementsToState({ ...el, M_deg: el.M_deg + n * t * 180 / Math.PI });
+    const rel = [
+        bodies[1].r[0] - bodies[0].r[0],
+        bodies[1].r[1] - bodies[0].r[1],
+        bodies[1].r[2] - bodies[0].r[2],
+    ];
+    return Math.hypot(rel[0]-an.r[0], rel[1]-an.r[1], rel[2]-an.r[2]) / aM;
+}
+
+test('RKF7(8) · one-step convergence is 8th order (tableau checksum)', () => {
+    // A single forced step of h vs h/2 must shrink the error by ~2⁸ = 256.
+    // A wrong tableau coefficient degrades the scheme to a lower order and
+    // lands far outside the accepted band.
+    function oneStepErr(h) {
+        const { el, bodies, n } = twoBodySetup(0.3);
+        const r = rkf78Step(bodies, h, 1e30, {});   // tol=1e30 → accept as-is
+        assert(r.h === h, 'forced step was not taken at the requested size');
+        return relErrVsAnalytic(bodies, el, n, h, 3.844e8);
+    }
+    const { P } = twoBodySetup(0.3);
+    const e1 = oneStepErr(P / 40);
+    const e2 = oneStepErr(P / 80);
+    const ratio = e1 / e2;
+    assert(ratio > 150 && ratio < 800,
+        `one-step error ratio ${ratio.toFixed(1)} outside 8th-order band [150, 800] ` +
+        `(order 7 would be ~128, order 6 ~64)`);
+});
+
+test('RKF7(8) · adaptive e=0.9 orbit, full period @ tol 1e-12', () => {
+    const { el, bodies, P, n } = twoBodySetup(0.9);
+    const E0 = totalEnergy(bodies).total;
+    const advanced = adaptiveStep(bodies, P, 1e-12, {});
+    assertBelow(Math.abs(advanced - P) / P, 1e-9, 'time actually advanced');
+    const posErr = relErrVsAnalytic(bodies, el, n, advanced, 3.844e8);
+    const dE = Math.abs((totalEnergy(bodies).total - E0) / E0);
+    assertBelow(posErr, 1e-9, 'position error vs analytic (fraction of a)');
+    assertBelow(dE, 1e-9, '|ΔE/E₀| through the e=0.9 pericenter');
+});
+
+test('hybrid · hot three-body SURVIVES the flyby via adaptive segment', () => {
+    // Same config that faults under strict fixed-dt (P0.2 test above).
+    // With hybrid stepping the core must switch to RKF7(8) near pericenter,
+    // carry the system through, and hand back to Yoshida-4 — with the
+    // energy account intact and honestly measured against the original E₀.
+    const sim = createSim({ bodies: hotTriple(), targetStep: 600 });
+    let fakeMs = 0;
+    const now = () => fakeMs;
+    let sawAdaptive = false, sawExit = false, fault = null;
+    let frames = 0;
+    while (Math.abs(sim.elapsedSec) < 1.2e6 && frames < 20000 && !fault) {
+        fakeMs += 16.7;
+        const res = advanceFrame(sim,
+            { dtRealSec: 1 / 60, warp: 2e6, direction: +1, budgetMs: 1e9 }, now);
+        if (res.integrator === 'rkf78') {
+            sawAdaptive = true;
+            assert(res.encounter, 'adaptive mode must name the encounter pair');
+        } else if (sawAdaptive) {
+            sawExit = true;
+        }
+        fault = res.fault;
+        frames++;
+    }
+    assert(!fault, `hybrid path faulted: ${JSON.stringify(fault)}`);
+    assert(sawAdaptive, 'never entered the adaptive close-encounter path');
+    assert(sawExit, 'never returned to the symplectic path after the flyby');
+    const dE = Math.abs(currentEnergy(sim) - sim.energy0) / Math.abs(sim.energy0);
+    assertBelow(dE, 1e-6, '|ΔE/E₀| through the resolved flyby');
+    for (const b of sim.bodies) {
+        assert(b.r.every(Number.isFinite) && b.v.every(Number.isFinite),
+            `non-finite state on ${b.name} after flyby`);
+    }
+});
+
+test('hybrid · all six curated systems stay on the symplectic path', () => {
+    for (const id of SYSTEM_ORDER) {
+        const sys = SYSTEMS[id];
+        const sim = createSim({ bodies: systemBodies(id), targetStep: sys.suggested_dt_s });
+        let fakeMs = 0;
+        const now = () => fakeMs;
+        for (let f = 0; f < 300; f++) {
+            fakeMs += 16.7;
+            const res = advanceFrame(sim,
+                { dtRealSec: 1 / 60, warp: sys.suggested_warp, direction: +1, budgetMs: 1e9 }, now);
+            assert(res.integrator === 'yoshida4',
+                `${id} left the symplectic path at default settings (frame ${f})`);
+            assert(!res.fault, `${id} faulted at default settings`);
+        }
+    }
+});
+
+test('hybrid · true singularity (radial plunge) faults as unresolvable', () => {
+    // Zero angular momentum head-on collision of point masses: no
+    // integrator can resolve r → 0. The adaptive step must collapse, the
+    // core must fault-and-rewind rather than emit NaN.
+    const m = 1e26;
+    const bodies = [
+        { name: 'a', m, r: [-5e8, 0, 0], v: [0, 0, 0] },
+        { name: 'b', m, r: [ 5e8, 0, 0], v: [0, 0, 0] },
+    ];
+    const sim = createSim({ bodies, targetStep: 600 });
+    const fault = runToFault(sim, { warp: 2e6, maxFrames: 20000 });
+    assert(fault, 'expected the radial plunge to fault');
+    for (const b of sim.bodies) {
+        assert(b.r.every(Number.isFinite) && b.v.every(Number.isFinite),
+            'restored state has non-finite values after singular plunge');
     }
 });
 

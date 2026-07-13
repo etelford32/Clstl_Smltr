@@ -118,6 +118,8 @@ const hud = {
     rewindBtn: null,      // ⏪ step back through the checkpoint ring
     warpSlider: null,
     throttleChip: null,   // amber "THROTTLED" chip near the warp readout
+    scheme:    null,      // active-integrator line in Integrator Health
+    watermark: null,      // stage watermark mirrors the active scheme
     faultBanner:  null,   // integration-fault banner overlay on the stage
     faultText:    null,
     faultDismiss: null,
@@ -655,6 +657,7 @@ function _tick(t) {
         }
         _renderHUDLive();
         _renderThrottleChip();
+        _renderSchemeReadout();
     }
 
     // Drive skin shader uniforms each frame (animations / time-driven
@@ -825,6 +828,31 @@ function _showFaultBanner(fault) {
         `State rewound ${_humaniseSeconds(Math.abs(fault.rewoundSec))}. ` +
         `Reduce warp (smaller steps) or ⏪ Rewind further, then resume.`;
     hud.faultBanner.hidden = false;
+}
+
+// Active-integrator readout (P0.4). Showing the scheme switch is a
+// feature, not a warning — the lab is telling you it knows a close
+// encounter demands different numerics.
+let _lastSchemeText = null;
+function _renderSchemeReadout() {
+    if (!state.sim) return;
+    const adaptive = state.sim.integrator === 'rkf78';
+    const enc = state.sim.encounter;
+    const text = adaptive
+        ? `RKF7(8) · adaptive${enc ? ` — ${_capitalize(enc.bodyA)} ↔ ${_capitalize(enc.bodyB)}` : ''}`
+        : 'Yoshida-4 · symplectic';
+    if (text === _lastSchemeText) return;
+    _lastSchemeText = text;
+    if (hud.scheme) {
+        hud.scheme.textContent = text;
+        hud.scheme.style.color = adaptive ? '#ffb830' : '';
+    }
+    if (hud.watermark) {
+        hud.watermark.textContent = adaptive
+            ? 'RKF7(8) · adaptive · close encounter'
+            : 'Yoshida-4 · symplectic · live';
+        hud.watermark.style.color = adaptive ? '#ffb830' : '';
+    }
 }
 
 let _lastThrottleText = null;
