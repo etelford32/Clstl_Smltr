@@ -572,6 +572,12 @@ canvas.gl-resonance-canvas {
             </button>
         </div>
 
+        <div id="gl-epoch-wrap" style="display:none;">
+            <div class="gl-label">Epoch</div>
+            <select id="gl-epoch" class="gl-input" style="width:100%;"></select>
+            <p class="gl-camera-hint" id="gl-epoch-note"></p>
+        </div>
+
         <div id="gl-sandbox-wrap" style="display:none;">
             <div class="gl-label">Sandbox</div>
             <div class="gl-controls">
@@ -789,6 +795,11 @@ const ui = {
     presetBtns:   Array.from(document.querySelectorAll('.gl-preset')),
     hint:         document.getElementById('gl-hint'),
     hintBtn:      document.getElementById('gl-hint-btn'),
+
+    // Epoch picker (P2.2)
+    epochWrap:    document.getElementById('gl-epoch-wrap'),
+    epochSelect:  document.getElementById('gl-epoch'),
+    epochNote:    document.getElementById('gl-epoch-note'),
 
     // Sandbox (P2.1)
     sandboxWrap:  document.getElementById('gl-sandbox-wrap'),

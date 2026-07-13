@@ -821,6 +821,46 @@ test('circumbinary ICs · osculating a and period match the published values', (
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 10c. Baked epochs (P2.2) — every entry in the generated epochs.js must
+//      assemble into a physically sane system: satellites bound to the
+//      parent with osculating a within 3% of the J2000 value (mean-motion
+//      propagation preserves a; J2 secular drift moves only angles).
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('epochs · baked vectors assemble into bound, a-preserving systems', async () => {
+    const { EPOCHS } = await import('../epochs.js');
+    let checked = 0;
+    for (const [id, entries] of Object.entries(EPOCHS)) {
+        const sys = SYSTEMS[id];
+        assert(sys, `epochs.js references unknown system ${id}`);
+        for (const entry of entries) {
+            assert(entry.jd > 2451545 && entry.jd < 2470000, `implausible JD ${entry.jd}`);
+            const parent = sys.bodies.find(b => b.is_parent);
+            for (const b of sys.bodies) {
+                if (b.is_parent || !b.elements_j2000) continue;
+                const vec = entry.bodies[b.name];
+                assert(vec, `${id}@${entry.label}: missing vector for ${b.name}`);
+                // Frame: parent-centered. Circumbinary bodies orbit the
+                // enclosed mass; approximate with total system mass bound.
+                const muMax = G_SI * (sys.bodies.reduce((s, x) => s + x.m, 0));
+                const muMin = G_SI * (parent.m + b.m);
+                const rMag = Math.hypot(...vec.r);
+                const v2 = vec.v[0]**2 + vec.v[1]**2 + vec.v[2]**2;
+                const eMin = 0.5 * v2 - muMax / rMag;
+                assert(eMin < 0, `${id}@${entry.label}: ${b.name} unbound`);
+                if (!b.circumbinary) {
+                    const a = -muMin / (2 * (0.5 * v2 - muMin / rMag));
+                    assertBelow(Math.abs(a - b.elements_j2000.a) / b.elements_j2000.a, 0.03,
+                        `${id}@${entry.label}: ${b.name} semi-major axis drift`);
+                }
+                checked++;
+            }
+        }
+    }
+    assert(checked > 100, `only ${checked} epoch vectors checked — bake incomplete?`);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 11. Determinism (P0.5) — the Worker and inline drivers both drive this
 //     exact sim-core with message-derived inputs, so bitwise determinism
 //     of the core under identical frame scripts is the parity guarantee
