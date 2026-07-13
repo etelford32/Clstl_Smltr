@@ -750,4 +750,38 @@ test('hybrid · true singularity (radial plunge) faults as unresolvable', () => 
     }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 11. Determinism (P0.5) — the Worker and inline drivers both drive this
+//     exact sim-core with message-derived inputs, so bitwise determinism
+//     of the core under identical frame scripts is the parity guarantee
+//     between the two paths (Node cannot host a browser Worker directly).
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('sim-core · bitwise deterministic under an identical frame script', () => {
+    function run() {
+        const sys = SYSTEMS['jupiter-galileans'];
+        const sim = createSim({ bodies: systemBodies('jupiter-galileans'), targetStep: sys.suggested_dt_s });
+        configureTrails(sim,
+            sim.bodies.map((b, i) => i === 0 ? null : { interval: 3600, scale: 1e-9 }), 768);
+        const now = () => 0;
+        for (let f = 0; f < 400; f++) {
+            // Vary the frame dt deterministically to exercise uneven substeps.
+            const dt = 1 / 60 + (f % 7) * 1e-3;
+            advanceFrame(sim, { dtRealSec: dt, warp: 86400 * 30, direction: +1, budgetMs: 1e9 }, now);
+        }
+        return sim;
+    }
+    const a = run(), b = run();
+    assert(a.elapsedSec === b.elapsedSec, 'elapsedSec diverged');
+    for (let i = 0; i < a.bodies.length; i++) {
+        for (let k = 0; k < 3; k++) {
+            assert(a.bodies[i].r[k] === b.bodies[i].r[k], `r diverged on body ${i}`);
+            assert(a.bodies[i].v[k] === b.bodies[i].v[k], `v diverged on body ${i}`);
+        }
+    }
+    for (let i = 1; i < a.trails.length; i++) {
+        assert(a.trails[i].total === b.trails[i].total, `trail total diverged on body ${i}`);
+    }
+});
+
 await runAll();

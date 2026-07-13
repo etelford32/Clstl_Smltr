@@ -495,6 +495,8 @@ function _restoreSlot(sim, slot) {
     sim.integrator = 'yoshida4';
     sim.encounter = null;
     sim.hAdaptive = null;
+    // Trail rings contain the now-discarded excursion — invalid data.
+    clearTrailBuffers(sim);
     return slot;
 }
 

@@ -10,22 +10,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 import {
-    totalAngularMomentum,
     stateToElements,
     G_SI,
 } from './physics.js';
-import {
-    createSim,
-    advanceFrame,
-    clearDebt,
-    currentEnergy,
-    rebaselineEnergy,
-    rewind,
-    configureTrails,
-    clearTrailBuffers,
-    PHYSICS_BUDGET_MS_DESKTOP,
-    PHYSICS_BUDGET_MS_MOBILE,
-} from './sim-core.js';
+import { createDriver } from './sim-driver.js';
 import { SYSTEMS, SYSTEM_ORDER, J2000_JD } from './systems.js';
 import {
     createBodyVisual,
@@ -49,17 +37,14 @@ const TRAIL_POINTS_PER_ORBIT = 256;
 const TRAIL_PERIODS_DEFAULT  = 3;   // per-system override: trail_periods
 const MIN_BODY_RADIUS_UNITS = 0.05;
 
-// Wall-clock physics budget per frame (P0.1). Coarse-pointer devices get a
-// smaller slice so the render loop keeps 60 fps headroom on mobile GPUs.
-const PHYSICS_BUDGET_MS =
-    (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches)
-        ? PHYSICS_BUDGET_MS_MOBILE
-        : PHYSICS_BUDGET_MS_DESKTOP;
-
 const state = {
     systemId:       null,
     sys:            null,    // active system descriptor (clone of SYSTEMS[id])
-    sim:            null,    // sim-core state (stepping / budget / throttle)
+    driver:         null,    // physics-loop driver (Worker or inline fallback)
+    driverMode:     'inline',
+    simView:        null,    // latest snapshot view — HUD/chips read this
+    L0Pending:      false,   // re-baseline |L₀| from the next snapshot
+    interp:         null,    // worker mode: {prevPos, currPos, prevMs, currMs}
     bodies:         [],      // mutable {m, r, v, …} array passed to integrator
     meshes:         [],      // pickable surface meshes paired by index
     bodyGroups:     [],      // Three.Group per body — what we translate each frame
@@ -317,15 +302,6 @@ export function loadSystem(systemId) {
         state.j2Opts    = null;
         state.j2Enabled = false;
     }
-    state.sim = createSim({
-        bodies:     state.bodies,
-        targetStep: state.targetStep,
-        j2Opts:     state.j2Opts,
-        j2Enabled:  state.j2Enabled,
-    });
-    state.energy0 = state.sim.energy0;
-    const L0 = totalAngularMomentum(state.bodies);
-    state.L0_mag = Math.hypot(L0[0], L0[1], L0[2]) || 1;
     if (hud.faultBanner) hud.faultBanner.hidden = true;
 
     state.meshes      = [];
@@ -344,7 +320,7 @@ export function loadSystem(systemId) {
     // orbital period, ring capped at trail_periods visible orbits.
     const trailCap = TRAIL_POINTS_PER_ORBIT * (src.trail_periods || TRAIL_PERIODS_DEFAULT);
     const metersToScene = KM_PER_M / state.sceneScaleKm;
-    configureTrails(state.sim, state.bodies.map(b => {
+    const trailSpecs = state.bodies.map(b => {
         if (b.is_parent) return null;
         let interval;
         if (b.elements_j2000) {
@@ -355,7 +331,7 @@ export function loadSystem(systemId) {
             interval = state.targetStep * 8;   // unbound / element-less fallback
         }
         return { interval, scale: metersToScene };
-    }), trailCap);
+    });
 
     for (let bi = 0; bi < state.bodies.length; bi++) {
         const b = state.bodies[bi];
@@ -434,6 +410,86 @@ export function loadSystem(systemId) {
     _renderBodyChips();
     _renderJ2Widget();
     if (hud.focusLabel) hud.focusLabel.textContent = 'Free orbit · click a body to focus';
+
+    // Hand the physics to the driver LAST — its first snapshot needs the
+    // GPU trail rings above to exist. Worker mode rebuilds body state from
+    // systems.js on its own thread; inline mode adopts state.bodies.
+    state.simView = null;
+    state.L0Pending = true;
+    state.energy0 = null;
+    state.interp = {
+        prevPos: new Float64Array(state.bodies.length * 3),
+        currPos: new Float64Array(state.bodies.length * 3),
+        prevMs: 0, currMs: 0, primed: false,
+    };
+    state.driver.load({
+        systemId,
+        bodies:     state.bodies,
+        targetStep: state.targetStep,
+        j2Opts:     state.j2Opts,
+        j2Enabled:  state.j2Enabled,
+        trailSpecs,
+        trailCap,
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Snapshot consumption — single path for both driver modes
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _capturePositions(dst) {
+    for (let i = 0; i < state.bodies.length; i++) {
+        const r = state.bodies[i].r, o = i * 3;
+        dst[o] = r[0]; dst[o + 1] = r[1]; dst[o + 2] = r[2];
+    }
+}
+
+/**
+ * Every physics result — worker or inline — lands here. Worker snapshot
+ * views alias a transferable buffer, so everything is consumed
+ * synchronously (bodies were already copied in place by the codec;
+ * trails go straight into the GPU rings).
+ */
+function _onSnapshot(view) {
+    state.simView = view;
+    state.elapsedSec = view.elapsedSec;
+    state.energy0 = view.energy0;
+    if (state.L0Pending) {
+        state.L0_mag = view.Lmag || 1;
+        state.L0Pending = false;
+    }
+
+    // Interpolation bookkeeping (worker mode): render between the last two
+    // snapshots for smoothness; snap hard across discontinuities.
+    if (state.driverMode === 'worker' && state.interp) {
+        const ip = state.interp;
+        if (!ip.primed || view.loaded || view.rewound || view.fault) {
+            _capturePositions(ip.currPos);
+            ip.prevPos.set(ip.currPos);
+            ip.prevMs = ip.currMs = performance.now();
+            ip.primed = true;
+        } else {
+            ip.prevPos.set(ip.currPos);
+            ip.prevMs = ip.currMs;
+            _capturePositions(ip.currPos);
+            ip.currMs = performance.now();
+        }
+    }
+
+    if (view.fault) {
+        // Guard tripped (P0.2): the core rewound to the newest healthy
+        // checkpoint and wiped its trail rings. Pause and surface it.
+        state.paused = true;
+        if (hud.playBtn) hud.playBtn.textContent = '▶ Play';
+        _showFaultBanner(view.fault);
+    }
+    if (view.fault || view.rewound || view.loaded) _resetTrailVisuals();
+    _syncTrails(view.trails);
+    if (state.paused) _updateMeshes();   // repaint rewind/fault while paused
+
+    _renderHUDLive();
+    _renderThrottleChip();
+    _renderSchemeReadout();
 }
 
 /**
@@ -560,11 +616,10 @@ function _updateMeshes() {
  * allocations, no color rewrites, no buffer rotation. Fade happens in the
  * trail shader from the head uniform.
  */
-function _syncTrails() {
-    const simTrails = state.sim?.trails;
-    if (!simTrails) return;
+function _syncTrails(sourceTrails) {
+    if (!sourceTrails) return;
     for (let i = 0; i < state.trails.length; i++) {
-        const st = simTrails[i];
+        const st = sourceTrails[i];
         const gt = state.trails[i];
         if (!st || !gt) continue;
         let fresh = st.total - gt.lastTotal;
@@ -629,36 +684,33 @@ function _tick(t) {
     _lastT = t;
 
     const dt_real = dt_real_ms / 1000;
-    if (!state.paused && dt_real > 0 && state.sim) {
-        // Budget-bounded stepping (P0.1). The core divides the requested
-        // sim time into fixed substeps but stops at the wall-clock budget;
-        // the shortfall carries as debt and, if sustained, becomes a warp
-        // cap surfaced in the amber throttle chip. The tab never freezes
-        // and sim time is never silently skipped.
-        const res = advanceFrame(state.sim, {
+    if (!state.paused && dt_real > 0 && state.driver) {
+        // Budget-bounded stepping (P0.1) via the driver (P0.5): worker mode
+        // posts a tick request and results arrive in _onSnapshot; inline
+        // mode executes synchronously through the same callback. Either
+        // way the tab never freezes and sim time is never silently
+        // skipped — sustained overload surfaces as the throttle chip.
+        state.driver.tick({
             dtRealSec: dt_real,
             warp:      state.warp,
             direction: state.direction,
-            budgetMs:  PHYSICS_BUDGET_MS,
         });
-        state.elapsedSec = state.sim.elapsedSec;
-        if (res.fault) {
-            // Blow-up guard tripped (P0.2): the core already rewound to the
-            // newest healthy checkpoint. Pause, surface the diagnosis, and
-            // wipe trails (they contain the faulted excursion).
-            state.paused = true;
-            if (hud.playBtn) hud.playBtn.textContent = '▶ Play';
-            _clearTrails();
-            _showFaultBanner(res.fault);
-            _updateMeshes();
-        } else if (res.stepsDone > 0) {
-            _updateMeshes();
-            _syncTrails();
-        }
-        _renderHUDLive();
-        _renderThrottleChip();
-        _renderSchemeReadout();
     }
+
+    // Worker mode renders between the last two snapshots for smoothness;
+    // inline mode's bodies are already exact.
+    if (state.driverMode === 'worker' && state.interp?.primed) {
+        const ip = state.interp;
+        const span = ip.currMs - ip.prevMs;
+        const k = span > 0 ? Math.min(1, Math.max(0, (t - ip.currMs) / span)) : 1;
+        for (let i = 0; i < state.bodies.length; i++) {
+            const r = state.bodies[i].r, o = i * 3;
+            r[0] = ip.prevPos[o]     + (ip.currPos[o]     - ip.prevPos[o])     * k;
+            r[1] = ip.prevPos[o + 1] + (ip.currPos[o + 1] - ip.prevPos[o + 1]) * k;
+            r[2] = ip.prevPos[o + 2] + (ip.currPos[o + 2] - ip.prevPos[o + 2]) * k;
+        }
+    }
+    _updateMeshes();
 
     // Drive skin shader uniforms each frame (animations / time-driven
     // band drift / GRS rotation still tick when the integrator is paused).
@@ -733,14 +785,14 @@ function _renderTabs() {
 }
 
 function _renderHUDLive() {
-    // Energy & angular-momentum drift. With J2 on, total energy includes
-    // the J2 potential so the diagnostic still reports the full drift.
-    if (!state.sim) return;
-    const E = currentEnergy(state.sim);
-    const L = totalAngularMomentum(state.bodies);
-    const dE = state.energy0 ? Math.abs((E - state.energy0) / state.energy0) : 0;
-    const Lm = Math.hypot(L[0], L[1], L[2]);
-    const dL = Math.abs(Lm - state.L0_mag) / state.L0_mag;
+    // Energy & angular-momentum drift, from the latest EXACT snapshot
+    // (never from interpolated render positions — that would show fake
+    // drift). With J2 on, total energy includes the J2 potential so the
+    // diagnostic still reports the full Hamiltonian drift.
+    const v = state.simView;
+    if (!v) return;
+    const dE = v.energy0 ? Math.abs((v.E - v.energy0) / v.energy0) : 0;
+    const dL = Math.abs(v.Lmag - state.L0_mag) / state.L0_mag;
 
     if (hud.energyDrift) hud.energyDrift.textContent = _scientific(dE);
     if (hud.angMomDrift) hud.angMomDrift.textContent = _scientific(dL);
@@ -805,8 +857,9 @@ function _renderHUDLive() {
     }
 }
 
-function _clearTrails() {
-    if (state.sim) clearTrailBuffers(state.sim);
+// GPU-side trail reset only — the sim-side rings are cleared by sim-core
+// wherever the state becomes discontinuous (restore/rewind/load).
+function _resetTrailVisuals() {
     for (const tr of state.trails) {
         if (!tr) continue;
         tr.segHead = -1;
@@ -835,9 +888,9 @@ function _showFaultBanner(fault) {
 // encounter demands different numerics.
 let _lastSchemeText = null;
 function _renderSchemeReadout() {
-    if (!state.sim) return;
-    const adaptive = state.sim.integrator === 'rkf78';
-    const enc = state.sim.encounter;
+    if (!state.simView) return;
+    const adaptive = state.simView.integrator === 'rkf78';
+    const enc = state.simView.encounter;
     const text = adaptive
         ? `RKF7(8) · adaptive${enc ? ` — ${_capitalize(enc.bodyA)} ↔ ${_capitalize(enc.bodyB)}` : ''}`
         : 'Yoshida-4 · symplectic';
@@ -857,9 +910,9 @@ function _renderSchemeReadout() {
 
 let _lastThrottleText = null;
 function _renderThrottleChip() {
-    if (!hud.throttleChip || !state.sim) return;
-    if (state.sim.throttled) {
-        const text = `THROTTLED — max sustainable warp ≈ ${_humaniseWarp(state.sim.warpCap)}`;
+    if (!hud.throttleChip || !state.simView) return;
+    if (state.simView.throttled) {
+        const text = `THROTTLED — max sustainable warp ≈ ${_humaniseWarp(state.simView.warpCap)}`;
         if (text !== _lastThrottleText) {
             hud.throttleChip.textContent = text;
             hud.throttleChip.hidden = false;
@@ -938,7 +991,7 @@ export function attachUI(refs) {
             state.direction *= -1;
             // Outstanding debt has the old sign — flush it so the reversal
             // takes effect immediately instead of paying down old time.
-            if (state.sim) clearDebt(state.sim);
+            if (state.driver) state.driver.clearDebt();
             hud.revBtn.textContent = state.direction > 0 ? '↻ Reverse Time' : '↺ Forward Time';
         });
     }
@@ -973,29 +1026,22 @@ export function attachUI(refs) {
         hud.j2Toggle.addEventListener('change', () => {
             state.j2Enabled = !!hud.j2Toggle.checked;
             // Re-baseline conserved quantities so the drift readout reflects
-            // post-toggle behaviour rather than the discontinuity.
-            if (state.sim) {
-                state.sim.j2Enabled = state.j2Enabled;
-                rebaselineEnergy(state.sim);
-                state.energy0 = state.sim.energy0;
-            }
-            const L = totalAngularMomentum(state.bodies);
-            state.L0_mag = Math.hypot(L[0], L[1], L[2]) || 1;
+            // post-toggle behaviour rather than the discontinuity. The new
+            // E₀/|L₀| arrive with the driver's confirmation snapshot.
+            state.L0Pending = true;
+            if (state.driver) state.driver.setJ2(state.j2Enabled);
         });
     }
 
     if (hud.rewindBtn) {
         hud.rewindBtn.addEventListener('click', () => {
-            if (!state.sim) return;
+            if (!state.driver) return;
             if (!state.paused) {
                 state.paused = true;
                 if (hud.playBtn) hud.playBtn.textContent = '▶ Play';
             }
-            rewind(state.sim);
-            state.elapsedSec = state.sim.elapsedSec;
-            _clearTrails();
-            _updateMeshes();
-            _renderHUDLive();
+            // The rewound snapshot repaints meshes, trails, and HUD.
+            state.driver.rewind();
         });
     }
 
@@ -1066,6 +1112,12 @@ function _humaniseWarp(w) {
 export function boot({ canvas, ui, defaultSystem = 'jupiter-galileans' }) {
     initScene(canvas);
     attachUI(ui);
+    // Physics home (P0.5): Web Worker when available, inline fallback
+    // otherwise. ?worker=0 forces inline for A/B comparison and debugging.
+    const forceInline = typeof location !== 'undefined' &&
+        new URLSearchParams(location.search).get('worker') === '0';
+    state.driver = createDriver(_onSnapshot, { forceInline });
+    state.driverMode = state.driver.mode;
     loadSystem(SYSTEM_ORDER.includes(defaultSystem) ? defaultSystem : SYSTEM_ORDER[0]);
     start();
     // Debug/test handle only — the smoke tests read trail buffers and sim

@@ -24,6 +24,16 @@ lab.js must keep it green.
 | Time reversal × 6 systems | 1e4 steps forward then backward returns to the initial state < 1e-9 relative |
 | Elements round-trip | `elementsToState` ∘ `stateToElements` = identity to ~1e-10 |
 | Barycenter integrity | COM stays pinned (< 1e-10 of system extent) through 1e4 steps |
+| sim-core budget (P0.1) | Substep loop bounded by the wall budget; advanced+debt = requested exactly; throttle engages after sustained overload and recovers |
+| Guards + rewind (P0.2) | Hot three-body faults with the pair named (strict fixed-dt mode); injected NaN caught; rewind walks back to a bit-exact initial state |
+| Trails (P0.3) | ~256 points/orbit at any warp; geometry warp-independent; ring capacity respected |
+| RKF7(8) + hybrid (P0.4) | One-step 8th-order convergence (tableau checksum); e=0.9 period at tol 1e-12 lands 1e-9 of analytic; hot triple SURVIVES via adaptive segment (\|ΔE/E₀\| < 1e-6) and returns to Yoshida; all six curated systems provably never leave the symplectic path; radial singularity faults as `unresolvable` |
+| Determinism (P0.5) | Bitwise-identical state after an identical frame script — the parity guarantee between the Worker and inline drivers, which both drive this same core |
+
+Browser-level acceptance lives in `tests/gravity-lab-smoke.mjs` (Playwright):
+frame-budget compliance, throttle honesty (never silently slower than the
+requested warp), anti-hairball trail-segment geometry at max warp, worker
+boot + `?worker=0` inline fallback.
 
 ## Findings against the pre-harness code (2026-07-13)
 
