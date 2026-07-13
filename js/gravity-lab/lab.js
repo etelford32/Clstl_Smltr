@@ -10,8 +10,6 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 import {
-    totalEnergy,
-    totalJ2PotentialEnergy,
     totalAngularMomentum,
     stateToElements,
     G_SI,
@@ -20,6 +18,9 @@ import {
     createSim,
     advanceFrame,
     clearDebt,
+    currentEnergy,
+    rebaselineEnergy,
+    rewind,
     PHYSICS_BUDGET_MS_DESKTOP,
     PHYSICS_BUDGET_MS_MOBILE,
 } from './sim-core.js';
@@ -108,8 +109,12 @@ const hud = {
     playBtn:   null,
     revBtn:    null,
     resetBtn:  null,
+    rewindBtn: null,      // ⏪ step back through the checkpoint ring
     warpSlider: null,
     throttleChip: null,   // amber "THROTTLED" chip near the warp readout
+    faultBanner:  null,   // integration-fault banner overlay on the stage
+    faultText:    null,
+    faultDismiss: null,
     tabs:       null,
     // Camera UI
     bodyChips:  null,    // container for body focus chips
@@ -311,9 +316,10 @@ export function loadSystem(systemId) {
         j2Opts:     state.j2Opts,
         j2Enabled:  state.j2Enabled,
     });
-    state.energy0 = _currentTotalEnergy();
+    state.energy0 = state.sim.energy0;
     const L0 = totalAngularMomentum(state.bodies);
     state.L0_mag = Math.hypot(L0[0], L0[1], L0[2]) || 1;
+    if (hud.faultBanner) hud.faultBanner.hidden = true;
 
     state.meshes      = [];
     state.bodyGroups  = [];
@@ -471,16 +477,10 @@ function _systemExtentUnits() {
     return r || 10;
 }
 
-// Energy diagnostic that includes the J2 contribution when active so the
-// readout reports true Hamiltonian drift rather than the oscillation of
-// the unaccounted J2 PE.
-function _currentTotalEnergy() {
-    let E = totalEnergy(state.bodies).total;
-    if (state.j2Enabled && state.j2Opts) {
-        E += totalJ2PotentialEnergy(state.bodies, state.j2Opts);
-    }
-    return E;
-}
+// Energy diagnostics (including the J2 contribution when active, so the
+// readout reports true Hamiltonian drift) live in sim-core — see
+// currentEnergy() / rebaselineEnergy(). The fault guard uses the same
+// baseline, so HUD and guard can never disagree.
 
 function _renderJ2Widget() {
     if (!hud.j2Wrap) return;
@@ -648,7 +648,16 @@ function _tick(t) {
             budgetMs:  PHYSICS_BUDGET_MS,
         });
         state.elapsedSec = state.sim.elapsedSec;
-        if (res.stepsDone > 0) {
+        if (res.fault) {
+            // Blow-up guard tripped (P0.2): the core already rewound to the
+            // newest healthy checkpoint. Pause, surface the diagnosis, and
+            // wipe trails (they contain the faulted excursion).
+            state.paused = true;
+            if (hud.playBtn) hud.playBtn.textContent = '▶ Play';
+            _clearTrails();
+            _showFaultBanner(res.fault);
+            _updateMeshes();
+        } else if (res.stepsDone > 0) {
             _updateMeshes();
             _appendTrails();
         }
@@ -731,7 +740,8 @@ function _renderTabs() {
 function _renderHUDLive() {
     // Energy & angular-momentum drift. With J2 on, total energy includes
     // the J2 potential so the diagnostic still reports the full drift.
-    const E = _currentTotalEnergy();
+    if (!state.sim) return;
+    const E = currentEnergy(state.sim);
     const L = totalAngularMomentum(state.bodies);
     const dE = state.energy0 ? Math.abs((E - state.energy0) / state.energy0) : 0;
     const Lm = Math.hypot(L[0], L[1], L[2]);
@@ -798,6 +808,29 @@ function _renderHUDLive() {
         }
         _drawResonanceTrace(phi);
     }
+}
+
+function _clearTrails() {
+    state.framesSinceTrail = 0;
+    for (const tr of state.trails) {
+        if (!tr) continue;
+        tr.head = 0;
+        tr.count = 0;
+        tr.geom.setDrawRange(0, 0);
+    }
+}
+
+function _showFaultBanner(fault) {
+    if (!hud.faultBanner || !hud.faultText) return;
+    const sep = (fault.separationM >= 0 && isFinite(fault.separationM))
+        ? ` — minimum separation ${(fault.separationM / 1000).toExponential(2)} km`
+        : '';
+    hud.faultText.textContent =
+        `Integration fault: the close encounter between ${_capitalize(fault.bodyA)} and ` +
+        `${_capitalize(fault.bodyB)}${sep} exceeded the fixed step. ` +
+        `State rewound ${_humaniseSeconds(Math.abs(fault.rewoundSec))}. ` +
+        `Reduce warp (smaller steps) or ⏪ Rewind further, then resume.`;
+    hud.faultBanner.hidden = false;
 }
 
 let _lastThrottleText = null;
@@ -917,12 +950,36 @@ export function attachUI(refs) {
     if (hud.j2Toggle) {
         hud.j2Toggle.addEventListener('change', () => {
             state.j2Enabled = !!hud.j2Toggle.checked;
-            if (state.sim) state.sim.j2Enabled = state.j2Enabled;
             // Re-baseline conserved quantities so the drift readout reflects
             // post-toggle behaviour rather than the discontinuity.
-            state.energy0 = _currentTotalEnergy();
+            if (state.sim) {
+                state.sim.j2Enabled = state.j2Enabled;
+                rebaselineEnergy(state.sim);
+                state.energy0 = state.sim.energy0;
+            }
             const L = totalAngularMomentum(state.bodies);
             state.L0_mag = Math.hypot(L[0], L[1], L[2]) || 1;
+        });
+    }
+
+    if (hud.rewindBtn) {
+        hud.rewindBtn.addEventListener('click', () => {
+            if (!state.sim) return;
+            if (!state.paused) {
+                state.paused = true;
+                if (hud.playBtn) hud.playBtn.textContent = '▶ Play';
+            }
+            rewind(state.sim);
+            state.elapsedSec = state.sim.elapsedSec;
+            _clearTrails();
+            _updateMeshes();
+            _renderHUDLive();
+        });
+    }
+
+    if (hud.faultDismiss) {
+        hud.faultDismiss.addEventListener('click', () => {
+            if (hud.faultBanner) hud.faultBanner.hidden = true;
         });
     }
 }

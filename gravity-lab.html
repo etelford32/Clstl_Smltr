@@ -340,6 +340,28 @@ canvas.gl-resonance-canvas {
     border-radius:6px; display:block;
 }
 
+/* ─── Integration-fault banner (overlay on stage) ───────────── */
+#gl-fault-banner {
+    position:absolute; left:50%; top:16px;
+    transform:translateX(-50%);
+    z-index:4;
+    max-width:min(560px, calc(100% - 32px));
+    display:flex; align-items:flex-start; gap:10px;
+    background:rgba(48,16,8,.88); backdrop-filter:blur(10px);
+    border:1px solid rgba(255,140,90,.55);
+    border-radius:10px;
+    padding:10px 12px;
+    font-family:monospace; font-size:.72rem; line-height:1.5;
+    color:#ffcfae;
+}
+#gl-fault-banner[hidden] { display:none; }
+#gl-fault-banner button {
+    background:none; border:none; color:#ffcfae;
+    font-size:.9rem; cursor:pointer; padding:0 2px;
+    flex-shrink:0;
+}
+#gl-fault-banner button:hover { color:#fff; }
+
 /* ─── Time-control bar (overlay on stage) ───────────────────── */
 #gl-stage-bar {
     position:absolute; left:50%; bottom:18px;
@@ -471,7 +493,10 @@ canvas.gl-resonance-canvas {
                 <button type="button" class="gl-btn gl-btn-primary" id="gl-play">❚❚ Pause</button>
                 <button type="button" class="gl-btn" id="gl-rev">↻ Reverse Time</button>
             </div>
-            <button type="button" class="gl-btn" id="gl-reset">Reset to J2000.0</button>
+            <div class="gl-btn-row">
+                <button type="button" class="gl-btn" id="gl-rewind" title="Step back ~0.5 s of history per press (pauses the sim)">⏪ Rewind</button>
+                <button type="button" class="gl-btn" id="gl-reset">Reset to J2000.0</button>
+            </div>
         </div>
 
         <div class="gl-label">Camera</div>
@@ -496,6 +521,10 @@ canvas.gl-resonance-canvas {
     <!-- ─── 3D STAGE ────────────────────────────────────────────────── -->
     <main id="gl-stage">
         <canvas id="gl-canvas"></canvas>
+        <div id="gl-fault-banner" hidden>
+            <span id="gl-fault-text"></span>
+            <button type="button" id="gl-fault-dismiss" aria-label="Dismiss">✕</button>
+        </div>
         <div id="gl-stage-bar">
             <span class="gl-stage-time" id="gl-elapsed">—</span>
             <span class="gl-stage-jd"   id="gl-jd">JD —</span>
@@ -566,8 +595,12 @@ const ui = {
     playBtn:    document.getElementById('gl-play'),
     revBtn:     document.getElementById('gl-rev'),
     resetBtn:   document.getElementById('gl-reset'),
+    rewindBtn:  document.getElementById('gl-rewind'),
     warpSlider: document.getElementById('gl-warp'),
     throttleChip: document.getElementById('gl-throttle'),
+    faultBanner:  document.getElementById('gl-fault-banner'),
+    faultText:    document.getElementById('gl-fault-text'),
+    faultDismiss: document.getElementById('gl-fault-dismiss'),
     tabs:       Array.from(document.querySelectorAll('#gl-tabs .gl-tab')),
 
     // Camera UI

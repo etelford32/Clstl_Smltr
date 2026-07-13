@@ -27,7 +27,9 @@ import {
     G_SI,
 } from '../physics.js';
 import { SYSTEMS, SYSTEM_ORDER } from '../systems.js';
-import { createSim, advanceFrame, clearDebt } from '../sim-core.js';
+import {
+    createSim, advanceFrame, clearDebt, rewind, currentEnergy,
+} from '../sim-core.js';
 
 const FAST = process.argv.includes('--fast');
 
@@ -443,6 +445,93 @@ test('sim-core · unpressured frame advances exactly the requested time', () => 
     sim.debtSec = 123;
     clearDebt(sim);
     assert(sim.debtSec === 0, 'clearDebt must zero the carry');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. Blow-up guards + checkpoint ring (P0.2).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Deliberately hot three-body config: two 1e26 kg bodies falling into a
+ * deep flyby (pericenter ~1e4 km — survivable with a resolved integrator,
+ * hopeless at a fixed 600 s step) plus a loosely bound spectator. Shared
+ * with the P0.4 hybrid-stepping acceptance test.
+ */
+function hotTriple() {
+    const m = 1e26;
+    return [
+        { name: 'alpha', m, r: [-5e8, 0, 0], v: [0, -260, 0] },
+        { name: 'beta',  m, r: [ 5e8, 0, 0], v: [0,  260, 0] },
+        { name: 'gamma', m: 1e22, r: [0, 4e9, 0], v: [1500, 0, 0] },
+    ];
+}
+
+function runToFault(sim, { warp = 2e6, maxFrames = 5000 } = {}) {
+    let fakeMs = 0;
+    const now = () => fakeMs;
+    for (let f = 0; f < maxFrames; f++) {
+        fakeMs += 16.7;
+        const res = advanceFrame(sim,
+            { dtRealSec: 1 / 60, warp, direction: +1, budgetMs: 1e9 }, now);
+        if (res.fault) return res.fault;
+    }
+    return null;
+}
+
+test('sim-core · hot three-body faults cleanly and rewinds (no NaN escapes)', () => {
+    const sim = createSim({ bodies: hotTriple(), targetStep: 600 });
+    const fault = runToFault(sim);
+    assert(fault, 'expected an integration fault from the unresolved encounter');
+    assert(fault.kind === 'energy' || fault.kind === 'nonfinite',
+        `unexpected fault kind ${fault.kind}`);
+    const pair = [fault.bodyA, fault.bodyB].sort().join('+');
+    assert(pair === 'alpha+beta', `fault should name the encounter pair, got ${pair}`);
+    assert(fault.rewoundSec > 0, 'fault must rewind, not stay on the bad state');
+    // Restored state is healthy: finite everywhere, energy back near E₀.
+    for (const b of sim.bodies) {
+        assert(b.r.every(Number.isFinite) && b.v.every(Number.isFinite),
+            `restored state has non-finite values on ${b.name}`);
+    }
+    const dE = Math.abs(currentEnergy(sim) - sim.energy0) / sim.energyScale;
+    assertBelow(dE, 1e-3, 'restored-state energy deviation');
+
+    // Rewind walks strictly backward and bottoms out at the initial state.
+    let prevT = sim.elapsedSec;
+    for (let k = 0; k < 200; k++) {
+        const { t } = rewind(sim);
+        assert(t <= prevT, `rewind went forward: ${t} > ${prevT}`);
+        prevT = t;
+    }
+    assert(prevT === 0, `rewind floor should be the initial state (t=0), got ${prevT}`);
+    const fresh = hotTriple();
+    for (let i = 0; i < fresh.length; i++) {
+        for (let k = 0; k < 3; k++) {
+            assert(sim.bodies[i].r[k] === fresh[i].r[k], 'initial checkpoint must be bit-exact');
+            assert(sim.bodies[i].v[k] === fresh[i].v[k], 'initial checkpoint must be bit-exact');
+        }
+    }
+});
+
+test('sim-core · injected NaN trips the nonfinite guard and restores', () => {
+    const bodies = systemBodies('earth-moon');
+    const sim = createSim({ bodies, targetStep: 600 });
+    let fakeMs = 0;
+    const now = () => fakeMs;
+    // Advance a few healthy frames so checkpoints exist beyond the seed.
+    for (let f = 0; f < 5; f++) {
+        fakeMs += 600;   // > checkpoint interval → one checkpoint per frame
+        advanceFrame(sim, { dtRealSec: 1 / 60, warp: 86400, direction: +1, budgetMs: 1e9 }, now);
+    }
+    sim.bodies[1].r[0] = NaN;
+    fakeMs += 600;
+    const res = advanceFrame(sim,
+        { dtRealSec: 1 / 60, warp: 86400, direction: +1, budgetMs: 1e9 }, now);
+    assert(res.fault && res.fault.kind === 'nonfinite',
+        `expected nonfinite fault, got ${JSON.stringify(res.fault)}`);
+    for (const b of sim.bodies) {
+        assert(b.r.every(Number.isFinite) && b.v.every(Number.isFinite),
+            'restore after NaN left non-finite state');
+    }
 });
 
 await runAll();

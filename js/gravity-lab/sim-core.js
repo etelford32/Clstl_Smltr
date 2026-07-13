@@ -22,7 +22,7 @@
  *   busy render) don't permanently degrade the warp.
  */
 
-import { yoshida4Step } from './physics.js';
+import { yoshida4Step, totalEnergy, totalJ2PotentialEnergy } from './physics.js';
 
 export const PHYSICS_BUDGET_MS_DESKTOP = 6;
 export const PHYSICS_BUDGET_MS_MOBILE  = 4;
@@ -32,12 +32,17 @@ const BUDGET_CHECK_EVERY = 16;    // substeps between wall-clock reads
 const CAP_SAFETY         = 0.9;   // cap at 90% of the measured sustainable rate
 const CAP_RECOVERY       = 1.02;  // per-in-budget-frame upward probe
 
+// Blow-up guard + checkpoint ring (P0.2, fixes D2 part 1).
+const FAULT_ENERGY_REL   = 1e-3;  // |ΔE| beyond this fraction of the energy scale
+const CKPT_CAPACITY      = 120;   // ~1 minute of history at one per 0.5 s
+const CKPT_INTERVAL_MS   = 500;   // wall-clock spacing between checkpoints
+
 /**
  * Create a simulation-core state object.
  * `bodies` is the live array the integrator mutates ({m, r, v, name, …}).
  */
 export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false }) {
-    return {
+    const sim = {
         bodies,
         targetStep,
         j2Opts,
@@ -47,7 +52,40 @@ export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false
         warpCap: Infinity,    // sustainable warp estimate; Infinity = uncapped
         throttled: false,
         _overBudgetSinceMs: null,
+        // Conserved-quantity baseline for the fault guard (and the HUD).
+        energy0: 0,
+        energyScale: 1,       // fault-guard denominator; robust when E₀ ≈ 0
+        // Checkpoint ring: fixed-capacity circular buffer of full states.
+        ckpt: { ring: new Array(CKPT_CAPACITY), head: -1, count: 0 },
+        _lastCkptMs: null,
     };
+    rebaselineEnergy(sim);
+    _recordCheckpoint(sim);   // slot 0 = the initial state, always rewindable
+    return sim;
+}
+
+/** Total energy including the J2 potential when the perturbation is active. */
+export function currentEnergy(sim) {
+    let E = totalEnergy(sim.bodies).total;
+    if (sim.j2Enabled && sim.j2Opts) {
+        E += totalJ2PotentialEnergy(sim.bodies, sim.j2Opts);
+    }
+    return E;
+}
+
+/**
+ * Re-anchor the conserved-quantity baseline (system load, J2 toggle,
+ * sandbox edits). The guard denominator uses max(|E₀|, KE) so a sandbox
+ * config with E₀ ≈ 0 (parabolic) cannot divide by zero or false-trip.
+ */
+export function rebaselineEnergy(sim) {
+    const { KE, total } = totalEnergy(sim.bodies);
+    let E = total;
+    if (sim.j2Enabled && sim.j2Opts) {
+        E += totalJ2PotentialEnergy(sim.bodies, sim.j2Opts);
+    }
+    sim.energy0 = E;
+    sim.energyScale = Math.max(Math.abs(E), KE, 1e-30);
 }
 
 /**
@@ -117,13 +155,129 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
         }
     }
 
+    // ── Blow-up guard (P0.2) ────────────────────────────────────────────
+    // Scan AFTER the frame's stepping: a NaN cannot heal and an energy
+    // spike from an unresolved encounter does not self-cancel, so
+    // per-frame granularity is enough — and it keeps the guard out of the
+    // hot substep loop.
+    let fault = null;
+    if (stepsDone > 0) {
+        const kind = _guardKind(sim);
+        if (kind) {
+            const pair = _closestPair(sim.bodies);
+            const atElapsedSec = sim.elapsedSec;
+            const cp = _restoreNewestCheckpoint(sim);
+            fault = {
+                kind,                              // 'nonfinite' | 'energy'
+                bodyA: pair.a, bodyB: pair.b,
+                separationM: pair.d,
+                atElapsedSec,
+                rewoundSec: atElapsedSec - sim.elapsedSec,
+                checkpointElapsedSec: cp.t,
+            };
+        } else if (sim._lastCkptMs === null || t - sim._lastCkptMs >= CKPT_INTERVAL_MS) {
+            _recordCheckpoint(sim);
+            sim._lastCkptMs = t;
+        }
+    }
+
     return {
         advancedSec,
         stepsDone,
         stepsWanted,
         effWarp,
         throttled: sim.throttled,
+        fault,
     };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fault guard + checkpoint ring (P0.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _guardKind(sim) {
+    for (const b of sim.bodies) {
+        if (!Number.isFinite(b.r[0]) || !Number.isFinite(b.r[1]) || !Number.isFinite(b.r[2]) ||
+            !Number.isFinite(b.v[0]) || !Number.isFinite(b.v[1]) || !Number.isFinite(b.v[2])) {
+            return 'nonfinite';
+        }
+    }
+    const E = currentEnergy(sim);
+    if (!Number.isFinite(E)) return 'nonfinite';
+    if (Math.abs(E - sim.energy0) > FAULT_ENERGY_REL * sim.energyScale) return 'energy';
+    return null;
+}
+
+function _closestPair(bodies) {
+    let a = null, b = null, d = Infinity;
+    for (let i = 0; i < bodies.length; i++) {
+        for (let j = i + 1; j < bodies.length; j++) {
+            const dx = bodies[j].r[0] - bodies[i].r[0];
+            const dy = bodies[j].r[1] - bodies[i].r[1];
+            const dz = bodies[j].r[2] - bodies[i].r[2];
+            let dij = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            if (!Number.isFinite(dij)) dij = -1;   // NaN pair is the culprit — rank first
+            if (dij < d) { d = dij; a = bodies[i].name ?? `body ${i}`; b = bodies[j].name ?? `body ${j}`; }
+        }
+    }
+    return { a, b, d };
+}
+
+function _recordCheckpoint(sim) {
+    const N = sim.bodies.length;
+    const ck = sim.ckpt;
+    ck.head = (ck.head + 1) % CKPT_CAPACITY;
+    if (ck.count < CKPT_CAPACITY) ck.count++;
+    let slot = ck.ring[ck.head];
+    if (!slot || slot.buf.length !== N * 6) {
+        slot = { t: 0, buf: new Float64Array(N * 6) };
+        ck.ring[ck.head] = slot;
+    }
+    slot.t = sim.elapsedSec;
+    const buf = slot.buf;
+    for (let i = 0; i < N; i++) {
+        const b = sim.bodies[i], o = i * 6;
+        buf[o]     = b.r[0]; buf[o + 1] = b.r[1]; buf[o + 2] = b.r[2];
+        buf[o + 3] = b.v[0]; buf[o + 4] = b.v[1]; buf[o + 5] = b.v[2];
+    }
+}
+
+function _restoreSlot(sim, slot) {
+    const buf = slot.buf;
+    for (let i = 0; i < sim.bodies.length; i++) {
+        const b = sim.bodies[i], o = i * 6;
+        b.r[0] = buf[o];     b.r[1] = buf[o + 1]; b.r[2] = buf[o + 2];
+        b.v[0] = buf[o + 3]; b.v[1] = buf[o + 4]; b.v[2] = buf[o + 5];
+    }
+    sim.elapsedSec = slot.t;
+    sim.debtSec = 0;
+    return slot;
+}
+
+function _restoreNewestCheckpoint(sim) {
+    return _restoreSlot(sim, sim.ckpt.ring[sim.ckpt.head]);
+}
+
+/**
+ * Step back one checkpoint (~0.5 s of wall-clock history per call; user
+ * feature and fault recovery both ride this). The first call after normal
+ * running restores the newest snapshot; subsequent calls walk older ones.
+ * The initial state is the floor — rewinding never empties the ring.
+ * Returns { t } of the restored checkpoint.
+ */
+export function rewind(sim) {
+    const ck = sim.ckpt;
+    const newest = ck.ring[ck.head];
+    // If the sim has advanced past the newest snapshot, the first press
+    // lands there; only when already sitting on it do we walk older.
+    // (elapsedSec comparison is exact: restore assigns it verbatim and no
+    // stepping happens while paused.)
+    if (sim.elapsedSec !== newest.t) return _restoreSlot(sim, newest);
+    if (ck.count > 1) {
+        ck.head = (ck.head - 1 + CKPT_CAPACITY) % CKPT_CAPACITY;
+        ck.count--;
+    }
+    return _restoreSlot(sim, ck.ring[ck.head]);
 }
 
 /** Zero the sim-time debt (call on direction flip / warp edits / reloads). */
