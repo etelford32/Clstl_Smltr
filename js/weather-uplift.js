@@ -87,4 +87,69 @@ export function computeUpliftField(windBuf, texW, texH, maxWind, out = null) {
     return out;
 }
 
+// ── Relative vorticity (Phase 4.2 of the wind+cloud depth plan) ─────────────
+// Same finite-difference stencil as the divergence above, rotated:
+// ζ = ∂V/∂x − ∂U/∂y. Where the uplift field answers "is air piling up
+// here", vorticity answers "is it spinning" — at 250 hPa it traces jet
+// streaks and cutoff lows, at the surface it rings synoptic storm centres.
+//
+// Operates on the COARSE m/s grids (72×36 CHW slices from the level feed /
+// weather grid, lat ascending, lon wrapping) rather than the decoded
+// 360×180 texture: vorticity is a derivative, and differencing an
+// upsampled field just measures the interpolator. The output RGBA buffer
+// renders at grid resolution and lets the GPU's LinearFilter upsample.
+//
+// Sign convention: the raw ζ is multiplied by the hemisphere sign so the
+// stored value is CYCLONIC-positive everywhere (NH counterclockwise, SH
+// clockwise both read +). This is what a forecaster's eye expects — storm
+// centres and jet-left exit regions paint warm in both hemispheres.
+export const VORT_FULL_SCALE = 1.5e-4;   // s⁻¹ — deep mid-lat trough / jet streak
+
+/**
+ * @param {Float32Array} u       eastward wind, m/s, gridW·gridH (lat ascending)
+ * @param {Float32Array} v       northward wind, m/s, same shape
+ * @param {number} gridW
+ * @param {number} gridH
+ * @param {Float32Array} [out]   gridW·gridH·4 RGBA destination
+ * @returns {Float32Array} out — R = signed cyclonic ζ/VORT_FULL_SCALE ∈ [-1,1],
+ *                               A = |R| (overlay alpha), G/B = 0.
+ */
+export function computeVorticityField(u, v, gridW, gridH, out = null) {
+    const N = gridW * gridH;
+    if (!out || out.length !== N * 4) out = new Float32Array(N * 4);
+    if (!u || !v) return out;
+
+    const dLatDeg = 180 / gridH;
+    const dyM     = dLatDeg * M_PER_DEG_LAT;
+    const dLonDeg = 360 / gridW;
+    const f = (x) => (x === x ? x : 0);   // NaN (feed gap) → 0
+
+    for (let j = 0; j < gridH; j++) {
+        const lat    = -90 + (j + 0.5) * dLatDeg;     // cell-centred rows
+        const cosLat = Math.max(COSLAT_FLOOR, Math.abs(Math.cos(lat * Math.PI / 180)));
+        const dxM    = dLonDeg * M_PER_DEG_LAT * cosLat;
+        const hemi   = lat >= 0 ? 1 : -1;             // cyclonic-positive fold
+        const jp = Math.min(gridH - 1, j + 1);
+        const jm = Math.max(0, j - 1);
+        const dySpan = (jp - jm) * dyM || dyM;
+
+        for (let i = 0; i < gridW; i++) {
+            const ip = (i + 1) % gridW;               // longitude wraps
+            const im = (i - 1 + gridW) % gridW;
+
+            const dVdx = (f(v[j * gridW + ip]) - f(v[j * gridW + im])) / (2 * dxM);
+            const dUdy = (f(u[jp * gridW + i]) - f(u[jm * gridW + i])) / dySpan;
+            const zeta = (dVdx - dUdy) * hemi;
+
+            const norm = Math.max(-1, Math.min(1, zeta / VORT_FULL_SCALE));
+            const o = (j * gridW + i) * 4;
+            out[o]     = norm;
+            out[o + 1] = 0;
+            out[o + 2] = 0;
+            out[o + 3] = Math.abs(norm);
+        }
+    }
+    return out;
+}
+
 export default computeUpliftField;

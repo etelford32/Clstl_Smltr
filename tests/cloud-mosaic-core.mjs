@@ -25,6 +25,7 @@ import assert from 'node:assert/strict';
 const {
     productKind, cloudinessFromPixel, discWeight,
     MosaicAccumulator, widestLowArc, gibsTimeCandidates, toUtcDate,
+    cloudTopHeightKm, IR_BT_WARM_K, IR_BT_COLD_K,
 } = await import('../js/cloud-mosaic-core.js');
 
 let pass = 0, fail = 0;
@@ -173,6 +174,56 @@ check('coverage stats + gap finder locate an uncovered lune', () => {
     assert.ok(stats.gapMaxDeg >= 20, `should report a wide gap, got ${stats.gapMaxDeg}°`);
     assert.ok(stats.gapCenterLon > 0 && stats.gapCenterLon < 90,
         `gap centre should fall in the missing Meteosat sector, got ${stats.gapCenterLon}°`);
+});
+
+// ── 4b. Cloud-top height channel (Phase 2.3) ────────────────────────────────
+const blueAt = (out, lon, lat) => out.data[(rowOfLat(lat) * W + colOfLon(lon)) * 4 + 2];
+
+check('IR discs write top-coldness into B; non-IR products leave B at 0', () => {
+    const acc = new MosaicAccumulator(W, H);
+    acc.addRegion(flatImage(235, 235, 235, 255), 'ir', 0, 'primary');       // cold tops
+    const out = acc.finalize();
+    // lum 235/255 ≈ 0.922 → coldness = (0.922 − 0.30)/(0.82 − 0.30) clamps to 1.
+    assert.equal(blueAt(out, 0, 0), 255, 'deep-cold IR top reads coldness 1');
+    assert.equal(blueAt(out, -110, 0), 0, 'outside the disc: no IR estimate');
+
+    const geo = new MosaicAccumulator(W, H);
+    geo.addRegion(flatImage(240, 242, 245, 255), 'geocolor', 0, 'primary'); // bright RGB cloud
+    const outGeo = geo.finalize();
+    assert.equal(blueAt(outGeo, 0, 0), 0, 'GeoColor carries no BT signal');
+    assert.ok(outGeo.data[(rowOfLat(0) * W + colOfLon(0)) * 4] > 200,
+        'GeoColor cloudiness (R) still composites normally');
+});
+
+check('warm-top IR (low deck) reads low coldness; overlapping discs blend B', () => {
+    const acc = new MosaicAccumulator(W, H);
+    // lum 120/255 ≈ 0.471 → coldness ≈ (0.471 − 0.30)/0.52 ≈ 0.328
+    acc.addRegion(flatImage(120, 120, 120, 255), 'ir', -75, 'primary');
+    acc.addRegion(flatImage(235, 235, 235, 255), 'ir', 0, 'primary');
+    const out = acc.finalize();
+    const warmOnly = blueAt(out, -110, 0);   // deep in the −75° disc only
+    const coldOnly = blueAt(out, 35, 0);     // deep in the 0° disc only
+    const mid      = blueAt(out, -37, 0);    // overlap → weighted between
+    assert.ok(Math.abs(warmOnly - Math.round(0.32845 * 255)) <= 2,
+        `warm top ≈ 84/255, got ${warmOnly}`);
+    assert.equal(coldOnly, 255);
+    assert.ok(mid > warmOnly && mid < coldOnly,
+        `overlap must blend between the discs, got ${mid}`);
+});
+
+check('cloudTopHeightKm decodes the coldness axis against a 2 m reference', () => {
+    // coldness 1 → BT 195 K = −78.15 °C. T2m 25 °C → (25 + 78.15)/6.5 ≈ 15.87 km.
+    const deep = cloudTopHeightKm(1, 25);
+    assert.ok(Math.abs(deep - (25 - (IR_BT_COLD_K - 273.15)) / 6.5) < 1e-9);
+    assert.ok(deep > 15 && deep < 16.5, `deep convection ≈ 15.9 km, got ${deep}`);
+    // coldness 0 → no estimate (accumulator writes 0 for "no IR").
+    assert.equal(cloudTopHeightKm(0, 25), null);
+    assert.equal(cloudTopHeightKm(0.5, NaN), null);
+    // Warm shallow top over a cold surface clamps at 0, never negative.
+    assert.equal(cloudTopHeightKm(0.05, -40), 0);
+    // Constants sanity — the CLOUD_FRAG ramp (26.85 − b·105 °C) must match.
+    assert.ok(Math.abs((IR_BT_WARM_K - 273.15) - 26.85) < 1e-9);
+    assert.equal(IR_BT_WARM_K - IR_BT_COLD_K, 105);
 });
 
 check('widestLowArc handles wrap-around and all-covered/all-gap edges', () => {

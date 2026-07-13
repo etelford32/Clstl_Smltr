@@ -17,7 +17,10 @@
  */
 
 import assert from 'node:assert/strict';
-import { computeUpliftField, UPLIFT_FULL_SCALE } from '../js/weather-uplift.js';
+import {
+    computeUpliftField, UPLIFT_FULL_SCALE,
+    computeVorticityField, VORT_FULL_SCALE,
+} from '../js/weather-uplift.js';
 
 let pass = 0, fail = 0;
 function check(name, fn) {
@@ -91,6 +94,63 @@ check('supplied out buffer is reused; null wind is a safe no-op', () => {
     assert.equal(ret, scratch, 'returns the same buffer instance');
     const z = computeUpliftField(null, W, H, MAXW);
     assert.ok(z instanceof Float32Array && z.length === W * H * 4, 'null wind → zeroed buffer, no throw');
+});
+
+// ── computeVorticityField (Phase 4.2) ───────────────────────────────────────
+// Coarse m/s grids, lat ascending, cell-centred. Shear flow ∂U/∂y < 0 in the
+// NH gives ζ = −∂U/∂y > 0 → cyclonic-positive after the hemisphere fold.
+
+// U increases northward (∂U/∂y > 0) everywhere: NH ζ raw = −∂U/∂y < 0.
+function shearU(gridW, gridH, dUdyMsPerRow = 5) {
+    const u = new Float32Array(gridW * gridH);
+    const v = new Float32Array(gridW * gridH);
+    for (let j = 0; j < gridH; j++) {
+        for (let i = 0; i < gridW; i++) u[j * gridW + i] = j * dUdyMsPerRow;
+    }
+    return { u, v };
+}
+
+check('vorticity: uniform flow spins nothing', () => {
+    const u = new Float32Array(W * H).fill(12);
+    const v = new Float32Array(W * H).fill(-4);
+    const out = computeVorticityField(u, v, W, H);
+    let maxMag = 0;
+    for (let k = 0; k < W * H; k++) maxMag = Math.max(maxMag, Math.abs(out[k * 4]));
+    assert.ok(maxMag < 1e-6, `uniform flow → ζ 0, got ${maxMag}`);
+});
+
+check('vorticity: anticyclonic shear reads negative in BOTH hemispheres (cyclonic fold)', () => {
+    // 30 m/s per 22.5° row ≈ ∂U/∂y 1.2e-5 s⁻¹ — a strong but synoptic shear.
+    const { u, v } = shearU(W, H, 30);
+    const out = computeVorticityField(u, v, W, H);
+    // Raw ζ = −∂U/∂y < 0 (NH anticyclonic). In the SH the same raw ζ is
+    // CYCLONIC — the fold flips it, so the stored value is negative in the
+    // NH rows and positive in the SH rows... which for THIS flow means:
+    const nh = out[(6 * W + 3) * 4];   // row 6 → +56° lat
+    const sh = out[(1 * W + 3) * 4];   // row 1 → −56° lat
+    assert.ok(nh < -0.05, `NH: anticyclonic shear negative, got ${nh.toFixed(3)}`);
+    assert.ok(sh > 0.05,  `SH: same raw shear is cyclonic there, got ${sh.toFixed(3)}`);
+});
+
+check('vorticity: clamps to ±1, A = |R|, NaN gaps read as calm not poison', () => {
+    const { u, v } = shearU(W, H, 500);           // absurd shear → clamp
+    u[2 * W + 2] = NaN;
+    const out = computeVorticityField(u, v, W, H);
+    let ok = true;
+    for (let k = 0; k < W * H; k++) {
+        const r = out[k * 4], a = out[k * 4 + 3];
+        if (!Number.isFinite(r) || Math.abs(r) > 1 + 1e-9) ok = false;
+        if (Math.abs(a - Math.abs(r)) > 1e-9) ok = false;
+    }
+    assert.ok(ok, 'all cells finite, clamped, A == |R|');
+    assert.ok(Math.abs(out[(6 * W + 3) * 4] + 1) < 1e-9, 'strong shear clamps to −1 in the NH');
+});
+
+check('vorticity: decode (R × VORT_FULL_SCALE) is a plausible synoptic rate', () => {
+    const { u, v } = shearU(W, H, 3);
+    const out = computeVorticityField(u, v, W, H);
+    const zeta = Math.abs(out[(6 * W + 3) * 4]) * VORT_FULL_SCALE;
+    assert.ok(zeta > 1e-8 && zeta < 1e-3, `plausible ζ, got ${zeta.toExponential(2)}`);
 });
 
 console.log('──────────────────────────────');
