@@ -138,6 +138,7 @@ export function parseSnapshot(buffer, meta, outBodies) {
         bodies:      outBodies,
         trails,
         encounter:   meta.encounter ?? null,
+        kernelActive: !!meta.kernel,
         fault:       meta.fault ?? null,
         loaded:      !!meta.loaded,
         rewound:     !!meta.rewound,

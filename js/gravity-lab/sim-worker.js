@@ -36,6 +36,22 @@ import {
 } from './sim-core.js';
 import { totalAngularMomentum } from './physics.js';
 import { packSnapshot, snapshotBytes } from './snapshot-codec.js';
+import { loadKernel } from './wasm/kernel.js';
+
+// WASM kernel (P3.1): loaded once, lazily; failure means the JS path in
+// sim-core carries on — same physics, parity-gated by the harness.
+let _kernelPromise = null;
+function _kernel() {
+    if (!_kernelPromise) {
+        _kernelPromise = loadKernel(new URL('./wasm/gravity_kernel.wasm', import.meta.url))
+            .catch(err => {
+                console.warn('[gravity-lab worker] WASM kernel unavailable — JS stepping:',
+                    err?.message ?? err);
+                return null;
+            });
+    }
+    return _kernelPromise;
+}
 
 let sim = null;
 let bufBytes = 0;
@@ -54,16 +70,18 @@ function _snapshot(meta, res) {
         advancedSec: res?.advancedSec ?? 0,
     });
     meta.gen = gen;
+    meta.kernel = !!sim.kernel;
     meta.encounter = sim.encounter ? { ...sim.encounter } : null;
     meta.fault = res?.fault ?? null;
     postMessage({ type: 'snap', buffer, meta }, [buffer]);
 }
 
-function _load(m) {
+async function _load(m) {
     // Raw bodies (sandbox / baked epochs / share URLs — P2) take priority;
     // otherwise rebuild from the curated systems table.
     const srcBodies = m.rawBodies ?? SYSTEMS[m.systemId]?.bodies;
     if (!srcBodies) return;
+    const kernel = await _kernel();   // ticks before readiness are guarded by `if (sim)`
     gen = m.gen ?? gen + 1;
     const bodies = srcBodies.map(b => ({
         name: b.name,
@@ -77,6 +95,7 @@ function _load(m) {
         j2Opts:     m.j2Opts ?? null,
         j2Enabled:  !!m.j2Enabled,
         softening:  m.softening ?? 0,
+        kernel:     bodies.length <= (kernel?.maxBodies ?? 0) ? kernel : null,
     });
     configureTrails(sim, m.trailSpecs, m.trailCap);
     const nTrails = m.trailSpecs.filter(Boolean).length;
@@ -100,6 +119,10 @@ onmessage = ev => {
                     budgetMs:  m.budgetMs,
                 });
                 _snapshot({ tick: true }, res);
+            } else {
+                // Load still initializing (async WASM kernel fetch) — ack so
+                // the driver's in-flight flag doesn't jam the tick pipeline.
+                postMessage({ type: 'ack' });
             }
             break;
         case 'set':

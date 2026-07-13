@@ -27,6 +27,7 @@ import {
     totalEnergy, totalJ2PotentialEnergy, G_SI,
     createVariational, variationalStep,
 } from './physics.js';
+import { writeBodies, readBodies } from './wasm/kernel.js';
 
 export const PHYSICS_BUDGET_MS_DESKTOP = 6;
 export const PHYSICS_BUDGET_MS_MOBILE  = 4;
@@ -85,7 +86,7 @@ const ADAPTIVE_TOL    = 1e-12; // per-step relative tolerance for RKF7(8)
  * Create a simulation-core state object.
  * `bodies` is the live array the integrator mutates ({m, r, v, name, …}).
  */
-export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false, hybrid = true, softening = 0 }) {
+export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false, hybrid = true, softening = 0, kernel = null }) {
     const sim = {
         bodies,
         targetStep,
@@ -106,6 +107,9 @@ export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false
         _lastCkptMs: null,
         // Sim-time trail sampling (P0.3) — configured via configureTrails().
         trails: null,
+        // WASM kernel (P3.1) — null runs the JS reference implementation.
+        // Same physics either way; the harness parity-gates them at 1e-12.
+        kernel,
         // MEGNO chaos indicator (P2.3) — null when off; see enableMegno().
         megno: null,
         // Hybrid stepping state (P0.4).
@@ -216,10 +220,19 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
             const absSub = Math.abs(sub);
             for (let k = 0; k < stepsWanted; k++) {
                 // With MEGNO on, step bodies + tangent vector through the
-                // integrator's exact tangent map (see yoshida4StepVar).
+                // integrator's exact tangent map (see yoshida4StepVar) —
+                // JS-only: the tangent map interleaves with the composition.
                 if (sim.megno) {
                     yoshida4StepVar(sim.bodies, sub, opts, sim.megno.vs);
                     _megnoAccumulate(sim, absSub);
+                } else if (sim.kernel) {
+                    // WASM kernel path (P3.1): copy in, step, copy out —
+                    // ~1 µs round-trip for N ≤ 16, and trails/encounter
+                    // scans below read sim.bodies as usual.
+                    writeBodies(sim.kernel, sim.bodies);
+                    sim.kernel.stepSystem(sim.bodies.length, 0, 1, sub,
+                        sim.soft2, opts ? opts.J2 : null);
+                    readBodies(sim.kernel, sim.bodies);
                 } else {
                     yoshida4Step(sim.bodies, sub, opts);
                 }

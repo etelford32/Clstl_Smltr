@@ -1732,9 +1732,10 @@ function _renderSchemeReadout() {
     if (!state.simView) return;
     const adaptive = state.simView.integrator === 'rkf78';
     const enc = state.simView.encounter;
+    const backend = state.simView.kernelActive ? ' · wasm' : '';
     const text = adaptive
         ? `RKF7(8) · adaptive${enc ? ` — ${_capitalize(enc.bodyA)} ↔ ${_capitalize(enc.bodyB)}` : ''}`
-        : 'Yoshida-4 · symplectic';
+        : `Yoshida-4 · symplectic${backend}`;
     if (text === _lastSchemeText) return;
     _lastSchemeText = text;
     if (hud.scheme) {

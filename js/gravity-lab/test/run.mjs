@@ -975,4 +975,97 @@ test('share codec · scenario round-trips through deflate+base64url', async () =
            true, 'decoder should not throw unhandled on garbage');
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 13. WASM kernel parity (P3.1) — the Rust kernel must agree with
+//     physics.js to ≤ 1e-12 relative after 1e4 Yoshida steps (they mirror
+//     each other op-for-op; sqrt is IEEE-exact on both sides and cbrt(2)
+//     is pinned to JS's bit pattern in the crate). Also gates the
+//     test-particle leapfrog: a particle on a circular orbit around the
+//     kernel-stepped bodies keeps bounded energy.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('wasm kernel · 1e4-step parity with physics.js ≤ 1e-12 (+J2, softening)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { loadKernel, writeBodies, readBodies } = await import('../wasm/kernel.js');
+    const bytes = readFileSync(new URL('../wasm/gravity_kernel.wasm', import.meta.url));
+    const kernel = await loadKernel(bytes);
+
+    for (const [id, j2on] of [['jupiter-galileans', false], ['mars-system', true], ['saturn-major', false]]) {
+        const sys = SYSTEMS[id];
+        const js = systemBodies(id);
+        const rs = systemBodies(id);
+        const j2 = j2on ? {
+            centerIdx: 0, J2: sys.oblateness.J2, R_eq: sys.oblateness.R_eq_m, mu: sys.mu_parent,
+        } : null;
+        const opts = j2 ? { J2: j2 } : undefined;
+        const dt = sys.suggested_dt_s;
+
+        for (let k = 0; k < 1e4; k++) yoshida4Step(js, dt, opts);
+        writeBodies(kernel, rs);
+        kernel.stepSystem(rs.length, 0, 1e4, dt, 0, j2);
+        readBodies(kernel, rs);
+
+        const { dR, dV } = maxStateDeviation(js, rs);
+        assertBelow(dR, 1e-12, `${id}${j2on ? '+J2' : ''} position parity`);
+        assertBelow(dV, 1e-12, `${id}${j2on ? '+J2' : ''} velocity parity`);
+        const eJs = totalEnergy(js).total;
+        const eRs = kernel.totalEnergy(rs.length, 0);
+        assertBelow(Math.abs((eJs - eRs) / eJs), 1e-12, `${id} energy parity`);
+    }
+
+    // Softened parity too — the sandbox path must not diverge either.
+    const js2 = systemBodies('earth-moon');
+    const rs2 = systemBodies('earth-moon');
+    const soft2 = 5e7 * 5e7;
+    for (let k = 0; k < 5e3; k++) yoshida4Step(js2, 600, { soft2 });
+    writeBodies(kernel, rs2);
+    kernel.stepSystem(rs2.length, 0, 5e3, 600, soft2, null);
+    readBodies(kernel, rs2);
+    const dev = maxStateDeviation(js2, rs2);
+    assertBelow(dev.dR, 1e-12, 'softened parity');
+});
+
+test('wasm kernel · test particle on circular orbit conserves energy', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { loadKernel, writeBodies } = await import('../wasm/kernel.js');
+    const bytes = readFileSync(new URL('../wasm/gravity_kernel.wasm', import.meta.url));
+    const kernel = await loadKernel(bytes);
+
+    // Sun + Jupiter analog; particle at 2.5 AU circular.
+    const MSUN = 1.989e30, MJ = 1.898e27, AU = 1.495978707e11;
+    const aJ = 5.2044 * AU;
+    const vJ = Math.sqrt(G_SI * MSUN / aJ);
+    const bodies = [
+        { m: MSUN, r: [0, 0, 0], v: [0, 0, 0] },
+        { m: MJ,   r: [aJ, 0, 0], v: [0, vJ, 0] },
+    ];
+    shiftToBarycenter(bodies);
+    writeBodies(kernel, bodies);
+    const ap = 2.5 * AU;
+    const vp = Math.sqrt(G_SI * MSUN / ap);
+    const pv = kernel.particlesView;
+    pv[0] = -ap; pv[1] = 0; pv[2] = 0;
+    pv[3] = 0;   pv[4] = -vp; pv[5] = 0;
+
+    const mu = G_SI * MSUN;
+    const E0 = 0.5 * vp * vp - mu / ap;
+    const dt = 2e6;
+    kernel.stepSystem(2, 1, 5000, dt, 0, null);   // ~317 yr
+
+    const bv = kernel.bodiesView;
+    const dx = pv[0] - bv[1], dy = pv[1] - bv[2], dz = pv[2] - bv[3];
+    const dvx = pv[3] - bv[4], dvy = pv[4] - bv[5], dvz = pv[5] - bv[6];
+    const r = Math.hypot(dx, dy, dz);
+    const E1 = 0.5 * (dvx*dvx + dvy*dvy + dvz*dvz) - mu / r;
+    // Jupiter perturbs the particle (that's the point), so the heliocentric
+    // energy wanders at the perturbation scale (~m_J/m_Sun ≈ 1e-3), but a
+    // 2.5 AU orbit far from resonance must stay bounded, not blow up.
+    assertBelow(Math.abs((E1 - E0) / E0), 0.02, 'particle energy boundedness');
+    // And a/e from compute_orbits must be sane.
+    kernel.computeOrbits(1, 0);
+    const a = kernel.orbitsView[0], e = kernel.orbitsView[1];
+    assertBelow(Math.abs(a - ap) / ap, 0.02, 'particle semi-major axis');
+    assertBelow(e, 0.05, 'particle eccentricity stays near-circular');
+});
+
 await runAll();

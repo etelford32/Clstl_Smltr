@@ -128,6 +128,7 @@ class InlineDriver {
             stepsDone:   res?.stepsDone ?? 0,
             advancedSec: res?.advancedSec ?? 0,
             megno:       sim.megno ? { meanY: sim.megno.meanY, t: sim.megno.t } : null,
+            kernelActive: !!sim.kernel,   // inline stays on the JS reference path
             bodies:      sim.bodies,      // live reference — zero copy
             trails:      sim.trails,      // live reference — zero copy
             encounter:   sim.encounter,
@@ -202,6 +203,10 @@ class WorkerDriver {
 
     _onMsg(ev) {
         const { type, buffer, meta } = ev.data;
+        if (type === 'ack') {
+            this._outstanding = false;   // tick arrived before the sim existed
+            return;
+        }
         if (type !== 'snap' || !this._bodies) return;
         if (meta.tick) this._outstanding = false;
         if (meta.gen !== this._gen) {

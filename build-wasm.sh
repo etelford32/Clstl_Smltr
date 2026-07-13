@@ -77,6 +77,20 @@ else
     echo "WARN: rust-abell85 build failed — serving committed js/abell85-wasm binary."
 fi
 
+# ── Build Gravity Lab N-body kernel ──────────────────────────
+# Dependency-free extern "C" module (no wasm-bindgen needed): plain cargo
+# build, artifact copied verbatim. The committed binary at
+# js/gravity-lab/wasm/gravity_kernel.wasm serves as the fallback if this
+# build ever fails on Vercel's toolchain.
+echo "Building gravity-kernel WASM (Gravity Lab N-body + test particles)..."
+if (cd rust-gravity && cargo build --release --target wasm32-unknown-unknown); then
+    mkdir -p js/gravity-lab/wasm
+    cp rust-gravity/target/wasm32-unknown-unknown/release/gravity_kernel.wasm \
+       js/gravity-lab/wasm/gravity_kernel.wasm
+else
+    echo "WARN: rust-gravity build failed — serving committed js/gravity-lab/wasm binary."
+fi
+
 # ── Build star renderer (solar flare sim) ─────────────────────
 # NOT built on Vercel. The Bevy dep graph (~479 crates) is too fragile for
 # Vercel's older rustc — a transitive `constant_time_eq 0.4.3` release broke
@@ -93,5 +107,6 @@ fi
 echo "✅ WASM build complete!"
 echo "   Built:   js/sstar-wasm/    (S-star orbital propagator)"
 echo "   Built:   js/forecast-wasm/ (24-hour location forecast core)"
+echo "   Built:   js/gravity-lab/wasm/ (Gravity Lab N-body kernel)"
 echo "   Skipped: rust/www/ star renderer — served from committed binary"
 ls -lh js/sstar-wasm/*.wasm js/forecast-wasm/*.wasm 2>/dev/null || true
