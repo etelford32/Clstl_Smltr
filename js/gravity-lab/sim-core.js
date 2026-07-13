@@ -58,6 +58,8 @@ export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false
         // Checkpoint ring: fixed-capacity circular buffer of full states.
         ckpt: { ring: new Array(CKPT_CAPACITY), head: -1, count: 0 },
         _lastCkptMs: null,
+        // Sim-time trail sampling (P0.3) — configured via configureTrails().
+        trails: null,
     };
     rebaselineEnergy(sim);
     _recordCheckpoint(sim);   // slot 0 = the initial state, always rewindable
@@ -115,9 +117,15 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
     const deadline = now() + budgetMs;
     let stepsDone = 0;
     if (total !== 0) {
+        const absSub = Math.abs(sub);
         for (let k = 0; k < stepsWanted; k++) {
             yoshida4Step(sim.bodies, sub, opts);
             stepsDone++;
+            // Sim-time trail sampling (P0.3) happens INSIDE the substep
+            // loop so high warp produces the same trail geometry as low
+            // warp — sampling density is a function of simulated time,
+            // never of frame rate.
+            if (sim.trails) _sampleTrails(sim, absSub);
             if (onStep) onStep(sim.bodies, sub);
             if ((stepsDone % BUDGET_CHECK_EVERY === 0) && now() > deadline) break;
         }
@@ -284,4 +292,66 @@ export function rewind(sim) {
 export function clearDebt(sim) {
     sim.debtSec = 0;
     sim._overBudgetSinceMs = null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sim-time trail sampling (P0.3, fixes D3/D4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Configure per-body trail sampling.
+ *
+ * @param {object} sim
+ * @param {Array}  specs     One entry per body: null (no trail) or
+ *                           { interval: seconds of SIM time between points,
+ *                             scale: SI-meters → scene-units factor }.
+ * @param {number} capacity  Ring size in points (points/orbit × visible
+ *                           periods). Older points age out — an orbit
+ *                           traced 50 times is noise, not information.
+ */
+export function configureTrails(sim, specs, capacity) {
+    sim.trails = specs.map(s => s ? {
+        interval: s.interval,
+        scale:    s.scale,
+        cap:      capacity,
+        buf:      new Float32Array(capacity * 3),   // scene-unit positions
+        head:     -1,       // ring slot of the newest point
+        count:    0,        // valid points in the ring (≤ cap)
+        total:    0,        // monotone point counter — consumers diff against it
+        acc:      0,        // sim-time accumulator toward the next point
+    } : null);
+}
+
+/** Reset all trail rings (system load, rewind, fault restore). */
+export function clearTrailBuffers(sim) {
+    if (!sim.trails) return;
+    for (const tr of sim.trails) {
+        if (!tr) continue;
+        tr.head = -1;
+        tr.count = 0;
+        tr.total = 0;
+        tr.acc = 0;
+    }
+}
+
+function _sampleTrails(sim, absDt) {
+    const trails = sim.trails;
+    for (let i = 0; i < trails.length; i++) {
+        const tr = trails[i];
+        if (!tr) continue;
+        tr.acc += absDt;
+        if (tr.acc < tr.interval) continue;
+        // A substep larger than the interval can cross several boundaries;
+        // intermediate positions no longer exist, so emit one point and
+        // carry the remainder (keeps long-run cadence exact).
+        tr.acc %= tr.interval;
+        const b = sim.bodies[i];
+        tr.head = (tr.head + 1) % tr.cap;
+        if (tr.count < tr.cap) tr.count++;
+        tr.total++;
+        const o = tr.head * 3;
+        tr.buf[o]     = b.r[0] * tr.scale;
+        tr.buf[o + 1] = b.r[1] * tr.scale;
+        tr.buf[o + 2] = b.r[2] * tr.scale;
+    }
 }

@@ -29,6 +29,7 @@ import {
 import { SYSTEMS, SYSTEM_ORDER } from '../systems.js';
 import {
     createSim, advanceFrame, clearDebt, rewind, currentEnergy,
+    configureTrails,
 } from '../sim-core.js';
 
 const FAST = process.argv.includes('--fast');
@@ -531,6 +532,89 @@ test('sim-core · injected NaN trips the nonfinite guard and restores', () => {
     for (const b of sim.bodies) {
         assert(b.r.every(Number.isFinite) && b.v.every(Number.isFinite),
             'restore after NaN left non-finite state');
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. Sim-time trail sampling (P0.3) — trail geometry is a function of the
+//    trajectory, never of warp/frame rate. Kills the hairball by
+//    construction.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function sampleTrailRun({ warp, simSeconds }) {
+    const sys = SYSTEMS['earth-moon'];
+    const bodies = systemBodies('earth-moon');
+    const sim = createSim({ bodies, targetStep: sys.suggested_dt_s });
+    const moon = bodies.findIndex(b => b.name === 'moon');
+    const mu = sys.mu_parent + bodies[moon].m * 6.6743e-11;
+    const periodS = 2 * Math.PI * Math.sqrt(sys.bodies[moon].elements_j2000.a ** 3 / mu);
+    const interval = periodS / 256;
+    configureTrails(sim,
+        bodies.map((b, i) => i === moon ? { interval, scale: 1e-3 / sys.scale_km_per_unit } : null),
+        256 * 3);
+    let fakeMs = 0;
+    const now = () => fakeMs;
+    // Advance EXACTLY simSeconds: the last frame is shortened so both warp
+    // settings integrate the same total sim time (otherwise the high-warp
+    // run overshoots by up to one frame's worth and the comparison is
+    // apples-to-oranges).
+    let remaining = simSeconds;
+    while (remaining > 1e-6) {
+        const dtReal = Math.min(1 / 60, remaining / warp);
+        fakeMs += 16.7;
+        advanceFrame(sim, { dtRealSec: dtReal, warp, direction: +1, budgetMs: 1e9 }, now);
+        remaining = simSeconds - sim.elapsedSec;
+    }
+    return { trail: sim.trails[moon], periodS };
+}
+
+test('trails · sampling cadence: ~256 points per orbital period at any warp', () => {
+    const lo = sampleTrailRun({ warp: 3e5, simSeconds: 2.36e6 });   // ≈1 moon period
+    const hi = sampleTrailRun({ warp: 3e7, simSeconds: 2.36e6 });
+    for (const [label, run] of [['low warp', lo], ['high warp', hi]]) {
+        const perOrbit = run.trail.total / (2.36e6 / run.periodS);
+        assert(Math.abs(perOrbit - 256) <= 3,
+            `${label}: ${perOrbit.toFixed(1)} points/orbit, expected ~256`);
+    }
+    assert(Math.abs(lo.trail.total - hi.trail.total) <= 2,
+        `point counts diverge with warp: ${lo.trail.total} vs ${hi.trail.total}`);
+});
+
+test('trails · geometry is warp-independent (same points, same places)', () => {
+    // Two full periods at 100× different warps → point k of each run sits
+    // at the same orbital phase. Emission timing is quantized by substep
+    // boundaries (≤ targetStep of arc ≈ 0.03% of the orbit), so the match
+    // tolerance is a small fraction of the semi-major axis.
+    const a_scene = 3.844e8 * 1e-3 / SYSTEMS['earth-moon'].scale_km_per_unit;
+    const lo = sampleTrailRun({ warp: 3e5, simSeconds: 4.7e6 });
+    const hi = sampleTrailRun({ warp: 3e7, simSeconds: 4.7e6 });
+    const n = Math.min(lo.trail.total, hi.trail.total, lo.trail.cap);
+    let maxDev = 0;
+    for (let k = 0; k < n; k++) {
+        // Ring slot of point (total-1-k) counting back from the newest.
+        const sl = (((lo.trail.head - k) % lo.trail.cap) + lo.trail.cap) % lo.trail.cap;
+        const sh = (((hi.trail.head - k) % hi.trail.cap) + hi.trail.cap) % hi.trail.cap;
+        const d = Math.hypot(
+            lo.trail.buf[sl*3]   - hi.trail.buf[sh*3],
+            lo.trail.buf[sl*3+1] - hi.trail.buf[sh*3+1],
+            lo.trail.buf[sl*3+2] - hi.trail.buf[sh*3+2]);
+        maxDev = Math.max(maxDev, d);
+    }
+    // Counts can differ by ±2 (boundary quantization) which offsets the
+    // newest-first alignment by up to 2 points — allow one point-spacing
+    // (2πa/256) plus the substep quantization above.
+    const tol = (2 * Math.PI * a_scene / 256) * 2.5;
+    assertBelow(maxDev / a_scene, tol / a_scene,
+        `trail deviation between warps (fraction of a, tol ${(tol / a_scene).toFixed(4)})`);
+});
+
+test('trails · ring respects capacity and ages out old orbits', () => {
+    const { trail } = sampleTrailRun({ warp: 3e7, simSeconds: 2.36e6 * 5 });  // ~5 orbits
+    assert(trail.count === trail.cap,
+        `ring should be full (${trail.count}/${trail.cap})`);
+    assert(trail.total > trail.cap, 'total must keep counting past capacity');
+    for (let k = 0; k < trail.cap * 3; k++) {
+        assert(Number.isFinite(trail.buf[k]), 'trail buffer has non-finite entries');
     }
 });
 

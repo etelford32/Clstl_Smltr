@@ -224,6 +224,79 @@ export function createOrbitGuide(elements, scaleKmPerUnit, color, opacity = 0.20
 // Label sprite — small text tag that rides above each body in screen space.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Orbit trail ring (P0.3) — zero-allocation GPU ring buffer.
+//
+// Geometry is a fixed pool of `capacity` line segments used as a circular
+// buffer: lab.js writes each new sample as one segment (previous point →
+// new point) at the advancing head slot. Because segments are independent
+// primitives there is no seam artifact when the ring wraps — the slot
+// being overwritten simply becomes the newest segment.
+//
+// Fade is computed in the vertex shader from the static per-segment slot
+// index and a `uHead` uniform: age = (head − slot) mod cap, newest = 1 →
+// alpha t², matching the old CPU-side quadratic fade. This replaces the
+// per-frame Float32Array rotation + full color rewrite (D4): steady-state
+// per-frame work is 6 floats per new point and two uniform updates —
+// zero allocations.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TRAIL_VERT = /* glsl */`
+    attribute float aSlot;
+    uniform float uHead;
+    uniform float uCount;
+    uniform float uCap;
+    varying float vAlpha;
+    void main() {
+        float age = mod(uHead - aSlot + uCap, uCap);
+        float visible = 1.0 - step(uCount - 0.5, age);   // age < count
+        float t = 1.0 - age / max(uCount, 1.0);
+        vAlpha = visible * t * t;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+
+const TRAIL_FRAG = /* glsl */`
+    precision mediump float;
+    uniform vec3 uColor;
+    varying float vAlpha;
+    void main() {
+        gl_FragColor = vec4(uColor * vAlpha, vAlpha);
+    }
+`;
+
+export function createTrailRing(capacity, color) {
+    const positions = new Float32Array(capacity * 2 * 3);   // zeros: degenerate, invisible
+    const slots = new Float32Array(capacity * 2);
+    for (let s = 0; s < capacity; s++) {
+        slots[2 * s] = s;
+        slots[2 * s + 1] = s;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('aSlot',    new THREE.BufferAttribute(slots, 1));
+
+    const uniforms = {
+        uHead:  { value: 0 },
+        uCount: { value: 0 },
+        uCap:   { value: capacity },
+        uColor: { value: new THREE.Color(color) },
+    };
+    const mat = new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader:   TRAIL_VERT,
+        fragmentShader: TRAIL_FRAG,
+        transparent:    true,
+        depthWrite:     false,
+        blending:       THREE.AdditiveBlending,
+    });
+    const line = new THREE.LineSegments(geom, mat);
+    // Ring contents move every frame; a stale bounding sphere would let the
+    // camera cull live trails, so skip frustum culling outright.
+    line.frustumCulled = false;
+    return { line, geom, posAttr: geom.getAttribute('position'), uniforms };
+}
+
 export function createLabelSprite(text, color = '#ffffff', accent = '#cba9ff') {
     const cv = document.createElement('canvas');
     const W = 256, H = 64;

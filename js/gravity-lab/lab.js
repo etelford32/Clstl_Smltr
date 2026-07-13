@@ -21,6 +21,8 @@ import {
     currentEnergy,
     rebaselineEnergy,
     rewind,
+    configureTrails,
+    clearTrailBuffers,
     PHYSICS_BUDGET_MS_DESKTOP,
     PHYSICS_BUDGET_MS_MOBILE,
 } from './sim-core.js';
@@ -31,6 +33,7 @@ import {
     createOrbitGuide,
     createLabelSprite,
     createStarfield,
+    createTrailRing,
 } from './visuals.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,8 +41,12 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const KM_PER_M  = 1e-3;
-const TRAIL_LEN = 600;            // points per orbit trail
-const TRAIL_GAP_FRAMES = 1;       // record every N frames
+// Trail sampling is SIM-time based (P0.3): one point per 1/256 of the
+// body's orbital period, ring capped at N visible periods. Warp cannot
+// change the trail geometry — sampling density is a property of the
+// trajectory, not the frame rate.
+const TRAIL_POINTS_PER_ORBIT = 256;
+const TRAIL_PERIODS_DEFAULT  = 3;   // per-system override: trail_periods
 const MIN_BODY_RADIUS_UNITS = 0.05;
 
 // Wall-clock physics budget per frame (P0.1). Coarse-pointer devices get a
@@ -67,7 +74,6 @@ const state = {
     targetStep:     600,
     energy0:        null,
     L0_mag:         1,
-    framesSinceTrail: 0,
     // Camera focus state — null = free orbit; integer = index into bodies[].
     focusIdx:       null,
     focusOffset:    new THREE.Vector3(),  // camera position relative to focus target
@@ -292,7 +298,6 @@ export function loadSystem(systemId) {
     state.elapsedSec    = 0;
     state.paused        = false;
     state.direction     = +1;
-    state.framesSinceTrail = 0;
     // J2 perturbation setup. When the system declares oblateness, build
     // the integrator's J2 opts object and seed the toggle from the
     // system's preferred default. The actual application happens in
@@ -333,6 +338,23 @@ export function loadSystem(systemId) {
     const systemExtentUnits = _systemExtentUnits();
     state.labelScale = Math.max(0.5, Math.min(3.0, systemExtentUnits / 30));
 
+    // Trail sampling config (P0.3): one point per 1/256 of each body's own
+    // orbital period, ring capped at trail_periods visible orbits.
+    const trailCap = TRAIL_POINTS_PER_ORBIT * (src.trail_periods || TRAIL_PERIODS_DEFAULT);
+    const metersToScene = KM_PER_M / state.sceneScaleKm;
+    configureTrails(state.sim, state.bodies.map(b => {
+        if (b.is_parent) return null;
+        let interval;
+        if (b.elements_j2000) {
+            const mu = src.mu_parent + G_SI * b.m;
+            const periodS = 2 * Math.PI * Math.sqrt(b.elements_j2000.a ** 3 / mu);
+            interval = periodS / TRAIL_POINTS_PER_ORBIT;
+        } else {
+            interval = state.targetStep * 8;   // unbound / element-less fallback
+        }
+        return { interval, scale: metersToScene };
+    }), trailCap);
+
     for (let bi = 0; bi < state.bodies.length; bi++) {
         const b = state.bodies[bi];
         const radiusUnits = Math.max(
@@ -370,27 +392,17 @@ export function loadSystem(systemId) {
 
         // Orbit trail + faint Keplerian guide (skip parent — it barely moves).
         if (!b.is_parent) {
-            // Vertex-coloured trail so the head is bright and the tail fades.
-            const positions = new Float32Array(TRAIL_LEN * 3);
-            const colors    = new Float32Array(TRAIL_LEN * 3);
-            const tg = new THREE.BufferGeometry();
-            tg.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            tg.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
-            tg.setDrawRange(0, 0);
-            const tm = new THREE.LineBasicMaterial({
-                vertexColors: true,
-                transparent:  true,
-                opacity:      0.95,
-                depthWrite:   false,
-                blending:     THREE.AdditiveBlending,
-            });
-            const line = new THREE.Line(tg, tm);
-            trailRoot.add(line);
-            const baseColor = new THREE.Color(b.color ?? 0xffffff);
+            // GPU segment-ring with shader fade (P0.3) — see visuals.js.
+            const ring = createTrailRing(trailCap, b.color ?? 0xffffff);
+            trailRoot.add(ring.line);
             state.trails.push({
-                line, geom: tg, positions, colors,
-                head: 0, count: 0,
-                baseColor,
+                ...ring,
+                cap:       trailCap,
+                segHead:   -1,     // newest written segment slot
+                segCount:  0,
+                lastTotal: 0,      // sim-core point counter at last sync
+                last:      new Float32Array(3),
+                hasLast:   false,
             });
 
             // Faint orbit guide. Drawn from the satellite's J2000 osculating
@@ -540,67 +552,47 @@ function _updateMeshes() {
     }
 }
 
-function _appendTrails() {
-    state.framesSinceTrail++;
-    if (state.framesSinceTrail < TRAIL_GAP_FRAMES) return;
-    state.framesSinceTrail = 0;
-
-    for (let i = 0; i < state.bodies.length; i++) {
-        const tr = state.trails[i];
-        if (!tr) continue;
-        const b = state.bodies[i];
-        const x = _toScene(b.r[0]);
-        const y = _toScene(b.r[1]);
-        const z = _toScene(b.r[2]);
-        const o = tr.head * 3;
-        tr.positions[o]     = x;
-        tr.positions[o + 1] = y;
-        tr.positions[o + 2] = z;
-        tr.head = (tr.head + 1) % TRAIL_LEN;
-        if (tr.count < TRAIL_LEN) tr.count++;
-
-        const cR = tr.baseColor.r, cG = tr.baseColor.g, cB = tr.baseColor.b;
-
-        // Draw the trail as a contiguous strip in chronological order. The
-        // head sits at the end of the draw range with the newest point full
-        // brightness; older points fade quadratically toward zero so the
-        // tail dies off into the starfield instead of clipping.
-        const arr = tr.positions;
-        const col = tr.colors;
-        if (tr.count < TRAIL_LEN) {
-            // Fill colours for indices 0..head-1 (chronological).
-            for (let k = 0; k < tr.count; k++) {
-                const t = k / Math.max(1, tr.count - 1);    // 0 → 1 newest
-                const a = t * t;
-                const ci = k * 3;
-                col[ci]     = cR * a;
-                col[ci + 1] = cG * a;
-                col[ci + 2] = cB * a;
-            }
-            tr.geom.setDrawRange(0, tr.count);
-            tr.geom.attributes.position.needsUpdate = true;
-            tr.geom.attributes.color.needsUpdate    = true;
-        } else {
-            // Rotate buffer so newest point is at the end of the draw range.
-            const rotated = new Float32Array(TRAIL_LEN * 3);
-            const start   = tr.head;
-            for (let k = 0; k < TRAIL_LEN; k++) {
-                const src = ((start + k) % TRAIL_LEN) * 3;
-                const dst = k * 3;
-                rotated[dst]     = arr[src];
-                rotated[dst + 1] = arr[src + 1];
-                rotated[dst + 2] = arr[src + 2];
-                const t = k / (TRAIL_LEN - 1);
-                const a = t * t;
-                col[dst]     = cR * a;
-                col[dst + 1] = cG * a;
-                col[dst + 2] = cB * a;
-            }
-            tr.geom.attributes.position.array.set(rotated);
-            tr.geom.setDrawRange(0, TRAIL_LEN);
-            tr.geom.attributes.position.needsUpdate = true;
-            tr.geom.attributes.color.needsUpdate    = true;
+/**
+ * Copy new sim-core trail points into the GPU segment rings (P0.3).
+ * Steady-state cost: 6 floats + 2 uniform scalars per new point — no
+ * allocations, no color rewrites, no buffer rotation. Fade happens in the
+ * trail shader from the head uniform.
+ */
+function _syncTrails() {
+    const simTrails = state.sim?.trails;
+    if (!simTrails) return;
+    for (let i = 0; i < state.trails.length; i++) {
+        const st = simTrails[i];
+        const gt = state.trails[i];
+        if (!st || !gt) continue;
+        let fresh = st.total - gt.lastTotal;
+        if (fresh <= 0) continue;
+        if (fresh >= st.cap) {
+            // The whole ring was overwritten since last sync — the previous
+            // pen position is stale, restart the stroke from the oldest
+            // surviving point.
+            fresh = st.cap;
+            gt.hasLast = false;
         }
+        const pos = gt.posAttr.array;
+        for (let k = fresh - 1; k >= 0; k--) {
+            const slot = (((st.head - k) % st.cap) + st.cap) % st.cap;
+            const o = slot * 3;
+            const x = st.buf[o], y = st.buf[o + 1], z = st.buf[o + 2];
+            if (gt.hasLast) {
+                gt.segHead = (gt.segHead + 1) % gt.cap;
+                if (gt.segCount < gt.cap) gt.segCount++;
+                const so = gt.segHead * 6;
+                pos[so]     = gt.last[0]; pos[so + 1] = gt.last[1]; pos[so + 2] = gt.last[2];
+                pos[so + 3] = x;          pos[so + 4] = y;          pos[so + 5] = z;
+            }
+            gt.last[0] = x; gt.last[1] = y; gt.last[2] = z;
+            gt.hasLast = true;
+        }
+        gt.lastTotal = st.total;
+        gt.posAttr.needsUpdate = true;
+        gt.uniforms.uHead.value  = gt.segHead;
+        gt.uniforms.uCount.value = gt.segCount;
     }
 }
 
@@ -659,7 +651,7 @@ function _tick(t) {
             _updateMeshes();
         } else if (res.stepsDone > 0) {
             _updateMeshes();
-            _appendTrails();
+            _syncTrails();
         }
         _renderHUDLive();
         _renderThrottleChip();
@@ -811,12 +803,14 @@ function _renderHUDLive() {
 }
 
 function _clearTrails() {
-    state.framesSinceTrail = 0;
+    if (state.sim) clearTrailBuffers(state.sim);
     for (const tr of state.trails) {
         if (!tr) continue;
-        tr.head = 0;
-        tr.count = 0;
-        tr.geom.setDrawRange(0, 0);
+        tr.segHead = -1;
+        tr.segCount = 0;
+        tr.lastTotal = 0;
+        tr.hasLast = false;
+        tr.uniforms.uCount.value = 0;   // shader hides every segment
     }
 }
 
@@ -1046,4 +1040,7 @@ export function boot({ canvas, ui, defaultSystem = 'jupiter-galileans' }) {
     attachUI(ui);
     loadSystem(SYSTEM_ORDER.includes(defaultSystem) ? defaultSystem : SYSTEM_ORDER[0]);
     start();
+    // Debug/test handle only — the smoke tests read trail buffers and sim
+    // state through this. Not a public API; do not build features on it.
+    if (typeof window !== 'undefined') window.__glLab = { state };
 }

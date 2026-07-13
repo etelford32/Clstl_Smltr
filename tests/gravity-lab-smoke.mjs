@@ -86,6 +86,43 @@ console.log('hud @ max warp:', JSON.stringify(hud));
 
 const dE = parseFloat(hud.dE.replace('e', 'E'));
 
+// ── P0.3: trail geometry at max warp — the anti-hairball gate ───────────
+// Frame-based sampling aliased across orbits and produced long chords
+// through the middle of the system. Sim-time sampling emits one point per
+// 1/256 orbit, so every rendered segment must be a short arc (~2π/256 of
+// the orbit circumference), whatever the warp.
+await page.click('[data-system="jupiter-galileans"]');
+await page.waitForTimeout(300);
+await page.evaluate(() => {
+    const s = document.getElementById('gl-warp');
+    s.value = '1000';
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await page.waitForTimeout(5000);
+const trailCheck = await page.evaluate(() => {
+    const st = window.__glLab.state;
+    const out = [];
+    for (let i = 0; i < st.bodies.length; i++) {
+        const gt = st.trails[i];
+        if (!gt) continue;
+        const orbitR = Math.hypot(...st.bodies[i].r) * 1e-3 / st.sceneScaleKm;
+        const pos = gt.posAttr.array;
+        let maxSeg = 0, checked = 0;
+        for (let s = 0; s < gt.segCount; s++) {
+            const o = s * 6;
+            const d = Math.hypot(pos[o] - pos[o+3], pos[o+1] - pos[o+4], pos[o+2] - pos[o+5]);
+            if (d > maxSeg) maxSeg = d;
+            checked++;
+        }
+        out.push({ name: st.bodies[i].name, segCount: gt.segCount, cap: gt.cap,
+                   maxSeg, orbitR, ratio: maxSeg / orbitR, checked });
+    }
+    return out;
+});
+for (const t of trailCheck) {
+    console.log(`trail ${t.name}: segs ${t.segCount}/${t.cap}  maxSeg/orbitR ${(t.ratio * 100).toFixed(2)}%`);
+}
+
 // ── 4: default boot state ───────────────────────────────────────────────
 await page.goto(`${BASE}/gravity-lab.html`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2500);
@@ -105,6 +142,14 @@ if (chip.hidden)          failures.push('throttle chip did not appear at max war
 if (!/THROTTLED/.test(chip.text)) failures.push(`chip text wrong: ${chip.text}`);
 if (!(dE < 1e-6))         failures.push(`energy drift ${hud.dE} not bounded under throttle`);
 if (boot.rows < 5)        failures.push(`body table has ${boot.rows} rows, expected 5`);
+if (!trailCheck.length)   failures.push('no trails found on jupiter-galileans');
+for (const t of trailCheck) {
+    if (t.segCount === 0) failures.push(`trail ${t.name} recorded no segments at max warp`);
+    // One point per 1/256 orbit → segment ≈ 2.5% of the orbit radius.
+    // Anything over 15% is an aliasing chord — the hairball coming back.
+    if (t.ratio > 0.15)   failures.push(
+        `trail ${t.name}: max segment ${(t.ratio * 100).toFixed(1)}% of orbit radius — aliasing`);
+}
 if (!/°/.test(boot.laplace ?? '')) failures.push(`Laplace readout missing: ${boot.laplace}`);
 if (errors.length)        failures.push(`console errors: ${errors.join(' | ')}`);
 
