@@ -9,19 +9,19 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Earth View — Parkers Physics App</title>
+<title>EarthView — Parkers Physics</title>
 <link rel="canonical" href="https://parkersphysics.com/earth.html">
-<meta name="description" content="Interactive 3D Earth simulation with live magnetosphere, solar wind interaction, and real-time satellite positions. Driven by NOAA SWPC and NASA OMNIWeb data.">
+<meta name="description" content="EarthView: your location's verdict at a glance — weather, aurora odds, ISS passes, and this week's best night — on a live 3D Earth with magnetosphere and solar wind. Driven by NOAA SWPC, NWS, and NASA data.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Parkers Physics">
 <meta property="og:url" content="https://parkersphysics.com/earth.html">
-<meta property="og:title" content="Earth View — Parkers Physics">
-<meta property="og:description" content="Interactive 3D Earth simulation with live magnetosphere, solar wind interaction, and real-time satellite positions. Driven by NOAA SWPC and NASA OMNIWeb data.">
+<meta property="og:title" content="EarthView — Parkers Physics">
+<meta property="og:description" content="EarthView: your location's verdict at a glance — weather, aurora odds, ISS passes, and this week's best night — on a live 3D Earth with magnetosphere and solar wind. Driven by NOAA SWPC, NWS, and NASA data.">
 <meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 <meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Earth View — Parkers Physics">
-<meta name="twitter:description" content="Interactive 3D Earth simulation with live magnetosphere, solar wind interaction, and real-time satellite positions. Driven by NOAA SWPC and NASA OMNIWeb data.">
+<meta name="twitter:title" content="EarthView — Parkers Physics">
+<meta name="twitter:description" content="EarthView: your location's verdict at a glance — weather, aurora odds, ISS passes, and this week's best night — on a live 3D Earth with magnetosphere and solar wind. Driven by NOAA SWPC, NWS, and NASA data.">
 <meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 <link rel="stylesheet" href="js/design-tokens.css?v=20260508">
 
@@ -331,6 +331,14 @@ nav {
 }
 #hud .hud-title { color: var(--c-accent); font-weight:700; font-size:10px;
     text-transform:uppercase; letter-spacing:.8px; margin-bottom:4px; }
+/* EarthView brand wordmark — blue→green gradient per the verdict-card
+   design tokens (see js/verdict-card.js §5 tokens). Gradient text needs
+   the clip pair; the solid color above stays as the no-support fallback. */
+#hud .hud-title {
+    background:linear-gradient(100deg,#4ddbff 0%,#1f8fff 34%,#bfe3ff 52%,#2eff9e 80%,#a8e63c 100%);
+    -webkit-background-clip:text; background-clip:text;
+    -webkit-text-fill-color:transparent;
+}
 #hud .hv { color:#a0d8f0; font-weight:600; }
 #hud .hk { color:#4a6a80; }
 
@@ -2377,7 +2385,7 @@ import './js/telemetry.js';
 
     <!-- HUD -->
     <div id="hud">
-        <div class="hud-title">Earth View</div>
+        <div class="hud-title">EarthView</div>
         <div><span class="hk">Date&nbsp;&nbsp;</span><span class="hv" id="h-date">—</span></div>
         <div><span class="hk">UTC&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-utc">—</span></div>
         <div><span class="hk">Local&nbsp;</span><span class="hv" id="h-local">—</span></div>
@@ -2966,6 +2974,13 @@ import './js/telemetry.js';
          (loc-input, loc-search, loc-result, loc-city, loc-card etc.)
          are unchanged so user-location.js + the on-globe marker code
          continue to work without modification. -->
+    <!-- EarthView verdict card mount point. The card itself (markup +
+         namespaced .ev-verdict-* styles) is injected by js/verdict-card.js;
+         keeping the host ABOVE #loc-panel makes it the first left-panel
+         element — the default dashboard. Opt out with ?verdict=0 or
+         localStorage ev_verdict='0'. -->
+    <div id="verdict-host"></div>
+
     <div id="loc-panel">
         <div class="panel-header" data-minimize="loc-panel">
             <h3>📍 My Location</h3>
@@ -3509,6 +3524,8 @@ import { GEO_GLSL } from './js/geo/coords.glsl.js';
 import { SatelliteTracker } from './js/satellite-tracker.js';
 import { solarPosition, sunTimes, compass16 } from './js/sun-altitude.js';
 import { nextPasses } from './js/pass-predictor.js';
+import { VerdictCard } from './js/verdict-card.js';
+import { AirQualityFeed } from './js/air-quality-feed.js';
 // Shared simulation-time bus. Lives in /operations/ for historical reasons
 // — it was originally Operations-only — but is now the cross-page clock for
 // any view that scrubs forecast/replay (Earth page time-controls, Operations
@@ -11754,6 +11771,57 @@ const _layerRegistry = {
                                    ?? document.getElementById('lyr-obs-snow')?.checked ?? false,
 };
 initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
+
+// ═══════════════════════════════════════════════════════════════
+//  EARTHVIEW VERDICT CARD — default dashboard
+// ═══════════════════════════════════════════════════════════════
+// Fuses feeds this page already runs (swFeed, nwsAlerts, satTracker) plus
+// the per-location AirQualityFeed into one draggable, touch-friendly answer
+// card mounted at #verdict-host. Pure logic lives in js/verdict-engine.js
+// (unit-tested: tests/verdict-engine.mjs); DOM/wiring in js/verdict-card.js.
+//
+// DEFAULT ON. Opt out with ?verdict=0 (one visit) or localStorage
+// ev_verdict='0' (sticky). The card is additive chrome — it removes or
+// replaces none of the panels/layers below, and "Explore ›" collapses it
+// to a pill so the full research UI stays one tap away.
+{
+    const verdictParam = new URLSearchParams(location.search).get('verdict');
+    let verdictLs = null;
+    try { verdictLs = localStorage.getItem('ev_verdict'); } catch {}
+    const VERDICT_ON = verdictParam !== '0' && !(verdictParam === null && verdictLs === '0');
+    if (VERDICT_ON) {
+        const startVerdict = () => {
+            try {
+                const evAirFeed = new AirQualityFeed();
+                const loc0 = loadUserLocation();
+                evAirFeed.start(loc0 || undefined);
+                window.__verdictCard = new VerdictCard(document.getElementById('verdict-host'), {
+                    swpc:   swFeed,
+                    alerts: nwsAlerts,
+                    air:    evAirFeed,
+                    getLocation: loadUserLocation,
+                    sunTimes,
+                    // ISS TLE comes from the 'stations' group satTracker already
+                    // loads for the globe; pass search runs off the first-paint
+                    // path (the card defers it to idle time internally).
+                    getIssPasses: (loc) => {
+                        const iss = satTracker.getSatellite?.(25544);
+                        if (!iss?.tle) return null;
+                        return nextPasses(iss.tle, { lat: loc.lat, lon: loc.lon },
+                            { horizonH: 48, minPeakDeg: 20, maxPasses: 10 });
+                    },
+                    flagSource: verdictParam === '1' ? 'query' : verdictLs === '1' ? 'ls' : 'default',
+                });
+            } catch (err) {
+                // The card must never take the globe down with it.
+                console.error('[EarthView] verdict card failed to start:', err);
+            }
+        };
+        // Lazy-init after first paint so the globe's LCP is unaffected.
+        if (document.readyState === 'complete') setTimeout(startVerdict, 0);
+        else window.addEventListener('load', () => setTimeout(startVerdict, 0), { once: true });
+    }
+}
 </script>
 
 <!-- ── Simulation description ──────────────────────────────────────────── -->
