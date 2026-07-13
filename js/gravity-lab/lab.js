@@ -11,6 +11,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 import {
     stateToElements,
+    elementsToState,
     G_SI,
 } from './physics.js';
 import { createDriver } from './sim-driver.js';
@@ -79,6 +80,13 @@ const state = {
     gridOn:         true,
     planesOn:       true,
     extentUnits:    10,      // cached system extent for label fade math
+    // Sandbox mode (P2.1).
+    sandbox:        false,
+    softeningKm:    0,       // Plummer ε (km) — sandbox-only, 0 elsewhere
+    gizmos:         [],      // velocity-vector gizmos, one per body
+    gizmoTau:       1,       // seconds of travel an arrow depicts
+    // Epoch base for the JD readout (P2.2) — J2000 unless an epoch loaded.
+    epochJD:        J2000_JD,
     // Central-body J2 perturbation. Toggleable per system.
     j2Enabled:      false,
     j2Opts:         null,    // {centerIdx, J2, R_eq, mu} consumed by integrator
@@ -146,6 +154,19 @@ const hud = {
     presetBtns:   null,   // overview / polar / plane-skim / ride chips
     hint:         null,   // zoom & camera controls tooltip on the stage
     hintBtn:      null,   // "?" button that re-shows the tooltip
+    // Sandbox (P2.1)
+    sandboxWrap:  null,
+    sbAdd:        null,
+    sbDel:        null,
+    sbSoftToggle: null,
+    sbSoftKm:     null,
+    sbSoftRow:    null,
+    sbEditor:     null,
+    sbProps:      null,   // {name, mass, radius, color} inputs
+    sbPropsApply: null,
+    sbElWrap:     null,
+    sbEl:         null,   // {a, e, i, raan, argp, M} inputs
+    sbElApply:    null,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -187,6 +208,16 @@ export function initScene(canvasEl) {
     // Any direct user input takes the wheel back from a preset tween.
     canvasEl.addEventListener('pointerdown', () => { _fly = null; });
     canvasEl.addEventListener('wheel', () => { _fly = null; }, { passive: true });
+
+    // Sandbox drag editing (P2.1). Begin pre-empts OrbitControls only when
+    // a body or gizmo tip is actually grabbed; a motionless grab falls
+    // through to the click-to-focus pick below.
+    canvasEl.addEventListener('pointerdown', e => _dragBegin(e));
+    canvasEl.addEventListener('pointermove', e => _dragMove(e));
+    canvasEl.addEventListener('pointerup',   e => _dragEnd(e));
+    canvasEl.addEventListener('wheel', e => {
+        if (_drag) { e.preventDefault(); _dragWheel(e); }
+    }, { passive: false });
 
     // Lighting — soft fill + a directional "sun" so spheres show shading.
     // The directional light direction is also fed into every skin's
@@ -323,6 +354,7 @@ export function setFocus(idx) {
         }
     }
     _renderBodyChips();
+    _syncSandboxUI();
 }
 
 function _aspect() {
@@ -361,7 +393,16 @@ function _disposeGroup(g) {
 export function loadSystem(systemId) {
     const src = SYSTEMS[systemId];
     if (!src) throw new Error(`Unknown system: ${systemId}`);
+    _loadDescriptor(src, systemId);
+}
 
+/**
+ * Load any system descriptor (P2.1): a curated entry from systems.js, a
+ * sandbox fork, a baked Horizons epoch, or a share-URL reconstruction.
+ * `systemId` is what the driver ships to the worker for curated loads;
+ * pass null to ship desc.bodies as raw state instead.
+ */
+function _loadDescriptor(src, systemId) {
     _disposeGroup(sceneRoot);
     _disposeGroup(trailRoot);
     _disposeGroup(overlayRoot);
@@ -379,14 +420,17 @@ export function loadSystem(systemId) {
         r: [b.r[0], b.r[1], b.r[2]],
         v: [b.v[0], b.v[1], b.v[2]],
     }));
-    state.systemId      = systemId;
+    state.systemId      = systemId ?? src.id;
+    state.sandbox       = !systemId && src.id === 'sandbox';
     state.sys           = src;
     state.sceneScaleKm  = src.scale_km_per_unit;
     state.targetStep    = src.suggested_dt_s;
     state.warp          = src.suggested_warp;
+    state.epochJD       = src.epoch_jd ?? J2000_JD;
     state.elapsedSec    = 0;
     state.paused        = false;
     state.direction     = +1;
+    if (!state.sandbox) state.softeningKm = 0;
     // J2 perturbation setup. When the system declares oblateness, build
     // the integrator's J2 opts object and seed the toggle from the
     // system's preferred default. The actual application happens in
@@ -430,15 +474,25 @@ export function loadSystem(systemId) {
     // orbital period, ring capped at trail_periods visible orbits.
     const trailCap = TRAIL_POINTS_PER_ORBIT * (src.trail_periods || TRAIL_PERIODS_DEFAULT);
     const metersToScene = KM_PER_M / state.sceneScaleKm;
-    const trailSpecs = state.bodies.map(b => {
-        if (b.is_parent) return null;
-        let interval;
+    const primaryIdx = Math.max(0, state.bodies.findIndex(b => b.is_parent));
+    const trailSpecs = state.bodies.map((b, bi) => {
+        if (bi === primaryIdx) return null;
+        let interval = 0;
         if (b.elements_j2000) {
             const mu = src.mu_parent + G_SI * b.m;
             const periodS = 2 * Math.PI * Math.sqrt(b.elements_j2000.a ** 3 / mu);
             interval = periodS / TRAIL_POINTS_PER_ORBIT;
         } else {
-            interval = state.targetStep * 8;   // unbound / element-less fallback
+            // Sandbox / epoch bodies carry no elements — derive the period
+            // from the current osculating orbit around the primary.
+            const p = state.bodies[primaryIdx];
+            const el = stateToElements(
+                [b.r[0]-p.r[0], b.r[1]-p.r[1], b.r[2]-p.r[2]],
+                [b.v[0]-p.v[0], b.v[1]-p.v[1], b.v[2]-p.v[2]],
+                G_SI * (p.m + b.m));
+            interval = (el.a > 0 && isFinite(el.period_s))
+                ? el.period_s / TRAIL_POINTS_PER_ORBIT
+                : state.targetStep * 8;   // unbound fallback
         }
         return { interval, scale: metersToScene };
     });
@@ -549,13 +603,20 @@ export function loadSystem(systemId) {
     };
     state.driver.load({
         systemId,
+        // Non-curated loads (sandbox/epoch/share) ship raw state — the
+        // worker can't look these up in systems.js.
+        rawBodies: systemId ? null : state.bodies.map(b => ({
+            name: b.name, m: b.m, r: [...b.r], v: [...b.v],
+        })),
         bodies:     state.bodies,
         targetStep: state.targetStep,
         j2Opts:     state.j2Opts,
         j2Enabled:  state.j2Enabled,
+        softening:  state.sandbox ? state.softeningKm * 1000 : 0,
         trailSpecs,
         trailCap,
     });
+    _syncSandboxUI();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -588,7 +649,7 @@ function _onSnapshot(view) {
     // snapshots for smoothness; snap hard across discontinuities.
     if (state.driverMode === 'worker' && state.interp) {
         const ip = state.interp;
-        if (!ip.primed || view.loaded || view.rewound || view.fault) {
+        if (!ip.primed || view.loaded || view.rewound || view.fault || view.edited) {
             _capturePositions(ip.currPos);
             ip.prevPos.set(ip.currPos);
             ip.prevMs = ip.currMs = performance.now();
@@ -607,8 +668,12 @@ function _onSnapshot(view) {
         state.paused = true;
         if (hud.playBtn) hud.playBtn.textContent = '▶ Play';
         _showFaultBanner(view.fault);
+        _syncGizmos(true);
     }
-    if (view.fault || view.rewound || view.loaded) _resetTrailVisuals();
+    if (view.fault || view.rewound || view.loaded || view.edited) _resetTrailVisuals();
+    // Rewind/undo and edits change body state — the sandbox editor fields
+    // must follow the authoritative snapshot.
+    if (state.sandbox && (view.rewound || view.edited)) _syncSandboxUI();
     _syncTrails(view.trails);
     if (state.paused) _updateMeshes();   // repaint rewind/fault while paused
 
@@ -828,6 +893,7 @@ function _updateMeshes() {
         const p = state.bodyGroups[0];
         if (p) guideAnchor.position.copy(p.position);
     }
+    if (state.gizmos.length) _updateGizmos();
 }
 
 /**
@@ -871,6 +937,396 @@ function _syncTrails(sourceTrails) {
         gt.uniforms.uHead.value  = gt.segHead;
         gt.uniforms.uCount.value = gt.segCount;
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sandbox mode (P2.1) — fork the current system and edit it live.
+//
+// Ownership contract: the DRIVER owns the authoritative body state.
+// Edits update state.bodies optimistically for immediate visuals (only
+// safe while paused — no snapshots overwrite them), then commit through
+// driver.setBody, which checkpoints the pre-edit state (⏪ Rewind = undo),
+// re-baselines E₀/L₀, and clears trails. Add/delete rebuild the whole
+// system through _loadDescriptor (elapsed resets — a new experiment).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SANDBOX_PALETTE = [0xff8c5a, 0x6fe48b, 0x5ab8ff, 0xffd166, 0xc792ea, 0xf07178];
+
+function _primaryIdxOf(bodies) {
+    let p = 0;
+    for (let i = 1; i < bodies.length; i++) if (bodies[i].m > bodies[p].m) p = i;
+    return p;
+}
+
+/**
+ * Reference frame for sandbox orbit math: the barycenter of everything
+ * EXCEPT the selected body. For a moon of a planet this is ≈ the planet;
+ * for a circumbinary body it is the inner-pair barycenter — the primary
+ * frame would be wrong there (the primary's own orbital velocity around
+ * the barycenter dwarfs a distant body's and inflates e past 1).
+ */
+function _sandboxRefFrame(excludeIdx) {
+    let M = 0;
+    const r = [0, 0, 0], v = [0, 0, 0];
+    for (let i = 0; i < state.bodies.length; i++) {
+        if (i === excludeIdx) continue;
+        const b = state.bodies[i];
+        M += b.m;
+        for (let k = 0; k < 3; k++) {
+            r[k] += b.m * b.r[k];
+            v[k] += b.m * b.v[k];
+        }
+    }
+    if (M > 0) for (let k = 0; k < 3; k++) { r[k] /= M; v[k] /= M; }
+    return { M, r, v };
+}
+
+/** Build a sandbox descriptor from a body list (current live state). */
+function _sandboxDesc(bodies) {
+    const src = state.sys;
+    const pIdx = _primaryIdxOf(bodies);
+    const list = bodies.map((b, i) => ({
+        name: b.name,
+        m: b.m,
+        r: [...b.r],
+        v: [...b.v],
+        radius_km: b.radius_km || 100,
+        color: b.color ?? 0xaaaaaa,
+        glow: b.glow,
+        skin: b.skin || null,
+        surface: b.surface || null,
+        is_parent: i === pIdx,
+        highlight: b.highlight || null,
+        // No elements_j2000: trails and the HUD table derive osculating
+        // orbits from the live state — stale elements would lie after edits.
+    }));
+    return {
+        id: 'sandbox',
+        name: 'Sandbox',
+        blurb: 'Your experiment. Every edit re-baselines the conservation ledger and clears trails.',
+        marketing: {
+            headline: 'Sandbox mode',
+            callout: `Forked from ${src?.name ?? 'scratch'}. Pause, then drag bodies to move them or drag a velocity arrow tip to redirect them — scroll adjusts out-of-plane. ⏪ Rewind undoes edits.`,
+            physics: 'Same engine, same honest ledger: Yoshida-4 symplectic with adaptive RKF7(8) close encounters. Plummer softening is available below — sandbox-only, clearly labeled, never applied to curated systems.',
+        },
+        bodies: list,
+        parent_name: list[pIdx].name,
+        mu_parent: G_SI * list[pIdx].m,
+        scale_km_per_unit: state.sceneScaleKm,
+        suggested_dt_s: state.targetStep,
+        suggested_warp: state.warp,
+        // J2 belongs to a specific curated primary; sandbox edits could
+        // remove or dwarf it. Off in sandbox.
+        oblateness: null,
+        j2_default: false,
+        // Rings only make sense while the original primary is still primary.
+        rings: (src?.rings && list[pIdx].name === src.parent_name) ? src.rings : null,
+        show_barycenter: true,
+        default_view: null,
+        trail_periods: src?.trail_periods || 0,
+        epoch_jd: state.epochJD,
+    };
+}
+
+function _enterSandbox() {
+    if (!state.bodies.length) return;
+    _loadDescriptor(_sandboxDesc(state.bodies), null);
+}
+
+function _sandboxAddBody() {
+    if (!state.sandbox) return;
+    const bodies = state.bodies;
+    // Spawn on a circular prograde orbit around the SYSTEM barycenter,
+    // outside the outermost body — stable in hierarchical systems where
+    // a primary-centered circle would be badly eccentric.
+    const bary = _sandboxRefFrame(-1);
+    let rMax = 0;
+    for (const b of bodies) {
+        rMax = Math.max(rMax,
+            Math.hypot(b.r[0]-bary.r[0], b.r[1]-bary.r[1], b.r[2]-bary.r[2]));
+    }
+    if (!rMax) rMax = 1e7;
+    const d = rMax * 1.35;
+    const vc = Math.sqrt(G_SI * bary.M / d);
+    const m = bodies[_primaryIdxOf(bodies)].m * 1e-4;
+    const radiusKm = Math.max(5, Math.cbrt(3 * m / (4 * Math.PI * 3000)) / 1000);
+    const nb = {
+        name: `body ${bodies.length + 1}`,
+        m,
+        r: [bary.r[0] + d, bary.r[1], bary.r[2]],
+        v: [bary.v[0], bary.v[1] + vc, bary.v[2]],
+        radius_km: radiusKm,
+        color: SANDBOX_PALETTE[bodies.length % SANDBOX_PALETTE.length],
+    };
+    _loadDescriptor(_sandboxDesc([...bodies, nb]), null);
+    setFocus(state.bodies.length - 1);
+}
+
+function _sandboxDeleteFocused() {
+    if (!state.sandbox || state.focusIdx == null || state.bodies.length <= 2) return;
+    const keep = state.bodies.filter((_, i) => i !== state.focusIdx);
+    _loadDescriptor(_sandboxDesc(keep), null);
+}
+
+/**
+ * Commit an r/v edit: optimistic local update + authoritative driver op.
+ * `pre` is the state at gesture START (drags pass it — the live body
+ * already holds preview values by commit time); when omitted, the current
+ * body state IS the pre-state (element editor path).
+ */
+function _commitBodyEdit(idx, r, v, pre = null) {
+    const b = state.bodies[idx];
+    if (!b) return;
+    if (!pre) pre = { r: [...b.r], v: [...b.v] };
+    if (r) { b.r[0] = r[0]; b.r[1] = r[1]; b.r[2] = r[2]; }
+    if (v) { b.v[0] = v[0]; b.v[1] = v[1]; b.v[2] = v[2]; }
+    state.L0Pending = true;
+    state.driver.setBody(idx, r ? [...r] : null, v ? [...v] : null, pre);
+    _resetTrailVisuals();
+    _updateMeshes();
+    _syncGizmos(true);
+    _syncSandboxUI();
+}
+
+function _sandboxApplyElements() {
+    const idx = state.focusIdx;
+    if (!state.sandbox || idx == null || !hud.sbEl) return;
+    const b = state.bodies[idx];
+    const ref = _sandboxRefFrame(idx);
+    if (!(ref.M > 0)) return;
+    const f = k => parseFloat(hud.sbEl[k].value);
+    const aKm = f('a'), e = f('e'), i = f('i'), raan = f('raan'), argp = f('argp'), M = f('M');
+    if (!(aKm > 0) || !(e >= 0) || e >= 1 || !isFinite(i)) return;
+    const mu = G_SI * (ref.M + b.m);
+    const { r, v } = elementsToState({
+        a: aKm * 1000, e, i_deg: i, raan_deg: raan || 0, argp_deg: argp || 0, M_deg: M || 0, mu,
+    });
+    _commitBodyEdit(idx,
+        [ref.r[0] + r[0], ref.r[1] + r[1], ref.r[2] + r[2]],
+        [ref.v[0] + v[0], ref.v[1] + v[1], ref.v[2] + v[2]]);
+}
+
+function _sandboxApplyProps() {
+    const idx = state.focusIdx;
+    if (!state.sandbox || idx == null || !hud.sbProps) return;
+    const bodies = state.bodies.map(b => ({ ...b, r: [...b.r], v: [...b.v] }));
+    const b = bodies[idx];
+    const name = hud.sbProps.name.value.trim();
+    const m = Number(hud.sbProps.mass.value);
+    const radiusKm = parseFloat(hud.sbProps.radius.value);
+    const color = parseInt(hud.sbProps.color.value.replace('#', ''), 16);
+    if (name) b.name = name;
+    if (m > 0 && isFinite(m)) b.m = m;
+    if (radiusKm > 0) b.radius_km = radiusKm;
+    if (isFinite(color)) b.color = color;
+    _loadDescriptor(_sandboxDesc(bodies), null);   // mass may change the primary
+    setFocus(Math.min(idx, state.bodies.length - 1));
+}
+
+// Keep the sandbox panel + selected-body editor in sync with state.
+function _syncSandboxUI() {
+    if (hud.sandboxWrap) hud.sandboxWrap.style.display = state.sandbox ? '' : 'none';
+    if (!state.sandbox) { _syncGizmos(true); return; }
+    if (hud.sbSoftToggle) hud.sbSoftToggle.checked = state.softeningKm > 0;
+    if (hud.sbSoftRow) hud.sbSoftRow.style.display = state.softeningKm > 0 ? '' : 'none';
+    const idx = state.focusIdx;
+    const show = idx != null && state.bodies[idx];
+    if (hud.sbEditor) hud.sbEditor.style.display = show ? '' : 'none';
+    if (show) {
+        const b = state.bodies[idx];
+        if (hud.sbProps) {
+            hud.sbProps.name.value = b.name;
+            hud.sbProps.mass.value = b.m.toExponential(4);
+            hud.sbProps.radius.value = (b.radius_km || 100).toFixed(1);
+            hud.sbProps.color.value = '#' + (b.color ?? 0xaaaaaa).toString(16).padStart(6, '0');
+        }
+        if (hud.sbEl) {
+            const ref = _sandboxRefFrame(idx);
+            const el = stateToElements(
+                [b.r[0]-ref.r[0], b.r[1]-ref.r[1], b.r[2]-ref.r[2]],
+                [b.v[0]-ref.v[0], b.v[1]-ref.v[1], b.v[2]-ref.v[2]],
+                G_SI * (ref.M + b.m));
+            const bound = el.a > 0 && isFinite(el.a);
+            hud.sbEl.a.value    = bound ? (el.a / 1000).toFixed(0) : '';
+            hud.sbEl.e.value    = el.e.toFixed(4);
+            hud.sbEl.i.value    = el.i_deg.toFixed(2);
+            hud.sbEl.raan.value = el.raan_deg.toFixed(1);
+            hud.sbEl.argp.value = el.argp_deg.toFixed(1);
+            hud.sbEl.M.value    = el.M_deg.toFixed(1);
+        }
+        if (hud.sbElWrap) hud.sbElWrap.style.display = '';
+    }
+    _syncGizmos(true);
+}
+
+// ── Velocity gizmos + drag editing ──────────────────────────────────────────
+// Arrows depict where each body will move (z-exaggeration applied like the
+// trajectories). Visible only in sandbox while paused. Tip spheres are the
+// grab targets; τ (seconds of travel per arrow) is frozen during a drag so
+// the mapping under the pointer stays stable.
+
+function _gizmosVisible() {
+    return state.sandbox && state.paused;
+}
+
+function _syncGizmos(rebuild = false) {
+    const want = _gizmosVisible();
+    if (rebuild || !want) {
+        for (const g of state.gizmos) {
+            if (!g) continue;
+            overlayRoot.remove(g.line, g.tip);
+            g.line.geometry.dispose(); g.line.material.dispose();
+            g.tip.geometry.dispose();  g.tip.material.dispose();
+        }
+        state.gizmos = [];
+    }
+    if (!want) return;
+    if (!state.gizmos.length) {
+        // Freeze τ so arrows are ~18% of the extent for the fastest body.
+        const E = state.zExag, mts = KM_PER_M / state.sceneScaleKm;
+        let vMax = 1e-9;
+        for (const b of state.bodies) {
+            vMax = Math.max(vMax, Math.hypot(b.v[0], b.v[1], b.v[2] * E) * mts);
+        }
+        state.gizmoTau = state.extentUnits * 0.18 / vMax;
+        for (let i = 0; i < state.bodies.length; i++) {
+            const color = state.bodies[i].color ?? 0xffffff;
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+            const line = new THREE.Line(geom, new THREE.LineBasicMaterial({
+                color, transparent: true, opacity: 0.9, depthTest: false,
+            }));
+            line.renderOrder = 998;
+            line.frustumCulled = false;
+            const tip = new THREE.Mesh(
+                new THREE.SphereGeometry(Math.max(state.extentUnits * 0.012, 0.02), 12, 8),
+                new THREE.MeshBasicMaterial({ color, depthTest: false }));
+            tip.renderOrder = 998;
+            tip.userData.gizmoIdx = i;
+            overlayRoot.add(line, tip);
+            state.gizmos.push({ line, tip });
+        }
+    }
+    _updateGizmos();
+}
+
+function _updateGizmos() {
+    if (!state.gizmos.length) return;
+    const E = state.zExag, mts = KM_PER_M / state.sceneScaleKm;
+    const [ox, oy, oz] = state.origin;
+    const tau = state.gizmoTau;
+    for (let i = 0; i < state.gizmos.length; i++) {
+        const g = state.gizmos[i], b = state.bodies[i];
+        if (!g || !b) continue;
+        const x0 = _toScene(b.r[0]) - ox;
+        const y0 = _toScene(b.r[1]) - oy;
+        const z0 = _toScene(b.r[2]) * E - oz;
+        const x1 = x0 + b.v[0] * mts * tau;
+        const y1 = y0 + b.v[1] * mts * tau;
+        const z1 = z0 + b.v[2] * E * mts * tau;
+        const pos = g.line.geometry.attributes.position;
+        pos.setXYZ(0, x0, y0, z0);
+        pos.setXYZ(1, x1, y1, z1);
+        pos.needsUpdate = true;
+        g.tip.position.set(x1, y1, z1);
+    }
+}
+
+// Drag context — one edit gesture at a time.
+let _drag = null;
+const _dragPlane = new THREE.Plane();
+const _dragHit = new THREE.Vector3();
+
+function _pickEditTarget(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    _ndc.x =  ((clientX - rect.left) / rect.width)  * 2 - 1;
+    _ndc.y = -((clientY - rect.top)  / rect.height) * 2 + 1;
+    _ray.setFromCamera(_ndc, camera);
+    const tips = state.gizmos.map(g => g?.tip).filter(Boolean);
+    const tipHit = _ray.intersectObjects(tips, false)[0];
+    if (tipHit) return { kind: 'vel', idx: tipHit.object.userData.gizmoIdx };
+    const meshHit = _ray.intersectObjects(state.meshes, false)[0];
+    if (meshHit) return { kind: 'body', idx: meshHit.object.userData.bodyIdx };
+    return null;
+}
+
+function _dragBegin(e) {
+    if (!_gizmosVisible()) return;
+    const hit = _pickEditTarget(e.clientX, e.clientY);
+    if (!hit || hit.idx == null || hit.idx < 0) return;
+    const b = state.bodies[hit.idx];
+    const E = state.zExag, [, , oz] = state.origin;
+    // The drag plane holds the target's CURRENT out-of-plane height;
+    // the wheel moves it during the gesture.
+    const zWorld = hit.kind === 'body'
+        ? _toScene(b.r[2]) * E - oz
+        : state.gizmos[hit.idx].tip.position.z;
+    _dragPlane.set(new THREE.Vector3(0, 0, 1), -zWorld);
+    _drag = {
+        ...hit, moved: false, zSI: b.r[2], vzSI: b.v[2],
+        pre: { r: [...b.r], v: [...b.v] },   // true undo point for the gesture
+    };
+    controls.enabled = false;
+    renderer.domElement.setPointerCapture(e.pointerId);
+    setFocus(hit.idx === state.focusIdx ? state.focusIdx : hit.idx);
+}
+
+function _dragMove(e) {
+    if (!_drag) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    _ndc.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+    _ndc.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+    _ray.setFromCamera(_ndc, camera);
+    if (!_ray.ray.intersectPlane(_dragPlane, _dragHit)) return;
+    _drag.moved = true;
+    const E = state.zExag, mts = KM_PER_M / state.sceneScaleKm;
+    const [ox, oy] = state.origin;
+    const b = state.bodies[_drag.idx];
+    if (_drag.kind === 'body') {
+        b.r[0] = (_dragHit.x + ox) / mts;
+        b.r[1] = (_dragHit.y + oy) / mts;
+        b.r[2] = _drag.zSI;
+        _updateMeshes();
+        _updateGizmos();
+    } else {
+        const g = state.gizmos[_drag.idx];
+        const x0 = _toScene(b.r[0]) - ox;
+        const y0 = _toScene(b.r[1]) - oy;
+        b.v[0] = (_dragHit.x - x0) / (mts * state.gizmoTau);
+        b.v[1] = (_dragHit.y - y0) / (mts * state.gizmoTau);
+        b.v[2] = _drag.vzSI;
+        _updateGizmos();
+    }
+}
+
+function _dragWheel(e) {
+    if (!_drag) return;
+    const b = state.bodies[_drag.idx];
+    const dir = e.deltaY > 0 ? -1 : 1;
+    if (_drag.kind === 'body') {
+        // Out-of-plane nudge: 1.5% of extent per notch.
+        _drag.zSI += dir * (state.extentUnits * 0.015) * state.sceneScaleKm / KM_PER_M;
+        b.r[2] = _drag.zSI;
+        _updateMeshes();
+    } else {
+        const vMag = Math.hypot(b.v[0], b.v[1], b.v[2]) || 1;
+        _drag.vzSI += dir * vMag * 0.03;
+        b.v[2] = _drag.vzSI;
+    }
+    _drag.moved = true;
+    _updateGizmos();
+}
+
+function _dragEnd(e) {
+    if (!_drag) return;
+    const d = _drag;
+    _drag = null;
+    controls.enabled = true;
+    try { renderer.domElement.releasePointerCapture(e.pointerId); } catch { /* released */ }
+    if (!d.moved) return;   // plain click — the pick handler owns it
+    const b = state.bodies[d.idx];
+    if (d.kind === 'body') _commitBodyEdit(d.idx, [...b.r], null, d.pre);
+    else                   _commitBodyEdit(d.idx, null, [...b.v], d.pre);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -965,8 +1421,10 @@ function _tick(t) {
     }
 
     // Worker mode renders between the last two snapshots for smoothness;
-    // inline mode's bodies are already exact.
-    if (state.driverMode === 'worker' && state.interp?.primed) {
+    // inline mode's bodies are already exact. Never interpolate while
+    // paused — sandbox drag previews own state.bodies then, and lerping
+    // would snap them back to the last snapshot every frame.
+    if (!state.paused && state.driverMode === 'worker' && state.interp?.primed) {
         const ip = state.interp;
         const span = ip.currMs - ip.prevMs;
         const k = span > 0 ? Math.min(1, Math.max(0, (t - ip.currMs) / span)) : 1;
@@ -1069,7 +1527,7 @@ function _renderHUDLive() {
     // Time readouts.
     if (hud.elapsed) hud.elapsed.textContent = _humaniseSeconds(state.elapsedSec);
     if (hud.jd) {
-        const jd = J2000_JD + state.elapsedSec / 86400;
+        const jd = state.epochJD + state.elapsedSec / 86400;
         hud.jd.textContent = jd.toFixed(4);
     }
     if (hud.warpVal) hud.warpVal.textContent = _humaniseWarp(state.warp);
@@ -1263,7 +1721,9 @@ export function attachUI(refs) {
     if (hud.tabs) {
         for (const btn of hud.tabs) {
             btn.addEventListener('click', () => {
-                if (btn.dataset.system && SYSTEMS[btn.dataset.system]) {
+                if (btn.dataset.system === 'sandbox') {
+                    _enterSandbox();
+                } else if (btn.dataset.system && SYSTEMS[btn.dataset.system]) {
                     loadSystem(btn.dataset.system);
                 }
             });
@@ -1274,6 +1734,7 @@ export function attachUI(refs) {
         hud.playBtn.addEventListener('click', () => {
             state.paused = !state.paused;
             hud.playBtn.textContent = state.paused ? '▶ Play' : '❚❚ Pause';
+            _syncGizmos(true);   // velocity gizmos live only in paused sandbox
         });
     }
     if (hud.revBtn) {
@@ -1366,6 +1827,28 @@ export function attachUI(refs) {
             });
         }
     }
+
+    // ── Sandbox (P2.1) ──────────────────────────────────────────────────
+    if (hud.sbAdd) hud.sbAdd.addEventListener('click', _sandboxAddBody);
+    if (hud.sbDel) hud.sbDel.addEventListener('click', _sandboxDeleteFocused);
+    if (hud.sbSoftToggle) {
+        hud.sbSoftToggle.addEventListener('change', () => {
+            state.softeningKm = hud.sbSoftToggle.checked
+                ? Math.max(0, parseFloat(hud.sbSoftKm?.value) || 1000)
+                : 0;
+            if (hud.sbSoftRow) hud.sbSoftRow.style.display = hud.sbSoftToggle.checked ? '' : 'none';
+            state.driver.setSoftening(state.softeningKm * 1000);
+        });
+    }
+    if (hud.sbSoftKm) {
+        hud.sbSoftKm.addEventListener('change', () => {
+            if (!hud.sbSoftToggle?.checked) return;
+            state.softeningKm = Math.max(0, parseFloat(hud.sbSoftKm.value) || 0);
+            state.driver.setSoftening(state.softeningKm * 1000);
+        });
+    }
+    if (hud.sbPropsApply) hud.sbPropsApply.addEventListener('click', _sandboxApplyProps);
+    if (hud.sbElApply)    hud.sbElApply.addEventListener('click', _sandboxApplyElements);
 
     // ── Camera presets + controls tooltip (P1.3) ────────────────────────
     if (hud.presetBtns) {
@@ -1462,5 +1945,14 @@ export function boot({ canvas, ui, defaultSystem = 'jupiter-galileans' }) {
     start();
     // Debug/test handle only — the smoke tests read trail buffers and sim
     // state through this. Not a public API; do not build features on it.
-    if (typeof window !== 'undefined') window.__glLab = { state, setFocus, loadSystem };
+    if (typeof window !== 'undefined') {
+        window.__glLab = {
+            state, setFocus, loadSystem,
+            enterSandbox: _enterSandbox,
+            addBody: _sandboxAddBody,
+            commitBodyEdit: _commitBodyEdit,
+            pickEditTarget: _pickEditTarget,
+            debugDrag: () => _drag,
+        };
+    }
 }

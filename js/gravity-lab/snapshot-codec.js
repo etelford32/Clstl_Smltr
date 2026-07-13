@@ -135,5 +135,6 @@ export function parseSnapshot(buffer, meta, outBodies) {
         fault:       meta.fault ?? null,
         loaded:      !!meta.loaded,
         rewound:     !!meta.rewound,
+        edited:      !!meta.edited,
     };
 }

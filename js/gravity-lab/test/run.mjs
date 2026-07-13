@@ -751,6 +751,38 @@ test('hybrid · true singularity (radial plunge) faults as unresolvable', () => 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 10a. Plummer softening (P2.1, sandbox-only) — the softened force must be
+//      the exact gradient of the softened potential, or the conservation
+//      ledger (and the P0.2 energy guard) lies. A huge ε on a tight orbit
+//      makes any force/potential mismatch blow past 1e-8 within steps.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('softening · softened force/potential pair conserves the softened energy', () => {
+    const { bodies } = (() => {
+        const M1 = 5.972e24, M2 = 7.342e22, a = 3.844e8;
+        const mu = G_SI * (M1 + M2);
+        const { r, v } = elementsToState({ a, e: 0.3, i_deg: 10, raan_deg: 0, argp_deg: 0, M_deg: 0, mu });
+        const f2 = M1 / (M1 + M2), f1 = M2 / (M1 + M2);
+        return { bodies: [
+            { m: M1, r: [-f1*r[0], -f1*r[1], -f1*r[2]], v: [-f1*v[0], -f1*v[1], -f1*v[2]] },
+            { m: M2, r: [ f2*r[0],  f2*r[1],  f2*r[2]], v: [ f2*v[0],  f2*v[1],  f2*v[2]] },
+        ] };
+    })();
+    const eps = 5e7;                       // 50,000 km — deliberately huge
+    const soft2 = eps * eps;
+    const opts = { soft2 };
+    const E0 = totalEnergy(bodies, soft2).total;
+    for (let k = 0; k < 2e4; k++) yoshida4Step(bodies, 600, opts);
+    const dE = Math.abs((totalEnergy(bodies, soft2).total - E0) / E0);
+    assertBelow(dE, 1e-8, 'softened |ΔE/E₀|');
+    // And the softened dynamics must NOT conserve the UNsoftened energy —
+    // otherwise the ε isn't actually reaching the force law.
+    const dEwrong = Math.abs((totalEnergy(bodies, 0).total - totalEnergy(bodies, soft2).total)
+        / totalEnergy(bodies, soft2).total);
+    assert(dEwrong > 1e-4, 'ε had no effect — softening not threaded into the force');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 10b. Circumbinary construction (P1.4) — Nix/Hydra orbit the Pluto+Charon
 //      barycenter and Algol Ab orbits the Aa1+Aa2 pair. The state vectors
 //      must reproduce the published elements RELATIVE TO THE ENCLOSED

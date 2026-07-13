@@ -83,12 +83,14 @@ const ADAPTIVE_TOL    = 1e-12; // per-step relative tolerance for RKF7(8)
  * Create a simulation-core state object.
  * `bodies` is the live array the integrator mutates ({m, r, v, name, …}).
  */
-export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false, hybrid = true }) {
+export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false, hybrid = true, softening = 0 }) {
     const sim = {
         bodies,
         targetStep,
         j2Opts,
         j2Enabled,
+        // Plummer softening ε² (m²). Sandbox-only; 0 for curated systems.
+        soft2: softening * softening,
         elapsedSec: 0,        // signed simulated seconds since epoch
         debtSec: 0,           // requested-but-not-yet-integrated sim time (signed)
         warpCap: Infinity,    // sustainable warp estimate; Infinity = uncapped
@@ -150,7 +152,7 @@ export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false
 
 /** Total energy including the J2 potential when the perturbation is active. */
 export function currentEnergy(sim) {
-    let E = totalEnergy(sim.bodies).total;
+    let E = totalEnergy(sim.bodies, sim.soft2).total;
     if (sim.j2Enabled && sim.j2Opts) {
         E += totalJ2PotentialEnergy(sim.bodies, sim.j2Opts);
     }
@@ -163,7 +165,7 @@ export function currentEnergy(sim) {
  * config with E₀ ≈ 0 (parabolic) cannot divide by zero or false-trip.
  */
 export function rebaselineEnergy(sim) {
-    const { KE, total } = totalEnergy(sim.bodies);
+    const { KE, total } = totalEnergy(sim.bodies, sim.soft2);
     let E = total;
     if (sim.j2Enabled && sim.j2Opts) {
         E += totalJ2PotentialEnergy(sim.bodies, sim.j2Opts);
@@ -194,7 +196,10 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
 
     const stepsWanted = Math.max(1, Math.ceil(Math.abs(total) / sim.targetStep));
     const sub = total / stepsWanted;
-    const opts = (sim.j2Enabled && sim.j2Opts) ? { J2: sim.j2Opts } : undefined;
+    const useJ2 = sim.j2Enabled && sim.j2Opts;
+    const opts = (useJ2 || sim.soft2)
+        ? { J2: useJ2 ? sim.j2Opts : null, soft2: sim.soft2 }
+        : undefined;
 
     const deadline = now() + budgetMs;
     let stepsDone = 0;
@@ -233,7 +238,7 @@ export function advanceFrame(sim, frame, nowMs, onStep) {
             // Close-encounter regime: adaptive RKF7(8) with PI control.
             // NOT symplectic — energy drift accrued here is expected and is
             // reported honestly against the original E₀ (never re-baselined).
-            const rkOpts = { J2: opts ? opts.J2 : null, ctrl: sim.rkCtrl };
+            const rkOpts = { J2: opts ? opts.J2 : null, soft2: sim.soft2, ctrl: sim.rkCtrl };
             let remaining = total - advancedSec;
             let h = sim.hAdaptive;
             if (!h || (h < 0) !== (remaining < 0)) h = remaining / 8;
@@ -523,14 +528,28 @@ function _restoreNewestCheckpoint(sim) {
  * The initial state is the floor — rewinding never empties the ring.
  * Returns { t } of the restored checkpoint.
  */
+function _stateMatchesSlot(sim, slot) {
+    if (slot.t !== sim.elapsedSec) return false;
+    const buf = slot.buf;
+    for (let i = 0; i < sim.bodies.length; i++) {
+        const b = sim.bodies[i], o = i * 6;
+        if (b.r[0] !== buf[o]     || b.r[1] !== buf[o + 1] || b.r[2] !== buf[o + 2] ||
+            b.v[0] !== buf[o + 3] || b.v[1] !== buf[o + 4] || b.v[2] !== buf[o + 5]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 export function rewind(sim) {
     const ck = sim.ckpt;
     const newest = ck.ring[ck.head];
-    // If the sim has advanced past the newest snapshot, the first press
-    // lands there; only when already sitting on it do we walk older.
-    // (elapsedSec comparison is exact: restore assigns it verbatim and no
-    // stepping happens while paused.)
-    if (sim.elapsedSec !== newest.t) return _restoreSlot(sim, newest);
+    // If the live state differs from the newest snapshot — the sim
+    // advanced past it, OR a sandbox edit changed state at the same
+    // elapsed time — the first press lands on that snapshot (this is what
+    // makes Rewind double as edit-undo). Only when already sitting on it
+    // bit-exactly do we walk older.
+    if (!_stateMatchesSlot(sim, newest)) return _restoreSlot(sim, newest);
     if (ck.count > 1) {
         ck.head = (ck.head - 1 + CKPT_CAPACITY) % CKPT_CAPACITY;
         ck.count--;
@@ -542,6 +561,49 @@ export function rewind(sim) {
 export function clearDebt(sim) {
     sim.debtSec = 0;
     sim._overBudgetSinceMs = null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sandbox editing (P2.1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Apply an edited state to one body (drag, velocity gizmo, element
+ * editor). Records a checkpoint of the PRE-edit state first, so the
+ * Rewind button doubles as undo. Re-baselines the conservation ledger —
+ * an edit is a new experiment, not integrator drift — and wipes trails,
+ * which now depict a trajectory that never happened.
+ *
+ * `pre` = {r, v} as they were BEFORE the edit gesture. It must be passed
+ * explicitly because the caller may have already written preview values
+ * into the live body (the inline driver aliases the main-thread array),
+ * so "current state" is not trustworthy as the undo point.
+ */
+export function setBodyState(sim, idx, r, v, pre = null) {
+    const b = sim.bodies[idx];
+    if (!b) return;
+    if (pre) {
+        const sr = [b.r[0], b.r[1], b.r[2]];
+        const sv = [b.v[0], b.v[1], b.v[2]];
+        b.r[0] = pre.r[0]; b.r[1] = pre.r[1]; b.r[2] = pre.r[2];
+        b.v[0] = pre.v[0]; b.v[1] = pre.v[1]; b.v[2] = pre.v[2];
+        _recordCheckpoint(sim);
+        b.r[0] = sr[0]; b.r[1] = sr[1]; b.r[2] = sr[2];
+        b.v[0] = sv[0]; b.v[1] = sv[1]; b.v[2] = sv[2];
+    } else {
+        _recordCheckpoint(sim);
+    }
+    if (r) { b.r[0] = r[0]; b.r[1] = r[1]; b.r[2] = r[2]; }
+    if (v) { b.v[0] = v[0]; b.v[1] = v[1]; b.v[2] = v[2]; }
+    rebaselineEnergy(sim);
+    clearTrailBuffers(sim);
+    clearDebt(sim);
+}
+
+/** Set the Plummer softening length (m). Sandbox-only; re-baselines. */
+export function setSoftening(sim, epsMeters) {
+    sim.soft2 = epsMeters * epsMeters;
+    rebaselineEnergy(sim);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

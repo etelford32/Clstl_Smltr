@@ -30,6 +30,8 @@ import {
     configureTrails,
     currentEnergy,
     rebaselineEnergy,
+    setBodyState,
+    setSoftening,
 } from './sim-core.js';
 import { totalAngularMomentum } from './physics.js';
 import { packSnapshot, snapshotBytes } from './snapshot-codec.js';
@@ -57,10 +59,12 @@ function _snapshot(meta, res) {
 }
 
 function _load(m) {
-    const src = SYSTEMS[m.systemId];
-    if (!src) return;
+    // Raw bodies (sandbox / baked epochs / share URLs — P2) take priority;
+    // otherwise rebuild from the curated systems table.
+    const srcBodies = m.rawBodies ?? SYSTEMS[m.systemId]?.bodies;
+    if (!srcBodies) return;
     gen = m.gen ?? gen + 1;
-    const bodies = src.bodies.map(b => ({
+    const bodies = srcBodies.map(b => ({
         name: b.name,
         m:    b.m,
         r:    [b.r[0], b.r[1], b.r[2]],
@@ -71,6 +75,7 @@ function _load(m) {
         targetStep: m.targetStep,
         j2Opts:     m.j2Opts ?? null,
         j2Enabled:  !!m.j2Enabled,
+        softening:  m.softening ?? 0,
     });
     configureTrails(sim, m.trailSpecs, m.trailCap);
     const nTrails = m.trailSpecs.filter(Boolean).length;
@@ -116,6 +121,18 @@ onmessage = ev => {
             if (sim) {
                 rewind(sim);   // restore also wipes the sim-side trail rings
                 _snapshot({ rewound: true });
+            }
+            break;
+        case 'setBody':
+            if (sim) {
+                setBodyState(sim, m.idx, m.r, m.v, m.pre);
+                _snapshot({ edited: true });
+            }
+            break;
+        case 'setSoftening':
+            if (sim) {
+                setSoftening(sim, m.eps);
+                _snapshot({});
             }
             break;
         case 'recycle':

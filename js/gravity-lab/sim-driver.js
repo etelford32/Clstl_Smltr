@@ -30,6 +30,8 @@ import {
     configureTrails,
     currentEnergy,
     rebaselineEnergy,
+    setBodyState,
+    setSoftening,
     PHYSICS_BUDGET_MS_DESKTOP,
     PHYSICS_BUDGET_MS_MOBILE,
 } from './sim-core.js';
@@ -52,8 +54,8 @@ class InlineDriver {
         this.sim = null;
     }
 
-    load({ bodies, targetStep, j2Opts, j2Enabled, trailSpecs, trailCap }) {
-        this.sim = createSim({ bodies, targetStep, j2Opts, j2Enabled });
+    load({ bodies, targetStep, j2Opts, j2Enabled, trailSpecs, trailCap, softening = 0 }) {
+        this.sim = createSim({ bodies, targetStep, j2Opts, j2Enabled, softening });
         configureTrails(this.sim, trailSpecs, trailCap);
         this._emit({ loaded: true }, null);
     }
@@ -85,6 +87,18 @@ class InlineDriver {
         if (!this.sim) return;
         rewind(this.sim);   // restore also wipes the sim-side trail rings
         this._emit({ rewound: true }, null);
+    }
+
+    setBody(idx, r, v, pre = null) {
+        if (!this.sim) return;
+        setBodyState(this.sim, idx, r, v, pre);
+        this._emit({ edited: true }, null);
+    }
+
+    setSoftening(eps) {
+        if (!this.sim) return;
+        setSoftening(this.sim, eps);
+        this._emit({}, null);
     }
 
     _emit(meta, res) {
@@ -136,15 +150,17 @@ class WorkerDriver {
         // count, different baselines). The worker echoes gen back and
         // _onMsg drops anything stale.
         this._gen++;
-        // The worker rebuilds body state from systems.js itself — only the
-        // config scalars cross the boundary.
+        // Curated loads ship only the systemId (the worker rebuilds from
+        // systems.js); sandbox / epoch / share loads ship raw body state.
         this.worker.postMessage({
             type: 'load',
             gen:        this._gen,
             systemId:   cfg.systemId,
+            rawBodies:  cfg.rawBodies ?? null,
             targetStep: cfg.targetStep,
             j2Opts:     cfg.j2Opts,
             j2Enabled:  cfg.j2Enabled,
+            softening:  cfg.softening ?? 0,
             trailSpecs: cfg.trailSpecs,
             trailCap:   cfg.trailCap,
         });
@@ -167,6 +183,8 @@ class WorkerDriver {
     clearDebt()   { this.worker.postMessage({ type: 'clearDebt' }); }
     clearTrails() { this.worker.postMessage({ type: 'clearTrails' }); }
     rewind()      { this.worker.postMessage({ type: 'rewind' }); }
+    setBody(idx, r, v, pre = null) { this.worker.postMessage({ type: 'setBody', idx, r, v, pre }); }
+    setSoftening(eps)  { this.worker.postMessage({ type: 'setSoftening', eps }); }
 
     _onMsg(ev) {
         const { type, buffer, meta } = ev.data;

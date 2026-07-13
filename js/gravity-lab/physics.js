@@ -70,13 +70,18 @@ function _accelerations(bodies, opts) {
     const acc = new Array(N);
     for (let i = 0; i < N; i++) acc[i] = [0, 0, 0];
 
+    // Plummer softening (sandbox-only, P2.1): r² → r² + ε². The softened
+    // force is the exact gradient of the softened potential used in
+    // totalEnergy, so the conservation ledger stays a true Hamiltonian.
+    const soft2 = (opts && opts.soft2) || 0;
+
     // Pairwise Newtonian gravity. Newton's third law => one pass over (i<j).
     for (let i = 0; i < N; i++) {
         for (let j = i + 1; j < N; j++) {
             const dx = bodies[j].r[0] - bodies[i].r[0];
             const dy = bodies[j].r[1] - bodies[i].r[1];
             const dz = bodies[j].r[2] - bodies[i].r[2];
-            const r2 = dx*dx + dy*dy + dz*dz;
+            const r2 = dx*dx + dy*dy + dz*dz + soft2;
             const r  = Math.sqrt(r2);
             const inv_r3 = 1 / (r2 * r);
             const Gi = G_SI * inv_r3;
@@ -180,10 +185,11 @@ function _rkScratch(N) {
     return _rk;
 }
 
-/** Pairwise gravity (+ optional J2) from a packed [r,v]×N state vector. */
+/** Pairwise gravity (+ optional J2/softening) from a packed [r,v]×N state. */
 function _accelFromY(y, bodies, opts, acc) {
     const N = bodies.length;
     acc.fill(0);
+    const soft2 = (opts && opts.soft2) || 0;
     for (let i = 0; i < N; i++) {
         const i6 = i * 6, i3 = i * 3;
         for (let j = i + 1; j < N; j++) {
@@ -191,7 +197,7 @@ function _accelFromY(y, bodies, opts, acc) {
             const dx = y[j6]     - y[i6];
             const dy = y[j6 + 1] - y[i6 + 1];
             const dz = y[j6 + 2] - y[i6 + 2];
-            const r2 = dx*dx + dy*dy + dz*dz;
+            const r2 = dx*dx + dy*dy + dz*dz + soft2;
             const inv_r3 = 1 / (r2 * Math.sqrt(r2));
             const Gi = G_SI * inv_r3;
             const aij = Gi * bodies[j].m;
@@ -394,8 +400,13 @@ export function totalJ2PotentialEnergy(bodies, j2Opts) {
     return PE;
 }
 
-/** Total kinetic + potential energy (J). For long-run integrator diagnostics. */
-export function totalEnergy(bodies) {
+/**
+ * Total kinetic + potential energy (J). For long-run integrator
+ * diagnostics. `soft2` = ε² of the Plummer softening (sandbox-only) —
+ * the potential −Gmm/√(r²+ε²) is what the softened force is the gradient
+ * of, so pass the SAME ε² used in stepping or the ledger lies.
+ */
+export function totalEnergy(bodies, soft2 = 0) {
     let KE = 0;
     for (const b of bodies) {
         const v2 = b.v[0]*b.v[0] + b.v[1]*b.v[1] + b.v[2]*b.v[2];
@@ -408,7 +419,7 @@ export function totalEnergy(bodies) {
             const dx = bodies[j].r[0] - bodies[i].r[0];
             const dy = bodies[j].r[1] - bodies[i].r[1];
             const dz = bodies[j].r[2] - bodies[i].r[2];
-            const r  = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            const r  = Math.sqrt(dx*dx + dy*dy + dz*dz + soft2);
             PE -= G_SI * bodies[i].m * bodies[j].m / r;
         }
     }

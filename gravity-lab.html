@@ -261,6 +261,33 @@ body {
     font-size:.64rem; color:#778; line-height:1.5; margin-top:6px; font-style:italic;
 }
 
+/* ─── Sandbox panel (P2.1) ──────────────────────────────────── */
+.gl-tab-sandbox {
+    border-style:dashed;
+    border-color:rgba(111,228,139,.35);
+}
+.gl-tab-sandbox:hover, .gl-tab-sandbox.on { border-color:#6fe48b; }
+.gl-tab-sandbox.on {
+    background:linear-gradient(120deg, rgba(111,228,139,.14), rgba(255,255,255,.03));
+}
+.gl-field-row {
+    display:flex; align-items:center; gap:8px;
+    font-family:monospace; font-size:.72rem; color:#998;
+}
+.gl-field-row label { min-width:42px; text-align:right; color:#7a78a4; }
+.gl-input {
+    flex:1; min-width:0;
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.12);
+    border-radius:6px;
+    color:#fff; font-family:monospace; font-size:.74rem;
+    padding:6px 8px;
+    outline:none;
+}
+.gl-input:focus { border-color:#6fe48b; }
+.gl-input-color { flex:0 0 52px; height:30px; padding:2px; cursor:pointer; }
+#gl-sandbox-wrap .gl-controls { gap:7px; }
+
 /* ─── Showcase block ────────────────────────────────────────── */
 .gl-showcase {
     background:linear-gradient(150deg, rgba(180,140,255,.10), rgba(10,6,28,.5) 70%);
@@ -539,6 +566,46 @@ canvas.gl-resonance-canvas {
                 <div class="gl-tab-name">Algol — Hierarchical Triple</div>
                 <div class="gl-tab-sub">stellar triple · orbits mutually inclined 86°</div>
             </button>
+            <button type="button" class="gl-tab gl-tab-sandbox" data-system="sandbox">
+                <div class="gl-tab-name">⚗ Sandbox</div>
+                <div class="gl-tab-sub">fork the current system · add bodies · drag orbits &amp; velocities</div>
+            </button>
+        </div>
+
+        <div id="gl-sandbox-wrap" style="display:none;">
+            <div class="gl-label">Sandbox</div>
+            <div class="gl-controls">
+                <div class="gl-btn-row">
+                    <button type="button" class="gl-btn gl-btn-primary" id="gl-sb-add">+ Add body</button>
+                    <button type="button" class="gl-btn" id="gl-sb-del">✕ Delete selected</button>
+                </div>
+                <p class="gl-camera-hint">Pause, then drag a body to move it or drag its velocity arrow tip to redirect it — scroll while dragging adjusts out-of-plane. ⏪ Rewind undoes edits.</p>
+                <label class="gl-j2-row">
+                    <input type="checkbox" id="gl-sb-soft" />
+                    <span class="gl-j2-name">Plummer softening — non-physical</span>
+                </label>
+                <div class="gl-field-row" id="gl-sb-soft-row" style="display:none;">
+                    <label>ε</label><input type="number" class="gl-input" id="gl-sb-soft-km" value="1000" min="0" step="100"><span>km</span>
+                </div>
+                <div id="gl-sb-editor" style="display:none;">
+                    <div class="gl-label">Selected body</div>
+                    <div class="gl-field-row"><label>name</label><input type="text" class="gl-input" id="gl-sb-name"></div>
+                    <div class="gl-field-row"><label>mass</label><input type="text" class="gl-input" id="gl-sb-mass"><span>kg</span></div>
+                    <div class="gl-field-row"><label>radius</label><input type="number" class="gl-input" id="gl-sb-radius" min="0.1"><span>km</span></div>
+                    <div class="gl-field-row"><label>color</label><input type="color" class="gl-input gl-input-color" id="gl-sb-color"></div>
+                    <button type="button" class="gl-btn" id="gl-sb-props-apply">Apply properties (rebuilds system)</button>
+                    <div id="gl-sb-el-wrap">
+                        <div class="gl-label">Orbit vs rest of system (osculating)</div>
+                        <div class="gl-field-row"><label>a</label><input type="number" class="gl-input" id="gl-sb-a"><span>km</span></div>
+                        <div class="gl-field-row"><label>e</label><input type="number" class="gl-input" id="gl-sb-e" min="0" max="0.99" step="0.01"></div>
+                        <div class="gl-field-row"><label>i</label><input type="number" class="gl-input" id="gl-sb-i" step="0.1"><span>°</span></div>
+                        <div class="gl-field-row"><label>Ω</label><input type="number" class="gl-input" id="gl-sb-raan" step="1"><span>°</span></div>
+                        <div class="gl-field-row"><label>ω</label><input type="number" class="gl-input" id="gl-sb-argp" step="1"><span>°</span></div>
+                        <div class="gl-field-row"><label>M</label><input type="number" class="gl-input" id="gl-sb-M" step="1"><span>°</span></div>
+                        <button type="button" class="gl-btn" id="gl-sb-el-apply">Apply orbit</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="gl-label">Showcase</div>
@@ -722,6 +789,32 @@ const ui = {
     presetBtns:   Array.from(document.querySelectorAll('.gl-preset')),
     hint:         document.getElementById('gl-hint'),
     hintBtn:      document.getElementById('gl-hint-btn'),
+
+    // Sandbox (P2.1)
+    sandboxWrap:  document.getElementById('gl-sandbox-wrap'),
+    sbAdd:        document.getElementById('gl-sb-add'),
+    sbDel:        document.getElementById('gl-sb-del'),
+    sbSoftToggle: document.getElementById('gl-sb-soft'),
+    sbSoftKm:     document.getElementById('gl-sb-soft-km'),
+    sbSoftRow:    document.getElementById('gl-sb-soft-row'),
+    sbEditor:     document.getElementById('gl-sb-editor'),
+    sbProps: {
+        name:   document.getElementById('gl-sb-name'),
+        mass:   document.getElementById('gl-sb-mass'),
+        radius: document.getElementById('gl-sb-radius'),
+        color:  document.getElementById('gl-sb-color'),
+    },
+    sbPropsApply: document.getElementById('gl-sb-props-apply'),
+    sbElWrap:     document.getElementById('gl-sb-el-wrap'),
+    sbEl: {
+        a:    document.getElementById('gl-sb-a'),
+        e:    document.getElementById('gl-sb-e'),
+        i:    document.getElementById('gl-sb-i'),
+        raan: document.getElementById('gl-sb-raan'),
+        argp: document.getElementById('gl-sb-argp'),
+        M:    document.getElementById('gl-sb-M'),
+    },
+    sbElApply:    document.getElementById('gl-sb-el-apply'),
 };
 
 boot({ canvas, ui, defaultSystem: 'jupiter-galileans' });
