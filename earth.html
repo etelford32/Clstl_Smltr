@@ -8328,6 +8328,17 @@ _paintForecastSkill(wxForecastValidator.summary());
 // that have to BEAT "tomorrow looks like today" on a published scoreboard,
 // not an opaque "AI-powered" claim. Friendly labels for the known model ids;
 // anything unregistered falls back to a de-suffixed id.
+// Matched-target threshold for a bucket to count. Referenced by both the
+// rankBySkill() call and the warming-row tooltip below — this used to be a
+// bare `MIN_N` in the tooltip template with no declaration anywhere, and
+// because the initial paint at the bottom of this section runs at module
+// top level, the ReferenceError aborted evaluation of this entire module
+// for any visitor whose on-disk summary had a warming model (fresh
+// profiles early-return before the template, which is why boot probes
+// passed). Everything below the call — _currentKp, the animate loop, the
+// verdict card — never initialized: black globe, dead HUD, and a TDZ error
+// ("can't access lexical declaration '_currentKp'") on every SWPC tick.
+const LB_MIN_N = 5;
 const LB_LABELS = {
     'wind-advection-rk2-v1':          'RK2 advect',
     'wind-advection-v1':              'wind advect',
@@ -8347,7 +8358,7 @@ function _paintForecastLeaderboard(summary) {
     }
     // Ranking is the pure, unit-tested rankBySkill() from the validator module;
     // here we only attach friendly labels and render.
-    const rows = rankBySkill(summary, { minN: 5 }).map(r => ({
+    const rows = rankBySkill(summary, { minN: LB_MIN_N }).map(r => ({
         ...r, label: LB_LABELS[r.model] || r.model.replace(/-v\d+$/, ''),
     }));
     if (rows.length === 0) { root.textContent = 'no models registered'; return; }
@@ -8355,7 +8366,7 @@ function _paintForecastLeaderboard(summary) {
     let leadAssigned = false, html = '';
     for (const r of rows) {
         if (r.skill === null) {
-            html += `<div class="wx-lb-row warming" title="needs ≥${MIN_N} matched targets on both sides">`
+            html += `<div class="wx-lb-row warming" title="needs ≥${LB_MIN_N} matched targets on both sides">`
                   + `<span class="wx-lb-name">${r.label}</span><span class="wx-lb-bar"></span>`
                   + `<span class="wx-lb-pct">…</span></div>`;
             continue;
