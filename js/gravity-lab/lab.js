@@ -10,13 +10,19 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 import {
-    yoshida4Step,
     totalEnergy,
     totalJ2PotentialEnergy,
     totalAngularMomentum,
     stateToElements,
     G_SI,
 } from './physics.js';
+import {
+    createSim,
+    advanceFrame,
+    clearDebt,
+    PHYSICS_BUDGET_MS_DESKTOP,
+    PHYSICS_BUDGET_MS_MOBILE,
+} from './sim-core.js';
 import { SYSTEMS, SYSTEM_ORDER, J2000_JD } from './systems.js';
 import {
     createBodyVisual,
@@ -35,9 +41,17 @@ const TRAIL_LEN = 600;            // points per orbit trail
 const TRAIL_GAP_FRAMES = 1;       // record every N frames
 const MIN_BODY_RADIUS_UNITS = 0.05;
 
+// Wall-clock physics budget per frame (P0.1). Coarse-pointer devices get a
+// smaller slice so the render loop keeps 60 fps headroom on mobile GPUs.
+const PHYSICS_BUDGET_MS =
+    (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches)
+        ? PHYSICS_BUDGET_MS_MOBILE
+        : PHYSICS_BUDGET_MS_DESKTOP;
+
 const state = {
     systemId:       null,
     sys:            null,    // active system descriptor (clone of SYSTEMS[id])
+    sim:            null,    // sim-core state (stepping / budget / throttle)
     bodies:         [],      // mutable {m, r, v, …} array passed to integrator
     meshes:         [],      // pickable surface meshes paired by index
     bodyGroups:     [],      // Three.Group per body — what we translate each frame
@@ -53,7 +67,6 @@ const state = {
     energy0:        null,
     L0_mag:         1,
     framesSinceTrail: 0,
-    accumDt:        0,
     // Camera focus state — null = free orbit; integer = index into bodies[].
     focusIdx:       null,
     focusOffset:    new THREE.Vector3(),  // camera position relative to focus target
@@ -96,6 +109,7 @@ const hud = {
     revBtn:    null,
     resetBtn:  null,
     warpSlider: null,
+    throttleChip: null,   // amber "THROTTLED" chip near the warp readout
     tabs:       null,
     // Camera UI
     bodyChips:  null,    // container for body focus chips
@@ -291,6 +305,12 @@ export function loadSystem(systemId) {
         state.j2Opts    = null;
         state.j2Enabled = false;
     }
+    state.sim = createSim({
+        bodies:     state.bodies,
+        targetStep: state.targetStep,
+        j2Opts:     state.j2Opts,
+        j2Enabled:  state.j2Enabled,
+    });
     state.energy0 = _currentTotalEnergy();
     const L0 = totalAngularMomentum(state.bodies);
     state.L0_mag = Math.hypot(L0[0], L0[1], L0[2]) || 1;
@@ -615,19 +635,25 @@ function _tick(t) {
     _lastT = t;
 
     const dt_real = dt_real_ms / 1000;
-    if (!state.paused && dt_real > 0) {
-        const dt_sim = dt_real * state.warp * state.direction;
-        const target = state.targetStep;
-        const nSub = Math.max(1, Math.ceil(Math.abs(dt_sim) / target));
-        const sub  = dt_sim / nSub;
-        const opts = (state.j2Enabled && state.j2Opts) ? { J2: state.j2Opts } : undefined;
-        for (let k = 0; k < nSub; k++) {
-            yoshida4Step(state.bodies, sub, opts);
+    if (!state.paused && dt_real > 0 && state.sim) {
+        // Budget-bounded stepping (P0.1). The core divides the requested
+        // sim time into fixed substeps but stops at the wall-clock budget;
+        // the shortfall carries as debt and, if sustained, becomes a warp
+        // cap surfaced in the amber throttle chip. The tab never freezes
+        // and sim time is never silently skipped.
+        const res = advanceFrame(state.sim, {
+            dtRealSec: dt_real,
+            warp:      state.warp,
+            direction: state.direction,
+            budgetMs:  PHYSICS_BUDGET_MS,
+        });
+        state.elapsedSec = state.sim.elapsedSec;
+        if (res.stepsDone > 0) {
+            _updateMeshes();
+            _appendTrails();
         }
-        state.elapsedSec += dt_sim;
-        _updateMeshes();
-        _appendTrails();
         _renderHUDLive();
+        _renderThrottleChip();
     }
 
     // Drive skin shader uniforms each frame (animations / time-driven
@@ -774,6 +800,22 @@ function _renderHUDLive() {
     }
 }
 
+let _lastThrottleText = null;
+function _renderThrottleChip() {
+    if (!hud.throttleChip || !state.sim) return;
+    if (state.sim.throttled) {
+        const text = `THROTTLED — max sustainable warp ≈ ${_humaniseWarp(state.sim.warpCap)}`;
+        if (text !== _lastThrottleText) {
+            hud.throttleChip.textContent = text;
+            hud.throttleChip.hidden = false;
+            _lastThrottleText = text;
+        }
+    } else if (_lastThrottleText !== null) {
+        hud.throttleChip.hidden = true;
+        _lastThrottleText = null;
+    }
+}
+
 function _drawResonanceTrace(phi) {
     const ctx = hud.resonanceCtx;
     const cv  = hud.resonanceCanvas;
@@ -839,6 +881,9 @@ export function attachUI(refs) {
     if (hud.revBtn) {
         hud.revBtn.addEventListener('click', () => {
             state.direction *= -1;
+            // Outstanding debt has the old sign — flush it so the reversal
+            // takes effect immediately instead of paying down old time.
+            if (state.sim) clearDebt(state.sim);
             hud.revBtn.textContent = state.direction > 0 ? '↻ Reverse Time' : '↺ Forward Time';
         });
     }
@@ -872,6 +917,7 @@ export function attachUI(refs) {
     if (hud.j2Toggle) {
         hud.j2Toggle.addEventListener('change', () => {
             state.j2Enabled = !!hud.j2Toggle.checked;
+            if (state.sim) state.sim.j2Enabled = state.j2Enabled;
             // Re-baseline conserved quantities so the drift readout reflects
             // post-toggle behaviour rather than the discontinuity.
             state.energy0 = _currentTotalEnergy();

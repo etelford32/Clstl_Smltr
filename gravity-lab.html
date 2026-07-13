@@ -163,6 +163,17 @@ body {
     font-weight:700;
 }
 .gl-warp-mini { font-size:.62rem; color:#778; margin-top:4px; font-family:monospace; }
+.gl-throttle {
+    margin-top:8px;
+    font-family:monospace; font-size:.66rem; font-weight:700;
+    color:#ffb830;
+    background:rgba(255,184,48,.10);
+    border:1px solid rgba(255,184,48,.35);
+    border-radius:6px;
+    padding:6px 9px;
+    line-height:1.4;
+}
+.gl-throttle[hidden] { display:none; }
 
 /* ─── Camera focus block ─────────────────────────────────────── */
 .gl-camera { display:grid; gap:8px; }
@@ -451,6 +462,7 @@ canvas.gl-resonance-canvas {
             <div class="gl-warp-readout" id="gl-warp-val">—</div>
             <input type="range" id="gl-warp" min="0" max="1000" step="1" value="700">
             <div class="gl-warp-mini">slider · log scale · 1× ↔ 1×10⁸×</div>
+            <div class="gl-throttle" id="gl-throttle" hidden></div>
         </div>
 
         <div class="gl-label">Controls</div>
@@ -529,7 +541,7 @@ canvas.gl-resonance-canvas {
 </div>
 
 <script type="module">
-import { boot } from './js/gravity-lab/lab.js?v=20260504a';
+import { boot } from './js/gravity-lab/lab.js?v=20260713a';
 
 const canvas = document.getElementById('gl-canvas');
 const ui = {
@@ -555,6 +567,7 @@ const ui = {
     revBtn:     document.getElementById('gl-rev'),
     resetBtn:   document.getElementById('gl-reset'),
     warpSlider: document.getElementById('gl-warp'),
+    throttleChip: document.getElementById('gl-throttle'),
     tabs:       Array.from(document.querySelectorAll('#gl-tabs .gl-tab')),
 
     // Camera UI

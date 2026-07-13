@@ -27,6 +27,7 @@ import {
     G_SI,
 } from '../physics.js';
 import { SYSTEMS, SYSTEM_ORDER } from '../systems.js';
+import { createSim, advanceFrame, clearDebt } from '../sim-core.js';
 
 const FAST = process.argv.includes('--fast');
 
@@ -360,6 +361,88 @@ test('barycenter stays pinned through 1e4 steps (all systems)', () => {
         const drift = Math.hypot(...com) / M / extent;
         assertBelow(drift, 1e-10, `${id} COM drift (fraction of extent)`);
     }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. sim-core frame budget (P0.1) — the substep loop is bounded by the
+//    wall-clock budget, the shortfall carries as debt (sim time is never
+//    skipped), sustained over-budget engages the warp throttle, and the
+//    cap recovers once frames fit the budget again.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('sim-core · budget bounds the substep loop; debt carries exactly', () => {
+    const bodies = systemBodies('saturn-major');
+    const sim = createSim({ bodies, targetStep: 1200 });
+
+    // Deterministic fake clock: each substep "costs" 0.5 ms via the onStep
+    // hook, so a 6 ms budget admits ~16-32 steps per frame (the core reads
+    // the clock every 16 steps).
+    let fakeMs = 0;
+    const now = () => fakeMs;
+    const onStep = () => { fakeMs += 0.5; };
+
+    const frame = { dtRealSec: 1 / 60, warp: 1e8, direction: +1, budgetMs: 6 };
+    const requested = frame.dtRealSec * frame.warp;   // 1.67e6 sim-s
+    const res = advanceFrame(sim, frame, now, onStep);
+
+    assert(res.stepsDone < res.stepsWanted,
+        `budget should truncate the loop (did ${res.stepsDone}/${res.stepsWanted})`);
+    assert(res.stepsDone <= 32, `stepsDone ${res.stepsDone} should be bounded by the budget`);
+    // Conservation of requested time: advanced + debt === requested.
+    const total = res.advancedSec + sim.debtSec;
+    assertBelow(Math.abs(total - requested) / requested, 1e-12, 'advanced+debt vs requested');
+    assert(sim.elapsedSec === res.advancedSec, 'elapsedSec must equal integrated time only');
+});
+
+test('sim-core · sustained over-budget engages throttle, cap recovers', () => {
+    const bodies = systemBodies('earth-moon');
+    const sim = createSim({ bodies, targetStep: 600 });
+
+    let fakeMs = 0;
+    const now = () => fakeMs;
+    const onStep = () => { fakeMs += 0.5; };
+
+    // Phase 1: hammer with an unsustainable warp. Each frame advances the
+    // fake clock ~16 ms of frame time + step costs; after >2 s of fake
+    // wall time the throttle must engage.
+    const hot = { dtRealSec: 1 / 60, warp: 1e8, direction: +1, budgetMs: 6 };
+    let throttledAt = -1;
+    for (let f = 0; f < 400; f++) {
+        fakeMs += 16.7;
+        const res = advanceFrame(sim, hot, now, onStep);
+        if (res.throttled) { throttledAt = f; break; }
+    }
+    assert(throttledAt >= 0, 'throttle never engaged under sustained overload');
+    assert(isFinite(sim.warpCap) && sim.warpCap >= 1, `warpCap should be finite, got ${sim.warpCap}`);
+    assert(sim.debtSec === 0, 'debt should be forgiven when the cap engages');
+    const capWhenHot = sim.warpCap;
+
+    // Phase 2: drop the requested warp below the cap — frames now fit the
+    // budget, the cap probes upward and eventually disengages.
+    const cool = { dtRealSec: 1 / 60, warp: 100, direction: +1, budgetMs: 6 };
+    let recovered = false;
+    for (let f = 0; f < 2000; f++) {
+        fakeMs += 16.7;
+        const res = advanceFrame(sim, cool, now, onStep);
+        if (!res.throttled) { recovered = true; break; }
+    }
+    assert(recovered, `throttle never recovered (cap stuck at ${sim.warpCap}, was ${capWhenHot})`);
+    assert(sim.warpCap === Infinity, 'cap should clear to Infinity after recovery');
+});
+
+test('sim-core · unpressured frame advances exactly the requested time', () => {
+    const bodies = systemBodies('pluto-charon');
+    const sim = createSim({ bodies, targetStep: 1800 });
+    const frame = { dtRealSec: 1 / 60, warp: 86400 * 1.5, direction: +1, budgetMs: 1e9 };
+    const requested = frame.dtRealSec * frame.warp;
+    const res = advanceFrame(sim, frame, () => 0);
+    assert(res.stepsDone === res.stepsWanted, 'all substeps should complete');
+    assertBelow(Math.abs(res.advancedSec - requested) / requested, 1e-12, 'advanced vs requested');
+    assert(sim.debtSec === 0, 'no debt without budget pressure');
+    // Reversal bookkeeping: clearDebt zeroes the carry.
+    sim.debtSec = 123;
+    clearDebt(sim);
+    assert(sim.debtSec === 0, 'clearDebt must zero the carry');
 });
 
 await runAll();
