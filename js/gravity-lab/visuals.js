@@ -98,9 +98,12 @@ export function createBodyVisual(body, parent, opts) {
             // Unskinned body — pick a procedural surface based on `surface` hint.
             surfaceMesh = _makeProcedural(body, radiusUnits, segmentsLow);
             group.add(surfaceMesh);
-            // Faint glow for parents.
-            if (body.is_parent && body.glow !== undefined) {
-                _addRimGlow(group, radiusUnits * 1.15, body.glow, 0.10);
+            // Faint glow for any body that declares one (parents, and the
+            // stars of the Algol system — satellites without a glow field
+            // are unaffected).
+            if (body.glow !== undefined) {
+                _addRimGlow(group, radiusUnits * 1.15, body.glow,
+                    body.surface === 'star' ? 0.22 : 0.10);
             }
         }
     }
@@ -782,6 +785,8 @@ function _makeProcedural(body, radiusUnits, segments) {
         'rocky-warm':  { roughness: 0.80, metalness: 0.0,  emissive: 0x110000, emissiveIntensity: 0.05 },
         'asteroid':    { roughness: 1.00, metalness: 0.05, emissive: 0x000000, emissiveIntensity: 0.0  },
         'gas-giant':   { roughness: 0.55, metalness: 0.0,  emissive: base,    emissiveIntensity: 0.18 },
+        // Self-luminous — stars don't take scene lighting.
+        'star':        { roughness: 1.0,  metalness: 0.0,  emissive: base,    emissiveIntensity: 1.0  },
     }[surface] ?? { roughness: 0.85, metalness: 0.0, emissive: 0x000000, emissiveIntensity: 0.0 };
 
     const mat = new THREE.MeshStandardMaterial({ color: base, ...params });

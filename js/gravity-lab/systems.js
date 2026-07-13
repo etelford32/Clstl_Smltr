@@ -30,6 +30,11 @@ import { elementsToState, shiftToBarycenter, G_SI } from './physics.js';
 const MU = {
     earth:      3.986004418e14,
     moon:       4.9028000e12,
+    neptune:    6.835100e15,   // Jacobson (2009), Neptune alone (no moons)
+    triton:     1.427598e12,   // Jacobson (2009)
+    proteus:    2.94e9,        // ~4.4e19 kg × G — density estimate (no direct GM)
+    nix:        3.0e6,         // Brozović et al. (2015): GM = 0.0030 km³/s²
+    hydra:      3.2e6,         // Brozović et al. (2015): GM = 0.0032 km³/s²
     mars:       4.282837e13,
     phobos:     7.087e5,
     deimos:     9.615e4,
@@ -60,7 +65,11 @@ const OBLATENESS = {
     earth:   { J2: 1.0826e-3,  R_eq_m: 6_378_137 },
     jupiter: { J2: 1.4736e-2,  R_eq_m: 71_492_000 },
     saturn:  { J2: 1.6298e-2,  R_eq_m: 60_268_000 },
+    neptune: { J2: 3.411e-3,   R_eq_m: 24_764_000 },    // Jacobson (2009)
 };
+
+// Solar mass (kg) for the stellar system below.
+const M_SUN = 1.98892e30;
 
 // Masses (kg) derived from MU, used by the integrator.
 const M = Object.fromEntries(
@@ -87,8 +96,33 @@ function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, sugges
     }];
     const mu_p = G_SI * parent.m;
     for (const s of satellites) {
-        const mu = mu_p + G_SI * s.m;
-        const { r, v } = elementsToState({ ...s.elements, mu });
+        let r, v;
+        if (s.circumbinary) {
+            // Circumbinary satellite (P1.4): orbits the barycenter of every
+            // body placed so far, with mu from the TOTAL enclosed mass —
+            // Nix/Hydra around Pluto+Charon, Algol Ab around Aa1+Aa2.
+            // Order matters: list circumbinary satellites after the inner
+            // bodies they enclose.
+            let M = 0;
+            const rB = [0, 0, 0], vB = [0, 0, 0];
+            for (const b of bodies) {
+                M += b.m;
+                for (let k = 0; k < 3; k++) {
+                    rB[k] += b.m * b.r[k];
+                    vB[k] += b.m * b.v[k];
+                }
+            }
+            for (let k = 0; k < 3; k++) { rB[k] /= M; vB[k] /= M; }
+            const mu = G_SI * (M + s.m);
+            const st = elementsToState({ ...s.elements, mu });
+            r = [st.r[0] + rB[0], st.r[1] + rB[1], st.r[2] + rB[2]];
+            v = [st.v[0] + vB[0], st.v[1] + vB[1], st.v[2] + vB[2]];
+        } else {
+            const mu = mu_p + G_SI * s.m;
+            const st = elementsToState({ ...s.elements, mu });
+            r = st.r;
+            v = st.v;
+        }
         bodies.push({
             name: s.name,
             m: s.m,
@@ -96,7 +130,9 @@ function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, sugges
             v: [v[0], v[1], v[2]],
             radius_km: s.radius_km,
             color: s.color,
+            glow: s.glow,
             elements_j2000: s.elements,
+            circumbinary: !!s.circumbinary,   // HUD computes elements vs the enclosed barycenter
             highlight: s.highlight || null,
             skin: s.skin || null,
             surface: s.surface || null,
@@ -584,11 +620,188 @@ const PLUTO_CHARON = _build({
                 M_deg:    0.0,
             },
         },
+        // Nix and Hydra are CIRCUMBINARY (P1.4): they orbit the
+        // Pluto-Charon barycenter, not Pluto. Semi-major axes, e, i and
+        // periods from Brozović et al. (2015) / Showalter & Hamilton
+        // (2015); orientation angles are nominal (near-coplanar with
+        // Charon, so raan/argp barely matter dynamically) with phases
+        // spread for readability. The binary's quadrupole makes their
+        // osculating elements wobble — that's the physics, not noise.
+        {
+            name: 'nix',
+            m: M.nix,
+            radius_km: 19.5,
+            color: 0xc8bfae,
+            surface: 'asteroid',
+            circumbinary: true,
+            highlight: 'circumbinary · chaotic tumbler',
+            elements: {
+                a:        48_694_000,
+                e:        0.0020,
+                i_deg:    0.13,
+                raan_deg: 223.0,
+                argp_deg: 0.0,
+                M_deg:    95.0,
+            },
+        },
+        {
+            name: 'hydra',
+            m: M.hydra,
+            radius_km: 18.0,
+            color: 0xb8c4c8,
+            surface: 'asteroid',
+            circumbinary: true,
+            highlight: 'circumbinary · outermost known moon',
+            elements: {
+                a:        64_738_000,
+                e:        0.00554,
+                i_deg:    0.24,
+                raan_deg: 223.0,
+                argp_deg: 0.0,
+                M_deg:    210.0,
+            },
+        },
     ],
     scale_km_per_unit: 1188.3,           // 1 scene unit = Pluto radius
     suggested_dt_s:    1800,             // 30-minute step
-    suggested_warp:    86400 * 1.5,      // 1.5 d / s — orbit completes in ~4 s
+    suggested_warp:    86400 * 1.5,      // 1.5 d / s — Charon's orbit in ~4 s
     show_barycenter:   true,
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Neptune + Triton (retrograde) + Proteus — counter-rotation in one frame
+// ─────────────────────────────────────────────────────────────────────────────
+// Triton orbits BACKWARD: i ≈ 157° to Neptune's equator — the only large
+// moon in the solar system on a retrograde orbit (a captured KBO). Proteus,
+// the largest inner regular moon, orbits prograde just inside it. Elements
+// referenced to Neptune's equatorial plane. Sources: Jacobson (2009)
+// NEP081/NEP086 ephemerides; GM values listed at the MU table.
+//
+// Toggle Neptune's J₂ (3.411e-3) and watch the asymmetry: Proteus's node
+// regresses at ~26°/yr, while Triton's node PROGRESSES (~0.5°/yr) because
+// cos i < 0 flips the sign of the J₂ secular rate for retrograde orbits.
+
+const NEPTUNE_TRITON = _build({
+    id:    'neptune-triton',
+    name:  'Neptune + Triton (retrograde)',
+    blurb: 'Triton orbits backward — 157° inclination — while Proteus circles prograde beneath it. Two moons, opposite directions, one frame.',
+    marketing: {
+        headline: 'The backward moon',
+        callout:  'Triton is the only large moon in the solar system on a retrograde orbit — a captured Kuiper Belt object. Watch it sweep one way while Proteus sweeps the other. With J₂ on, Proteus\'s node regresses at ~26°/yr while Triton\'s slowly advances: cos i < 0 flips the sign.',
+        physics:  'Pure Newtonian N-body; the counter-rotation is all initial conditions. Triton\'s tidal decay (it will shred into a ring system in ~3.6 Gyr) is dissipative and outside the symplectic model — same future toggle as Phobos.',
+    },
+    parent: {
+        name: 'neptune',
+        m: M.neptune,
+        radius_km: 24_764,
+        color: 0x3f66e0,
+        glow:  0x7aa2ff,
+        surface: 'gas-giant',
+    },
+    satellites: [
+        {
+            name: 'proteus',
+            m: M.proteus,
+            radius_km: 210,
+            color: 0x8a8078,
+            surface: 'cratered',
+            highlight: 'largest inner moon · prograde',
+            elements: { a: 117_647_000, e: 0.0005, i_deg: 0.026,
+                        raan_deg: 162.0, argp_deg: 0.0, M_deg: 30.0 },
+        },
+        {
+            name: 'triton',
+            m: M.triton,
+            radius_km: 1353.4,
+            color: 0xd8c8c0,
+            surface: 'icy',
+            highlight: 'retrograde · captured KBO · i = 157°',
+            elements: { a: 354_759_000, e: 0.000016, i_deg: 156.885,
+                        raan_deg: 177.7, argp_deg: 0.0, M_deg: 260.0 },
+        },
+    ],
+    scale_km_per_unit: 24_764,           // 1 scene unit = Neptune radius
+    suggested_dt_s:    300,              // Proteus period 1.12 d → 323 steps/orbit
+    suggested_warp:    86400 * 0.5,      // Triton lap ≈ 12 s, Proteus ≈ 2 s
+    oblateness:        OBLATENESS.neptune,
+    j2_default:        false,
+    default_view:      'skim',           // the counter-rotation reads edge-on
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Algol (β Persei) — a hierarchical stellar triple with an 86° tilt
+// ─────────────────────────────────────────────────────────────────────────────
+// The famous eclipsing binary: a B8V dwarf and a K0IV subgiant whirling in
+// 2.87 days, orbited every 680 days by an Am star on an orbit tilted ~86°
+// to the inner pair — one of the most extreme mutual inclinations measured
+// (CHARA interferometry, Baron et al. 2012). Masses/elements therefrom:
+//   Aa1 3.17 M☉ · Aa2 0.70 M☉ · a_in = 0.062 AU · e_in ≈ 0
+//   Ab  1.76 M☉ · a_out = 2.69 AU · e_out = 0.227 · P_out = 680 d
+// Reference plane = the OUTER orbit; the inner binary carries the 86°.
+// Kepler check: P_in = 2π√(a³/G(m₁+m₂)) = 2.86 d ✓, P_out = 680 d ✓.
+//
+// Left to run at high warp, the third star torques the inner binary —
+// Kozai-Lidov cycles on ~kyr timescales pump its eccentricity, and the
+// hybrid integrator rides the resulting pericenter passages adaptively.
+
+const ALGOL_TRIPLE = _build({
+    id:    'algol-triple',
+    name:  'Algol — hierarchical triple',
+    blurb: 'A 2.87-day stellar binary orbited by a third star on a plane tilted 86° — mutually inclined orbits you can finally SEE.',
+    marketing: {
+        headline: 'Three suns, two planes, 86° apart',
+        callout:  'The Demon Star is a triple. Its inner pair eclipses every 2.87 days; the outer star takes 680 days on an orbit tilted a measured ~86° to the pair. Hit Plane skim, turn on the orbit-plane discs, and the geometry snaps into focus.',
+        physics:  'Newtonian three-body with stellar masses (3.17 + 0.70 + 1.76 M☉, CHARA interferometry — Baron et al. 2012). At this mutual inclination Kozai-Lidov cycles pump the inner eccentricity over millennia: crank the warp and the close-encounter integrator takes the pericenters adaptively.',
+    },
+    parent: {
+        name: 'algol Aa1',
+        m: 3.17 * M_SUN,
+        radius_km: 1_900_000,            // 2.73 R☉
+        color: 0xbfd4ff,
+        glow:  0xd6e4ff,
+        surface: 'star',
+    },
+    satellites: [
+        {
+            name: 'algol Aa2',
+            m: 0.70 * M_SUN,
+            radius_km: 2_420_000,        // 3.48 R☉ subgiant
+            color: 0xffb36b,
+            glow:  0xffd9a8,
+            surface: 'star',
+            highlight: 'K0IV subgiant · eclipses every 2.87 d',
+            elements: {
+                a:        9.274e9,       // 0.062 AU
+                e:        0.0,
+                i_deg:    86.0,          // the measured mutual inclination
+                raan_deg: 0.0,
+                argp_deg: 0.0,
+                M_deg:    0.0,
+            },
+        },
+        {
+            name: 'algol Ab',
+            m: 1.76 * M_SUN,
+            radius_km: 1_200_000,        // 1.73 R☉
+            color: 0xfff0c8,
+            glow:  0xfff4d8,
+            surface: 'star',
+            circumbinary: true,
+            highlight: 'Am star · 680 d circumbinary orbit',
+            elements: {
+                a:        4.030e11,      // 2.69 AU
+                e:        0.227,
+                i_deg:    0.0,           // defines the reference plane
+                raan_deg: 0.0,
+                argp_deg: 90.0,
+                M_deg:    45.0,
+            },
+        },
+    ],
+    scale_km_per_unit: 1_900_000,        // 1 scene unit = Aa1 radius
+    suggested_dt_s:    1800,             // inner P = 2.87 d → ~138 steps/orbit
+    suggested_warp:    86400 * 2,        // inner orbit ~1.4 s, outer ~340 s
+    default_view:      'skim',
 });
 
 export const SYSTEMS = {
@@ -597,7 +810,9 @@ export const SYSTEMS = {
     'jupiter-galileans': JUPITER_GALILEANS,
     'saturn-major':      SATURN_MAJOR,
     'saturn-coorbitals': SATURN_COORBITALS,
+    'neptune-triton':    NEPTUNE_TRITON,
     'pluto-charon':      PLUTO_CHARON,
+    'algol-triple':      ALGOL_TRIPLE,
 };
 
 export const SYSTEM_ORDER = [
@@ -606,7 +821,9 @@ export const SYSTEM_ORDER = [
     'jupiter-galileans',
     'saturn-major',
     'saturn-coorbitals',
+    'neptune-triton',
     'pluto-charon',
+    'algol-triple',
 ];
 
 // J2000.0 epoch (TT ~= TDB) as Julian Date.

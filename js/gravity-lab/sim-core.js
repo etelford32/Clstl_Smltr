@@ -43,16 +43,20 @@ const CKPT_INTERVAL_MS   = 500;   // wall-clock spacing between checkpoints
 //
 // Detection is per-pair, with different physics for the two pair classes:
 //
-//  A. Pairs NOT involving the most-massive body ("satellite-satellite"):
+//  A. TRUE satellite-satellite pairs — neither body is the primary and
+//     BOTH are light (m ≤ HILL_MASS_MAX × m_primary; the Hill sphere is
+//     only meaningful for m ≪ M — a stellar companion at 55% of the
+//     primary's mass has R_Hill ≈ its whole orbit and would trigger
+//     permanently, as Algol Ab demonstrated):
 //     1. MERCURIUS-style Hill criterion (the plan's scheme):
 //        d ≤ K · max(R_Hill) with R_Hill,i = d_i0 · (m_i/3 m_0)^(1/3), K = 3.
 //     2. Pair-resolution backstop: τ_pair = sqrt(d³/G(m_i+m_j)) <
-//        RESOLVE · targetStep — covers comparable-mass non-primary pairs
-//        where Hill radii lose meaning.
+//        RESOLVE · targetStep — covers comparable-mass light pairs.
 //
-//  B. Pairs involving the primary. Hill radii are undefined here, and a
-//     bare timescale test misclassifies REGULAR tight orbits (Mimas runs
-//     at ~11 substeps per radian and is perfectly healthy — bounded
+//  B. Pairs involving the primary OR a heavy secondary (Charon at 12% of
+//     Pluto, the Algol stars). Hill radii are undefined here, and a bare
+//     timescale test misclassifies REGULAR tight orbits (Mimas runs at
+//     ~11 substeps per radian and is perfectly healthy — bounded
 //     symplectic oscillation). What actually kills fixed-dt is a plunge,
 //     so the criteria are:
 //     1. Closing-time: the pair could close its separation within
@@ -68,9 +72,10 @@ const CKPT_INTERVAL_MS   = 500;   // wall-clock spacing between checkpoints
 // are Mimas (τ backstop margin ~2.7×, closing margin ~7×) and
 // Pluto–Charon (τ margin ~12×).
 const ENC_HILL_K      = 3;
+const ENC_HILL_MASS_MAX = 0.05; // Hill only when m ≤ this fraction of primary
 const ENC_RESOLVE     = 16;    // substeps per τ, satellite-satellite backstop
-const ENC_CLOSE_STEPS = 48;    // primary pairs: time-to-close window
-const ENC_TAU_HARD    = 4;     // primary pairs: hard under-resolution limit
+const ENC_CLOSE_STEPS = 48;    // class-B pairs: time-to-close window
+const ENC_TAU_HARD    = 4;     // class-B pairs: hard under-resolution limit
 const ENC_EXIT_FACTOR = 1.5;
 const ADAPTIVE_TOL    = 1e-12; // per-step relative tolerance for RKF7(8)
 
@@ -119,15 +124,22 @@ export function createSim({ bodies, targetStep, j2Opts = null, j2Enabled = false
     const nPairs = bodies.length * (bodies.length - 1) / 2;
     sim._encPairI = new Int16Array(nPairs);
     sim._encPairJ = new Int16Array(nPairs);
-    sim._encPrimary = new Uint8Array(nPairs);   // 1 = pair involves the primary
+    // Pair class: 1 = closing-time regime (involves the primary or any
+    // body heavier than ENC_HILL_MASS_MAX of it); 0 = Hill-eligible.
+    sim._encClassB = new Uint8Array(nPairs);
     sim._encR2Enter = new Float64Array(nPairs);
     sim._encR2Exit  = new Float64Array(nPairs);
+    const mPrim = bodies[sim._primaryIdx].m;
     let p = 0;
     for (let i = 0; i < bodies.length; i++) {
         for (let j = i + 1; j < bodies.length; j++) {
             sim._encPairI[p] = i;
             sim._encPairJ[p] = j;
-            sim._encPrimary[p] = (i === sim._primaryIdx || j === sim._primaryIdx) ? 1 : 0;
+            sim._encClassB[p] = (
+                i === sim._primaryIdx || j === sim._primaryIdx ||
+                bodies[i].m > ENC_HILL_MASS_MAX * mPrim ||
+                bodies[j].m > ENC_HILL_MASS_MAX * mPrim
+            ) ? 1 : 0;
             p++;
         }
     }
@@ -344,7 +356,7 @@ function _refreshEncounterRadii(sim) {
         const bi = bodies[i], bj = bodies[j];
         const gm = G_SI * (bi.m + bj.m);
         let rEnter, rExit;
-        if (sim._encPrimary[k]) {
+        if (sim._encClassB[k]) {
             const tauEnter = ENC_TAU_HARD * sim.targetStep;
             const tauExit  = tauEnter * ENC_EXIT_FACTOR;
             rEnter = Math.cbrt(tauEnter * tauEnter * gm);
@@ -379,7 +391,7 @@ function _pairHot(sim, k, r2Limit, closeWindowSec) {
     const dz = bj.r[2] - bi.r[2];
     const d2 = dx*dx + dy*dy + dz*dz;
     if (d2 <= r2Limit) return true;
-    if (sim._encPrimary[k]) {
+    if (sim._encClassB[k]) {
         // Closing-time criterion, symmetric in |ṙ| so the outgoing leg of
         // a flyby stays adaptive until the fixed step is comfortable.
         const dvx = bj.v[0] - bi.v[0];

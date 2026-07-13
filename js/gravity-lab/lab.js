@@ -1086,9 +1086,30 @@ function _renderHUDLive() {
     for (let i = 0; i < state.bodies.length; i++) {
         const b = state.bodies[i];
         if (b.is_parent) continue;
-        const dr = [b.r[0]-parent.r[0], b.r[1]-parent.r[1], b.r[2]-parent.r[2]];
-        const dv = [b.v[0]-parent.v[0], b.v[1]-parent.v[1], b.v[2]-parent.v[2]];
-        const mu = mu_p + G_SI * b.m;
+        let dr, dv, mu;
+        if (b.circumbinary) {
+            // Circumbinary bodies (Nix/Hydra, Algol Ab) orbit the
+            // barycenter of everything interior to them — parent-relative
+            // elements would show inflated e and the wrong period.
+            let M = 0;
+            const rB = [0, 0, 0], vB = [0, 0, 0];
+            for (let j = 0; j < i; j++) {
+                const o = state.bodies[j];
+                M += o.m;
+                for (let k = 0; k < 3; k++) {
+                    rB[k] += o.m * o.r[k];
+                    vB[k] += o.m * o.v[k];
+                }
+            }
+            for (let k = 0; k < 3; k++) { rB[k] /= M; vB[k] /= M; }
+            dr = [b.r[0]-rB[0], b.r[1]-rB[1], b.r[2]-rB[2]];
+            dv = [b.v[0]-vB[0], b.v[1]-vB[1], b.v[2]-vB[2]];
+            mu = G_SI * (M + b.m);
+        } else {
+            dr = [b.r[0]-parent.r[0], b.r[1]-parent.r[1], b.r[2]-parent.r[2]];
+            dv = [b.v[0]-parent.v[0], b.v[1]-parent.v[1], b.v[2]-parent.v[2]];
+            mu = mu_p + G_SI * b.m;
+        }
         const el = stateToElements(dr, dv, mu);
         const row = tbody.querySelector(`[data-row="${i}"]`);
         if (row) {

@@ -715,7 +715,7 @@ test('hybrid · hot three-body SURVIVES the flyby via adaptive segment', () => {
     }
 });
 
-test('hybrid · all six curated systems stay on the symplectic path', () => {
+test('hybrid · all curated systems stay on the symplectic path', () => {
     for (const id of SYSTEM_ORDER) {
         const sys = SYSTEMS[id];
         const sim = createSim({ bodies: systemBodies(id), targetStep: sys.suggested_dt_s });
@@ -747,6 +747,44 @@ test('hybrid · true singularity (radial plunge) faults as unresolvable', () => 
     for (const b of sim.bodies) {
         assert(b.r.every(Number.isFinite) && b.v.every(Number.isFinite),
             'restored state has non-finite values after singular plunge');
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10b. Circumbinary construction (P1.4) — Nix/Hydra orbit the Pluto+Charon
+//      barycenter and Algol Ab orbits the Aa1+Aa2 pair. The state vectors
+//      must reproduce the published elements RELATIVE TO THE ENCLOSED
+//      BARYCENTER: building them Pluto-relative (the old _build path)
+//      would inflate a by the barycenter offset and wreck the period.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('circumbinary ICs · osculating a and period match the published values', () => {
+    const cases = [
+        { sys: 'pluto-charon', body: 'nix',      inner: ['pluto', 'charon'], a: 48_694_000,  P_d: 24.85 },
+        { sys: 'pluto-charon', body: 'hydra',    inner: ['pluto', 'charon'], a: 64_738_000,  P_d: 38.20 },
+        { sys: 'algol-triple', body: 'algol Ab', inner: ['algol Aa1', 'algol Aa2'], a: 4.030e11, P_d: 680.2 },
+    ];
+    for (const c of cases) {
+        const bodies = SYSTEMS[c.sys].bodies;
+        const sat = bodies.find(b => b.name === c.body);
+        const inner = bodies.filter(b => c.inner.includes(b.name));
+        assert(sat && inner.length === c.inner.length, `bodies missing for ${c.body}`);
+        let M = 0;
+        const rB = [0, 0, 0], vB = [0, 0, 0];
+        for (const b of inner) {
+            M += b.m;
+            for (let k = 0; k < 3; k++) { rB[k] += b.m * b.r[k]; vB[k] += b.m * b.v[k]; }
+        }
+        for (let k = 0; k < 3; k++) { rB[k] /= M; vB[k] /= M; }
+        const mu = G_SI * (M + sat.m);
+        const el = stateToElements(
+            [sat.r[0]-rB[0], sat.r[1]-rB[1], sat.r[2]-rB[2]],
+            [sat.v[0]-vB[0], sat.v[1]-vB[1], sat.v[2]-vB[2]],
+            mu);
+        assertBelow(Math.abs(el.a - c.a) / c.a, 0.01, `${c.body} osculating a vs published`);
+        const P_d = el.period_s / 86400;
+        assert(Math.abs(P_d - c.P_d) / c.P_d < 0.02,
+            `${c.body} period ${P_d.toFixed(2)} d vs published ${c.P_d} d`);
     }
 });
 
