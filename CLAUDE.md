@@ -57,6 +57,7 @@ This is **parkersphysics.com** — a physics-first space weather forecasting pla
 | Vercel cron / pipeline ops | `OPERATIONS_STATUS.md`, `vercel.json`, `api/cron/*` |
 | SWMF Docker container | `swmf/Dockerfile` header comments, `MHD_DENSITY_PHASE0_RUNBOOK.md` |
 | Gannon hindcast | `GANNON_SIMULATION_DESIGN.md`, `MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md` |
+| Hindcast database (new events, scorecards) | `HINDCAST_BACKLOG.md`, `HINDCAST_DATABASE_STANDARD.md`, then the per-event runbook |
 | Earth / weather forecast | `WEATHER_FORECAST_PLAN.md`, `EARTH_LOD_NASA_PRECIP_PLAN.md` |
 | Navigation across pages | Run `node scripts/lint-nav.mjs`. There is a structural CI gate. |
 | Design system / tokens | `DESIGN_TOKENS.md` |
