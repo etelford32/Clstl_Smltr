@@ -23,7 +23,7 @@
  * Usage: node scripts/build-stpatrick-replay.mjs
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,6 +35,13 @@ const GROUND   = p('dsmc/fixtures/hindcast/st_patrick_mar_2015/ground_mag.csv');
 const IMF      = p('swmf/fixtures/hindcast/st_patrick_mar_2015/imf_l1.dat');
 const AP       = p('dsmc/fixtures/hindcast/st_patrick_mar_2015/historical_ap.csv');
 const OUT      = p('data/hindcast/st_patrick_mar_2015_replay.json');
+
+// Run-2 artifacts — OPTIONAL. When these land (see the runbook: model Dst
+// from parse_geoindex_log.py, CPCP reference from import_pc_index.py),
+// re-running this baker adds their series and the page picks them up with
+// no code change (st-patrick-storm.html adds the traces conditionally).
+const MODEL_DST = p('data/hindcast/st_patrick_mar_2015_model_dst.csv');
+const CPCP_REF  = p('dsmc/fixtures/hindcast/st_patrick_mar_2015/cpcp_reference.csv');
 
 // Joint two-event pseudo-Ap fit (see module docstring). Clamped at 0.
 const APSTAR = { c0: -0.68, cPhi: 1.317, cHpi: 0.623, version: 'joint-v1 (Gannon + Feb 2022), out-of-sample' };
@@ -85,6 +92,24 @@ function apAt(ms) {
     return cur;
 }
 
+// ── optional run-2 artifacts: headered t,<value>,… CSVs on ~5-min grids ──
+function readTimeValueCsv(path, valueCol) {
+    const lines = readFileSync(path, 'utf8').trim().split('\n');
+    const head = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const iT = head.indexOf('t'), iV = head.indexOf(valueCol);
+    if (iT < 0 || iV < 0) throw new Error(`${path}: need t + ${valueCol} columns, got ${head}`);
+    const at = new Map();
+    for (const ln of lines.slice(1)) {
+        const c = ln.split(',');
+        const ms = Date.parse(c[iT]);
+        const v = parseFloat(c[iV]);
+        if (Number.isFinite(ms) && Number.isFinite(v)) at.set(ms, v);
+    }
+    return at;
+}
+const modelDstAt = existsSync(MODEL_DST) ? readTimeValueCsv(MODEL_DST, 'dst_nt') : null;
+const cpcpRefAt  = existsSync(CPCP_REF)  ? readTimeValueCsv(CPCP_REF, 'phi_pc_kv') : null;
+
 // nearest-minute lookup with a small search radius (fills 1–2 min gaps).
 function nearest(map, ms, radiusMin) {
     for (let d = 0; d <= radiusMin; d++) {
@@ -121,6 +146,14 @@ for (let i = 0; i < N; i++) {
     S.v_kms.push(w ? round(w.v, 0) : null);
     S.n_cc.push(w ? round(w.n, 1) : null);
     S.ap_real.push(apAt(ms));
+    if (modelDstAt) {
+        const d = nearest(modelDstAt, ms, 5);
+        (S.dst_model_nt ??= []).push(d != null ? round(d, 1) : null);
+    }
+    if (cpcpRefAt) {
+        const r = nearest(cpcpRefAt, ms, 5);
+        (S.phi_pc_ref_kv ??= []).push(r != null ? round(r, 1) : null);
+    }
 }
 
 const h = (iso) => (Date.parse(iso) - START) / 3600_000;
@@ -144,6 +177,8 @@ const bundle = {
         v_kms:     { label: 'V_SW',      units: 'km/s', source: 'OMNI HRO 1-min L1 driver (model input)' },
         n_cc:      { label: 'N_p',       units: '/cc',  source: 'OMNI HRO 1-min L1 driver (model input)' },
         ap_real:   { label: 'ap (GFZ)',  units: '',     source: 'GFZ definitive 3-h ap' },
+        ...(modelDstAt ? { dst_model_nt: { label: 'Dst (model)', units: 'nT', source: 'BATS-R-US #GEOMAGINDICES via parse_geoindex_log.py' } } : {}),
+        ...(cpcpRefAt ? { phi_pc_ref_kv: { label: 'Φ_PC ref', units: 'kV', source: 'PC(N)-derived, Ridley & Kihn 2004 (import_pc_index.py)' } } : {}),
     },
     // Storm phases, hours from window start. quiet → sheath at the observed
     // SSC (04:48 UT Mar 17); sheath → main at the observed partial-recovery
@@ -180,10 +215,15 @@ const bundle = {
         ground_mag: 'OMNI HRO 1-min SYM-H/AE (dsmc/fixtures/hindcast/st_patrick_mar_2015/ground_mag.csv, fingerprint −234 nT @ 22:47 UT verified)',
         ap: 'GFZ definitive 3-h ap (historical_ap.csv, peak 179)',
         ap_star: APSTAR.version,
+        ...(modelDstAt ? { model_dst: 'data/hindcast/st_patrick_mar_2015_model_dst.csv (#GEOMAGINDICES)' } : {}),
+        ...(cpcpRefAt ? { cpcp_reference: 'dsmc/fixtures/hindcast/st_patrick_mar_2015/cpcp_reference.csv (Ridley & Kihn 2004)' } : {}),
         builder: 'scripts/build-stpatrick-replay.mjs',
     },
     generated_utc: new Date().toISOString(),
 };
+
+console.log(`model-Dst series: ${modelDstAt ? `INCLUDED (${modelDstAt.size} rows)` : 'absent — run 2 artifact not staged yet (see runbook §Model Dst)'}`);
+console.log(`CPCP reference series: ${cpcpRefAt ? `INCLUDED (${cpcpRefAt.size} rows)` : 'absent — cpcp_reference.csv not staged yet (see runbook Day 3)'}`);
 
 writeFileSync(OUT, JSON.stringify(bundle));
 const apStarPeak = Math.max(...S.ap_star.filter(x => x != null));

@@ -343,8 +343,9 @@ body {
       <div class="sp-legend">
         <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#ffd24d;"></span> SYM-H (OMNI 1-min, observed)</div>
         <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#8899aa;"></span> AE / 10 (observed)</div>
+        <div class="sp-legend-row" id="sp-legend-dstmodel" hidden><span class="sp-legend-swatch" style="background:#52e09a;"></span> Dst (model, BATS-R-US #GEOMAGINDICES)</div>
       </div>
-      <p style="font-size:.72rem; color:#8ab89d; margin:6px 0 0;">
+      <p id="sp-symh-note" style="font-size:.72rem; color:#8ab89d; margin:6px 0 0;">
         Model Dst is deliberately absent: the GM+IE baseline carries no ring current, so it has no
         honest Dst to show. The RCM-coupled run (run 2) owns that trace — its pre-registered target
         is −170 to −220 nT. No cherry-picking: this panel is pure observation.
@@ -357,6 +358,7 @@ body {
       <div class="sp-legend">
         <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#52e09a;"></span> Φ<sub>PC</sub> polar-cap potential (kV)</div>
         <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#4fc3f7;"></span> HPI hemispheric power (GW)</div>
+        <div class="sp-legend-row" id="sp-legend-cpcpref" hidden><span class="sp-legend-swatch" style="background:#ffd24d;"></span> Φ<sub>PC</sub> reference (PC-index-derived, Ridley &amp; Kihn 2004)</div>
       </div>
       <p style="font-size:.72rem; color:#8ab89d; margin:6px 0 0;">
         Episode 1 (sheath): 107 kV at 06:19 UT. The lull: 42 kV at 11:15 UT, right as observed
@@ -554,9 +556,24 @@ function paint(s) {
     // AE is plotted /10 so it shares the SYM-H axis scale honestly labeled.
     replay.series.ae_div10 = replay.series.ae_nt.map(v => (v == null ? null : v / 10));
 
+    // Run-2 artifacts arrive via the bundle baker (see the runbook): when the
+    // bundle carries them, add the traces and unhide their legend rows — the
+    // page ships forward-wired so run 2 lands with a rebake, no code change.
+    const hasModelDst = Array.isArray(replay.series.dst_model_nt);
+    const hasCpcpRef  = Array.isArray(replay.series.phi_pc_ref_kv);
+    if (hasModelDst) {
+        document.getElementById('sp-legend-dstmodel').hidden = false;
+        document.getElementById('sp-symh-note').textContent =
+            'The model Dst trace is the RCM-coupled run (run 2), extracted from ' +
+            'BATS-R-US #GEOMAGINDICES — scored against the pre-registered −170 to ' +
+            '−220 nT target in the ledger. SYM-H stays untouched observation.';
+    }
+    if (hasCpcpRef) document.getElementById('sp-legend-cpcpref').hidden = false;
+
     const symhChart = createSeriesChart(document.getElementById('sp-chart-symh'), replay, player, {
         series: [
             { key: 'ae_div10',  color: '#8899aa', width: 1 },
+            ...(hasModelDst ? [{ key: 'dst_model_nt', color: '#52e09a', width: 2, dash: [6, 4] }] : []),
             { key: 'sym_h_nt',  color: '#ffd24d', width: 2 },
         ],
         yLabel: 'nT (AE ÷ 10)', zeroLine: true, phaseBands: true, onSeekHours,
@@ -571,6 +588,7 @@ function paint(s) {
     const modelChart = createSeriesChart(document.getElementById('sp-chart-model'), replay, player, {
         series: [
             { key: 'hpi_gw',    color: '#4fc3f7', width: 1.5 },
+            ...(hasCpcpRef ? [{ key: 'phi_pc_ref_kv', color: '#ffd24d', width: 1, dash: [4, 3] }] : []),
             { key: 'phi_pc_kv', color: '#52e09a', width: 2 },
         ],
         yLabel: 'kV · GW', phaseBands: true, onSeekHours,
