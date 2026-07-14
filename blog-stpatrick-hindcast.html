@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Storm Every Model Takes — St. Patrick's 2015 Write-up · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/blog-stpatrick-hindcast">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/blog-stpatrick-hindcast">
+<meta property="og:title" content="The storm every model takes: replaying St. Patrick's Day 2015">
+<meta property="og:description" content="The most-modeled geomagnetic storm in the literature, replayed under our frozen hindcast configuration. Both steps of the two-step main phase reproduced from L1 data alone — and one honest miss, published with the hits. In English, español, français.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/st-patrick-storm.jpg">
+<meta property="og:image:alt" content="St. Patrick's Day March 2015 G4 storm hindcast">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The storm every model takes: replaying St. Patrick's Day 2015">
+<meta name="twitter:description" content="The community benchmark storm, replayed through coupled MHD. Two-step main phase: reproduced. Out-of-sample pseudo-Ap: 50% hot, and we published it.">
+<meta name="twitter:image" content="https://parkersphysics.com/static/og/st-patrick-storm.jpg">
+<meta name="description" content="Technical write-up of the March 2015 St. Patrick's Day G4 hindcast: BATS-R-US + Ridley under the frozen hc-std-v1 configuration, both driving episodes of the two-step main phase reproduced, Φ_PC peak 148 kV within the published-model band, and a +53% out-of-sample pseudo-Ap bias published rather than hidden. Part 1: GM+IE baseline; the RCM-coupled run follows. Available in English, Spanish, and French.">
+
+<link rel="stylesheet" href="colors_and_type.css">
+<link rel="stylesheet" href="js/nav-styles.css">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#020f08 ; color:#cfe8da;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    line-height:1.65;
+}
+
+.bp-wrap { max-width:760px; margin:0 auto; padding:88px 20px 80px; }
+
+/* ── language dropdown (flag) ── */
+.bp-langdd {
+    position:relative; display:flex; justify-content:flex-end; margin-bottom:28px;
+}
+.bp-langdd summary {
+    list-style:none; cursor:pointer; user-select:none;
+    display:inline-flex; align-items:center; gap:8px;
+    background:rgba(82,224,154,.08); border:1px solid rgba(82,224,154,.25);
+    color:#9fe0bd; font-size:.8rem; font-weight:600;
+    padding:6px 14px; border-radius:999px;
+    transition:background .15s;
+}
+.bp-langdd summary::-webkit-details-marker { display:none; }
+.bp-langdd summary:hover { background:rgba(82,224,154,.18); }
+.bp-langdd summary .flag { font-size:1.05rem; line-height:1; }
+.bp-langdd summary .chev { font-size:.6rem; color:#7fa892; transition:transform .15s; }
+.bp-langdd[open] summary .chev { transform:rotate(180deg); }
+.bp-langdd .menu {
+    position:absolute; top:calc(100% + 6px); right:0; z-index:60;
+    min-width:170px; padding:6px;
+    background:#07160e; border:1px solid rgba(82,224,154,.35);
+    border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.55);
+}
+.bp-langdd .menu button {
+    display:flex; align-items:center; gap:10px; width:100%;
+    background:none; border:0; color:#cfe8da; font:inherit; font-size:.82rem;
+    padding:8px 10px; border-radius:7px; cursor:pointer; text-align:left;
+}
+.bp-langdd .menu button:hover { background:rgba(82,224,154,.14); }
+.bp-langdd .menu button[aria-pressed="true"] { color:#f0fff6; background:rgba(82,224,154,.20); }
+.bp-langdd .menu .flag { font-size:1.05rem; line-height:1; }
+.bp-langdd .menu .check { margin-left:auto; color:#52e09a; font-size:.75rem; }
+
+/* ── article ── */
+article[data-lang] { display:none; }
+article[data-lang].bp-active { display:block; }
+
+.bp-kicker {
+    font-size:.72rem; letter-spacing:.18em; text-transform:uppercase;
+    color:#52e09a; font-weight:700; margin-bottom:14px;
+}
+h1 {
+    font-size:clamp(1.7rem, 4.6vw, 2.6rem); line-height:1.15; color:#f0fff6;
+    font-weight:800; margin-bottom:16px;
+}
+.bp-standfirst { font-size:1.06rem; color:#9fc9b2; margin-bottom:10px; }
+.bp-meta { font-size:.74rem; color:#639678; margin-bottom:36px; }
+
+h2 { font-size:1.18rem; color:#e2ffef; margin:38px 0 12px; font-weight:750; }
+p  { margin-bottom:16px; font-size:.95rem; }
+strong { color:#f0fff6; }
+em { color:#c6f2da; }
+
+/* ── stat cards ── */
+.bp-stats {
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin:30px 0;
+}
+.bp-stat {
+    background:rgba(82,224,154,.07); border:1px solid rgba(82,224,154,.22);
+    border-radius:10px; padding:16px 14px; text-align:center;
+}
+.bp-stat .n {
+    display:block; font-size:1.55rem; font-weight:800;
+    background:linear-gradient(45deg,#52e09a,#4fc3f7);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.bp-stat .l { display:block; font-size:.68rem; color:#7fa892; margin-top:5px; }
+
+/* ── pull quote ── */
+.bp-pull {
+    border-left:3px solid #52e09a; padding:6px 0 6px 18px; margin:28px 0;
+    font-size:1.05rem; color:#c6f2da; font-style:italic;
+}
+
+/* ── CTA ── */
+.bp-cta {
+    display:block; margin:44px 0 0; padding:18px 22px; border-radius:12px;
+    background:linear-gradient(120deg, rgba(82,224,154,.16), rgba(79,195,247,.10));
+    border:1px solid rgba(82,224,154,.35); text-decoration:none;
+}
+.bp-cta .t { color:#f0fff6; font-weight:750; font-size:.98rem; }
+.bp-cta .s { color:#8dbba0; font-size:.78rem; margin-top:4px; display:block; }
+.bp-cta:hover { border-color:rgba(79,195,247,.55); }
+
+.bp-foot { margin-top:40px; font-size:.74rem; color:#639678; }
+.bp-foot a { color:#52e09a; text-decoration:none; }
+
+@media (max-width:768px) {
+    .bp-wrap { padding:76px 16px 60px; }
+    .bp-stats { grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260714"; initNav("blog-stpatrick-hindcast");</script>
+
+<main class="bp-wrap">
+
+  <details class="bp-langdd" id="bp-langdd">
+    <summary aria-label="Article language">
+      <span class="flag" id="bp-lang-flag">🇺🇸</span>
+      <span id="bp-lang-name">English</span>
+      <span class="chev">▼</span>
+    </summary>
+    <div class="menu" role="menu" aria-label="Choose language">
+      <button role="menuitem" data-setlang="en" aria-pressed="true"><span class="flag">🇺🇸</span> English <span class="check">✓</span></button>
+      <button role="menuitem" data-setlang="es" aria-pressed="false"><span class="flag">🇪🇸</span> Español <span class="check" hidden>✓</span></button>
+      <button role="menuitem" data-setlang="fr" aria-pressed="false"><span class="flag">🇫🇷</span> Français <span class="check" hidden>✓</span></button>
+    </div>
+  </details>
+
+  <!-- ═══════════════════════ ENGLISH ═══════════════════════ -->
+  <article data-lang="en" class="bp-active">
+    <div class="bp-kicker">Research note · Hindcast database · Event 1 · Part 1 of 2 (GM+IE baseline)</div>
+    <h1>The storm every model takes: replaying St. Patrick's Day 2015</h1>
+    <p class="bp-standfirst">Every magnetosphere model in the world eventually sits the same exam: 17 March 2015. We just took it — under a configuration we froze in writing beforehand, with our predictions on the record before the run started.</p>
+    <p class="bp-meta">Parkers Physics · July 2026 · 6 min read · The RCM-coupled results (Part 2) will be appended to this note.</p>
+
+    <p>On St. Patrick's Day 2015, the strongest geomagnetic storm of solar cycle 24 arrived at the worst possible moment for anyone trying to dismiss it — and the best possible moment for science. It hit at equinox, when Earth's magnetic geometry couples to the solar wind most efficiently. It came from a single, well-observed CME. And its ground signature was so distinctive that the modeling community adopted it as <strong>the</strong> benchmark: if you build a magnetosphere code, sooner or later you publish your March 17 run.</p>
+
+    <p>The storm's signature is the <strong>two-step main phase</strong>, and it's a forecaster's trap. The CME's sheath arrived at 04:48&nbsp;UT and drove the ring-current index SYM-H down to −101&nbsp;nT by mid-morning. Then it recovered to −38&nbsp;nT by noon. On the dashboards, the storm looked finished — a moderate event, going home early. It was not. The magnetic cloud behind the sheath carried a core field pointing hard south (−26&nbsp;nT, held for hours), and by 22:47&nbsp;UT SYM-H had collapsed to <strong>−234&nbsp;nT</strong> — a G4, with aurora photographed across the mid-United States and Europe.</p>
+
+    <h2>What we did</h2>
+    <p>We replayed the full 72 hours (16 Mar 12:00&nbsp;UT → 19 Mar 12:00&nbsp;UT) through BATS-R-US global magnetohydrodynamics coupled to the Ridley ionosphere solver, driven by nothing but real L1 solar-wind measurements — the data a forecaster would actually have had. Same grid, same solver ladder, same coupling cadences, same Docker image as our Gannon May 2024 replay: the configuration is frozen (<em>hc-std-v1</em>) precisely so that no event gets a flattering tune. This is Event 1 of our hindcast validation database, and the second data point in the argument that one good run is not luck.</p>
+
+    <div class="bp-stats">
+      <div class="bp-stat"><span class="n">2 / 2</span><span class="l">driving episodes of the two-step main phase reproduced, in order, from L1 data alone</span></div>
+      <div class="bp-stat"><span class="n">148 kV</span><span class="l">peak polar-cap potential — inside the published-model band for this storm</span></div>
+      <div class="bp-stat"><span class="n">+53%</span><span class="l">out-of-sample pseudo-Ap bias at peak — the miss we're publishing next to the hits</span></div>
+    </div>
+
+    <h2>What the physics said</h2>
+    <p>The model's polar-cap potential — the voltage the solar wind drives across Earth's polar ionosphere — reproduced the storm's shape beat for beat. Episode one: the sheath spins it up to <strong>107&nbsp;kV</strong> at 06:19&nbsp;UT, ninety minutes after the observed shock. The lull: it collapses to <strong>42&nbsp;kV</strong> at 11:15&nbsp;UT, exactly as the real storm staged its deceptive recovery. Episode two: the cloud core drives it to the global maximum, <strong>148&nbsp;kV</strong> at 13:40&nbsp;UT, sitting right on the observed Bz floor. Auroral precipitation power peaked at 142&nbsp;GW that evening, while the real electrojets hit 2298&nbsp;nT.</p>
+
+    <p>Unlike Gannon — where the official Ap index pinned at its 400 ceiling and the physics had to measure past it — this storm peaked at ap&nbsp;179, comfortably inside the scale. That makes it the clean control: the event that tests the model itself, not the index's failure mode.</p>
+
+    <h2>The honest parts</h2>
+    <p>Two, again — because trust is the product. First: <strong>this baseline run publishes no model Dst at all.</strong> The GM+IE configuration carries no ring current, so it cannot honestly reproduce a −234&nbsp;nT storm floor, and we won't decorate the page with a curve we know is physically incomplete. Our pre-registered prediction for what it <em>would</em> show is −30 to −60&nbsp;nT — the same fractional deficit as Gannon — and the ring-current (RCM) coupled run, whose target of −170 to −220&nbsp;nT is also on the record, is Part 2.</p>
+
+    <p>Second: we took the pseudo-Ap regression fitted jointly on Gannon and February 2022 and applied it to this storm <strong>blind — the first true out-of-sample test</strong>. Verdict: the shape is right and the amplitude runs hot, peaking at Ap*&nbsp;274 against a real ap of 179. That +53% bias points exactly where our frozen prediction pointed (BATS-R-US is known to overdrive the polar-cap potential by tens of percent), and now it's not folklore — it's a measured number our next calibration must answer to.</p>
+
+    <div class="bp-pull">A validation database is not a highlight reel. The miss goes in the table next to the hit — and both were written down before the run started.</div>
+
+    <h2>Why it matters</h2>
+    <p>Anyone can show you one good storm. The claim that matters — to a satellite operator budgeting fuel, to an agency evaluating a forecast pipeline — is that the <em>same</em> physics, under the <em>same</em> frozen configuration, holds up across storms it has never seen. Gannon proved the pipeline works at G5 extremes where the index breaks. St. Patrick's 2015 tests it against the deepest-studied storm in the literature, where decades of published SWMF, LFM, and OpenGGCM runs are waiting to be compared against. That comparison figure — our trace alongside theirs — is the next deliverable, and the numbers above are already sitting in the public scorecard it will be built on.</p>
+
+    <a class="bp-cta" href="st-patrick-storm.html">
+      <span class="t">🍀 Explore the interactive St. Patrick's hindcast →</span>
+      <span class="s">The full 72-hour replay — observed SYM-H, both driving episodes, the L1 driver, and the honest Ap* panel, live in your browser.</span>
+    </a>
+
+    <p class="bp-foot">Methods, the frozen configuration, and the prediction ledger live in the ParkersPhysics repository (<code>MHD_DENSITY_PHASE0_RESULTS.md</code>, <code>HINDCAST_DATABASE_STANDARD.md</code>). Questions or operator inquiries: <a href="request-access.html">request access</a>.</p>
+  </article>
+
+  <!-- ═══════════════════════ ESPAÑOL ═══════════════════════ -->
+  <article data-lang="es">
+    <div class="bp-kicker">Nota de investigación · Base de datos de hindcasts · Evento 1 · Parte 1 de 2 (línea base GM+IE)</div>
+    <h1>La tormenta que examina a todos los modelos: recreando el San Patricio de 2015</h1>
+    <p class="bp-standfirst">Todo modelo de la magnetosfera acaba rindiendo el mismo examen: el 17 de marzo de 2015. Nosotros acabamos de rendirlo — con una configuración congelada por escrito de antemano y con nuestras predicciones registradas antes de arrancar la simulación.</p>
+    <p class="bp-meta">Parkers Physics · Julio 2026 · 6 min de lectura · Los resultados acoplados con RCM (Parte 2) se añadirán a esta nota.</p>
+
+    <p>El día de San Patricio de 2015, la tormenta geomagnética más intensa del ciclo solar 24 llegó en el peor momento posible para quien quisiera ignorarla — y en el mejor momento posible para la ciencia. Golpeó en el equinoccio, cuando la geometría magnética de la Tierra se acopla al viento solar con máxima eficiencia. Vino de una única CME bien observada. Y su firma en tierra fue tan característica que la comunidad de modelización la adoptó como <strong>el</strong> banco de pruebas: si construyes un código de magnetosfera, tarde o temprano publicas tu simulación del 17 de marzo.</p>
+
+    <p>La firma de la tormenta es la <strong>fase principal en dos pasos</strong>, y es una trampa para pronosticadores. La vaina de la CME llegó a las 04:48&nbsp;UT y hundió el índice de corriente de anillo SYM-H hasta −101&nbsp;nT a media mañana. Después se recuperó hasta −38&nbsp;nT al mediodía. En los paneles, la tormenta parecía terminada — un evento moderado que se iba a casa temprano. No era así. La nube magnética detrás de la vaina traía un campo central apuntando fuerte hacia el sur (−26&nbsp;nT, sostenido durante horas), y a las 22:47&nbsp;UT el SYM-H se había desplomado hasta <strong>−234&nbsp;nT</strong> — un G4, con auroras fotografiadas en medio Estados Unidos y Europa.</p>
+
+    <h2>Qué hicimos</h2>
+    <p>Recreamos las 72 horas completas (16 mar 12:00&nbsp;UT → 19 mar 12:00&nbsp;UT) con la magnetohidrodinámica global BATS-R-US acoplada al resolvedor ionosférico de Ridley, alimentada únicamente con mediciones reales del viento solar en L1 — los datos que un pronosticador habría tenido de verdad. La misma malla, la misma escalera de arranque, las mismas cadencias de acoplamiento y la misma imagen Docker que nuestra recreación de Gannon de mayo de 2024: la configuración está congelada (<em>hc-std-v1</em>) precisamente para que ningún evento reciba un ajuste favorecedor. Este es el Evento 1 de nuestra base de datos de validación por hindcast, y el segundo punto de datos del argumento de que una buena simulación no es suerte.</p>
+
+    <div class="bp-stats">
+      <div class="bp-stat"><span class="n">2 / 2</span><span class="l">episodios de forzamiento de la fase en dos pasos reproducidos, en orden, solo con datos de L1</span></div>
+      <div class="bp-stat"><span class="n">148 kV</span><span class="l">pico del potencial de casquete polar — dentro de la banda de los modelos publicados para esta tormenta</span></div>
+      <div class="bp-stat"><span class="n">+53%</span><span class="l">sesgo del pseudo-Ap fuera de muestra en el pico — el fallo que publicamos junto a los aciertos</span></div>
+    </div>
+
+    <h2>Qué dijo la física</h2>
+    <p>El potencial de casquete polar del modelo — el voltaje que el viento solar impone a través de la ionosfera polar terrestre — reprodujo la forma de la tormenta paso a paso. Episodio uno: la vaina lo eleva a <strong>107&nbsp;kV</strong> a las 06:19&nbsp;UT, noventa minutos después del choque observado. La tregua: se desploma a <strong>42&nbsp;kV</strong> a las 11:15&nbsp;UT, justo cuando la tormenta real escenificaba su recuperación engañosa. Episodio dos: el núcleo de la nube lo lleva al máximo global, <strong>148&nbsp;kV</strong> a las 13:40&nbsp;UT, exactamente sobre el suelo de Bz observado. La potencia de precipitación auroral alcanzó 142&nbsp;GW esa tarde, mientras los electrochorros reales llegaban a 2298&nbsp;nT.</p>
+
+    <p>A diferencia de Gannon — donde el índice oficial Ap quedó clavado en su techo de 400 y la física tuvo que medir más allá — esta tormenta alcanzó ap&nbsp;179, cómodamente dentro de la escala. Eso la convierte en el control limpio: el evento que examina al modelo en sí, no el modo de fallo del índice.</p>
+
+    <h2>La parte honesta</h2>
+    <p>Dos cosas, otra vez — porque la confianza es el producto. Primera: <strong>esta simulación de línea base no publica ningún Dst del modelo.</strong> La configuración GM+IE no lleva corriente de anillo, así que no puede reproducir honestamente un suelo de −234&nbsp;nT, y no vamos a decorar la página con una curva que sabemos físicamente incompleta. Nuestra predicción pre-registrada de lo que mostraría es −30 a −60&nbsp;nT — el mismo déficit fraccional que Gannon — y la simulación acoplada con corriente de anillo (RCM), cuyo objetivo de −170 a −220&nbsp;nT también está registrado, es la Parte 2.</p>
+
+    <p>Segunda: tomamos la regresión de pseudo-Ap ajustada conjuntamente sobre Gannon y febrero de 2022 y la aplicamos a esta tormenta <strong>a ciegas — la primera prueba verdaderamente fuera de muestra</strong>. Veredicto: la forma es correcta y la amplitud se pasa de caliente, con un pico de Ap*&nbsp;274 frente a un ap real de 179. Ese sesgo del +53% apunta exactamente adonde apuntaba nuestra predicción congelada (es sabido que BATS-R-US sobreexcita el potencial de casquete polar en decenas de por ciento), y ahora ya no es folclore — es un número medido al que nuestra próxima calibración tendrá que responder.</p>
+
+    <div class="bp-pull">Una base de datos de validación no es un vídeo de mejores jugadas. El fallo va en la tabla junto al acierto — y ambos quedaron por escrito antes de arrancar la simulación.</div>
+
+    <h2>Por qué importa</h2>
+    <p>Cualquiera puede enseñarte una buena tormenta. La afirmación que importa — a un operador de satélites presupuestando combustible, a una agencia evaluando una cadena de pronóstico — es que la <em>misma</em> física, bajo la <em>misma</em> configuración congelada, se sostiene en tormentas que nunca ha visto. Gannon demostró que la cadena funciona en los extremos G5 donde el índice se rompe. El San Patricio de 2015 la examina contra la tormenta más estudiada de la literatura, donde décadas de simulaciones publicadas de SWMF, LFM y OpenGGCM esperan la comparación. Esa figura comparativa — nuestra traza junto a las suyas — es el siguiente entregable, y los números de arriba ya están en el scorecard público sobre el que se construirá.</p>
+
+    <a class="bp-cta" href="st-patrick-storm.html">
+      <span class="t">🍀 Explora el hindcast interactivo de San Patricio →</span>
+      <span class="s">La recreación completa de 72 horas — SYM-H observado, los dos episodios de forzamiento, el forzante de L1 y el panel honesto de Ap*, en tu navegador.</span>
+    </a>
+
+    <p class="bp-foot">Los métodos, la configuración congelada y el registro de predicciones viven en el repositorio de ParkersPhysics (<code>MHD_DENSITY_PHASE0_RESULTS.md</code>, <code>HINDCAST_DATABASE_STANDARD.md</code>). Consultas de operadores: <a href="request-access.html">solicitar acceso</a>.</p>
+  </article>
+
+  <!-- ═══════════════════════ FRANÇAIS ═══════════════════════ -->
+  <article data-lang="fr">
+    <div class="bp-kicker">Note de recherche · Base de données de hindcasts · Événement 1 · Partie 1 sur 2 (référence GM+IE)</div>
+    <h1>La tempête qui fait passer l'examen à tous les modèles : rejouer la Saint-Patrick 2015</h1>
+    <p class="bp-standfirst">Tôt ou tard, chaque modèle de magnétosphère passe le même examen : le 17 mars 2015. Nous venons de le passer — avec une configuration gelée par écrit à l'avance, et nos prédictions consignées avant le lancement de la simulation.</p>
+    <p class="bp-meta">Parkers Physics · Juillet 2026 · 6 min de lecture · Les résultats couplés RCM (Partie 2) seront ajoutés à cette note.</p>
+
+    <p>Le jour de la Saint-Patrick 2015, la plus forte tempête géomagnétique du cycle solaire 24 est arrivée au pire moment pour quiconque voulait l'ignorer — et au meilleur moment pour la science. Elle a frappé à l'équinoxe, quand la géométrie magnétique de la Terre se couple au vent solaire avec une efficacité maximale. Elle venait d'une seule CME bien observée. Et sa signature au sol était si caractéristique que la communauté de modélisation l'a adoptée comme <strong>le</strong> banc d'essai : qui construit un code de magnétosphère finit par publier sa simulation du 17 mars.</p>
+
+    <p>La signature de cette tempête, c'est la <strong>phase principale en deux temps</strong> — un piège à prévisionnistes. La gaine de la CME est arrivée à 04h48&nbsp;UT et a enfoncé l'indice de courant annulaire SYM-H jusqu'à −101&nbsp;nT en milieu de matinée. Puis il est remonté à −38&nbsp;nT vers midi. Sur les tableaux de bord, la tempête semblait finie — un événement modéré qui rentrait chez lui. Il n'en était rien. Le nuage magnétique derrière la gaine portait un champ central orienté plein sud (−26&nbsp;nT, tenu pendant des heures), et à 22h47&nbsp;UT le SYM-H s'était effondré à <strong>−234&nbsp;nT</strong> — un G4, avec des aurores photographiées jusqu'au centre des États-Unis et en Europe.</p>
+
+    <h2>Ce que nous avons fait</h2>
+    <p>Nous avons rejoué les 72 heures complètes (16 mars 12h00&nbsp;UT → 19 mars 12h00&nbsp;UT) à travers la magnétohydrodynamique globale BATS-R-US couplée au solveur ionosphérique de Ridley, pilotée uniquement par de vraies mesures du vent solaire en L1 — les données dont un prévisionniste aurait réellement disposé. Même grille, même échelle de démarrage, mêmes cadences de couplage, même image Docker que notre reconstitution de Gannon en mai 2024 : la configuration est gelée (<em>hc-std-v1</em>) précisément pour qu'aucun événement ne reçoive de réglage flatteur. C'est l'Événement 1 de notre base de données de validation par hindcast, et le deuxième point de données de l'argument selon lequel une bonne simulation n'est pas un coup de chance.</p>
+
+    <div class="bp-stats">
+      <div class="bp-stat"><span class="n">2 / 2</span><span class="l">épisodes de forçage de la phase en deux temps reproduits, dans l'ordre, à partir des seules données L1</span></div>
+      <div class="bp-stat"><span class="n">148 kV</span><span class="l">pic du potentiel de calotte polaire — dans la fourchette des modèles publiés pour cette tempête</span></div>
+      <div class="bp-stat"><span class="n">+53%</span><span class="l">biais du pseudo-Ap hors échantillon au pic — l'échec que nous publions à côté des réussites</span></div>
+    </div>
+
+    <h2>Ce que la physique a dit</h2>
+    <p>Le potentiel de calotte polaire du modèle — la tension que le vent solaire impose à travers l'ionosphère polaire terrestre — a reproduit la forme de la tempête temps pour temps. Épisode un : la gaine le fait monter à <strong>107&nbsp;kV</strong> à 06h19&nbsp;UT, quatre-vingt-dix minutes après le choc observé. L'accalmie : il s'effondre à <strong>42&nbsp;kV</strong> à 11h15&nbsp;UT, exactement quand la vraie tempête mettait en scène sa fausse récupération. Épisode deux : le cœur du nuage le pousse au maximum global, <strong>148&nbsp;kV</strong> à 13h40&nbsp;UT, pile sur le plancher de Bz observé. La puissance de précipitation aurorale a culminé à 142&nbsp;GW ce soir-là, pendant que les électrojets réels atteignaient 2298&nbsp;nT.</p>
+
+    <p>Contrairement à Gannon — où l'indice officiel Ap est resté cloué à son plafond de 400 et où la physique a dû mesurer au-delà — cette tempête a culminé à ap&nbsp;179, confortablement dans l'échelle. C'est donc le contrôle propre : l'événement qui teste le modèle lui-même, et non le mode de défaillance de l'indice.</p>
+
+    <h2>La part d'honnêteté</h2>
+    <p>Deux constats, encore — parce que la confiance est le produit. D'abord : <strong>cette simulation de référence ne publie aucun Dst modèle.</strong> La configuration GM+IE ne porte pas de courant annulaire ; elle ne peut donc pas reproduire honnêtement un plancher de −234&nbsp;nT, et nous ne décorerons pas la page d'une courbe que nous savons physiquement incomplète. Notre prédiction pré-enregistrée de ce qu'elle montrerait est −30 à −60&nbsp;nT — le même déficit fractionnaire que Gannon — et la simulation couplée au courant annulaire (RCM), dont l'objectif de −170 à −220&nbsp;nT est lui aussi consigné, fait l'objet de la Partie 2.</p>
+
+    <p>Ensuite : nous avons pris la régression de pseudo-Ap ajustée conjointement sur Gannon et février 2022 et nous l'avons appliquée à cette tempête <strong>en aveugle — le premier vrai test hors échantillon</strong>. Verdict : la forme est juste, l'amplitude chauffe trop, culminant à Ap*&nbsp;274 contre un ap réel de 179. Ce biais de +53% pointe exactement là où pointait notre prédiction gelée (BATS-R-US est connu pour surestimer le potentiel de calotte polaire de plusieurs dizaines de pour cent), et ce n'est plus du folklore — c'est un nombre mesuré auquel notre prochaine calibration devra répondre.</p>
+
+    <div class="bp-pull">Une base de données de validation n'est pas un best-of. L'échec va dans le tableau à côté de la réussite — et les deux étaient écrits avant le lancement de la simulation.</div>
+
+    <h2>Pourquoi c'est important</h2>
+    <p>N'importe qui peut vous montrer une belle tempête. L'affirmation qui compte — pour un opérateur de satellites qui budgète son carburant, pour une agence qui évalue une chaîne de prévision — c'est que la <em>même</em> physique, sous la <em>même</em> configuration gelée, tient sur des tempêtes qu'elle n'a jamais vues. Gannon a prouvé que la chaîne fonctionne aux extrêmes G5, là où l'indice casse. La Saint-Patrick 2015 la confronte à la tempête la plus étudiée de la littérature, où des décennies de simulations publiées de SWMF, LFM et OpenGGCM attendent la comparaison. Cette figure comparative — notre trace à côté des leurs — est le prochain livrable, et les chiffres ci-dessus sont déjà dans le scorecard public sur lequel elle sera construite.</p>
+
+    <a class="bp-cta" href="st-patrick-storm.html">
+      <span class="t">🍀 Explorer le hindcast interactif de la Saint-Patrick →</span>
+      <span class="s">La reconstitution complète des 72 heures — SYM-H observé, les deux épisodes de forçage, le forçage L1 et le panneau honnête d'Ap*, dans votre navigateur.</span>
+    </a>
+
+    <p class="bp-foot">Les méthodes, la configuration gelée et le registre de prédictions vivent dans le dépôt ParkersPhysics (<code>MHD_DENSITY_PHASE0_RESULTS.md</code>, <code>HINDCAST_DATABASE_STANDARD.md</code>). Demandes d'opérateurs : <a href="request-access.html">demander l'accès</a>.</p>
+  </article>
+
+</main>
+
+<script>
+(() => {
+    const KEY = 'pp-blog-lang';
+    const META = {
+        en: { flag: '🇺🇸', name: 'English'  },
+        es: { flag: '🇪🇸', name: 'Español'  },
+        fr: { flag: '🇫🇷', name: 'Français' },
+    };
+    const dd      = document.getElementById('bp-langdd');
+    const flagEl  = document.getElementById('bp-lang-flag');
+    const nameEl  = document.getElementById('bp-lang-name');
+    const buttons = dd.querySelectorAll('.menu button');
+
+    function setLang(lang) {
+        if (!META[lang]) lang = 'en';
+        document.querySelectorAll('article[data-lang]').forEach(a =>
+            a.classList.toggle('bp-active', a.dataset.lang === lang));
+        buttons.forEach(b => {
+            const active = b.dataset.setlang === lang;
+            b.setAttribute('aria-pressed', String(active));
+            b.querySelector('.check').hidden = !active;
+        });
+        flagEl.textContent = META[lang].flag;
+        nameEl.textContent = META[lang].name;
+        document.documentElement.lang = lang;
+        try { localStorage.setItem(KEY, lang); } catch (_) { /* private mode */ }
+    }
+
+    buttons.forEach(b => b.addEventListener('click', () => {
+        setLang(b.dataset.setlang);
+        dd.removeAttribute('open');
+    }));
+    document.addEventListener('click', e => {
+        if (dd.hasAttribute('open') && !dd.contains(e.target)) dd.removeAttribute('open');
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') dd.removeAttribute('open');
+    });
+
+    let initial = null;
+    try { initial = localStorage.getItem(KEY); } catch (_) { /* private mode */ }
+    if (!initial) initial = (navigator.language || 'en').slice(0, 2);
+    setLang(initial);
+})();
+</script>
+
+</body>
+</html>
