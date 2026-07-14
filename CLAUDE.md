@@ -58,6 +58,7 @@ This is **parkersphysics.com** — a physics-first space weather forecasting pla
 | SWMF Docker container | `swmf/Dockerfile` header comments, `MHD_DENSITY_PHASE0_RUNBOOK.md` |
 | Gannon hindcast | `GANNON_SIMULATION_DESIGN.md`, `MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md` |
 | Hindcast database (new events, scorecards) | `HINDCAST_BACKLOG.md`, `HINDCAST_DATABASE_STANDARD.md`, then the per-event runbook |
+| Hindcast Lab pages (st-patrick-storm.html + future event pages) | `js/hindcast-replay-engine.js` + `js/hindcast-charts.js` headers (generic, event-agnostic — new events get a bundle via a `scripts/build-*-replay.mjs` baker, NOT a fork of the Gannon modules) |
 | Earth / weather forecast | `WEATHER_FORECAST_PLAN.md`, `EARTH_LOD_NASA_PRECIP_PLAN.md` |
 | EarthView verdict card (earth.html dashboard) | §4.4 below, then `js/verdict-engine.js` + `js/verdict-card.js` headers; run `node tests/verdict-engine.mjs` after engine edits |
 | Navigation across pages | Run `node scripts/lint-nav.mjs`. There is a structural CI gate. |

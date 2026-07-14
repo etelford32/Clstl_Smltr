@@ -36,12 +36,17 @@ SWMF/BATS-R-US, LFM, and OpenGGCM results.
 
 - [ ] SYM-H/Dst reconstruction vs Kyoto — side-by-side with published SWMF
       community-challenge results
-- [ ] Two-step main phase timing: does the model reproduce both
+- [~] Two-step main phase timing: does the model reproduce both
       intensification steps and the partial recovery between them?
+      *(GM+IE baseline: yes in the driving — Φ_PC sheath episode peaks
+      107 kV @ 06:19 UT, collapses to 42 kV @ 11:15 during the observed
+      partial recovery (−38 nT @ 12:06), MC episode peaks 148 kV @ 13:40.
+      The Dst-trace version of this check needs model Dst → §3.1 + RCM run)*
 - [ ] GSA pipeline Dst (INTERMAGNET reconstruction) vs Kyoto official — the
       credibility asset, exercised on a second storm
-- [ ] Cross-polar cap potential time series (known BATS-R-US overprediction
-      bias — quantify ours)
+- [~] Cross-polar cap potential time series (known BATS-R-US overprediction
+      bias — quantify ours) *(series delivered @ 5 min, peak 148.3 kV;
+      bias number still needs a PC-index/AMIE reference series)*
 
 ### Initial predictions (pre-run — recorded before any run starts, per the standard)
 
@@ -55,15 +60,21 @@ SWMF/BATS-R-US, LFM, and OpenGGCM results.
 
 ### Backlog tasks
 
-- [ ] Pull OMNI 1-min + Wind/ACE level-2 for 16–19 Mar 2015; cross-check gaps
-      *(workstation path — SPDF is 403-blocked from the sandbox, re-confirmed
-      2026-07-13; exact commands in the runbook)*
+- [x] Pull OMNI 1-min + Wind/ACE level-2 for 16–19 Mar 2015; cross-check gaps
+      *(fixtures committed: `swmf/fixtures/hindcast/st_patrick_mar_2015/imf_l1.dat`
+      + `dsmc/…/ground_mag.csv`; SYM-H fingerprint verified −234 nT @ 22:47 UT
+      Mar 17, AE max 2298 nT)*
 - [x] Adapt Gannon runbook: interval boundaries, F10.7, dipole tilt for March
       equinox → `HINDCAST_STPATRICK_2015_RUNBOOK.md`
 - [x] Ap + F10.7 fixture staged
       (`dsmc/fixtures/hindcast/st_patrick_mar_2015/historical_ap.csv`,
       2015-03-15 → 03-21, peak 3-h ap 179)
-- [ ] Baseline GM+IE run (repeat Gannon config exactly — controlled comparison)
+- [x] Baseline GM+IE run (repeat Gannon config exactly — controlled comparison)
+      *(completed 2026-07-13: 72 h clean finish, 864 samples @ 5 min; peak
+      Φ_PC 148.3 kV @ 13:40 UT Mar 17, peak HPI 142.3 GW @ 17:20 UT; both
+      driving episodes of the two-step main phase reproduced. Hindcast JSON +
+      gm_ie scorecard committed under `data/hindcast/`; results section in
+      `MHD_DENSITY_PHASE0_RESULTS.md`. Model Dst still pending §3.1.)*
 - [ ] RCM-coupled run once Docker build validates *(image
       `parkerphysics/swmf:gm-ie-im` already ran Gannon run 2 + Feb 2022 —
       build is validated; this unblocks immediately after the GM+IE baseline)*

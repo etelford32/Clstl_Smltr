@@ -1,0 +1,54 @@
+{
+  "schema": "pp.hindcast.scorecard.v1",
+  "event_id": "st_patrick_mar_2015",
+  "label": "Mar 2015 St. Patrick's Day storm (G4)",
+  "variant": "gm_ie",
+  "config_version": "hc-std-v1",
+  "config_deviations": [],
+  "window_utc": [
+    "2015-03-16T12:00:00Z",
+    "2015-03-19T12:00:00Z"
+  ],
+  "generated_utc": "2026-07-14T12:57:28.949430Z",
+  "metrics": {
+    "density": {
+      "r": null,
+      "lag_min": null,
+      "n": 0
+    },
+    "velocity": {
+      "r": null,
+      "lag_min": null,
+      "n": 0
+    },
+    "dst": {
+      "model_min_nt": null,
+      "obs_min_nt": -234.0,
+      "depth_ratio": null,
+      "timing_error_min": null
+    },
+    "cpcp": {
+      "model_peak_kv": 148.3,
+      "obs_peak_kv": null,
+      "bias_pct": null
+    },
+    "highlight": {
+      "label": "two-step main phase",
+      "value": "2/2 driving episodes in \u03a6_PC (sheath 107 kV @ 06:19, lull 42 kV @ 11:15, MC 148 kV @ 13:40 UT Mar 17); model Dst pending (\u00a73.1)"
+    }
+  },
+  "inputs": {
+    "obs_symh": {
+      "path": "../dsmc/fixtures/hindcast/st_patrick_mar_2015/ground_mag.csv",
+      "column": "h_comp_mean_nt",
+      "rows": 4321,
+      "skipped": 0
+    },
+    "hindcast": {
+      "path": "../data/hindcast/st_patrick_mar_2015_hindcast.gm_ie.json",
+      "column": "phi_pc_kv",
+      "rows": 864,
+      "source": "batsrus"
+    }
+  }
+}
