@@ -116,7 +116,7 @@ Either way the output lands as a CSV (`t,dst_nt`) consumed by
 |---|---|---|---|---|---|---|---|
 | may_2024_gannon | gm_ie | **0.96** (20 min) | — | **0.025** (−13 / −518 nT) | — | peak 302 kV (5-min) | Ap* 524 vs Ap pinned 400 |
 | may_2024_gannon | gm_ie_im | — | — | TBD (extract model Dst) | TBD | peak 307.3 kV | relaxation-model gate PASS +48% |
-| st_patrick_mar_2015 | gm_ie | | | | | | |
+| st_patrick_mar_2015 | gm_ie | — | — | TBD (model Dst pending §3.1; obs −234 nT) | TBD | peak **148.3 kV** (5-min) | two-step: 2/2 driving episodes in Φ_PC (107 kV sheath / 42 kV lull / 148 kV MC) |
 | st_patrick_mar_2015 | gm_ie_im | | | | | | |
 | feb_2022_starlink | gm_ie_im | — | — | TBD | TBD | peak 70.6 kV | drag-force delta TBD |
 | september_2017 | gm_ie | | | | | | |

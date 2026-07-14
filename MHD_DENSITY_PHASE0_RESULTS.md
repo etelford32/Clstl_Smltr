@@ -287,3 +287,60 @@ workstations — the R2_* env vars are Vercel Sensitive-type (CLI pull
 returns empty). Not needed for launch: the page boots from this committed
 bundle. For between-deploy updates, either read the values from the Vercel
 dashboard into `.env.production.local`, or publish from a deploy-side job.
+
+## Mar 2015 St. Patrick's Day (G4) — run 1, GM+IE (no ring current) — `st_patrick_mar_2015`
+
+**Run (2026-07-13, workstation):** standard `hc-std-v1` GM+IE baseline
+(`gen_param gm_ie --no-im`), window 2015-03-16T12:00Z → 03-19T12:00Z (72 h),
+F10.7 114.3, OMNI HRO 1-min driver (`imf_l1.dat`, sentinel-clean, data gate
+passed). RIM positional IE log parsed at 300 s cadence → 864 samples
+(2 malformed rows skipped) → `data/hindcast/st_patrick_mar_2015_hindcast.json`
+(+ `.gm_ie.json` variant archive). Event 1 of the hindcast database — the
+community benchmark storm.
+
+**Headline numbers (model, GM+IE):**
+
+| Quantity | Value | When (UT) |
+|---|---|---|
+| Φ_PC peak (sheath episode) | 107.1 kV | Mar 17 06:19 |
+| Φ_PC lull between episodes | 42.1 kV | Mar 17 11:15 |
+| Φ_PC peak (magnetic-cloud episode, global) | **148.3 kV** | Mar 17 13:40 |
+| HPI peak | 142.3 GW | Mar 17 17:20 |
+| Pre-storm Φ_PC mean (Mar 16 12–24 UT) | 27.0 kV | — |
+
+**Two-step main phase (event highlight):** both driving episodes are
+present and correctly ordered. The model's sheath episode (Φ_PC 107 kV @
+06:19) follows the observed SSC (+67 nT SYM-H compression @ 04:48); the
+inter-episode collapse to 42 kV @ 11:15 brackets the observed partial
+recovery (SYM-H −38 nT @ 12:06); the magnetic-cloud episode (148 kV @
+13:40) sits at the observed Bz floor (−26 nT @ 13:07) and precedes the
+observed SYM-H minimum (−234 nT @ 22:47) by the expected ring-current
+integration lag. Observed values from the committed `ground_mag.csv`
+fixture (OMNI HRO 1-min; fingerprint −234 nT matches Kyoto/published).
+
+**Against the frozen predictions** (backlog, recorded pre-run):
+
+1. *GM+IE Dst floor −30 to −60 nT* — *unscored*: model Dst extraction
+   (standard §3.1) is still the open cross-cutting item; resolve before
+   the RCM run so both variants get `st_patrick_mar_2015_model_dst.csv`.
+2. *RCM-coupled −170 to −220 nT* — pending run 2.
+3. *density/velocity r ≥ 0.9* — pending workstation post-processing
+   (aligned model/obs CSV export, as for Gannon).
+4. *CPCP overpredicted 20–40 % vs PC-index/AMIE* — reference series not
+   yet staged; model peak 148.3 kV recorded, bias number TBD. For scale:
+   published SWMF CPCP peaks for this storm sit in the ~150–250 kV band,
+   so 148.3 kV is NOT an obvious overprediction — flagging now so the
+   eventual bias number is read against the frozen prediction honestly.
+
+**Caveats:**
+
+* The `ap_pseudo` track inside the hindcast JSON was emitted with the
+  runner's `v0-placeholder` regression (0.45·Φ_PC + 0.55·HPI) — do NOT
+  quote it. Ap* for this event should be re-derived with the joint
+  two-event fit (v1) before any Ap-comparison claim; the replay bundle
+  applies the joint fit out-of-sample and labels it as such.
+* GM+IE only — no ring current, so no Dst-depth claim is made anywhere
+  on the page/paper for this run; that is run 2's deliverable.
+
+**Scorecard:** `data/hindcast/st_patrick_mar_2015_scorecard_gm_ie.json`
+(hc-std-v1, no deviations). §3.2 table updated.

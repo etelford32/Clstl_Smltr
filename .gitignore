@@ -62,6 +62,12 @@ data/hindcast/*
 # Replays bundled with the front-end pages ARE tracked — they're small,
 # deterministic, and the static HTML depends on them at load time.
 !data/hindcast/*_replay.json
+# HINDCAST_DATABASE_STANDARD.md §4.2: the per-event hindcast timeseries
+# (current-best + per-variant archive), scorecards, and pseudo-Ap fits are
+# committed — they are the validation database rows the site + docs cite.
+!data/hindcast/*_hindcast*.json
+!data/hindcast/*_scorecard_*.json
+!data/hindcast/*_pseudo_ap_fit*.json
 
 # Jacchia surrogate vs. NRLMSISE-00 residual sweeps — runtime outputs.
 # Regenerate via: python -m dsmc.pipeline.jacchia_residuals
