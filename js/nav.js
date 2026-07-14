@@ -3,7 +3,9 @@
  *
  * Generates a full navigation bar with:
  *   - Logo + brand
- *   - Dropdown menus: Earth, Space Weather, Stars, Black Holes, Simulators
+ *   - Dropdown menus: Earth, Space Weather, Hindcast Lab, Stars, Black Holes,
+ *     Simulators — Hindcast Lab groups each validation-database event's
+ *     replay page with its paper as a nested (↳) link
  *   - Tier-gated items (public, free, advanced) where 'advanced' ≡ PRO
  *     (Advanced + Institution + Enterprise). See auth.isPro().
  *   - Auth state (Sign In / Dashboard / Admin badge)
@@ -56,21 +58,39 @@ const NAV_DROPDOWNS = [
         label: 'Space Weather',
         id: 'space-weather',
         items: [
+            { section: 'Live space weather' },
             { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',   tier: 'public', icon: '🌤️', id: 'weather' },
             { href: 'auroracle.html', label: 'AurOracle', sub: 'Predict the aurora · 7-night + 30-day outlook', tier: 'public', icon: '🌌', badge: 'NEW', id: 'auroracle' },
             { href: 'ring-current.html', label: 'Ring Current', sub: 'Live Dst digital twin · L1-driven forecast', tier: 'public', icon: '🧲', badge: 'NEW', id: 'ring-current' },
             { href: 'far-side-watch.html', label: 'Far-Side Watch', sub: 'Regions rotating in · days-to-weeks horizon', tier: 'public', icon: '🌗', badge: 'NEW', id: 'far-side-watch' },
-            { href: 'gannon-superstorm.html', label: 'Gannon Superstorm', sub: 'May 2024 G5 hindcast · MHD-corrected density', tier: 'public', icon: '⚡', badge: 'NEW', id: 'gannon-superstorm' },
-            { href: 'blog-gannon-hindcast.html', label: 'The Index That Lied', sub: 'Gannon hindcast write-up · EN/ES/FR', tier: 'public', icon: '📝', badge: 'NEW', id: 'blog-gannon-hindcast' },
+            { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
+            { section: 'Planetary systems' },
             { href: 'solar-system.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: '🪐', id: 'solar' },
             { href: 'jupiter-system.html', label: 'Jupiter System', sub: 'Galilean moons · 4:2:1 Laplace resonance', tier: 'public', icon: '🪐', id: 'jupiter-system' },
             { href: 'saturn-system.html', label: 'Saturn System', sub: 'Moon-sculpted rings · Cassini Division · live density waves', tier: 'public', icon: '🪐', badge: 'NEW', id: 'saturn-system' },
             { href: 'uranus-system.html', label: 'Uranus System', sub: 'Tipped 98° · ε-ring shepherds · crowded moons', tier: 'public', icon: '🔷', badge: 'NEW', id: 'uranus-system' },
             { href: 'neptune-system.html', label: 'Neptune System', sub: 'Retrograde Triton · rings & arcs · J₂ N-body', tier: 'public', icon: '🔵', badge: 'NEW', id: 'neptune-system' },
-            { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
+            { section: 'Missions & maps' },
             { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: '🛸', id: 'missions' },
             { href: 'mission-planner.html', label: 'Mission Planner', sub: 'Launch rockets · plan Moon & Mars trips', tier: 'public', icon: '🎯', badge: 'NEW', id: 'mission-planner' },
             { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',           tier: 'free',   icon: '🌌' },
+        ],
+    },
+    {
+        // Hindcast Lab — the validation database, one section per event with
+        // its interactive replay page and the accompanying paper nested
+        // under it. Events land here as their runs complete
+        // (HINDCAST_BACKLOG.md order: Gannon → St. Patrick's → Feb 2022
+        // Starlink → Sep 2017).
+        label: 'Hindcast Lab',
+        id: 'hindcast-lab',
+        items: [
+            { section: 'May 2024 · Gannon superstorm (G5)' },
+            { href: 'gannon-superstorm.html', label: 'Gannon Superstorm', sub: '72 h replay · MHD-corrected density vs the Ap ceiling', tier: 'public', icon: '⚡', id: 'gannon-superstorm' },
+            { href: 'blog-gannon-hindcast.html', label: '↳ Paper · The Index That Lied', sub: 'Write-up · EN/ES/FR', tier: 'public', icon: '📝', id: 'blog-gannon-hindcast' },
+            { section: "Mar 2015 · St. Patrick's Day (G4)" },
+            { href: 'st-patrick-storm.html', label: "St. Patrick's Storm", sub: 'Two-step main phase · the community benchmark', tier: 'public', icon: '🍀', badge: 'NEW', id: 'st-patrick-storm' },
+            { href: 'blog-stpatrick-hindcast.html', label: '↳ Paper · The Storm Every Model Takes', sub: 'Write-up · EN/ES/FR', tier: 'public', icon: '📝', badge: 'NEW', id: 'blog-stpatrick-hindcast' },
         ],
     },
     {
