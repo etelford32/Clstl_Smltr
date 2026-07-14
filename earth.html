@@ -342,6 +342,17 @@ nav {
 #hud .hv { color:#a0d8f0; font-weight:600; }
 #hud .hk { color:#4a6a80; }
 
+/* When the verdict card is active it OWNS the location UX: its stable
+   header carries the location editor, its stats block carries the sun /
+   ISS / clock readouts. The legacy #hud readout, the standalone
+   #loc-panel, and the mobile-toolbar Location button are therefore
+   hidden — ONE panel, per the EarthView consolidation. They come back
+   untouched when the card is opted out (?verdict=0 / ev_verdict='0')
+   or if the card fails to boot (the init's catch removes this class). */
+body.ev-verdict-solo #hud,
+body.ev-verdict-solo #loc-panel,
+body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:none !important; }
+
 /* ─── Coord tooltip ──────────────────────────────────────────── */
 #coord-tip {
     position:absolute; z-index:55; pointer-events:none;
@@ -12639,6 +12650,17 @@ window.addEventListener('user-location-changed', e => {
     }
 })();
 
+// EarthView verdict-card flag — computed once, up here, because two
+// consumers need it: the first-visit #loc-panel hint just below (the
+// hint must not fire when the panel it points at is hidden) and the
+// card init at the bottom of this script. DEFAULT ON; opt out with
+// ?verdict=0 (one visit) or localStorage ev_verdict='0' (sticky).
+const EV_VERDICT_QUERY = new URLSearchParams(location.search).get('verdict');
+let EV_VERDICT_LS = null;
+try { EV_VERDICT_LS = localStorage.getItem('ev_verdict'); } catch {}
+const EV_VERDICT_ON = EV_VERDICT_QUERY !== '0'
+    && !(EV_VERDICT_QUERY === null && EV_VERDICT_LS === '0');
+
 // First-visit hint — dismissable toast that points at the new top-left
 // #loc-panel. Fires only when (a) the visitor has never dismissed it,
 // and (b) no location is currently saved. The hint disappears
@@ -12646,6 +12668,9 @@ window.addEventListener('user-location-changed', e => {
 // flow doesn't get nagged. Stamping a localStorage flag prevents
 // re-display on subsequent visits.
 (function() {
+    // The verdict card supersedes the loc-panel (and carries its own
+    // set-location affordance), so the hint would point at nothing.
+    if (EV_VERDICT_ON) return;
     const HINT_KEY = 'pp-earth-loc-hint-dismissed';
     try { if (localStorage.getItem(HINT_KEY) === '1') return; } catch {}
     if (loadUserLocation()) return;
@@ -13127,15 +13152,23 @@ initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
 // (unit-tested: tests/verdict-engine.mjs); DOM/wiring in js/verdict-card.js.
 //
 // DEFAULT ON. Opt out with ?verdict=0 (one visit) or localStorage
-// ev_verdict='0' (sticky). The card is additive chrome — it removes or
-// replaces none of the panels/layers below, and "Explore ›" collapses it
-// to a pill so the full research UI stays one tap away.
+// ev_verdict='0' (sticky) — the flag itself (EV_VERDICT_ON) is computed
+// up by the first-visit hint block, which also consumes it.
+//
+// The card is the ONE location panel on this page: it carries the
+// location editor (type / pick a saved place, ↵ to search, auto-fly +
+// zoom to the result), the Fly here / Clear buttons, and the sun / ISS /
+// clock stats that used to live in #loc-panel and #hud — both of which
+// are hidden via body.ev-verdict-solo while the card is active (and
+// restored on opt-out or card-boot failure). Everything else — the layer
+// system, research panels, forecast-validation suite — stays untouched;
+// "Explore ›" collapses the card to a draggable pill so the full
+// research UI stays one tap away.
 {
-    const verdictParam = new URLSearchParams(location.search).get('verdict');
-    let verdictLs = null;
-    try { verdictLs = localStorage.getItem('ev_verdict'); } catch {}
-    const VERDICT_ON = verdictParam !== '0' && !(verdictParam === null && verdictLs === '0');
-    if (VERDICT_ON) {
+    if (EV_VERDICT_ON) {
+        // Hide the superseded chrome immediately (not at load-complete)
+        // so #hud / #loc-panel never flash before the card mounts.
+        document.body.classList.add('ev-verdict-solo');
         const startVerdict = () => {
             try {
                 const evAirFeed = new AirQualityFeed();
@@ -13147,6 +13180,24 @@ initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
                     air:    evAirFeed,
                     getLocation: loadUserLocation,
                     sunTimes,
+                    solarPos: solarPosition,
+                    // Location editor plumbing. saveUserLocation /
+                    // clearUserLocation dispatch 'user-location-changed',
+                    // which the rest of the page (globe pin, hidden legacy
+                    // panel, saved-locations card) already listens for.
+                    searchLocation: async (q) => {
+                        const loc = await geocodeQuery(q);
+                        saveUserLocation(loc);
+                        return loc;
+                    },
+                    setLocation:   saveUserLocation,
+                    clearLocation: clearUserLocation,
+                    getSavedLocations: listSavedLocations,
+                    // Auto-zoom target: same low tilt-band arrival as the
+                    // classic "Fly here" button; the fly pipeline flips
+                    // controls.autoRotate off on arrival so the globe stops
+                    // rotating under the framed location.
+                    flyTo: (loc) => flyToLatLon(loc.lat, loc.lon, 1.12),
                     // ISS TLE comes from the 'stations' group satTracker already
                     // loads for the globe; pass search runs off the first-paint
                     // path (the card defers it to idle time internally).
@@ -13156,10 +13207,12 @@ initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
                         return nextPasses(iss.tle, { lat: loc.lat, lon: loc.lon },
                             { horizonH: 48, minPeakDeg: 20, maxPasses: 10 });
                     },
-                    flagSource: verdictParam === '1' ? 'query' : verdictLs === '1' ? 'ls' : 'default',
+                    flagSource: EV_VERDICT_QUERY === '1' ? 'query' : EV_VERDICT_LS === '1' ? 'ls' : 'default',
                 });
             } catch (err) {
-                // The card must never take the globe down with it.
+                // The card must never take the globe down with it — and if
+                // it dies, give the classic location UX back.
+                document.body.classList.remove('ev-verdict-solo');
                 console.error('[EarthView] verdict card failed to start:', err);
             }
         };

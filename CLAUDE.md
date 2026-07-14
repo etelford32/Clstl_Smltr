@@ -116,12 +116,29 @@ overlap is not a bug).
 - **Flag:** default ON. Opt out with `?verdict=0` (one visit) or
   `localStorage ev_verdict='0'` (sticky). "Explore ›" collapses the card to
   a pill — it does NOT destroy it.
-- **The card is additive chrome.** Do not remove the layer system, the
-  research panels, the forecast-validation suite, or any existing panel in
-  its favor — and do not remove the card in theirs. `verdict-card.js`'s
-  header documents the stable-header / re-rendered-body split that keeps
-  drag wiring alive across data refreshes; don't "simplify" it into a full
-  innerHTML re-render.
+- **The card OWNS the location UX** (2026-07 consolidation, explicitly
+  requested): it carries the location editor row (typeable + saved-place
+  datalist, ↵ geocodes via the page-supplied `searchLocation` dep,
+  auto-flies + zooms via `flyTo`, arrival turns `controls.autoRotate` off),
+  the Fly here / Clear buttons, and the sun / ISS / clock stats. While it
+  is active, `body.ev-verdict-solo` hides `#hud`, `#loc-panel`, and the
+  mobile-toolbar Location button. Do NOT resurrect those alongside the
+  card — one location panel is the point — and do NOT delete them either:
+  they are the fallback UI for `?verdict=0` and for card-boot failure
+  (the init's catch removes the class). The editor row is a STABLE element
+  like the header; putting it in the re-rendered body would blow away the
+  input mid-keystroke.
+- **The collapsed pill is a second drag handle** (`makePanelDraggable`'s
+  `handle` option) — the header is `display:none` while minimised, so
+  without it the pill can't be moved. The collapsed card container is
+  `pointer-events:none` (pill re-enables) so its invisible footprint
+  doesn't block globe rotation.
+- **Otherwise the card is additive chrome.** Do not remove the layer
+  system, the research panels, the forecast-validation suite, or any other
+  panel in its favor — and do not remove the card in theirs.
+  `verdict-card.js`'s header documents the stable-header /
+  re-rendered-body split that keeps drag wiring alive across data
+  refreshes; don't "simplify" it into a full innerHTML re-render.
 - **Telemetry:** `telemetry.recordFeature(feature, action, meta)` → kind
   `'feature'`, 100% sampled. The kind exists in the DB via
   `supabase-feature-telemetry-migration.sql` (applied 2026-07-13). The CHECK

@@ -7,11 +7,17 @@
  *
  *   1. The card mounts at #verdict-host by default (no flag needed) and
  *      renders all sections: verdict word, 6 factor chips, temp graph,
- *      week grid, tonight's-sky rows, CTA + Explore, provenance.
+ *      week grid, tonight's-sky rows, local stats, CTA + Explore,
+ *      provenance — and it is the ONE location panel (#hud + #loc-panel
+ *      are hidden while it is active).
  *   2. Factor chips carry real values from the mocked feed (not '--').
  *   3. Dragging the header by pointer moves the card and persists position.
- *   4. Explore › collapses to the pill; the pill restores the card.
- *   5. ?verdict=0 disables the card entirely (opt-out contract).
+ *   4. Explore › collapses to the pill; the pill restores the card AND
+ *      is itself a drag handle (a minimised card must stay movable).
+ *   5. The location editor row geocodes a typed query, personalises the
+ *      card, auto-flies the camera, and stops auto-rotation on arrival.
+ *   6. ?verdict=0 disables the card entirely and restores the classic
+ *      #loc-panel + #hud chrome (opt-out contract).
  *
  * Runs via `npx playwright test tests/verdict-card-smoke.spec.js`.
  */
@@ -110,6 +116,21 @@ test.describe('EarthView verdict card', () => {
         await expect(card.locator('.ev-verdict-explore')).toBeVisible();
         await expect(card.locator('.ev-verdict-prov')).toContainText('NOAA SWPC');
         await expect(card.locator('.ev-verdict-prov')).toContainText('May 2024 G5');
+
+        // Location editor: input pre-filled from the saved location, with
+        // the Fly here / Clear buttons showing (location is set).
+        await expect(card.locator('[data-ev="loc-input"]')).toHaveValue('Granite Bay');
+        await expect(card.locator('[data-ev="loc-fly"]')).toBeVisible();
+        await expect(card.locator('[data-ev="loc-clear"]')).toBeVisible();
+
+        // Local stats block: sun card + clock strip carry real values.
+        await expect(card.locator('.ev-verdict-stats')).toBeAttached();
+        await expect(card.locator('.ev-verdict-statcard').first()).toContainText('Day length');
+        await expect(card.locator('[data-ev="stat-utc"]')).not.toHaveText('--');
+
+        // The card is the ONE location panel: legacy chrome is hidden.
+        await expect(page.locator('#hud')).toBeHidden();
+        await expect(page.locator('#loc-panel')).toBeHidden();
     });
 
     test('drags by the header and persists position', async ({ page }) => {
@@ -152,12 +173,69 @@ test.describe('EarthView verdict card', () => {
         await expect(card.locator('.ev-verdict-word')).toBeVisible();
     });
 
+    test('collapsed pill is a drag handle — the minimised card stays movable', async ({ page }) => {
+        await bootWithCard(page);
+        const card = page.locator('#ev-verdict-card');
+        await expect(card.locator('.ev-verdict-explore')).toBeVisible({ timeout: 30_000 });
+        await card.locator('.ev-verdict-explore').click();
+
+        const pill = card.locator('[data-ev="pill"]');
+        await expect(pill).toBeVisible();
+        // The Explore click may have auto-scrolled the window (the button
+        // sits near the card's bottom edge); raw mouse coordinates below
+        // need the pill actually inside the viewport.
+        await pill.scrollIntoViewIfNeeded();
+        const box = await pill.boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2 + 180, box.y + box.height / 2 + 120, { steps: 8 });
+        await page.mouse.up();
+
+        const left = await card.evaluate(el => parseFloat(el.style.left));
+        const top = await card.evaluate(el => parseFloat(el.style.top));
+        expect(left).toBeGreaterThan(100);
+        expect(top).toBeGreaterThan(150);
+        const stored = await page.evaluate(() => localStorage.getItem('earth-panel-pos-ev-verdict-card'));
+        expect(stored).toBeTruthy();
+
+        // A drag must not eat the pill's click-to-expand for good.
+        await pill.click();
+        await expect(card).not.toHaveClass(/ev-collapsed/);
+    });
+
+    test('typing a location personalises the card, flies, and stops rotation', async ({ page }) => {
+        await page.route('**/nominatim.openstreetmap.org/**', r => r.fulfill({
+            json: [{
+                lat: '40.7128', lon: '-74.0060',
+                display_name: 'New York, NY, USA',
+                address: { city: 'New York' },
+            }],
+        }));
+        await bootWithCard(page);
+        const card = page.locator('#ev-verdict-card');
+        await expect(card).toBeVisible({ timeout: 30_000 });
+        await expect(page.locator('#lyr-rotate')).toBeChecked();
+
+        const input = card.locator('[data-ev="loc-input"]');
+        await input.fill('New York');
+        await input.press('Enter');
+
+        await expect(card.locator('[data-ev="loc-name"]')).toHaveText('New York', { timeout: 15_000 });
+        await expect(card.locator('[data-ev="loc-coords"]')).toContainText('40.71°N');
+        // Auto-fly landed → the fly pipeline turns auto-rotation off (and
+        // syncs the Layers checkbox), so the framed location stays framed.
+        await expect(page.locator('#lyr-rotate')).not.toBeChecked({ timeout: 15_000 });
+    });
+
     test('?verdict=0 disables the card', async ({ page }) => {
         await bootWithCard(page, '/earth.html?verdict=0');
         // Give the lazy-init window time to (not) fire.
         await page.waitForTimeout(4_000);
         await expect(page.locator('#ev-verdict-card')).toHaveCount(0);
-        // The host stays present-but-empty; the classic UI is untouched.
+        // The host stays present-but-empty; the classic UI is untouched —
+        // opting out restores the standalone location panel and HUD.
         await expect(page.locator('#loc-panel')).toBeAttached();
+        await expect(page.locator('#loc-panel')).toBeVisible();
+        await expect(page.locator('#hud')).toBeVisible();
     });
 });
