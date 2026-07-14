@@ -97,18 +97,43 @@ official Dst from Kyoto WDC for the side-by-side figure; density/velocity
 truth from the OMNI L1 series itself (propagated) or a virtual-satellite
 extraction, per event runbook.
 
-### 3.1 Model-Dst source — open item
+### 3.1 Model-Dst source — RESOLVED 2026-07-14 (option 1)
 
-The GM logfile currently saves the `RAW` variable set, which does **not**
-include a Dst proxy; the Gannon GM+IE model-Dst (−13 nT) was computed by
-workstation post-processing. Before the Event-1 coupled run, pick one:
+Both templates now carry a session-3 `#GEOMAGINDICES` block (180-min Kp
+window, 60 s output — the SWPC v2 recipe). GM writes
+`GM/IO2/geoindex_e<stamp>.log` with Kp and the Biot–Savart Dst;
+`swmf/pipeline/parse_geoindex_log.py` extracts it to the canonical CSV:
 
-1. add a session-3 `#GEOMAGINDICES` block to both templates (SWPC v2 does
-   this; emits a `geoindex_*.log` with Kp/Dst — needs a small parser), or
-2. keep the workstation Biot–Savart post-processing and land it as a script.
+```sh
+python3 -m pipeline.parse_geoindex_log --run-dir <RUN_DIR> \
+  --start <window-start> --end <window-end> \
+  --out ../data/hindcast/<event>_model_dst.csv     # → t,dst_nt,kp @ 5 min
+# then: scorecard.py … --model-dst ../data/hindcast/<event>_model_dst.csv
+```
 
-Either way the output lands as a CSV (`t,dst_nt`) consumed by
-`scorecard.py --model-dst`. Tracked in `HINDCAST_BACKLOG.md` cross-cutting.
+**This is output-only — the solution is untouched, so `hc-std-v1` is
+retained** (the version guard exists to protect physics comparability, and
+the physics is identical). Runs that predate the block (Gannon runs 1–2,
+Feb 2022 run 1, St. Patrick's gm_ie run 1) have no geoindex log; their
+model Dst still comes from workstation Biot–Savart post-processing (the
+Gannon −13 nT path) or stays unscored. First run to get it natively: the
+St. Patrick's `gm_ie_im` run 2.
+
+**CPCP reference (the `cpcp_bias_pct` input) is also now one command** —
+the PC(N) index ships inside the same OMNI monthly ASCII staged on Day 1
+(column 45), converted via Ridley & Kihn (2004):
+
+```sh
+cd dsmc && python3 -m pipeline.import_pc_index \
+  --in ../swmf/raw/omni/<omni_monthly>.asc \
+  --out fixtures/hindcast/<event_id>/cpcp_reference.csv \
+  --start <window-start> --end <window-end> -v
+# then: scorecard.py … --obs-cpcp ../dsmc/fixtures/hindcast/<event_id>/cpcp_reference.csv
+```
+
+Mind the tool's documented caveats (±10–20% inherent uncertainty; linear
+extrapolation overstates the reference above PC ≈ 10 where CPCP saturates —
+re-examine before leaning on it for a G5).
 
 ### 3.2 Scorecard table (running)
 

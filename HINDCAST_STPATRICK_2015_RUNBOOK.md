@@ -66,7 +66,8 @@ move the goalposts:
 | Kyoto official Dst (final) | WDC Kyoto | `dsmc/fixtures/hindcast/st_patrick_mar_2015/kyoto_dst.csv` (`t,dst_nt`) | 1 h |
 | Wind + ACE L2 (gap cross-check) | SPDF | workstation-local `swmf/raw/` — not committed | 1 min |
 | BATS-R-US output (Φ_PC, HPI) | this run | `data/hindcast/st_patrick_mar_2015_hindcast.json` (+ per-variant archive copy) | 5 min |
-| Model Dst | run post-processing (standard §3.1 — resolve before the coupled run) | `data/hindcast/st_patrick_mar_2015_model_dst.csv` (`t,dst_nt`) | ≤ 5 min |
+| Model Dst | `#GEOMAGINDICES` geoindex log → `parse_geoindex_log.py` (run 2+; run 1 predates the block → post-processing fallback) | `data/hindcast/st_patrick_mar_2015_model_dst.csv` (`t,dst_nt,kp`) | ≤ 5 min |
+| CPCP reference (PC-index-derived) | PC(N) col 45 of the Day-1 OMNI monthly ASCII → `import_pc_index.py` (Ridley & Kihn 2004) | `dsmc/fixtures/hindcast/st_patrick_mar_2015/cpcp_reference.csv` (`t,phi_pc_kv,pc_n`) | 5 min |
 | Scorecards | `pipeline/scorecard.py` | `data/hindcast/st_patrick_mar_2015_scorecard_{gm_ie,gm_ie_im}.json` | — |
 
 ## Day 1 — pull / verify inputs (workstation path)
@@ -162,10 +163,21 @@ cp ../data/hindcast/st_patrick_mar_2015_hindcast.json \
    ../data/hindcast/st_patrick_mar_2015_hindcast.gm_ie.json
 ```
 
-**Model Dst:** resolve standard §3.1 (session-3 `#GEOMAGINDICES` block vs
-workstation Biot–Savart post-processing) **before the coupled run**, so both
-variants get a `st_patrick_mar_2015_model_dst.csv` and the headline
-deliverable is one command.
+**Model Dst (standard §3.1 — resolved 2026-07-14):** both PARAM templates
+now carry a session-3 `#GEOMAGINDICES` block, so any run generated from them
+(the coupled run 2 onward) writes `GM/IO2/geoindex_e*.log`. Extract after
+the run:
+
+```sh
+python3 -m pipeline.parse_geoindex_log --run-dir <RUN_DIR> \
+  --start 2015-03-16T12:00:00Z --end 2015-03-19T12:00:00Z \
+  --out ../data/hindcast/st_patrick_mar_2015_model_dst.csv
+```
+
+Note the gm_ie run 1 (2026-07-13) predates the block — its PARAM had no
+geoindex output, so scoring P1 (the GM+IE Dst-floor prediction) still needs
+the workstation Biot–Savart post-processing fallback, or stays unscored.
+Run 2 gets the headline Dst deliverable natively.
 
 ## Day 3 — score
 
@@ -199,10 +211,22 @@ booleans + two timing errors, condensed into the highlight string:
 
 Example: `--highlight "two-step main phase=2/2 steps, Δt1 +25 min, Δt2 −40 min"`.
 
-**CPCP:** no committed reference series yet. Stage a PC-index-derived or
-AMIE Φ_PC as `dsmc/fixtures/hindcast/st_patrick_mar_2015/cpcp_reference.csv`
-(`t,phi_pc_kv`) if obtainable; otherwise the scorecard reports model peak
-only and the bias claim leans on the published-values comparison below.
+**CPCP:** the reference series is now one workstation command — the PC(N)
+index rides in the same OMNI monthly ASCII pulled on Day 1 (column 45):
+
+```sh
+cd dsmc && python3 -m pipeline.import_pc_index \
+  --in ../swmf/raw/omni/omni_min201503.asc \
+  --out fixtures/hindcast/st_patrick_mar_2015/cpcp_reference.csv \
+  --start 2015-03-16T12:00:00Z --end 2015-03-19T12:00:00Z -v
+```
+
+Commit the fixture, then add
+`--obs-cpcp ../dsmc/fixtures/hindcast/st_patrick_mar_2015/cpcp_reference.csv`
+to the scorecard call — `cpcp_bias_pct` fills in and P4 gets its number.
+Mind the conversion's documented caveats (±10–20% inherent; saturates
+above PC ≈ 10); the published-values comparison below remains the
+second, independent check.
 
 Update the §3.2 scorecard table in `HINDCAST_DATABASE_STANDARD.md` with the
 printed markdown rows, append a results section to

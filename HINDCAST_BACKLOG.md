@@ -199,7 +199,13 @@ the main delta)
       `HINDCAST_DATABASE_STANDARD.md` §4
 - [x] Register `st_patrick_mar_2015` and `september_2017` in
       `swmf/pipeline/hindcast_runner.py` EVENTS
-- [ ] Model-Dst extraction path: session-3 `#GEOMAGINDICES` output (or
+- [x] Model-Dst extraction path: session-3 `#GEOMAGINDICES` output (or
       workstation Biot–Savart post-processing) → CSV consumed by
       `scorecard.py --model-dst`. Decide + wire before the Event-1 RCM run
       so the Dst deliverables are one command. (See standard doc §3.1.)
+      *(Resolved 2026-07-14, option 1: `#GEOMAGINDICES` in session 3 of both
+      templates + `swmf/pipeline/parse_geoindex_log.py` (11 tests). Output-
+      only → hc-std-v1 retained. Pre-existing runs still need the
+      post-processing fallback. Bonus: `dsmc/pipeline/import_pc_index.py`
+      builds the CPCP reference from the Day-1 OMNI monthly ASCII (PC(N)
+      col 45 → Ridley & Kihn 2004), unblocking `cpcp_bias_pct` too.)*

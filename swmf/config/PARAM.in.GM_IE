@@ -324,6 +324,21 @@ T			DoSaveRestart
 2			nStage
 0.6			CflExpl
 
+! Geomagnetic index output — the standard §3.1 model-Dst path (resolved
+! 2026-07-14, option 1). GM computes Kp (3-h window over a synthetic
+! mid-latitude magnetometer ring, per the SWPC recipe) and Dst (Biot–Savart
+! integral of all GM-domain currents at Earth's center) and writes
+! GM/IO2/geoindex_e<stamp>.log at 60 s. parse_geoindex_log.py turns that
+! into the t,dst_nt CSV consumed by scorecard.py --model-dst.
+! OUTPUT-ONLY: no effect on the solution, so hc-std-v1 is retained (see
+! standard §3.1). Runs that predate this block simply have no geoindex log —
+! their model Dst needs workstation Biot–Savart post-processing instead.
+! If a build rejects the command (PARAM.XML drift), delete this block and
+! fall back to that post-processing path; do NOT change anything else.
+#GEOMAGINDICES
+180			nSizeKpWindow [min]
+60.0			DtOutput      [sec]
+
 #END_COMP GM ────────────────────────────────────────────────────────────────
 
 ! Total storm duration. gen_param.py sets ${STOP_TIME_S}; time advances only
