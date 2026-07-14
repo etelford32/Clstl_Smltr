@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>St. Patrick's Day Storm 2015 Hindcast · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/st-patrick-storm">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/st-patrick-storm">
+<meta property="og:title" content="March 2015 St. Patrick's Day Storm — the benchmark hindcast">
+<meta property="og:description" content="Replay of the most-modeled geomagnetic storm in the literature through BATS-R-US + Ridley, driven by real L1 data. Both steps of the famous two-step main phase, reproduced — with the observed SYM-H alongside.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/st-patrick-storm.jpg">
+<meta property="og:image:alt" content="St. Patrick's Day March 2015 G4 storm hindcast">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="March 2015 St. Patrick's Day Storm — the benchmark hindcast">
+<meta name="twitter:description" content="The community benchmark storm, replayed through coupled MHD driven by real L1 data — two-step main phase reproduced.">
+<meta name="twitter:image" content="https://parkersphysics.com/static/og/st-patrick-storm.jpg">
+<meta name="description" content="Interactive hindcast of the 17 March 2015 St. Patrick's Day G4 storm: BATS-R-US + Ridley (hc-std-v1) driven by real OMNI L1 data, with observed SYM-H, AE, and GFZ ap alongside the model's Φ_PC, HPI, and out-of-sample pseudo-Ap. Event 1 of the Parkers Physics hindcast validation database.">
+
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#02100a; color:#cce8d8;
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+
+/* ── Layout ─────────────────────────────────────────────── */
+#sp-app {
+    display:grid;
+    grid-template-columns: 340px 1fr 380px;
+    gap:14px; padding:14px;
+    min-height:calc(100vh - 50px);
+}
+@media (max-width: 1280px) {
+    #sp-app { grid-template-columns: 300px 1fr; }
+    #sp-right { grid-column: 1 / -1; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+}
+@media (max-width: 900px) {
+    #sp-app { grid-template-columns: 1fr; padding:10px; gap:10px; }
+    #sp-right { grid-template-columns:1fr; }
+}
+
+.sp-panel {
+    background: rgba(4,20,12,.74); backdrop-filter: blur(14px);
+    border: 1px solid rgba(82,224,154,.18);
+    border-radius: 12px;
+    padding: 14px 16px;
+}
+.sp-panel h2 {
+    font-size:.68rem; text-transform:uppercase; letter-spacing:.14em;
+    color:#52e09a; font-weight:700; margin-bottom:10px;
+}
+
+/* ── Hero ──────────────────────────────────────────────── */
+#sp-hero { padding:18px 22px 16px; grid-column:1 / -1; }
+#sp-hero-row { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+#sp-hero h1 {
+    font-size: 1.45rem; font-weight: 800;
+    background: linear-gradient(100deg, #eafff2 35%, #52e09a 80%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    margin: 0;
+}
+#sp-hero p { font-size:.84rem; color:#bcd8c8; line-height:1.5; margin-top:6px; max-width:760px; }
+.sp-badge {
+    display:inline-block; padding:3px 9px; border-radius:4px;
+    font-size:.62rem; font-weight:800; letter-spacing:.08em;
+    background: rgba(82,224,154,.14); color:#52e09a;
+    border:1px solid rgba(82,224,154,.32);
+}
+.sp-pill {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:3px 10px; border-radius:999px;
+    font-size:.66rem; font-weight:700; letter-spacing:.04em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(100,240,150,.5);
+    color:#6f8;
+}
+.sp-sources { display:flex; flex-wrap:wrap; gap:6px 10px; margin-top:8px; }
+.sp-src {
+    font-size:.6rem; letter-spacing:.03em; color:#6f8;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    border:1px solid rgba(100,240,150,.35); border-radius:999px;
+    padding:2px 8px;
+}
+
+/* ── Charts ─────────────────────────────────────────────── */
+.sp-chart {
+    width: 100%; height: 240px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.02);
+    border: 1px dashed rgba(255,255,255,.12);
+    display:flex; align-items:center; justify-content:center;
+    color:#7a9;  font-size:.78rem;
+    position:relative; overflow:hidden;
+}
+.sp-chart canvas { display:block; width:100%; height:100%; }
+
+.sp-legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; }
+.sp-legend-row { display:flex; align-items:center; gap:6px; font-size:.74rem; color:#bcd8c8; }
+.sp-legend-swatch { width:14px; height:3px; border-radius:2px; }
+
+/* ── Scrubber ──────────────────────────────────────────── */
+#sp-scrubber {
+    width:100%; appearance:none; height:6px;
+    background: linear-gradient(90deg,#1a3428,#52e09a,#1a3428);
+    border-radius:3px; outline:none;
+}
+#sp-scrubber::-webkit-slider-thumb {
+    appearance:none; width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #52e09a; cursor:pointer;
+}
+.sp-scrubber-row { display:flex; align-items:center; gap:12px; margin-top:8px; }
+.sp-scrubber-row .sp-time { font-family: ui-monospace, monospace; font-size:.84rem; color:#9fe8c0; }
+.sp-controls { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+.sp-controls button {
+    background: rgba(82,224,154,.14); color:#52e09a;
+    border: 1px solid rgba(82,224,154,.32);
+    border-radius: 6px; padding: 4px 12px;
+    font-weight: 700; font-size:.72rem; cursor:pointer;
+}
+.sp-controls button:hover { background: rgba(82,224,154,.24); }
+
+/* ── Phase chip ─────────────────────────────────────────── */
+.sp-phase {
+    display:inline-block; padding:2px 9px; border-radius:4px;
+    font-size:.66rem; font-weight:800; letter-spacing:.06em;
+    text-transform:uppercase;
+}
+.sp-phase--quiet    { background: rgba(160,160,200,.12); color:#b8b0e0; border:1px solid rgba(160,160,200,.4); }
+.sp-phase--sheath   { background: rgba(255,200,80,.12);  color:#fc6;    border:1px solid rgba(255,200,80,.4); }
+.sp-phase--main     { background: rgba(255,80,80,.14);   color:#f88;    border:1px solid rgba(255,80,80,.45); }
+.sp-phase--recovery { background: rgba(120,200,255,.12); color:#6cf;    border:1px solid rgba(120,200,255,.45); }
+
+/* ── KPI tiles ──────────────────────────────────────────── */
+.sp-kpi-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+.sp-kpi {
+    background: rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius: 8px; padding: 10px 12px;
+}
+.sp-kpi-label { font-size:.64rem; color:#8ab89d; text-transform:uppercase; letter-spacing:.08em; margin-bottom:4px; }
+.sp-kpi-value { font-size:1.05rem; font-weight:700; color:#fff; font-family: ui-monospace, monospace; }
+.sp-kpi-sub   { font-size:.68rem; color:#8ab89d; margin-top:2px; }
+
+/* ── Narration band (hc- classes from js/hindcast-charts.js) ── */
+#sp-narration { position:relative; padding:8px 0 0; min-height:118px; }
+.hc-narration-track {
+    position:relative; height:30px;
+    border-top:1px solid rgba(255,255,255,.18);
+    margin-top:26px;
+}
+.hc-narration-moment {
+    position:absolute; top:-24px; transform:translateX(-50%);
+    background:none; border:none; padding:0; margin:0;
+    color:inherit; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+    font:inherit; width:max-content; max-width:13ch; text-align:center;
+}
+.hc-narration-moment--low { top:auto; bottom:-4px; flex-direction:column-reverse; }
+.hc-narration-label {
+    font-size:.62rem; color:#bcd8c8;
+    font-family: ui-monospace, monospace; letter-spacing:.02em;
+    opacity:.7; transition:color .12s, opacity .12s; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; max-width:13ch;
+}
+.hc-narration-tick { display:block; width:1px; height:8px; background:rgba(255,255,255,.35); }
+.hc-narration-dot {
+    display:block; width:9px; height:9px; border-radius:50%;
+    background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.35);
+    transition:background .12s, transform .12s, box-shadow .12s;
+}
+.hc-narration-moment:hover .hc-narration-label { opacity:1; color:#fff; }
+.hc-narration-moment:hover .hc-narration-dot   { transform:scale(1.18); }
+.hc-narration-moment--quiet    .hc-narration-dot { background:rgba(180,170,230,.32); border-color:#b8b0e0; }
+.hc-narration-moment--sheath   .hc-narration-dot { background:rgba(255,200,80,.35);  border-color:#fc6; }
+.hc-narration-moment--main     .hc-narration-dot { background:rgba(255,90,90,.45);   border-color:#f88; }
+.hc-narration-moment--recovery .hc-narration-dot { background:rgba(120,200,255,.4);  border-color:#6cf; }
+.hc-narration-moment.is-active .hc-narration-label { opacity:1; color:#fff; font-weight:600; }
+.hc-narration-moment.is-active .hc-narration-dot {
+    transform:scale(1.32); box-shadow:0 0 12px 2px rgba(82,224,154,.45);
+}
+.hc-narration-caption { padding:16px 4px 4px; min-height:64px; }
+.hc-narration-clock {
+    font-size:.68rem; color:#8ab89d;
+    font-family: ui-monospace, monospace; letter-spacing:.08em; text-transform:uppercase;
+}
+.hc-narration-title { font-size:1rem; font-weight:700; color:#fff; margin-top:2px; }
+.hc-narration-body  { font-size:.82rem; line-height:1.45; color:#bcd8c8; margin-top:4px; max-width:64ch; }
+
+/* ── Prediction ledger ──────────────────────────────────── */
+.sp-pred { border-left:2px solid rgba(255,255,255,.14); padding:1px 0 1px 11px; margin-bottom:12px; }
+.sp-pred-id {
+    font-family: ui-monospace, monospace; font-size:.6rem;
+    letter-spacing:.08em; text-transform:uppercase; color:#8ab89d; margin-bottom:4px;
+    display:flex; align-items:center; gap:8px;
+}
+.sp-pred-line { font-size:.78rem; line-height:1.5; color:#bcd8c8; }
+.sp-pred-line strong { color:#eafff2; }
+.sp-pred-status {
+    font-size:.56rem; font-weight:800; letter-spacing:.08em; border-radius:4px; padding:2px 6px;
+}
+.sp-pred-status--hit     { color:#6f8; border:1px solid rgba(100,240,150,.4); background:rgba(100,240,150,.07); }
+.sp-pred-status--pending { color:#fc6; border:1px solid rgba(255,200,80,.4);  background:rgba(255,200,80,.06); }
+.sp-pred-status--flag    { color:#f88; border:1px solid rgba(255,90,90,.4);   background:rgba(255,90,90,.07); }
+.sp-note {
+    font-size:.74rem; line-height:1.5; color:#8ab89d; margin-top:12px;
+    padding-top:10px; border-top:1px solid rgba(255,255,255,.08);
+}
+.sp-note strong { color:#bcd8c8; font-weight:700; }
+
+/* ── Methodology ────────────────────────────────────────── */
+#sp-methodology p { font-size:.78rem; line-height:1.55; color:#bcd8c8; margin-bottom:8px; }
+#sp-methodology a { color:#52e09a; text-decoration:none; }
+#sp-methodology a:hover { text-decoration:underline; }
+
+/* ── Paper CTA ──────────────────────────────────────────── */
+.sp-cta {
+    display:block; margin-top:12px; padding:14px 16px; border-radius:10px;
+    background:linear-gradient(120deg, rgba(82,224,154,.14), rgba(79,195,247,.08));
+    border:1px solid rgba(82,224,154,.35); text-decoration:none;
+}
+.sp-cta .t { color:#eafff2; font-weight:750; font-size:.9rem; display:block; }
+.sp-cta .s { color:#8ab89d; font-size:.74rem; margin-top:4px; display:block; }
+.sp-cta:hover { border-color:rgba(79,195,247,.55); }
+
+@keyframes pulse { 0%,100% { opacity:.6; } 50% { opacity:1; } }
+.gn-pulse, .sp-pulse { animation: pulse 1.8s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<!-- ── Nav (shared via nav.js) ───────────────────────────── -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260714"; initNav("st-patrick-storm");</script>
+
+<div id="sp-app">
+
+  <!-- ── Hero ───────────────────────────────────────── -->
+  <section id="sp-hero" class="sp-panel">
+    <div id="sp-hero-row">
+      <h1>March 2015 St. Patrick's Day Storm — the benchmark hindcast</h1>
+      <span class="sp-badge">G4 · SYM-H −234</span>
+      <span id="sp-source-pill" class="sp-pill">● REAL BATS-R-US HINDCAST · GM+IE baseline</span>
+    </div>
+    <div class="sp-sources" aria-label="Data sources — all committed, all real">
+      <span class="sp-src">● MHD model — BATS-R-US + Ridley (hc-std-v1)</span>
+      <span class="sp-src">● L1 driver — NASA OMNI 1-min</span>
+      <span class="sp-src">● SYM-H / AE — OMNI (observed)</span>
+      <span class="sp-src">● ap — GFZ definitive</span>
+    </div>
+    <p>
+      The most-modeled geomagnetic storm in the literature — the storm every
+      magnetosphere code is judged against — replayed for 72 hours
+      (16 Mar 12:00 UTC → 19 Mar 12:00 UTC) through BATS-R-US + Ridley under
+      the frozen hindcast-database configuration, driven by nothing but real
+      L1 solar wind. Its signature is the <strong>two-step main phase</strong>:
+      sheath first, a deceptive lull, then the magnetic-cloud core. The model
+      reproduces both driving episodes; the observed SYM-H runs alongside,
+      unretouched. Event 1 of the hindcast validation database.
+    </p>
+  </section>
+
+  <!-- ── Left: scrubber + KPIs ───────────────────────── -->
+  <aside id="sp-left">
+
+    <section class="sp-panel">
+      <h2>Time scrubber</h2>
+      <input id="sp-scrubber" type="range" min="0" max="72" step="0.1" value="0">
+      <div class="sp-scrubber-row">
+        <span id="sp-time" class="sp-time">2015-03-16T12:00:00Z</span>
+        <span id="sp-phase" class="sp-phase sp-phase--quiet">quiet</span>
+      </div>
+      <div class="sp-controls">
+        <button data-seek-h="0">window</button>
+        <button data-seek-h="16.8">SSC</button>
+        <button data-seek-h="21.6">step 1</button>
+        <button data-seek-h="24.1">the lull</button>
+        <button data-seek-h="25.67">Φ peak</button>
+        <button data-seek-h="34.78">SYM-H min</button>
+        <button data-seek-h="48">recovery</button>
+        <button id="sp-play">▶ play 600×</button>
+      </div>
+    </section>
+
+    <section class="sp-panel" style="margin-top:14px;">
+      <h2>At cursor — observed</h2>
+      <div class="sp-kpi-grid">
+        <div class="sp-kpi"><div class="sp-kpi-label">SYM-H</div>
+          <div class="sp-kpi-value" id="sp-kpi-symh">—</div>
+          <div class="sp-kpi-sub">nT · ring current (obs)</div></div>
+        <div class="sp-kpi"><div class="sp-kpi-label">AE</div>
+          <div class="sp-kpi-value" id="sp-kpi-ae">—</div>
+          <div class="sp-kpi-sub">nT · electrojets (obs)</div></div>
+        <div class="sp-kpi"><div class="sp-kpi-label">Bz (GSM)</div>
+          <div class="sp-kpi-value" id="sp-kpi-bz">—</div>
+          <div class="sp-kpi-sub">nT · L1 driver</div></div>
+        <div class="sp-kpi"><div class="sp-kpi-label">V<sub>SW</sub></div>
+          <div class="sp-kpi-value" id="sp-kpi-vsw">—</div>
+          <div class="sp-kpi-sub">km/s · L1 driver</div></div>
+      </div>
+      <h2 style="margin-top:14px;">At cursor — model</h2>
+      <div class="sp-kpi-grid">
+        <div class="sp-kpi"><div class="sp-kpi-label">Φ<sub>PC</sub></div>
+          <div class="sp-kpi-value" id="sp-kpi-phi">—</div>
+          <div class="sp-kpi-sub">kV · BATS-R-US</div></div>
+        <div class="sp-kpi"><div class="sp-kpi-label">HPI</div>
+          <div class="sp-kpi-value" id="sp-kpi-hpi">—</div>
+          <div class="sp-kpi-sub">GW · precipitation</div></div>
+        <div class="sp-kpi"><div class="sp-kpi-label">Ap* (joint fit)</div>
+          <div class="sp-kpi-value" id="sp-kpi-apstar">—</div>
+          <div class="sp-kpi-sub">out-of-sample · see ledger P4</div></div>
+        <div class="sp-kpi"><div class="sp-kpi-label">ap (GFZ)</div>
+          <div class="sp-kpi-value" id="sp-kpi-apreal">—</div>
+          <div class="sp-kpi-sub">3-h definitive · peak 179</div></div>
+      </div>
+    </section>
+
+  </aside>
+
+  <!-- ── Center: narrative + charts ──────────────────── -->
+  <main id="sp-center">
+
+    <section class="sp-panel">
+      <h2>Storm narrative</h2>
+      <div id="sp-narration" class="sp-pulse">Storm timeline renders here</div>
+    </section>
+
+    <section class="sp-panel" style="margin-top:14px;">
+      <h2>The two-step main phase — observed SYM-H</h2>
+      <div id="sp-chart-symh" class="sp-chart sp-pulse" style="height:260px;">SYM-H trace renders here</div>
+      <div class="sp-legend">
+        <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#ffd24d;"></span> SYM-H (OMNI 1-min, observed)</div>
+        <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#8899aa;"></span> AE / 10 (observed)</div>
+      </div>
+      <p style="font-size:.72rem; color:#8ab89d; margin:6px 0 0;">
+        Model Dst is deliberately absent: the GM+IE baseline carries no ring current, so it has no
+        honest Dst to show. The RCM-coupled run (run 2) owns that trace — its pre-registered target
+        is −170 to −220 nT. No cherry-picking: this panel is pure observation.
+      </p>
+    </section>
+
+    <section class="sp-panel" style="margin-top:14px;">
+      <h2>Model driving — Φ<sub>PC</sub> and HPI reproduce both episodes</h2>
+      <div id="sp-chart-model" class="sp-chart sp-pulse" style="height:260px;">Φ_PC + HPI render here</div>
+      <div class="sp-legend">
+        <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#52e09a;"></span> Φ<sub>PC</sub> polar-cap potential (kV)</div>
+        <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#4fc3f7;"></span> HPI hemispheric power (GW)</div>
+      </div>
+      <p style="font-size:.72rem; color:#8ab89d; margin:6px 0 0;">
+        Episode 1 (sheath): 107 kV at 06:19 UT. The lull: 42 kV at 11:15 UT, right as observed
+        SYM-H relaxes. Episode 2 (cloud): 148 kV at 13:40 UT, on the Bz floor. Same shape,
+        same order, same timing class as the observed storm — from L1 data alone.
+      </p>
+    </section>
+
+    <section class="sp-panel" style="margin-top:14px;">
+      <h2>What hit the magnetosphere — L1 driver</h2>
+      <div id="sp-chart-imf" class="sp-chart sp-pulse" style="height:240px;">IMF Bz + V render here</div>
+      <div class="sp-legend">
+        <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#f88;"></span> Bz GSM (nT) — the reconnection driver</div>
+        <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#9a86ff;"></span> V<sub>SW</sub> (km/s, right axis)</div>
+      </div>
+      <p style="font-size:.72rem; color:#8ab89d; margin:6px 0 0;">
+        This is the model's <em>entire</em> input: OMNI 1-min L1 measurements, sentinel-cleaned and
+        gated (line gaps are real data gaps — we don't interpolate). One CME, near-equinox geometry,
+        Bz floor −26 nT held for hours: the textbook reconnection storm.
+      </p>
+    </section>
+
+    <section class="sp-panel" style="margin-top:14px;">
+      <h2>The index test — GFZ ap vs out-of-sample Ap*</h2>
+      <div id="sp-chart-ap" class="sp-chart sp-pulse" style="height:240px;">ap comparison renders here</div>
+      <div class="sp-legend">
+        <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#889;"></span> ap (GFZ definitive 3-h, staircase)</div>
+        <div class="sp-legend-row"><span class="sp-legend-swatch" style="background:#52e09a;"></span> Ap* from Φ<sub>PC</sub>+HPI (joint two-event fit, applied blind)</div>
+      </div>
+      <p style="font-size:.72rem; color:#8ab89d; margin:6px 0 0;">
+        The honest panel. Gannon needed Ap* because ap saturated at 400; here ap peaks at 179 —
+        no ceiling — so this storm is a clean test of the mapping itself. Verdict: shape right,
+        amplitude ~50% hot at peak (274 vs 179). That bias is consistent with the well-known
+        BATS-R-US CPCP overprediction we pre-registered in the runbook, and it's now a measured
+        number we can calibrate against — see the paper.
+      </p>
+    </section>
+
+  </main>
+
+  <!-- ── Right: predictions + why + methodology ──────── -->
+  <aside id="sp-right">
+
+    <section class="sp-panel">
+      <h2>Prediction ledger — frozen before the run</h2>
+      <div class="sp-pred">
+        <div class="sp-pred-id">P1 · GM+IE Dst floor −30 to −60 nT <span class="sp-pred-status sp-pred-status--pending">PENDING §3.1</span></div>
+        <p class="sp-pred-line">Scoring needs the model-Dst extraction path (Biot–Savart post-processing or
+        <code>#GEOMAGINDICES</code>), which is the one open cross-cutting item. Not scored ≠ passed.</p>
+      </div>
+      <div class="sp-pred">
+        <div class="sp-pred-id">P2 · RCM run: −170 to −220 nT <span class="sp-pred-status sp-pred-status--pending">RUN 2</span></div>
+        <p class="sp-pred-line">The coupled GM+IE+IM (RCM2) run is next — the same image that ran Gannon run 2.
+        Its Dst-depth target is on the record before it runs.</p>
+      </div>
+      <div class="sp-pred">
+        <div class="sp-pred-id">P3 · density/velocity r ≥ 0.9 <span class="sp-pred-status sp-pred-status--pending">POST-PROC</span></div>
+        <p class="sp-pred-line">Wind + ACE were both healthy in this era; the aligned model/observed series
+        export (the Gannon r = 0.96 construction) is queued workstation post-processing.</p>
+      </div>
+      <div class="sp-pred">
+        <div class="sp-pred-id">P4 · CPCP overpredicted 20–40% <span class="sp-pred-status sp-pred-status--flag">BIAS SEEN</span></div>
+        <p class="sp-pred-line">Φ<sub>PC</sub> peaked at <strong>148.3 kV</strong> — inside the published-model band for
+        this storm. But the out-of-sample Ap* built from Φ<sub>PC</sub>+HPI runs ~50% hot vs GFZ ap
+        at peak (274 vs 179), pointing the same direction as the pre-registered bias. The AMIE/PC-index
+        reference series will pin the CPCP number itself.</p>
+      </div>
+      <p class="sp-note">
+        <strong>Why a ledger?</strong> Predictions recorded in
+        <a href="/HINDCAST_BACKLOG.md" target="_blank" style="color:#52e09a">the backlog</a> before any run,
+        scored in public afterward — including the misses. That's the product.
+      </p>
+    </section>
+
+    <section class="sp-panel" style="margin-top:14px;">
+      <h2>Why this storm matters</h2>
+      <div class="sp-pred">
+        <div class="sp-pred-id">The community benchmark</div>
+        <p class="sp-pred-line">17 March 2015 is the most-modeled storm in the magnetosphere literature —
+        SWMF, LFM, and OpenGGCM all have published runs against it. Reproducing it under the same frozen
+        configuration that ran Gannon is what turns <em>one good run</em> into <em>a validation database</em>.</p>
+      </div>
+      <div class="sp-pred">
+        <div class="sp-pred-id">The controlled comparison</div>
+        <p class="sp-pred-line">Same grid, same solver ladder, same coupling cadences, same container image
+        as the Gannon baseline (<code>hc-std-v1</code>) — only the storm changed. Peak ap 179 vs Gannon's
+        pinned 400: this event tests the physics in the regime where the index still works.</p>
+      </div>
+      <div class="sp-pred">
+        <div class="sp-pred-id">Database status</div>
+        <p class="sp-pred-line">Event 0 Gannon G5 ✓ (both variants) · <strong>Event 1 St. Patrick's G4 — GM+IE done, RCM queued</strong> ·
+        Event 2 Feb 2022 Starlink ✓ (coupled) · Event 3 Sep 2017 staged.</p>
+      </div>
+      <a class="sp-cta" href="blog-stpatrick-hindcast.html">
+        <span class="t">📝 Read the paper: “The storm every model takes” →</span>
+        <span class="s">The write-up — what we froze, what we got, and the bias we're publishing instead of hiding. EN/ES/FR.</span>
+      </a>
+    </section>
+
+    <section id="sp-methodology" class="sp-panel" style="margin-top:14px;">
+      <h2>Methodology</h2>
+      <p>
+        OMNI HRO 1-min L1 IMF is replayed into BATS-R-US + Ridley (SWMF) under the frozen
+        <code>hc-std-v1</code> configuration — the identical grid, three-session cold-start ladder,
+        Boris correction, and coupling cadences as every other event in the database — yielding
+        Φ<sub>PC</sub> and HPI at 5-minute cadence. Observed SYM-H/AE come from the committed
+        OMNI ground-mag fixture (fingerprint-checked: −234 nT at 22:47 UT). Ap* applies the joint
+        two-event pseudo-Ap fit (Gannon + Feb 2022) <em>out of sample</em> — its miss is data, not decoration.
+      </p>
+      <p>
+        Reproduce it: <a href="/HINDCAST_STPATRICK_2015_RUNBOOK.md" target="_blank">event runbook</a> ·
+        <a href="/HINDCAST_DATABASE_STANDARD.md" target="_blank">frozen standard + scorecard</a> ·
+        <a href="/data/hindcast/st_patrick_mar_2015_scorecard_gm_ie.json" target="_blank">scorecard JSON</a> ·
+        <a href="/data/hindcast/st_patrick_mar_2015_replay.json" target="_blank">this page's bundle</a>.
+      </p>
+      <p>Sources: NASA SPDF (OMNI) · GFZ Potsdam · WDC Kyoto · SWMF/BATS-R-US (U. Michigan).</p>
+    </section>
+
+  </aside>
+
+</div>
+
+<!-- ── AURORA ALERT CAPTURE ─────────────────────────────── -->
+<section class="aurora-capture-band" aria-label="Aurora alerts signup">
+  <div class="aurora-capture-copy">
+    <span class="aurora-kicker">Aurora Alerts · Free</span>
+    <h2>The 2015 storm lit up the mid-latitudes. Catch the next one.</h2>
+    <p>We'll email you the moment Kp spikes and the aurora comes within reach — with a live link to watch it hit Earth's magnetosphere.</p>
+  </div>
+  <form data-aurora-capture data-source="stpatrick" novalidate>
+    <input type="email" inputmode="email" autocomplete="email" placeholder="you@email.com" aria-label="Email" required>
+    <input type="text" name="company" tabindex="-1" autocomplete="off"
+           aria-hidden="true" style="position:absolute;left:-9999px;opacity:0;height:0;width:0">
+    <button type="submit">Alert me →</button>
+    <span data-aurora-status class="aurora-status" role="status" aria-live="polite"></span>
+  </form>
+</section>
+<script type="module">
+  import { initAuroraCapture } from './js/aurora-capture.js';
+  initAuroraCapture();
+</script>
+
+<!-- ── Engine bootstrap ──────────────────────────────────── -->
+<script type="module">
+import { loadReplay, createPlayer } from './js/hindcast-replay-engine.js?v=1';
+import { createSeriesChart, createNarrationBand } from './js/hindcast-charts.js?v=1';
+
+const els = {
+    scrub:  document.getElementById('sp-scrubber'),
+    time:   document.getElementById('sp-time'),
+    phase:  document.getElementById('sp-phase'),
+    play:   document.getElementById('sp-play'),
+    pill:   document.getElementById('sp-source-pill'),
+    symh:   document.getElementById('sp-kpi-symh'),
+    ae:     document.getElementById('sp-kpi-ae'),
+    bz:     document.getElementById('sp-kpi-bz'),
+    vsw:    document.getElementById('sp-kpi-vsw'),
+    phi:    document.getElementById('sp-kpi-phi'),
+    hpi:    document.getElementById('sp-kpi-hpi'),
+    apstar: document.getElementById('sp-kpi-apstar'),
+    apreal: document.getElementById('sp-kpi-apreal'),
+};
+
+const fmt = (x, d = 0, unit = '') =>
+    (x === null || x === undefined) ? '—' : Number(x).toFixed(d) + unit;
+
+function paint(s) {
+    els.time.textContent = s.t.slice(0, 19) + 'Z';
+    els.phase.textContent = s.phase.label;
+    els.phase.className = `sp-phase sp-phase--${s.phase.id}`;
+    els.symh.textContent   = fmt(s.series.sym_h_nt, 0, ' nT');
+    els.ae.textContent     = fmt(s.series.ae_nt, 0, ' nT');
+    els.bz.textContent     = fmt(s.series.bz_nt, 1, ' nT');
+    els.vsw.textContent    = fmt(s.series.v_kms, 0);
+    els.phi.textContent    = fmt(s.series.phi_pc_kv, 1, ' kV');
+    els.hpi.textContent    = fmt(s.series.hpi_gw, 1, ' GW');
+    els.apstar.textContent = fmt(s.series.ap_star, 0);
+    els.apreal.textContent = fmt(s.series.ap_real, 0);
+}
+
+(async function boot() {
+    let replay, player;
+    try {
+        replay = await loadReplay({ url: '/data/hindcast/st_patrick_mar_2015_replay.json' });
+        player = createPlayer(replay);
+    } catch (e) {
+        console.error('st-patrick: replay load failed', e);
+        els.pill.textContent = '⚠ replay load failed';
+        return;
+    }
+
+    const H = (iso) => player.hoursOfISO(iso);
+    const onSeekHours = (h) => { els.scrub.value = h; onScrub(); };
+
+    // AE is plotted /10 so it shares the SYM-H axis scale honestly labeled.
+    replay.series.ae_div10 = replay.series.ae_nt.map(v => (v == null ? null : v / 10));
+
+    const symhChart = createSeriesChart(document.getElementById('sp-chart-symh'), replay, player, {
+        series: [
+            { key: 'ae_div10',  color: '#8899aa', width: 1 },
+            { key: 'sym_h_nt',  color: '#ffd24d', width: 2 },
+        ],
+        yLabel: 'nT (AE ÷ 10)', zeroLine: true, phaseBands: true, onSeekHours,
+        markers: [
+            { h: H('2015-03-17T04:48:00Z'), label: 'SSC +67',  color: '#fc6' },
+            { h: H('2015-03-17T09:37:00Z'), label: 'step 1 −101', color: '#fc6', labelDy: 14 },
+            { h: H('2015-03-17T12:06:00Z'), label: 'lull −38', color: '#b8b0e0', labelDy: 28 },
+            { h: H('2015-03-17T22:47:00Z'), label: 'min −234', color: '#f88' },
+        ],
+    });
+
+    const modelChart = createSeriesChart(document.getElementById('sp-chart-model'), replay, player, {
+        series: [
+            { key: 'hpi_gw',    color: '#4fc3f7', width: 1.5 },
+            { key: 'phi_pc_kv', color: '#52e09a', width: 2 },
+        ],
+        yLabel: 'kV · GW', phaseBands: true, onSeekHours,
+        markers: [
+            { h: H('2015-03-17T06:19:00Z'), label: 'ep. 1 · 107 kV', color: '#52e09a' },
+            { h: H('2015-03-17T11:15:00Z'), label: 'lull 42', color: '#b8b0e0', labelDy: 14 },
+            { h: H('2015-03-17T13:40:00Z'), label: 'ep. 2 · 148 kV', color: '#52e09a', labelDy: 28 },
+        ],
+    });
+
+    const imfChart = createSeriesChart(document.getElementById('sp-chart-imf'), replay, player, {
+        series: [
+            { key: 'v_kms', color: '#9a86ff', width: 1, axis: 'right' },
+            { key: 'bz_nt', color: '#f88', width: 1.5 },
+        ],
+        yLabel: 'Bz nT', yLabelRight: 'V km/s', zeroLine: true, phaseBands: true, onSeekHours,
+        markers: [
+            { h: H('2015-03-17T13:07:00Z'), label: 'Bz −26', color: '#f88' },
+        ],
+    });
+
+    const apChart = createSeriesChart(document.getElementById('sp-chart-ap'), replay, player, {
+        series: [
+            { key: 'ap_real', color: '#889', width: 1.5, staircase: true },
+            { key: 'ap_star', color: '#52e09a', width: 1.5 },
+        ],
+        yLabel: 'ap', phaseBands: true, onSeekHours,
+        markers: [
+            { h: H('2015-03-17T13:40:00Z'), label: 'Ap* 274 vs ap 179', color: '#52e09a' },
+        ],
+    });
+
+    const narration = createNarrationBand(document.getElementById('sp-narration'), replay, player, { onSeekHours });
+
+    els.scrub.max = player.hoursMax;
+
+    function onScrub() {
+        const h = parseFloat(els.scrub.value);
+        const s = player.seekHours(h);
+        paint(s);
+        for (const c of [symhChart, modelChart, imfChart, apChart]) c.setCursor(h);
+        narration.setCursor(h);
+    }
+    els.scrub.addEventListener('input', onScrub);
+    document.querySelectorAll('[data-seek-h]').forEach(btn => {
+        btn.addEventListener('click', () => { els.scrub.value = btn.dataset.seekH; onScrub(); });
+    });
+
+    let playing = false, raf = null, lastT = 0;
+    function tick(now) {
+        if (!playing) return;
+        if (!lastT) lastT = now;
+        const dt = (now - lastT) / 1000;
+        lastT = now;
+        const h = Math.min(player.hoursMax, player.cursorHours + dt / 6); // 600×: 1 wall-s = 10 storm-min
+        els.scrub.value = h;
+        onScrub();
+        if (h >= player.hoursMax) { playing = false; els.play.textContent = '▶ play 600×'; return; }
+        raf = requestAnimationFrame(tick);
+    }
+    els.play.addEventListener('click', () => {
+        playing = !playing;
+        els.play.textContent = playing ? '⏸ pause' : '▶ play 600×';
+        if (playing) { lastT = 0; raf = requestAnimationFrame(tick); }
+        else if (raf) cancelAnimationFrame(raf);
+    });
+
+    onScrub();
+})();
+</script>
+
+</body>
+</html>
