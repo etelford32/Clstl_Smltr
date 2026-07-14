@@ -1,0 +1,21 @@
+[package]
+name = "shielding-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Shielding Lab ionospheric potential solver: height-integrated current continuity ∇·(Σ∇Φ) = −J∥·sin(I) on a magnetic lat/MLT grid, R1/R2 FAC driving with a relaxation-ODE Region-2 (the shielding physics), Moen–Brekke EUV + auroral oval + subauroral trough conductance, SAPS conductance feedback. Same equation the SWMF IE component (Ridley Ionosphere Model) solves. Pure Rust core (cargo test runs the physics gate), cdylib extern-C surface for the browser (no wasm-bindgen)."
+
+[lib]
+# cdylib → the WASM artifact; rlib → native tests + the CLI example harness.
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Tests/examples run through dev profile; keep opt on so the solver loops
+# don't make `cargo test` crawl.
+[profile.dev]
+opt-level = 2

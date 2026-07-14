@@ -18,7 +18,8 @@ resolver = "2"
 #   rust-sirius/   Sirius A+B binary physics engine   (build-sirius.sh)
 #   rust-abell85/  Black Hole Observatory N-body kernel (build-wasm.sh)
 #   rust-gravity/  Gravity Lab N-body + test-particle kernel (build-wasm.sh)
-exclude  = ["rust", "rust-sstar", "rust-forecast", "rust-sgp4", "rust-sunfield", "rust-sirius", "rust-abell85", "rust-gravity"]
+#   rust-shielding/ Shielding Lab ionospheric potential solver (build-wasm.sh)
+exclude  = ["rust", "rust-sstar", "rust-forecast", "rust-sgp4", "rust-sunfield", "rust-sirius", "rust-abell85", "rust-gravity", "rust-shielding"]
 
 [profile.release]
 opt-level        = 3
