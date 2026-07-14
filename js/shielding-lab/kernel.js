@@ -51,6 +51,9 @@ export async function loadKernel(source) {
             x.shl_set_controls(bz, by, vsw, nDens, f107, tauMin, sapsOn ? 1 : 0);
         },
 
+        /** R2 mode: 'relaxation' (default) or 'drift' (mini-RCM, Phase 6). */
+        setR2Mode(mode) { x.shl_set_r2_mode(mode === 'drift' ? 1 : 0); },
+
         /** Advance substeps × dtSeconds of simulated time. */
         step(dtSeconds, substeps = 1) { x.shl_step(dtSeconds, substeps); },
 
@@ -61,6 +64,8 @@ export async function loadKernel(source) {
         vEast() { return view(x.shl_v_east_ptr, n); },
         vNorth() { return view(x.shl_v_north_ptr, n); },
         sapsProfile() { return view(x.shl_saps_profile_ptr, nlat); },
+        /** Ring-current pressure (nPa) — zeros unless drift-physics R2. */
+        pressure() { return view(x.shl_pressure_ptr, n); },
 
         // Scalar diagnostics.
         cpcpKv() { return x.shl_cpcp_kv(); },

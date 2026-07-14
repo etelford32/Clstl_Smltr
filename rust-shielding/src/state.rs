@@ -24,7 +24,20 @@ use crate::conductance::{self, CondParams, SAPS_DEPLETION_FLOOR};
 use crate::diagnostics::{self, Fields, SapsSummary};
 use crate::fac::{self, FacParams};
 use crate::grid::{idx, Grid, N, NLAT, NMLT};
+use crate::rcm::Rcm;
 use crate::solver::{self, Operator, Workspace};
+
+/// How Region 2 is produced (plan Phase 6).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum R2Mode {
+    /// Parameterized: mirror-image sheets whose amplitude relaxes toward
+    /// α·I_R1 with time constant τ_s. Morphology imposed, timing emergent.
+    Relaxation,
+    /// mini-RCM drift physics (rcm.rs): proton channels drift in the
+    /// solved E-field; R2 is the Vasyliunas current of the partial ring
+    /// current. Morphology AND timing emergent; τ_s slider inert.
+    DriftPhysics,
+}
 
 /// SAPS frictional-heating threshold (V/m): ~30 mV/m.
 pub const SAPS_E_THRESHOLD: f64 = 0.030;
@@ -74,6 +87,8 @@ pub struct Sim {
     pub controls: Controls,
     /// R2/R1 equilibrium ratio α.
     pub alpha: f64,
+    pub r2_mode: R2Mode,
+    pub rcm: Rcm,
 
     pub t_sim_s: f64,
     pub i_r1_ma: f64,
@@ -110,17 +125,23 @@ pub struct Sim {
     pub out_v_east: Vec<f32>,
     pub out_v_north: Vec<f32>,
     pub out_saps_profile: Vec<f32>,
+    /// Ring-current pressure (nPa) — nonzero only in DriftPhysics mode.
+    pub out_pressure: Vec<f32>,
 }
 
 impl Sim {
     pub fn new() -> Self {
         let controls = Controls::default();
+        let grid = Grid::new();
+        let rcm = Rcm::new(&grid);
         let mut sim = Sim {
-            grid: Grid::new(),
+            grid,
             cond: CondParams::default(),
             facp: FacParams::default(),
             controls,
             alpha: 0.8,
+            r2_mode: R2Mode::Relaxation,
+            rcm,
             t_sim_s: 0.0,
             i_r1_ma: 0.0,
             i_r2_ma: 0.0,
@@ -151,6 +172,7 @@ impl Sim {
             out_v_east: vec![0.0; N],
             out_v_north: vec![0.0; N],
             out_saps_profile: vec![0.0; NLAT],
+            out_pressure: vec![0.0; N],
         };
         // Start in equilibrium at the default (quiet) driving so the first
         // frame is already a sensible steady state.
@@ -175,9 +197,22 @@ impl Sim {
         // (1–2) Driving.
         let e_kl = fac::kan_lee_mvpm(c.bz_nt, c.by_nt, c.vsw_kms);
         self.i_r1_ma = fac::r1_current_ma(e_kl);
-        let tau = (c.tau_s_min * 60.0).max(1.0);
-        let eq = self.alpha * self.i_r1_ma;
-        self.i_r2_ma += (eq - self.i_r2_ma) * (1.0 - (-dt_s / tau).exp());
+        match self.r2_mode {
+            R2Mode::Relaxation => {
+                let tau = (c.tau_s_min * 60.0).max(1.0);
+                let eq = self.alpha * self.i_r1_ma;
+                self.i_r2_ma += (eq - self.i_r2_ma) * (1.0 - (-dt_s / tau).exp());
+            }
+            R2Mode::DriftPhysics => {
+                // Drift the ring current in the PREVIOUS step's solved
+                // potential (one-step lag, same convention as the SAPS
+                // feedback), then read the emergent R2 off the Vasyliunas
+                // current. τ_s is inert here — timing comes from drifts.
+                self.rcm
+                    .step(&self.grid, &self.phi, dt_s, c.vsw_kms, c.n_cm3);
+                self.i_r2_ma = self.rcm.downward_ma(&self.grid);
+            }
+        }
         self.t_sim_s += dt_s;
 
         let shift = self.lat_shift_deg();
@@ -254,7 +289,17 @@ impl Sim {
             &mut self.sigma_p,
             &mut self.sigma_h,
         );
-        fac::rebuild_jpar(&self.grid, &self.facp, self.i_r1_ma, self.i_r2_ma, shift, &mut self.jpar);
+        match self.r2_mode {
+            R2Mode::Relaxation => {
+                fac::rebuild_jpar(&self.grid, &self.facp, self.i_r1_ma, self.i_r2_ma, shift, &mut self.jpar);
+            }
+            R2Mode::DriftPhysics => {
+                fac::rebuild_jpar(&self.grid, &self.facp, self.i_r1_ma, 0.0, shift, &mut self.jpar);
+                for k in 0..N {
+                    self.jpar[k] += self.rcm.jpar_applied[k];
+                }
+            }
+        }
         fac::rebuild_jpar(&self.grid, &self.facp, self.i_r1_ma, 0.0, shift, &mut self.jpar_r1);
         let op: Operator = solver::assemble(
             &self.grid,
@@ -284,6 +329,9 @@ impl Sim {
         }
         for i in 0..NLAT {
             self.out_saps_profile[i] = self.saps_profile[i] as f32;
+        }
+        for k in 0..N {
+            self.out_pressure[k] = self.rcm.pressure_npa[k] as f32;
         }
     }
 

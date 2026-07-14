@@ -408,3 +408,194 @@ impl CloneLite for Workspace {
         Workspace::new()
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Phase 6 — mini-RCM drift-physics R2 (rcm.rs)
+// ═══════════════════════════════════════════════════════════════════════
+
+use shielding_kernel::rcm::{Rcm, NK, NRCM};
+use shielding_kernel::state::R2Mode;
+
+/// The upwind advection is conservative: with no source/loss and no flow
+/// across the domain edges (φ-independent potential → ψ̇ = 0), total
+/// content is preserved to rounding.
+#[test]
+fn rcm_advection_conserves_content() {
+    let grid = Grid::new();
+    let mut rcm = Rcm::new(&grid);
+    // Interior blob in channel 2, rows 20–30, all MLT.
+    for i in 20..=30 {
+        for j in 0..NMLT {
+            rcm.content[(2 * NRCM + i) * NMLT + j] = 1.0e18 * (1.0 + (j as f64 * 0.3).sin());
+        }
+    }
+    let before = rcm.total_content();
+    // Zero solved potential → corotation + gradient drift only: pure
+    // azimuthal flow (V and Φ_cor are φ-independent → ψ̇ = 0 everywhere,
+    // so nothing can leave through the latitude boundaries either).
+    let phi = vec![0.0; N];
+    rcm.prepare_hamiltonian_for_test(2, &grid, &phi);
+    for _ in 0..200 {
+        rcm.advect_channel(2, &grid, 10.0, 0.0);
+    }
+    let after = rcm.total_content();
+    assert!(
+        ((after - before) / before).abs() < 1e-12,
+        "content drifted: {before:.6e} → {after:.6e}"
+    );
+}
+
+/// Sign conventions, pinned: corotation advects EASTWARD; ion
+/// gradient/curvature drift advects WESTWARD. (These two fix the canonical
+/// orientation of the (ψ, φ) Euler pair — get them right and E×B follows.)
+#[test]
+fn rcm_drift_directions() {
+    let grid = Grid::new();
+    let phi = vec![0.0; N];
+
+    // Blob column tracker: circular centroid displacement sign.
+    let centroid_shift = |rcm: &Rcm, k: usize, i: usize, j0: usize| -> f64 {
+        let mut sx = 0.0;
+        let mut sy = 0.0;
+        for j in 0..NMLT {
+            let c = rcm.content[(k * NRCM + i) * NMLT + j];
+            let a = (j as f64 + 0.5) / NMLT as f64 * std::f64::consts::TAU;
+            sx += c * a.cos();
+            sy += c * a.sin();
+        }
+        let a = sy.atan2(sx);
+        let a0 = (j0 as f64 + 0.5) / NMLT as f64 * std::f64::consts::TAU;
+        let mut d = a - a0;
+        while d > std::f64::consts::PI {
+            d -= std::f64::consts::TAU;
+        }
+        while d < -std::f64::consts::PI {
+            d += std::f64::consts::TAU;
+        }
+        d
+    };
+
+    // (a) Corotation only: kill the energy invariant of channel 0.
+    let mut rcm = Rcm::new(&grid);
+    rcm.lambda[0] = 0.0;
+    let (row, col) = (30usize, 24usize);
+    rcm.content[(0 * NRCM + row) * NMLT + col] = 1.0e18;
+    rcm.prepare_hamiltonian_for_test(0, &grid, &phi);
+    for _ in 0..180 {
+        rcm.advect_channel(0, &grid, 10.0, 0.0);
+    }
+    let d_corot = centroid_shift(&rcm, 0, row, col);
+    assert!(d_corot > 0.005, "corotation must drift EASTWARD, got Δφ = {d_corot:.4} rad");
+
+    // (b) Gradient drift only (corotation off, top energy channel).
+    let mut rcm = Rcm::new(&grid);
+    rcm.corotation = false;
+    let k = NK - 1;
+    rcm.content[(k * NRCM + row) * NMLT + col] = 1.0e18;
+    rcm.prepare_hamiltonian_for_test(k, &grid, &phi);
+    for _ in 0..180 {
+        rcm.advect_channel(k, &grid, 10.0, 0.0);
+    }
+    let d_gc = centroid_shift(&rcm, k, row, col);
+    assert!(d_gc < -0.005, "ion gc-drift must be WESTWARD, got Δφ = {d_gc:.4} rad");
+}
+
+/// The Vasyliunas current sums to zero over the domain (exact, by the
+/// single-valued face-flux construction) — the solver's source stays
+/// balanced with drift-physics R2 exactly as with the parameterized one.
+#[test]
+fn rcm_vasyliunas_current_balance() {
+    let mut sim = Sim::new();
+    sim.r2_mode = R2Mode::DriftPhysics;
+    sim.controls = Controls { bz_nt: -12.0, vsw_kms: 650.0, ..Controls::default() };
+    run_to_steady(&mut sim, 45.0);
+    let mut net = 0.0;
+    let mut down = 0.0;
+    for i in 0..NLAT {
+        for j in 0..NMLT {
+            let v = sim.rcm.jpar_applied[idx(i, j)] * sim.grid.area[i];
+            net += v;
+            if v > 0.0 {
+                down += v;
+            }
+        }
+    }
+    assert!(down > 1e5, "expected a substantial ring-current FAC, got {down:.3e} A");
+    assert!(
+        (net / down).abs() < 1e-9,
+        "Vasyliunas current unbalanced: net {net:.3e} of downward {down:.3e}"
+    );
+}
+
+/// Emergent R2 polarity and magnitude: the partial ring current's FAC is
+/// downward on the dusk half, upward on the dawn half (Region-2 sense),
+/// with a storm-time total in the physical 0.5–6 MA band.
+#[test]
+fn rcm_r2_polarity_and_magnitude() {
+    let mut sim = Sim::new();
+    sim.r2_mode = R2Mode::DriftPhysics;
+    sim.controls = Controls { bz_nt: -2.0, vsw_kms: 450.0, ..Controls::default() };
+    run_to_steady(&mut sim, 40.0); // spin-up
+    sim.controls.bz_nt = -15.0;
+    sim.controls.vsw_kms = 700.0;
+    run_to_steady(&mut sim, 60.0);
+
+    assert!(
+        (0.5..=6.0).contains(&sim.i_r2_ma),
+        "emergent I_R2 {:.2} MA outside 0.5–6 MA",
+        sim.i_r2_ma
+    );
+    let mut dusk = 0.0;
+    let mut dawn = 0.0;
+    for i in 0..NLAT {
+        for j in 0..NMLT {
+            let v = sim.rcm.jpar_applied[idx(i, j)] * sim.grid.area[i];
+            if sim.grid.mlt[j] >= 12.0 {
+                dusk += v;
+            } else {
+                dawn += v;
+            }
+        }
+    }
+    assert!(dusk > 0.0, "dusk half should carry net DOWNWARD R2, got {dusk:.3e} A");
+    assert!(dawn < 0.0, "dawn half should carry net UPWARD R2, got {dawn:.3e} A");
+}
+
+/// THE Phase-6 exit criterion: shielding timing is EMERGENT. A southward
+/// turning spikes the penetration E, which decays as the drifting ring
+/// current builds its own R2; a northward turning then reverses the sign
+/// (overshielding) because the built-up partial ring current outlives the
+/// convection that made it.
+#[test]
+fn rcm_emergent_shielding_and_overshielding() {
+    let mut sim = Sim::new();
+    sim.r2_mode = R2Mode::DriftPhysics;
+    sim.controls = Controls {
+        bz_nt: -2.0,
+        vsw_kms: 450.0,
+        saps_enabled: false, // isolate the shielding physics
+        ..Controls::default()
+    };
+    run_to_steady(&mut sim, 90.0); // ring-current spin-up
+
+    sim.controls.bz_nt = -15.0;
+    sim.controls.vsw_kms = 700.0;
+    run_to_steady(&mut sim, 3.0);
+    let spike = sim.pen_e_vpm * 1e3;
+    assert!(spike > 0.0, "undershielding penetration E should be eastward, got {spike:.4}");
+
+    run_to_steady(&mut sim, 117.0);
+    let settled = sim.pen_e_vpm * 1e3;
+    assert!(
+        settled.abs() < 0.6 * spike.abs(),
+        "no emergent shielding: spike {spike:.4} → settled {settled:.4} mV/m"
+    );
+
+    sim.controls.bz_nt = 5.0;
+    run_to_steady(&mut sim, 20.0);
+    let over = sim.pen_e_vpm * 1e3;
+    assert!(
+        over < 0.0,
+        "no emergent overshielding after northward turning: {over:.4} mV/m"
+    );
+}

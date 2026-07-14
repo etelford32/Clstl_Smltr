@@ -16,6 +16,7 @@
 import { loadKernel } from './kernel.js';
 import { DialRenderer } from './render.js';
 import { StripChart, ProfileChart } from './charts.js';
+import { REPLAY_SOURCES, loadReplaySource, pearson } from './replay.js';
 
 const KERNEL_DT_S = 10;        // fixed physics step (plan §2.3)
 const MAX_STEPS_PER_FRAME = 18; // 3 min sim per frame cap — keeps UI live
@@ -35,6 +36,13 @@ export async function boot() {
     const profile = new ProfileChart($('sl-chart-saps'), {
         latMinDeg: kernel.latMinDeg, dlatDeg: kernel.dlatDeg,
     });
+    // Validation panel charts (replay only): 24 h window, storm timescale.
+    const chartCpcpCmp = new StripChart($('sl-chart-cpcp-cmp'), {
+        unit: 'kV', color: '#00c6ff', windowS: 86400, signed: false, refLabel: 'SWMF IE',
+    });
+    const chartSymH = new StripChart($('sl-chart-symh'), {
+        unit: 'nT', color: '#ffb066', windowS: 86400, signed: true,
+    });
 
     const state = {
         tau: TAU_PRESETS[1],
@@ -43,7 +51,10 @@ export async function boot() {
         lastWallMs: performance.now(),
         probe: null,
         scenario: null, // {name, t0SimS, script(tMin) → {bz, vsw?}}
-        layers: { cond: true, efield: true, contours: true, drift: true },
+        replay: null,   // loaded replay source (drives controls from data)
+        replayAcc: { ours: [], ridley: [] }, // CPCP pairs for Pearson r
+        r2Mode: 'relaxation',
+        layers: { cond: true, efield: true, contours: true, drift: true, pressure: false },
         controls: { bz: -2, by: 0, vsw: 400, n: 5, f107: 120, tauMin: 25, sapsOn: true },
         stepMsAvg: 5,
     };
@@ -74,7 +85,10 @@ export async function boot() {
         el.addEventListener('input', () => {
             state.controls[key] = parseFloat(el.value);
             $(id + '-val').textContent = fmt(state.controls[key]);
-            if (key === 'bz' || key === 'vsw') cancelScenario('manual-override');
+            if (key === 'bz' || key === 'vsw') {
+                cancelScenario('manual-override');
+                cancelReplay('manual-override');
+            }
             pushControls();
         });
         el.addEventListener('change', () => record('slider', { key, value: state.controls[key] }));
@@ -120,11 +134,13 @@ export async function boot() {
     });
     $('sl-reset').addEventListener('click', () => {
         kernel.reset();
+        kernel.setR2Mode(state.r2Mode);
         state.controls = { bz: -2, by: 0, vsw: 400, n: 5, f107: 120, tauMin: 25, sapsOn: true };
         for (const [, key] of sliders) syncSlider(key);
         $('sl-saps-toggle').checked = true;
         pushControls();
         cancelScenario('reset');
+        cancelReplay('reset');
         chartPen.clear();
         chartCpcp.clear();
         record('reset');
@@ -151,6 +167,7 @@ export async function boot() {
     };
     for (const [name, sc] of Object.entries(SCENARIOS)) {
         $(`sl-scn-${name}`).addEventListener('click', () => {
+            cancelReplay('scenario');
             state.scenario = { name, t0: kernel.simTimeS(), script: sc.script };
             document.querySelectorAll('.sl-scn').forEach((b) => b.classList.remove('active'));
             $(`sl-scn-${name}`).classList.add('active');
@@ -164,6 +181,109 @@ export async function boot() {
         document.querySelectorAll('.sl-scn').forEach((b) => b.classList.remove('active'));
         $('sl-scn-status').textContent = why === 'manual-override' ? 'scenario cancelled — manual control' : '';
     }
+
+    // ── Hindcast replay (Phase 5): real storms drive the solver ─────────
+    // Buttons are created from the registry; a source whose bundle isn't
+    // committed yet (Gannon until its baker runs with network) reports
+    // that on click instead of silently vanishing.
+    for (const src of REPLAY_SOURCES) {
+        const btn = document.createElement('button');
+        btn.className = 'sl-btn sl-replay-btn';
+        btn.id = `sl-replay-${src.id}`;
+        btn.textContent = `▶ ${src.label}`;
+        btn.title = src.sub;
+        btn.addEventListener('click', async () => {
+            if (state.replay?.id === src.id) return;
+            btn.disabled = true;
+            try {
+                const replay = await loadReplaySource(src);
+                startReplay(replay, btn);
+            } catch (err) {
+                console.warn('[shielding-lab] replay unavailable:', err);
+                $('sl-scn-status').textContent =
+                    `${src.label}: bundle not available (bake with scripts/build-shielding-gannon-replay.mjs)`;
+            } finally {
+                btn.disabled = false;
+            }
+        });
+        $('sl-replay-btns').appendChild(btn);
+    }
+
+    function startReplay(replay, btn) {
+        cancelScenario('replay');
+        cancelReplay('restart');
+        kernel.reset();
+        kernel.setR2Mode(state.r2Mode === 'drift' ? 'drift' : 'relaxation');
+        state.replay = replay;
+        state.replayAcc = { ours: [], ridley: [] };
+        state.paused = false;
+        $('sl-pause').textContent = '⏸ pause';
+        state.tau = TAU_PRESETS[TAU_PRESETS.length - 1];
+        $('sl-tau-speed').textContent = `×${state.tau}`;
+        state.simBacklogS = 0;
+        chartPen.clear();
+        chartCpcp.clear();
+        chartCpcpCmp.clear();
+        chartSymH.clear();
+        const c0 = replay.controlsAt(0);
+        Object.assign(state.controls, { bz: c0.bz, by: c0.by, vsw: c0.vsw, n: c0.n, f107: c0.f107 });
+        ['bz', 'by', 'vsw', 'n', 'f107'].forEach(syncSlider);
+        pushControls();
+        document.querySelectorAll('.sl-replay-btn').forEach((b) => b.classList.remove('active'));
+        btn?.classList.add('active');
+        $('sl-validation').style.display = '';
+        const holds = Object.values(replay.driverHolds).reduce((a, b) => a + b, 0);
+        $('sl-scn-status').textContent =
+            `replay: ${replay.label} (${replay.window.start.slice(0, 10)}, ${replay.stepMin}-min drivers` +
+            (holds ? `, ${holds} held samples)` : ')');
+        record('replay-start', { id: replay.id });
+    }
+
+    function cancelReplay(why) {
+        if (!state.replay) return;
+        const id = state.replay.id;
+        state.replay = null;
+        document.querySelectorAll('.sl-replay-btn').forEach((b) => b.classList.remove('active'));
+        $('sl-validation').style.display = 'none';
+        if (why === 'manual-override') $('sl-scn-status').textContent = 'replay cancelled — manual control';
+        record('replay-cancel', { id, why });
+    }
+
+    function endReplay() {
+        const replay = state.replay;
+        state.paused = true;
+        $('sl-pause').textContent = '▶ resume';
+        const r = pearson(state.replayAcc.ours, state.replayAcc.ridley);
+        const peakOurs = state.replayAcc.ours.reduce((m, v) => Math.max(m, v ?? 0), 0);
+        const peakRef = replay.headline?.cpcp_peak_kv;
+        $('sl-scn-status').textContent =
+            `replay complete — peak CPCP ${peakOurs.toFixed(0)} kV (this solver)` +
+            (peakRef ? ` vs ${peakRef.toFixed(0)} kV (SWMF IE)` : '') +
+            (r != null ? ` · r = ${r.toFixed(2)}` : '');
+        record('replay-end', { id: replay.id, peak: Math.round(peakOurs), r });
+        state.replay = null;
+        document.querySelectorAll('.sl-replay-btn').forEach((b) => b.classList.remove('active'));
+    }
+
+    // ── R2 mode (Phase 6): parameterized ODE vs drift-physics mini-RCM ──
+    function setR2Mode(mode) {
+        state.r2Mode = mode;
+        kernel.setR2Mode(mode);
+        $('sl-r2-relax').classList.toggle('active', mode === 'relaxation');
+        $('sl-r2-drift').classList.toggle('active', mode === 'drift');
+        // τ_s only exists in the parameterized model.
+        $('sl-tau').disabled = mode === 'drift';
+        $('sl-tau-row').style.opacity = mode === 'drift' ? 0.4 : 1;
+        $('sl-layer-pressure-wrap').style.display = mode === 'drift' ? '' : 'none';
+        state.layers.pressure = mode === 'drift';
+        $('sl-layer-pressure').checked = state.layers.pressure;
+        $('sl-r2-note').textContent = mode === 'drift'
+            ? 'R2 emerges from drifting ring-current pressure (Vasyliunas) — spin-up ~1 h sim'
+            : 'R2 relaxes toward α·R1 with time constant τs';
+        record('r2-mode', { mode });
+    }
+    $('sl-r2-relax').addEventListener('click', () => setR2Mode('relaxation'));
+    $('sl-r2-drift').addEventListener('click', () => setR2Mode('drift'));
 
     // ── Probe (click the dial) ───────────────────────────────────────────
     $('sl-dial').addEventListener('pointerdown', (e) => {
@@ -194,6 +314,14 @@ export async function boot() {
                     if (o.bz !== undefined && o.bz !== state.controls.bz) { state.controls.bz = o.bz; syncSlider('bz'); }
                     if (o.vsw !== undefined && o.vsw !== state.controls.vsw) { state.controls.vsw = o.vsw; syncSlider('vsw'); }
                     pushControls();
+                } else if (state.replay) {
+                    const c = state.replay.controlsAt(kernel.simTimeS());
+                    if (c.bz !== state.controls.bz || c.vsw !== state.controls.vsw
+                        || c.n !== state.controls.n || c.by !== state.controls.by) {
+                        Object.assign(state.controls, { bz: c.bz, by: c.by, vsw: c.vsw, n: c.n, f107: c.f107 });
+                        ['bz', 'by', 'vsw', 'n'].forEach(syncSlider);
+                        pushControls();
+                    }
                 }
                 const t0 = performance.now();
                 kernel.step(KERNEL_DT_S, steps);
@@ -210,6 +338,7 @@ export async function boot() {
         frame.emag = kernel.emagMvpm();
         frame.vE = kernel.vEast();
         frame.vN = kernel.vNorth();
+        frame.pressure = kernel.pressure();
 
         dial.resize();
         dial.draw(frame, { layers: state.layers, dtSimS: dtSimThisFrame, probe: state.probe });
@@ -218,9 +347,23 @@ export async function boot() {
             const t = kernel.simTimeS();
             chartPen.push(t, kernel.penEMvpm(), kernel.penEUnshieldedMvpm());
             chartCpcp.push(t, kernel.cpcpKv());
+            if (state.replay) {
+                const truth = state.replay.truthAt(t);
+                chartCpcpCmp.push(t, kernel.cpcpKv(), truth.phiPcRidley);
+                if (truth.symH != null) chartSymH.push(t, truth.symH);
+                state.replayAcc.ours.push(kernel.cpcpKv());
+                state.replayAcc.ridley.push(truth.phiPcRidley);
+                if (t >= state.replay.durationS) endReplay();
+            }
         }
         chartPen.draw();
         chartCpcp.draw();
+        if (state.replay) {
+            chartCpcpCmp.draw();
+            chartSymH.draw();
+            const r = pearson(state.replayAcc.ours, state.replayAcc.ridley);
+            $('sl-val-r').textContent = r == null ? '—' : r.toFixed(2);
+        }
         profile.draw(kernel.sapsProfile(), {
             peakMs: kernel.sapsPeakMs(),
             peakLatDeg: kernel.sapsPeakLatDeg(),
@@ -259,9 +402,14 @@ export async function boot() {
             : 'no jet — quiet subauroral flow';
 
         const t = kernel.simTimeS();
-        const hh = Math.floor(t / 3600), mm = Math.floor((t % 3600) / 60), ss = Math.floor(t % 60);
-        $('sl-clock').textContent =
-            `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+        if (state.replay) {
+            // Real storm time: show UTC + phase instead of the lab clock.
+            $('sl-clock').textContent = `${state.replay.utcAt(t)} · ${state.replay.phaseAt(t)}`;
+        } else {
+            const hh = Math.floor(t / 3600), mm = Math.floor((t % 3600) / 60), ss = Math.floor(t % 60);
+            $('sl-clock').textContent =
+                `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+        }
         $('sl-solver').textContent = `${kernel.solverIters()} it · ${state.stepMsAvg.toFixed(1)} ms/step`;
 
         if (state.probe) {

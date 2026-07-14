@@ -156,6 +156,18 @@ export class DialRenderer {
                 g = 14 + 58 * t;
                 b = 26 + 84 * t;
             }
+            if (layers.pressure && frame.pressure) {
+                // Ring-current pressure 0.5→25 nPa: violet glow — the
+                // drifting partial ring current (drift-physics R2 only).
+                const p = this._sample(frame.pressure, i0, j0, fx, fy);
+                const t = Math.min(Math.max((p - 0.5) / 24.5, 0), 1);
+                if (t > 0) {
+                    const w = Math.sqrt(t) * 0.85;
+                    r = r * (1 - w) + 185 * w;
+                    g = g * (1 - w) + 80 * w;
+                    b = b * (1 - w) + 255 * w;
+                }
+            }
             if (layers.efield) {
                 // |E| 5→60 mV/m: transparent → amber → hot. SAPS glows here.
                 const e = this._sample(frame.emag, i0, j0, fx, fy);

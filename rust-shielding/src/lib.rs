@@ -33,6 +33,7 @@ pub mod conductance;
 pub mod diagnostics;
 pub mod fac;
 pub mod grid;
+pub mod rcm;
 pub mod solver;
 pub mod state;
 
@@ -94,6 +95,19 @@ pub extern "C" fn shl_step(dt_s: f64, substeps: u32) {
     }
 }
 
+/// Region-2 mode: 0 = parameterized relaxation (default), 1 = mini-RCM
+/// drift physics (Phase 6). Switching to drift physics starts the ring
+/// current from the current state's plasma-sheet boundary (≈1 h spin-up);
+/// switching back leaves the parameterized R2 at its last ODE value.
+#[no_mangle]
+pub extern "C" fn shl_set_r2_mode(mode: u32) {
+    sim().r2_mode = if mode == 1 {
+        state::R2Mode::DriftPhysics
+    } else {
+        state::R2Mode::Relaxation
+    };
+}
+
 // ── Grid metadata ───────────────────────────────────────────────────────
 
 #[no_mangle]
@@ -147,6 +161,12 @@ pub extern "C" fn shl_v_north_ptr() -> *const f32 {
 #[no_mangle]
 pub extern "C" fn shl_saps_profile_ptr() -> *const f32 {
     sim().out_saps_profile.as_ptr()
+}
+
+/// Ring-current pressure (nPa, NLAT×NMLT) — zero unless drift-physics R2.
+#[no_mangle]
+pub extern "C" fn shl_pressure_ptr() -> *const f32 {
+    sim().out_pressure.as_ptr()
 }
 
 // ── Scalar diagnostics ──────────────────────────────────────────────────

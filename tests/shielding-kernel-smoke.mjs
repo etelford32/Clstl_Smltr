@@ -71,6 +71,24 @@ check('R1/R2 sane', kernel.r1Ma() > 0.2 && kernel.r2Ma() > 0.2,
 check('solver converged', kernel.solverResidual() < 1e-5,
     `res ${kernel.solverResidual().toExponential(1)}, ${kernel.solverIters()} iters`);
 
+// Drift-physics R2 (Phase 6): switch modes, spin up, and confirm the
+// emergent ring current produces a real R2 and a nonzero pressure field.
+const kd = await loadKernel(await readFile(wasmPath));
+kd.setR2Mode('drift');
+kd.setControls({ bz: -12, by: 0, vsw: 650, n: 8, f107: 150, tauMin: 25, sapsOn: true });
+kd.step(10, 6 * 75); // 75 min spin-up under storm driving
+check('drift-mode R2 emerges (0.3–6 MA)', kd.r2Ma() > 0.3 && kd.r2Ma() < 6,
+    `${kd.r2Ma().toFixed(2)} MA`);
+const press = kd.pressure();
+const pMax = Math.max(...press);
+check('ring-current pressure field nonzero', pMax > 1 && Number.isFinite(pMax),
+    `peak ${pMax.toFixed(1)} nPa`);
+check('drift-mode CPCP sane', kd.cpcpKv() > 40 && kd.cpcpKv() < 300,
+    `${kd.cpcpKv().toFixed(1)} kV`);
+kd.setR2Mode('relaxation');
+kd.step(10, 6);
+check('mode switch back is safe', Number.isFinite(kd.cpcpKv()));
+
 // Determinism: same history → same frame (seedless kernel).
 const k2 = await loadKernel(await readFile(wasmPath));
 k2.setControls({ bz: -2, by: 0, vsw: 400, n: 5, f107: 120, tauMin: 20, sapsOn: true });

@@ -74,6 +74,57 @@ test.describe('shielding lab', () => {
         expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
     });
 
+    test('st-patrick replay drives controls and shows validation panel', async ({ page }) => {
+        await expect(page.locator('#sl-cpcp')).not.toHaveText('—', { timeout: 20_000 });
+        await page.click('#sl-replay-stpatrick2015');
+        await expect(page.locator('#sl-scn-status')).toContainText("St. Patrick's", { timeout: 10_000 });
+        await expect(page.locator('#sl-validation')).toBeVisible();
+        // The replay sets controls from real OMNI data: Bz slider follows
+        // (quiet start ≈ +12 nT, not the default −2).
+        await page.waitForTimeout(1500);
+        const bz = parseFloat(await page.locator('#sl-bz').inputValue());
+        expect(bz).toBeGreaterThan(0);
+        // HUD shows real UTC.
+        await expect(page.locator('#sl-clock')).toContainText('2015-03');
+        // Manual slider input cancels the replay.
+        await page.locator('#sl-vsw').evaluate((el) => {
+            el.value = '500';
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await expect(page.locator('#sl-validation')).toBeHidden();
+        expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+    });
+
+    test('replay completion reports the validation summary', async ({ page }) => {
+        await expect(page.locator('#sl-cpcp')).not.toHaveText('—', { timeout: 20_000 });
+        await page.click('#sl-replay-stpatrick2015');
+        await expect(page.locator('#sl-validation')).toBeVisible();
+        // Shrink the window so the replay finishes in seconds instead of 72 h
+        // (drivers still real — we just stop early).
+        await page.evaluate(() => {
+            window.__shieldingLab.state.replay.durationS = 1200;
+        });
+        await expect(page.locator('#sl-scn-status')).toContainText('replay complete', { timeout: 30_000 });
+        await expect(page.locator('#sl-scn-status')).toContainText('peak CPCP');
+        await expect(page.locator('#sl-scn-status')).toContainText('SWMF IE');
+        expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+    });
+
+    test('drift-physics R2 mode enables the pressure layer', async ({ page }) => {
+        await expect(page.locator('#sl-cpcp')).not.toHaveText('—', { timeout: 20_000 });
+        await page.click('#sl-r2-drift');
+        await expect(page.locator('#sl-r2-drift')).toHaveClass(/active/);
+        await expect(page.locator('#sl-layer-pressure-wrap')).toBeVisible();
+        await expect(page.locator('#sl-tau')).toBeDisabled();
+        await expect(page.locator('#sl-r2-note')).toContainText('Vasyliunas');
+        await page.waitForTimeout(2000); // a few solves in drift mode
+        const r2 = parseFloat(await page.locator('#sl-r2').textContent());
+        expect(Number.isFinite(r2)).toBe(true);
+        await page.click('#sl-r2-relax');
+        await expect(page.locator('#sl-layer-pressure-wrap')).toBeHidden();
+        expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+    });
+
     test('probe opens with local values; toggles are safe', async ({ page }) => {
         await expect(page.locator('#sl-cpcp')).not.toHaveText('—', { timeout: 20_000 });
         const dial = page.locator('#sl-dial');

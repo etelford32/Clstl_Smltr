@@ -6,16 +6,16 @@
 
 ## Status (2026-07-14)
 
-Phases 1–4 are SHIPPED in the initial build:
+All six phases have shipped code; Phase 5's Gannon leg awaits one networked baker run:
 
 | Phase | Scope | State |
 |---|---|---|
-| 1 | Solver core: FV grid, conductance, R1/R2 FACs, BiCGSTAB, §2.4 test suite, CLI harness | ✅ `rust-shielding/` — `cargo test` = 10/10 |
+| 1 | Solver core: FV grid, conductance, R1/R2 FACs, BiCGSTAB, §2.4 test suite, CLI harness | ✅ `rust-shielding/` — `cargo test` = 15/15 |
 | 2 | WASM + render: extern-C kernel (no wasm-bindgen), polar dial, layer toggles, sliders | ✅ `js/shielding-lab/`, committed binary at `js/shielding-lab/wasm/` |
 | 3 | Shielding dynamics: R2 relaxation ODE, τ_s slider, scenario buttons, pen-E strip chart | ✅ southward/northward/sawtooth scenarios |
 | 4 | SAPS: trough model, conductance feedback, |E| layer, 21-MLT profile panel | ✅ storm driving → 700–1400 m/s jet, 2–3.5° wide |
-| 5 | OMNI/Gannon replay + INTERMAGNET validation, nested grid | ⬜ next |
-| 6 | mini-RCM R2 (2-invariant drift physics) | ⬜ stretch |
+| 5 | Hindcast replay + validation | ✅ St. Patrick's 2015 replay ships (committed 5-min OMNI drivers; validation panel = our CPCP vs the BATS-R-US+Ridley SWMF-IE hindcast + observed SYM-H, live Pearson r). ⬜ Gannon 2024: run `scripts/build-shielding-gannon-replay.mjs` on a machine that can reach SPDF and commit `data/hindcast/gannon_shielding_replay.json` — the page's button lights up automatically. ⬜ INTERMAGNET equatorial ΔH comparison (needs the GSA pipeline data; flagship follow-up). |
+| 6 | mini-RCM R2 (2-invariant drift physics) | ✅ `rcm.rs`: 6 proton λ-channels, Hamiltonian advection in dipole (ψ,φ) Euler coordinates, corotation, plasma-sheet boundary (Borovsky-style), charge-exchange loss, Vasyliunas FAC closure (exactly current-conserving). UI mode toggle + ring-pressure dial layer. Emergent under/overshielding is test-pinned. |
 
 Guardrails for future sessions:
 
@@ -24,6 +24,9 @@ Guardrails for future sessions:
 - **The Hall term uses the stream-function corner form** (solver.rs) — exactly conservative and exactly divergence-free for uniform Σ_H. Don't "simplify" it back to face gradients; that reintroduces edge leaks the tests will catch.
 - **The oval conductance scales with max(I_R1, I_R2), not raw I_R1** — precipitation inertia. Scaling with instantaneous R1 made the overshielding window absurdly resistive (500 kV CPCP artifacts).
 - **The SAPS feedback applies to the NEXT step's solve** (one solve per step, honest 300 s relaxation) — don't add an in-step fixed-point loop back without measuring WASM frame cost.
+- **rcm.rs sign conventions are test-pinned** (`rcm_drift_directions`): the (ψ, φ) Euler pair orientation was chosen so corotation advects eastward AND ion gradient drift advects westward AND E×B matches diagnostics.rs. All three lock the same sign — if one looks wrong, the other two are how you find the real bug.
+- **The Vasyliunas FAC is the discrete divergence of the gc-only charge flux with the sign J∥_down = −div** (charge converging horizontally flows down into the ionosphere). It sums to zero exactly by the single-valued-face-flux construction; `rcm_vasyliunas_current_balance` pins it.
+- **Replay bundles follow `pp.hindcast.replay.v1`** and are consumed through `js/hindcast-replay-engine.js` (never forked, per CLAUDE.md). Driver series hold last-valid through gaps (the solver can't ingest null) and the hold count is surfaced in the status line; validation series render gaps.
 
 ---
 
@@ -107,13 +110,12 @@ tests/shielding-kernel-smoke.mjs   Node gate on the committed binary
 tests/shielding-lab-smoke.spec.js  Playwright page smoke (no network needed)
 ```
 
-## 4. Remaining phases
+## 4. Remaining work
 
-**Phase 5 — Replay & validation.** OMNI 1-min ingestion, Gannon replay mode (2024-05-10/11), validation readouts vs published values, nested grid if needed, cross-links from ring-current.html and the Gannon validation page. The flagship row: same event, same ground-station network, model vs data, on a public page (equatorial–off-equatorial INTERMAGNET differences from the GSA pipeline).
-
-**Phase 6 (stretch) — mini-RCM R2.** Replace the parameterized R2 with a 2-invariant drift model driven by the solved E-field — closes the M–I loop for real. Only after Phase 5 ships.
-
-Also open: By-driven pattern rotation, seasonal/UT conductance asymmetries, southern hemisphere.
+- **Gannon 2024 replay bundle** — `scripts/build-shielding-gannon-replay.mjs` is written and consumes the verified `/api/omni/imf` endpoint (it deliberately does NOT reparse SPDF ASCII; that endpoint owns the 46-column map). Run it anywhere with SPDF access, commit `data/hindcast/gannon_shielding_replay.json`, done — the page's registry (js/shielding-lab/replay.js) picks it up with no code change. Note: the committed `gannon_may_2024_replay.json` `drivers_compact.bz_nt` hourly array is NOT usable as a driver (values like 405/2275 in a "nT" field — mislabeled or corrupt); the baker takes Bz from OMNI directly and only reuses that bundle's Φ_PC.
+- **INTERMAGNET equatorial ΔH vs penetration E** — the flagship validation row; needs the GSA-pipeline ground-station series baked into the bundle (`eej_dh_nt`). Blocked on data access from the pipeline, not on page work.
+- **Phase-6 refinements (optional):** electron drift channels (current carriers on the dawn side), higher-order advection (the first-order upwind inner edge is diffusive), self-consistent electron precipitation → oval conductance from the drift population.
+- Also open: By-driven pattern rotation, seasonal/UT conductance asymmetries, southern hemisphere, nested subauroral grid.
 
 ## 5. Validation targets (on the page — it's the differentiator)
 
