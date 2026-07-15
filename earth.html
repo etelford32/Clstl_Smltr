@@ -3575,6 +3575,10 @@ import './js/telemetry.js';
 import './js/live-status-bar.js';
 import * as THREE from 'three';
 import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import {
     geocodeQuery, saveUserLocation, loadUserLocation,
@@ -3616,6 +3620,8 @@ import { makeWeatherFlowForecasters, WindAdvectionRK2Forecaster,
          MultiLevelAdvectionForecaster, multilevelLevelsDense,
          DEFAULT_HORIZONTAL_DIFFUSION } from './js/weather-flow.js';
 import { FocusFootprint }        from './js/focus-footprint.js';
+import { EarthTerrainPatch }     from './js/earth-terrain-patch.js';
+import { EarthDemInset }         from './js/earth-dem-inset.js';
 import { WeatherPatchFeed }      from './js/weather-patch.js';
 import { EarthDetailInset, stitchGlobalBase, GIBS_LAYERS } from './js/earth-detail-inset.js';
 import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
@@ -3807,6 +3813,47 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, /Mobi|Android/i.test(navigator.userAgent) ? 1.5 : 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
+// ═══════════════════════════════════════════════════════════════
+//  HDR PIPELINE — ACES tone mapping + threshold bloom (EffectComposer)
+// ═══════════════════════════════════════════════════════════════
+// The whole earth-skin.js stack (surface, ocean glint, cloud tops, city
+// lights ×2.5, aurora, atmosphere rim) outputs LINEAR HDR that until now
+// went straight to an sRGB-encoded canvas with NO tone mapping — so every
+// bright source hard-clipped to flat white. ACES filmic tone mapping rolls
+// those highlights off; a high-threshold bloom gives the genuinely bright
+// sources a physical glow.
+//
+// Correctness (three r160): material tone mapping is applied ONLY when
+// rendering to the canvas (WebGLRenderer: currentRenderTarget === null,
+// three.module.js:20719 / 30151). RenderPass draws into the composer's
+// HalfFloat (linear) target, so the scene pass is NOT tone-mapped; OutputPass
+// applies renderer.toneMapping + the sRGB encode exactly ONCE at the end.
+// No double tone-map, and no per-material `toneMapped` flags to babysit.
+//
+// Desktop-first / mobile-parity split: the ACES look (RenderPass+OutputPass)
+// is one cheap fullscreen pass, so mobile gets it too (parity). UnrealBloomPass
+// is the fill-rate-heavy "deep feature": desktop-only at boot, and the FIRST
+// thing the adaptive governor sheds under load. Escape hatch: ?hdr=0 (one
+// visit) or localStorage ev_hdr='0' (sticky) → original renderer.render path.
+const _isMobileUA = /Mobi|Android/i.test(navigator.userAgent);
+const HDR_ON = (() => {
+    const q = new URLSearchParams(location.search).get('hdr');
+    if (q === '0' || q === 'off') return false;
+    if (q === '1' || q === 'on')  return true;
+    if (localStorage.getItem('ev_hdr') === '0') return false;
+    return true;                       // default ON everywhere; bloom gated separately
+})();
+// ACES compresses the midtones ~10-15% vs the old raw-sRGB path; lift exposure
+// back so the daylit hemisphere keeps its brightness while highlights roll off.
+const TONE_EXPOSURE = 1.15;
+let composer   = null;   // assigned once _prNow exists (after the governor block)
+let bloomPass  = null;
+let _bloomWanted = false;   // desktop-first: whether bloom should be on when headroom allows
+if (HDR_ON) {
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = TONE_EXPOSURE;
+}
+
 const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 0.001, 200);
 camera.position.set(0, 0.4, 3.0);
@@ -3835,6 +3882,14 @@ function onResize() {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    // Keep the HDR chain's render targets in lockstep with the canvas and the
+    // governor's current pixel ratio. Guarded on `composer` so the boot-time
+    // onResize() call (which runs before the composer is built, while _prNow is
+    // still in its TDZ) short-circuits without touching either.
+    if (composer) {
+        composer.setPixelRatio(_prNow);
+        composer.setSize(w, h);
+    }
 }
 new ResizeObserver(onResize).observe(canvas);
 onResize();
@@ -3859,6 +3914,41 @@ const _prFloor = Math.min(1, _prCap);   // never upscale past 1:1 CSS pixels
 let   _prNow   = _prCap;                 // matches the setPixelRatio() call above
 let   _prEmaMs = 1000 / 60;             // frame-interval EMA, seeded at 60 fps
 let   _prLastEvalMs = 0;
+
+// Build the HDR chain now that _prNow exists. RenderPass → UnrealBloomPass →
+// OutputPass (see the HDR header block by the renderer for the correctness
+// argument). Kept null when HDR is off so the render call falls back to the
+// original renderer.render(scene, camera) path untouched.
+if (HDR_ON) {
+    composer = new EffectComposer(renderer);
+    // The canvas' antialias:true only covers the default framebuffer; once
+    // RenderPass draws into the composer's offscreen target that MSAA is gone
+    // and the globe limb aliases. Restore it with a multisampled target
+    // (WebGL2 only). Desktop-first: 4× on desktop, 2× on mobile.
+    if (renderer.capabilities.isWebGL2) {
+        const _samples = _isMobileUA ? 2 : 4;
+        composer.renderTarget1.samples = _samples;
+        composer.renderTarget2.samples = _samples;
+    }
+    composer.setPixelRatio(_prNow);
+    composer.setSize(canvas.clientWidth, canvas.clientHeight);
+    composer.addPass(new RenderPass(scene, camera));
+    // Threshold 0.85 so ONLY genuine highlights bloom — the ocean sun-glint,
+    // city lights, aurora crowns, storm-lit cloud tops — never the midtone
+    // cloud field (blooming that would re-expose the zonal banding
+    // earth-skin.js works hard to suppress). Gentle strength/radius: a halo,
+    // not a smear.
+    bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(canvas.clientWidth, canvas.clientHeight),
+        0.55,   // strength
+        0.40,   // radius
+        0.85,   // luminance threshold
+    );
+    _bloomWanted    = !_isMobileUA;    // desktop-first; mobile keeps the ACES look, skips bloom
+    bloomPass.enabled = _bloomWanted;
+    composer.addPass(bloomPass);
+    composer.addPass(new OutputPass());
+}
 // Stage 2 of the governor: cloud-shader ALU tiers (u_quality in CLOUD_FRAG).
 // Resolution scaling alone can't rescue a GPU whose bottleneck is per-
 // fragment FBM noise — fewer pixels just re-spend the savings on the same
@@ -3897,14 +3987,23 @@ function _governResolution(frameMs) {
     if (_prEmaMs > 22) {                                       // < ~45 fps → coarsen
         if (_prNow > _prFloor) {
             next = Math.max(_prFloor, +(_prNow - 0.25).toFixed(2));
+        } else if (bloomPass && bloomPass.enabled) {
+            // Pixels are already at the floor: shed the heaviest pass next.
+            // Bloom is a multi-tap fullscreen blur pyramid — the single
+            // biggest fill-rate item — so it goes before the cloud octaves.
+            bloomPass.enabled = false;
         } else if (!_cloudQForced && _cloudQIdx < _CLOUD_Q_TIERS.length - 1) {
             _cloudQIdx++;
             _setCloudQuality(_CLOUD_Q_TIERS[_cloudQIdx]);
         }
     } else if (_prEmaMs < 15) {                                // > ~66 fps → refine
+        // Restore in reverse order of shedding: cloud octaves, then bloom,
+        // then pixel sharpness — so the cheapest-to-render quality returns first.
         if (!_cloudQForced && _cloudQIdx > 0) {
             _cloudQIdx--;
             _setCloudQuality(_CLOUD_Q_TIERS[_cloudQIdx]);
+        } else if (bloomPass && _bloomWanted && !bloomPass.enabled) {
+            bloomPass.enabled = true;
         } else if (_prNow < _prCap) {
             next = Math.min(_prCap, +(_prNow + 0.25).toFixed(2));
         }
@@ -4054,6 +4153,50 @@ const earthMat = new THREE.ShaderMaterial({
 const earthMesh = new THREE.Mesh(earthGeo, earthMat);
 // Earth spin axis = world Y. Sun direction baked into uniforms (equatorial frame).
 scene.add(earthMesh);
+
+// ── 3D displaced terrain patch (T1 of the LOD plan) ─────────────────────────
+// A high-subdivision grid mesh over the camera footprint whose vertices are
+// displaced radially by the elevation map, so real ridgelines break the limb
+// (bump mapping can shade a slope but never change the silhouette). It parents
+// to earthMesh and SHARES earthU + EARTH_FRAG, so it shades identically to the
+// globe beneath — no seam (see js/earth-terrain-patch.js).
+//
+// Behind a flag until it can be tuned on a real GPU: opt in with ?terrain3d=1
+// or localStorage ev_terrain3d='1'. Desktop-first — it's a vertex/fill-heavy
+// deep feature, so it stays off on mobile even when flagged. Never fatal: a
+// construction failure just leaves the smooth globe.
+const TERRAIN3D_ON = (() => {
+    const q = new URLSearchParams(location.search).get('terrain3d');
+    if (q === '1' || q === 'on')  return true;
+    if (q === '0' || q === 'off') return false;
+    return localStorage.getItem('ev_terrain3d') === '1';
+})();
+let terrainPatch = null;
+try {
+    terrainPatch = new EarthTerrainPatch({
+        THREE, earthMesh, earthUniforms: earthU, fragmentShader: EARTH_FRAG,
+    });
+    terrainPatch.setEnabled(TERRAIN3D_ON && !_isMobileUA);
+} catch (e) {
+    terrainPatch = null;
+}
+
+// High-res DEM inset (T1b): fetches real-elevation tiles over the footprint at
+// close zoom and feeds them to the terrain patch as a second sampler, which
+// blends real-metre displacement over the global-height base (see
+// js/earth-dem-inset.js). Shares the terrain flag; if the tile source is
+// unreachable it silently degrades to T1a (global height) — never fatal.
+let demInset = null;
+if (terrainPatch) {
+    try {
+        demInset = new EarthDemInset();
+        document.addEventListener('earth-dem-inset', (ev) => terrainPatch.setDemInset(ev.detail));
+        document.addEventListener('earth-dem-clear', () => terrainPatch.clearDemInset());
+        demInset.setEnabled(TERRAIN3D_ON && !_isMobileUA);
+    } catch (e) {
+        demInset = null;
+    }
+}
 
 const cloudGeo = new THREE.IcosahedronGeometry(R_CLOUDS, ICO_LEVEL);
 const cloudMat = new THREE.ShaderMaterial({
@@ -12077,7 +12220,8 @@ function animate() {
         if (camR < CAM_FLOOR) camera.position.multiplyScalar(CAM_FLOOR / camR);
     }
 
-    renderer.render(scene, camera);
+    if (composer) composer.render();
+    else renderer.render(scene, camera);
 }
 
 // ═══════════════════════════════════════════════════════════════
