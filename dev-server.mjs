@@ -15,7 +15,7 @@
  */
 
 import { createServer }         from 'node:http';
-import { readFileSync }         from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { readFile, stat }       from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -27,28 +27,44 @@ const ROOT = fileURLToPath(new URL('.', import.meta.url));
 // Lets the smoke-test runbook be a single command instead of a paragraph of
 // `export FOO=...`. Reads .env.local from the project root if present;
 // existing process.env values win (so CI/explicit overrides aren't clobbered).
-try {
-    const envPath = join(ROOT, '.env.local');
-    const raw = readFileSync(envPath, 'utf8');
-    let count = 0;
-    for (const line of raw.split('\n')) {
-        const t = line.trim();
-        if (!t || t.startsWith('#')) continue;
-        const eq = t.indexOf('=');
-        if (eq <= 0) continue;
-        const key = t.slice(0, eq).trim();
-        let val   = t.slice(eq + 1).trim();
-        if ((val.startsWith('"') && val.endsWith('"')) ||
-            (val.startsWith("'") && val.endsWith("'"))) {
-            val = val.slice(1, -1);
+function loadEnvFile(filename, allowKey = () => true) {
+    try {
+        const raw = readFileSync(join(ROOT, filename), 'utf8');
+        let count = 0;
+        for (const line of raw.split('\n')) {
+            const t = line.trim();
+            if (!t || t.startsWith('#')) continue;
+            const eq = t.indexOf('=');
+            if (eq <= 0) continue;
+            const key = t.slice(0, eq).trim();
+            let val   = t.slice(eq + 1).trim();
+            if ((val.startsWith('"') && val.endsWith('"')) ||
+                (val.startsWith("'") && val.endsWith("'"))) {
+                val = val.slice(1, -1);
+            }
+            // Skip empties: `vercel env pull` writes sensitive vars as "",
+            // and an empty string would read as "configured" downstream.
+            if (!val) continue;
+            if (process.env[key] === undefined && allowKey(key)) {
+                process.env[key] = val;
+                count++;
+            }
         }
-        if (process.env[key] === undefined) {
-            process.env[key] = val;
-            count++;
-        }
-    }
-    if (count) console.log(`[dev-server] loaded ${count} vars from .env.local`);
-} catch (_) { /* no .env.local — fine */ }
+        if (count) console.log(`[dev-server] loaded ${count} vars from ${filename}`);
+    } catch (_) { /* file absent — fine */ }
+}
+
+loadEnvFile('.env.local');
+
+// Data-pipeline fallback: `vercel env pull` writes the full production env to
+// .env.production.local, but .env.local (hand-maintained) is missing the
+// Supabase service key — so /api/weather/grid returned supabase_not_configured
+// locally and the globe silently ran on procedural DEMO data. Pull ONLY the
+// read-path data keys from the production file; deliberately NOT Stripe/
+// Resend/R2/CRON secrets, so a local session can't accidentally act on live
+// billing or email surfaces.
+loadEnvFile('.env.production.local', key =>
+    /^(SUPABASE_|NEXT_PUBLIC_SUPABASE_|NASA_|METNO_|NWS_)/.test(key));
 
 // ── MIME types ────────────────────────────────────────────────────────────────
 const MIME = {
@@ -167,7 +183,17 @@ async function handleHorizons(rawUrl, nodeRes) {
 // ── Handle an /api/* request ──────────────────────────────────────────────────
 
 async function handleApi(pathname, rawUrl, nodeRes, nodeReq) {
-    const fnPath = API_ROUTES[pathname];
+    // Explicit table first (kept for routes that need aliasing), then fall
+    // back to Vercel's file-based convention: /api/foo/bar → api/foo/bar.js.
+    // The table used to be the ONLY resolution path, so every endpoint not
+    // hand-registered here (telemetry/log, celestrak/tle, most of
+    // api/weather/*) 404'd locally while working in prod. The strict
+    // character allowlist (no dots) rules out path traversal.
+    let fnPath = API_ROUTES[pathname];
+    if (!fnPath && /^\/api\/[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/.test(pathname)) {
+        const candidate = pathname.slice(1) + '.js';       // api/foo/bar.js
+        if (existsSync(join(ROOT, candidate))) fnPath = candidate;
+    }
     if (!fnPath) {
         nodeRes.writeHead(404, { 'Content-Type': 'application/json' });
         nodeRes.end(JSON.stringify({ error: 'not_found', path: pathname }));

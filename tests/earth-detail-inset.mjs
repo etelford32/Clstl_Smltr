@@ -5,7 +5,9 @@
  * Tests the GIBS WMTS tile math + stitcher behind the zoom-LOD detail
  * inset (js/earth-detail-inset.js):
  *
- *   - tile geometry constants (2·2^z × 2^z grid, 180/2^z °/tile)
+ *   - tile geometry constants (GIBS EPSG:4326 grid: 288/2^z °/tile,
+ *     ceil(360/span) × ceil(180/span) matrices — NOT a power-of-two
+ *     pyramid; values pinned against WMTSCapabilities.xml 2026-07-15)
  *   - zoomForSpan clamping + monotonicity
  *   - planInset: activation gate, tile-snapped bounds that COVER the
  *     footprint, antimeridian-crossing column ranges, pole clamping
@@ -69,12 +71,22 @@ function check(name, fn) {
 console.log('earth-detail-inset.mjs');
 console.log('──────────────────────────────');
 
-await check('tile geometry: 2·2^z × 2^z grid at 180/2^z °/tile', () => {
-    assert.equal(tileSpanDeg(0), 180);
+await check('tile geometry: GIBS 4326 grid — 288/2^z °/tile, ceil() matrices', () => {
+    // Pinned against the live capabilities document: z0 2×1, z1 3×2,
+    // z2 5×3, z3 10×5, z8 320×160.
+    assert.equal(tileSpanDeg(0), 288);
     assert.equal(tilesAcross(0), 2);
     assert.equal(tilesDown(0), 1);
-    assert.equal(tileSpanDeg(8), 0.703125);
-    assert.equal(tilesAcross(8), 512);
+    assert.equal(tilesAcross(1), 3);
+    assert.equal(tilesDown(1), 2);
+    assert.equal(tilesAcross(2), 5);
+    assert.equal(tilesDown(2), 3);
+    assert.equal(tileSpanDeg(3), 36);
+    assert.equal(tilesAcross(3), 10);
+    assert.equal(tilesDown(3), 5);
+    assert.equal(tileSpanDeg(8), 1.125);
+    assert.equal(tilesAcross(8), 320);
+    assert.equal(tilesDown(8), 160);
 });
 
 await check('zoomForSpan: clamps to [0, maxLevel], deeper for tighter spans', () => {
@@ -102,10 +114,10 @@ await check('planInset: inactive for wide footprints', () => {
 await check('planInset: snapped bounds cover the footprint', () => {
     const fp = { spanLatDeg: 10, spanLonDeg: 16, latMin: 30, latMax: 40, lonMin: -110 };
     const p = planInset(fp);
-    assert.equal(p.z, 5);
+    assert.equal(p.z, 6);                           // 4.5°/tile on the real grid
     assert.equal(p.nRows, 3);
-    assert.equal(p.nCols, 4);
-    assert.equal(p.canvasW, 4 * 512);
+    assert.equal(p.nCols, 5);
+    assert.equal(p.canvasW, 5 * 512);
     // Coverage: snapped bounds contain the original footprint.
     assert.ok(p.bounds.latMin <= fp.latMin);
     assert.ok(p.bounds.latMin + p.bounds.latSpan >= fp.latMax);
@@ -119,12 +131,12 @@ await check('planInset: snapped bounds cover the footprint', () => {
 await check('planInset: antimeridian crossing keeps one contiguous window', () => {
     const fp = { spanLatDeg: 10, spanLonDeg: 20, latMin: -5, latMax: 5, lonMin: 170 };
     const p = planInset(fp);
-    assert.equal(p.z, 5);
-    assert.equal(p.colStart, 62);
-    assert.equal(p.nCols, 4);                       // 62, 63, wrap → 0, 1
+    assert.equal(p.z, 5);                           // 9°/tile, 40 tiles across
+    assert.equal(p.colStart, 38);
+    assert.equal(p.nCols, 4);                       // 38, 39, wrap → 0, 1
     assert.ok(p.colStart + p.nCols > tilesAcross(p.z), 'range extends past the matrix edge');
-    assert.equal(p.bounds.lonMin, 168.75);          // snapped, normalised
-    assert.equal(p.bounds.lonSpan, 22.5);           // covers 170..190
+    assert.equal(p.bounds.lonMin, 162);             // snapped, normalised
+    assert.equal(p.bounds.lonSpan, 36);             // covers 170..190
 });
 
 await check('planInset: rows clamp at the poles', () => {
@@ -138,12 +150,12 @@ await check('stitchTiles: wraps columns and places tiles on the canvas', async (
     drawn.length = 0; fetchLog = []; failUrlPattern = null;
     const canvas = await stitchTiles({
         layer: GIBS_LAYERS.imagery, z: 5,
-        rowMin: 8, nRows: 1, colStart: 62, nCols: 4,
+        rowMin: 8, nRows: 1, colStart: 38, nCols: 4,
     });
     assert.ok(canvas, 'stitch succeeded');
     assert.equal(drawn.length, 4);
     const cols = fetchLog.map(u => Number(u.split('/').pop().replace('.jpg', ''))).sort((a, b) => a - b);
-    assert.deepEqual(cols, [0, 1, 62, 63], 'columns wrapped mod 64');
+    assert.deepEqual(cols, [0, 1, 38, 39], 'columns wrapped mod 40');
     // Wrapped tile (col 0, third across) draws at x = 2·512.
     const wrapTile = drawn.find(d => d.url.endsWith('/8/0.jpg'));
     assert.equal(wrapTile.x, 2 * 512);
@@ -151,10 +163,10 @@ await check('stitchTiles: wraps columns and places tiles on the canvas', async (
 });
 
 await check('stitchTiles: any failed tile aborts the whole stitch', async () => {
-    drawn.length = 0; fetchLog = []; failUrlPattern = '/8/63.jpg';
+    drawn.length = 0; fetchLog = []; failUrlPattern = '/8/39.jpg';
     const canvas = await stitchTiles({
         layer: GIBS_LAYERS.imagery, z: 5,
-        rowMin: 8, nRows: 1, colStart: 62, nCols: 4,
+        rowMin: 8, nRows: 1, colStart: 38, nCols: 4,
     });
     assert.equal(canvas, null);
     failUrlPattern = null;

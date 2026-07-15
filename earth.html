@@ -3623,6 +3623,7 @@ import { WindShearProxy } from './js/wind-shear-proxy.js';
 import { AdvectionGainTracker } from './js/advection-gain-tracker.js';
 import { createWeatherOverlay } from './js/weather-overlay.js';
 import { StormWatchPanel } from './js/storm-watch-panel.js';
+import { ExtremesFeed, attachExtremesSection } from './js/extremes-watch.js';
 import { StormTrackOverlay } from './js/storm-track-overlay.js';
 import { extrapolateStormTrack, interpolateTrackAtHour } from './js/storm-forecast.js';
 import { makePanelDraggable, resetPanelPosition, makePanelResizable, resetPanelSize } from './js/draggable-panel.js';
@@ -4543,23 +4544,26 @@ loadEarthTextures(earthU, cloudU, { anisotropy: EARTH_TEX_ANISO }).then(() => {
     _scheduleBaseUpgrade();
 });
 
-// ── 8K base-texture upgrade ─────────────────────────────────────────────────
+// ── Hi-res base-texture upgrade ─────────────────────────────────────────────
 // The CDN Blue Marble is 4096×2048 (~0.09°/px) — visibly soft from half-globe
 // zoom inward. Once the page is idle, stitch BlueMarble_NextGeneration from
-// GIBS WMTS at level 3 (8192×4096, ~3–5 MB of edge-cached jpeg tiles) and
-// swap it over u_day. Strictly no-worse: any failure keeps the CDN texture.
+// GIBS WMTS and swap it over u_day. With the real GIBS grid (288/2^z °/tile,
+// see earth-detail-inset.js) level 3 is 5120×2560 (~50 tiles) and level 4 is
+// 10240×5120 (~200 tiles) — pick 4 only when the GPU can hold it. Strictly
+// no-worse: any failure keeps the CDN texture.
 function _scheduleBaseUpgrade() {
-    if (renderer.capabilities.maxTextureSize < 8192) return;
+    if (renderer.capabilities.maxTextureSize < 5120) return;
     if (navigator.connection?.saveData) return;
-    // GPU-memory gate: 8192×4096 RGBA8 + mips ≈ 180 MB resident (vs ~45 MB
-    // for the 4K texture). Fine on desktop; on phones it invites texture
-    // eviction jank, so mobile stays on 4K + anisotropy — which already
-    // fixes most of the mid-zoom smear. deviceMemory is Chrome-only, so
-    // only skip on the signal when it exists and reads low.
+    // GPU-memory gate: 10240×5120 RGBA8 + mips ≈ 280 MB resident, 5120×2560
+    // ≈ 70 MB (vs ~45 MB for the 4K texture). Fine on desktop; on phones it
+    // invites texture eviction jank, so mobile stays on 4K + anisotropy —
+    // which already fixes most of the mid-zoom smear. deviceMemory is
+    // Chrome-only, so only skip on the signal when it exists and reads low.
     if (IS_MOBILE_UA) return;
     if (Number.isFinite(navigator.deviceMemory) && navigator.deviceMemory < 8) return;
+    const level = renderer.capabilities.maxTextureSize >= 10240 ? 4 : 3;
     const kick = () => {
-        stitchGlobalBase().then((canvas) => {
+        stitchGlobalBase({ level }).then((canvas) => {
             if (!canvas) return;
             const tex = new THREE.CanvasTexture(canvas);
             tex.colorSpace = THREE.SRGBColorSpace;
@@ -4572,7 +4576,7 @@ function _scheduleBaseUpgrade() {
             const old = earthU.u_day.value;
             earthU.u_day.value = tex;
             old?.dispose?.();
-            console.info('[EarthSkin] base texture upgraded to 8K GIBS Blue Marble');
+            console.info(`[EarthSkin] base texture upgraded to ${canvas.width}×${canvas.height} GIBS Blue Marble (level ${level})`);
         });
     };
     if ('requestIdleCallback' in window) requestIdleCallback(kick, { timeout: 15_000 });
@@ -12907,6 +12911,16 @@ const stormWatchPanel = new StormWatchPanel({
 });
 stormWatchPanel.mount();
 window._stormWatchPanel = stormWatchPanel;   // dev console handle
+
+// Global extremes section — percentile analysis vs the 30-day grid archive
+// (heat/cold/wind/precip) + NASA EONET wildfires, rendered inside the storm
+// panel below the cyclone list. Independent module: it appends a sibling
+// section, so StormWatchPanel's list re-renders can't wipe it (and vice
+// versa). Click a row → same fly-to hook the storm cards use.
+new ExtremesFeed().start();
+attachExtremesSection(stormWatchPanel.element, {
+    onFly: (lat, lon) => flyToLatLon(lat, lon),
+});
 
 // Restore minimized states on load. Each panel can have an HTML default
 // (e.g. info-panel ships minimized so first-time visitors see the globe);

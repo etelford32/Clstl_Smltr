@@ -56,6 +56,12 @@ const CLASS_META = {
     TY:  { label: 'Typhoon',             tint: '#f08020' },
     STY: { label: 'Super Typhoon',       tint: '#e64545' },
     MH:  { label: 'Major Hurricane',     tint: '#d8345f' },
+    // JTWC/EONET vocabulary for Southern Hemisphere + Indian Ocean systems
+    // (api/storms.js merges NASA EONET for the basins NHC doesn't cover).
+    TC:  { label: 'Tropical Cyclone',    tint: '#e08030' },
+    SD:  { label: 'Subtropical Depression', tint: '#5a7fb0' },
+    SS:  { label: 'Subtropical Storm',   tint: '#4aa8a0' },
+    EX:  { label: 'Post-Tropical',       tint: '#8a8fa8' },
 };
 
 // Pretty basin names — the upstream codes are terse.
@@ -761,7 +767,7 @@ export class StormWatchPanel {
             this._listEl.innerHTML = `
                 <div class="sw-empty">
                     ${status === 'offline'
-                        ? 'NHC feed unreachable — retrying.'
+                        ? 'Storm feeds (NHC + EONET) unreachable — retrying.'
                         : 'No active tropical cyclones worldwide right now. 🌊'}
                 </div>`;
             // No storms left — drop any lingering active focus so the
@@ -789,7 +795,7 @@ export class StormWatchPanel {
 
         if (this._footEl) {
             const updated = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            this._footEl.textContent = `Source: NHC CurrentStorms · updated ${updated}`;
+            this._footEl.textContent = `Source: NOAA NHC + NASA EONET · updated ${updated}`;
         }
 
         // Re-apply scrub readouts after the cards rewrote — the new
