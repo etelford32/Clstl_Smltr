@@ -78,22 +78,33 @@ function writeStoredPos(id, pos) {
 }
 
 /**
- * Make `panel` draggable by its `.panel-header`. Idempotent: calling
- * twice on the same panel adds only one set of listeners.
+ * Make `panel` draggable by its `.panel-header` (or an explicit handle).
+ * Idempotent per handle: calling twice with the same handle adds only one
+ * set of listeners, but a panel MAY have several drag handles — e.g. the
+ * verdict card wires both its header AND its collapsed pill, because the
+ * header is display:none while the card is minimised and an invisible
+ * handle can't be grabbed.
  *
  * @param {HTMLElement} panel
  * @param {object}      [opts]
  * @param {string}      [opts.id]      Override the panel's id for storage.
  *                                     Defaults to panel.id.
  * @param {boolean}     [opts.persist] Write/read localStorage. Default true.
+ * @param {HTMLElement} [opts.handle]  Drag handle element. Defaults to the
+ *                                     panel's `.panel-header`.
  */
-export function makePanelDraggable(panel, { id, persist = true } = {}) {
-    if (!panel || panel.dataset.draggableWired === '1') return;
-    panel.dataset.draggableWired = '1';
+export function makePanelDraggable(panel, { id, persist = true, handle } = {}) {
+    if (!panel) return;
 
     const storageId = id ?? panel.id;
-    const header = panel.querySelector('.panel-header');
-    if (!header) return;
+    const header = handle ?? panel.querySelector('.panel-header');
+    if (!header || header.dataset.dragHandleWired === '1') return;
+    header.dataset.dragHandleWired = '1';
+
+    // Panel-level wiring (stored position + resize re-clamp) happens once,
+    // no matter how many handles are attached afterwards.
+    const firstHandleForPanel = panel.dataset.draggableWired !== '1';
+    panel.dataset.draggableWired = '1';
 
     // Visual affordance: the header's existing cursor:pointer becomes
     // grab/grabbing for clarity. Buttons inside the header keep the
@@ -102,10 +113,14 @@ export function makePanelDraggable(panel, { id, persist = true } = {}) {
     header.style.touchAction = 'none';   // disable browser scroll-while-dragging
 
     // Apply stored position if present and valid for the current viewport.
-    const stored = persist ? readStoredPos(storageId) : null;
-    if (stored) {
-        const pos = clampToViewport(panel, stored.left, stored.top);
-        applyAbsolutePosition(panel, pos.left, pos.top);
+    // Only on the first handle — a second handle must not re-snap a panel
+    // the user has already moved this session.
+    if (firstHandleForPanel) {
+        const stored = persist ? readStoredPos(storageId) : null;
+        if (stored) {
+            const pos = clampToViewport(panel, stored.left, stored.top);
+            applyAbsolutePosition(panel, pos.left, pos.top);
+        }
     }
 
     let dragging = false;
@@ -191,18 +206,21 @@ export function makePanelDraggable(panel, { id, persist = true } = {}) {
     // Re-clamp on viewport resize so a stored position from a wider
     // browser doesn't leave the panel off-screen on a phone in
     // portrait. We only touch panels that have an explicit position;
-    // un-dragged panels keep their CSS-default anchoring.
-    const onResize = () => {
-        if (!panel.style.left && !panel.style.top) return;
-        const rect = panel.getBoundingClientRect();
-        const next = clampToViewport(panel, rect.left, rect.top);
-        if (next.left !== rect.left || next.top !== rect.top) {
-            applyAbsolutePosition(panel, next.left, next.top);
-            if (persist) writeStoredPos(storageId, next);
-        }
-    };
-    window.addEventListener('resize',           onResize);
-    window.addEventListener('orientationchange', onResize);
+    // un-dragged panels keep their CSS-default anchoring. One listener
+    // per panel, not per handle.
+    if (firstHandleForPanel) {
+        const onResize = () => {
+            if (!panel.style.left && !panel.style.top) return;
+            const rect = panel.getBoundingClientRect();
+            const next = clampToViewport(panel, rect.left, rect.top);
+            if (next.left !== rect.left || next.top !== rect.top) {
+                applyAbsolutePosition(panel, next.left, next.top);
+                if (persist) writeStoredPos(storageId, next);
+            }
+        };
+        window.addEventListener('resize',           onResize);
+        window.addEventListener('orientationchange', onResize);
+    }
 }
 
 function applyAbsolutePosition(panel, left, top) {

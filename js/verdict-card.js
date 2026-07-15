@@ -19,7 +19,19 @@
  * makePanelDraggable used by every other earth.html panel (pointer events →
  * works for mouse + touch, position persisted per viewport, dblclick
  * resets). The header is a STABLE element — only the card body re-renders —
- * so drag wiring survives data refreshes.
+ * so drag wiring survives data refreshes. The collapsed pill is a SECOND
+ * drag handle on the same panel (makePanelDraggable's `handle` option):
+ * while minimised the header is display:none, so without this the pill
+ * was stuck wherever the card was last dropped.
+ *
+ * Location editor: the card owns the location UX on earth.html (it
+ * replaced the #loc-panel + #hud pair). The editor row is a STABLE
+ * element like the header — if it lived in the re-rendered body, a data
+ * refresh would blow away the input mid-keystroke. Submitting a location
+ * geocodes + persists it via the deps (which dispatch
+ * 'user-location-changed' for the rest of the page: globe pin, feeds),
+ * then auto-flies the camera to the spot — arrival stops auto-rotation
+ * via the page's existing fly pipeline.
  *
  * Degradation: any dep in error state renders its chip/row as '--' with
  * muted color; one dead feed never blanks the card (see verdict-engine's
@@ -73,6 +85,46 @@ const CSS = `
 .ev-verdict-min{min-width:34px;min-height:34px;border-radius:9px;border:1px solid rgba(77,219,255,.25);
   background:rgba(1,4,9,.5);color:#8ba3c7;font-size:.85rem;line-height:1}
 .ev-verdict-min:hover{border-color:rgba(77,219,255,.6);color:#f0f6ff}
+
+/* location editor row — stable element (survives body re-renders) */
+.ev-verdict-locrow{padding:10px 20px 0}
+.ev-verdict-locline{display:flex;gap:7px}
+.ev-verdict-locinput{flex:1;min-width:0;min-height:38px;padding:8px 12px;border-radius:9px;
+  border:1px solid rgba(77,219,255,.25);background:rgba(1,4,9,.55);color:#f0f6ff;
+  font-family:var(--font-mono,'JetBrains Mono',ui-monospace,monospace);font-size:.72rem}
+.ev-verdict-locinput::placeholder{color:#5f7597}
+.ev-verdict-locinput:focus{outline:none;border-color:rgba(77,219,255,.6);
+  box-shadow:0 0 12px rgba(31,143,255,.25)}
+.ev-verdict-locgo{min-width:38px;min-height:38px;border-radius:9px;border:1px solid rgba(77,219,255,.3);
+  background:rgba(31,143,255,.14);color:#4ddbff;font-size:.85rem}
+.ev-verdict-locgo:hover{border-color:rgba(77,219,255,.65);color:#f0f6ff}
+.ev-verdict-locbtns{display:none;gap:7px;margin-top:8px}
+.ev-verdict-locbtns.on{display:flex}
+.ev-verdict-locbtn{flex:1;min-height:36px;padding:7px 10px;border-radius:9px;
+  border:1px solid rgba(46,255,158,.35);background:rgba(46,255,158,.08);color:#2eff9e;
+  font-size:.68rem;font-weight:600;letter-spacing:.04em;transition:filter .15s}
+.ev-verdict-locbtn:hover{filter:brightness(1.25)}
+.ev-verdict-locbtn.danger{border-color:rgba(255,48,80,.35);background:rgba(255,48,80,.07);color:#ff7088}
+.ev-verdict-locerr{display:none;margin-top:7px;padding:7px 10px;border-radius:8px;font-size:.68rem;
+  color:#ff7088;background:rgba(255,48,80,.08);border:1px solid rgba(255,48,80,.3)}
+
+/* local stats (sun / ISS / clocks) — bottom section */
+.ev-verdict-stats{padding:12px 20px 2px}
+.ev-verdict-statgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.ev-verdict-statcard{background:rgba(1,4,9,.5);border:1px solid rgba(77,219,255,.11);border-radius:11px;
+  padding:9px 11px;min-width:0}
+.ev-verdict-stathdr{display:flex;justify-content:space-between;align-items:baseline;gap:6px;
+  font-size:.68rem;font-weight:600;color:#f0f6ff;margin-bottom:6px}
+.ev-verdict-stathdr small{font-family:var(--font-mono,'JetBrains Mono',monospace);font-weight:400;
+  font-size:.56rem;color:#5f7597;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev-verdict-statrow{display:flex;justify-content:space-between;gap:8px;font-size:.62rem;line-height:1.8}
+.ev-verdict-statrow .k{color:#5f7597}
+.ev-verdict-statrow .v{font-family:var(--font-mono,'JetBrains Mono',monospace);color:#c2d4ee;text-align:right}
+.ev-verdict-statclocks{display:flex;justify-content:space-between;gap:10px;margin-top:8px;padding:7px 11px;
+  border-radius:9px;background:rgba(1,4,9,.4);border:1px solid rgba(77,219,255,.08);
+  font-family:var(--font-mono,'JetBrains Mono',monospace);font-size:.6rem;color:#8ba3c7}
+.ev-verdict-statclocks b{color:#c2d4ee;font-weight:600}
+@media(max-width:420px){.ev-verdict-statgrid{grid-template-columns:1fr}}
 
 /* verdict */
 .ev-verdict-verdict{padding:14px 20px 4px}
@@ -189,18 +241,23 @@ const CSS = `
   background:rgba(1,4,9,.5);color:#4ddbff;font-size:.74rem;font-weight:600}
 
 /* collapsed pill */
-.ev-verdict-pill{display:none;align-items:center;gap:8px;min-height:44px;padding:10px 16px;border-radius:999px;
+.ev-verdict-pill{display:none;align-self:flex-start;align-items:center;gap:8px;min-height:44px;padding:10px 16px;border-radius:999px;
   border:1px solid rgba(77,219,255,.35);background:linear-gradient(180deg,rgba(7,27,48,.9),rgba(4,16,30,.96));
   color:#c2d4ee;font-size:.8rem;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.4)}
 .ev-verdict-pill b{font-family:var(--font-display,'Orbitron',sans-serif);font-weight:800;letter-spacing:.04em;
   text-transform:uppercase;font-size:.72rem;
   background:linear-gradient(100deg,#4ddbff 0%,#1f8fff 34%,#bfe3ff 52%,#2eff9e 80%,#a8e63c 100%);
   -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-.ev-verdict-card.ev-collapsed{background:none;border:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;overflow:visible}
+/* pointer-events: the collapsed card container still spans the card's
+   width invisibly — only the pill itself may catch clicks/drags, or the
+   ghost rectangle blocks globe rotation underneath. */
+.ev-verdict-card.ev-collapsed{background:none;border:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;overflow:visible;pointer-events:none}
+.ev-verdict-card.ev-collapsed .ev-verdict-pill{pointer-events:auto}
 .ev-verdict-card.ev-collapsed::before{display:none}
 .ev-verdict-card.ev-collapsed .ev-verdict-head,
+.ev-verdict-card.ev-collapsed .ev-verdict-locrow,
 .ev-verdict-card.ev-collapsed .ev-verdict-scroll{display:none}
-.ev-verdict-card.ev-collapsed .ev-verdict-pill{display:inline-flex}
+.ev-verdict-card.ev-collapsed .ev-verdict-pill{display:inline-flex;cursor:grab}
 
 @media(max-width:640px){
   .ev-verdict-card{top:64px;left:10px;right:10px;width:auto;max-height:calc(100dvh - 120px)}
@@ -253,7 +310,17 @@ export class VerdictCard {
      * @param {object}   [deps.air]          AirQualityFeed instance (.state, .setLocation)
      * @param {Function} [deps.getLocation]  () => {lat, lon, city, displayName} | null
      * @param {Function} [deps.getIssPasses] (loc) => pass-predictor Pass[] | null
-     * @param {Function} [deps.sunTimes]     (date, lat, lon) => {sunrise, sunset}
+     * @param {Function} [deps.sunTimes]     (date, lat, lon) => {sunrise, sunset,
+     *                                       solarNoon, dayLengthH, polar}
+     * @param {Function} [deps.solarPos]     (date, lat, lon) => {altitudeDeg, azimuthDeg}
+     * @param {Function} [deps.searchLocation] async (q) => loc — geocode + persist
+     *                                       (must dispatch 'user-location-changed')
+     * @param {Function} [deps.setLocation]  (loc) => void — persist a known loc
+     * @param {Function} [deps.clearLocation] () => void — forget the saved loc
+     * @param {Function} [deps.flyTo]        (loc) => void — camera fly + zoom;
+     *                                       the page's fly pipeline stops
+     *                                       auto-rotation on arrival
+     * @param {Function} [deps.getSavedLocations] () => [{city, lat, lon, …}]
      * @param {string}   [deps.flagSource]   'query' | 'ls' | 'default' (telemetry)
      */
     constructor(hostEl, deps = {}) {
@@ -293,7 +360,7 @@ export class VerdictCard {
         card.setAttribute('aria-label', 'EarthView verdict for your location');
         card.innerHTML = `
             <div class="ev-verdict-head panel-header">
-                <div class="ev-verdict-loc">📍 <span data-ev="loc-name">EarthView</span>
+                <div class="ev-verdict-loc" data-ev="loc-title" title="Edit location">📍 <span data-ev="loc-name">EarthView</span>
                     <small data-ev="loc-coords">set a location to personalise</small>
                 </div>
                 <div class="ev-verdict-headright">
@@ -302,8 +369,23 @@ export class VerdictCard {
                             title="Collapse card" aria-label="Collapse card">▾</button>
                 </div>
             </div>
+            <div class="ev-verdict-locrow" data-ev="locrow">
+                <div class="ev-verdict-locline">
+                    <input class="ev-verdict-locinput" data-ev="loc-input" type="text"
+                           list="ev-verdict-loc-list" placeholder="City, zip, or address…"
+                           maxlength="80" autocomplete="off" aria-label="Set location">
+                    <datalist id="ev-verdict-loc-list"></datalist>
+                    <button class="ev-verdict-locgo" data-ev="loc-go"
+                            title="Search location" aria-label="Search location">↵</button>
+                </div>
+                <div class="ev-verdict-locbtns" data-ev="loc-btns">
+                    <button class="ev-verdict-locbtn" data-ev="loc-fly" title="Fly the camera to this location">📍 Fly here</button>
+                    <button class="ev-verdict-locbtn danger" data-ev="loc-clear" title="Forget this location">✕ Clear</button>
+                </div>
+                <div class="ev-verdict-locerr" data-ev="loc-err"></div>
+            </div>
             <div class="ev-verdict-scroll" data-ev="body"></div>
-            <button class="ev-verdict-pill" data-ev="pill" title="Open EarthView card">
+            <button class="ev-verdict-pill" data-ev="pill" title="Open EarthView card — drag to move">
                 🌍 <b>EarthView</b> <span data-ev="pill-word">—</span> ▸
             </button>`;
         this._host.appendChild(card);
@@ -312,7 +394,12 @@ export class VerdictCard {
 
         // Drag: same machinery as every other panel (pointer events → touch
         // included; position persisted under earth-panel-pos-ev-verdict-card).
+        // The collapsed pill is a second handle on the same panel — the
+        // header is display:none while minimised, so the pill has to carry
+        // the drag itself. Its click-to-expand survives because the drag
+        // machinery swallows the click only after a real (>4 px) drag.
         makePanelDraggable(card);
+        makePanelDraggable(card, { handle: card.querySelector('[data-ev="pill"]') });
         const head = card.querySelector('.ev-verdict-head');
         head.addEventListener('dblclick', (ev) => {
             if (ev.target.closest('.panel-btn')) return;
@@ -332,10 +419,115 @@ export class VerdictCard {
         card.querySelector('[data-ev="collapse"]').addEventListener('click', () => this._setCollapsed(true, 'collapse_btn'));
         card.querySelector('[data-ev="pill"]').addEventListener('click', () => this._setCollapsed(false, 'pill'));
 
+        // Location editor (stable row — lives outside the re-rendered body
+        // so a data refresh never eats a half-typed query).
+        this._locInput = card.querySelector('[data-ev="loc-input"]');
+        this._locGo    = card.querySelector('[data-ev="loc-go"]');
+        this._locBtns  = card.querySelector('[data-ev="loc-btns"]');
+        this._locErr   = card.querySelector('[data-ev="loc-err"]');
+        this._locList  = card.querySelector('#ev-verdict-loc-list');
+        this._locGo.addEventListener('click', () => this._submitLocation());
+        this._locInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); this._submitLocation(); }
+        });
+        // Picking a saved place from the datalist resolves instantly — no
+        // geocoder round-trip for a location we already know.
+        this._locInput.addEventListener('change', () => {
+            if (this._savedMatch(this._locInput.value)) this._submitLocation();
+        });
+        card.querySelector('[data-ev="loc-fly"]').addEventListener('click', () => {
+            const loc = safe(() => this._deps.getLocation?.());
+            if (loc) { this._deps.flyTo?.(loc); record('loc_fly'); }
+        });
+        card.querySelector('[data-ev="loc-clear"]').addEventListener('click', () => {
+            this._deps.clearLocation?.();
+            this._locInput.value = '';
+            this._locErr.style.display = 'none';
+            record('loc_clear');
+        });
+        // Tapping the header's location name jumps to the editor.
+        card.querySelector('[data-ev="loc-title"]').addEventListener('click', () => {
+            this._locInput.focus();
+            this._locInput.select();
+        });
+
         // One delegated listener for everything inside the re-rendered body.
         this._body.addEventListener('click', (e) => this._onBodyClick(e));
 
         if (this._collapsed) card.classList.add('ev-collapsed');
+        this._syncLocRow(safe(() => this._deps.getLocation?.()) || null);
+    }
+
+    // ── Location editor ─────────────────────────────────────────────────────
+
+    /** Exact-name match against the saved-locations list (datalist pick). */
+    _savedMatch(q) {
+        const needle = String(q || '').trim().toLowerCase();
+        if (!needle) return null;
+        const saved = safe(() => this._deps.getSavedLocations?.()) || [];
+        return saved.find(r =>
+            String(r.city || r.name || '').trim().toLowerCase() === needle) || null;
+    }
+
+    async _submitLocation() {
+        const q = (this._locInput.value || '').trim();
+        if (!q || this._locBusy) return;
+        this._locErr.style.display = 'none';
+        this._locBusy = true;
+        this._locGo.disabled = true;
+        const goGlyph = this._locGo.textContent;
+        this._locGo.textContent = '…';
+        try {
+            let loc;
+            const hit = this._savedMatch(q);
+            if (hit) {
+                loc = {
+                    lat: hit.lat, lon: hit.lon,
+                    city: hit.city || hit.name,
+                    displayName: hit.displayName || hit.city || hit.name,
+                };
+                this._deps.setLocation?.(loc);
+            } else {
+                loc = await this._deps.searchLocation?.(q);
+            }
+            if (loc) {
+                this._locInput.value = loc.city || loc.displayName || q;
+                this._locInput.blur();
+                // Auto-zoom to the fresh location; the page's fly pipeline
+                // stops auto-rotation on arrival so the spot stays framed.
+                this._deps.flyTo?.(loc);
+                record('loc_set', { source: hit ? 'saved' : 'search' });
+            }
+        } catch (err) {
+            this._locErr.textContent = err?.message || 'Location lookup failed';
+            this._locErr.style.display = 'block';
+            record('loc_error');
+        } finally {
+            this._locBusy = false;
+            this._locGo.disabled = false;
+            this._locGo.textContent = goGlyph;
+        }
+    }
+
+    /** Keep the editor row consistent with the saved location. */
+    _syncLocRow(loc) {
+        if (!this._locInput) return;
+        // Never clobber an in-progress edit.
+        if (document.activeElement !== this._locInput) {
+            this._locInput.value = loc ? (loc.city || loc.displayName || '') : '';
+        }
+        this._locBtns.classList.toggle('on', !!loc);
+        // Saved locations feed the datalist so past places are one tap away.
+        const saved = safe(() => this._deps.getSavedLocations?.()) || [];
+        const opts = saved
+            .map(r => String(r.city || r.name || '').trim())
+            .filter(Boolean)
+            .slice(0, 12);
+        const sig = JSON.stringify(opts);
+        if (sig !== this._locListSig) {
+            this._locListSig = sig;
+            this._locList.innerHTML = opts.map(c => `<option value="${esc(c)}"></option>`).join('');
+        }
     }
 
     _subscribe() {
@@ -489,7 +681,7 @@ export class VerdictCard {
         card.querySelector('[data-ev="loc-coords"]').textContent = inputs.loc
             ? `${fmtCoord(inputs.loc.lat, 'N', 'S')} · ${fmtCoord(inputs.loc.lon, 'E', 'W')} · saved location`
             : 'set a location to personalise';
-        this._tickClock();
+        this._syncLocRow(safe(() => this._deps.getLocation?.()) || null);
         card.querySelector('[data-ev="pill-word"]').textContent =
             this._pillWord(model, inputs);
 
@@ -559,6 +751,12 @@ export class VerdictCard {
             </div>
         </div>`);
 
+        const stats = this._renderStats(inputs);
+        if (stats) {
+            parts.push('<hr class="ev-verdict-divider">');
+            parts.push(stats);
+        }
+
         const ctaContext = model.skyEvents[0].state !== 'no' ? 'aurora'
             : model.skyEvents[1].state === 'go' ? 'iss' : 'aurora';
         const ctaLabel = ctaContext === 'iss' ? '🔔 Alert me before the pass' : '🔔 Alert me before the storm';
@@ -575,6 +773,9 @@ export class VerdictCard {
         </div>`);
 
         this._body.innerHTML = parts.join('');
+        // After the body exists: the clock tick also fills the stats-strip
+        // local/UTC pair, which lives in the freshly rendered body.
+        this._tickClock();
     }
 
     _renderTempGraph(series, inputs, tz) {
@@ -680,6 +881,81 @@ export class VerdictCard {
         </div>`;
     }
 
+    /**
+     * Bottom stats block — the "my location" numbers that used to live in
+     * the standalone #loc-panel (sun rise/set + ISS next pass), plus the
+     * local/UTC clock pair that used to live in the #hud readout. Rendered
+     * with the body (≥5 s cadence); the clock line alone is also refreshed
+     * by _tickClock between renders.
+     */
+    _renderStats(inputs) {
+        const loc = inputs.loc;
+        if (!loc) return '';
+        const tz = loc.tz;
+        const now = new Date();
+        const d = this._deps;
+        const row = (k, v) => `<div class="ev-verdict-statrow"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
+
+        // Sun card — same fields as the old loc-panel sun card.
+        let sunCard = '';
+        const st = typeof d.sunTimes === 'function'
+            ? safe(() => d.sunTimes(now, loc.lat, loc.lon)) : null;
+        if (st) {
+            const pos = typeof d.solarPos === 'function'
+                ? safe(() => d.solarPos(now, loc.lat, loc.lon)) : null;
+            const meta = pos
+                ? `${pos.altitudeDeg >= 0 ? '+' : ''}${pos.altitudeDeg.toFixed(1)}° · ${compass16(pos.azimuthDeg)}`
+                : '';
+            const dlen = st.polar === 'day' ? '24h 00m'
+                : st.polar === 'night' ? '0h 00m'
+                : `${Math.floor(st.dayLengthH)}h ${String(Math.round((st.dayLengthH % 1) * 60)).padStart(2, '0')}m`;
+            sunCard = `
+            <div class="ev-verdict-statcard">
+                <div class="ev-verdict-stathdr"><span>☀️ Sun</span><small>${esc(meta)}</small></div>
+                ${row('Rises', st.polar === 'night' ? 'polar night' : fmtClock(st.sunrise, tz))}
+                ${row('Solar max', fmtClock(st.solarNoon, tz))}
+                ${row('Sets', st.polar === 'day' ? 'polar day' : fmtClock(st.sunset, tz))}
+                ${row('Day length', dlen)}
+            </div>`;
+        }
+
+        // ISS card — next upcoming pass from the cached prediction set.
+        let issCard = '';
+        const pass = (this._iss.passes || []).find(p =>
+            (p.set ?? p.peakTime ?? p.rise) > now) || null;
+        if (pass) {
+            const mins = Math.max(0, (pass.rise - now) / 60_000);
+            const when = mins < 60 ? `in ${Math.round(mins)} min`
+                : mins < 720 ? `in ${Math.round(mins / 60)} h`
+                : fmtDay(pass.rise, tz);
+            issCard = `
+            <div class="ev-verdict-statcard">
+                <div class="ev-verdict-stathdr"><span>🛰️ ISS pass</span><small>${esc(when)}</small></div>
+                ${row('Rises', `${fmtClock(pass.rise, tz)} · ${pass.riseAz}`)}
+                ${row('Peak', `${Math.round(pass.peakAlt ?? 0)}° · ${fmtClock(pass.peakTime, tz)}`)}
+                ${row('Direction', `${pass.riseAz} → ${pass.setAz}`)}
+                ${row('Duration', pass.durationMin != null ? `${pass.durationMin.toFixed(1)} min` : '--')}
+            </div>`;
+        } else {
+            issCard = `
+            <div class="ev-verdict-statcard">
+                <div class="ev-verdict-stathdr"><span>🛰️ ISS pass</span><small>next 48 h</small></div>
+                ${row('Status', this._iss.passes ? 'none ≥ 20°' : 'waiting TLE…')}
+            </div>`;
+        }
+
+        if (!sunCard && !issCard) return '';
+        return `
+        <div class="ev-verdict-stats">
+            <div class="ev-verdict-mini">Local stats</div>
+            <div class="ev-verdict-statgrid">${sunCard}${issCard}</div>
+            <div class="ev-verdict-statclocks">
+                <span>Local <b data-ev="stat-local">--</b></span>
+                <span>UTC <b data-ev="stat-utc">--</b></span>
+            </div>
+        </div>`;
+    }
+
     _weekRangeLabel(tz) {
         try {
             const fmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', ...(tz ? { timeZone: tz } : {}) });
@@ -723,6 +999,21 @@ export class VerdictCard {
             const stale = this._deps.air?.state?.status === 'error';
             live.classList.toggle('stale', !!stale);
         }
+        // Stats clock pair (local + UTC) — cheap targeted writes so the
+        // strip stays current between full body renders.
+        const statLocal = this._card.querySelector('[data-ev="stat-local"]');
+        const statUtc   = this._card.querySelector('[data-ev="stat-utc"]');
+        if (statLocal || statUtc) {
+            const now = new Date();
+            try {
+                if (statLocal) statLocal.textContent = new Intl.DateTimeFormat('en-US', {
+                    hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}),
+                }).format(now);
+                if (statUtc) statUtc.textContent = new Intl.DateTimeFormat('en-US', {
+                    hour12: false, hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
+                }).format(now);
+            } catch { /* clock is cosmetic */ }
+        }
     }
 
     // ── Interactions ────────────────────────────────────────────────────────
@@ -756,10 +1047,9 @@ export class VerdictCard {
                 this._setCollapsed(true, 'explore');
                 break;
             case 'setloc': {
-                const locInput = document.getElementById('loc-input');
-                const locPanel = document.getElementById('loc-panel');
-                locPanel?.classList.remove('panel-minimized');
-                locInput?.focus();
+                // The card owns the location editor now — jump to its own
+                // input instead of the retired standalone #loc-panel.
+                this._locInput?.focus();
                 record('set_location_prompt');
                 break;
             }
@@ -815,6 +1105,15 @@ function safeTz() {
 
 function fmtCoord(v, pos, neg) {
     return `${Math.abs(v).toFixed(2)}°${v >= 0 ? pos : neg}`;
+}
+
+/** "Sat" — weekday label for a far-out timestamp, in the loc's tz. */
+function fmtDay(t, tz) {
+    try {
+        return new Intl.DateTimeFormat('en-US', {
+            weekday: 'short', ...(tz ? { timeZone: tz } : {}),
+        }).format(new Date(t));
+    } catch { return '--'; }
 }
 
 export default VerdictCard;
