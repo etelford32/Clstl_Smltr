@@ -22,6 +22,7 @@
 import * as THREE from 'three';
 import { geo } from './geo/coords.js';
 import { GEO_GLSL } from './geo/coords.glsl.js';
+import { INSET_GLSL_HELPERS } from './geo/inset.glsl.js';
 import { buildTempLUTPixels, TEMP_RAMP_STOPS, TEMP_LUT_SIZE } from './temp-ramp.js';
 
 // ── Version-pinned CDN — avoids broken URLs from three-globe package updates ──
@@ -85,26 +86,10 @@ export { TEMP_RAMP_STOPS };
 // latMin) — do NOT "fix" this to match the global textures' row
 // conventions; insets are sampled with an explicitly computed UV, not vUv.
 
-const INSET_GLSL_HELPERS = /* glsl */`
-// highp: the cloud frag runs mediump by default, and fp16 quantises
-// degree-range values to 0.06–0.125° — up to half a weather-patch cell at
-// the 0.25° floor. Inset math must stay full-precision on mobile GPUs.
-
-// Equirectangular uv → inset-local uv (may land outside [0,1]).
-highp vec2 insetUV(vec2 uv, highp vec4 b) {
-    highp vec2 llDeg = uvToLatLonDeg(uv);                 // (lat, lon)
-    highp float dLon = mod(llDeg.y - b.x, 360.0);
-    return vec2(dLon / max(1e-3, b.z),
-                (llDeg.x - b.y) / max(1e-3, b.w));
-}
-
-// 1 in the inset interior, easing to 0 across the outer ~12% so the
-// high-res window blends into the global field with no visible seam.
-float insetWeight(vec2 uvP) {
-    vec2 edge = min(uvP, 1.0 - uvP);
-    return smoothstep(0.0, 0.12, min(edge.x, edge.y));
-}
-`;
+// INSET_GLSL_HELPERS (insetUV / insetWeight) now lives in ./geo/inset.glsl.js so
+// the terrain-patch vertex shader can share the exact source without pulling
+// THREE into node tests. Imported above; still concatenated into EARTH_FRAG /
+// CLOUD_FRAG below exactly as before.
 
 const PATCH_GLSL_CORE = /* glsl */`
 uniform sampler2D u_patch_weather;  // same packing as u_weather

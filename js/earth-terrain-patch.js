@@ -47,8 +47,18 @@
  */
 
 import { GEO_GLSL } from './geo/coords.glsl.js';
+import { INSET_GLSL_HELPERS } from './geo/inset.glsl.js';
 
 const DEG = Math.PI / 180;
+
+// 1×1 "sea level" placeholder so the u_dem sampler is never null before the DEM
+// inset delivers a real tile canvas. Terrarium sea level (0 m) encodes as
+// R=128,G=0,B=0 → (128·256)−32768 = 0, so this displaces nothing.
+function _placeholderTex(THREE) {
+    const t = new THREE.DataTexture(new Uint8Array([128, 0, 0, 255]), 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    return t;
+}
 
 // Geographic → unit position, byte-identical to geo.latLonToNormal
 // (js/geo/coords.js): the fragment shader's normalToUV() is the inverse, so a
@@ -144,16 +154,33 @@ export function buildPatchArrays({ latMin, latMax, lonMinDeg, lonSpanDeg, segs =
 // what keeps the patch's shading seam-free. GEO_GLSL supplies normalToUV().
 export const TERRAIN_VERT = /* glsl */`
 ${GEO_GLSL}
+${INSET_GLSL_HELPERS}
 uniform sampler2D u_topology;      // shared with EARTH_FRAG: normalised height (r)
 uniform sampler2D u_specular;      // shared: ocean mask (r = ocean)
-uniform float u_terrain_exag;      // vertical exaggeration
+uniform float u_terrain_exag;      // vertical exaggeration on the normalised global map
 uniform float u_terrain_sealevel;  // height value that maps to sea level
 uniform float u_terrain_skirt;     // skirt tuck-under depth (globe radii)
+
+// ── High-res DEM inset (T1b, js/earth-dem-inset.js) ─────────────────────────
+uniform sampler2D u_dem;           // Terrarium terrain-RGB, resampled to equirect
+uniform highp vec4 u_dem_bounds;   // lonMin, latMin, lonSpan, latSpan (degrees)
+uniform float u_dem_on;
+uniform float u_dem_exag;          // UNITLESS vertical exaggeration on real metres
+
 attribute float aSkirt;
 
 varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
+
+const float EARTH_RADIUS_M = 6371000.0;
+
+// Terrarium decode: metres = (R·256 + G + B/256) − 32768, RGB in 0..1 → ·255.
+// Mirrors decodeTerrarium in js/earth-dem-inset.js — keep them in lockstep.
+float demMetres(vec2 uvD) {
+    vec3 c = texture2D(u_dem, uvD).rgb * 255.0;
+    return (c.r * 256.0 + c.g + c.b / 256.0) - 32768.0;
+}
 
 void main() {
     vec3 dir = normalize(position);
@@ -161,10 +188,24 @@ void main() {
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
 
     vec2  uv    = normalToUV(dir);
-    float h     = texture2D(u_topology, uv).r;
     float ocean = texture2D(u_specular, uv).r;
-    float land  = max(0.0, h - u_terrain_sealevel) * (1.0 - ocean);
-    float disp  = u_terrain_exag * land;
+
+    // Base: global normalised height (T1a) — continental swells.
+    float h    = texture2D(u_topology, uv).r;
+    float disp = u_terrain_exag * max(0.0, h - u_terrain_sealevel) * (1.0 - ocean);
+
+    // Inside the DEM footprint, blend to real-metre elevation (T1b). Physically
+    // grounded: metres / Earth radius = elevation in globe radii, so u_dem_exag
+    // is a pure vertical-exaggeration factor. Bathymetry (negative) clamps to 0.
+    if (u_dem_on > 0.5) {
+        vec2  uvD = insetUV(uv, u_dem_bounds);
+        float wgt = insetWeight(uvD);
+        if (wgt > 0.001) {
+            float dispDem = u_dem_exag * max(0.0, demMetres(uvD)) / EARTH_RADIUS_M;
+            disp = mix(disp, dispDem, wgt);
+        }
+    }
+
     // Skirt-ring vertices ignore the height field and drop straight down under
     // the globe so the patch boundary never shows a floating cliff edge.
     disp = mix(disp, -u_terrain_skirt, aSkirt);
@@ -186,6 +227,7 @@ export class EarthTerrainPatch {
         THREE, earthMesh, earthUniforms, fragmentShader,
         segs = 96, activateSpanDeg = 18,
         exaggeration = 0.035, seaLevel = 0.5, skirtDepth = 0.02,
+        demExaggeration = 22,
     }) {
         this._THREE   = THREE;
         this._parent  = earthMesh;
@@ -198,6 +240,11 @@ export class EarthTerrainPatch {
             u_terrain_exag:     { value: exaggeration },
             u_terrain_sealevel: { value: seaLevel },
             u_terrain_skirt:    { value: skirtDepth },
+            // DEM inset (T1b) — off until earth-dem-inset feeds a texture.
+            u_dem:        { value: _placeholderTex(THREE) },
+            u_dem_bounds: { value: new THREE.Vector4(0, 0, 1, 1) },
+            u_dem_on:     { value: 0 },
+            u_dem_exag:   { value: demExaggeration },
         });
 
         this._mat = new THREE.ShaderMaterial({
@@ -229,6 +276,30 @@ export class EarthTerrainPatch {
 
     setExaggeration(v) { this._uniforms.u_terrain_exag.value = v; }
     setSeaLevel(v)     { this._uniforms.u_terrain_sealevel.value = v; }
+    setDemExaggeration(v) { this._uniforms.u_dem_exag.value = v; }
+
+    /**
+     * Feed a resampled DEM tile canvas (from js/earth-dem-inset.js) as the
+     * high-res elevation inset. NearestFilter — the packed terrain-RGB encoding
+     * must not be linearly interpolated.
+     * @param {{canvas:HTMLCanvasElement, bounds:{lonMin,latMin,lonSpan,latSpan}}} d
+     */
+    setDemInset({ canvas, bounds }) {
+        if (!canvas || !bounds) return;
+        const THREE = this._THREE;
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.magFilter = THREE.NearestFilter;
+        tex.minFilter = THREE.NearestFilter;
+        tex.generateMipmaps = false;
+        tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+        const old = this._uniforms.u_dem.value;
+        this._uniforms.u_dem.value = tex;
+        this._uniforms.u_dem_bounds.value.set(bounds.lonMin, bounds.latMin, bounds.lonSpan, bounds.latSpan);
+        this._uniforms.u_dem_on.value = 1;
+        if (old && old.dispose) old.dispose();
+    }
+
+    clearDemInset() { this._uniforms.u_dem_on.value = 0; }
 
     _onFootprint(ev) {
         const fp = ev.detail;

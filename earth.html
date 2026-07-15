@@ -3621,6 +3621,7 @@ import { makeWeatherFlowForecasters, WindAdvectionRK2Forecaster,
          DEFAULT_HORIZONTAL_DIFFUSION } from './js/weather-flow.js';
 import { FocusFootprint }        from './js/focus-footprint.js';
 import { EarthTerrainPatch }     from './js/earth-terrain-patch.js';
+import { EarthDemInset }         from './js/earth-dem-inset.js';
 import { WeatherPatchFeed }      from './js/weather-patch.js';
 import { EarthDetailInset, stitchGlobalBase, GIBS_LAYERS } from './js/earth-detail-inset.js';
 import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
@@ -4178,6 +4179,23 @@ try {
     terrainPatch.setEnabled(TERRAIN3D_ON && !_isMobileUA);
 } catch (e) {
     terrainPatch = null;
+}
+
+// High-res DEM inset (T1b): fetches real-elevation tiles over the footprint at
+// close zoom and feeds them to the terrain patch as a second sampler, which
+// blends real-metre displacement over the global-height base (see
+// js/earth-dem-inset.js). Shares the terrain flag; if the tile source is
+// unreachable it silently degrades to T1a (global height) — never fatal.
+let demInset = null;
+if (terrainPatch) {
+    try {
+        demInset = new EarthDemInset();
+        document.addEventListener('earth-dem-inset', (ev) => terrainPatch.setDemInset(ev.detail));
+        document.addEventListener('earth-dem-clear', () => terrainPatch.clearDemInset());
+        demInset.setEnabled(TERRAIN3D_ON && !_isMobileUA);
+    } catch (e) {
+        demInset = null;
+    }
 }
 
 const cloudGeo = new THREE.IcosahedronGeometry(R_CLOUDS, ICO_LEVEL);
