@@ -523,7 +523,7 @@ export class VerdictCard {
             .map(r => String(r.city || r.name || '').trim())
             .filter(Boolean)
             .slice(0, 12);
-        const sig = opts.join(' ');
+        const sig = JSON.stringify(opts);
         if (sig !== this._locListSig) {
             this._locListSig = sig;
             this._locList.innerHTML = opts.map(c => `<option value="${esc(c)}"></option>`).join('');
