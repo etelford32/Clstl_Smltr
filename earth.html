@@ -3620,6 +3620,7 @@ import { makeWeatherFlowForecasters, WindAdvectionRK2Forecaster,
          MultiLevelAdvectionForecaster, multilevelLevelsDense,
          DEFAULT_HORIZONTAL_DIFFUSION } from './js/weather-flow.js';
 import { FocusFootprint }        from './js/focus-footprint.js';
+import { EarthTerrainPatch }     from './js/earth-terrain-patch.js';
 import { WeatherPatchFeed }      from './js/weather-patch.js';
 import { EarthDetailInset, stitchGlobalBase, GIBS_LAYERS } from './js/earth-detail-inset.js';
 import { TracerSkillTracker } from './js/tracer-skill-tracker.js';
@@ -4151,6 +4152,33 @@ const earthMat = new THREE.ShaderMaterial({
 const earthMesh = new THREE.Mesh(earthGeo, earthMat);
 // Earth spin axis = world Y. Sun direction baked into uniforms (equatorial frame).
 scene.add(earthMesh);
+
+// ── 3D displaced terrain patch (T1 of the LOD plan) ─────────────────────────
+// A high-subdivision grid mesh over the camera footprint whose vertices are
+// displaced radially by the elevation map, so real ridgelines break the limb
+// (bump mapping can shade a slope but never change the silhouette). It parents
+// to earthMesh and SHARES earthU + EARTH_FRAG, so it shades identically to the
+// globe beneath — no seam (see js/earth-terrain-patch.js).
+//
+// Behind a flag until it can be tuned on a real GPU: opt in with ?terrain3d=1
+// or localStorage ev_terrain3d='1'. Desktop-first — it's a vertex/fill-heavy
+// deep feature, so it stays off on mobile even when flagged. Never fatal: a
+// construction failure just leaves the smooth globe.
+const TERRAIN3D_ON = (() => {
+    const q = new URLSearchParams(location.search).get('terrain3d');
+    if (q === '1' || q === 'on')  return true;
+    if (q === '0' || q === 'off') return false;
+    return localStorage.getItem('ev_terrain3d') === '1';
+})();
+let terrainPatch = null;
+try {
+    terrainPatch = new EarthTerrainPatch({
+        THREE, earthMesh, earthUniforms: earthU, fragmentShader: EARTH_FRAG,
+    });
+    terrainPatch.setEnabled(TERRAIN3D_ON && !_isMobileUA);
+} catch (e) {
+    terrainPatch = null;
+}
 
 const cloudGeo = new THREE.IcosahedronGeometry(R_CLOUDS, ICO_LEVEL);
 const cloudMat = new THREE.ShaderMaterial({
