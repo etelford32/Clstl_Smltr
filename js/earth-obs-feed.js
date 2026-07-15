@@ -105,16 +105,19 @@ const CRS           = 'EPSG:4326';
 export const EARTH_OBS_LAYERS = [
     {
         id:          'precip-rate',
-        // GIBS identifier for the daily-aggregated IMERG Late Run product.
-        // The legacy 'IMERG_Precipitation_Rate' alias was retired in
-        // 2024; both the snapshot and WMS endpoints now 404 for it,
-        // which is why the layer was rendering as broken.
-        // 'GPM_3IMERGDL_Precipitation_Rate' is the current daily Late
-        // Run identifier (≈1-day latency, global coverage). For a
-        // half-hourly product see the optional 'precip-imerg-30min'
-        // entry below — that one needs a sub-day TIME parameter so
-        // the snapshot URL builder isn't a clean fit yet.
-        gibs:        'GPM_3IMERGDL_Precipitation_Rate',
+        // GIBS identifier for the daily-aggregated IMERG product.
+        // WARNING — this ID has flip-flopped upstream twice now. The
+        // 2024-era 'GPM_3IMERGDL_Precipitation_Rate' identifier was
+        // REMOVED from the GIBS catalogue; as of 2026-07 the catalogue
+        // (WMTSCapabilities.xml, epsg4326/best) lists
+        // 'IMERG_Precipitation_Rate' (daily, P1D, default = yesterday)
+        // and 'IMERG_Precipitation_Rate_30min' (PT30M, ~6 h latency).
+        // Verified live 2026-07-15: snapshot returns HTTP 500 for the
+        // GPM_3IMERGDL id and a real PNG for this one. If this layer
+        // goes red again, re-check the catalogue before assuming the
+        // endpoint is down:
+        //   curl -s https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/1.0.0/WMTSCapabilities.xml | grep -o '<ows:Identifier>[^<]*IMERG[^<]*'
+        gibs:        'IMERG_Precipitation_Rate',
         name:        'Precipitation Rate',
         category:    'atmosphere',
         description: 'GPM IMERG Late Run daily precipitation rate (rain + snow)',
@@ -133,15 +136,22 @@ export const EARTH_OBS_LAYERS = [
         defaultOn:   true,
     },
     {
-        id:          'precip-amsr2',
-        gibs:        'AMSR2_Surface_Precipitation_Rate_Day',
-        name:        'AMSR2 Precip Rate (Day)',
+        // Second (microwave-only) precip observation for cross-checking the
+        // IMERG fusion product — the role EARTH_LOD_NASA_PRECIP_PLAN.md
+        // assigned to AMSR2. The AMSR2 layer itself is dead upstream: GIBS
+        // renamed it 'AMSRU2_Surface_Precipitation_Day' AND its data ends
+        // 2025-09-01 (instrument EOL), verified against the catalogue
+        // 2026-07-15. GPM GMI is the live equivalent (current through
+        // yesterday, P1D cadence).
+        id:          'precip-gmi',
+        gibs:        'GMI_Precipitation_Rate_Asc',
+        name:        'GMI Precip Rate (microwave)',
         category:    'atmosphere',
-        description: 'GCOM-W1 AMSR2 passive microwave precipitation rate',
+        description: 'GPM GMI passive microwave precipitation rate (ascending passes)',
         unit:        'mm/hr',
         resolution:  { w: 2048, h: 1024 },
         cadence:     60 * 60_000,
-        latency:     '~3 hours',
+        latency:     '~1 day (daily composite)',
         colorRamp:   'Blue → green → yellow → red',
         format:      'image/png',
         timeOffset:  1,

@@ -15,6 +15,11 @@
  *   • U declines >8 m/s in 7d ⇒  weakening (often presages displacement)
  *   • U < 10 m/s              ⇒  disturbed (vortex displacement likely)
  *   • U < 0  (easterly)        ⇒  Sudden Stratospheric Warming
+ *   • EXCEPT May–August: the 10 hPa flow at 60°N is climatologically
+ *     easterly all summer (the vortex is dormant, not "warming"), so
+ *     U < 10 in those months reports state 'summer_easterlies' at low
+ *     risk instead of a false SSW. SSW classification is a winter
+ *     (Sep–Apr) concept.
  *
  * SSW events typically translate to mid-latitude cold-air outbreaks
  * 10-21 days after the reversal — the operational reason this card
@@ -42,7 +47,10 @@ const OPEN_METEO_GFS = 'https://api.open-meteo.com/v1/gfs';
 
 // 6 longitudes around 60°N for a zonal-mean estimate. Good balance
 // between accuracy and Open-Meteo's per-call quota.
-const DEFAULT_LONS = [0, 60, 120, 180, 240, 300];
+// MUST be signed [-180, 180]: Open-Meteo rejects 0–360-style longitudes
+// with HTTP 400 ("Longitude must be in range of -180 to 180°"), which
+// took this endpoint down entirely (verified live 2026-07-15).
+const DEFAULT_LONS = [0, 60, 120, 180, -120, -60];
 const LAT          = 60;
 const LEVELS       = [10, 30, 50];   // hPa
 const FORECAST_DAYS = 14;
@@ -63,7 +71,7 @@ function uFromDir(speed, dir_deg) {
     return -speed * Math.sin(dr);
 }
 
-function classifyVortex(u10_now, u10_d7) {
+function classifyVortex(u10_now, u10_d7, monthUTC = new Date().getUTCMonth()) {
     if (!Number.isFinite(u10_now)) {
         return {
             state: 'unknown',
@@ -73,6 +81,20 @@ function classifyVortex(u10_now, u10_d7) {
         };
     }
     const slope = Number.isFinite(u10_d7) ? (u10_d7 - u10_now) : 0;
+
+    // Summer guard: May–Aug (UTC months 4–7) the stratospheric circulation
+    // at 60°N is NORMALLY easterly — the winter vortex doesn't exist to be
+    // "suddenly warmed". Without this gate the endpoint reported a
+    // permanent high-risk SSW all summer (observed live 2026-07-15,
+    // U₁₀ ≈ -10 m/s), and surface-outlook's stratoCold branch turned that
+    // into phantom "cold-air outbreak" regimes whenever AO dipped negative.
+    if (monthUTC >= 4 && monthUTC <= 7 && u10_now < 10) return {
+        state: 'summer_easterlies',
+        label: 'Summer easterly regime',
+        risk:  'low',
+        detail:'Climatological summer easterlies at 10 hPa — the winter '
+             + 'polar vortex is dormant. SSW watch resumes in September.',
+    };
 
     if (u10_now < 0) return {
         state: 'ssw',

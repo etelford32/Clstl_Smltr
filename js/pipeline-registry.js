@@ -161,7 +161,7 @@ export const PIPELINES = [
       warnAgeS:  12 * 3600, critAgeS: 48 * 3600 },
 
     // ── Weather · GFS + NOAA CPC ───────────────────────────────────────────
-    { id: 'weather-grid',       label: 'Weather grid (648-pt)',
+    { id: 'weather-grid',       label: 'Weather grid (2592-pt)',
       endpoint: '/api/weather/grid',
       category: 'weather', upstream: 'Open-Meteo GFS · cron-fed',
       cadence_s: 3_600, prewarm: null,

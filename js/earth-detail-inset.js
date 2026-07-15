@@ -67,10 +67,24 @@ export const GIBS_LAYERS = Object.freeze({
 });
 
 // ── Pure tile math (exported for tests) ────────────────────────────────────
+//
+// CRITICAL — GIBS EPSG:4326 tile grids are NOT the power-of-two pyramid
+// (2·2^z × 2^z at 180/2^z °/tile) that "web-mercator intuition" suggests.
+// Per WMTSCapabilities.xml (verified 2026-07-15), every GIBS 4326 matrix
+// set uses 512-px tiles spanning 288/2^z degrees, with matrix dims
+// ceil(360/span) × ceil(180/span) and PADDED bottom/right edge tiles:
+//   z0: 2×1 (288°)   z1: 3×2 (144°)   z2: 5×3 (72°)   z3: 10×5 (36°)
+//   z4: 20×10 (18°)  …  z8: 320×160 (1.125°)
+// The old 180/2^z math requested tiles past the real matrix edge (e.g.
+// col 10–15 of the 10-wide level 3), which GIBS answers with HTTP 400 —
+// and the all-or-nothing stitcher then dropped the whole run, so the 8K
+// base upgrade NEVER landed and edge-adjacent insets silently vanished.
+// Rows/cols that do exist were also mislabeled in degrees, warping any
+// inset that did render. Do not "simplify" these back to powers of two.
 
-export function tileSpanDeg(z)  { return 180 / 2 ** z; }
-export function tilesAcross(z)  { return 2 * 2 ** z; }
-export function tilesDown(z)    { return 2 ** z; }
+export function tileSpanDeg(z)  { return 288 / 2 ** z; }
+export function tilesAcross(z)  { return Math.ceil(360 / tileSpanDeg(z)); }
+export function tilesDown(z)    { return Math.ceil(180 / tileSpanDeg(z)); }
 
 export function buildTileUrl(layer, z, row, col) {
     return `${GIBS_BASE}/${layer.id}/default/${layer.time ?? 'default'}`
@@ -82,7 +96,8 @@ export function buildTileUrl(layer, z, row, col) {
  * columns (the +1 slack absorbs the snap to tile edges).
  */
 export function zoomForSpan(spanDeg, { maxTilesAcross = 5, maxLevel = 8 } = {}) {
-    const z = Math.floor(Math.log2(180 * (maxTilesAcross - 1) / Math.max(1e-6, spanDeg)));
+    // 288 = tileSpanDeg(0); see the grid-geometry note above.
+    const z = Math.floor(Math.log2(288 * (maxTilesAcross - 1) / Math.max(1e-6, spanDeg)));
     return Math.max(0, Math.min(maxLevel, z));
 }
 
@@ -319,12 +334,12 @@ export class EarthDetailInset {
 // ── Global base-texture upgrade ─────────────────────────────────────────────
 
 /**
- * Stitch a full-globe Blue Marble at the requested level (default 3 →
- * 16×8 tiles = 8192×4096) for swapping over the 4K CDN day texture — the
- * "bump the base texture to 8K" win without taking a dependency on an
- * unpinned third-party texture host. ~128 tiles ≈ 3–5 MB, intended to run
- * once on idle after first paint; GIBS edge-caches aggressively so repeat
- * visits are fast.
+ * Stitch a full-globe Blue Marble at the requested level for swapping over
+ * the 4K CDN day texture. With the real GIBS grid geometry:
+ *   level 3 → 10×5 tiles  = 5120×2560  (~50 jpegs, "5K")
+ *   level 4 → 20×10 tiles = 10240×5120 (~200 jpegs, "10K")
+ * Intended to run once on idle after first paint; GIBS edge-caches
+ * aggressively so repeat visits are fast.
  *
  * Resolves to the canvas, or null on any failure (caller keeps the CDN
  * texture — strictly no-worse behaviour).
