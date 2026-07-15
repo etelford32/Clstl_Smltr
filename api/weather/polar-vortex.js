@@ -42,7 +42,10 @@ const OPEN_METEO_GFS = 'https://api.open-meteo.com/v1/gfs';
 
 // 6 longitudes around 60°N for a zonal-mean estimate. Good balance
 // between accuracy and Open-Meteo's per-call quota.
-const DEFAULT_LONS = [0, 60, 120, 180, 240, 300];
+// MUST be signed [-180, 180]: Open-Meteo rejects 0–360-style longitudes
+// with HTTP 400 ("Longitude must be in range of -180 to 180°"), which
+// took this endpoint down entirely (verified live 2026-07-15).
+const DEFAULT_LONS = [0, 60, 120, 180, -120, -60];
 const LAT          = 60;
 const LEVELS       = [10, 30, 50];   // hPa
 const FORECAST_DAYS = 14;
