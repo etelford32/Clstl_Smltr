@@ -342,6 +342,17 @@ nav {
 #hud .hv { color:#a0d8f0; font-weight:600; }
 #hud .hk { color:#4a6a80; }
 
+/* When the verdict card is active it OWNS the location UX: its stable
+   header carries the location editor, its stats block carries the sun /
+   ISS / clock readouts. The legacy #hud readout, the standalone
+   #loc-panel, and the mobile-toolbar Location button are therefore
+   hidden — ONE panel, per the EarthView consolidation. They come back
+   untouched when the card is opted out (?verdict=0 / ev_verdict='0')
+   or if the card fails to boot (the init's catch removes this class). */
+body.ev-verdict-solo #hud,
+body.ev-verdict-solo #loc-panel,
+body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:none !important; }
+
 /* ─── Coord tooltip ──────────────────────────────────────────── */
 #coord-tip {
     position:absolute; z-index:55; pointer-events:none;
@@ -350,6 +361,18 @@ nav {
     opacity:0; transition:opacity .2s; white-space:nowrap;
 }
 #coord-tip.show { opacity:1; }
+
+/* ─── City hover tooltip (major-city dots) ───────────────────── */
+#city-tip {
+    position:fixed; z-index:56; display:none; pointer-events:none;
+    background:rgba(2,10,20,.9); border:1px solid rgba(77,219,255,.45);
+    border-radius:8px; padding:7px 11px; white-space:nowrap;
+    box-shadow:0 4px 18px rgba(0,0,0,.5);
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+}
+#city-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
+#city-tip .cty-sub  { color:#8ff0ff; font-size:10px; margin-top:1px; }
+#city-tip .cty-hint { color:#5f7597; font-size:9px;  margin-top:3px; }
 #coord-tip .ct-title { color: var(--c-accent); font-size:9px; text-transform:uppercase;
     letter-spacing:.6px; margin-bottom:2px; }
 #coord-tip .ct-val { color:#a0d8f0; font-weight:600; }
@@ -2000,8 +2023,10 @@ nav {
         border-radius: 10px 10px 0 0;
     }
 
-    /* Coord tooltip hidden on touch (no hover) */
+    /* Coord tooltip hidden on touch (no hover). City tip too — it is
+       shown via inline style from the hover raycast, hence !important. */
     #coord-tip { display: none; }
+    #city-tip { display: none !important; }
 }
 
 @media (max-width: 480px) {
@@ -2428,6 +2453,15 @@ import './js/telemetry.js';
         <div id="ct-readouts"></div>
     </div>
 
+    <!-- City hover tooltip (major-city dots; follows cursor). Populated
+         by the shared hover raycast; hidden whenever no dot is under the
+         cursor or a quake/alert marker takes hover priority. -->
+    <div id="city-tip">
+        <div class="cty-name" id="city-tip-name">—</div>
+        <div class="cty-sub"  id="city-tip-sub">—</div>
+        <div class="cty-hint">click to set as my location</div>
+    </div>
+
     <!-- Layer controls -->
     <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="bottom:16px;right:12px;">⚡ Weather</a>
 
@@ -2566,6 +2600,18 @@ import './js/telemetry.js';
                         <span class="lyr-featured-desc">USGS M2.5+ quakes, last 30 days</span>
                     </span>
                     <span class="lyr-status" data-layer="earthquakes"></span>
+                </label>
+
+                <label class="lyr-featured-row" for="feat-lyr-cities"
+                       title="~270 major world cities as glowing dots — size scales with metro population, gold = 10 M+, cyan = 4 M+. Hover for name + population; click any dot to set it as your location (the EarthView card, beacon, and sun/ISS stats all follow).">
+                    <input type="checkbox" id="feat-lyr-cities" data-mirror="lyr-cities" checked>
+                    <span class="lyr-featured-text">
+                        <span class="lyr-featured-name">
+                            <span class="lyr-featured-icon">🏙️</span>Major Cities
+                            <span class="lyr-featured-badge">new</span>
+                        </span>
+                        <span class="lyr-featured-desc">Click a city dot to set your location</span>
+                    </span>
                 </label>
             </div>
         </div>
@@ -2745,6 +2791,7 @@ import './js/telemetry.js';
             <div class="lyr-section-body"><div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-iss"><label for="lyr-iss">ISS Tracker</label></label>
+                <label class="lyr" title="~270 major world cities as glowing, clickable dots. Click one to set it as your location."><input type="checkbox" id="lyr-cities" checked><label for="lyr-cities">Major Cities</label></label>
             </div></div>
         </div>
     </div>
@@ -3617,6 +3664,9 @@ import { solarPosition, sunTimes, compass16 } from './js/sun-altitude.js';
 import { nextPasses } from './js/pass-predictor.js';
 import { VerdictCard } from './js/verdict-card.js';
 import { AirQualityFeed } from './js/air-quality-feed.js';
+import { LocationBeacon } from './js/location-beacon.js';
+import { CityMarkers } from './js/city-markers.js';
+import { MAJOR_CITIES } from './js/data/major-cities.js';
 // Shared simulation-time bus. Lives in /operations/ for historical reasons
 // — it was originally Operations-only — but is now the cross-page clock for
 // any view that scrubs forecast/replay (Earth page time-controls, Operations
@@ -5356,6 +5406,39 @@ document.getElementById('lyr-rotate').addEventListener('change', e => {
 document.getElementById('lyr-earthquakes').addEventListener('change', e => {
     eqMarkers.setVisible(e.target.checked);
 });
+// ── Major-city dots (js/city-markers.js) ────────────────────────────
+// One Points draw call for the whole js/data/major-cities.js dataset;
+// parented to earthMesh so dots track rotation and the globe occludes
+// the far side. Hover + click-to-select wiring lives with the shared
+// raycast handlers further down; per-frame twinkle in animate().
+const cityMarkers = new CityMarkers(THREE, { cities: MAJOR_CITIES, geoToXYZ });
+earthMesh.add(cityMarkers.group);
+window.__cityMarkers = cityMarkers;   // smoke-test / console handle
+document.getElementById('lyr-cities').addEventListener('change', e => {
+    cityMarkers.setVisible(e.target.checked);
+});
+// Test/console probe (same family as window.__evCamera): the most
+// camera-facing city dot and its screen position — lets the click-to-
+// select smoke test aim a real mouse click at a dot without hardcoding
+// screen coordinates (globe rotation makes those unstable).
+window.__cityAtCenter = () => {
+    const camDir = camera.position.clone().normalize();
+    let best = null, bestDot = -1;
+    for (const c of MAJOR_CITIES) {
+        const w = geoToXYZ(c.lat, c.lon).multiplyScalar(1.0035)
+            .applyMatrix4(earthMesh.matrixWorld);
+        const d = w.clone().normalize().dot(camDir);
+        if (d > bestDot) { bestDot = d; best = { c, w }; }
+    }
+    const v = best.w.project(camera);
+    const r = renderer.domElement.getBoundingClientRect();
+    return {
+        name: best.c.n, country: best.c.c, facing: bestDot,
+        x: r.left + (v.x + 1) / 2 * r.width,
+        y: r.top + (1 - (v.y + 1) / 2) * r.height,
+    };
+};
+
 document.getElementById('lyr-iss').addEventListener('change', e => {
     satTracker.setHighlightVisible(e.target.checked);
     if (!e.target.checked) {
@@ -11191,6 +11274,7 @@ renderer.domElement.addEventListener('mousemove', e => {
     if (eqHovered) {
         _showEqPopup(eqHovered, e.clientX, e.clientY);
         hideAlertTip();
+        _setCityHover(null);
         return;
     } else {
         _hideEqPopup();
@@ -11200,11 +11284,47 @@ renderer.domElement.addEventListener('mousemove', e => {
     const hovered = alertMarkers.getHovered(alertRay);
     if (hovered) {
         showAlertTip(hovered, e.clientX, e.clientY);
+        _setCityHover(null);
     } else {
         hideAlertTip();
+        // City dots take the lowest hover priority — event markers
+        // (quakes, alerts) always win the cursor.
+        _setCityHover(cityMarkers.getHovered(alertRay), e.clientX, e.clientY);
     }
 });
-renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hideEqPopup(); });
+renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hideEqPopup(); _setCityHover(null); });
+
+// ── City-dot hover: tooltip + dot highlight + pointer cursor ────────────────
+// hit = { city, index } | null from cityMarkers.getHovered. State is
+// tracked so the DOM is touched only on hover transitions, not every
+// mousemove.
+let _cityHoverIdx = -1;
+function _setCityHover(hit, cx, cy) {
+    const tip = document.getElementById('city-tip');
+    if (!hit) {
+        if (_cityHoverIdx !== -1) {
+            _cityHoverIdx = -1;
+            cityMarkers.setHighlight(-1);
+            tip.style.display = 'none';
+            renderer.domElement.style.cursor = '';
+        }
+        return;
+    }
+    const { city, index } = hit;
+    if (index !== _cityHoverIdx) {
+        _cityHoverIdx = index;
+        cityMarkers.setHighlight(index);
+        document.getElementById('city-tip-name').textContent = city.n;
+        document.getElementById('city-tip-sub').textContent =
+            `${city.c} · metro ~${city.p >= 1 ? city.p.toFixed(1) + ' M' : Math.round(city.p * 1000) + ' k'}`;
+        tip.style.display = 'block';
+        renderer.domElement.style.cursor = 'pointer';
+    }
+    // Follow the cursor (viewport-fixed), nudged off the pointer and
+    // clamped so it never clips the right/bottom edge.
+    tip.style.left = Math.min(cx + 14, window.innerWidth - 170) + 'px';
+    tip.style.top  = Math.min(cy + 12, window.innerHeight - 70) + 'px';
+}
 
 // ── Click-to-pin: earthquake or NWS alert under the cursor ──────────────────
 //   Works across mouse, touch, and pen. Listens on both pointerup (modern
@@ -11233,6 +11353,12 @@ renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hide
 
         const a = alertMarkers.getHovered(ray);
         if (a) { _pinEvent('alert', a, clientX, clientY); return true; }
+
+        // City dots: tap → select as "my location". Same pipeline as the
+        // EarthView card's search box (saveUserLocation → card + beacon +
+        // saved list), so every location surface stays in sync.
+        const cty = cityMarkers.getHovered(ray);
+        if (cty) { _selectCity(cty.city); return true; }
 
         // Column probe (Phase 4.1): with the probe layer armed, a bare-
         // globe tap pins the vertical-profile card for that point instead
@@ -11309,6 +11435,25 @@ renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hide
         const { lat, lon } = geo.deg.uvToLatLon(hits[0].uv.x, hits[0].uv.y);
         flyToLatLon(lat, lon, 1.10);
     });
+
+    // City-dot selection: persists the city as the user location (which
+    // updates the EarthView card, the on-globe beacon, and the saved-
+    // locations list via 'user-location-changed'), then gently recentres
+    // the camera at the user's CURRENT altitude (clamped) — the user
+    // clicked something already in view, so the surface-dive arrival the
+    // search box uses would be disorienting here. Arrival stops
+    // auto-rotation via the shared fly pipeline.
+    function _selectCity(city) {
+        saveUserLocation({
+            lat: city.lat, lon: city.lon,
+            city: city.n, displayName: `${city.n}, ${city.c}`,
+        });
+        flyToLatLon(city.lat, city.lon,
+            Math.min(Math.max(camera.position.length(), 1.35), 3.2));
+        // A tap never gets a hover-out event — drop the tooltip explicitly.
+        _setCityHover(null);
+        try { telemetry.recordFeature('city_markers', 'select', { city: city.n }); } catch { /* fire-and-forget */ }
+    }
 
     // Touch interactions should suppress the mouse-style hover popups,
     // which iOS otherwise fires as synthetic mousemove after a tap and
@@ -11842,36 +11987,16 @@ function animate() {
     // ── Exosphere: orient to sun + solar-wind shader uniforms + mesh animation
     exosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
 
-    // ── User location pin: multi-ring radar ping + sky beam
-    // Three rings on staggered phases (0, ⅓, ⅔ of a 2.4s period) so the
-    // marker reads as a continuous outward radar pulse instead of a
-    // single ring expanding and snapping back. Halo and beam track the
-    // brightest ring's phase so the whole stack breathes together.
-    if (_userPinRings?.length) {
-        const period = 2.4;
-        const phase  = (t % period) / period;     // 0..1
-        for (let i = 0; i < _userPinRings.length; i++) {
-            const ring = _userPinRings[i];
-            const local = (phase + i / _userPinRings.length) % 1;
-            // Quadratic ease-out scale; rings start near the core and expand
-            // to ~3.6× outer radius before fading to zero opacity.
-            const s = 1 + local * local * 3.2;
-            ring.scale.set(s, s, 1);
-            // Opacity fades faster at the start so the leading ring is the
-            // brightest and trailing rings are progressively softer.
-            ring.material.opacity = 0.85 * (1 - local) * (1 - local);
-        }
-    }
-    if (_userPinHalo) {
-        const breathe = (Math.sin(t * 2.2) * 0.5 + 0.5);
-        _userPinHalo.material.opacity = 0.18 + breathe * 0.18;
-        const hs = 1 + breathe * 0.18;
-        _userPinHalo.scale.set(hs, hs, hs);
-    }
-    if (_userPinBeam) {
-        const beat = Math.sin(t * 1.8) * 0.5 + 0.5;
-        _userPinBeam.material.opacity = 0.32 + beat * 0.34;
-    }
+    // ── User location beacon (js/location-beacon.js): radar rings,
+    // floating gem, glow sprite, light pillar, orbiting sparks. Parented
+    // to earthMesh so geography tracks rotation; tick is allocation-free.
+    _userBeacon?.tick(t);
+
+    // ── Major-city dots: twinkle clock + point-size attenuation factor
+    // (drawing-buffer height over the perspective half-angle — gl_PointSize
+    // is in device pixels, so DPR is already folded into .height).
+    cityMarkers.tick(t, renderer.domElement.height /
+        (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)));
 
     // ── Fly-to animation
     if (_flyTarget && _flyProgress < 1) {
@@ -12047,14 +12172,14 @@ window.__evCamera = () => ({
 });
 
 // ═══════════════════════════════════════════════════════════════
-//  USER LOCATION PIN  (must be declared before animate() runs)
+//  USER LOCATION BEACON  (must be declared before animate() runs)
 // ═══════════════════════════════════════════════════════════════
-let _userPinGroup = null;
-let _userPinRing  = null;     // legacy single-ring handle (kept for any
-                              // external code that might still poke it).
-let _userPinRings = [];       // array of expanding radar rings
-let _userPinHalo  = null;     // soft glowing sphere wrapping the core
-let _userPinBeam  = null;     // radial cylinder pointing outward from surface
+// The old inline pin (core + halo + 3 radar rings + beam, ~90 lines of
+// mesh construction plus a per-frame block in animate) moved into
+// js/location-beacon.js and grew a floating gem, a camera-facing glow
+// sprite, a gradient light-pillar shader, and orbiting sparks. Lazy —
+// constructed on first _setUserPin call; null while no location is set.
+let _userBeacon = null;
 let _userLat = null, _userLon = null;
 let _currentKp = 2;
 
@@ -12135,99 +12260,15 @@ _tickLocalClock();
 setInterval(_tickLocalClock, 1000);
 
 function _setUserPin(lat, lon) {
-    if (_userPinGroup) {
-        earthMesh.remove(_userPinGroup);
-        _userPinGroup.traverse(c => { c.geometry?.dispose(); c.material?.dispose(); });
-        _userPinGroup = null;
-        _userPinRing  = null;
-        _userPinRings = [];
-        _userPinHalo  = null;
-        _userPinBeam  = null;
+    if (lat == null || lon == null) {
+        _userBeacon?.clear();
+        return;
     }
-    if (lat == null || lon == null) return;
     _userLat = lat; _userLon = lon;
-
-    // Position on unit sphere surface (earthMesh is R=1). Outward normal
-    // is the same vector — used for the sky beam orientation below.
-    const surface = geoToXYZ(lat, lon).multiplyScalar(1.003);
-    const normal  = surface.clone().normalize();
-
-    _userPinGroup = new THREE.Group();
-    _userPinRings = [];
-
-    // Palette: warm gold core fading through a teal corona. Two colors
-    // produce a stronger silhouette against both day-side blue and the
-    // night-side dark than a single-hue marker did.
-    const COLOR_CORE  = 0xfff0a8;   // bright warm core
-    const COLOR_HALO  = 0x6effe0;   // teal corona
-    const COLOR_RING  = 0x88ffe6;   // pulse rings
-    const COLOR_BEAM  = 0xffd766;   // sky beam — sun-warm
-
-    // 1. Core dot — small, fully opaque, sits on the surface. Brighter
-    //    than the surrounding glow so the marker has a hard centre even
-    //    when the halo + rings dim below the day-side terminator.
-    const coreGeo = new THREE.SphereGeometry(0.014, 16, 16);
-    const coreMat = new THREE.MeshBasicMaterial({ color: COLOR_CORE });
-    const core    = new THREE.Mesh(coreGeo, coreMat);
-    core.position.copy(surface);
-    _userPinGroup.add(core);
-
-    // 2. Halo sphere — larger, additive-blended, breathes in/out. Reads
-    //    as a soft glow around the core dot from any camera angle (a
-    //    flat ring would vanish edge-on; a sphere never does).
-    const haloGeo = new THREE.SphereGeometry(0.030, 18, 18);
-    const haloMat = new THREE.MeshBasicMaterial({
-        color: COLOR_HALO, transparent: true, opacity: 0.32,
-        depthWrite: false, blending: THREE.AdditiveBlending,
-    });
-    _userPinHalo = new THREE.Mesh(haloGeo, haloMat);
-    _userPinHalo.position.copy(surface);
-    _userPinGroup.add(_userPinHalo);
-
-    // 3. Radar rings — three tangent rings on staggered phases. The
-    //    per-frame tick at line ~6453 expands each one through its own
-    //    portion of a shared period so the marker reads as a continuous
-    //    outward sweep instead of a single oscillation.
-    const ringGeo = new THREE.RingGeometry(0.022, 0.030, 48);
-    for (let i = 0; i < 3; i++) {
-        const mat = new THREE.MeshBasicMaterial({
-            color: COLOR_RING, transparent: true, opacity: 0.7,
-            side: THREE.DoubleSide, depthWrite: false,
-            blending: THREE.AdditiveBlending,
-        });
-        const ring = new THREE.Mesh(ringGeo, mat);
-        ring.position.copy(surface);
-        ring.lookAt(new THREE.Vector3(0, 0, 0));     // tangent to sphere
-        _userPinGroup.add(ring);
-        _userPinRings.push(ring);
-    }
-    // Preserve legacy handle in case other code dereferences it.
-    _userPinRing = _userPinRings[0];
-
-    // 4. Sky beam — a thin radial cylinder pointing OUT of the sphere.
-    //    Stretched to ~0.20 Earth radii (~1270 km) so it's visible from
-    //    typical orbital camera distances but doesn't punch through the
-    //    info panels at zoomed-out POVs. Additive blending makes the
-    //    beam transparent against both day and night sides without any
-    //    z-fight against the atmosphere shader.
-    const beamLen = 0.22;
-    const beamGeo = new THREE.CylinderGeometry(0.006, 0.014, beamLen, 16, 1, true);
-    // Cylinder default axis is +Y; translate so its base sits AT the
-    // surface and the body extends outward along +Y in local space.
-    beamGeo.translate(0, beamLen / 2, 0);
-    const beamMat = new THREE.MeshBasicMaterial({
-        color: COLOR_BEAM, transparent: true, opacity: 0.5,
-        side: THREE.DoubleSide, depthWrite: false,
-        blending: THREE.AdditiveBlending,
-    });
-    _userPinBeam = new THREE.Mesh(beamGeo, beamMat);
-    _userPinBeam.position.copy(surface);
-    // Orient local +Y to the outward surface normal at this lat/lon.
-    _userPinBeam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
-    _userPinGroup.add(_userPinBeam);
-
-    _userPinGroup.renderOrder = 12;
-    earthMesh.add(_userPinGroup);
+    // Beacon lives in earthMesh space (globe R = 1); lift it slightly off
+    // the sphere so it never z-fights the surface texture.
+    if (!_userBeacon) _userBeacon = new LocationBeacon(THREE, earthMesh);
+    _userBeacon.show(geoToXYZ(lat, lon).multiplyScalar(1.003));
 }
 
 function _flyToUserLocation() {
@@ -12639,6 +12680,17 @@ window.addEventListener('user-location-changed', e => {
     }
 })();
 
+// EarthView verdict-card flag — computed once, up here, because two
+// consumers need it: the first-visit #loc-panel hint just below (the
+// hint must not fire when the panel it points at is hidden) and the
+// card init at the bottom of this script. DEFAULT ON; opt out with
+// ?verdict=0 (one visit) or localStorage ev_verdict='0' (sticky).
+const EV_VERDICT_QUERY = new URLSearchParams(location.search).get('verdict');
+let EV_VERDICT_LS = null;
+try { EV_VERDICT_LS = localStorage.getItem('ev_verdict'); } catch {}
+const EV_VERDICT_ON = EV_VERDICT_QUERY !== '0'
+    && !(EV_VERDICT_QUERY === null && EV_VERDICT_LS === '0');
+
 // First-visit hint — dismissable toast that points at the new top-left
 // #loc-panel. Fires only when (a) the visitor has never dismissed it,
 // and (b) no location is currently saved. The hint disappears
@@ -12646,6 +12698,9 @@ window.addEventListener('user-location-changed', e => {
 // flow doesn't get nagged. Stamping a localStorage flag prevents
 // re-display on subsequent visits.
 (function() {
+    // The verdict card supersedes the loc-panel (and carries its own
+    // set-location affordance), so the hint would point at nothing.
+    if (EV_VERDICT_ON) return;
     const HINT_KEY = 'pp-earth-loc-hint-dismissed';
     try { if (localStorage.getItem(HINT_KEY) === '1') return; } catch {}
     if (loadUserLocation()) return;
@@ -12773,7 +12828,7 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     'lyr-clouds', 'lyr-atm', 'lyr-aurora', 'lyr-lights', 'lyr-grid',
     'lyr-tropic', 'lyr-subsolar', 'lyr-weather', 'lyr-wind', 'lyr-jet',
     'lyr-isobars', 'lyr-fronts', 'lyr-alerts', 'lyr-earthquakes', 'lyr-iss',
-    'lyr-rotate',
+    'lyr-rotate', 'lyr-cities',
     // Derived weather overlays (humidity / precip-rate / mist) — share
     // the existing weather DataTextures, so they need the same synthetic
     // change-event dispatch on first render to align mesh visibility
@@ -13088,6 +13143,7 @@ const _layerRegistry = {
                              || (magnetosphere?._auroraN?.visible ?? false)
                              || (magnetosphere?._auroraS?.visible ?? false),
     'lyr-lights':         () => (earthU.u_city_lights?.value ?? 0) > 0.5,
+    'lyr-cities':         () => cityMarkers.group.visible,
     'lyr-grid':           () => gridGroup.visible,
     'lyr-tropic':         () => tropicGroup.visible,
     'lyr-subsolar':       () => subsolarMarker.group.visible,
@@ -13127,15 +13183,23 @@ initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
 // (unit-tested: tests/verdict-engine.mjs); DOM/wiring in js/verdict-card.js.
 //
 // DEFAULT ON. Opt out with ?verdict=0 (one visit) or localStorage
-// ev_verdict='0' (sticky). The card is additive chrome — it removes or
-// replaces none of the panels/layers below, and "Explore ›" collapses it
-// to a pill so the full research UI stays one tap away.
+// ev_verdict='0' (sticky) — the flag itself (EV_VERDICT_ON) is computed
+// up by the first-visit hint block, which also consumes it.
+//
+// The card is the ONE location panel on this page: it carries the
+// location editor (type / pick a saved place, ↵ to search, auto-fly +
+// zoom to the result), the Fly here / Clear buttons, and the sun / ISS /
+// clock stats that used to live in #loc-panel and #hud — both of which
+// are hidden via body.ev-verdict-solo while the card is active (and
+// restored on opt-out or card-boot failure). Everything else — the layer
+// system, research panels, forecast-validation suite — stays untouched;
+// "Explore ›" collapses the card to a draggable pill so the full
+// research UI stays one tap away.
 {
-    const verdictParam = new URLSearchParams(location.search).get('verdict');
-    let verdictLs = null;
-    try { verdictLs = localStorage.getItem('ev_verdict'); } catch {}
-    const VERDICT_ON = verdictParam !== '0' && !(verdictParam === null && verdictLs === '0');
-    if (VERDICT_ON) {
+    if (EV_VERDICT_ON) {
+        // Hide the superseded chrome immediately (not at load-complete)
+        // so #hud / #loc-panel never flash before the card mounts.
+        document.body.classList.add('ev-verdict-solo');
         const startVerdict = () => {
             try {
                 const evAirFeed = new AirQualityFeed();
@@ -13147,6 +13211,24 @@ initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
                     air:    evAirFeed,
                     getLocation: loadUserLocation,
                     sunTimes,
+                    solarPos: solarPosition,
+                    // Location editor plumbing. saveUserLocation /
+                    // clearUserLocation dispatch 'user-location-changed',
+                    // which the rest of the page (globe pin, hidden legacy
+                    // panel, saved-locations card) already listens for.
+                    searchLocation: async (q) => {
+                        const loc = await geocodeQuery(q);
+                        saveUserLocation(loc);
+                        return loc;
+                    },
+                    setLocation:   saveUserLocation,
+                    clearLocation: clearUserLocation,
+                    getSavedLocations: listSavedLocations,
+                    // Auto-zoom target: same low tilt-band arrival as the
+                    // classic "Fly here" button; the fly pipeline flips
+                    // controls.autoRotate off on arrival so the globe stops
+                    // rotating under the framed location.
+                    flyTo: (loc) => flyToLatLon(loc.lat, loc.lon, 1.12),
                     // ISS TLE comes from the 'stations' group satTracker already
                     // loads for the globe; pass search runs off the first-paint
                     // path (the card defers it to idle time internally).
@@ -13156,10 +13238,12 @@ initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
                         return nextPasses(iss.tle, { lat: loc.lat, lon: loc.lon },
                             { horizonH: 48, minPeakDeg: 20, maxPasses: 10 });
                     },
-                    flagSource: verdictParam === '1' ? 'query' : verdictLs === '1' ? 'ls' : 'default',
+                    flagSource: EV_VERDICT_QUERY === '1' ? 'query' : EV_VERDICT_LS === '1' ? 'ls' : 'default',
                 });
             } catch (err) {
-                // The card must never take the globe down with it.
+                // The card must never take the globe down with it — and if
+                // it dies, give the classic location UX back.
+                document.body.classList.remove('ev-verdict-solo');
                 console.error('[EarthView] verdict card failed to start:', err);
             }
         };

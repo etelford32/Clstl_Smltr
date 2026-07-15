@@ -44,7 +44,7 @@ const NAV_DROPDOWNS = [
         label: 'Earth',
         id: 'earth-menu',
         items: [
-            { href: 'earth.html',             label: 'Earth Weather',       sub: 'Predictive weather + magnetosphere',   tier: 'public',   icon: '🌍' },
+            { href: 'earth.html',             label: 'EarthView',           sub: 'Predictive weather + magnetosphere',   tier: 'public',   icon: '🌍' },
             { href: 'moon.html',              label: 'Moon',                sub: 'Lunar radiation environment',          tier: 'public',   icon: '🌙' },
             { href: 'operations.html',        label: 'Operations',          sub: 'Fleet & debris analysis console',      tier: 'public',   icon: '🛰️', badge: 'PRO PREVIEW', id: 'operations' },
             { href: 'satellites.html',        label: 'Satellites',          sub: 'Real-time orbital tracking',           tier: 'public', icon: '🛰️' },
