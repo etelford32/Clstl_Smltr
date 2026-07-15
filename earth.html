@@ -3575,6 +3575,10 @@ import './js/telemetry.js';
 import './js/live-status-bar.js';
 import * as THREE from 'three';
 import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import {
     geocodeQuery, saveUserLocation, loadUserLocation,
@@ -3807,6 +3811,47 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, /Mobi|Android/i.test(navigator.userAgent) ? 1.5 : 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
+// ═══════════════════════════════════════════════════════════════
+//  HDR PIPELINE — ACES tone mapping + threshold bloom (EffectComposer)
+// ═══════════════════════════════════════════════════════════════
+// The whole earth-skin.js stack (surface, ocean glint, cloud tops, city
+// lights ×2.5, aurora, atmosphere rim) outputs LINEAR HDR that until now
+// went straight to an sRGB-encoded canvas with NO tone mapping — so every
+// bright source hard-clipped to flat white. ACES filmic tone mapping rolls
+// those highlights off; a high-threshold bloom gives the genuinely bright
+// sources a physical glow.
+//
+// Correctness (three r160): material tone mapping is applied ONLY when
+// rendering to the canvas (WebGLRenderer: currentRenderTarget === null,
+// three.module.js:20719 / 30151). RenderPass draws into the composer's
+// HalfFloat (linear) target, so the scene pass is NOT tone-mapped; OutputPass
+// applies renderer.toneMapping + the sRGB encode exactly ONCE at the end.
+// No double tone-map, and no per-material `toneMapped` flags to babysit.
+//
+// Desktop-first / mobile-parity split: the ACES look (RenderPass+OutputPass)
+// is one cheap fullscreen pass, so mobile gets it too (parity). UnrealBloomPass
+// is the fill-rate-heavy "deep feature": desktop-only at boot, and the FIRST
+// thing the adaptive governor sheds under load. Escape hatch: ?hdr=0 (one
+// visit) or localStorage ev_hdr='0' (sticky) → original renderer.render path.
+const _isMobileUA = /Mobi|Android/i.test(navigator.userAgent);
+const HDR_ON = (() => {
+    const q = new URLSearchParams(location.search).get('hdr');
+    if (q === '0' || q === 'off') return false;
+    if (q === '1' || q === 'on')  return true;
+    if (localStorage.getItem('ev_hdr') === '0') return false;
+    return true;                       // default ON everywhere; bloom gated separately
+})();
+// ACES compresses the midtones ~10-15% vs the old raw-sRGB path; lift exposure
+// back so the daylit hemisphere keeps its brightness while highlights roll off.
+const TONE_EXPOSURE = 1.15;
+let composer   = null;   // assigned once _prNow exists (after the governor block)
+let bloomPass  = null;
+let _bloomWanted = false;   // desktop-first: whether bloom should be on when headroom allows
+if (HDR_ON) {
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = TONE_EXPOSURE;
+}
+
 const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 0.001, 200);
 camera.position.set(0, 0.4, 3.0);
@@ -3835,6 +3880,14 @@ function onResize() {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    // Keep the HDR chain's render targets in lockstep with the canvas and the
+    // governor's current pixel ratio. Guarded on `composer` so the boot-time
+    // onResize() call (which runs before the composer is built, while _prNow is
+    // still in its TDZ) short-circuits without touching either.
+    if (composer) {
+        composer.setPixelRatio(_prNow);
+        composer.setSize(w, h);
+    }
 }
 new ResizeObserver(onResize).observe(canvas);
 onResize();
@@ -3859,6 +3912,41 @@ const _prFloor = Math.min(1, _prCap);   // never upscale past 1:1 CSS pixels
 let   _prNow   = _prCap;                 // matches the setPixelRatio() call above
 let   _prEmaMs = 1000 / 60;             // frame-interval EMA, seeded at 60 fps
 let   _prLastEvalMs = 0;
+
+// Build the HDR chain now that _prNow exists. RenderPass → UnrealBloomPass →
+// OutputPass (see the HDR header block by the renderer for the correctness
+// argument). Kept null when HDR is off so the render call falls back to the
+// original renderer.render(scene, camera) path untouched.
+if (HDR_ON) {
+    composer = new EffectComposer(renderer);
+    // The canvas' antialias:true only covers the default framebuffer; once
+    // RenderPass draws into the composer's offscreen target that MSAA is gone
+    // and the globe limb aliases. Restore it with a multisampled target
+    // (WebGL2 only). Desktop-first: 4× on desktop, 2× on mobile.
+    if (renderer.capabilities.isWebGL2) {
+        const _samples = _isMobileUA ? 2 : 4;
+        composer.renderTarget1.samples = _samples;
+        composer.renderTarget2.samples = _samples;
+    }
+    composer.setPixelRatio(_prNow);
+    composer.setSize(canvas.clientWidth, canvas.clientHeight);
+    composer.addPass(new RenderPass(scene, camera));
+    // Threshold 0.85 so ONLY genuine highlights bloom — the ocean sun-glint,
+    // city lights, aurora crowns, storm-lit cloud tops — never the midtone
+    // cloud field (blooming that would re-expose the zonal banding
+    // earth-skin.js works hard to suppress). Gentle strength/radius: a halo,
+    // not a smear.
+    bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(canvas.clientWidth, canvas.clientHeight),
+        0.55,   // strength
+        0.40,   // radius
+        0.85,   // luminance threshold
+    );
+    _bloomWanted    = !_isMobileUA;    // desktop-first; mobile keeps the ACES look, skips bloom
+    bloomPass.enabled = _bloomWanted;
+    composer.addPass(bloomPass);
+    composer.addPass(new OutputPass());
+}
 // Stage 2 of the governor: cloud-shader ALU tiers (u_quality in CLOUD_FRAG).
 // Resolution scaling alone can't rescue a GPU whose bottleneck is per-
 // fragment FBM noise — fewer pixels just re-spend the savings on the same
@@ -3897,14 +3985,23 @@ function _governResolution(frameMs) {
     if (_prEmaMs > 22) {                                       // < ~45 fps → coarsen
         if (_prNow > _prFloor) {
             next = Math.max(_prFloor, +(_prNow - 0.25).toFixed(2));
+        } else if (bloomPass && bloomPass.enabled) {
+            // Pixels are already at the floor: shed the heaviest pass next.
+            // Bloom is a multi-tap fullscreen blur pyramid — the single
+            // biggest fill-rate item — so it goes before the cloud octaves.
+            bloomPass.enabled = false;
         } else if (!_cloudQForced && _cloudQIdx < _CLOUD_Q_TIERS.length - 1) {
             _cloudQIdx++;
             _setCloudQuality(_CLOUD_Q_TIERS[_cloudQIdx]);
         }
     } else if (_prEmaMs < 15) {                                // > ~66 fps → refine
+        // Restore in reverse order of shedding: cloud octaves, then bloom,
+        // then pixel sharpness — so the cheapest-to-render quality returns first.
         if (!_cloudQForced && _cloudQIdx > 0) {
             _cloudQIdx--;
             _setCloudQuality(_CLOUD_Q_TIERS[_cloudQIdx]);
+        } else if (bloomPass && _bloomWanted && !bloomPass.enabled) {
+            bloomPass.enabled = true;
         } else if (_prNow < _prCap) {
             next = Math.min(_prCap, +(_prNow + 0.25).toFixed(2));
         }
@@ -12077,7 +12174,8 @@ function animate() {
         if (camR < CAM_FLOOR) camera.position.multiplyScalar(CAM_FLOOR / camR);
     }
 
-    renderer.render(scene, camera);
+    if (composer) composer.render();
+    else renderer.render(scene, camera);
 }
 
 // ═══════════════════════════════════════════════════════════════
