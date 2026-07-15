@@ -22,6 +22,7 @@
 import * as THREE from 'three';
 import { geo } from './geo/coords.js';
 import { GEO_GLSL } from './geo/coords.glsl.js';
+import { INSET_GLSL_HELPERS } from './geo/inset.glsl.js';
 import { buildTempLUTPixels, TEMP_RAMP_STOPS, TEMP_LUT_SIZE } from './temp-ramp.js';
 
 // ── Version-pinned CDN — avoids broken URLs from three-globe package updates ──
@@ -85,26 +86,10 @@ export { TEMP_RAMP_STOPS };
 // latMin) — do NOT "fix" this to match the global textures' row
 // conventions; insets are sampled with an explicitly computed UV, not vUv.
 
-const INSET_GLSL_HELPERS = /* glsl */`
-// highp: the cloud frag runs mediump by default, and fp16 quantises
-// degree-range values to 0.06–0.125° — up to half a weather-patch cell at
-// the 0.25° floor. Inset math must stay full-precision on mobile GPUs.
-
-// Equirectangular uv → inset-local uv (may land outside [0,1]).
-highp vec2 insetUV(vec2 uv, highp vec4 b) {
-    highp vec2 llDeg = uvToLatLonDeg(uv);                 // (lat, lon)
-    highp float dLon = mod(llDeg.y - b.x, 360.0);
-    return vec2(dLon / max(1e-3, b.z),
-                (llDeg.x - b.y) / max(1e-3, b.w));
-}
-
-// 1 in the inset interior, easing to 0 across the outer ~12% so the
-// high-res window blends into the global field with no visible seam.
-float insetWeight(vec2 uvP) {
-    vec2 edge = min(uvP, 1.0 - uvP);
-    return smoothstep(0.0, 0.12, min(edge.x, edge.y));
-}
-`;
+// INSET_GLSL_HELPERS (insetUV / insetWeight) now lives in ./geo/inset.glsl.js so
+// the terrain-patch vertex shader can share the exact source without pulling
+// THREE into node tests. Imported above; still concatenated into EARTH_FRAG /
+// CLOUD_FRAG below exactly as before.
 
 const PATCH_GLSL_CORE = /* glsl */`
 uniform sampler2D u_patch_weather;  // same packing as u_weather
@@ -192,12 +177,16 @@ vec2 topoGradient(vec2 uv) {
             float kx = min(32.0, 0.17578125 / max(1e-5, stepLonDeg));
             float ky = min(32.0, 0.17578125 / max(1e-5, stepLatDeg));
             // "Drive the bump pass harder": modest boost over a strict unit
-            // match, so close-range relief visibly pops. Deltas are clamped
-            // to the magnitude range the global map produces, keeping the
-            // downstream normalize() well-conditioned.
+            // match, so close-range relief visibly pops. Deltas are clamped to
+            // roughly the magnitude range the global map produces (±0.06, not
+            // the old ±0.25 — that was ~25× the real global delta and, once
+            // multiplied by the 85.0 bump gain in main(), flipped the normal
+            // and blacked out the terrain). The downstream SLOPE_MAX cap is the
+            // hard guarantee; this clamp keeps the pre-cap gradient clean so
+            // fewer pixels saturate and JPEG noise doesn't shimmer.
             const float TOPO_DETAIL_BOOST = 1.35;
-            hDx = mix(hDx, clamp(tDx * kx * TOPO_DETAIL_BOOST, -0.25, 0.25), wgt);
-            hDy = mix(hDy, clamp(tDy * ky * TOPO_DETAIL_BOOST, -0.25, 0.25), wgt);
+            hDx = mix(hDx, clamp(tDx * kx * TOPO_DETAIL_BOOST, -0.06, 0.06), wgt);
+            hDy = mix(hDy, clamp(tDy * ky * TOPO_DETAIL_BOOST, -0.06, 0.06), wgt);
         }
     }
     return vec2(hDx, hDy);
@@ -338,7 +327,22 @@ void main() {
     vec3  tEast   = normalize(cross(up, N_base));
     vec3  tNorth  = normalize(cross(N_base, tEast));
     float landMsk = (1.0 - oceanMsk) * u_bump_strength;
-    vec3  N = normalize(N_base - (tEast * hDx + tNorth * hDy) * 85.0 * landMsk);
+    // Tangential displacement of the surface normal from the height gradient.
+    // The 85.0 gain is tuned for the GLOBAL height map's tiny per-texel deltas.
+    vec3  slope   = (tEast * hDx + tNorth * hDy) * 85.0 * landMsk;
+    // Cap its length. Without this, the high-res topology inset's rescaled
+    // gradient (up to ±0.06 after the clamp in topoGradient → ±5 after the
+    // gain) rotates the normal clear into the tangent plane, flipping it away
+    // from the sun so NdotL — and therefore dayMix and lit — collapse to
+    // their dark floor: the "terrain goes black when you zoom in" bug. Bounding
+    // the push to SLOPE_MAX keeps the tilt ≤ atan(1.5) ≈ 56° so normalize()
+    // always lands on the sunlit side, which turns the runaway over-bump into
+    // crisp, stable hillshade relief at close range. The global path never
+    // reaches this cap, so the wide-view look is unchanged.
+    const float SLOPE_MAX = 1.5;
+    float slLen = length(slope);
+    if (slLen > SLOPE_MAX) slope *= SLOPE_MAX / slLen;
+    vec3  N = normalize(N_base - slope);
 
     float NdotL  = dot(N, u_sun_dir);
     float dayMix = smoothstep(-0.10, 0.20, NdotL);
