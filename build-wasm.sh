@@ -91,6 +91,21 @@ else
     echo "WARN: rust-gravity build failed — serving committed js/gravity-lab/wasm binary."
 fi
 
+# ── Build Shielding Lab ionospheric potential solver ─────────
+# Dependency-free extern "C" module (no wasm-bindgen needed): plain cargo
+# build, artifact copied verbatim. The committed binary at
+# js/shielding-lab/wasm/shielding_kernel.wasm serves as the fallback if
+# this build ever fails on Vercel's toolchain. Physics is gated by
+# `cargo test` in rust-shielding/ — run it before editing the kernel.
+echo "Building shielding-kernel WASM (Shielding Lab M-I coupling solver)..."
+if (cd rust-shielding && cargo build --release --target wasm32-unknown-unknown); then
+    mkdir -p js/shielding-lab/wasm
+    cp rust-shielding/target/wasm32-unknown-unknown/release/shielding_kernel.wasm \
+       js/shielding-lab/wasm/shielding_kernel.wasm
+else
+    echo "WARN: rust-shielding build failed — serving committed js/shielding-lab/wasm binary."
+fi
+
 # ── Build star renderer (solar flare sim) ─────────────────────
 # NOT built on Vercel. The Bevy dep graph (~479 crates) is too fragile for
 # Vercel's older rustc — a transitive `constant_time_eq 0.4.3` release broke
