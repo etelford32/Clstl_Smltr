@@ -9,12 +9,15 @@
 --     id           BIGSERIAL primary key
 --     fetched_at   when the upstream fetch completed
 --     source       provider label (open-meteo, etc.)
---     payload      JSONB array of 648 per-location current-weather objects
---                  (same shape as Open-Meteo's multi-location response)
+--     payload      JSONB array of per-location current-weather objects
+--                  (same shape as Open-Meteo's multi-location response;
+--                  originally 648 points, 2592 since the Vercel-cron
+--                  writer took over)
 --
--- Supabase pg_cron inserts one row/hour (see
--- supabase-weather-pgcron-migration.sql). /api/weather/grid returns
--- the newest row to browsers via the CDN.
+-- Writer history: originally Supabase pg_cron (see
+-- supabase-weather-pgcron-migration.sql); superseded by the Vercel cron
+-- api/cron/refresh-weather-grid.js (hourly, sole writer, vercel.json).
+-- /api/weather/grid returns the newest row to browsers via the CDN.
 -- ═══════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS public.weather_grid_cache (

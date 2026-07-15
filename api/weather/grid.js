@@ -31,10 +31,11 @@
  * stale-while-revalidate keeps a stale copy serving while the CDN
  * refreshes in the background.
  *
- * Refresher: Supabase pg_cron — hourly, sole writer. Defined in
- * supabase-weather-pgcron-migration.sql. Runs entirely inside Postgres; no
- * Vercel cron, no GitHub Actions. Staleness is surfaced to the UI via the
- * `age_seconds` field on responses so a silent pg_cron failure is visible
+ * Refresher: the Vercel cron api/cron/refresh-weather-grid.js — hourly,
+ * sole writer (2592-pt grid; scheduled in vercel.json). It REPLACED the
+ * Supabase pg_cron writer described in supabase-weather-pgcron-migration.sql
+ * (648-pt, kept only as history). Staleness is surfaced to the UI via the
+ * `age_seconds` field on responses so a silent cron failure is visible
  * to visitors within one reload.
  *
  * Single-frame response shape (consumed by js/weather-feed.js):
@@ -85,11 +86,12 @@ const CACHE_SWR = 600;    // serve stale up to 10 min while refreshing
 const RANGE_MAX_AGE = 300;
 const RANGE_SWR     = 60;
 
-// Hard cap on range-query limit — matches the table's retention (see
-// trim_weather_grid_cache in supabase-weather-cache-migration.sql).
-// A request asking for more than the server has would just get the
-// retention's worth back regardless; clamping early saves the round-trip
-// past the cap.
+// Hard cap on range-query limit. The binding constraint is the Edge
+// response-body ceiling (~4 MB compressed), NOT retention: trimmed frames
+// gzip to ~60 KB each, so 72 frames ≈ 4.3 MB — already at the limit.
+// (Retention itself is 720 rows / 30 days since the
+// supabase-weather-cache-retention-migration bump; raising this cap
+// requires paginating the response, not just editing the constant.)
 const RANGE_MAX_LIMIT     = 72;
 const RANGE_DEFAULT_LIMIT = 24;
 

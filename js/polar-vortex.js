@@ -26,6 +26,8 @@ const STATE_COLORS = {
     weakening:  '#ffcc66',
     disturbed:  '#ff9060',
     ssw:        '#ff5577',
+    // May–Aug climatological easterlies — vortex dormant, not an event.
+    summer_easterlies: '#9aa8c0',
     unknown:    '#778',
 };
 

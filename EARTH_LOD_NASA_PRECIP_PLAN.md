@@ -86,10 +86,13 @@ Yes — and the architecture is now wired to make it happen automatically.
    `WEATHER_FORECAST_PLAN.md` — earns the "watch the storm move" UX.
    Particularly strong for moving features (fronts, low-pressure
    systems) where AR/persistence struggle.
-2. **AMSR2 second observation source.** Activate `precip-amsr2` in
-   `EarthObsFeed`, extend `NasaPrecipExtractor` to pair against it,
-   and feed both observations into the bias tracker for a microwave-
-   only cross-check on the IMERG fusion product.
+2. **GMI second observation source.** ~~AMSR2~~ — dead upstream: GIBS
+   renamed the layer AND its data ends 2025-09-01 (instrument EOL,
+   verified 2026-07-15). The live microwave equivalent is GPM GMI,
+   now in `EarthObsFeed` as `precip-gmi` (default-off). Activate it,
+   extend `NasaPrecipExtractor` to pair against it, and feed both
+   observations into the bias tracker for a microwave-only
+   cross-check on the IMERG fusion product.
 3. **Server-side cold archive (`EARTH_ML_FIRST_PRINCIPLES.md` Phase
    0a).** Bump `weather_grid_cache` retention from 72 h → 720 h (30
    days). Unlocks Phase 4 NN training.
@@ -102,10 +105,13 @@ Yes — and the architecture is now wired to make it happen automatically.
 - **IMERG colour-ramp accuracy.** The current anchor table is
   approximate. A `GetLegendGraphic` parser would tighten absolute
   calibration; rank ordering is already fine for skill scoring.
-- **AMSR2 layer.** A second observation source (`precip-amsr2`) is
+- **GMI layer** (was AMSR2 — dead upstream since 2025-09-01). A second
+  observation source (`precip-gmi`, GPM GMI ascending passes) is
   available in `EarthObsFeed` but currently default-off. Activating it
   and extending the extractor would give us a microwave-only
-  cross-check for the IMERG fusion product.
+  cross-check for the IMERG fusion product. Note GIBS layer IDs
+  flip-flop — verify against WMTSCapabilities.xml before debugging
+  "broken" layers (the IMERG daily ID has changed twice now).
 - **Local-hour binning resolution.** 24 bins are coarse for thunderstorm
   modelling (peaks are tighter than 1 h). Half-hourly bins would double
   the store to ~1 MB per resolution — still trivial, but worth scoring
