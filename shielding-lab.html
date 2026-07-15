@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shielding Lab · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/shielding-lab.html">
+<meta name="description" content="Interactive magnetosphere–ionosphere coupling solver: a real ionospheric potential solve (the same equation as the SWMF Ridley Ionosphere Model) running client-side. Watch penetration electric fields, Region-2 shielding, and SAPS form in real time.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/shielding-lab.html">
+<meta property="og:title" content="Shielding Lab — SAPS &amp; Penetration Electric Fields">
+<meta property="og:description" content="A physically honest M–I coupling solver in your browser: Region-1/2 currents, undershielding, overshielding, and self-sharpening SAPS jets — solved live, not animated.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Shielding Lab — Parkers Physics">
+<meta name="twitter:description" content="Real ionospheric potential solver in WASM: shielding, penetration E-fields, and SAPS, live in the browser.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<!-- Canonical nav: structure + styling owned by js/nav.js + js/nav-styles.css.
+     All page CSS below is sl- prefixed; there is intentionally NO nav styling
+     here (js/nav-styles.css owns it). -->
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+    min-height:100vh;
+    background:#03010e;
+    color:#cdd5e4;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    overflow-x:hidden;
+}
+
+.sl-hero { padding:26px 22px 10px; display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; }
+.sl-hero h1 {
+    font-size:1.45rem; font-weight:800;
+    background:linear-gradient(45deg,#00c6ff,#7fe6c3);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.sl-hero .sl-sub { font-size:.85rem; color:#8b94ad; }
+.sl-live {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:.7rem; font-weight:700; letter-spacing:.08em; color:#7fe6c3;
+    border:1px solid rgba(127,230,195,.35); border-radius:999px; padding:3px 10px;
+}
+.sl-live::before {
+    content:''; width:7px; height:7px; border-radius:50%;
+    background:#37e0a0; box-shadow:0 0 8px #37e0a0;
+}
+
+.sl-wrap { display:grid; grid-template-columns: minmax(0,1.35fr) minmax(280px,1fr); gap:14px; padding:10px 22px 22px; max-width:1400px; margin:0 auto; }
+
+.sl-panel {
+    background:rgba(10,16,34,.72);
+    border:1px solid rgba(0,198,255,.18);
+    border-radius:12px;
+    padding:12px 14px;
+}
+.sl-panel h2 {
+    font-size:.72rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+    color:#00c6ff; margin-bottom:8px; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
+}
+.sl-panel h2 .sl-hint { font-weight:400; text-transform:none; letter-spacing:0; color:#8b94ad; font-size:.72rem; }
+
+.sl-dial-panel { display:flex; flex-direction:column; gap:10px; }
+.sl-dial-box { position:relative; width:100%; aspect-ratio:1/1; }
+#sl-dial { width:100%; height:100%; display:block; cursor:crosshair; border-radius:10px; }
+
+.sl-dial-hud {
+    position:absolute; top:8px; left:10px; font-size:.72rem; color:#8b94ad;
+    background:rgba(3,1,14,.55); padding:4px 8px; border-radius:8px; pointer-events:none;
+}
+.sl-dial-hud b { color:#cdd5e4; font-variant-numeric:tabular-nums; }
+
+.sl-layerbar { display:flex; flex-wrap:wrap; gap:10px 16px; font-size:.78rem; color:#aeb6cc; }
+.sl-layerbar label { display:inline-flex; gap:6px; align-items:center; cursor:pointer; }
+.sl-layerbar input { accent-color:#00c6ff; }
+
+#sl-probe {
+    display:none; font-size:.78rem; color:#aeb6cc;
+    border-top:1px dashed rgba(120,140,180,.25); padding-top:8px;
+    grid-template-columns:repeat(auto-fit, minmax(120px,1fr)); gap:4px 14px;
+}
+#sl-probe.on { display:grid; }
+#sl-probe b { color:#cdd5e4; font-variant-numeric:tabular-nums; }
+#sl-probe .sl-probe-k { color:#7fe6c3; }
+
+.sl-col { display:flex; flex-direction:column; gap:14px; min-width:0; }
+
+.sl-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; }
+.sl-stat {
+    background:rgba(6,10,24,.6); border:1px solid rgba(0,198,255,.12);
+    border-radius:10px; padding:8px 10px;
+}
+.sl-stat .sl-k { font-size:.66rem; letter-spacing:.07em; text-transform:uppercase; color:#8b94ad; }
+.sl-stat .sl-v { font-size:1.35rem; font-weight:800; color:#eaf2ff; font-variant-numeric:tabular-nums; }
+.sl-stat .sl-u { font-size:.72rem; color:#8b94ad; margin-left:2px; }
+.sl-stat .sl-note { font-size:.68rem; color:#7fe6c3; min-height:1em; }
+.sl-stat.amber .sl-v { color:#ffd9ae; }
+
+canvas.sl-chart { width:100%; height:120px; display:block; }
+canvas.sl-chart-tall { height:150px; }
+
+.sl-legend { display:flex; gap:14px; font-size:.7rem; color:#8b94ad; }
+.sl-legend .sw { display:inline-block; width:14px; height:0; border-top:2px solid #00c6ff; vertical-align:middle; margin-right:5px; }
+.sl-legend .sw.dash { border-top:2px dashed rgba(139,148,173,.8); }
+
+.sl-controls { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:8px 18px; }
+.sl-slider { font-size:.78rem; color:#aeb6cc; }
+.sl-slider .row { display:flex; justify-content:space-between; align-items:baseline; }
+.sl-slider .val { color:#eaf2ff; font-variant-numeric:tabular-nums; font-weight:600; }
+.sl-slider input[type=range] { width:100%; accent-color:#00c6ff; }
+
+.sl-btnrow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+.sl-btn {
+    background:rgba(0,198,255,.1); color:#cdeffd; border:1px solid rgba(0,198,255,.3);
+    padding:6px 12px; border-radius:8px; font-size:.78rem; cursor:pointer;
+}
+.sl-btn:hover { background:rgba(0,198,255,.2); }
+.sl-btn.active { background:rgba(0,198,255,.28); border-color:#00c6ff; }
+.sl-scn { border-color:rgba(255,176,102,.4); background:rgba(255,176,102,.08); color:#ffd9ae; }
+.sl-scn:hover { background:rgba(255,176,102,.18); }
+.sl-scn.active { background:rgba(255,176,102,.28); border-color:#ffb066; }
+#sl-scn-status { font-size:.72rem; color:#ffb066; }
+.sl-toggle { display:inline-flex; gap:6px; align-items:center; font-size:.78rem; color:#aeb6cc; cursor:pointer; }
+.sl-toggle input { accent-color:#ffb066; }
+
+.sl-prose { max-width:1100px; margin:8px auto 30px; padding:0 22px; }
+.sl-prose section { margin-top:26px; }
+.sl-prose h2 {
+    font-size:1.05rem; font-weight:700; color:#00c6ff; margin-bottom:10px;
+}
+.sl-prose p, .sl-prose li { font-size:.88rem; line-height:1.55; color:#aeb6cc; }
+.sl-prose ul { padding-left:20px; margin:8px 0; }
+.sl-prose b { color:#dbe6f7; }
+.sl-eq {
+    font-family:ui-monospace, 'Cascadia Code', Consolas, monospace;
+    background:rgba(6,10,24,.7); border:1px solid rgba(0,198,255,.18); border-radius:10px;
+    padding:12px 16px; margin:10px 0; font-size:.95rem; color:#eaf2ff;
+    overflow-x:auto; white-space:nowrap;
+}
+.sl-table-wrap { overflow-x:auto; }
+.sl-prose table { border-collapse:collapse; width:100%; margin:10px 0; font-size:.82rem; }
+.sl-prose th, .sl-prose td { text-align:left; padding:7px 10px; border-bottom:1px solid rgba(120,140,180,.18); }
+.sl-prose th { color:#8b94ad; font-weight:600; text-transform:uppercase; font-size:.68rem; letter-spacing:.06em; }
+.sl-prose td b { font-variant-numeric:tabular-nums; }
+.sl-xlink { color:#7fe6c3; text-decoration:none; border-bottom:1px dotted rgba(127,230,195,.5); }
+.sl-xlink:hover { color:#b8ffe4; }
+
+.sl-fallback {
+    margin:20px 22px; padding:14px; border:1px solid rgba(255,176,102,.4);
+    border-radius:10px; color:#ffd9ae; font-size:.85rem; display:none;
+}
+
+@media (max-width: 980px) {
+    .sl-wrap { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+    .sl-hero { padding:18px 14px 8px; }
+    .sl-wrap { padding:8px 14px 16px; }
+    .sl-prose { padding:0 14px; }
+    .sl-stat .sl-v { font-size:1.15rem; }
+}
+</style>
+</head>
+<body>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260714"; initNav("shielding-lab");</script>
+
+<div class="sl-hero">
+    <h1>Shielding Lab</h1>
+    <span class="sl-sub">SAPS &amp; penetration electric fields — a real M–I coupling solve, not an animation</span>
+    <span class="sl-live">LIVE SOLVER</span>
+</div>
+
+<div class="sl-wrap">
+    <!-- ── Polar dial ─────────────────────────────────────────────── -->
+    <div class="sl-panel sl-dial-panel">
+        <h2>Ionospheric potential · polar view
+            <span class="sl-hint">noon at top · click anywhere to probe · contours are the drift streamlines</span>
+        </h2>
+        <div class="sl-dial-box">
+            <canvas id="sl-dial"></canvas>
+            <div class="sl-dial-hud">t = <b id="sl-clock">00:00:00</b> · <span id="sl-solver">—</span></div>
+        </div>
+        <div class="sl-layerbar">
+            <label><input type="checkbox" id="sl-layer-cond" checked> conductance Σ<sub>P</sub></label>
+            <label><input type="checkbox" id="sl-layer-efield" checked> |E| field</label>
+            <label><input type="checkbox" id="sl-layer-contours" checked> potential Φ</label>
+            <label><input type="checkbox" id="sl-layer-drift" checked> drift streaklets</label>
+            <label id="sl-layer-pressure-wrap" style="display:none"><input type="checkbox" id="sl-layer-pressure"> ring-current P</label>
+        </div>
+        <div id="sl-probe">
+            <span><span class="sl-probe-k">probe</span> <b id="sl-probe-pos">—</b></span>
+            <span>Φ <b id="sl-probe-phi">—</b></span>
+            <span>|E| <b id="sl-probe-e">—</b></span>
+            <span>Σ<sub>P</sub> <b id="sl-probe-sig">—</b></span>
+            <span>v<sub>E×B</sub> <b id="sl-probe-v">—</b></span>
+        </div>
+    </div>
+
+    <!-- ── Readouts ───────────────────────────────────────────────── -->
+    <div class="sl-col">
+        <div class="sl-panel">
+            <h2>State of the circuit</h2>
+            <div class="sl-stats">
+                <div class="sl-stat">
+                    <div class="sl-k">CPCP</div>
+                    <div><span class="sl-v" id="sl-cpcp">—</span><span class="sl-u">kV</span></div>
+                    <div class="sl-note">cross polar cap potential</div>
+                </div>
+                <div class="sl-stat">
+                    <div class="sl-k">Shielding</div>
+                    <div><span class="sl-v" id="sl-eff">—</span><span class="sl-u">%</span></div>
+                    <div class="sl-note" id="sl-eff-state">—</div>
+                </div>
+                <div class="sl-stat">
+                    <div class="sl-k">R1 current</div>
+                    <div><span class="sl-v" id="sl-r1">—</span><span class="sl-u">MA</span></div>
+                    <div class="sl-note">solar-wind driven</div>
+                </div>
+                <div class="sl-stat">
+                    <div class="sl-k">R2 current</div>
+                    <div><span class="sl-v" id="sl-r2">—</span><span class="sl-u">MA</span></div>
+                    <div class="sl-note">lags by τ<sub>s</sub> — the shield</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sl-panel">
+            <h2>Penetration E — virtual equatorial readout
+                <span class="sl-hint">eastward + · at the 40° MLAT boundary, noon</span>
+            </h2>
+            <canvas id="sl-chart-pen" class="sl-chart"></canvas>
+            <div class="sl-legend">
+                <span><span class="sw"></span>solved (with R2 shielding) · <b id="sl-pen" style="color:#eaf2ff">—</b> mV/m</span>
+                <span><span class="sw dash"></span>unshielded (R1 only)</span>
+            </div>
+        </div>
+
+        <div class="sl-panel">
+            <h2>CPCP history</h2>
+            <canvas id="sl-chart-cpcp" class="sl-chart"></canvas>
+        </div>
+
+        <div class="sl-panel">
+            <h2>SAPS probe · westward flow at 21 MLT</h2>
+            <canvas id="sl-chart-saps" class="sl-chart sl-chart-tall"></canvas>
+            <div class="sl-stats" style="margin-top:8px">
+                <div class="sl-stat amber" style="grid-column:1/-1">
+                    <div class="sl-k">SAPS jet</div>
+                    <div><span class="sl-v" id="sl-saps-peak">—</span><span class="sl-u">m/s westward</span></div>
+                    <div class="sl-note" id="sl-saps-meta">—</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Controls ──────────────────────────────────────────────────── -->
+<div class="sl-wrap" style="grid-template-columns:1fr; padding-top:0">
+    <div class="sl-panel">
+        <h2>Drive the magnetosphere
+            <span class="sl-hint">the solver re-solves the full potential every 10 s of sim time</span>
+        </h2>
+        <div class="sl-controls">
+            <div class="sl-slider"><div class="row"><span>IMF B<sub>z</sub></span><span class="val" id="sl-bz-val">—</span></div>
+                <input type="range" id="sl-bz" min="-25" max="10" step="0.5" value="-2"></div>
+            <div class="sl-slider"><div class="row"><span>IMF B<sub>y</sub></span><span class="val" id="sl-by-val">—</span></div>
+                <input type="range" id="sl-by" min="-20" max="20" step="0.5" value="0"></div>
+            <div class="sl-slider"><div class="row"><span>Solar wind v</span><span class="val" id="sl-vsw-val">—</span></div>
+                <input type="range" id="sl-vsw" min="300" max="900" step="10" value="400"></div>
+            <div class="sl-slider"><div class="row"><span>Density n</span><span class="val" id="sl-n-val">—</span></div>
+                <input type="range" id="sl-n" min="1" max="40" step="0.5" value="5"></div>
+            <div class="sl-slider"><div class="row"><span>F10.7</span><span class="val" id="sl-f107-val">—</span></div>
+                <input type="range" id="sl-f107" min="65" max="250" step="5" value="120"></div>
+            <div class="sl-slider" id="sl-tau-row"><div class="row"><span>Shielding τ<sub>s</sub></span><span class="val" id="sl-tau-val">—</span></div>
+                <input type="range" id="sl-tau" min="5" max="60" step="1" value="25"></div>
+        </div>
+        <div class="sl-btnrow">
+            <button class="sl-btn sl-scn" id="sl-scn-southward">Southward turning</button>
+            <button class="sl-btn sl-scn" id="sl-scn-northward">Northward turning</button>
+            <button class="sl-btn sl-scn" id="sl-scn-sawtooth">Sawtooth</button>
+            <span id="sl-replay-btns" style="display:contents"></span>
+            <span id="sl-scn-status"></span>
+            <span style="flex:1"></span>
+            <label class="sl-toggle"><input type="checkbox" id="sl-saps-toggle" checked> SAPS feedback</label>
+            <button class="sl-btn" id="sl-speed">speed <span id="sl-tau-speed">×300</span></button>
+            <button class="sl-btn" id="sl-pause">⏸ pause</button>
+            <button class="sl-btn" id="sl-reset">↺ reset</button>
+        </div>
+        <div class="sl-btnrow" style="margin-top:6px">
+            <span style="font-size:.72rem; letter-spacing:.07em; text-transform:uppercase; color:#8b94ad">Region 2</span>
+            <button class="sl-btn active" id="sl-r2-relax">relaxation ODE</button>
+            <button class="sl-btn" id="sl-r2-drift">drift physics · mini-RCM</button>
+            <span id="sl-r2-note" style="font-size:.72rem; color:#8b94ad">R2 relaxes toward α·R1 with time constant τs</span>
+        </div>
+    </div>
+</div>
+
+<!-- ── Replay validation (visible during hindcast replays) ─────────── -->
+<div class="sl-wrap" style="grid-template-columns:1fr; padding-top:0; display:block" id="sl-validation-wrap">
+    <div class="sl-panel" id="sl-validation" style="display:none">
+        <h2>Replay validation · model vs data
+            <span class="sl-hint">same storm, same drivers — our WASM solve vs the full SWMF IE hindcast and the observed indices</span>
+        </h2>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px">
+            <div>
+                <div class="sl-legend" style="margin-bottom:4px">
+                    <span><span class="sw"></span>CPCP — this solver</span>
+                    <span><span class="sw dash"></span>Φ_PC — BATS-R-US + Ridley (SWMF IE)</span>
+                    <span>r = <b id="sl-val-r" style="color:#eaf2ff">—</b></span>
+                </div>
+                <canvas id="sl-chart-cpcp-cmp" class="sl-chart sl-chart-tall"></canvas>
+            </div>
+            <div>
+                <div class="sl-legend" style="margin-bottom:4px">
+                    <span><span class="sw" style="border-top-color:#ffb066"></span>SYM-H observed (ring current, OMNI)</span>
+                </div>
+                <canvas id="sl-chart-symh" class="sl-chart sl-chart-tall"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="sl-fallback" id="sl-fallback">
+    The solver engine failed to load (WebAssembly required). The physics notes below still apply.
+</div>
+
+<!-- ── Physics & honesty ─────────────────────────────────────────── -->
+<div class="sl-prose">
+    <section>
+        <h2>What is actually being solved</h2>
+        <p>Every frame, this page solves height-integrated ionospheric current continuity for the
+        electrostatic potential Φ on a 100×96 magnetic-latitude/MLT grid:</p>
+        <div class="sl-eq">∇⊥ · ( Σ · ∇⊥Φ ) = −J<sub>∥</sub> · sin(I)</div>
+        <p>Σ is the 2×2 conductance tensor built from Pedersen and Hall conductances
+        (solar EUV via Moen–Brekke 1993, an auroral oval scaled to the driving, and a subauroral
+        trough); J<sub>∥</sub> is the field-aligned current — two Region-1 sheets driven
+        instantaneously by the solar wind through the Kan–Lee merging electric field, and two
+        Region-2 sheets that <b>lag</b> with time constant τ<sub>s</sub>. <b>That lag is the whole
+        story</b>: while R2 catches up, the high-latitude field leaks to low latitudes
+        (undershielding); when the driver drops, the leftover R2 overshoots the other way
+        (overshielding). This is the same equation the ionospheric electrodynamics component of
+        the SWMF (the Ridley Ionosphere Model) solves inside NOAA's operational geospace model —
+        here it runs in WebAssembly, in your browser, with a BiCGSTAB solver in double precision.</p>
+        <p>The equipotential contours <b>are</b> the E×B drift streamlines — plasma flows along
+        them. The streaklets are advected by the solved drift field at physical speed on the same
+        simulation clock as the solver; nothing is animated for effect.</p>
+        <p>SAPS — subauroral polarization streams — emerge rather than being drawn: Region-2
+        current closing across the low-conductance trough demands a large poleward electric field
+        (same current, less conductance → more field), which drives a fast westward jet. Where
+        |E| exceeds ~30 mV/m, frictional heating deepens the density trough, conductance drops
+        further, and the jet self-sharpens — that feedback runs live (toggle it and watch the
+        difference).</p>
+        <p><b>Drift-physics Region 2 (mini-RCM).</b> The default R2 is a parameterized relaxation
+        (τ<sub>s</sub> slider). Switch to <b>drift physics</b> and R2 is instead computed the way
+        the Rice Convection Model does it: six proton channels, each carrying a conserved energy
+        invariant λ = W·V<sup>2/3</sup>, drift through the solved potential (E×B + corotation +
+        gradient drift) from a plasma-sheet boundary scaled to the upstream wind. The
+        field-aligned current is the Vasyliunas closure of the partial ring current's pressure
+        asymmetry — nothing about R2's strength, location, or timing is imposed. Shielding still
+        emerges (the test suite proves under- and overshielding without the ODE), and you can
+        watch the violet pressure layer drift westward and symmetrize when the driving stops —
+        which is <i>why</i> overshielding decays, not just <i>that</i> it decays.</p>
+        <p><b>Storm replays.</b> The replay buttons drive every control from real OMNI 1-minute
+        data through a committed hindcast bundle (the same `pp.hindcast.replay.v1` bundles the
+        Hindcast Lab pages use). During a replay the validation panel compares this solver's CPCP
+        against the full BATS-R-US + Ridley (SWMF IE) hindcast of the same storm — the two solve
+        the same equation, one on a supercomputer, one in your browser tab — with the observed
+        SYM-H alongside for storm-phase context.</p>
+    </section>
+
+    <section>
+        <h2>Validation targets</h2>
+        <p>These are the benchmarks the model is tested against — the Rust test suite gates every
+        change on the analytic solution, current conservation, superposition, dawn–dusk symmetry,
+        and the behaviors below.</p>
+        <div class="sl-table-wrap">
+        <table>
+            <thead><tr><th>Quantity</th><th>This model</th><th>Benchmark</th></tr></thead>
+            <tbody>
+                <tr><td>CPCP vs driving</td><td><b>≈50 kV quiet → ≈160–185 kV storm</b> (B<sub>z</sub> −15 nT, 700 km/s)</td>
+                    <td>Boyle et&nbsp;al. (1997) empirical CPCP; saturation near 200 kV</td></tr>
+                <tr><td>Shielding time constant</td><td><b>penetration decays on τ<sub>s</sub></b> (slider 5–60 min; watch the strip chart)</td>
+                    <td>Senior &amp; Blanc (1984): ~20–30 min classic result</td></tr>
+                <tr><td>Overshielding</td><td><b>sign reversal</b> of equatorial E after northward turning</td>
+                    <td>Kelley et&nbsp;al. (2003) penetration framework</td></tr>
+                <tr><td>SAPS peak &amp; width</td><td><b>≈700–1400 m/s, 2–3.5° wide, 62–66° MLAT</b> under storm driving</td>
+                    <td>Foster &amp; Vo (2002) statistical SAPS climatology</td></tr>
+                <tr><td>St. Patrick's 2015 replay</td><td><b>CPCP trace + live correlation r</b> in the validation panel</td>
+                    <td>BATS-R-US + Ridley (SWMF IE) hindcast, hc-std-v1 · observed SYM-H/AE (OMNI)</td></tr>
+                <tr><td>Emergent R2 (drift mode)</td><td><b>0.5–6 MA storm-time</b>, downward dusk / upward dawn, symmetrizes in recovery</td>
+                    <td>Vasyliunas (1970) closure; RCM formalism (Toffoletto et&nbsp;al. 2003)</td></tr>
+            </tbody>
+        </table>
+        </div>
+        <p>Companion page: the <a class="sl-xlink" href="ring-current.html">Ring Current twin</a>
+        shows where the Region-2 current comes from (the injected ring current); this page shows
+        what it does to the ionosphere. The <a class="sl-xlink" href="st-patrick-storm.html">St.
+        Patrick's Storm hindcast page</a> documents the SWMF runs this page validates against. A
+        Gannon 2024 replay lights up automatically once its driver bundle is baked
+        (<code>scripts/build-shielding-gannon-replay.mjs</code> — needs SPDF network access); the
+        equatorial INTERMAGNET comparison from the
+        <a class="sl-xlink" href="gannon-superstorm.html">Gannon hindcast pipeline</a> remains the
+        flagship follow-up.</p>
+    </section>
+
+    <section>
+        <h2>Known simplifications — read before trusting</h2>
+        <ul>
+            <li><b>Electrostatic, height-integrated ionosphere; no neutral-wind dynamo.</b> The model
+            shows prompt penetration only — no disturbance dynamo, which dominates hours after storm onset.</li>
+            <li><b>Φ = 0 at 40° MLAT.</b> Standard IE practice; the "penetration E" readout is taken at that
+            boundary, not the true equator, so treat it as a shape/timing signal, not an absolute amplitude.</li>
+            <li><b>Region 2, default mode:</b> parameterized (a relaxation toward α·I<sub>R1</sub>) — shielding
+            <i>morphology</i> is imposed; the <i>timing</i> is emergent. The <b>drift-physics mode</b> removes
+            that: R2 is the Vasyliunas current of a real drifting ring current. Its own honest limits:
+            protons only (cold-electron closure), six energy channels, first-order upwind advection
+            (numerically diffusive inner edge), a crude charge-exchange lifetime, and R1 stays
+            parameterized — the solar-wind side of the circuit is not an MHD simulation.</li>
+            <li><b>Single hemisphere, aligned dipole, no seasons.</b> Solar zenith angle uses magnetic
+            coordinates directly; B<sub>y</sub> enters the coupling function but does not yet rotate the
+            convection pattern.</li>
+            <li><b>The density slider is a compression proxy</b> — it nudges the oval and current sheets
+            equatorward with dynamic pressure; it does not change the coupling function.</li>
+        </ul>
+    </section>
+</div>
+
+<script type="module">
+import { boot } from './js/shielding-lab/engine.js';
+boot().then((handle) => {
+    // Test/debug handle (used by tests/shielding-lab-smoke.spec.js to
+    // exercise the replay-completion path without a 72 h run).
+    window.__shieldingLab = handle;
+}).catch((err) => {
+    console.error('[shielding-lab] engine failed:', err);
+    const el = document.getElementById('sl-fallback');
+    if (el) el.style.display = 'block';
+});
+</script>
+
+</body>
+</html>
