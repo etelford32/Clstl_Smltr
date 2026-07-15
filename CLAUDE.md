@@ -59,6 +59,7 @@ This is **parkersphysics.com** — a physics-first space weather forecasting pla
 | Gannon hindcast | `GANNON_SIMULATION_DESIGN.md`, `MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md` |
 | Hindcast database (new events, scorecards) | `HINDCAST_BACKLOG.md`, `HINDCAST_DATABASE_STANDARD.md`, then the per-event runbook |
 | Hindcast Lab pages (st-patrick-storm.html + future event pages) | `js/hindcast-replay-engine.js` + `js/hindcast-charts.js` headers (generic, event-agnostic — new events get a bundle via a `scripts/build-*-replay.mjs` baker, NOT a fork of the Gannon modules) |
+| Shielding Lab (shielding-lab.html / rust-shielding) | `SHIELDING_LAB_PLAN.md` (status + guardrails), then `rust-shielding/src/lib.rs` header; run `cargo test` in `rust-shielding/` after ANY kernel edit and refresh the committed WASM (`node tests/shielding-kernel-smoke.mjs` catches drift) |
 | Earth / weather forecast | `WEATHER_FORECAST_PLAN.md`, `EARTH_LOD_NASA_PRECIP_PLAN.md` |
 | EarthView verdict card (earth.html dashboard) | §4.4 below, then `js/verdict-engine.js` + `js/verdict-card.js` headers; run `node tests/verdict-engine.mjs` after engine edits |
 | EarthView globe markers (location beacon, city dots) | `js/location-beacon.js` + `js/city-markers.js` headers; city data in `js/data/major-cities.js` (run `node tests/major-cities.mjs` after edits); hover/click wiring lives with the shared raycast handlers in earth.html |

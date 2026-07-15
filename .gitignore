@@ -98,3 +98,4 @@ dsmc/raw/
 # only the reviewed, verified CSV gets committed back into pipelines/cme/
 pipelines/cme/step0_out/
 rust-gravity/target/
+rust-shielding/target/
