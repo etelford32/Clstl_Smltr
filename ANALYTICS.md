@@ -98,7 +98,13 @@ Three superadmin RPCs (see migration):
 - `telemetry_auth_funnel_summary(days)` — one row per stage with
   occurrences, distinct funnels, distinct users, first/last seen.
 - `telemetry_auth_funnel_top_drops(days, limit)` — biggest stage→stage
-  drops in the chosen window. Fastest way to find what's broken.
+  drops in the chosen window. Fastest way to find what's broken. Stitches on
+  a **session-bounded `visitor_id`** with a `funnel_id` fallback
+  (`supabase-auth-funnel-visitor-stitch-migration.sql`), so a handoff that
+  crosses a tab boundary — landing → signup.html in a fresh tab, which mints a
+  new per-tab `funnel_id` — is counted as a continuation, not abandonment.
+  Rows with no `visitor_id` fall back to `funnel_id` and read exactly as
+  before. Here "funnels" means stitched journeys, not raw tabs.
 - `telemetry_auth_funnel_replay(funnel_id)` — ordered stage list for
   one specific funnel. Use when debugging a support ticket.
 - `telemetry_auth_funnel_dropoffs(days, limit, grace)` — one row per
