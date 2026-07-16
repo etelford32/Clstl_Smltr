@@ -2181,6 +2181,67 @@ export async function fetchFunnelVisitorSummary(days = 30) {
     }
 }
 
+/**
+ * Top failure-reason histogram over the stable `code` enum. Wraps
+ * telemetry_funnel_failure_codes(days, limit). Groups *_failed /
+ * *_validation_error funnel events by their code (pre-code-enum rows bucket
+ * as '(uncategorized)'), so the histogram survives free-text reason drift —
+ * the last open item in AUTH_FLOW_REVIEW.md. Superadmin-gated.
+ */
+export async function fetchFunnelFailureCodes(days = 30, limit = 20) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_funnel_failure_codes', { p_days: days, p_limit: limit });
+        if (error) throw error;
+        return { ok: true, data: (data || []).map(r => ({
+            code:            r.code,
+            modalFlow:       r.modal_flow,
+            occurrences:     Number(r.occurrences) || 0,
+            distinctFunnels: Number(r.distinct_funnels) || 0,
+            sampleReason:    r.sample_reason || null,
+            lastSeen:        r.last_seen || null,
+        })) };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_funnel_failure_codes', 'supabase-funnel-engagement-metrics-migration.sql') };
+    }
+}
+
+/**
+ * Per-source / per-device outcome breakdown. Wraps
+ * telemetry_funnel_dimension_conversion(days, dimension, limit) where
+ * dimension ∈ {referrer, utm_source, utm_campaign, device}. Each row is one
+ * source/device value with a three-tier outcome — bounced (only passive
+ * views), engaged (interacted but didn't convert), converted (reached a
+ * success terminal) — so "which sources convert vs just bounce" is
+ * answerable even when full conversion is rare. Superadmin-gated.
+ */
+export async function fetchFunnelDimensionConversion(days = 30, dimension = 'referrer', limit = 20) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    const DIMS = new Set(['referrer', 'utm_source', 'utm_campaign', 'device']);
+    if (!DIMS.has(dimension)) return { ok: false, error: `invalid dimension: ${dimension}` };
+    try {
+        const { data, error } = await client.rpc('telemetry_funnel_dimension_conversion', {
+            p_days: days, p_dimension: dimension, p_limit: limit,
+        });
+        if (error) throw error;
+        return { ok: true, data: { dimension, rows: (data || []).map(r => ({
+            value:          r.value,
+            funnels:        Number(r.funnels) || 0,
+            engaged:        Number(r.engaged) || 0,
+            converted:      Number(r.converted) || 0,
+            bounced:        Number(r.bounced) || 0,
+            engagementRate: r.engagement_rate == null ? 0 : Number(r.engagement_rate),
+            conversionRate: r.conversion_rate == null ? 0 : Number(r.conversion_rate),
+        })) } };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_funnel_dimension_conversion', 'supabase-funnel-engagement-metrics-migration.sql') };
+    }
+}
+
 /** New vs returning users in the window. */
 export async function fetchNewVsReturning(days = 30) {
     const client = await sb();
