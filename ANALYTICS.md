@@ -41,8 +41,11 @@ funnel.step('signin_succeeded', { method: 'password', retry_count: 1 });
   `funnel_id` (per-tab, sessionStorage, un-joinable across sessions), this
   persists, so it is what lets the admin answer *"has this visitor been here
   before?"* — new vs returning vs repeat-bouncer. It rides in the context
-  block only (once per funnel), never on every event. See the privacy note
-  below before treating this as free.
+  block (once per funnel) **and, since the identity-fragmentation fix, as a
+  top-level `visitor_id` on every event** — the latter is the fallback join
+  key that stitches a visitor's stages across funnel_ids when a tab boundary
+  forks the funnel (landing → signup.html in a fresh tab mints a new per-tab
+  `funnel_id`). See the privacy note below before treating this as free.
 
 ### Canonical stages
 
@@ -95,7 +98,13 @@ Three superadmin RPCs (see migration):
 - `telemetry_auth_funnel_summary(days)` — one row per stage with
   occurrences, distinct funnels, distinct users, first/last seen.
 - `telemetry_auth_funnel_top_drops(days, limit)` — biggest stage→stage
-  drops in the chosen window. Fastest way to find what's broken.
+  drops in the chosen window. Fastest way to find what's broken. Stitches on
+  a **session-bounded `visitor_id`** with a `funnel_id` fallback
+  (`supabase-auth-funnel-visitor-stitch-migration.sql`), so a handoff that
+  crosses a tab boundary — landing → signup.html in a fresh tab, which mints a
+  new per-tab `funnel_id` — is counted as a continuation, not abandonment.
+  Rows with no `visitor_id` fall back to `funnel_id` and read exactly as
+  before. Here "funnels" means stitched journeys, not raw tabs.
 - `telemetry_auth_funnel_replay(funnel_id)` — ordered stage list for
   one specific funnel. Use when debugging a support ticket.
 - `telemetry_auth_funnel_dropoffs(days, limit, grace)` — one row per
@@ -187,11 +196,16 @@ Analytics has been around since the original `supabase-bootstrap-fresh.sql`.
   softening of the original "per-tab, un-joinable" posture, made so we can
   measure returning visitors and repeat bounces pre-auth. It is defensible
   because the id is a random UUID with **no PII**, is first-party
-  operational telemetry, reuses the id the visitor already carries for
-  experiments/analytics (no new tracking surface), and is written once per
-  funnel rather than per event. If the threat model tightens, gate it behind
-  `window.ppConsent.has('analytics')` in `captureContext()` — but note that
-  gating it blinds the pre-consent bounce measurement it exists to provide.
+  operational telemetry, and reuses the id the visitor already carries for
+  experiments/analytics (no new tracking surface). It was originally written
+  once per funnel (context block only); the **identity-fragmentation fix**
+  additionally attaches it as a top-level `visitor_id` on every event so the
+  CTA→signup handoff — which crosses a tab boundary and therefore a
+  `funnel_id` — remains joinable. The footprint cost is one UUID per event on
+  a low-volume, auth-flow-bounded stream. If the threat model tightens, gate
+  `getVisitorId()` behind `window.ppConsent.has('analytics')` in **both**
+  `captureContext()` and `step()` — but note that gating it blinds the
+  pre-consent bounce measurement it exists to provide.
 - **Sample rate:** funnel events are 100% sampled (volume is small —
   bounded by the size of the auth flow). Vitals/perf are still 25%.
 - **Retention:** `client_telemetry` rows older than 90 days are pruned
