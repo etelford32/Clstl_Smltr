@@ -131,4 +131,22 @@ test.describe('auth funnel', () => {
         const missing = events.filter(e => !e.metadata?.funnel_id);
         expect(missing, `events missing funnel_id: ${JSON.stringify(missing)}`).toEqual([]);
     });
+
+    test('all auth_funnel events carry a top-level visitor_id (cross-tab join key)', async ({ page }) => {
+        const events = attachFunnelInterceptor(page);
+        await page.goto('/signin.html', { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(300);
+        await flushTelemetry(page);
+
+        // visitor_id must ride on EVERY event, not just the once-per-funnel
+        // context block. It is the fallback join key that stitches a single
+        // visitor's stages across funnel_ids when a tab boundary forks the
+        // funnel (e.g. landing → signup.html in a fresh tab). Without the
+        // per-event copy, the CTA→signup handoff is un-joinable and reads as
+        // abandonment. localStorage is available in the test browser, so
+        // getVisitorId() never degrades to null here.
+        expect(events.length, 'at least one funnel event captured').toBeGreaterThan(0);
+        const missing = events.filter(e => !e.metadata?.visitor_id);
+        expect(missing, `events missing visitor_id: ${JSON.stringify(missing.map(e => e.metadata?.stage))}`).toEqual([]);
+    });
 });
