@@ -109,6 +109,47 @@ function isFirstCall() {
     }
 }
 
+/**
+ * Map a free-text auth error into a small, STABLE category code.
+ *
+ * Why: the funnel already records the raw `reason` string, but those
+ * strings come straight from Supabase / Resend / the browser and their
+ * wording drifts over time (and varies by locale). A future "top failure
+ * reasons" histogram (flagged in AUTH_FLOW_REVIEW.md) needs a stable key
+ * to group by. This is that key. `reason` stays alongside for the human-
+ * readable detail; `code` is the machine-groupable bucket.
+ *
+ * The vocabulary is intentionally tiny and closed. Add a bucket only when
+ * a genuinely new failure class appears — resist splitting hairs, or the
+ * histogram fragments back into free-text noise. Unmatched errors fall to
+ * 'unknown' (still useful: a spike in 'unknown' means a new failure class
+ * to name).
+ *
+ * @param {string|Error|{message?:string}} err
+ * @returns {string} snake_case category code
+ */
+export function classifyAuthError(err) {
+    let msg = '';
+    try {
+        msg = (typeof err === 'string' ? err : (err?.message ?? String(err ?? ''))) || '';
+    } catch { msg = ''; }
+    const m = msg.toLowerCase();
+    if (!m) return 'unknown';
+    // Order matters — earlier, more-specific matches win.
+    if (/confirm|verify your email|not confirmed|email.*not.*verif/.test(m)) return 'email_not_confirmed';
+    if (/already (registered|exists|in use)|user already|email.*taken/.test(m)) return 'email_exists';
+    if (/rate limit|too many|429|try again later|temporarily/.test(m)) return 'rate_limited';
+    if (/invalid login|invalid email or password|incorrect|bad cred|wrong password|invalid credentials/.test(m)) return 'bad_credentials';
+    if (/password/.test(m) && /(short|weak|at least|minimum|6 char|8 char|characters)/.test(m)) return 'weak_password';
+    if (/valid email|email.*invalid|invalid.*email|malformed/.test(m)) return 'invalid_email';
+    if (/oauth|provider|popup|redirect uri|id token|access token/.test(m)) return 'oauth_error';
+    if (/magic|otp|link expired|token expired|expired/.test(m)) return 'link_expired';
+    if (/network|failed to fetch|timeout|timed out|offline|connection/.test(m)) return 'network';
+    if (/captcha|hcaptcha|recaptcha/.test(m)) return 'captcha';
+    if (/disabled|not allowed|forbidden|signups not/.test(m)) return 'not_allowed';
+    return 'unknown';
+}
+
 class AuthFunnel {
     constructor() {
         this._funnelId = null;
@@ -176,5 +217,11 @@ export const funnel = new AuthFunnel();
 // Expose on window for non-module classic <script> blocks (signin.html
 // and signup.html have post-module classic scripts that can't `import`).
 try {
-    if (typeof window !== 'undefined') window.ppFunnel = funnel;
+    if (typeof window !== 'undefined') {
+        window.ppFunnel = funnel;
+        // Exposed for the post-module classic <script> blocks in
+        // signin.html / signup.html that pass a `code` alongside `reason`
+        // on *_failed steps but can't `import`.
+        window.ppClassifyAuthError = classifyAuthError;
+    }
 } catch {}

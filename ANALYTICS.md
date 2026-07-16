@@ -153,9 +153,34 @@ Analytics has been around since the original `supabase-bootstrap-fresh.sql`.
   bounded by the size of the auth flow). Vitals/perf are still 25%.
 - **Retention:** `client_telemetry` rows older than 90 days are pruned
   by the existing telemetry-retention cron. Funnel rows ride along.
-- **Dashboards:** add a "Funnel" card to the admin Onboarding tab that
-  calls `telemetry_auth_funnel_summary(30)` and renders one bar per
-  stage. The drop-offs RPC powers a "Where users get stuck" panel.
+- **Dashboards:** the admin Activation → Onboarding tab renders three
+  funnel surfaces, in order of altitude:
+  1. **Auth funnel — stage-by-stage** (`#auth-funnel-summary-container`):
+     one bar per canonical stage (distinct browser tabs) from
+     `telemetry_auth_funnel_summary(30)`, plus the steepest stage→stage
+     losses from `telemetry_auth_funnel_top_drops(30, 8)`. This is the
+     "shape of the leak" — where the anonymous population thins out.
+  2. **Auth funnel drop-offs** (`#auth-dropoffs-container`): individual
+     stalled sessions from `telemetry_auth_funnel_dropoffs(7, 50)`, each
+     classified client-side into **viewed only** (landed, never
+     interacted — an empty `reason` is EXPECTED, not a bug), **attempted ·
+     failed** (`*_failed` / `*_validation_error` — where `reason`/`code`
+     live), and **abandoned mid-form**. Filterable by class.
+  3. Traffic context (`referrer`, `utm_source`, `utm_campaign`, `device`)
+     is joined from each funnel's first-event `context` block by
+     `supabase-auth-funnel-dropoffs-context-migration.sql` so a bounce
+     cluster can be traced to one bad source. The UI renders these columns
+     only when present, so it degrades cleanly before the migration runs.
+  - **Population caveat:** the New-vs-returning, Returning-sessions, and
+    Avg-retries cards are **authenticated users only** (sourced from
+    `activation_events`), NOT the anonymous funnel above — they're labelled
+    as such so the two populations aren't conflated.
+- **Failure `code` vs `reason`:** `*_failed` steps now carry a stable
+  `code` (from `classifyAuthError()` in `js/auth-funnel.js`) alongside the
+  free-text `reason`. `reason` is the human detail; `code` is the closed,
+  machine-groupable bucket a top-reasons histogram should group by, since
+  Supabase/Resend wording drifts over time. Add a bucket only for a
+  genuinely new failure class — unmatched errors fall to `unknown`.
 - **Schema drift guard:** the `kind` CHECK constraint and the in-RPC
   whitelist must stay in sync. The migration updates both. If you add
   another kind later, do both edits in the same SQL file.

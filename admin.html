@@ -453,13 +453,34 @@
                     <div id="demo-metrics-container"><div class="empty">Loading…</div></div>
                 </div>
                 <div class="card" style="margin:0">
-                    <h3 style="font-size:.82rem;margin-bottom:10px">Auth flow</h3>
+                    <h3 style="font-size:.82rem;margin-bottom:10px">
+                        Auth flow
+                        <span style="font-size:.7rem;color:#c99;font-weight:400;margin-left:6px">authenticated users only</span>
+                    </h3>
                     <div id="auth-flow-container"><div class="empty">Loading…</div></div>
                 </div>
             </div>
             <div class="card" style="margin:14px 0 0">
-                <h3 style="font-size:.82rem;margin-bottom:10px">New vs returning users</h3>
+                <h3 style="font-size:.82rem;margin-bottom:10px">
+                    New vs returning users
+                    <span style="font-size:.7rem;color:#c99;font-weight:400;margin-left:6px">authenticated users only</span>
+                </h3>
                 <div id="new-returning-container"><div class="empty">Loading…</div></div>
+            </div>
+            <!-- ── Auth funnel — stage-by-stage aggregate ────────────────
+                 The "shape of the leak" view: population at each canonical
+                 stage (distinct funnels = browser tabs) plus the steepest
+                 single-step drops. Backed by the telemetry_auth_funnel_summary
+                 / telemetry_auth_funnel_top_drops RPCs (superadmin-only).
+                 Sits ABOVE the raw per-session drop-off list below, which
+                 answers "which specific journeys stalled" vs this panel's
+                 "where does the population thin out". -->
+            <div class="card" style="margin:14px 0 0">
+                <h3 style="font-size:.82rem;margin-bottom:10px">
+                    Auth funnel — stage-by-stage
+                    <span style="font-size:.7rem;color:#778;font-weight:400;margin-left:6px">last 30 days · distinct browser tabs per canonical stage</span>
+                </h3>
+                <div id="auth-funnel-summary-container"><div class="empty">Loading…</div></div>
             </div>
             <!-- ── Auth funnel drop-offs ─────────────────────────────────
                  One row per stalled session: the last funnel stage it hit,
@@ -469,7 +490,7 @@
             <div class="card" style="margin:14px 0 0">
                 <h3 style="font-size:.82rem;margin-bottom:10px">
                     Auth funnel drop-offs
-                    <span style="font-size:.7rem;color:#778;font-weight:400;margin-left:6px">last 7 days · sessions that did not reach a success terminal</span>
+                    <span style="font-size:.7rem;color:#778;font-weight:400;margin-left:6px">last 7 days · individual sessions that did not reach a success terminal</span>
                 </h3>
                 <div id="auth-dropoffs-container"><div class="empty">Loading…</div></div>
             </div>
@@ -1043,7 +1064,7 @@ import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
 import { EXPERIMENTS, EXPERIMENT_GOALS } from './js/experiments.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchSyntheticJourneys, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, fetchDailyRetentionCurve, fetchStickiness, fetchFeatureReturnRates, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchSyntheticJourneys, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchAuthFunnelSummary, fetchAuthFunnelTopDrops, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, fetchDailyRetentionCurve, fetchStickiness, fetchFeatureReturnRates, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -2461,11 +2482,116 @@ async function loadNewVsReturning() {
             <div style="background:#4fc3f7;width:${retPct}%"></div>
         </div>`;
 }
+// ── Auth funnel — stage-by-stage aggregate ("shape of the leak") ────────────
+// Pairs the summary RPC (level at each canonical stage) with the top-drops
+// RPC (steepest single-step losses). This is the aggregate view; the raw
+// per-session drop-off list below is the "which journeys stalled" view.
+// Both RPCs are superadmin-only — a plain admin sees the shared hint.
+function _prettyStage(s) {
+    return String(s || '')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+}
+async function loadAuthFunnelSummary() {
+    const el = document.getElementById('auth-funnel-summary-container');
+    if (!el) return;
+    const [sumR, dropR] = await Promise.all([
+        fetchAuthFunnelSummary(30),
+        fetchAuthFunnelTopDrops(30, 8),
+    ]);
+    if (!sumR.ok) {
+        el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(sumR.error)}</div>`;
+        return;
+    }
+    // Only render stages that actually have traffic — the canonical list is
+    // long (aurora capture, password reset, etc.) and a wall of zero-rows
+    // buries the stages that matter. A stage with 0 funnels but a non-zero
+    // predecessor is the interesting gap, so we keep zero-rows that sit
+    // between two non-zero stages; pure trailing/leading zeros are dropped.
+    const rows = sumR.data || [];
+    const active = rows.filter(r => r.distinctFunnels > 0);
+    if (!active.length) {
+        el.innerHTML = '<div class="empty">No auth-funnel events in the last 30 days.</div>';
+        return;
+    }
+    const firstIdx = rows.findIndex(r => r.distinctFunnels > 0);
+    const lastIdx  = rows.length - 1 - [...rows].reverse().findIndex(r => r.distinctFunnels > 0);
+    const shown = rows.slice(firstIdx, lastIdx + 1);
+    const maxFunnels = Math.max(1, ...shown.map(r => r.distinctFunnels));
+
+    const bars = shown.map(r => {
+        const pct = (r.distinctFunnels / maxFunnels) * 100;
+        const dim = r.distinctFunnels === 0;
+        return `
+        <div style="display:grid;grid-template-columns:180px 1fr 120px;gap:10px;align-items:center;padding:3px 0;${dim ? 'opacity:.45' : ''}">
+            <div style="font-size:.76rem;color:#cde;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(r.stage)}">${_esc(_prettyStage(r.stage))}</div>
+            <div style="height:14px;background:rgba(255,255,255,.05);border-radius:4px;overflow:hidden">
+                <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#4fc3f7,#9ad36f);min-width:${r.distinctFunnels > 0 ? '2px' : '0'}"></div>
+            </div>
+            <div style="font-size:.74rem;color:#aab;text-align:right;white-space:nowrap">
+                <strong style="color:#fff">${r.distinctFunnels}</strong> tabs
+                <span style="color:#667">· ${r.occurrences} ev</span>
+            </div>
+        </div>`;
+    }).join('');
+
+    let dropsHtml = '';
+    if (dropR.ok && (dropR.data || []).length) {
+        const items = dropR.data.filter(d => d.dropCount > 0).map(d => `
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:4px 0;font-size:.76rem;border-bottom:1px solid rgba(255,255,255,.04)">
+                <span style="color:#cde">${_esc(_prettyStage(d.fromStage))} <span style="color:#667">→</span> ${_esc(_prettyStage(d.toStage))}</span>
+                <span style="white-space:nowrap;color:#ff9a9a"><strong>${d.dropCount}</strong> lost${d.dropPct != null ? ` <span style="color:#c88">(${d.dropPct}%)</span>` : ''}</span>
+            </div>`).join('');
+        if (items) {
+            dropsHtml = `
+            <div style="margin-top:14px">
+                <div style="font-size:.7rem;color:#778;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">Steepest stage→stage drops</div>
+                ${items}
+            </div>`;
+        }
+    } else if (!dropR.ok) {
+        dropsHtml = `<div style="margin-top:12px;font-size:.7rem;color:#a66">Top-drops unavailable: ${_esc(dropR.error)}</div>`;
+    }
+
+    el.innerHTML = `
+        <div style="font-size:.7rem;color:#667;margin-bottom:10px;line-height:1.5">
+            Bars show <strong style="color:#9ac">distinct browser tabs</strong> (funnel_id) that reached each canonical stage in the last 30 days — a pre-auth, anonymous-inclusive population. Read it top-to-bottom: where the bar shortens is where the population thins.
+        </div>
+        ${bars}
+        ${dropsHtml}`;
+}
+
 // Last 50 auth-funnel drop-offs. Each row is a stalled session — the
 // funnel_id is copyable so an operator can feed it to the replay RPC
 // (telemetry_auth_funnel_replay) for a stage-by-stage view. The card
 // renders empty cleanly when there are no drop-offs in the window —
 // that's the "happy" state, not an error.
+//
+// Each stalled session is classified by WHY it's in the list, so a
+// "viewed the page and left" row isn't misread as broken reason data:
+//   • viewed     — last stage is a bare *_view / callback_enter: the visitor
+//                  landed but never interacted. Empty reason is EXPECTED here.
+//   • failed     — last stage is a *_failed / *_validation_error: an attempt
+//                  that errored. This is where reason/code actually live.
+//   • abandoned  — anything else (plan selected, first interaction, submit…):
+//                  the visitor engaged but dropped before a terminal.
+const _DROPOFF_VIEWED = new Set([
+    'landing_view', 'signup_view', 'signin_view', 'password_reset_view',
+    'auth_callback_enter', 'aurora_capture_view',
+]);
+function _classifyDropoff(stage) {
+    const s = String(stage || '');
+    if (_DROPOFF_VIEWED.has(s)) {
+        return { key: 'viewed', label: 'viewed only', color: '#8894c8', bg: 'rgba(120,140,220,.16)', border: 'rgba(120,140,220,.4)' };
+    }
+    if (/_failed$/.test(s) || /_validation_error$/.test(s)) {
+        return { key: 'failed', label: 'attempted · failed', color: '#ffb0a0', bg: 'rgba(255,120,90,.16)', border: 'rgba(255,120,90,.42)' };
+    }
+    return { key: 'abandoned', label: 'abandoned mid-form', color: '#ffd58a', bg: 'rgba(255,190,80,.14)', border: 'rgba(255,190,80,.38)' };
+}
+// Module-scoped so the filter chips can re-render without refetching.
+let _dropoffRows = [];
+let _dropoffFilter = 'all';
 function _fmtTimeAgo(iso) {
     try {
         const ms = Date.now() - new Date(iso).getTime();
@@ -2479,31 +2605,70 @@ function _fmtTimeAgo(iso) {
         return `${Math.floor(h / 24)}d ago`;
     } catch { return '—'; }
 }
-async function loadAuthFunnelDropoffs() {
+// Compact "source" line from the per-funnel context columns (referrer /
+// utm / device) added by supabase-auth-funnel-dropoffs-context-migration.sql.
+// Renders nothing before that migration is applied (fields undefined), so
+// the card degrades gracefully to the pre-Phase-2 layout.
+function _dropoffSource(row) {
+    const parts = [];
+    const utm = row.utm_source || row.utm_campaign
+        ? [row.utm_source, row.utm_campaign].filter(Boolean).join(' / ')
+        : '';
+    if (utm)          parts.push(`utm ${_esc(utm)}`);
+    if (row.referrer) parts.push(_esc(row.referrer));
+    if (row.device)   parts.push(_esc(row.device));
+    if (!parts.length) return '';
+    return `<div style="color:#667;font-size:.68rem;margin-top:3px">${parts.join(' · ')}</div>`;
+}
+function _renderDropoffs() {
     const el = document.getElementById('auth-dropoffs-container');
     if (!el) return;
-    const r = await fetchAuthFunnelDropoffs(7, 50);
-    if (!r.ok) {
-        el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(r.error)}</div>`;
-        return;
-    }
-    const rows = r.data || [];
+    const all = _dropoffRows || [];
+    // Interaction-class counts across the whole (unfiltered) window.
+    const counts = { all: all.length, viewed: 0, failed: 0, abandoned: 0 };
+    for (const row of all) counts[_classifyDropoff(row.last_stage).key]++;
+
+    const CHIPS = [
+        { key: 'all',       label: 'All' },
+        { key: 'failed',    label: 'Attempted · failed' },
+        { key: 'abandoned', label: 'Abandoned mid-form' },
+        { key: 'viewed',    label: 'Viewed only' },
+    ];
+    const chips = CHIPS.map(c => {
+        const on = _dropoffFilter === c.key;
+        return `<button class="pp-dropoff-chip" data-filter="${c.key}" style="cursor:pointer;font-size:.7rem;padding:3px 10px;border-radius:12px;border:1px solid ${on ? 'rgba(120,180,255,.6)' : 'rgba(255,255,255,.12)'};background:${on ? 'rgba(120,180,255,.18)' : 'transparent'};color:${on ? '#cfe4ff' : '#99a'}">${_esc(c.label)} <span style="color:#778">${counts[c.key]}</span></button>`;
+    }).join('');
+    const chipBar = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${chips}</div>`;
+
+    const rows = _dropoffFilter === 'all'
+        ? all
+        : all.filter(row => _classifyDropoff(row.last_stage).key === _dropoffFilter);
+
+    const explain = `
+        <div style="font-size:.7rem;color:#667;margin-bottom:10px;line-height:1.5">
+            <strong style="color:#8894c8">Viewed only</strong> = landed but never interacted (an empty reason is expected here, not a bug).
+            <strong style="color:#ffb0a0">Attempted · failed</strong> = an attempt that errored — reason/code live here.
+            <strong style="color:#ffd58a">Abandoned mid-form</strong> = engaged, then dropped before a terminal.
+        </div>`;
+
     if (!rows.length) {
-        el.innerHTML = '<div class="empty">No drop-offs in the last 7 days — every funnel reached a success terminal.</div>';
+        el.innerHTML = chipBar + explain + '<div class="empty">No sessions in this bucket for the last 7 days.</div>';
+        _bindDropoffHandlers(el);
         return;
     }
     const head = `
-        <div style="display:grid;grid-template-columns:80px 1.6fr 1.4fr 80px 70px;gap:10px;padding:6px 8px;font-size:.66rem;color:#778;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,.06)">
+        <div style="display:grid;grid-template-columns:80px 1.7fr 1.3fr 70px 70px;gap:10px;padding:6px 8px;font-size:.66rem;color:#778;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,.06)">
             <div>When</div>
-            <div>Last stage</div>
+            <div>Last stage · type</div>
             <div>Reason / code</div>
             <div>Steps</div>
             <div>Funnel</div>
         </div>`;
     const body = rows.map(row => {
+        const cls      = _classifyDropoff(row.last_stage);
         const when     = _fmtTimeAgo(row.last_seen);
         const stage    = _esc(row.last_stage || '—');
-        const route    = row.last_route ? `<span style="color:#667;font-size:.7rem"> · ${_esc(row.last_route)}</span>` : '';
+        const badge    = `<span style="display:inline-block;font-size:.62rem;padding:1px 6px;border-radius:4px;background:${cls.bg};border:1px solid ${cls.border};color:${cls.color};margin-left:6px;vertical-align:middle;white-space:nowrap">${_esc(cls.label)}</span>`;
         const code     = row.last_code     ? `<code style="background:rgba(255,140,80,.18);border:1px solid rgba(255,140,80,.4);color:#ffc090;padding:1px 6px;border-radius:4px;font-size:.72rem;font-family:'SFMono-Regular',Consolas,monospace">${_esc(row.last_code)}</code>` : '';
         const provider = row.last_provider ? `<span style="font-size:.7rem;color:#88a"> · ${_esc(row.last_provider)}</span>` : '';
         const method   = row.last_method   ? `<span style="font-size:.7rem;color:#88a"> · ${_esc(row.last_method)}</span>` : '';
@@ -2514,15 +2679,16 @@ async function loadAuthFunnelDropoffs() {
         const fid      = row.funnel_id || '';
         const fidShort = fid.length > 10 ? `${fid.slice(0,8)}…` : fid;
         return `
-        <div style="display:grid;grid-template-columns:80px 1.6fr 1.4fr 80px 70px;gap:10px;padding:8px;font-size:.78rem;border-bottom:1px solid rgba(255,255,255,.04);align-items:start">
+        <div style="display:grid;grid-template-columns:80px 1.7fr 1.3fr 70px 70px;gap:10px;padding:8px;font-size:.78rem;border-bottom:1px solid rgba(255,255,255,.04);align-items:start">
             <div style="color:#88a;font-size:.74rem">${_esc(when)}</div>
             <div>
-                <div style="color:#cde;font-weight:600">${stage}${provider}${method}</div>
-                ${route ? `<div style="color:#667;font-size:.7rem;margin-top:2px">${_esc(row.last_route || '')}</div>` : ''}
+                <div style="color:#cde;font-weight:600">${stage}${badge}${provider}${method}</div>
+                ${row.last_route ? `<div style="color:#667;font-size:.7rem;margin-top:2px">${_esc(row.last_route)}</div>` : ''}
+                ${_dropoffSource(row)}
             </div>
             <div>
                 ${code}
-                ${reason}
+                ${reason || (cls.key === 'viewed' ? '<span style="color:#556;font-size:.72rem">— (no interaction)</span>' : '')}
             </div>
             <div style="color:#88a">${row.stage_count ?? 0}</div>
             <div>
@@ -2531,6 +2697,8 @@ async function loadAuthFunnelDropoffs() {
         </div>`;
     }).join('');
     el.innerHTML = `
+        ${chipBar}
+        ${explain}
         ${head}
         ${body}
         <div style="font-size:.7rem;color:#667;margin-top:10px;line-height:1.5">
@@ -2538,11 +2706,19 @@ async function loadAuthFunnelDropoffs() {
             <code style="color:#9ad36f">SELECT * FROM public.telemetry_auth_funnel_replay('&lt;id&gt;');</code>
             to see the full stage-by-stage replay. In-flight sessions (last event &lt; 2 min ago) are hidden so a user mid-form does not appear as a drop-off.
         </div>`;
-    // Delegated click handler — copies the funnel_id from the data
-    // attribute so we avoid quoting headaches when interpolating into
-    // an inline onclick. Re-bound on each refresh; .onclick assignment
-    // overwrites any previous handler so we don't accumulate listeners.
+    _bindDropoffHandlers(el);
+}
+// Delegated handlers — copy funnel_id, and switch the interaction-class
+// filter. Re-bound on each render; .onclick assignment overwrites any
+// previous handler so we don't accumulate listeners.
+function _bindDropoffHandlers(el) {
     el.onclick = (ev) => {
+        const chip = ev.target.closest?.('.pp-dropoff-chip');
+        if (chip) {
+            _dropoffFilter = chip.dataset.filter || 'all';
+            _renderDropoffs();
+            return;
+        }
         const t = ev.target.closest?.('.pp-fid-copy');
         if (!t) return;
         const fid = t.dataset.fid || '';
@@ -2555,6 +2731,21 @@ async function loadAuthFunnelDropoffs() {
         } catch {}
     };
 }
+async function loadAuthFunnelDropoffs() {
+    const el = document.getElementById('auth-dropoffs-container');
+    if (!el) return;
+    const r = await fetchAuthFunnelDropoffs(7, 50);
+    if (!r.ok) {
+        el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(r.error)}</div>`;
+        return;
+    }
+    _dropoffRows = r.data || [];
+    if (!_dropoffRows.length) {
+        el.innerHTML = '<div class="empty">No drop-offs in the last 7 days — every funnel reached a success terminal.</div>';
+        return;
+    }
+    _renderDropoffs();
+}
 
 async function loadOnboardingAll() {
     await Promise.all([
@@ -2563,6 +2754,7 @@ async function loadOnboardingAll() {
         loadDemoMetrics(),
         loadAuthFlowMetrics(),
         loadNewVsReturning(),
+        loadAuthFunnelSummary(),
         loadAuthFunnelDropoffs(),
     ]);
 }

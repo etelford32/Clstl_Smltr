@@ -701,6 +701,10 @@
     const _funnel = (typeof window !== 'undefined' && window.ppFunnel) || {
         step: () => {}, stepDeferred: () => {}, id: () => null,
     };
+    // Stable error-category mapper (js/auth-funnel.js side-effect). Passed
+    // as `code` on signup_failed so a top-reasons histogram groups by a
+    // fixed key rather than the drifting free-text `reason`.
+    const _classifyErr = (typeof window !== 'undefined' && window.ppClassifyAuthError) || (() => 'unknown');
 
     function selectPlan(val) {
         document.querySelectorAll('.plan-pill').forEach(p => p.classList.remove('selected'));
@@ -871,6 +875,7 @@
                 _funnel.step('signup_failed', {
                     plan:   _selectedPlan,
                     reason: String(result.error || 'unknown').slice(0, 120),
+                    code:   _classifyErr(result.error),
                 });
                 return;
             }
