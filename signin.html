@@ -576,6 +576,10 @@
     const _funnel = (typeof window !== 'undefined' && window.ppFunnel) || {
         step: () => {}, stepDeferred: () => {}, id: () => null,
     };
+    // Stable error-category mapper (js/auth-funnel.js side-effect). Passed
+    // as `code` on *_failed steps so a top-reasons histogram can group by
+    // a fixed key instead of the drifting free-text `reason`.
+    const _classifyErr = (typeof window !== 'undefined' && window.ppClassifyAuthError) || (() => 'unknown');
 
     // ── Time-to-first-interaction signal ────────────────────────────
     // Fires once on the first focus of any input on the form. Indicates
@@ -774,6 +778,7 @@
                     _funnel.step('signin_failed', {
                         method: 'magic_link',
                         reason: String(result.error || 'unknown').slice(0, 120),
+                        code:   _classifyErr(result.error),
                     });
                     return;
                 }
@@ -831,6 +836,7 @@
                 _funnel.step('signin_failed', {
                     method:      'password',
                     reason:      String(result.error || 'unknown').slice(0, 120),
+                    code:        _classifyErr(result.error),
                     retry_count: _retriesNow + 1,
                 });
                 // Failed-signin counter — survives the page lifetime so the

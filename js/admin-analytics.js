@@ -2076,6 +2076,111 @@ export async function fetchAuthFunnelDropoffs(days = 7, limit = 50) {
     }
 }
 
+/**
+ * Stage-by-stage auth-funnel summary — the "shape of the leak" aggregate.
+ *
+ * Wraps telemetry_auth_funnel_summary(p_days), which returns one row per
+ * canonical stage with its occurrence count, distinct funnels (browser
+ * tabs), distinct users, and first/last seen. Ordered by the canonical
+ * stage_order so the caller can render the funnel top-to-bottom without
+ * re-sorting. Superadmin-gated server-side.
+ *
+ * This is the aggregate counterpart to fetchAuthFunnelDropoffs (which
+ * lists individual stalled sessions): summary answers "where does the
+ * population thin out", drop-offs answers "which specific journeys stalled".
+ */
+export async function fetchAuthFunnelSummary(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_auth_funnel_summary', { p_days: days });
+        if (error) throw error;
+        return { ok: true, data: (data || []).map(r => ({
+            stage:           r.stage,
+            stageOrder:      Number(r.stage_order) || 0,
+            occurrences:     Number(r.occurrences) || 0,
+            distinctFunnels: Number(r.distinct_funnels) || 0,
+            distinctUsers:   Number(r.distinct_users) || 0,
+            firstSeen:       r.first_seen || null,
+            lastSeen:        r.last_seen || null,
+        })) };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_auth_funnel_summary', 'supabase-auth-funnel-migration.sql') };
+    }
+}
+
+/**
+ * Steepest stage→stage drop-offs in the window. Wraps
+ * telemetry_auth_funnel_top_drops(p_days, p_limit) — for each canonical
+ * transition A→B it counts funnels that hit A but never reached B, sorted
+ * by absolute drop. Complements fetchAuthFunnelSummary: the summary shows
+ * the level at each stage, this shows the biggest single-step losses.
+ * Superadmin-gated server-side.
+ */
+export async function fetchAuthFunnelTopDrops(days = 30, limit = 10) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_auth_funnel_top_drops', {
+            p_days:  days,
+            p_limit: limit,
+        });
+        if (error) throw error;
+        return { ok: true, data: (data || []).map(r => ({
+            fromStage:     r.from_stage,
+            toStage:       r.to_stage,
+            funnelsAtFrom: Number(r.funnels_at_from) || 0,
+            funnelsAtTo:   Number(r.funnels_at_to) || 0,
+            dropCount:     Number(r.drop_count) || 0,
+            dropPct:       r.drop_pct == null ? null : Number(r.drop_pct),
+        })) };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_auth_funnel_top_drops', 'supabase-auth-funnel-migration.sql') };
+    }
+}
+
+/**
+ * Anonymous-visitor summary — the pre-auth population view keyed on the
+ * persistent visitor_id (pp_vid), NOT the per-tab funnel_id. Wraps
+ * telemetry_funnel_visitor_summary(p_days). Answers "who are our anonymous
+ * visitors and do they come back?":
+ *   distinctVisitors, newVisitors, returningVisitors (≥2 funnels ever),
+ *   convertedVisitors (ever reached a success terminal), repeatBouncers
+ *   (returning AND never converted), avgFunnels.
+ *
+ * Reads all-zeros until clients start writing visitor_id into the funnel
+ * context (js/auth-funnel.js, Phase 3) — the card shows a "warming up"
+ * hint in that state rather than a misleading 0%. Superadmin-gated.
+ */
+export async function fetchFunnelVisitorSummary(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('telemetry_funnel_visitor_summary', { p_days: days });
+        if (error) throw error;
+        const r = (Array.isArray(data) ? data[0] : data) || {};
+        const distinct = Number(r.distinct_visitors) || 0;
+        const returning = Number(r.returning_visitors) || 0;
+        const converted = Number(r.converted_visitors) || 0;
+        return { ok: true, data: {
+            distinctVisitors:   distinct,
+            newVisitors:        Number(r.new_visitors) || 0,
+            returningVisitors:  returning,
+            convertedVisitors:  converted,
+            repeatBouncers:     Number(r.repeat_bouncers) || 0,
+            avgFunnels:         r.avg_funnels == null ? 0 : Number(r.avg_funnels),
+            // Convenience rates for the card (guarded against /0).
+            returningShare:     distinct ? +(returning / distinct).toFixed(3) : 0,
+            conversionRate:     distinct ? +(converted / distinct).toFixed(3) : 0,
+        } };
+    } catch (err) {
+        return { ok: false, error: _telemetryHint(err, 'telemetry_funnel_visitor_summary', 'supabase-auth-funnel-phase3-migration.sql') };
+    }
+}
+
 /** New vs returning users in the window. */
 export async function fetchNewVsReturning(days = 30) {
     const client = await sb();
