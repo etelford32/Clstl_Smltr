@@ -132,6 +132,9 @@ import {
 } from './ring-current-particles.js';
 import { SimClock, SCALE, apparentUnitsPerSec } from './sim-clock.js';
 import { EarthSkin } from './earth-skin.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+import { CopyShader } from 'three/addons/shaders/CopyShader.js';
 
 const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);   // H⁺ (solar wind)
 const ION_O_COLOR    = new THREE.Color(0.58, 1.00, 0.34);   // O⁺ (ionospheric outflow)
@@ -782,6 +785,10 @@ export class RingCurrentGlobe {
         this._renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
         this._renderer.setSize(w, h);
         container.appendChild(this._renderer.domElement);
+
+        // Additive bloom overlay (see _renderFrame). Sized to the drawing
+        // buffer (CSS px × pixelRatio), not CSS px, so the glow registers 1:1.
+        this._initBloom(this._renderer.domElement.width, this._renderer.domElement.height);
 
         this._controls = new OrbitControls(this._camera, this._renderer.domElement);
         this._controls.enableDamping = true;
@@ -2949,7 +2956,7 @@ export class RingCurrentGlobe {
             if (k >= 1) this._flight = null;
         }
         this._controls.update();
-        this._renderer.render(this._scene, this._camera);
+        this._renderFrame();
         blend('render', tMark, performance.now());
         this._perfCheck(wallNow, dt);
     }
@@ -3026,12 +3033,97 @@ export class RingCurrentGlobe {
         this._magGroup.updateMatrixWorld();                        // tooltip picking reads it
     }
 
+    /**
+     * Build the additive bloom overlay. Opt out with ?bloom=0 (a cheap safety
+     * valve, no UI surface — mirrors the verdict card's ?verdict=0). Failure
+     * is non-fatal: the scene simply renders without glow.
+     */
+    _initBloom(w, h) {
+        const params = new URLSearchParams(location.search);
+        this._bloomEnabled = params.get('bloom') !== '0';
+        if (!this._bloomEnabled || !(w > 0 && h > 0)) { this._bloomEnabled = false; return; }
+        try {
+            // Tuned for this additive-glow scene: a low luminosity threshold
+            // isolates the bright cores (ring torus, plasmapause, aurora oval,
+            // injection flashes, hot ion cores) and a soft wide radius blooms
+            // them into luminous plasma without washing out the dark backdrop.
+            this._bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 1.05, 0.72, 0.2);
+            // Offscreen HDR copy of the scene for bloom extraction. HalfFloat
+            // so stacked additive particles push past 1.0 and the threshold
+            // can pick out genuine cores rather than clipping everything.
+            this._rtScene = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType });
+            // Fullscreen additive blit of the pure glow over the untouched
+            // base frame (CopyShader = passthrough; AdditiveBlending adds it).
+            const blit = new THREE.ShaderMaterial({
+                uniforms: THREE.UniformsUtils.clone(CopyShader.uniforms),
+                vertexShader: CopyShader.vertexShader,
+                fragmentShader: CopyShader.fragmentShader,
+                blending: THREE.AdditiveBlending,
+                transparent: true, depthTest: false, depthWrite: false,
+            });
+            blit.uniforms.opacity.value = 1.0;
+            this._bloomBlit = new FullScreenQuad(blit);
+        } catch (e) {
+            console.warn('[ring-current] bloom overlay unavailable — rendering without glow:', e);
+            this._bloomEnabled = false;
+            this._bloom = null;
+        }
+    }
+
+    /**
+     * Draw the frame: the untouched transparent base render FIRST (so the
+     * .rc-stage CSS gradient still shows through exactly as before), then —
+     * on the full-quality tier only — an ADDITIVE bloom overlay so the
+     * additive-glow populations read as luminous plasma.
+     *
+     * We composite the glow ourselves instead of using EffectComposer because
+     * UnrealBloomPass's own to-screen path clears the canvas and blits through
+     * an OPAQUE material (alpha → 1), which would paint the backdrop black and
+     * erase the gradient. Here the base frame is never cleared or recolored;
+     * only the blurred bright cores are added on top.
+     */
+    _renderFrame() {
+        const r = this._renderer;
+        // Base frame — byte-for-byte the pre-bloom behavior.
+        r.render(this._scene, this._camera);
+        // Bloom is extra scene-render cost; skip it the moment the adaptive
+        // quality system steps down (tier > 0), and when disabled/unavailable.
+        if (!this._bloomEnabled || !this._bloom || this._perf.tier > 0) return;
+
+        const prevTarget = r.getRenderTarget();
+        const prevAutoClear = r.autoClear;
+        // 1) Scene → offscreen HDR target (transparent clear; only luminance
+        //    matters for extraction).
+        r.setRenderTarget(this._rtScene);
+        r.setClearColor(0x000000, 0);
+        r.clear();
+        r.render(this._scene, this._camera);
+        // 2) Highpass + mip blur + composite. With renderToScreen=false the
+        //    pure glow lands in renderTargetsHorizontal[0].
+        r.autoClear = false;
+        this._bloom.renderToScreen = false;
+        this._bloom.render(r, this._rtScene, this._rtScene, 0, false);
+        // 3) Lay the glow additively over the untouched base frame.
+        r.setRenderTarget(null);
+        this._bloomBlit.material.uniforms.tDiffuse.value =
+            this._bloom.renderTargetsHorizontal[0].texture;
+        this._bloomBlit.render(r);
+        // Restore renderer state for the next base frame.
+        r.autoClear = prevAutoClear;
+        r.setRenderTarget(prevTarget);
+    }
+
     _resize() {
         const w = this._container.clientWidth, h = this._container.clientHeight;
         if (!w || !h) return;
         this._camera.aspect = w / h;
         this._camera.updateProjectionMatrix();
         this._renderer.setSize(w, h);
+        if (this._bloom) {
+            const dw = this._renderer.domElement.width, dh = this._renderer.domElement.height;
+            this._bloom.setSize(dw, dh);
+            this._rtScene.setSize(dw, dh);
+        }
     }
 
     dispose() {
@@ -3047,6 +3139,9 @@ export class RingCurrentGlobe {
             o.geometry?.dispose?.();
             if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose());
         });
+        this._bloom?.dispose?.();
+        this._rtScene?.dispose?.();
+        this._bloomBlit?.dispose?.();
         this._renderer.dispose();
         this._renderer.domElement.remove();
     }
