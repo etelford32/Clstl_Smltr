@@ -64,9 +64,15 @@ function getFunnelStartMs() {
 // Privacy note: unlike funnel_id (per-tab, sessionStorage, un-joinable across
 // sessions), this id DOES persist across sessions/tabs — it is what lets the
 // funnel answer "has this anonymous visitor bounced before". It is a random
-// UUID with no PII. It is attached ONLY to the once-per-funnel context block,
-// not to every event, to keep the footprint minimal. See ANALYTICS.md
-// "Privacy posture".
+// UUID with no PII. As of the identity-fragmentation fix it is attached to
+// EVERY event (top-level `visitor_id` in step()), not just the once-per-funnel
+// context block — the context block still carries it too for the Phase-3 RPCs
+// that read context->>'visitor_id'. The per-event copy is the join key that
+// stitches a visitor's stages across funnel_ids when a tab boundary forks the
+// funnel (see step()); the footprint cost is one UUID string per event, and
+// funnel volume is small (100% sampled but bounded by the auth flow). If the
+// threat model tightens, gate getVisitorId() behind analytics consent in BOTH
+// captureContext() and step() — see ANALYTICS.md "Privacy posture".
 const VISITOR_ID_KEY = 'pp_vid';
 function getVisitorId() {
     try {
@@ -213,9 +219,21 @@ class AuthFunnel {
         try {
             const fid     = this.id();
             const startMs = getFunnelStartMs();
+            const vid     = getVisitorId();
             const baseMeta = {
                 funnel_id:           fid,
                 t_since_landing_ms:  Math.max(0, Date.now() - startMs),
+                // Persistent visitor_id on EVERY event, not only the
+                // once-per-funnel context block. This is the fallback join
+                // key: funnel_id is per-tab (sessionStorage), so a tab
+                // boundary — landing → signup.html opening in a fresh tab —
+                // mints a NEW funnel_id and the CTA→signup handoff can never
+                // be stitched by funnel_id alone. visitor_id (localStorage,
+                // cross-tab) survives that boundary and lets the RPCs rejoin
+                // the two funnels as one visitor. Placed BEFORE ...props so an
+                // explicit per-call override still wins; omitted entirely when
+                // null (localStorage blocked) so we never write an empty key.
+                ...(vid ? { visitor_id: vid } : {}),
                 ...props,
             };
             if (isFirstCall()) {
