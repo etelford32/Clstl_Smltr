@@ -1040,6 +1040,15 @@
             //   - this was a class-seat invite (student rides parent's plan).
             const goToCheckout = plan !== 'free' && !invitedComp && !classSeatApplied;
             if (goToCheckout) {
+                // Funnel: paid-signup intent. Fired at the decision point (not
+                // at the fetch below) so a user who bails during the 1.5s
+                // redirect delay still counts as having started checkout. The
+                // completion signal is the `subscription_started` activation
+                // event written by the Stripe webhook, so paid-signup
+                // abandonment = checkout_started − subscription_started. Closes
+                // the gap AUTH_FLOW_REVIEW.md flagged: Stripe abandonment was
+                // previously invisible to us.
+                try { _funnel.step('checkout_started', { plan }); } catch {}
                 // User selected a paid plan — redirect to checkout after brief delay.
                 // Post-Stripe we land back on dashboard.html as a 'success' return,
                 // which is the historical contract Stripe webhook + the portal page

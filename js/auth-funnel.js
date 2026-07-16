@@ -55,6 +55,33 @@ function getFunnelStartMs() {
     } catch { return Date.now(); }
 }
 
+// Persistent, cross-tab anonymous visitor id. Reuses `pp_vid` — the SAME
+// localStorage key js/experiments.js and js/analytics.js already use, so a
+// visitor has ONE stable id everywhere rather than a per-surface fork.
+// Read-or-create (matches experiments.js visitorId()): whichever module runs
+// first mints it, the rest reuse the same value.
+//
+// Privacy note: unlike funnel_id (per-tab, sessionStorage, un-joinable across
+// sessions), this id DOES persist across sessions/tabs — it is what lets the
+// funnel answer "has this anonymous visitor bounced before". It is a random
+// UUID with no PII. It is attached ONLY to the once-per-funnel context block,
+// not to every event, to keep the footprint minimal. See ANALYTICS.md
+// "Privacy posture".
+const VISITOR_ID_KEY = 'pp_vid';
+function getVisitorId() {
+    try {
+        let id = localStorage.getItem(VISITOR_ID_KEY);
+        if (id) return id;
+        id = makeFunnelId();   // same UUID generator as the funnel id
+        localStorage.setItem(VISITOR_ID_KEY, id);
+        return id;
+    } catch {
+        // localStorage blocked (private mode / cookie wall) — degrade to
+        // null rather than minting a volatile id that can't persist anyway.
+        return null;
+    }
+}
+
 function safeReferrerOrigin() {
     try {
         if (!document.referrer) return null;
@@ -81,6 +108,9 @@ function captureContext() {
         page:        (window.location.pathname || '/').slice(0, 200),
         referrer:    safeReferrerOrigin(),
         utm:         captureUtm(),
+        // Persistent anonymous id — lets the admin distinguish a first-time
+        // visitor from one returning for another attempt (repeat bouncers).
+        visitor_id:  getVisitorId(),
         viewport:    { w: window.innerWidth || 0, h: window.innerHeight || 0 },
         locale:      (navigator.language || '').slice(0, 16),
         // Coarse device class — not a fingerprint, just a "mobile vs

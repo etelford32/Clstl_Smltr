@@ -34,7 +34,15 @@ funnel.step('signin_succeeded', { method: 'password', retry_count: 1 });
 - `t_since_landing_ms` — milliseconds since this funnel started. Use this
   to spot users who hesitated or got stuck.
 - On the first call only: a `context` block with `page`, `referrer` (origin
-  only), `utm` (UTM parameters), `viewport`, `locale`, `device`, `consent`.
+  only), `utm` (UTM parameters), `viewport`, `locale`, `device`, `consent`,
+  and `visitor_id`.
+- `visitor_id` — the persistent, cross-tab anonymous id (localStorage
+  `pp_vid`, the SAME id `js/experiments.js` + `js/analytics.js` use). Unlike
+  `funnel_id` (per-tab, sessionStorage, un-joinable across sessions), this
+  persists, so it is what lets the admin answer *"has this visitor been here
+  before?"* — new vs returning vs repeat-bouncer. It rides in the context
+  block only (once per funnel), never on every event. See the privacy note
+  below before treating this as free.
 
 ### Canonical stages
 
@@ -59,6 +67,7 @@ won't show up in the ordered funnel summary.
 | signup.html | `signup_failed` | Auth/Supabase error |
 | signup.html | `signup_email_confirmation_required` | Supabase sent confirm email |
 | signup.html | `signup_succeeded` | Auto-confirmed signup |
+| signup.html | `checkout_started` | Paid plan — fired just before the Stripe redirect |
 | signin.html | `signin_view` | Page load |
 | signin.html | `signin_method_selected` | Magic-link toggle |
 | signin.html | `signin_first_interaction` | First field focus |
@@ -73,6 +82,7 @@ won't show up in the ordered funnel summary.
 | signin.html | `password_reset_requested` | Reset form submitted |
 | signin.html / signup.html | `oauth_button_clicked` | Google/Apple click |
 | signin.html / signup.html | `oauth_start_failed` | `auth.signInWithProvider` rejected |
+| auth-callback.html | `email_confirm_link_clicked` | Landed via the email-confirm link (`type=signup`) |
 | auth-callback.html | `auth_callback_enter` | Callback page hits boot |
 | auth-callback.html | `auth_callback_succeeded` | Returning user |
 | auth-callback.html | `auth_callback_signup` | New OAuth/magic-link account |
@@ -88,6 +98,16 @@ Three superadmin RPCs (see migration):
   drops in the chosen window. Fastest way to find what's broken.
 - `telemetry_auth_funnel_replay(funnel_id)` — ordered stage list for
   one specific funnel. Use when debugging a support ticket.
+- `telemetry_auth_funnel_dropoffs(days, limit, grace)` — one row per
+  *stalled* session (latest stage is not a success terminal), carrying
+  `reason`/`code`, the first-event traffic context (`referrer`,
+  `utm_source`, `utm_campaign`, `device`), and the persistent
+  `visitor_id` + `prior_funnels` (how many earlier journeys this visitor
+  had). Powers the admin drop-offs list.
+- `telemetry_funnel_visitor_summary(days)` — the anonymous-visitor
+  population keyed on `visitor_id`: distinct / new / returning / converted
+  / repeat-bouncer counts. The pre-auth "do they come back?" view the
+  per-tab `funnel_id` could never give.
 
 Example queries:
 
@@ -149,6 +169,16 @@ Analytics has been around since the original `supabase-bootstrap-fresh.sql`.
 - **Privacy floor:** funnel metadata must never include email, password,
   IP, full UA, or any value that could identify a user when joined with
   another column. UTMs are public marketing identifiers — fine.
+- **Persistent `visitor_id` posture (Phase 3):** the funnel now carries a
+  cross-session anonymous id in its context block. This is a *deliberate*
+  softening of the original "per-tab, un-joinable" posture, made so we can
+  measure returning visitors and repeat bounces pre-auth. It is defensible
+  because the id is a random UUID with **no PII**, is first-party
+  operational telemetry, reuses the id the visitor already carries for
+  experiments/analytics (no new tracking surface), and is written once per
+  funnel rather than per event. If the threat model tightens, gate it behind
+  `window.ppConsent.has('analytics')` in `captureContext()` — but note that
+  gating it blinds the pre-consent bounce measurement it exists to provide.
 - **Sample rate:** funnel events are 100% sampled (volume is small —
   bounded by the size of the auth flow). Vitals/perf are still 25%.
 - **Retention:** `client_telemetry` rows older than 90 days are pruned
@@ -171,6 +201,14 @@ Analytics has been around since the original `supabase-bootstrap-fresh.sql`.
      `supabase-auth-funnel-dropoffs-context-migration.sql` so a bounce
      cluster can be traced to one bad source. The UI renders these columns
      only when present, so it degrades cleanly before the migration runs.
+  4. **Anonymous visitors** (`#funnel-visitor-container`): the pre-auth
+     population from `telemetry_funnel_visitor_summary(30)` — distinct /
+     first-time / returning / ever-converted / repeat-bouncer counts keyed
+     on the persistent `visitor_id`. Distinct from the authenticated
+     New-vs-returning card. Drop-off rows also flag `↻ seen N× before` when
+     `prior_funnels > 0`. Both land with `supabase-auth-funnel-phase3-migration.sql`
+     and read all-zeros until `visitor_id` instrumentation has been live a
+     session or two.
   - **Population caveat:** the New-vs-returning, Returning-sessions, and
     Avg-retries cards are **authenticated users only** (sourced from
     `activation_events`), NOT the anonymous funnel above — they're labelled
