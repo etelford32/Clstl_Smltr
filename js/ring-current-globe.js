@@ -2894,6 +2894,11 @@ export class RingCurrentGlobe {
         this._simHours += dSimH;
         this._lastDt = dt;
         this._stepTransportLayers(dt, dSimH);
+        if (this._enaEnabled && this._enaSweep) {
+            this._enaPhase = (this._enaPhase + dt * this._enaSweepRate) % (2 * Math.PI);
+            if (this._enaSliderEl) this._enaSliderEl.value = String(Math.round(this._enaPhase / (2 * Math.PI) * 1000));
+            this._updateEnaPose();
+        }
         // Sun corona breathes with the strongest incoming VBs — a storm you
         // can FEEL approaching before it arrives (cinematic, data-driven).
         this._sun.scale.setScalar(11 * (1 + (0.02 + 0.09 * (this._sunVbsNorm ?? 0))
@@ -3242,6 +3247,42 @@ export class RingCurrentGlobe {
         this._heatMesh.visible = this._heatEnabled;
         this._magGroup.add(this._heatMesh);
 
+        // Companion MERIDIAN slice (noon–midnight plane) — the GEMSIS P⊥
+        // cross-section. Shares the equatorial colour texture: each point maps
+        // to its dipole (L, MLT=noon|midnight) and a latitude falloff fades it
+        // off the equatorial plane, so it reads as the ring's cross-section.
+        this._meridEnabled = new URLSearchParams(location.search).get('merid') !== '0';
+        const mmat = new THREE.ShaderMaterial({
+            uniforms: {
+                uMap: { value: this._heatTex }, uOpacity: { value: 0.5 },
+                uLMin: { value: t.cfg.lMin }, uLMax: { value: t.cfg.lMax },
+            },
+            transparent: true, depthWrite: false, depthTest: true,
+            side: THREE.DoubleSide, blending: THREE.NormalBlending,
+            vertexShader: 'varying vec2 vXY; void main(){ vXY = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+            fragmentShader: `
+                precision highp float;
+                uniform sampler2D uMap; uniform float uOpacity, uLMin, uLMax;
+                varying vec2 vXY;
+                void main() {
+                    float r = length(vXY);
+                    float lat = atan(vXY.y, abs(vXY.x));         // magnetic latitude
+                    float cl = cos(lat);
+                    float L = r / (cl * cl);
+                    float lf = (L - uLMin) / (uLMax - uLMin);
+                    if (lf < 0.0 || lf > 1.0) discard;
+                    float mlt = vXY.x >= 0.0 ? 12.0 : 0.0;       // noon (+X) / midnight (−X)
+                    vec4 c = texture2D(uMap, vec2(mlt / 24.0, lf));
+                    float latF = exp(-(lat * lat) / 0.12);       // fade off the equator
+                    float edge = smoothstep(0.0, 0.05, lf) * (1.0 - smoothstep(0.93, 1.0, lf));
+                    gl_FragColor = vec4(c.rgb, c.a * uOpacity * latF * edge);
+                }`,
+        });
+        this._meridMesh = new THREE.Mesh(new THREE.PlaneGeometry(2 * t.cfg.lMax, 2 * t.cfg.lMax, 1, 1), mmat);
+        this._meridMesh.renderOrder = -1;           // XY plane already = noon-midnight meridian
+        this._meridMesh.visible = this._heatEnabled && this._meridEnabled;
+        this._magGroup.add(this._meridMesh);
+
         this._buildHeatPanel();
         this._updateRcHeatmap();
     }
@@ -3264,16 +3305,26 @@ export class RingCurrentGlobe {
               .rc-heat-seg button.rc-on{color:#fff;background:rgba(120,160,255,.22);border-color:rgba(120,160,255,.5)}
               .rc-heat-canvas{width:100%;height:9px;border-radius:2px;display:block;margin-top:2px}
               .rc-heat-scale{display:flex;justify-content:space-between;font:9px system-ui;color:#8b93a7;margin-top:1px}
+              .rc-merid-toggle{font:10px system-ui;color:#aeb6c8;background:rgba(255,255,255,.05);
+                border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:3px 0;cursor:pointer;width:100%;margin-top:5px}
+              .rc-merid-toggle.rc-on{color:#fff;background:rgba(120,160,255,.22);border-color:rgba(120,160,255,.5)}
               .rc-ena-toggle{font:600 11px system-ui;color:#cdd5e4;background:rgba(255,255,255,.06);
                 border:1px solid rgba(255,255,255,.14);border-radius:5px;padding:3px 8px;cursor:pointer;width:100%;margin-bottom:5px}
               .rc-ena-toggle.rc-on{color:#9ecbff;border-color:rgba(158,203,255,.4);background:rgba(158,203,255,.1)}
               .rc-ena-cap{position:absolute;z-index:40;font:10px/1.35 system-ui,sans-serif;text-align:right;
                 pointer-events:none;text-shadow:0 1px 3px #000}
               .rc-ena-title{font-weight:700;letter-spacing:.04em;color:#bcd6ff}
-              .rc-ena-sub{color:#8b93a7;font-size:9px}`;
+              .rc-ena-sub{color:#8b93a7;font-size:9px}
+              .rc-ena-ctl{display:flex;gap:6px;align-items:center;justify-content:flex-end;margin-top:3px;pointer-events:auto}
+              .rc-ena-play{font:10px system-ui;color:#cdd5e4;background:rgba(255,255,255,.08);
+                border:1px solid rgba(255,255,255,.16);border-radius:4px;padding:2px 6px;cursor:pointer;white-space:nowrap}
+              .rc-ena-play.rc-on{color:#9ecbff;border-color:rgba(158,203,255,.5);background:rgba(158,203,255,.14)}
+              .rc-ena-slider{flex:1;max-width:118px;height:12px;cursor:pointer;accent-color:#9ecbff}`;
             document.head.appendChild(st);
         }
-        const enaOn = new URLSearchParams(location.search).get('ena') !== '0';
+        const params = new URLSearchParams(location.search);
+        const enaOn = params.get('ena') !== '0';
+        const meridOn = params.get('merid') !== '0';
         const panel = document.createElement('div');
         panel.className = 'rc-heat-panel' + (this._heatEnabled ? '' : ' rc-off');
         panel.innerHTML =
@@ -3289,6 +3340,8 @@ export class RingCurrentGlobe {
                 '<button data-q="pressure" class="rc-on">P⊥</button><button data-q="flux">Flux</button></div>' +
               '<canvas class="rc-heat-canvas" width="150" height="9"></canvas>' +
               '<div class="rc-heat-scale"><span>0</span><span class="rc-heat-max">— nPa</span></div>' +
+              '<button class="rc-merid-toggle' + (meridOn ? ' rc-on' : '') +
+                '" title="Noon–midnight meridian cross-section (GEMSIS-style)">◨ Meridian slice</button>' +
             '</div>';
         this._container.appendChild(panel);
         this._heatPanel = panel;
@@ -3312,6 +3365,8 @@ export class RingCurrentGlobe {
             b.addEventListener('click', () => this.setHeatmapQuantity(b.dataset.q)));
         this._enaTogEl = panel.querySelector('.rc-ena-toggle');
         this._enaTogEl.addEventListener('click', () => this.setEnaEnabled(!this._enaEnabled));
+        this._meridTogEl = panel.querySelector('.rc-merid-toggle');
+        this._meridTogEl.addEventListener('click', () => this.setMeridianEnabled(!this._meridEnabled));
     }
 
     /** Highlight the active button in a panel segment (keeps UI ↔ state synced
@@ -3374,7 +3429,14 @@ export class RingCurrentGlobe {
     setHeatmapEnabled(on) {
         this._heatEnabled = !!on;
         if (this._heatMesh) this._heatMesh.visible = this._heatEnabled;
+        if (this._meridMesh) this._meridMesh.visible = this._heatEnabled && this._meridEnabled;
         this._heatPanel?.classList.toggle('rc-off', !this._heatEnabled);
+    }
+
+    setMeridianEnabled(on) {
+        this._meridEnabled = !!on;
+        if (this._meridMesh) this._meridMesh.visible = this._heatEnabled && this._meridEnabled;
+        this._meridTogEl?.classList.toggle('rc-on', this._meridEnabled);
     }
 
     setHeatmapSpecies(key) {
@@ -3391,10 +3453,11 @@ export class RingCurrentGlobe {
 
     // ── ENA imager (Stage 3 — Roelof & Williams 1988) ────────────────────────
     //
-    // A virtual Energetic-Neutral-Atom camera at a FIXED vantage (~8 R_E, 30°
-    // MLAT, dusk meridian — Roelof's Fig 17 geometry). Each output pixel casts
-    // a ray through the ring current and integrates the ENA line-of-sight
-    // emission in a SHADER:
+    // A virtual Energetic-Neutral-Atom camera on a MOVABLE vantage — an
+    // eccentric polar orbit (Roelof's Fig 17) the user can sweep, watching the
+    // ENA morphology change with viewing geometry (Fig 18's latitude series).
+    // Each output pixel casts a ray through the ring current and integrates the
+    // ENA line-of-sight emission in a SHADER:
     //     j_ENA(dir) = ∫ Σ_species j_ion·σ_cx·n_H(r) ds
     // The equatorial ion×σ_cx factor comes from the transport core
     // (enaEmissivityMap → a data texture); the ray-march applies the
@@ -3418,13 +3481,13 @@ export class RingCurrentGlobe {
         this._enaTex.needsUpdate = true;
         this._enaAbsMax = 0;
 
-        // Fixed vantage in the dipole (magGroup) frame: dusk = −Z, up = +Y.
-        const R = 8, ml = 30 * Math.PI / 180;
-        const pos = new THREE.Vector3(0, R * Math.sin(ml), -R * Math.cos(ml));
-        const fwd = pos.clone().multiplyScalar(-1).normalize();
-        const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), fwd).normalize();
-        const up = new THREE.Vector3().crossVectors(fwd, right).normalize();
-        const uTan = Math.tan(46 * Math.PI / 180);
+        // Movable vantage on an eccentric polar orbit (Roelof Fig 17). The pose
+        // is a function of the orbit phase, recomputed every frame by
+        // _updateEnaPose; here we just set the defaults.
+        this._enaTan = Math.tan(46 * Math.PI / 180);
+        this._enaPhase = 2.15;                     // ~dusk-north — an interesting default
+        this._enaSweep = false;
+        this._enaSweepRate = 2 * Math.PI / 24;     // full orbit ≈ 24 s
 
         const ENA_FRAG = `
             precision highp float;
@@ -3483,8 +3546,9 @@ export class RingCurrentGlobe {
         const mat = new THREE.ShaderMaterial({
             uniforms: {
                 uEmiss: { value: this._enaTex },
-                uImgPos: { value: pos }, uRight: { value: right }, uUp: { value: up }, uFwd: { value: fwd },
-                uTan: { value: uTan }, uLMin: { value: t.cfg.lMin }, uLMax: { value: t.cfg.lMax },
+                uImgPos: { value: new THREE.Vector3() }, uRight: { value: new THREE.Vector3() },
+                uUp: { value: new THREE.Vector3() }, uFwd: { value: new THREE.Vector3() },
+                uTan: { value: this._enaTan }, uLMin: { value: t.cfg.lMin }, uLMax: { value: t.cfg.lMax },
                 uEnaMax: { value: 0.03 }, uActive: { value: 1 },
             },
             transparent: true, depthTest: false, depthWrite: false,
@@ -3495,31 +3559,78 @@ export class RingCurrentGlobe {
         this._enaPanel.frustumCulled = false;
         this._enaScene.add(this._enaPanel);
 
-        // 3D vantage marker + view frustum (dipole frame, so it tilts too).
+        // 3D vantage marker + view frustum + the orbit path (dipole frame, so
+        // they tilt with the dipole). Marker/frustum move with the phase.
         const grp = new THREE.Group();
-        const marker = new THREE.Mesh(new THREE.OctahedronGeometry(0.26),
+        this._enaMarkerMesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.26),
             new THREE.MeshBasicMaterial({ color: 0x9ecbff }));
-        marker.position.copy(pos);
-        grp.add(marker);
-        const far = 14, pts = [];
-        const farPts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, c]) => {
-            const d = fwd.clone()
-                .add(right.clone().multiplyScalar(a * uTan))
-                .add(up.clone().multiplyScalar(c * uTan)).normalize();
-            return pos.clone().add(d.multiplyScalar(far));
-        });
-        for (let i = 0; i < 4; i++) pts.push(pos.x, pos.y, pos.z, farPts[i].x, farPts[i].y, farPts[i].z);
-        for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; pts.push(farPts[i].x, farPts[i].y, farPts[i].z, farPts[j].x, farPts[j].y, farPts[j].z); }
-        const fg = new THREE.BufferGeometry();
-        fg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-        grp.add(new THREE.LineSegments(fg, new THREE.LineBasicMaterial({ color: 0x5fb8ff, transparent: true, opacity: 0.32 })));
+        grp.add(this._enaMarkerMesh);
+        this._enaFrustumGeo = new THREE.BufferGeometry();
+        this._enaFrustumGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(16 * 3), 3));
+        grp.add(new THREE.LineSegments(this._enaFrustumGeo,
+            new THREE.LineBasicMaterial({ color: 0x5fb8ff, transparent: true, opacity: 0.32 })));
+        const opos = [];
+        for (let i = 0; i <= 96; i++) { const p = this._enaOrbit((i / 96) * 2 * Math.PI).pos; opos.push(p.x, p.y, p.z); }
+        const og = new THREE.BufferGeometry();
+        og.setAttribute('position', new THREE.Float32BufferAttribute(opos, 3));
+        grp.add(new THREE.Line(og, new THREE.LineBasicMaterial({ color: 0x3f6f9f, transparent: true, opacity: 0.4 })));
         grp.visible = this._enaEnabled;
         this._enaMarker = grp;
         this._magGroup.add(grp);
 
         this._buildEnaCaption();
         this._layoutEna();
+        this._updateEnaPose();
         this._updateEnaImager();
+    }
+
+    /**
+     * Imager position on the eccentric polar orbit (Roelof Fig 17) at true
+     * anomaly `phase`. Apogee ≈9.5 R_E (north), perigee ≈2.4 R_E (south), in
+     * the dusk–north meridian plane (x≈0): perigee toward −Y (south), quadrature
+     * toward −Z (dusk). Sweeping phase runs south→dusk→north→dawn, so the ENA
+     * viewing geometry runs through the full Fig-18 latitude/distance series.
+     */
+    _enaOrbit(phase) {
+        const a = 5.95, e = 0.6;                    // apogee a(1+e)=9.5, perigee a(1−e)=2.38
+        const r = a * (1 - e * e) / (1 + e * Math.cos(phase));
+        const pos = new THREE.Vector3(0, -r * Math.cos(phase), -r * Math.sin(phase));
+        const mlatDeg = Math.atan2(pos.y, Math.hypot(pos.x, pos.z)) * 180 / Math.PI;
+        return { pos, r, mlatDeg };
+    }
+
+    /** Place the imager (shader uniforms + 3D marker/frustum + readout) from the
+     *  current orbit phase. Cheap — safe to call every frame while sweeping. */
+    _updateEnaPose() {
+        if (!this._enaPanel) return;
+        const { pos, r, mlatDeg } = this._enaOrbit(this._enaPhase);
+        const fwd = pos.clone().negate().normalize();
+        // Avoid the degenerate up-reference when looking along ±Y (over a pole).
+        const refUp = Math.abs(fwd.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+        const right = new THREE.Vector3().crossVectors(refUp, fwd).normalize();
+        const up = new THREE.Vector3().crossVectors(fwd, right).normalize();
+        const u = this._enaPanel.material.uniforms;
+        u.uImgPos.value.copy(pos); u.uFwd.value.copy(fwd);
+        u.uRight.value.copy(right); u.uUp.value.copy(up);
+        if (this._enaMarkerMesh) this._enaMarkerMesh.position.copy(pos);
+        this._updateEnaFrustum(pos, fwd, right, up);
+        if (this._enaVantEl) {
+            const hemi = mlatDeg >= 0 ? 'N' : 'S';
+            this._enaVantEl.textContent = `${Math.abs(mlatDeg).toFixed(0)}°${hemi} · ${r.toFixed(1)} Rᴇ`;
+        }
+    }
+
+    _updateEnaFrustum(pos, fwd, right, up) {
+        if (!this._enaFrustumGeo) return;
+        const far = 13, tan = this._enaTan;
+        const fp = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, c]) => fwd.clone()
+            .add(right.clone().multiplyScalar(a * tan))
+            .add(up.clone().multiplyScalar(c * tan)).normalize().multiplyScalar(far).add(pos));
+        const arr = this._enaFrustumGeo.attributes.position.array;
+        let k = 0; const put = (v) => { arr[k++] = v.x; arr[k++] = v.y; arr[k++] = v.z; };
+        for (let i = 0; i < 4; i++) { put(pos); put(fp[i]); }
+        for (let i = 0; i < 4; i++) { put(fp[i]); put(fp[(i + 1) % 4]); }
+        this._enaFrustumGeo.attributes.position.needsUpdate = true;
     }
 
     _buildEnaCaption() {
@@ -3527,11 +3638,30 @@ export class RingCurrentGlobe {
         cap.className = 'rc-ena-cap';
         cap.style.display = this._enaEnabled ? 'block' : 'none';
         cap.innerHTML =
-            '<div class="rc-ena-title">ENA IMAGER · dusk · 8 R<sub>E</sub></div>' +
-            '<div class="rc-ena-sub">charge-exchange · log colour, ×100 span · <span class="rc-ena-max">—</span></div>';
+            '<div class="rc-ena-title">ENA IMAGER · <span class="rc-ena-vant">—</span></div>' +
+            '<div class="rc-ena-sub">charge-exchange · log ×100 · <span class="rc-ena-max">—</span></div>' +
+            '<div class="rc-ena-ctl">' +
+              '<button class="rc-ena-play" title="Sweep the orbit (Roelof Fig 17)">▶ sweep</button>' +
+              '<input class="rc-ena-slider" type="range" min="0" max="1000" value="0" aria-label="orbit phase">' +
+            '</div>';
         this._container.appendChild(cap);
         this._enaCap = cap;
         this._enaMaxEl = cap.querySelector('.rc-ena-max');
+        this._enaVantEl = cap.querySelector('.rc-ena-vant');
+        this._enaSliderEl = cap.querySelector('.rc-ena-slider');
+        this._enaPlayEl = cap.querySelector('.rc-ena-play');
+        this._enaSliderEl.value = String(Math.round(this._enaPhase / (2 * Math.PI) * 1000));
+        this._enaPlayEl.addEventListener('click', () => {
+            this._enaSweep = !this._enaSweep;
+            this._enaPlayEl.textContent = this._enaSweep ? '❚❚ sweep' : '▶ sweep';
+            this._enaPlayEl.classList.toggle('rc-on', this._enaSweep);
+        });
+        this._enaSliderEl.addEventListener('input', () => {
+            this._enaSweep = false;
+            this._enaPlayEl.textContent = '▶ sweep'; this._enaPlayEl.classList.remove('rc-on');
+            this._enaPhase = (Number(this._enaSliderEl.value) / 1000) * 2 * Math.PI;
+            this._updateEnaPose();
+        });
     }
 
     /** Position the screen-space ENA panel (kept square) + its caption. Sits
