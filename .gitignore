@@ -99,3 +99,4 @@ dsmc/raw/
 pipelines/cme/step0_out/
 rust-gravity/target/
 rust-shielding/target/
+rust-ring-current/target/

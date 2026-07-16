@@ -106,6 +106,22 @@ else
     echo "WARN: rust-shielding build failed — serving committed js/shielding-lab/wasm binary."
 fi
 
+# ── Build Ring-Current transport kernel ──────────────────────
+# Dependency-free extern "C" module (no wasm-bindgen): plain cargo build,
+# artifact copied verbatim. The committed binary at
+# js/ring-current-wasm/ring_current_kernel.wasm serves as the fallback if this
+# build ever fails on Vercel's toolchain. js/ring-current-transport.js is the
+# reference oracle — `cargo test` in rust-ring-current/ gates the physics, and
+# node tests/ring-current-kernel-smoke.mjs pins the WASM ↔ JS agreement.
+echo "Building ring-current-kernel WASM (bounce-averaged ring-current transport)..."
+if (cd rust-ring-current && cargo build --release --target wasm32-unknown-unknown); then
+    mkdir -p js/ring-current-wasm
+    cp rust-ring-current/target/wasm32-unknown-unknown/release/ring_current_kernel.wasm \
+       js/ring-current-wasm/ring_current_kernel.wasm
+else
+    echo "WARN: rust-ring-current build failed — serving committed js/ring-current-wasm binary."
+fi
+
 # ── Build star renderer (solar flare sim) ─────────────────────
 # NOT built on Vercel. The Bevy dep graph (~479 crates) is too fragile for
 # Vercel's older rustc — a transitive `constant_time_eq 0.4.3` release broke
