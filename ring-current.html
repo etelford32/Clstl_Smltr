@@ -960,7 +960,18 @@ function makeStageDraggable(panel, handle, onPlaced) {
 let globe = null;
 try {
     const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260712');
-    globe = new RingCurrentGlobe(stage, { clock });
+    // Optional Rust/WASM transport core — byte-identical to the JS reference
+    // (pinned by tests/ring-current-kernel-smoke.mjs). Opt in with ?rcwasm=1;
+    // any load failure falls back to the JS core transparently.
+    let transport;
+    if (new URLSearchParams(location.search).get('rcwasm') === '1') {
+        try {
+            const { loadRingCurrentKernel } = await import('./js/ring-current-kernel.js');
+            transport = await loadRingCurrentKernel('./js/ring-current-wasm/ring_current_kernel.wasm');
+            console.info('[ring-current] transport core: Rust/WASM kernel');
+        } catch (e) { console.warn('[ring-current] WASM kernel unavailable — using JS core:', e); }
+    }
+    globe = new RingCurrentGlobe(stage, { clock, transport });
     window.rcGlobe = globe;   // debug/probe handle (tests/ smoke probes)
 } catch (err) {
     console.warn('[ring-current] 3D disabled:', err);

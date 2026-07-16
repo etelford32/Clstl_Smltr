@@ -132,6 +132,10 @@ import {
 } from './ring-current-particles.js';
 import { SimClock, SCALE, apparentUnitsPerSec } from './sim-clock.js';
 import { EarthSkin } from './earth-skin.js';
+import { RingCurrentTransport } from './ring-current-transport.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+import { CopyShader } from 'three/addons/shaders/CopyShader.js';
 
 const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);   // H⁺ (solar wind)
 const ION_O_COLOR    = new THREE.Color(0.58, 1.00, 0.34);   // O⁺ (ionospheric outflow)
@@ -783,6 +787,10 @@ export class RingCurrentGlobe {
         this._renderer.setSize(w, h);
         container.appendChild(this._renderer.domElement);
 
+        // Additive bloom overlay (see _renderFrame). Sized to the drawing
+        // buffer (CSS px × pixelRatio), not CSS px, so the glow registers 1:1.
+        this._initBloom(this._renderer.domElement.width, this._renderer.domElement.height);
+
         this._controls = new OrbitControls(this._camera, this._renderer.domElement);
         this._controls.enableDamping = true;
         this._controls.dampingFactor = 0.06;
@@ -808,10 +816,21 @@ export class RingCurrentGlobe {
         this._magGroup = new THREE.Group();
         this._scene.add(this._magGroup);
 
+        // Physics transport core — a bounce-averaged (L, MLT, energy, species)
+        // model, stepped on THIS scene's SimClock from the SAME live driver
+        // (Kp/VBs) the empirical model uses, so its emergent Dst* and the twin's
+        // stay coherent. Defaults to the JS reference (js/ring-current-transport
+        // .js); the page may inject the byte-identical Rust/WASM kernel instead
+        // (opts.transport = loadRingCurrentKernel(...)) — same interface, both
+        // pinned equal by tests/ring-current-kernel-smoke.mjs.
+        this._transport = opts.transport ?? new RingCurrentTransport();
+
         this._buildEarth();
         this._buildFieldLines();
         this._buildParticles();
         this._buildRings();
+        this._buildRcHeatmap();
+        this._buildEnaImager();
         this._buildSunAndTransit();
         this._buildBoundaries();
         this._buildFlashes();
@@ -2793,6 +2812,17 @@ export class RingCurrentGlobe {
             // storm main phase — saturate the nightside pulse there.
             injection:    Math.min(1, Math.abs(now.injectionQ ?? 0) / 12),
         };
+        // Drive the transport core from the SAME live inputs (Kp, VBs). On the
+        // first real sample, schedule a spread spin-up (a few sim-hours run
+        // over the next frames) so the pressure layer arrives already reflecting
+        // current conditions instead of an empty ring.
+        if (this._transport) {
+            this._transport.setDriver({
+                kp: Number.isFinite(now.kp) ? now.kp : 1,
+                vbs: this._driverVbs,
+            });
+            if (!this._heatSpunUp) { this._heatSpunUp = true; this._heatSpinup = 3 * 3600; }
+        }
         this._setCompositionMix(now.oxygenFraction);
         for (const p of this._popList ?? []) {
             this._syncStateUniforms(p.mat);
@@ -2866,6 +2896,12 @@ export class RingCurrentGlobe {
         this._tView += dt;
         this._simHours += dSimH;
         this._lastDt = dt;
+        this._stepTransportLayers(dt, dSimH);
+        if (this._enaEnabled && this._enaSweep) {
+            this._enaPhase = (this._enaPhase + dt * this._enaSweepRate) % (2 * Math.PI);
+            if (this._enaSliderEl) this._enaSliderEl.value = String(Math.round(this._enaPhase / (2 * Math.PI) * 1000));
+            this._updateEnaPose();
+        }
         // Sun corona breathes with the strongest incoming VBs — a storm you
         // can FEEL approaching before it arrives (cinematic, data-driven).
         this._sun.scale.setScalar(11 * (1 + (0.02 + 0.09 * (this._sunVbsNorm ?? 0))
@@ -2949,7 +2985,7 @@ export class RingCurrentGlobe {
             if (k >= 1) this._flight = null;
         }
         this._controls.update();
-        this._renderer.render(this._scene, this._camera);
+        this._renderFrame();
         blend('render', tMark, performance.now());
         this._perfCheck(wallNow, dt);
     }
@@ -3026,12 +3062,658 @@ export class RingCurrentGlobe {
         this._magGroup.updateMatrixWorld();                        // tooltip picking reads it
     }
 
+    /**
+     * Build the additive bloom overlay. Opt out with ?bloom=0 (a cheap safety
+     * valve, no UI surface — mirrors the verdict card's ?verdict=0). Failure
+     * is non-fatal: the scene simply renders without glow.
+     */
+    _initBloom(w, h) {
+        const params = new URLSearchParams(location.search);
+        this._bloomEnabled = params.get('bloom') !== '0';
+        if (!this._bloomEnabled || !(w > 0 && h > 0)) { this._bloomEnabled = false; return; }
+        try {
+            // Tuned for this additive-glow scene: a low luminosity threshold
+            // isolates the bright cores (ring torus, plasmapause, aurora oval,
+            // injection flashes, hot ion cores) and a soft wide radius blooms
+            // them into luminous plasma without washing out the dark backdrop.
+            this._bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 1.05, 0.72, 0.2);
+            // Offscreen HDR copy of the scene for bloom extraction. HalfFloat
+            // so stacked additive particles push past 1.0 and the threshold
+            // can pick out genuine cores rather than clipping everything.
+            this._rtScene = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType });
+            // Fullscreen additive blit of the pure glow over the untouched
+            // base frame (CopyShader = passthrough; AdditiveBlending adds it).
+            const blit = new THREE.ShaderMaterial({
+                uniforms: THREE.UniformsUtils.clone(CopyShader.uniforms),
+                vertexShader: CopyShader.vertexShader,
+                fragmentShader: CopyShader.fragmentShader,
+                blending: THREE.AdditiveBlending,
+                transparent: true, depthTest: false, depthWrite: false,
+            });
+            blit.uniforms.opacity.value = 1.0;
+            this._bloomBlit = new FullScreenQuad(blit);
+        } catch (e) {
+            console.warn('[ring-current] bloom overlay unavailable — rendering without glow:', e);
+            this._bloomEnabled = false;
+            this._bloom = null;
+        }
+    }
+
+    /**
+     * Draw the frame: the untouched transparent base render FIRST (so the
+     * .rc-stage CSS gradient still shows through exactly as before), then —
+     * on the full-quality tier only — an ADDITIVE bloom overlay so the
+     * additive-glow populations read as luminous plasma.
+     *
+     * We composite the glow ourselves instead of using EffectComposer because
+     * UnrealBloomPass's own to-screen path clears the canvas and blits through
+     * an OPAQUE material (alpha → 1), which would paint the backdrop black and
+     * erase the gradient. Here the base frame is never cleared or recolored;
+     * only the blurred bright cores are added on top.
+     */
+    _renderFrame() {
+        const r = this._renderer;
+        // Base frame — byte-for-byte the pre-bloom behavior.
+        r.render(this._scene, this._camera);
+        // Bloom is extra scene-render cost; skip it the moment the adaptive
+        // quality system steps down (tier > 0), and when disabled/unavailable.
+        if (this._bloomEnabled && this._bloom && this._perf.tier === 0) {
+            const prevTarget = r.getRenderTarget();
+            const prevAutoClear = r.autoClear;
+            // 1) Scene → offscreen HDR target (transparent clear; only luminance
+            //    matters for extraction).
+            r.setRenderTarget(this._rtScene);
+            r.setClearColor(0x000000, 0);
+            r.clear();
+            r.render(this._scene, this._camera);
+            // 2) Highpass + mip blur + composite. With renderToScreen=false the
+            //    pure glow lands in renderTargetsHorizontal[0].
+            r.autoClear = false;
+            this._bloom.renderToScreen = false;
+            this._bloom.render(r, this._rtScene, this._rtScene, 0, false);
+            // 3) Lay the glow additively over the untouched base frame.
+            r.setRenderTarget(null);
+            this._bloomBlit.material.uniforms.tDiffuse.value =
+                this._bloom.renderTargetsHorizontal[0].texture;
+            this._bloomBlit.render(r);
+            // Restore renderer state for the next base frame.
+            r.autoClear = prevAutoClear;
+            r.setRenderTarget(prevTarget);
+        }
+
+        // ENA imager overlay — a crisp screen-space instrument panel drawn on
+        // top of the finished frame (kept out of the bloom so it stays legible).
+        if (this._enaEnabled && this._enaScene) {
+            const prevAC = r.autoClear;
+            r.autoClear = false;
+            r.setRenderTarget(null);
+            r.clearDepth();
+            r.render(this._enaScene, this._enaCam);
+            r.autoClear = prevAC;
+        }
+    }
+
     _resize() {
         const w = this._container.clientWidth, h = this._container.clientHeight;
         if (!w || !h) return;
         this._camera.aspect = w / h;
         this._camera.updateProjectionMatrix();
         this._renderer.setSize(w, h);
+        if (this._bloom) {
+            const dw = this._renderer.domElement.width, dh = this._renderer.domElement.height;
+            this._bloom.setSize(dw, dh);
+            this._rtScene.setSize(dw, dh);
+        }
+        this._layoutEna();
+    }
+
+    // ── Ring pressure/flux heatmap layer (Stage 2) ───────────────────────────
+    //
+    // An ADDITIVE, toggleable equatorial sheet coloured by the transport core's
+    // (L, MLT) field — perpendicular pressure (nPa) by default, or ion flux —
+    // per species. It lives in the magGroup so it tilts with the dipole and
+    // shares the scene's GSM frame and MLT convention exactly, and it steps on
+    // the shared SimClock from the same live driver as everything else. This is
+    // the "planetary magnetospheric ring environment" made visible: the same
+    // physics that draws the particles paints the pressure it produces.
+
+    /** Rainbow colour ramp (blue→cyan→green→yellow→red→magenta) matching the
+     *  GEMSIS-style P⊥ scale. t∈[0,1] → [r,g,b] 0–255. */
+    _heatColormap(t) {
+        const S = this._HEAT_STOPS || (this._HEAT_STOPS = [
+            [0.00, 8, 16, 120], [0.18, 0, 120, 255], [0.38, 0, 220, 190],
+            [0.55, 120, 240, 70], [0.70, 250, 225, 30], [0.85, 255, 110, 20],
+            [1.00, 225, 20, 150],
+        ]);
+        const x = Math.max(0, Math.min(1, t));
+        for (let i = 1; i < S.length; i++) {
+            if (x <= S[i][0]) {
+                const a = S[i - 1], b = S[i];
+                const f = (x - a[0]) / (b[0] - a[0] || 1);
+                return [a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f];
+            }
+        }
+        return [S[S.length - 1][1], S[S.length - 1][2], S[S.length - 1][3]];
+    }
+
+    _buildRcHeatmap() {
+        const t = this._transport;
+        this._heatEnabled = new URLSearchParams(location.search).get('heat') !== '0';
+        this._heatSpecies = 'all';
+        this._heatQuantity = 'pressure';
+        this._heatMax = 0;
+        const nL = t.nL, nMlt = t.nMlt;
+
+        // Baked-colour data texture (width=MLT, height=L; row-major i*nMlt+j).
+        this._heatData = new Uint8Array(nL * nMlt * 4);
+        this._heatTex = new THREE.DataTexture(this._heatData, nMlt, nL, THREE.RGBAFormat);
+        this._heatTex.wrapS = THREE.RepeatWrapping;      // MLT is periodic
+        this._heatTex.wrapT = THREE.ClampToEdgeWrapping;
+        this._heatTex.minFilter = THREE.LinearFilter;
+        this._heatTex.magFilter = THREE.LinearFilter;
+        this._heatTex.needsUpdate = true;
+
+        const geo = new THREE.RingGeometry(t.cfg.lMin, t.cfg.lMax, 192, 1);
+        const mat = new THREE.ShaderMaterial({
+            uniforms: {
+                uMap: { value: this._heatTex },
+                uOpacity: { value: 0.52 },
+                uLMin: { value: t.cfg.lMin },
+                uLMax: { value: t.cfg.lMax },
+            },
+            // A translucent contour sheet (like the GEMSIS P⊥ plot), NOT an
+            // additive glow — additive + the bloom pass blows the disc out.
+            transparent: true, depthWrite: false, depthTest: true,
+            side: THREE.DoubleSide, blending: THREE.NormalBlending,
+            vertexShader: `
+                varying vec2 vXY;
+                void main() { vXY = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `
+                precision highp float;
+                uniform sampler2D uMap; uniform float uOpacity, uLMin, uLMax;
+                varying vec2 vXY;
+                const float PI = 3.141592653589793;
+                void main() {
+                    float L = length(vXY);
+                    float lf = (L - uLMin) / (uLMax - uLMin);
+                    if (lf < 0.0 || lf > 1.0) discard;
+                    // World θ = atan2(z,x); this disc's local +Y → world −Z, so z = −vXY.y.
+                    float mlt = 12.0 - atan(-vXY.y, vXY.x) * 12.0 / PI;
+                    vec4 c = texture2D(uMap, vec2(fract(mlt / 24.0), lf));
+                    float edge = smoothstep(0.0, 0.05, lf) * (1.0 - smoothstep(0.93, 1.0, lf));
+                    gl_FragColor = vec4(c.rgb, c.a * uOpacity * edge);
+                }`,
+        });
+        this._heatMesh = new THREE.Mesh(geo, mat);
+        this._heatMesh.rotation.x = -Math.PI / 2;   // XY ring → equatorial (XZ) plane
+        this._heatMesh.renderOrder = -1;            // under the particles/rings
+        this._heatMesh.visible = this._heatEnabled;
+        this._magGroup.add(this._heatMesh);
+
+        // Companion MERIDIAN slice (noon–midnight plane) — the GEMSIS P⊥
+        // cross-section. Shares the equatorial colour texture: each point maps
+        // to its dipole (L, MLT=noon|midnight) and a latitude falloff fades it
+        // off the equatorial plane, so it reads as the ring's cross-section.
+        this._meridEnabled = new URLSearchParams(location.search).get('merid') !== '0';
+        const mmat = new THREE.ShaderMaterial({
+            uniforms: {
+                uMap: { value: this._heatTex }, uOpacity: { value: 0.5 },
+                uLMin: { value: t.cfg.lMin }, uLMax: { value: t.cfg.lMax },
+            },
+            transparent: true, depthWrite: false, depthTest: true,
+            side: THREE.DoubleSide, blending: THREE.NormalBlending,
+            vertexShader: 'varying vec2 vXY; void main(){ vXY = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+            fragmentShader: `
+                precision highp float;
+                uniform sampler2D uMap; uniform float uOpacity, uLMin, uLMax;
+                varying vec2 vXY;
+                void main() {
+                    float r = length(vXY);
+                    float lat = atan(vXY.y, abs(vXY.x));         // magnetic latitude
+                    float cl = cos(lat);
+                    float L = r / (cl * cl);
+                    float lf = (L - uLMin) / (uLMax - uLMin);
+                    if (lf < 0.0 || lf > 1.0) discard;
+                    float mlt = vXY.x >= 0.0 ? 12.0 : 0.0;       // noon (+X) / midnight (−X)
+                    vec4 c = texture2D(uMap, vec2(mlt / 24.0, lf));
+                    float latF = exp(-(lat * lat) / 0.12);       // fade off the equator
+                    float edge = smoothstep(0.0, 0.05, lf) * (1.0 - smoothstep(0.93, 1.0, lf));
+                    gl_FragColor = vec4(c.rgb, c.a * uOpacity * latF * edge);
+                }`,
+        });
+        this._meridMesh = new THREE.Mesh(new THREE.PlaneGeometry(2 * t.cfg.lMax, 2 * t.cfg.lMax, 1, 1), mmat);
+        this._meridMesh.renderOrder = -1;           // XY plane already = noon-midnight meridian
+        this._meridMesh.visible = this._heatEnabled && this._meridEnabled;
+        this._magGroup.add(this._meridMesh);
+
+        this._buildHeatPanel();
+        this._updateRcHeatmap();
+    }
+
+    _buildHeatPanel() {
+        if (!document.getElementById('rc-heat-style')) {
+            const st = document.createElement('style');
+            st.id = 'rc-heat-style';
+            st.textContent = `
+              .rc-heat-panel{position:absolute;left:12px;bottom:12px;z-index:40;font:11px/1.3 system-ui,sans-serif;
+                color:#cdd5e4;background:rgba(3,1,14,.72);border:1px solid rgba(255,255,255,.1);border-radius:8px;
+                padding:6px 8px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);user-select:none;width:172px}
+              .rc-heat-panel.rc-off .rc-heat-body{display:none}
+              .rc-heat-toggle{font:600 11px system-ui;color:#cdd5e4;background:rgba(255,255,255,.06);
+                border:1px solid rgba(255,255,255,.14);border-radius:5px;padding:3px 8px;cursor:pointer;width:100%;margin-bottom:5px}
+              .rc-heat-toggle.rc-on{color:#7fe6c3;border-color:rgba(127,230,195,.4);background:rgba(127,230,195,.1)}
+              .rc-heat-seg{display:flex;gap:3px;margin-bottom:4px}
+              .rc-heat-seg button{flex:1;font:10px system-ui;color:#aeb6c8;background:rgba(255,255,255,.05);
+                border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:2px 0;cursor:pointer}
+              .rc-heat-seg button.rc-on{color:#fff;background:rgba(120,160,255,.22);border-color:rgba(120,160,255,.5)}
+              .rc-heat-canvas{width:100%;height:9px;border-radius:2px;display:block;margin-top:2px}
+              .rc-heat-scale{display:flex;justify-content:space-between;font:9px system-ui;color:#8b93a7;margin-top:1px}
+              .rc-merid-toggle{font:10px system-ui;color:#aeb6c8;background:rgba(255,255,255,.05);
+                border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:3px 0;cursor:pointer;width:100%;margin-top:5px}
+              .rc-merid-toggle.rc-on{color:#fff;background:rgba(120,160,255,.22);border-color:rgba(120,160,255,.5)}
+              .rc-ena-toggle{font:600 11px system-ui;color:#cdd5e4;background:rgba(255,255,255,.06);
+                border:1px solid rgba(255,255,255,.14);border-radius:5px;padding:3px 8px;cursor:pointer;width:100%;margin-bottom:5px}
+              .rc-ena-toggle.rc-on{color:#9ecbff;border-color:rgba(158,203,255,.4);background:rgba(158,203,255,.1)}
+              .rc-ena-cap{position:absolute;z-index:40;font:10px/1.35 system-ui,sans-serif;text-align:right;
+                pointer-events:none;text-shadow:0 1px 3px #000}
+              .rc-ena-title{font-weight:700;letter-spacing:.04em;color:#bcd6ff}
+              .rc-ena-sub{color:#8b93a7;font-size:9px}
+              .rc-ena-ctl{display:flex;gap:6px;align-items:center;justify-content:flex-end;margin-top:3px;pointer-events:auto}
+              .rc-ena-play{font:10px system-ui;color:#cdd5e4;background:rgba(255,255,255,.08);
+                border:1px solid rgba(255,255,255,.16);border-radius:4px;padding:2px 6px;cursor:pointer;white-space:nowrap}
+              .rc-ena-play.rc-on{color:#9ecbff;border-color:rgba(158,203,255,.5);background:rgba(158,203,255,.14)}
+              .rc-ena-slider{flex:1;max-width:118px;height:12px;cursor:pointer;accent-color:#9ecbff}`;
+            document.head.appendChild(st);
+        }
+        const params = new URLSearchParams(location.search);
+        const enaOn = params.get('ena') !== '0';
+        const meridOn = params.get('merid') !== '0';
+        const panel = document.createElement('div');
+        panel.className = 'rc-heat-panel' + (this._heatEnabled ? '' : ' rc-off');
+        panel.innerHTML =
+            '<button class="rc-heat-toggle' + (this._heatEnabled ? ' rc-on' : '') +
+                '" title="Ring plasma pressure layer (transport model)">◧ Ring plasma</button>' +
+            '<button class="rc-ena-toggle' + (enaOn ? ' rc-on' : '') +
+                '" title="ENA imager — Roelof-style line-of-sight (dusk, 8 Rᴇ)">◉ ENA imager</button>' +
+            '<div class="rc-heat-body">' +
+              '<div class="rc-heat-seg rc-heat-sp">' +
+                '<button data-sp="all" class="rc-on">All</button><button data-sp="hydrogen">H⁺</button>' +
+                '<button data-sp="oxygen">O⁺</button><button data-sp="helium">He⁺</button></div>' +
+              '<div class="rc-heat-seg rc-heat-q">' +
+                '<button data-q="pressure" class="rc-on">P⊥</button><button data-q="flux">Flux</button></div>' +
+              '<canvas class="rc-heat-canvas" width="150" height="9"></canvas>' +
+              '<div class="rc-heat-scale"><span>0</span><span class="rc-heat-max">— nPa</span></div>' +
+              '<button class="rc-merid-toggle' + (meridOn ? ' rc-on' : '') +
+                '" title="Noon–midnight meridian cross-section (GEMSIS-style)">◨ Meridian slice</button>' +
+            '</div>';
+        this._container.appendChild(panel);
+        this._heatPanel = panel;
+        this._heatMaxEl = panel.querySelector('.rc-heat-max');
+        // Colour-bar swatch.
+        const cv = panel.querySelector('.rc-heat-canvas');
+        const cx = cv.getContext('2d');
+        for (let x = 0; x < cv.width; x++) {
+            const [r, g, b] = this._heatColormap(x / (cv.width - 1));
+            cx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+            cx.fillRect(x, 0, 1, cv.height);
+        }
+        // Wiring.
+        panel.querySelector('.rc-heat-toggle').addEventListener('click', (e) => {
+            this.setHeatmapEnabled(!this._heatEnabled);
+            e.currentTarget.classList.toggle('rc-on', this._heatEnabled);
+        });
+        panel.querySelectorAll('.rc-heat-sp button').forEach(b =>
+            b.addEventListener('click', () => this.setHeatmapSpecies(b.dataset.sp)));
+        panel.querySelectorAll('.rc-heat-q button').forEach(b =>
+            b.addEventListener('click', () => this.setHeatmapQuantity(b.dataset.q)));
+        this._enaTogEl = panel.querySelector('.rc-ena-toggle');
+        this._enaTogEl.addEventListener('click', () => this.setEnaEnabled(!this._enaEnabled));
+        this._meridTogEl = panel.querySelector('.rc-merid-toggle');
+        this._meridTogEl.addEventListener('click', () => this.setMeridianEnabled(!this._meridEnabled));
+    }
+
+    /** Highlight the active button in a panel segment (keeps UI ↔ state synced
+     *  whether the change came from a click or a programmatic call). */
+    _heatMark(cls, attr, val) {
+        this._heatPanel?.querySelectorAll(`.${cls} button`).forEach(b =>
+            b.classList.toggle('rc-on', b.dataset[attr] === val));
+    }
+
+    /** Re-bake the data texture from the transport's current (L,MLT) field. */
+    _updateRcHeatmap() {
+        if (!this._heatMesh) return;
+        const field = this._heatQuantity === 'flux'
+            ? this._transport.equatorialMap(this._heatSpecies, 'content')
+            : this._transport.pressureMap(this._heatSpecies);
+        let mx = 0;
+        for (let n = 0; n < field.length; n++) if (field[n] > mx) mx = field[n];
+        const floor = this._heatQuantity === 'flux' ? 1e-30 : 0.05;   // nPa / rel floor
+        mx = Math.max(mx, floor);
+        // Eased colour-bar top so it tracks the storm without flickering.
+        this._heatMax = this._heatMax ? this._heatMax + (mx - this._heatMax) * 0.1 : mx;
+        const inv = 1 / this._heatMax;
+        const data = this._heatData;
+        for (let n = 0; n < field.length; n++) {
+            let v = field[n] * inv; if (v < 0) v = 0; else if (v > 1) v = 1;
+            const c = this._heatColormap(v);
+            const o = n * 4;
+            data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2];
+            data[o + 3] = Math.round(255 * Math.pow(v, 0.85));   // faint low → opaque high
+        }
+        this._heatTex.needsUpdate = true;
+        if (this._heatMaxEl) {
+            this._heatMaxEl.textContent = this._heatQuantity === 'flux'
+                ? 'rel. flux' : `${this._heatMax.toFixed(1)} nPa`;
+        }
+    }
+
+    /** Step the transport on the SimClock (throttled ~15 Hz) and refresh every
+     *  ENABLED transport-driven layer (pressure heatmap, ENA imager). The
+     *  one-time spin-up spreads a few sim-hours over the first frames so the
+     *  ring arrives populated. Sheds load below quality tier 2. */
+    _stepTransportLayers(dt, dSimH) {
+        if (!this._transport) return;
+        if (!this._heatEnabled && !this._enaEnabled) return;
+        if (this._perf.tier >= 2) return;
+        this._heatSimAcc = (this._heatSimAcc || 0) + dSimH * 3600;
+        this._heatWallAcc = (this._heatWallAcc || 0) + dt;
+        if (this._heatWallAcc < 1 / 15) return;
+        let simStep = this._heatSimAcc;
+        if (this._heatSpinup > 0) {
+            const chunk = Math.min(this._heatSpinup, 900);
+            simStep += chunk; this._heatSpinup -= chunk;
+        }
+        if (simStep > 0) this._transport.step(simStep);
+        this._heatWallAcc = 0; this._heatSimAcc = 0;
+        if (this._heatEnabled && this._heatMesh) this._updateRcHeatmap();
+        if (this._enaEnabled && this._enaPanel) this._updateEnaImager();
+    }
+
+    setHeatmapEnabled(on) {
+        this._heatEnabled = !!on;
+        if (this._heatMesh) this._heatMesh.visible = this._heatEnabled;
+        if (this._meridMesh) this._meridMesh.visible = this._heatEnabled && this._meridEnabled;
+        this._heatPanel?.classList.toggle('rc-off', !this._heatEnabled);
+    }
+
+    setMeridianEnabled(on) {
+        this._meridEnabled = !!on;
+        if (this._meridMesh) this._meridMesh.visible = this._heatEnabled && this._meridEnabled;
+        this._meridTogEl?.classList.toggle('rc-on', this._meridEnabled);
+    }
+
+    setHeatmapSpecies(key) {
+        this._heatSpecies = key; this._heatMax = 0;
+        this._heatMark('rc-heat-sp', 'sp', key);
+        this._updateRcHeatmap();
+    }
+
+    setHeatmapQuantity(q) {
+        this._heatQuantity = q; this._heatMax = 0;
+        this._heatMark('rc-heat-q', 'q', q);
+        this._updateRcHeatmap();
+    }
+
+    // ── ENA imager (Stage 3 — Roelof & Williams 1988) ────────────────────────
+    //
+    // A virtual Energetic-Neutral-Atom camera on a MOVABLE vantage — an
+    // eccentric polar orbit (Roelof's Fig 17) the user can sweep, watching the
+    // ENA morphology change with viewing geometry (Fig 18's latitude series).
+    // Each output pixel casts a ray through the ring current and integrates the
+    // ENA line-of-sight emission in a SHADER:
+    //     j_ENA(dir) = ∫ Σ_species j_ion·σ_cx·n_H(r) ds
+    // The equatorial ion×σ_cx factor comes from the transport core
+    // (enaEmissivityMap → a data texture); the ray-march applies the
+    // geocoronal density n_H(r), an equatorial (mirroring) latitude falloff,
+    // and the path integral, then log-scales over ×100 (2 decades below the
+    // peak) exactly as the paper's colour bar. Shown as a screen-space
+    // instrument panel, with the vantage + view frustum marked in 3D.
+
+    _buildEnaImager() {
+        const t = this._transport;
+        this._enaEnabled = new URLSearchParams(location.search).get('ena') !== '0';
+        const nL = t.nL, nMlt = t.nMlt;
+
+        // Equatorial emissivity source texture (normalised 0..1 in R).
+        this._enaData = new Uint8Array(nL * nMlt * 4);
+        this._enaTex = new THREE.DataTexture(this._enaData, nMlt, nL, THREE.RGBAFormat);
+        this._enaTex.wrapS = THREE.RepeatWrapping;
+        this._enaTex.wrapT = THREE.ClampToEdgeWrapping;
+        this._enaTex.minFilter = THREE.LinearFilter;
+        this._enaTex.magFilter = THREE.LinearFilter;
+        this._enaTex.needsUpdate = true;
+        this._enaAbsMax = 0;
+
+        // Movable vantage on an eccentric polar orbit (Roelof Fig 17). The pose
+        // is a function of the orbit phase, recomputed every frame by
+        // _updateEnaPose; here we just set the defaults.
+        this._enaTan = Math.tan(46 * Math.PI / 180);
+        this._enaPhase = 2.15;                     // ~dusk-north — an interesting default
+        this._enaSweep = false;
+        this._enaSweepRate = 2 * Math.PI / 24;     // full orbit ≈ 24 s
+
+        const ENA_FRAG = `
+            precision highp float;
+            varying vec2 vUv;
+            uniform sampler2D uEmiss;
+            uniform vec3 uImgPos, uRight, uUp, uFwd;
+            uniform float uTan, uLMin, uLMax, uEnaMax, uActive;
+            const float PI = 3.141592653589793;
+            vec3 cmap(float t){
+                t = clamp(t, 0.0, 1.0);
+                vec3 c = mix(vec3(0.02,0.02,0.16), vec3(0.0,0.42,0.95), smoothstep(0.0,0.25,t));
+                c = mix(c, vec3(0.0,0.85,0.72), smoothstep(0.20,0.45,t));
+                c = mix(c, vec3(0.55,0.95,0.20), smoothstep(0.40,0.60,t));
+                c = mix(c, vec3(1.0,0.85,0.12), smoothstep(0.56,0.75,t));
+                c = mix(c, vec3(1.0,0.36,0.10), smoothstep(0.72,0.90,t));
+                c = mix(c, vec3(1.0,0.92,0.88), smoothstep(0.88,1.00,t));
+                return c;
+            }
+            void main(){
+                vec3 bg = vec3(0.03, 0.02, 0.09);
+                float b = min(min(vUv.x, 1.0-vUv.x), min(vUv.y, 1.0-vUv.y));
+                if (b < 0.010) { gl_FragColor = vec4(0.30,0.45,0.72,0.92); return; }   // frame
+                if (vUv.y < 0.085) {                                                   // colour bar
+                    float c = clamp((vUv.x-0.06)/0.88, 0.0, 1.0);
+                    gl_FragColor = vec4(cmap(c), 0.96); return;
+                }
+                vec2 iuv = vec2((vUv.x-0.04)/0.92, (vUv.y-0.10)/0.87);
+                if (iuv.x<0.0||iuv.x>1.0||iuv.y<0.0||iuv.y>1.0 || uActive<0.5) { gl_FragColor=vec4(bg,0.9); return; }
+                vec2 sc = iuv*2.0 - 1.0;
+                vec3 dir = normalize(uFwd + sc.x*uTan*uRight + sc.y*uTan*uUp);
+                float acc = 0.0;
+                const int N = 88; float s0=2.0, s1=20.0, ds=(s1-s0)/float(N);
+                for (int i=0;i<N;i++){
+                    float s = s0 + (float(i)+0.5)*ds;
+                    vec3 p = uImgPos + dir*s;
+                    float r = length(p);
+                    if (r<1.25 || r>12.0) continue;
+                    float rho = length(p.xz);
+                    float lat = atan(p.y, rho);
+                    float cl = cos(lat);
+                    float L = r/(cl*cl);
+                    if (L<uLMin || L>uLMax) continue;
+                    float mlt = 12.0 - atan(p.z, p.x)*12.0/PI;
+                    float eps = texture2D(uEmiss, vec2(fract(mlt/24.0), (L-uLMin)/(uLMax-uLMin))).r;
+                    float latF = exp(-(lat*lat)/0.10);          // equatorial concentration
+                    float nH = pow(max(1.05, r), -3.5);         // geocorona
+                    acc += eps * latF * nH * ds;
+                }
+                float t = 0.0;
+                if (acc > 1e-9) { float lo=log(uEnaMax/100.0), hi=log(uEnaMax); t=clamp((log(acc)-lo)/(hi-lo),0.0,1.0); }
+                gl_FragColor = vec4(t<=0.002 ? bg : cmap(t), 0.92);
+            }`;
+
+        this._enaCam = new THREE.OrthographicCamera(0, 1, 1, 0, -1, 1);
+        this._enaScene = new THREE.Scene();
+        const mat = new THREE.ShaderMaterial({
+            uniforms: {
+                uEmiss: { value: this._enaTex },
+                uImgPos: { value: new THREE.Vector3() }, uRight: { value: new THREE.Vector3() },
+                uUp: { value: new THREE.Vector3() }, uFwd: { value: new THREE.Vector3() },
+                uTan: { value: this._enaTan }, uLMin: { value: t.cfg.lMin }, uLMax: { value: t.cfg.lMax },
+                uEnaMax: { value: 0.03 }, uActive: { value: 1 },
+            },
+            transparent: true, depthTest: false, depthWrite: false,
+            vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+            fragmentShader: ENA_FRAG,
+        });
+        this._enaPanel = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+        this._enaPanel.frustumCulled = false;
+        this._enaScene.add(this._enaPanel);
+
+        // 3D vantage marker + view frustum + the orbit path (dipole frame, so
+        // they tilt with the dipole). Marker/frustum move with the phase.
+        const grp = new THREE.Group();
+        this._enaMarkerMesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.26),
+            new THREE.MeshBasicMaterial({ color: 0x9ecbff }));
+        grp.add(this._enaMarkerMesh);
+        this._enaFrustumGeo = new THREE.BufferGeometry();
+        this._enaFrustumGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(16 * 3), 3));
+        grp.add(new THREE.LineSegments(this._enaFrustumGeo,
+            new THREE.LineBasicMaterial({ color: 0x5fb8ff, transparent: true, opacity: 0.32 })));
+        const opos = [];
+        for (let i = 0; i <= 96; i++) { const p = this._enaOrbit((i / 96) * 2 * Math.PI).pos; opos.push(p.x, p.y, p.z); }
+        const og = new THREE.BufferGeometry();
+        og.setAttribute('position', new THREE.Float32BufferAttribute(opos, 3));
+        grp.add(new THREE.Line(og, new THREE.LineBasicMaterial({ color: 0x3f6f9f, transparent: true, opacity: 0.4 })));
+        grp.visible = this._enaEnabled;
+        this._enaMarker = grp;
+        this._magGroup.add(grp);
+
+        this._buildEnaCaption();
+        this._layoutEna();
+        this._updateEnaPose();
+        this._updateEnaImager();
+    }
+
+    /**
+     * Imager position on the eccentric polar orbit (Roelof Fig 17) at true
+     * anomaly `phase`. Apogee ≈9.5 R_E (north), perigee ≈2.4 R_E (south), in
+     * the dusk–north meridian plane (x≈0): perigee toward −Y (south), quadrature
+     * toward −Z (dusk). Sweeping phase runs south→dusk→north→dawn, so the ENA
+     * viewing geometry runs through the full Fig-18 latitude/distance series.
+     */
+    _enaOrbit(phase) {
+        const a = 5.95, e = 0.6;                    // apogee a(1+e)=9.5, perigee a(1−e)=2.38
+        const r = a * (1 - e * e) / (1 + e * Math.cos(phase));
+        const pos = new THREE.Vector3(0, -r * Math.cos(phase), -r * Math.sin(phase));
+        const mlatDeg = Math.atan2(pos.y, Math.hypot(pos.x, pos.z)) * 180 / Math.PI;
+        return { pos, r, mlatDeg };
+    }
+
+    /** Place the imager (shader uniforms + 3D marker/frustum + readout) from the
+     *  current orbit phase. Cheap — safe to call every frame while sweeping. */
+    _updateEnaPose() {
+        if (!this._enaPanel) return;
+        const { pos, r, mlatDeg } = this._enaOrbit(this._enaPhase);
+        const fwd = pos.clone().negate().normalize();
+        // Avoid the degenerate up-reference when looking along ±Y (over a pole).
+        const refUp = Math.abs(fwd.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+        const right = new THREE.Vector3().crossVectors(refUp, fwd).normalize();
+        const up = new THREE.Vector3().crossVectors(fwd, right).normalize();
+        const u = this._enaPanel.material.uniforms;
+        u.uImgPos.value.copy(pos); u.uFwd.value.copy(fwd);
+        u.uRight.value.copy(right); u.uUp.value.copy(up);
+        if (this._enaMarkerMesh) this._enaMarkerMesh.position.copy(pos);
+        this._updateEnaFrustum(pos, fwd, right, up);
+        if (this._enaVantEl) {
+            const hemi = mlatDeg >= 0 ? 'N' : 'S';
+            this._enaVantEl.textContent = `${Math.abs(mlatDeg).toFixed(0)}°${hemi} · ${r.toFixed(1)} Rᴇ`;
+        }
+    }
+
+    _updateEnaFrustum(pos, fwd, right, up) {
+        if (!this._enaFrustumGeo) return;
+        const far = 13, tan = this._enaTan;
+        const fp = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, c]) => fwd.clone()
+            .add(right.clone().multiplyScalar(a * tan))
+            .add(up.clone().multiplyScalar(c * tan)).normalize().multiplyScalar(far).add(pos));
+        const arr = this._enaFrustumGeo.attributes.position.array;
+        let k = 0; const put = (v) => { arr[k++] = v.x; arr[k++] = v.y; arr[k++] = v.z; };
+        for (let i = 0; i < 4; i++) { put(pos); put(fp[i]); }
+        for (let i = 0; i < 4; i++) { put(fp[i]); put(fp[(i + 1) % 4]); }
+        this._enaFrustumGeo.attributes.position.needsUpdate = true;
+    }
+
+    _buildEnaCaption() {
+        const cap = document.createElement('div');
+        cap.className = 'rc-ena-cap';
+        cap.style.display = this._enaEnabled ? 'block' : 'none';
+        cap.innerHTML =
+            '<div class="rc-ena-title">ENA IMAGER · <span class="rc-ena-vant">—</span></div>' +
+            '<div class="rc-ena-sub">charge-exchange · log ×100 · <span class="rc-ena-max">—</span></div>' +
+            '<div class="rc-ena-ctl">' +
+              '<button class="rc-ena-play" title="Sweep the orbit (Roelof Fig 17)">▶ sweep</button>' +
+              '<input class="rc-ena-slider" type="range" min="0" max="1000" value="0" aria-label="orbit phase">' +
+            '</div>';
+        this._container.appendChild(cap);
+        this._enaCap = cap;
+        this._enaMaxEl = cap.querySelector('.rc-ena-max');
+        this._enaVantEl = cap.querySelector('.rc-ena-vant');
+        this._enaSliderEl = cap.querySelector('.rc-ena-slider');
+        this._enaPlayEl = cap.querySelector('.rc-ena-play');
+        this._enaSliderEl.value = String(Math.round(this._enaPhase / (2 * Math.PI) * 1000));
+        this._enaPlayEl.addEventListener('click', () => {
+            this._enaSweep = !this._enaSweep;
+            this._enaPlayEl.textContent = this._enaSweep ? '❚❚ sweep' : '▶ sweep';
+            this._enaPlayEl.classList.toggle('rc-on', this._enaSweep);
+        });
+        this._enaSliderEl.addEventListener('input', () => {
+            this._enaSweep = false;
+            this._enaPlayEl.textContent = '▶ sweep'; this._enaPlayEl.classList.remove('rc-on');
+            this._enaPhase = (Number(this._enaSliderEl.value) / 1000) * 2 * Math.PI;
+            this._updateEnaPose();
+        });
+    }
+
+    /** Position the screen-space ENA panel (kept square) + its caption. Sits
+     *  bottom-CENTRE of the stage: the WebGL overlay draws under the HTML docks
+     *  (legend top-right, analytics right, heat panel bottom-left), so it must
+     *  live in the clear strip between them. */
+    _layoutEna() {
+        if (!this._enaPanel) return;
+        const w = this._container.clientWidth || 1280, h = this._container.clientHeight || 800;
+        const px = Math.max(140, Math.min(230, Math.min(w, h) * 0.30));
+        const sx = px / w, sy = px / h;
+        const cx = 0.45;                 // centre fraction, clear of both docks
+        this._enaPanel.scale.set(sx, sy, 1);
+        this._enaPanel.position.set(cx, 12 / h + sy / 2, 0);
+        if (this._enaCap) {
+            this._enaCap.style.right = ((1 - (cx + sx / 2)) * w) + 'px';
+            this._enaCap.style.bottom = (px + 16) + 'px';
+            this._enaCap.style.width = px + 'px';
+        }
+    }
+
+    /** Re-bake the emissivity texture and refresh the imager readout. */
+    _updateEnaImager() {
+        if (!this._enaPanel) return;
+        const emap = this._transport.enaEmissivityMap();
+        let mx = 0;
+        for (let n = 0; n < emap.length; n++) if (emap[n] > mx) mx = emap[n];
+        const active = mx > 1e-30;
+        this._enaAbsMax = this._enaAbsMax ? this._enaAbsMax + (mx - this._enaAbsMax) * 0.1 : mx;
+        const inv = this._enaAbsMax > 0 ? 1 / this._enaAbsMax : 0;
+        const d = this._enaData;
+        for (let n = 0; n < emap.length; n++) {
+            let v = emap[n] * inv; if (v < 0) v = 0; else if (v > 1) v = 1;
+            const bb = (v * 255) | 0; const o = n * 4;
+            d[o] = bb; d[o + 1] = bb; d[o + 2] = bb; d[o + 3] = 255;
+        }
+        this._enaTex.needsUpdate = true;
+        this._enaPanel.material.uniforms.uActive.value = active ? 1 : 0;
+        if (this._enaMaxEl) {
+            const dst = this._transport.dstStar();
+            this._enaMaxEl.textContent = active ? `MAX @ Dst* ${dst.toFixed(0)} nT` : 'quiet';
+        }
+    }
+
+    setEnaEnabled(on) {
+        this._enaEnabled = !!on;
+        if (this._enaMarker) this._enaMarker.visible = this._enaEnabled;
+        if (this._enaCap) this._enaCap.style.display = this._enaEnabled ? 'block' : 'none';
+        this._enaTogEl?.classList.toggle('rc-on', this._enaEnabled);
     }
 
     dispose() {
@@ -3047,6 +3729,15 @@ export class RingCurrentGlobe {
             o.geometry?.dispose?.();
             if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose());
         });
+        this._bloom?.dispose?.();
+        this._rtScene?.dispose?.();
+        this._bloomBlit?.dispose?.();
+        this._heatTex?.dispose?.();
+        this._heatPanel?.remove();
+        this._enaTex?.dispose?.();
+        this._enaPanel?.geometry?.dispose?.();
+        this._enaPanel?.material?.dispose?.();
+        this._enaCap?.remove();
         this._renderer.dispose();
         this._renderer.domElement.remove();
     }
