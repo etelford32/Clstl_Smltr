@@ -1,0 +1,20 @@
+[package]
+name = "ring-current-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Ring-current TRANSPORT core: a bounce-averaged phase-space-density model (drift + radial diffusion + species-resolved charge-exchange loss + plasma-sheet source) on an (L, MLT, energy, species) grid. Rust/WASM port of js/ring-current-transport.js, which remains the reference oracle (tests/ring-current-kernel-smoke.mjs compares the two). Pure extern-C surface for the browser (no wasm-bindgen); cargo test runs the physics gate."
+
+[lib]
+# cdylib → the WASM artifact; rlib → native tests.
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Keep optimisation on in dev so `cargo test`'s storm integration doesn't crawl.
+[profile.dev]
+opt-level = 2

@@ -19,7 +19,8 @@ resolver = "2"
 #   rust-abell85/  Black Hole Observatory N-body kernel (build-wasm.sh)
 #   rust-gravity/  Gravity Lab N-body + test-particle kernel (build-wasm.sh)
 #   rust-shielding/ Shielding Lab ionospheric potential solver (build-wasm.sh)
-exclude  = ["rust", "rust-sstar", "rust-forecast", "rust-sgp4", "rust-sunfield", "rust-sirius", "rust-abell85", "rust-gravity", "rust-shielding"]
+#   rust-ring-current/ Ring-current transport core (build-wasm.sh)
+exclude  = ["rust", "rust-sstar", "rust-forecast", "rust-sgp4", "rust-sunfield", "rust-sirius", "rust-abell85", "rust-gravity", "rust-shielding", "rust-ring-current"]
 
 [profile.release]
 opt-level        = 3

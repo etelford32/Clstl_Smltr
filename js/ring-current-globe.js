@@ -816,11 +816,14 @@ export class RingCurrentGlobe {
         this._magGroup = new THREE.Group();
         this._scene.add(this._magGroup);
 
-        // Physics transport core (js/ring-current-transport.js) — the same
-        // bounce-averaged (L, MLT, energy, species) model, stepped on THIS
-        // scene's SimClock from the SAME live driver (Kp/VBs) the empirical
-        // model uses, so its emergent Dst* and the twin's stay coherent.
-        this._transport = new RingCurrentTransport();
+        // Physics transport core — a bounce-averaged (L, MLT, energy, species)
+        // model, stepped on THIS scene's SimClock from the SAME live driver
+        // (Kp/VBs) the empirical model uses, so its emergent Dst* and the twin's
+        // stay coherent. Defaults to the JS reference (js/ring-current-transport
+        // .js); the page may inject the byte-identical Rust/WASM kernel instead
+        // (opts.transport = loadRingCurrentKernel(...)) — same interface, both
+        // pinned equal by tests/ring-current-kernel-smoke.mjs.
+        this._transport = opts.transport ?? new RingCurrentTransport();
 
         this._buildEarth();
         this._buildFieldLines();
