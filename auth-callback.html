@@ -253,6 +253,21 @@ const callbackSource = (
 // we count even the cases where the rest of this script crashes.
 try { funnel.step('auth_callback_enter', { source: callbackSource }); } catch {}
 
+// Funnel: email-confirmation link clicked. Supabase stamps `type=signup`
+// on the confirmation link it emails for the password-signup flow (in the
+// URL hash, or the query for the PKCE verify flow). Firing here — before
+// hydration, independent of whether the session restores — closes the loop
+// that signup.html opened with `signup_email_confirmation_required`: we can
+// finally see whether a user who was told to "check your email" ever came
+// back through the link. Distinct from `auth_callback_signup`, which is the
+// OAuth/magic-link new-account path.
+try {
+    const _cbType = hashParams.get('type') || params.get('type');
+    if (_cbType === 'signup' && !errCode) {
+        funnel.step('email_confirm_link_clicked', { source: 'email' });
+    }
+} catch {}
+
 if (errCode) {
     const desc = params.get('error_description')
               || hashParams.get('error_description')

@@ -19,7 +19,7 @@
 
 import { auth } from './auth.js';
 import { SOCIAL_PROVIDERS } from './config.js';
-import { funnel } from './auth-funnel.js';
+import { funnel, classifyAuthError } from './auth-funnel.js';
 
 // Provider metadata. label, brand colours, and the OFFICIAL logo
 // markup. Google + Apple both publish brand guidelines we must follow
@@ -202,6 +202,7 @@ async function handleClick(provider, btn, errEl, opts) {
                 provider,
                 source: opts.source || null,
                 reason: String(e?.message || 'unknown').slice(0, 120),
+                code:   classifyAuthError(e),
             });
         } catch {}
     }
