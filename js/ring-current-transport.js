@@ -63,8 +63,8 @@
  */
 
 import {
-    PHYS, DPS_J_PER_NT, chargeExchangeLifetimeHours, driftPeriodHours,
-    plasmapauseL, oxygenFraction,
+    PHYS, DPS_J_PER_NT, chargeExchangeLifetimeHours, chargeExchangeCrossSection,
+    driftPeriodHours, plasmapauseL, oxygenFraction,
 } from './ring-current-model.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -506,6 +506,29 @@ export class RingCurrentTransport {
         let mx = 0;
         for (let n = 0; n < m.length; n++) if (m[n] > mx) mx = m[n];
         return mx;
+    }
+
+    /**
+     * Equatorial ENA-SOURCE map: Σ_E Σ_species content·σ_cx(E,species) — the
+     * ion population weighted by its charge-exchange cross-section with the
+     * geocorona, i.e. the local rate at which the ring current sheds energetic
+     * neutral atoms (Roelof & Williams 1988). This is the equatorial factor of
+     * the ENA line-of-sight integral; the geocoronal density n_H(r) and the
+     * path geometry are applied by the imager (the 3D LOS ray-march). Relative
+     * units — the ENA image is log-normalised to its own peak, as in the paper.
+     */
+    enaEmissivityMap() {
+        const out = new Float64Array(this.nL * this.nMlt);
+        for (let s = 0; s < this.nS; s++) {
+            const sp = SPECIES[s];
+            for (let k = 0; k < this.nE; k++) {
+                const sig = chargeExchangeCrossSection(this.eKev[k], sp.cxKey);
+                if (!Number.isFinite(sig) || sig <= 0) continue;
+                const C = this.C[s][k];
+                for (let n = 0; n < out.length; n++) out[n] += C[n] * sig;
+            }
+        }
+        return out;
     }
 
     /** Energy spectrum at a grid cell (Σ over MLT-local cell) for a species —

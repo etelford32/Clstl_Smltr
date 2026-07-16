@@ -827,6 +827,7 @@ export class RingCurrentGlobe {
         this._buildParticles();
         this._buildRings();
         this._buildRcHeatmap();
+        this._buildEnaImager();
         this._buildSunAndTransit();
         this._buildBoundaries();
         this._buildFlashes();
@@ -2892,7 +2893,7 @@ export class RingCurrentGlobe {
         this._tView += dt;
         this._simHours += dSimH;
         this._lastDt = dt;
-        this._stepHeatmap(dt, dSimH);
+        this._stepTransportLayers(dt, dSimH);
         // Sun corona breathes with the strongest incoming VBs — a storm you
         // can FEEL approaching before it arrives (cinematic, data-driven).
         this._sun.scale.setScalar(11 * (1 + (0.02 + 0.09 * (this._sunVbsNorm ?? 0))
@@ -3108,29 +3109,40 @@ export class RingCurrentGlobe {
         r.render(this._scene, this._camera);
         // Bloom is extra scene-render cost; skip it the moment the adaptive
         // quality system steps down (tier > 0), and when disabled/unavailable.
-        if (!this._bloomEnabled || !this._bloom || this._perf.tier > 0) return;
+        if (this._bloomEnabled && this._bloom && this._perf.tier === 0) {
+            const prevTarget = r.getRenderTarget();
+            const prevAutoClear = r.autoClear;
+            // 1) Scene → offscreen HDR target (transparent clear; only luminance
+            //    matters for extraction).
+            r.setRenderTarget(this._rtScene);
+            r.setClearColor(0x000000, 0);
+            r.clear();
+            r.render(this._scene, this._camera);
+            // 2) Highpass + mip blur + composite. With renderToScreen=false the
+            //    pure glow lands in renderTargetsHorizontal[0].
+            r.autoClear = false;
+            this._bloom.renderToScreen = false;
+            this._bloom.render(r, this._rtScene, this._rtScene, 0, false);
+            // 3) Lay the glow additively over the untouched base frame.
+            r.setRenderTarget(null);
+            this._bloomBlit.material.uniforms.tDiffuse.value =
+                this._bloom.renderTargetsHorizontal[0].texture;
+            this._bloomBlit.render(r);
+            // Restore renderer state for the next base frame.
+            r.autoClear = prevAutoClear;
+            r.setRenderTarget(prevTarget);
+        }
 
-        const prevTarget = r.getRenderTarget();
-        const prevAutoClear = r.autoClear;
-        // 1) Scene → offscreen HDR target (transparent clear; only luminance
-        //    matters for extraction).
-        r.setRenderTarget(this._rtScene);
-        r.setClearColor(0x000000, 0);
-        r.clear();
-        r.render(this._scene, this._camera);
-        // 2) Highpass + mip blur + composite. With renderToScreen=false the
-        //    pure glow lands in renderTargetsHorizontal[0].
-        r.autoClear = false;
-        this._bloom.renderToScreen = false;
-        this._bloom.render(r, this._rtScene, this._rtScene, 0, false);
-        // 3) Lay the glow additively over the untouched base frame.
-        r.setRenderTarget(null);
-        this._bloomBlit.material.uniforms.tDiffuse.value =
-            this._bloom.renderTargetsHorizontal[0].texture;
-        this._bloomBlit.render(r);
-        // Restore renderer state for the next base frame.
-        r.autoClear = prevAutoClear;
-        r.setRenderTarget(prevTarget);
+        // ENA imager overlay — a crisp screen-space instrument panel drawn on
+        // top of the finished frame (kept out of the bloom so it stays legible).
+        if (this._enaEnabled && this._enaScene) {
+            const prevAC = r.autoClear;
+            r.autoClear = false;
+            r.setRenderTarget(null);
+            r.clearDepth();
+            r.render(this._enaScene, this._enaCam);
+            r.autoClear = prevAC;
+        }
     }
 
     _resize() {
@@ -3144,6 +3156,7 @@ export class RingCurrentGlobe {
             this._bloom.setSize(dw, dh);
             this._rtScene.setSize(dw, dh);
         }
+        this._layoutEna();
     }
 
     // ── Ring pressure/flux heatmap layer (Stage 2) ───────────────────────────
@@ -3250,14 +3263,24 @@ export class RingCurrentGlobe {
                 border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:2px 0;cursor:pointer}
               .rc-heat-seg button.rc-on{color:#fff;background:rgba(120,160,255,.22);border-color:rgba(120,160,255,.5)}
               .rc-heat-canvas{width:100%;height:9px;border-radius:2px;display:block;margin-top:2px}
-              .rc-heat-scale{display:flex;justify-content:space-between;font:9px system-ui;color:#8b93a7;margin-top:1px}`;
+              .rc-heat-scale{display:flex;justify-content:space-between;font:9px system-ui;color:#8b93a7;margin-top:1px}
+              .rc-ena-toggle{font:600 11px system-ui;color:#cdd5e4;background:rgba(255,255,255,.06);
+                border:1px solid rgba(255,255,255,.14);border-radius:5px;padding:3px 8px;cursor:pointer;width:100%;margin-bottom:5px}
+              .rc-ena-toggle.rc-on{color:#9ecbff;border-color:rgba(158,203,255,.4);background:rgba(158,203,255,.1)}
+              .rc-ena-cap{position:absolute;z-index:40;font:10px/1.35 system-ui,sans-serif;text-align:right;
+                pointer-events:none;text-shadow:0 1px 3px #000}
+              .rc-ena-title{font-weight:700;letter-spacing:.04em;color:#bcd6ff}
+              .rc-ena-sub{color:#8b93a7;font-size:9px}`;
             document.head.appendChild(st);
         }
+        const enaOn = new URLSearchParams(location.search).get('ena') !== '0';
         const panel = document.createElement('div');
         panel.className = 'rc-heat-panel' + (this._heatEnabled ? '' : ' rc-off');
         panel.innerHTML =
             '<button class="rc-heat-toggle' + (this._heatEnabled ? ' rc-on' : '') +
                 '" title="Ring plasma pressure layer (transport model)">◧ Ring plasma</button>' +
+            '<button class="rc-ena-toggle' + (enaOn ? ' rc-on' : '') +
+                '" title="ENA imager — Roelof-style line-of-sight (dusk, 8 Rᴇ)">◉ ENA imager</button>' +
             '<div class="rc-heat-body">' +
               '<div class="rc-heat-seg rc-heat-sp">' +
                 '<button data-sp="all" class="rc-on">All</button><button data-sp="hydrogen">H⁺</button>' +
@@ -3287,6 +3310,8 @@ export class RingCurrentGlobe {
             b.addEventListener('click', () => this.setHeatmapSpecies(b.dataset.sp)));
         panel.querySelectorAll('.rc-heat-q button').forEach(b =>
             b.addEventListener('click', () => this.setHeatmapQuantity(b.dataset.q)));
+        this._enaTogEl = panel.querySelector('.rc-ena-toggle');
+        this._enaTogEl.addEventListener('click', () => this.setEnaEnabled(!this._enaEnabled));
     }
 
     /** Highlight the active button in a panel segment (keeps UI ↔ state synced
@@ -3324,11 +3349,13 @@ export class RingCurrentGlobe {
         }
     }
 
-    /** Step the transport on the SimClock (throttled ~15 Hz) and refresh the
-     *  layer. The one-time spin-up spreads a few sim-hours over the first
-     *  frames so the ring arrives populated. Sheds load below quality tier 2. */
-    _stepHeatmap(dt, dSimH) {
-        if (!this._transport || !this._heatEnabled || !this._heatMesh) return;
+    /** Step the transport on the SimClock (throttled ~15 Hz) and refresh every
+     *  ENABLED transport-driven layer (pressure heatmap, ENA imager). The
+     *  one-time spin-up spreads a few sim-hours over the first frames so the
+     *  ring arrives populated. Sheds load below quality tier 2. */
+    _stepTransportLayers(dt, dSimH) {
+        if (!this._transport) return;
+        if (!this._heatEnabled && !this._enaEnabled) return;
         if (this._perf.tier >= 2) return;
         this._heatSimAcc = (this._heatSimAcc || 0) + dSimH * 3600;
         this._heatWallAcc = (this._heatWallAcc || 0) + dt;
@@ -3340,7 +3367,8 @@ export class RingCurrentGlobe {
         }
         if (simStep > 0) this._transport.step(simStep);
         this._heatWallAcc = 0; this._heatSimAcc = 0;
-        this._updateRcHeatmap();
+        if (this._heatEnabled && this._heatMesh) this._updateRcHeatmap();
+        if (this._enaEnabled && this._enaPanel) this._updateEnaImager();
     }
 
     setHeatmapEnabled(on) {
@@ -3361,6 +3389,200 @@ export class RingCurrentGlobe {
         this._updateRcHeatmap();
     }
 
+    // ── ENA imager (Stage 3 — Roelof & Williams 1988) ────────────────────────
+    //
+    // A virtual Energetic-Neutral-Atom camera at a FIXED vantage (~8 R_E, 30°
+    // MLAT, dusk meridian — Roelof's Fig 17 geometry). Each output pixel casts
+    // a ray through the ring current and integrates the ENA line-of-sight
+    // emission in a SHADER:
+    //     j_ENA(dir) = ∫ Σ_species j_ion·σ_cx·n_H(r) ds
+    // The equatorial ion×σ_cx factor comes from the transport core
+    // (enaEmissivityMap → a data texture); the ray-march applies the
+    // geocoronal density n_H(r), an equatorial (mirroring) latitude falloff,
+    // and the path integral, then log-scales over ×100 (2 decades below the
+    // peak) exactly as the paper's colour bar. Shown as a screen-space
+    // instrument panel, with the vantage + view frustum marked in 3D.
+
+    _buildEnaImager() {
+        const t = this._transport;
+        this._enaEnabled = new URLSearchParams(location.search).get('ena') !== '0';
+        const nL = t.nL, nMlt = t.nMlt;
+
+        // Equatorial emissivity source texture (normalised 0..1 in R).
+        this._enaData = new Uint8Array(nL * nMlt * 4);
+        this._enaTex = new THREE.DataTexture(this._enaData, nMlt, nL, THREE.RGBAFormat);
+        this._enaTex.wrapS = THREE.RepeatWrapping;
+        this._enaTex.wrapT = THREE.ClampToEdgeWrapping;
+        this._enaTex.minFilter = THREE.LinearFilter;
+        this._enaTex.magFilter = THREE.LinearFilter;
+        this._enaTex.needsUpdate = true;
+        this._enaAbsMax = 0;
+
+        // Fixed vantage in the dipole (magGroup) frame: dusk = −Z, up = +Y.
+        const R = 8, ml = 30 * Math.PI / 180;
+        const pos = new THREE.Vector3(0, R * Math.sin(ml), -R * Math.cos(ml));
+        const fwd = pos.clone().multiplyScalar(-1).normalize();
+        const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), fwd).normalize();
+        const up = new THREE.Vector3().crossVectors(fwd, right).normalize();
+        const uTan = Math.tan(46 * Math.PI / 180);
+
+        const ENA_FRAG = `
+            precision highp float;
+            varying vec2 vUv;
+            uniform sampler2D uEmiss;
+            uniform vec3 uImgPos, uRight, uUp, uFwd;
+            uniform float uTan, uLMin, uLMax, uEnaMax, uActive;
+            const float PI = 3.141592653589793;
+            vec3 cmap(float t){
+                t = clamp(t, 0.0, 1.0);
+                vec3 c = mix(vec3(0.02,0.02,0.16), vec3(0.0,0.42,0.95), smoothstep(0.0,0.25,t));
+                c = mix(c, vec3(0.0,0.85,0.72), smoothstep(0.20,0.45,t));
+                c = mix(c, vec3(0.55,0.95,0.20), smoothstep(0.40,0.60,t));
+                c = mix(c, vec3(1.0,0.85,0.12), smoothstep(0.56,0.75,t));
+                c = mix(c, vec3(1.0,0.36,0.10), smoothstep(0.72,0.90,t));
+                c = mix(c, vec3(1.0,0.92,0.88), smoothstep(0.88,1.00,t));
+                return c;
+            }
+            void main(){
+                vec3 bg = vec3(0.03, 0.02, 0.09);
+                float b = min(min(vUv.x, 1.0-vUv.x), min(vUv.y, 1.0-vUv.y));
+                if (b < 0.010) { gl_FragColor = vec4(0.30,0.45,0.72,0.92); return; }   // frame
+                if (vUv.y < 0.085) {                                                   // colour bar
+                    float c = clamp((vUv.x-0.06)/0.88, 0.0, 1.0);
+                    gl_FragColor = vec4(cmap(c), 0.96); return;
+                }
+                vec2 iuv = vec2((vUv.x-0.04)/0.92, (vUv.y-0.10)/0.87);
+                if (iuv.x<0.0||iuv.x>1.0||iuv.y<0.0||iuv.y>1.0 || uActive<0.5) { gl_FragColor=vec4(bg,0.9); return; }
+                vec2 sc = iuv*2.0 - 1.0;
+                vec3 dir = normalize(uFwd + sc.x*uTan*uRight + sc.y*uTan*uUp);
+                float acc = 0.0;
+                const int N = 88; float s0=2.0, s1=20.0, ds=(s1-s0)/float(N);
+                for (int i=0;i<N;i++){
+                    float s = s0 + (float(i)+0.5)*ds;
+                    vec3 p = uImgPos + dir*s;
+                    float r = length(p);
+                    if (r<1.25 || r>12.0) continue;
+                    float rho = length(p.xz);
+                    float lat = atan(p.y, rho);
+                    float cl = cos(lat);
+                    float L = r/(cl*cl);
+                    if (L<uLMin || L>uLMax) continue;
+                    float mlt = 12.0 - atan(p.z, p.x)*12.0/PI;
+                    float eps = texture2D(uEmiss, vec2(fract(mlt/24.0), (L-uLMin)/(uLMax-uLMin))).r;
+                    float latF = exp(-(lat*lat)/0.10);          // equatorial concentration
+                    float nH = pow(max(1.05, r), -3.5);         // geocorona
+                    acc += eps * latF * nH * ds;
+                }
+                float t = 0.0;
+                if (acc > 1e-9) { float lo=log(uEnaMax/100.0), hi=log(uEnaMax); t=clamp((log(acc)-lo)/(hi-lo),0.0,1.0); }
+                gl_FragColor = vec4(t<=0.002 ? bg : cmap(t), 0.92);
+            }`;
+
+        this._enaCam = new THREE.OrthographicCamera(0, 1, 1, 0, -1, 1);
+        this._enaScene = new THREE.Scene();
+        const mat = new THREE.ShaderMaterial({
+            uniforms: {
+                uEmiss: { value: this._enaTex },
+                uImgPos: { value: pos }, uRight: { value: right }, uUp: { value: up }, uFwd: { value: fwd },
+                uTan: { value: uTan }, uLMin: { value: t.cfg.lMin }, uLMax: { value: t.cfg.lMax },
+                uEnaMax: { value: 0.03 }, uActive: { value: 1 },
+            },
+            transparent: true, depthTest: false, depthWrite: false,
+            vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+            fragmentShader: ENA_FRAG,
+        });
+        this._enaPanel = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+        this._enaPanel.frustumCulled = false;
+        this._enaScene.add(this._enaPanel);
+
+        // 3D vantage marker + view frustum (dipole frame, so it tilts too).
+        const grp = new THREE.Group();
+        const marker = new THREE.Mesh(new THREE.OctahedronGeometry(0.26),
+            new THREE.MeshBasicMaterial({ color: 0x9ecbff }));
+        marker.position.copy(pos);
+        grp.add(marker);
+        const far = 14, pts = [];
+        const farPts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, c]) => {
+            const d = fwd.clone()
+                .add(right.clone().multiplyScalar(a * uTan))
+                .add(up.clone().multiplyScalar(c * uTan)).normalize();
+            return pos.clone().add(d.multiplyScalar(far));
+        });
+        for (let i = 0; i < 4; i++) pts.push(pos.x, pos.y, pos.z, farPts[i].x, farPts[i].y, farPts[i].z);
+        for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; pts.push(farPts[i].x, farPts[i].y, farPts[i].z, farPts[j].x, farPts[j].y, farPts[j].z); }
+        const fg = new THREE.BufferGeometry();
+        fg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+        grp.add(new THREE.LineSegments(fg, new THREE.LineBasicMaterial({ color: 0x5fb8ff, transparent: true, opacity: 0.32 })));
+        grp.visible = this._enaEnabled;
+        this._enaMarker = grp;
+        this._magGroup.add(grp);
+
+        this._buildEnaCaption();
+        this._layoutEna();
+        this._updateEnaImager();
+    }
+
+    _buildEnaCaption() {
+        const cap = document.createElement('div');
+        cap.className = 'rc-ena-cap';
+        cap.style.display = this._enaEnabled ? 'block' : 'none';
+        cap.innerHTML =
+            '<div class="rc-ena-title">ENA IMAGER · dusk · 8 R<sub>E</sub></div>' +
+            '<div class="rc-ena-sub">charge-exchange · log colour, ×100 span · <span class="rc-ena-max">—</span></div>';
+        this._container.appendChild(cap);
+        this._enaCap = cap;
+        this._enaMaxEl = cap.querySelector('.rc-ena-max');
+    }
+
+    /** Position the screen-space ENA panel (kept square) + its caption. Sits
+     *  bottom-CENTRE of the stage: the WebGL overlay draws under the HTML docks
+     *  (legend top-right, analytics right, heat panel bottom-left), so it must
+     *  live in the clear strip between them. */
+    _layoutEna() {
+        if (!this._enaPanel) return;
+        const w = this._container.clientWidth || 1280, h = this._container.clientHeight || 800;
+        const px = Math.max(140, Math.min(230, Math.min(w, h) * 0.30));
+        const sx = px / w, sy = px / h;
+        const cx = 0.45;                 // centre fraction, clear of both docks
+        this._enaPanel.scale.set(sx, sy, 1);
+        this._enaPanel.position.set(cx, 12 / h + sy / 2, 0);
+        if (this._enaCap) {
+            this._enaCap.style.right = ((1 - (cx + sx / 2)) * w) + 'px';
+            this._enaCap.style.bottom = (px + 16) + 'px';
+            this._enaCap.style.width = px + 'px';
+        }
+    }
+
+    /** Re-bake the emissivity texture and refresh the imager readout. */
+    _updateEnaImager() {
+        if (!this._enaPanel) return;
+        const emap = this._transport.enaEmissivityMap();
+        let mx = 0;
+        for (let n = 0; n < emap.length; n++) if (emap[n] > mx) mx = emap[n];
+        const active = mx > 1e-30;
+        this._enaAbsMax = this._enaAbsMax ? this._enaAbsMax + (mx - this._enaAbsMax) * 0.1 : mx;
+        const inv = this._enaAbsMax > 0 ? 1 / this._enaAbsMax : 0;
+        const d = this._enaData;
+        for (let n = 0; n < emap.length; n++) {
+            let v = emap[n] * inv; if (v < 0) v = 0; else if (v > 1) v = 1;
+            const bb = (v * 255) | 0; const o = n * 4;
+            d[o] = bb; d[o + 1] = bb; d[o + 2] = bb; d[o + 3] = 255;
+        }
+        this._enaTex.needsUpdate = true;
+        this._enaPanel.material.uniforms.uActive.value = active ? 1 : 0;
+        if (this._enaMaxEl) {
+            const dst = this._transport.dstStar();
+            this._enaMaxEl.textContent = active ? `MAX @ Dst* ${dst.toFixed(0)} nT` : 'quiet';
+        }
+    }
+
+    setEnaEnabled(on) {
+        this._enaEnabled = !!on;
+        if (this._enaMarker) this._enaMarker.visible = this._enaEnabled;
+        if (this._enaCap) this._enaCap.style.display = this._enaEnabled ? 'block' : 'none';
+        this._enaTogEl?.classList.toggle('rc-on', this._enaEnabled);
+    }
+
     dispose() {
         this._disposed = true;
         cancelAnimationFrame(this._raf);
@@ -3379,6 +3601,10 @@ export class RingCurrentGlobe {
         this._bloomBlit?.dispose?.();
         this._heatTex?.dispose?.();
         this._heatPanel?.remove();
+        this._enaTex?.dispose?.();
+        this._enaPanel?.geometry?.dispose?.();
+        this._enaPanel?.material?.dispose?.();
+        this._enaCap?.remove();
         this._renderer.dispose();
         this._renderer.domElement.remove();
     }

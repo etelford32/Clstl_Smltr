@@ -121,6 +121,13 @@ const approx = (a, b, rel = 1e-6, msg = '') =>
     const pk = t.peakPressureNPa('all');
     assert.ok(pk > 1 && pk < 80, `peak P⊥ physical (${pk.toFixed(1)} nPa)`);
     assert.equal(t.pressureMap('oxygen').length, t.nL * t.nMlt, 'pressureMap shape');
+    // ENA source (ion × charge-exchange σ) is positive and peaks on the ring.
+    const ena = t.enaEmissivityMap();
+    assert.equal(ena.length, t.nL * t.nMlt, 'enaEmissivityMap shape');
+    let emx = 0, emi = 0;
+    for (let i = 0; i < t.nL; i++) { let row = 0; for (let j = 0; j < t.nMlt; j++) row += ena[t.idx(i, j)]; if (row > emx) { emx = row; emi = i; } }
+    assert.ok(emx > 0, 'ENA source is nonzero during a storm');
+    assert.ok(t.L[emi] > 2.5 && t.L[emi] < 6, `ENA source peaks on the ring (L${t.L[emi].toFixed(1)})`);
     // Recovery under quiet driving.
     t.setDriver({ kp: 1, vbs: 0 });
     for (let h = 0; h < 24; h++) t.step(3600);
