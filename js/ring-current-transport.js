@@ -137,6 +137,13 @@ const DEFAULTS = Object.freeze({
     sourceNorm: 6.36e25,
     e0Kev: 12,                  // plasma-sheet spectral e-folding energy (keV)
     heliumFraction: 0.04,
+    // Perpendicular-pressure calibration (pressureMap): scales the energy-
+    // density → nPa conversion so a Dst≈−124 nT storm peaks at ~15 nPa — a
+    // physically reasonable strong-storm ring P⊥ (obs. peaks are 10s of nPa;
+    // cf. the GEMSIS ~0–3 nPa idealized-snapshot scale). The heatmap colour
+    // bar auto-scales to the live peak regardless. Set with sourceNorm in
+    // tests/ring-current-transport.mjs.
+    pressCal: 0.04,
 });
 
 export class RingCurrentTransport {
@@ -466,6 +473,39 @@ export class RingCurrentTransport {
             }
         }
         return out;
+    }
+
+    /**
+     * Equatorial PERPENDICULAR PRESSURE map (nPa) — the quantity the modern
+     * kinetic ring-current figures colour (e.g. GEMSIS P⊥; 2010JA015682). Per
+     * cell: energy density u = Σ_E (content·E) / V_cell, with the equatorial
+     * flux-tube volume V_cell(L) = L·ΔL·Δaz·R_E³ (annulus × ~1 R_E scale
+     * height). Equatorially-mirroring ⇒ P⊥ ≈ u. `PRESS_CAL` is the single
+     * calibration tying the (Dst-calibrated) content units to a realistic
+     * peak (a few nPa for a strong storm — the top of the GEMSIS scale).
+     */
+    pressureMap(speciesKey = 'all') {
+        const out = new Float64Array(this.nL * this.nMlt);
+        const eDens = this.equatorialMap(speciesKey, 'energy');  // Σ content·E_keV
+        const cal = this.cfg.pressCal;
+        for (let i = 0; i < this.nL; i++) {
+            // V_cell(L) in m³: (L·R_E·Δaz)·(ΔL·R_E)·(hZ·R_E), hZ ≈ 1.
+            const vCell = this.L[i] * this.dAz * this.dL * R_E * R_E * R_E;
+            const kNpa = KEV_J / vCell * 1e9 * cal;   // (content·keV) → nPa
+            for (let j = 0; j < this.nMlt; j++) {
+                const n = this.idx(i, j);
+                out[n] = eDens[n] * kNpa;
+            }
+        }
+        return out;
+    }
+
+    /** Peak equatorial pressure (nPa) for a species — the colour-bar top. */
+    peakPressureNPa(speciesKey = 'all') {
+        const m = this.pressureMap(speciesKey);
+        let mx = 0;
+        for (let n = 0; n < m.length; n++) if (m[n] > mx) mx = m[n];
+        return mx;
     }
 
     /** Energy spectrum at a grid cell (Σ over MLT-local cell) for a species —

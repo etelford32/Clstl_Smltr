@@ -117,6 +117,10 @@ const approx = (a, b, rel = 1e-6, msg = '') =>
     assert.ok(m.asymmetry > 0.3, `partial-ring asymmetry emerged (${m.asymmetry.toFixed(2)})`);
     assert.ok(m.peakL > 3 && m.peakL < 5.5, `ring peaks near L~4 (${m.peakL.toFixed(2)})`);
     assert.ok(m.peakMlt >= 15 || m.peakMlt <= 4, `partial ring in dusk-midnight sector (${m.peakMlt.toFixed(1)} MLT)`);
+    // Perpendicular pressure lands in a physical strong-storm band (nPa).
+    const pk = t.peakPressureNPa('all');
+    assert.ok(pk > 1 && pk < 80, `peak P⊥ physical (${pk.toFixed(1)} nPa)`);
+    assert.equal(t.pressureMap('oxygen').length, t.nL * t.nMlt, 'pressureMap shape');
     // Recovery under quiet driving.
     t.setDriver({ kp: 1, vbs: 0 });
     for (let h = 0; h < 24; h++) t.step(3600);

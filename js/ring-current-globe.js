@@ -132,6 +132,7 @@ import {
 } from './ring-current-particles.js';
 import { SimClock, SCALE, apparentUnitsPerSec } from './sim-clock.js';
 import { EarthSkin } from './earth-skin.js';
+import { RingCurrentTransport } from './ring-current-transport.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { CopyShader } from 'three/addons/shaders/CopyShader.js';
@@ -815,10 +816,17 @@ export class RingCurrentGlobe {
         this._magGroup = new THREE.Group();
         this._scene.add(this._magGroup);
 
+        // Physics transport core (js/ring-current-transport.js) — the same
+        // bounce-averaged (L, MLT, energy, species) model, stepped on THIS
+        // scene's SimClock from the SAME live driver (Kp/VBs) the empirical
+        // model uses, so its emergent Dst* and the twin's stay coherent.
+        this._transport = new RingCurrentTransport();
+
         this._buildEarth();
         this._buildFieldLines();
         this._buildParticles();
         this._buildRings();
+        this._buildRcHeatmap();
         this._buildSunAndTransit();
         this._buildBoundaries();
         this._buildFlashes();
@@ -2800,6 +2808,17 @@ export class RingCurrentGlobe {
             // storm main phase — saturate the nightside pulse there.
             injection:    Math.min(1, Math.abs(now.injectionQ ?? 0) / 12),
         };
+        // Drive the transport core from the SAME live inputs (Kp, VBs). On the
+        // first real sample, schedule a spread spin-up (a few sim-hours run
+        // over the next frames) so the pressure layer arrives already reflecting
+        // current conditions instead of an empty ring.
+        if (this._transport) {
+            this._transport.setDriver({
+                kp: Number.isFinite(now.kp) ? now.kp : 1,
+                vbs: this._driverVbs,
+            });
+            if (!this._heatSpunUp) { this._heatSpunUp = true; this._heatSpinup = 3 * 3600; }
+        }
         this._setCompositionMix(now.oxygenFraction);
         for (const p of this._popList ?? []) {
             this._syncStateUniforms(p.mat);
@@ -2873,6 +2892,7 @@ export class RingCurrentGlobe {
         this._tView += dt;
         this._simHours += dSimH;
         this._lastDt = dt;
+        this._stepHeatmap(dt, dSimH);
         // Sun corona breathes with the strongest incoming VBs — a storm you
         // can FEEL approaching before it arrives (cinematic, data-driven).
         this._sun.scale.setScalar(11 * (1 + (0.02 + 0.09 * (this._sunVbsNorm ?? 0))
@@ -3126,6 +3146,221 @@ export class RingCurrentGlobe {
         }
     }
 
+    // ── Ring pressure/flux heatmap layer (Stage 2) ───────────────────────────
+    //
+    // An ADDITIVE, toggleable equatorial sheet coloured by the transport core's
+    // (L, MLT) field — perpendicular pressure (nPa) by default, or ion flux —
+    // per species. It lives in the magGroup so it tilts with the dipole and
+    // shares the scene's GSM frame and MLT convention exactly, and it steps on
+    // the shared SimClock from the same live driver as everything else. This is
+    // the "planetary magnetospheric ring environment" made visible: the same
+    // physics that draws the particles paints the pressure it produces.
+
+    /** Rainbow colour ramp (blue→cyan→green→yellow→red→magenta) matching the
+     *  GEMSIS-style P⊥ scale. t∈[0,1] → [r,g,b] 0–255. */
+    _heatColormap(t) {
+        const S = this._HEAT_STOPS || (this._HEAT_STOPS = [
+            [0.00, 8, 16, 120], [0.18, 0, 120, 255], [0.38, 0, 220, 190],
+            [0.55, 120, 240, 70], [0.70, 250, 225, 30], [0.85, 255, 110, 20],
+            [1.00, 225, 20, 150],
+        ]);
+        const x = Math.max(0, Math.min(1, t));
+        for (let i = 1; i < S.length; i++) {
+            if (x <= S[i][0]) {
+                const a = S[i - 1], b = S[i];
+                const f = (x - a[0]) / (b[0] - a[0] || 1);
+                return [a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f];
+            }
+        }
+        return [S[S.length - 1][1], S[S.length - 1][2], S[S.length - 1][3]];
+    }
+
+    _buildRcHeatmap() {
+        const t = this._transport;
+        this._heatEnabled = new URLSearchParams(location.search).get('heat') !== '0';
+        this._heatSpecies = 'all';
+        this._heatQuantity = 'pressure';
+        this._heatMax = 0;
+        const nL = t.nL, nMlt = t.nMlt;
+
+        // Baked-colour data texture (width=MLT, height=L; row-major i*nMlt+j).
+        this._heatData = new Uint8Array(nL * nMlt * 4);
+        this._heatTex = new THREE.DataTexture(this._heatData, nMlt, nL, THREE.RGBAFormat);
+        this._heatTex.wrapS = THREE.RepeatWrapping;      // MLT is periodic
+        this._heatTex.wrapT = THREE.ClampToEdgeWrapping;
+        this._heatTex.minFilter = THREE.LinearFilter;
+        this._heatTex.magFilter = THREE.LinearFilter;
+        this._heatTex.needsUpdate = true;
+
+        const geo = new THREE.RingGeometry(t.cfg.lMin, t.cfg.lMax, 192, 1);
+        const mat = new THREE.ShaderMaterial({
+            uniforms: {
+                uMap: { value: this._heatTex },
+                uOpacity: { value: 0.52 },
+                uLMin: { value: t.cfg.lMin },
+                uLMax: { value: t.cfg.lMax },
+            },
+            // A translucent contour sheet (like the GEMSIS P⊥ plot), NOT an
+            // additive glow — additive + the bloom pass blows the disc out.
+            transparent: true, depthWrite: false, depthTest: true,
+            side: THREE.DoubleSide, blending: THREE.NormalBlending,
+            vertexShader: `
+                varying vec2 vXY;
+                void main() { vXY = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `
+                precision highp float;
+                uniform sampler2D uMap; uniform float uOpacity, uLMin, uLMax;
+                varying vec2 vXY;
+                const float PI = 3.141592653589793;
+                void main() {
+                    float L = length(vXY);
+                    float lf = (L - uLMin) / (uLMax - uLMin);
+                    if (lf < 0.0 || lf > 1.0) discard;
+                    // World θ = atan2(z,x); this disc's local +Y → world −Z, so z = −vXY.y.
+                    float mlt = 12.0 - atan(-vXY.y, vXY.x) * 12.0 / PI;
+                    vec4 c = texture2D(uMap, vec2(fract(mlt / 24.0), lf));
+                    float edge = smoothstep(0.0, 0.05, lf) * (1.0 - smoothstep(0.93, 1.0, lf));
+                    gl_FragColor = vec4(c.rgb, c.a * uOpacity * edge);
+                }`,
+        });
+        this._heatMesh = new THREE.Mesh(geo, mat);
+        this._heatMesh.rotation.x = -Math.PI / 2;   // XY ring → equatorial (XZ) plane
+        this._heatMesh.renderOrder = -1;            // under the particles/rings
+        this._heatMesh.visible = this._heatEnabled;
+        this._magGroup.add(this._heatMesh);
+
+        this._buildHeatPanel();
+        this._updateRcHeatmap();
+    }
+
+    _buildHeatPanel() {
+        if (!document.getElementById('rc-heat-style')) {
+            const st = document.createElement('style');
+            st.id = 'rc-heat-style';
+            st.textContent = `
+              .rc-heat-panel{position:absolute;left:12px;bottom:12px;z-index:40;font:11px/1.3 system-ui,sans-serif;
+                color:#cdd5e4;background:rgba(3,1,14,.72);border:1px solid rgba(255,255,255,.1);border-radius:8px;
+                padding:6px 8px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);user-select:none;width:172px}
+              .rc-heat-panel.rc-off .rc-heat-body{display:none}
+              .rc-heat-toggle{font:600 11px system-ui;color:#cdd5e4;background:rgba(255,255,255,.06);
+                border:1px solid rgba(255,255,255,.14);border-radius:5px;padding:3px 8px;cursor:pointer;width:100%;margin-bottom:5px}
+              .rc-heat-toggle.rc-on{color:#7fe6c3;border-color:rgba(127,230,195,.4);background:rgba(127,230,195,.1)}
+              .rc-heat-seg{display:flex;gap:3px;margin-bottom:4px}
+              .rc-heat-seg button{flex:1;font:10px system-ui;color:#aeb6c8;background:rgba(255,255,255,.05);
+                border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:2px 0;cursor:pointer}
+              .rc-heat-seg button.rc-on{color:#fff;background:rgba(120,160,255,.22);border-color:rgba(120,160,255,.5)}
+              .rc-heat-canvas{width:100%;height:9px;border-radius:2px;display:block;margin-top:2px}
+              .rc-heat-scale{display:flex;justify-content:space-between;font:9px system-ui;color:#8b93a7;margin-top:1px}`;
+            document.head.appendChild(st);
+        }
+        const panel = document.createElement('div');
+        panel.className = 'rc-heat-panel' + (this._heatEnabled ? '' : ' rc-off');
+        panel.innerHTML =
+            '<button class="rc-heat-toggle' + (this._heatEnabled ? ' rc-on' : '') +
+                '" title="Ring plasma pressure layer (transport model)">◧ Ring plasma</button>' +
+            '<div class="rc-heat-body">' +
+              '<div class="rc-heat-seg rc-heat-sp">' +
+                '<button data-sp="all" class="rc-on">All</button><button data-sp="hydrogen">H⁺</button>' +
+                '<button data-sp="oxygen">O⁺</button><button data-sp="helium">He⁺</button></div>' +
+              '<div class="rc-heat-seg rc-heat-q">' +
+                '<button data-q="pressure" class="rc-on">P⊥</button><button data-q="flux">Flux</button></div>' +
+              '<canvas class="rc-heat-canvas" width="150" height="9"></canvas>' +
+              '<div class="rc-heat-scale"><span>0</span><span class="rc-heat-max">— nPa</span></div>' +
+            '</div>';
+        this._container.appendChild(panel);
+        this._heatPanel = panel;
+        this._heatMaxEl = panel.querySelector('.rc-heat-max');
+        // Colour-bar swatch.
+        const cv = panel.querySelector('.rc-heat-canvas');
+        const cx = cv.getContext('2d');
+        for (let x = 0; x < cv.width; x++) {
+            const [r, g, b] = this._heatColormap(x / (cv.width - 1));
+            cx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+            cx.fillRect(x, 0, 1, cv.height);
+        }
+        // Wiring.
+        panel.querySelector('.rc-heat-toggle').addEventListener('click', (e) => {
+            this.setHeatmapEnabled(!this._heatEnabled);
+            e.currentTarget.classList.toggle('rc-on', this._heatEnabled);
+        });
+        panel.querySelectorAll('.rc-heat-sp button').forEach(b =>
+            b.addEventListener('click', () => this.setHeatmapSpecies(b.dataset.sp)));
+        panel.querySelectorAll('.rc-heat-q button').forEach(b =>
+            b.addEventListener('click', () => this.setHeatmapQuantity(b.dataset.q)));
+    }
+
+    /** Highlight the active button in a panel segment (keeps UI ↔ state synced
+     *  whether the change came from a click or a programmatic call). */
+    _heatMark(cls, attr, val) {
+        this._heatPanel?.querySelectorAll(`.${cls} button`).forEach(b =>
+            b.classList.toggle('rc-on', b.dataset[attr] === val));
+    }
+
+    /** Re-bake the data texture from the transport's current (L,MLT) field. */
+    _updateRcHeatmap() {
+        if (!this._heatMesh) return;
+        const field = this._heatQuantity === 'flux'
+            ? this._transport.equatorialMap(this._heatSpecies, 'content')
+            : this._transport.pressureMap(this._heatSpecies);
+        let mx = 0;
+        for (let n = 0; n < field.length; n++) if (field[n] > mx) mx = field[n];
+        const floor = this._heatQuantity === 'flux' ? 1e-30 : 0.05;   // nPa / rel floor
+        mx = Math.max(mx, floor);
+        // Eased colour-bar top so it tracks the storm without flickering.
+        this._heatMax = this._heatMax ? this._heatMax + (mx - this._heatMax) * 0.1 : mx;
+        const inv = 1 / this._heatMax;
+        const data = this._heatData;
+        for (let n = 0; n < field.length; n++) {
+            let v = field[n] * inv; if (v < 0) v = 0; else if (v > 1) v = 1;
+            const c = this._heatColormap(v);
+            const o = n * 4;
+            data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2];
+            data[o + 3] = Math.round(255 * Math.pow(v, 0.85));   // faint low → opaque high
+        }
+        this._heatTex.needsUpdate = true;
+        if (this._heatMaxEl) {
+            this._heatMaxEl.textContent = this._heatQuantity === 'flux'
+                ? 'rel. flux' : `${this._heatMax.toFixed(1)} nPa`;
+        }
+    }
+
+    /** Step the transport on the SimClock (throttled ~15 Hz) and refresh the
+     *  layer. The one-time spin-up spreads a few sim-hours over the first
+     *  frames so the ring arrives populated. Sheds load below quality tier 2. */
+    _stepHeatmap(dt, dSimH) {
+        if (!this._transport || !this._heatEnabled || !this._heatMesh) return;
+        if (this._perf.tier >= 2) return;
+        this._heatSimAcc = (this._heatSimAcc || 0) + dSimH * 3600;
+        this._heatWallAcc = (this._heatWallAcc || 0) + dt;
+        if (this._heatWallAcc < 1 / 15) return;
+        let simStep = this._heatSimAcc;
+        if (this._heatSpinup > 0) {
+            const chunk = Math.min(this._heatSpinup, 900);
+            simStep += chunk; this._heatSpinup -= chunk;
+        }
+        if (simStep > 0) this._transport.step(simStep);
+        this._heatWallAcc = 0; this._heatSimAcc = 0;
+        this._updateRcHeatmap();
+    }
+
+    setHeatmapEnabled(on) {
+        this._heatEnabled = !!on;
+        if (this._heatMesh) this._heatMesh.visible = this._heatEnabled;
+        this._heatPanel?.classList.toggle('rc-off', !this._heatEnabled);
+    }
+
+    setHeatmapSpecies(key) {
+        this._heatSpecies = key; this._heatMax = 0;
+        this._heatMark('rc-heat-sp', 'sp', key);
+        this._updateRcHeatmap();
+    }
+
+    setHeatmapQuantity(q) {
+        this._heatQuantity = q; this._heatMax = 0;
+        this._heatMark('rc-heat-q', 'q', q);
+        this._updateRcHeatmap();
+    }
+
     dispose() {
         this._disposed = true;
         cancelAnimationFrame(this._raf);
@@ -3142,6 +3377,8 @@ export class RingCurrentGlobe {
         this._bloom?.dispose?.();
         this._rtScene?.dispose?.();
         this._bloomBlit?.dispose?.();
+        this._heatTex?.dispose?.();
+        this._heatPanel?.remove();
         this._renderer.dispose();
         this._renderer.domElement.remove();
     }
