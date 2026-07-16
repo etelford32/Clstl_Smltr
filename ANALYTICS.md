@@ -108,6 +108,19 @@ Three superadmin RPCs (see migration):
   population keyed on `visitor_id`: distinct / new / returning / converted
   / repeat-bouncer counts. The pre-auth "do they come back?" view the
   per-tab `funnel_id` could never give.
+- `telemetry_funnel_failure_codes(days, limit)` — top-N histogram over the
+  stable `code` enum on `*_failed` / `*_validation_error` events, with a
+  representative `reason` and the flow (signin/signup/oauth/callback) each
+  code appears in most. Groups by `code` so free-text wording drift can't
+  fragment it. Pre-enum rows bucket as `(uncategorized)`.
+- `telemetry_funnel_dimension_conversion(days, dimension, limit)` —
+  per-value outcome breakdown where `dimension ∈ {referrer, utm_source,
+  utm_campaign, device}`. Three tiers per source/device: **bounced** (only
+  passive views), **engaged** (interacted, didn't convert), **converted**
+  (reached a success terminal). Answers "which sources / devices convert vs
+  just bounce" even when full conversion is rare. A value with high
+  engagement but zero conversion points at a page/flow to fix, not a bad
+  source.
 
 Example queries:
 
