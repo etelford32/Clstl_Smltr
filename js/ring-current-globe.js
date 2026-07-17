@@ -844,6 +844,7 @@ export class RingCurrentGlobe {
         this._buildRings();
         this._buildRcHeatmap();
         this._buildDriftPaths();
+        this._buildProtonArc();
         this._buildEnaImager();
         this._buildSunAndTransit();
         this._buildBoundaries();
@@ -3148,6 +3149,7 @@ export class RingCurrentGlobe {
                 this._windSheet.visible = false;
                 this._enaHalo.visible = false;
                 this._env.visible = false;
+                if (this._pArc) this._pArc.visible = false;
             }
             console.info(`[ring-current] frame ${p.frameMs.toFixed(1)} ms sustained — quality tier ${p.tier}`);
         }
@@ -3613,9 +3615,9 @@ export class RingCurrentGlobe {
     }
 
     /** Step the transport on the SimClock (throttled ~15 Hz) and refresh every
-     *  ENABLED transport-driven layer (pressure heatmap, ENA imager). The
-     *  one-time spin-up spreads a few sim-hours over the first frames so the
-     *  ring arrives populated. Sheds load below quality tier 2. */
+     *  ENABLED transport-driven layer (pressure heatmap, ENA imager, proton
+     *  arc). The one-time spin-up spreads a few sim-hours over the first
+     *  frames so the ring arrives populated. Sheds load below quality tier 2. */
     _stepTransportLayers(dt, dSimH) {
         if (!this._transport) return;
         if (!this._heatEnabled && !this._enaEnabled) return;
@@ -3632,6 +3634,76 @@ export class RingCurrentGlobe {
         this._heatWallAcc = 0; this._heatSimAcc = 0;
         if (this._heatEnabled && this._heatGroup) this._updateRcHeatmap();
         if (this._enaEnabled && this._enaPanel) this._updateEnaImager();
+        this._updateProtonArc();
+    }
+
+    // ── Proton aurora — the EMIC precipitation made visible ──────────────────
+    //
+    // The transport's emicPrecipitationMap() is the flux being pitch-angle-
+    // scattered into the loss cone RIGHT NOW, per (L, MLT). Those protons
+    // follow their field line to the dipole foot latitude λ = acos(√(1/L))
+    // and light the atmosphere there: the SUBAURORAL PROTON ARC — a real,
+    // observed phenomenon (dusk-side detached red/Hα arcs equatorward of the
+    // electron oval). Both hemispheres, dipole frame, crimson-pink so it
+    // reads apart from the green electron oval on the EarthSkin.
+
+    _buildProtonArc() {
+        const cap = this._transport ? this._transport.nL * this._transport.nMlt * 2 : 0;
+        if (!cap) return;
+        this._pArcGeo = new THREE.BufferGeometry();
+        this._pArcPos = new Float32Array(cap * 3);
+        this._pArcCol = new Float32Array(cap * 3);
+        this._pArcGeo.setAttribute('position', new THREE.BufferAttribute(this._pArcPos, 3).setUsage(THREE.DynamicDrawUsage));
+        this._pArcGeo.setAttribute('color', new THREE.BufferAttribute(this._pArcCol, 3).setUsage(THREE.DynamicDrawUsage));
+        this._pArc = new THREE.Points(this._pArcGeo, glowPointsMaterial(0.10, 0.85));
+        this._pArc.frustumCulled = false;
+        this._magGroup.add(this._pArc);
+        this._pArcMax = 0;
+    }
+
+    _updateProtonArc() {
+        if (!this._pArc || typeof this._transport.emicPrecipitationMap !== 'function') return;
+        const t = this._transport;
+        const map = t.emicPrecipitationMap();
+        let mx = 0;
+        for (let n = 0; n < map.length; n++) if (map[n] > mx) mx = map[n];
+        // Eased normalisation so the arc brightens/fades smoothly with the
+        // storm instead of renormalising every refresh.
+        this._pArcMax = this._pArcMax ? this._pArcMax + (mx - this._pArcMax) * 0.08 : mx;
+        const inv = this._pArcMax > 0 ? 1 / this._pArcMax : 0;
+        const nL = t.nL, nMlt = t.nMlt;
+        const lArr = t.L ?? null;
+        const lMin = t.cfg.lMin, lMax = t.cfg.lMax;
+        const pos = this._pArcPos, col = this._pArcCol;
+        let p = 0;
+        for (let i = 0; i < nL; i++) {
+            const L = lArr ? lArr[i] : lMin + (i + 0.5) * (lMax - lMin) / nL;
+            const lam = Math.acos(Math.sqrt(1 / Math.max(1.01, L)));  // foot latitude
+            const cl = Math.cos(lam), sl = Math.sin(lam);
+            for (let j = 0; j < nMlt; j++) {
+                const v = map[i * nMlt + j] * inv;
+                if (v <= 0.03) continue;
+                const az = 2 * Math.PI * ((j + 0.5) * 24 / nMlt) / 24;
+                const th = Math.PI - az;                               // scene mapping
+                const b = 0.25 + 0.75 * Math.min(1, v);
+                // Proton-aurora crimson-pink (Hα/red-dominated emission).
+                const r = 1.03;
+                for (const hemi of [1, -1]) {
+                    const o = p * 3;
+                    pos[o]     = r * cl * Math.cos(th);
+                    pos[o + 1] = hemi * r * sl;
+                    pos[o + 2] = r * cl * Math.sin(th);
+                    col[o]     = 1.0 * b;
+                    col[o + 1] = 0.30 * b;
+                    col[o + 2] = 0.45 * b;
+                    p++;
+                }
+            }
+        }
+        // Park unused slots (black + origin-inside-Earth = invisible).
+        for (let n = p * 3; n < pos.length; n++) { pos[n] = 0; col[n] = 0; }
+        this._pArcGeo.attributes.position.needsUpdate = true;
+        this._pArcGeo.attributes.color.needsUpdate = true;
     }
 
     setHeatmapEnabled(on) {
