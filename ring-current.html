@@ -193,6 +193,12 @@ body {
 .rc-dock-lab b { color:#cdd5e4; font-weight:650; }
 .rc-dock canvas { display:block; width:100%; height:44px; margin-top:2px; }
 .rc-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:baseline; }
+/* Interactive legend rows: click a species to show/hide its particles. */
+.rc-legend-pop { cursor:pointer; border-radius:4px; padding:1px 3px; margin:0 -3px; transition:opacity .12s, background .12s; outline:none; }
+.rc-legend-pop:hover { background:rgba(255,255,255,.09); }
+.rc-legend-pop:focus-visible { background:rgba(255,255,255,.12); box-shadow:0 0 0 1px rgba(158,203,255,.5); }
+.rc-legend-pop.rc-off { opacity:.4; }
+.rc-legend-pop.rc-off .rc-dot { background:transparent !important; box-shadow:inset 0 0 0 1.5px #7a8296; }
 
 .rc-col { display:flex; flex-direction:column; gap:12px; min-width:0; }
 .rc-panel {
@@ -508,9 +514,9 @@ body {
             <button class="rc-legend-min" id="rc-legend-min" title="Minimize legend" aria-label="Minimize legend" aria-expanded="true">&#8722;</button>
         </div>
         <div class="rc-legend-body" id="rc-legend-body">
-            <span class="rc-dot" style="background:#ffa040"></span>H&#8314; ions &mdash; drift west, true-rate bounce<br>
-            <span class="rc-dot" style="background:#94ff57"></span>O&#8314; ions &mdash; ionospheric, dies ~10&times; sooner (two-phase decay)<br>
-            <span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east<br>
+            <span class="rc-legend-pop" data-pop="ionsH" role="button" tabindex="0" aria-pressed="true" title="Show / hide H⁺ particles"><span class="rc-dot" style="background:#ffa040"></span>H&#8314; ions &mdash; drift west, true-rate bounce</span><br>
+            <span class="rc-legend-pop" data-pop="ionsO" role="button" tabindex="0" aria-pressed="true" title="Show / hide O⁺ particles"><span class="rc-dot" style="background:#94ff57"></span>O&#8314; ions &mdash; ionospheric, dies ~10&times; sooner (two-phase decay)</span><br>
+            <span class="rc-legend-pop" data-pop="electrons" role="button" tabindex="0" aria-pressed="true" title="Show / hide electron particles"><span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;opposite drifts = one westward current</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;tint = energy: pale ≈250 keV laps deep ≈20 keV (dispersion)</span><br>
             <span class="rc-dot" style="background:#fff3a0"></span>Injection &mdash; ion&ndash;e&#8315; pairs born together, split by drift: ions &rarr; dusk &middot; e&#8315; &rarr; dawn<br>
@@ -1002,6 +1008,33 @@ if (globe) {
     // Restore with the flight (instant under prefers-reduced-motion) — the
     // glide from Earth re-orients returning users in the larger scene.
     if (savedView && savedView !== 'earth' && globe.setView(savedView)) mark(savedView);
+}
+
+// ── Interactive legend: the three species rows toggle their populations ─────
+// Colour-coordinated with the 3D particles + analytics dots; choice persists.
+if (globe) {
+    const POP_LS = 'pp_rc_pop';
+    let hidden = {};
+    try { hidden = JSON.parse(localStorage.getItem(POP_LS) || '{}') || {}; } catch { hidden = {}; }
+    document.querySelectorAll('.rc-legend-pop').forEach(el => {
+        const key = el.dataset.pop;
+        const apply = (on) => {
+            el.classList.toggle('rc-off', !on);
+            el.setAttribute('aria-pressed', on ? 'true' : 'false');
+            globe.setPopulationVisible(key, on);
+        };
+        apply(!hidden[key]);                         // restore persisted state
+        const toggle = () => {
+            const on = el.classList.contains('rc-off');   // currently hidden → show
+            apply(on);
+            hidden[key] = !on;
+            try { localStorage.setItem(POP_LS, JSON.stringify(hidden)); } catch { /* quota */ }
+        };
+        el.addEventListener('click', toggle);
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+    });
 }
 
 // ── Particle inspector (Phase 1 — RING_CURRENT_ANALYTICS_PLAN.md) ──────────
