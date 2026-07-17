@@ -33,8 +33,13 @@
 // the JSON response (if any) that reports age_seconds; pipelines without one
 // fall back to "request completed" as the freshness proxy.
 const PIPELINES = [
-    { key: 'noaa-kp',      label: 'NOAA Kp (1-min)',      group: 'Space Weather', url: '/api/noaa/kp-1m',                  freshKey: 'age_min',     freshUnit: 'min', target: 2 },
-    { key: 'noaa-dst',     label: 'NOAA Dst',             group: 'Space Weather', url: '/api/noaa/dst',                    freshKey: 'age_min',     freshUnit: 'min', target: 15 },
+    // Targets are warn-at-1×, stale-at-2× (see probeOnce). They must absorb
+    // the full publication chain — NOAA's own 2-5 min lag + edge cache —
+    // not just the nominal product cadence. target:2 on the 1-min feeds
+    // pinned these rows "stale" at their healthy steady state (5-8 min);
+    // Dst is an HOURLY product, so target:15 flagged it around the clock.
+    { key: 'noaa-kp',      label: 'NOAA Kp (1-min)',      group: 'Space Weather', url: '/api/noaa/kp-1m',                  freshKey: 'age_min',     freshUnit: 'min', target: 10 },
+    { key: 'noaa-dst',     label: 'NOAA Dst',             group: 'Space Weather', url: '/api/noaa/dst',                    freshKey: 'age_min',     freshUnit: 'min', target: 90 },
     { key: 'noaa-xray',    label: 'GOES X-ray',           group: 'Space Weather', url: '/api/noaa/xray',                   freshKey: null,          target: 10 },
     { key: 'noaa-aurora',  label: 'OVATION Aurora',       group: 'Space Weather', url: '/api/noaa/aurora',                 freshKey: null,          target: 15 },
     { key: 'noaa-flares',  label: 'X-ray Flares (7d)',    group: 'Space Weather', url: '/api/noaa/flares',                 freshKey: null,          target: 60 },
@@ -44,14 +49,16 @@ const PIPELINES = [
     { key: 'noaa-electrons', label: 'GOES Electrons',     group: 'Space Weather', url: '/api/noaa/electrons',              freshKey: null,          target: 10 },
     { key: 'noaa-radio',   label: 'F10.7 Radio Flux',     group: 'Space Weather', url: '/api/noaa/radio-flux',             freshKey: null,          target: 1440 },
 
-    { key: 'donki-cme',    label: 'DONKI CME',            group: 'NASA DONKI',    url: '/api/donki/cme',                   freshKey: null,          target: 60 },
-    { key: 'donki-flares', label: 'DONKI Flares',         group: 'NASA DONKI',    url: '/api/donki/flares',                freshKey: null,          target: 60 },
-    { key: 'donki-gst',    label: 'DONKI Geo Storms',     group: 'NASA DONKI',    url: '/api/donki/gst',                   freshKey: null,          target: 60 },
-    { key: 'donki-sep',    label: 'DONKI SEP',            group: 'NASA DONKI',    url: '/api/donki/sep',                   freshKey: null,          target: 60 },
-    { key: 'donki-notif',  label: 'DONKI Notifications',  group: 'NASA DONKI',    url: '/api/donki/notifications',         freshKey: null,          target: 60 },
+    // timeoutMs 16000 on DONKI: api.nasa.gov takes 8-15 s on a cold cache —
+    // the global 8 s probe abort reported healthy-but-slow rows as timeouts.
+    { key: 'donki-cme',    label: 'DONKI CME',            group: 'NASA DONKI',    url: '/api/donki/cme',                   freshKey: null,          target: 60, timeoutMs: 16_000 },
+    { key: 'donki-flares', label: 'DONKI Flares',         group: 'NASA DONKI',    url: '/api/donki/flares',                freshKey: null,          target: 60, timeoutMs: 16_000 },
+    { key: 'donki-gst',    label: 'DONKI Geo Storms',     group: 'NASA DONKI',    url: '/api/donki/gst',                   freshKey: null,          target: 60, timeoutMs: 16_000 },
+    { key: 'donki-sep',    label: 'DONKI SEP',            group: 'NASA DONKI',    url: '/api/donki/sep',                   freshKey: null,          target: 60, timeoutMs: 16_000 },
+    { key: 'donki-notif',  label: 'DONKI Notifications',  group: 'NASA DONKI',    url: '/api/donki/notifications',         freshKey: null,          target: 60, timeoutMs: 16_000 },
 
     { key: 'celestrak',    label: 'CelesTrak TLE',        group: 'Orbital',       url: '/api/celestrak/tle?group=stations', freshKey: null,         target: 240 },
-    { key: 'solar-wind',   label: 'DSCOVR Solar Wind',    group: 'Space Weather', url: '/api/solar-wind/latest',           freshKey: 'age_min',     freshUnit: 'min', target: 2 },
+    { key: 'solar-wind',   label: 'DSCOVR Solar Wind',    group: 'Space Weather', url: '/api/solar-wind/latest',           freshKey: 'age_min',     freshUnit: 'min', target: 10 },
     { key: 'launches',     label: 'Launch Library 2',     group: 'Launches',      url: '/api/launches/upcoming?limit=10',  freshKey: null,          target: 120 },
     { key: 'weather-grid', label: 'Open-Meteo Grid',      group: 'Weather',       url: '/api/weather/grid',                freshKey: 'age_seconds', freshUnit: 's', target: 3600 },
 ];
@@ -103,7 +110,7 @@ async function probeOnce(pipe) {
         const res = await fetch(pipe.url, {
             method: 'GET',
             headers: { 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+            signal: AbortSignal.timeout(pipe.timeoutMs ?? PROBE_TIMEOUT_MS),
             cache: 'no-store',   // bypass SW / browser cache so we see the CDN's view
         });
         row.latency_ms  = Math.round(performance.now() - started);
