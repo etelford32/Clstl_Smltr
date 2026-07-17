@@ -2963,6 +2963,8 @@ export class RingCurrentGlobe {
         let tMark = performance.now();
         this._updateGeometry(simNow);
         this._skin.update(this._tView);   // aurora animation clock
+        // Ring-plasma lens ULF shimmer (wall clock — a live cosmetic ripple).
+        if (this._heatLayers) for (const m of this._heatLayers) m.material.uniforms.uTime.value = this._tView;
         // All trapped-particle motion + lifecycle is in the vertex shader —
         // the per-frame CPU cost of 4 700 particles is two uniform writes
         // per material (drift/lifecycle on SIM hours; bounce on wall — the
@@ -3062,6 +3064,11 @@ export class RingCurrentGlobe {
                 this._resize();
                 for (const P of Object.values(this._popPoints ?? {})) {
                     for (const e of P.echoes) e.points.visible = false;
+                }
+                // Volumetric plasma lens → single equatorial sheet (cut overdraw).
+                if (this._heatLayers) {
+                    const mid = this._heatLayers.length >> 1;
+                    this._heatLayers.forEach((m, i) => { if (i !== mid) m.visible = false; });
                 }
             } else {
                 this._windSheet.visible = false;
@@ -3296,24 +3303,21 @@ export class RingCurrentGlobe {
         this._heatTex.magFilter = THREE.LinearFilter;
         this._heatTex.needsUpdate = true;
 
+        // Volumetric ring-plasma LENS. A single flat equatorial sheet read as
+        // a flat ellipse; instead stack several magnetic-latitude sheets so the
+        // plasma has vertical extent and shows real parallax when the globe is
+        // rotated — a 3D torus of pressure, not a disc. Each sheet fades and
+        // narrows with |latitude| (equatorial mirroring + field-line
+        // convergence), so the stack's cross-section is an almond/lens, and a
+        // faint azimuthal ULF shimmer keeps it alive. Every sheet samples the
+        // ONE baked (L,MLT) colour texture. NormalBlending (not additive) so
+        // the stack composites cleanly and the bloom pass can't blow it out.
         const geo = new THREE.RingGeometry(t.cfg.lMin, t.cfg.lMax, 192, 1);
-        const mat = new THREE.ShaderMaterial({
-            uniforms: {
-                uMap: { value: this._heatTex },
-                uOpacity: { value: 0.52 },
-                uLMin: { value: t.cfg.lMin },
-                uLMax: { value: t.cfg.lMax },
-            },
-            // A translucent contour sheet (like the GEMSIS P⊥ plot), NOT an
-            // additive glow — additive + the bloom pass blows the disc out.
-            transparent: true, depthWrite: false, depthTest: true,
-            side: THREE.DoubleSide, blending: THREE.NormalBlending,
-            vertexShader: `
-                varying vec2 vXY;
-                void main() { vXY = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-            fragmentShader: `
+        const heatVert = `varying vec2 vXY;
+                void main() { vXY = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+        const heatFrag = `
                 precision highp float;
-                uniform sampler2D uMap; uniform float uOpacity, uLMin, uLMax;
+                uniform sampler2D uMap; uniform float uOpacity, uLMin, uLMax, uLatW, uTime, uShim;
                 varying vec2 vXY;
                 const float PI = 3.141592653589793;
                 void main() {
@@ -3324,14 +3328,42 @@ export class RingCurrentGlobe {
                     float mlt = 12.0 - atan(-vXY.y, vXY.x) * 12.0 / PI;
                     vec4 c = texture2D(uMap, vec2(fract(mlt / 24.0), lf));
                     float edge = smoothstep(0.0, 0.05, lf) * (1.0 - smoothstep(0.93, 1.0, lf));
-                    gl_FragColor = vec4(c.rgb, c.a * uOpacity * edge);
-                }`,
-        });
-        this._heatMesh = new THREE.Mesh(geo, mat);
-        this._heatMesh.rotation.x = -Math.PI / 2;   // XY ring → equatorial (XZ) plane
-        this._heatMesh.renderOrder = -1;            // under the particles/rings
-        this._heatMesh.visible = this._heatEnabled;
-        this._magGroup.add(this._heatMesh);
+                    // Faint azimuthal ULF shimmer — plasma waves, NOT bulk drift
+                    // (a rigid spin would drag the fixed dusk bulge off the Sun).
+                    float shim = 1.0 + uShim * sin(mlt * 0.7 + uTime * 1.4 + lf * 4.0);
+                    gl_FragColor = vec4(c.rgb * shim, c.a * uOpacity * uLatW * edge);
+                }`;
+        const LAYERS = 5;
+        const midL = 0.5 * (t.cfg.lMin + t.cfg.lMax);
+        const LAT_MAX = 0.42, LAT_SIG = 0.26;   // ±24° span, gaussian latitude weight
+        this._heatLayers = [];
+        this._heatGroup = new THREE.Group();
+        for (let i = 0; i < LAYERS; i++) {
+            const f = LAYERS === 1 ? 0 : (i / (LAYERS - 1)) * 2 - 1;   // −1..1
+            const lat = f * LAT_MAX;
+            const w = Math.exp(-(lat * lat) / (2 * LAT_SIG * LAT_SIG));
+            const mat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uMap: { value: this._heatTex },
+                    uOpacity: { value: 0.30 },
+                    uLMin: { value: t.cfg.lMin }, uLMax: { value: t.cfg.lMax },
+                    uLatW: { value: w }, uTime: { value: 0 }, uShim: { value: 0.12 },
+                },
+                transparent: true, depthWrite: false, depthTest: true,
+                side: THREE.DoubleSide, blending: THREE.NormalBlending,
+                vertexShader: heatVert, fragmentShader: heatFrag,
+            });
+            const m = new THREE.Mesh(geo, mat);
+            m.rotation.x = -Math.PI / 2;                  // XY ring → equatorial (XZ) plane
+            m.position.y = Math.sin(lat) * midL * 0.55;   // stack along the dipole axis
+            const rs = 1 - 0.09 * Math.abs(f);            // converge inward with |lat|
+            m.scale.set(rs, rs, 1);
+            m.renderOrder = -1;                           // under the particles/rings
+            this._heatGroup.add(m);
+            this._heatLayers.push(m);
+        }
+        this._heatGroup.visible = this._heatEnabled;
+        this._magGroup.add(this._heatGroup);
 
         // Companion MERIDIAN slice (noon–midnight plane) — the GEMSIS P⊥
         // cross-section. Shares the equatorial colour texture: each point maps
@@ -3463,7 +3495,7 @@ export class RingCurrentGlobe {
 
     /** Re-bake the data texture from the transport's current (L,MLT) field. */
     _updateRcHeatmap() {
-        if (!this._heatMesh) return;
+        if (!this._heatGroup) return;
         const field = this._heatQuantity === 'flux'
             ? this._transport.equatorialMap(this._heatSpecies, 'content')
             : this._transport.pressureMap(this._heatSpecies);
@@ -3507,13 +3539,13 @@ export class RingCurrentGlobe {
         }
         if (simStep > 0) this._transport.step(simStep);
         this._heatWallAcc = 0; this._heatSimAcc = 0;
-        if (this._heatEnabled && this._heatMesh) this._updateRcHeatmap();
+        if (this._heatEnabled && this._heatGroup) this._updateRcHeatmap();
         if (this._enaEnabled && this._enaPanel) this._updateEnaImager();
     }
 
     setHeatmapEnabled(on) {
         this._heatEnabled = !!on;
-        if (this._heatMesh) this._heatMesh.visible = this._heatEnabled;
+        if (this._heatGroup) this._heatGroup.visible = this._heatEnabled;
         if (this._meridMesh) this._meridMesh.visible = this._heatEnabled && this._meridEnabled;
         this._heatPanel?.classList.toggle('rc-off', !this._heatEnabled);
     }
