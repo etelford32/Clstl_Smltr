@@ -260,6 +260,12 @@ body {
 }
 .rc-skill { font-size:.72rem; color:#8b94ad; }
 .rc-skill b { color:#e8edf7; font-variant-numeric:tabular-nums; }
+.rc-phase { border:1px solid rgba(255,255,255,.14); border-radius:5px; padding:1.5px 8px;
+    font-weight:700; letter-spacing:.03em; font-variant-numeric:tabular-nums; cursor:help; }
+.rc-phase-quiet    { color:#8b94ad; }
+.rc-phase-initial  { color:#7fb4ff; border-color:rgba(127,180,255,.4); background:rgba(127,180,255,.08); }
+.rc-phase-main     { color:#ff7d66; border-color:rgba(255,125,102,.45); background:rgba(255,125,102,.1); }
+.rc-phase-recovery { color:#7fe6c3; border-color:rgba(127,230,195,.4); background:rgba(127,230,195,.08); }
 #rc-chart { width:100%; height:240px; display:block; }
 
 .rc-alert {
@@ -769,6 +775,7 @@ body {
         <div class="rc-chart-head">
             <h2 id="rc-chart-title">Dst &mdash; model vs observed, 24 h + forecast</h2>
             <span class="rc-skill">model skill: RMSE <b id="rc-rmse">&mdash;</b> &middot; bias <b id="rc-bias">&mdash;</b> &middot; r <b id="rc-corr" title="Pearson correlation, model vs Kyoto over the plotted window">&mdash;</b></span>
+            <span class="rc-skill rc-phase" id="rc-phase" hidden title="Storm phase auto-detected from the model series; the energy ledger integrates the Dessler–Parker–Sckopke relation over the detected storm.">&mdash;</span>
             <button class="rc-replay-btn" id="rc-replay">&#9654; Replay Gannon G5 (May 2024)</button>
             <span class="rc-skill"><span class="rc-dot" style="background:#59e0d8"></span>observed
                 <span class="rc-dot" style="background:#ff9a3d;margin-left:10px"></span>model
@@ -810,6 +817,7 @@ import {
     noaaRScale, noaaSScale, noaaGScale, geoChargingRisk,
 } from './js/ring-current-model.js?v=20260711';
 import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260712';
+import { detectStormPhase, formatStormPhase } from './js/ring-current-storm-phase.js';
 import { loadUserLocation } from './js/user-location.js';
 import { INTERVALS, NOAA } from './js/config.js';
 
@@ -1735,6 +1743,19 @@ function renderHud(s) {
             }
             return sxx > 0 && syy > 0 ? (sxy / Math.sqrt(sxx * syy)).toFixed(2) : '—';
         })();
+        // Storm-phase badge + DPS energy ledger (pure detector, node-tested).
+        const ph = detectStormPhase(s.series?.model ?? [], Date.now());
+        const phEl = $('rc-phase');
+        if (ph) {
+            const led = ph.ledger && ph.phase !== 'quiet'
+                ? ` · W ${(ph.ledger.wNowJ / 1e14).toFixed(1)}/${(ph.ledger.wPeakJ / 1e14).toFixed(1)}×10¹⁴ J`
+                : '';
+            phEl.textContent = (formatStormPhase(ph) ?? '—') + led;
+            phEl.className = `rc-skill rc-phase rc-phase-${ph.phase}`;
+            phEl.hidden = false;
+        } else {
+            phEl.hidden = true;
+        }
     }
 
     // Predictive threshold alert — the 30–90 min lead users ask for.
