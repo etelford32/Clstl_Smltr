@@ -192,6 +192,10 @@ body {
 .rc-dock-lab .rc-dot { width:6px; height:6px; margin-right:3px; }
 .rc-dock-lab b { color:#cdd5e4; font-weight:650; }
 .rc-dock canvas { display:block; width:100%; height:44px; margin-top:2px; }
+/* Spectroscopy: the energy spectrum gets a keV axis, the spectrogram a bit
+   more height for its 16 energy rows. */
+#rc-dock-spec { height:56px; }
+#rc-dock-spectro { height:52px; border-radius:3px; }
 .rc-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:baseline; }
 /* Interactive legend rows: click a species to show/hide its particles. */
 .rc-legend-pop { cursor:pointer; border-radius:4px; padding:1px 3px; margin:0 -3px; transition:opacity .12s, background .12s; outline:none; }
@@ -490,6 +494,10 @@ body {
                     <span><span class="rc-dot" style="background:#59baff"></span>e&#8315;</span>
                 </div>
                 <canvas id="rc-dock-spec" title="Energy spectrum of the drawn particles, 20–250 keV log bins, by species"></canvas>
+                <div class="rc-dock-lab"><b>spectrogram</b> keV &times; time &middot; flux
+                    <span style="color:#6a7285">low&rarr;high &uarr; &middot; now &rarr;</span>
+                </div>
+                <canvas id="rc-dock-spectro" title="Energy-vs-time waterfall: each column is one sample, rows are 20–250 keV log bins, colour = flux. Watch the spectrum harden during injection and soften through recovery."></canvas>
                 <div class="rc-dock-lab"><b>L shell</b> R&#7431; &middot;
                     <span><span class="rc-dot" style="background:#59e0d8"></span>drawn</span>
                     <span><span class="rc-dot" style="background:#ffd27a"></span>model (Dst*)</span>
@@ -1122,6 +1130,12 @@ if (globe) {
     const samples = [];                    // rolling {dSimH, ena, precip}, ≤40
     let lastSimH = null;
     const SPECIES_COLOR = { ionsH: '#ffa040', ionsO: '#94ff57', ionsHe: '#b48cff', electrons: '#59baff' };
+    // Spectrogram history: a rolling waterfall of the TOTAL spectrum (all
+    // species) per 1 Hz sample — column = time, row = energy bin, colour =
+    // flux. Shows the spectrum harden during injection, soften in recovery.
+    const SPECT_COLS = 96;
+    const spectro = [];        // ring of Float32Array(NB), newest last
+    let spectMax = 0;          // eased normalisation top (brightening stays real)
 
     function prepChart(id) {
         const cv = $(id);
@@ -1150,11 +1164,78 @@ if (globe) {
         }
         g.stroke();
     }
+    // Filled + outlined step curve within a plot band [top, top+ph], baseline
+    // at `base` — area fill reads as a spectrum, the crisp line keeps species
+    // separable where they overlap.
+    function specCurve(g, w, base, ph, bins, max, color) {
+        if (!(max > 0)) return;
+        const bw = w / bins.length;
+        g.beginPath(); g.moveTo(0, base);
+        for (let b = 0; b < bins.length; b++) {
+            const y = base - (bins[b] / max) * ph;
+            g.lineTo(b * bw, y); g.lineTo((b + 1) * bw, y);
+        }
+        g.lineTo(w, base); g.closePath();
+        g.globalAlpha = 0.13; g.fillStyle = color; g.fill(); g.globalAlpha = 1;
+        g.strokeStyle = color; g.lineWidth = 1.4;
+        g.beginPath();
+        for (let b = 0; b < bins.length; b++) {
+            const y = base - (bins[b] / max) * ph;
+            if (b === 0) g.moveTo(0, y);
+            g.lineTo(b * bw, y); g.lineTo((b + 1) * bw, y);
+        }
+        g.stroke();
+    }
+    const E_TICKS = [20, 50, 100, 250];
     function drawSpec() {
         const { g, w, h } = prepChart('rc-dock-spec');
+        const AX = 10, top = 2, base = h - AX, ph = base - top;
+        const { min, max: emax } = S.DOMAINS.E_KEV;
+        const lg = Math.log(emax / min);
+        // Log-keV gridlines + tick labels.
+        g.font = '7px system-ui'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+        for (const e of E_TICKS) {
+            const x = (Math.log(e / min) / lg) * w;
+            g.strokeStyle = 'rgba(255,255,255,.07)'; g.lineWidth = 1;
+            g.beginPath(); g.moveTo(x, top); g.lineTo(x, base); g.stroke();
+            g.fillStyle = '#6a7285';
+            g.fillText(String(e), Math.max(9, Math.min(w - 10, x)), h - 1.5);
+        }
         const max = Math.max(1, ...spec.ionsH, ...spec.ionsO, ...spec.ionsHe, ...spec.electrons);
-        for (const key of ['ionsH', 'ionsO', 'ionsHe', 'electrons']) {
-            stepLine(g, w, h, spec[key], max, SPECIES_COLOR[key]);
+        // Ions drawn last so their crisp lines sit above the electron fill.
+        for (const key of ['electrons', 'ionsHe', 'ionsO', 'ionsH']) {
+            specCurve(g, w, base, ph, spec[key], max, SPECIES_COLOR[key]);
+        }
+    }
+    // Flux colour ramp for the spectrogram (dark → magenta → orange → pale).
+    function spectroColor(t) {
+        const S2 = [[0, 12, 6, 34], [0.35, 122, 24, 120], [0.60, 226, 82, 42],
+                    [0.82, 255, 182, 46], [1, 255, 240, 196]];
+        const x = Math.max(0, Math.min(1, t));
+        for (let i = 1; i < S2.length; i++) {
+            if (x <= S2[i][0]) {
+                const a = S2[i - 1], b = S2[i], f = (x - a[0]) / ((b[0] - a[0]) || 1);
+                return [a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f];
+            }
+        }
+        return [S2[4][1], S2[4][2], S2[4][3]];
+    }
+    function drawSpectro() {
+        const { g, w, h } = prepChart('rc-dock-spectro');
+        if (!spectro.length) return;
+        let mx = 0;
+        for (const c of spectro) for (let b = 0; b < NB; b++) if (c[b] > mx) mx = c[b];
+        spectMax = spectMax ? spectMax + (mx - spectMax) * 0.15 : mx;   // eased top
+        const inv = spectMax > 0 ? 1 / spectMax : 0;
+        const colW = w / SPECT_COLS, rowH = h / NB, off = SPECT_COLS - spectro.length;
+        for (let c = 0; c < spectro.length; c++) {
+            const col = spectro[c], x = (off + c) * colW;
+            for (let b = 0; b < NB; b++) {
+                let v = col[b] * inv; if (v <= 0.02) continue; if (v > 1) v = 1;
+                const [r, gg, bb] = spectroColor(Math.pow(v, 0.6));   // gamma: low flux visible
+                g.fillStyle = `rgb(${r | 0},${gg | 0},${bb | 0})`;
+                g.fillRect(x, h - (b + 1) * rowH, Math.ceil(colW), Math.ceil(rowH));  // low-E bottom
+            }
         }
     }
     function drawLProf() {
@@ -1209,6 +1290,11 @@ if (globe) {
         for (const { key, pop, visFrac } of snap.populations) {
             if (spec[key]) visN[key] = S.energySpectrum(pop, visFrac, spec[key]);
         }
+        // Roll the total-spectrum column into the spectrogram history.
+        const col = new Float32Array(NB);
+        for (let b = 0; b < NB; b++) col[b] = spec.ionsH[b] + spec.ionsO[b] + spec.ionsHe[b] + spec.electrons[b];
+        spectro.push(col);
+        if (spectro.length > SPECT_COLS) spectro.shift();
         if (byKey.ionsH) S.lDistribution(byKey.ionsH.pop, byKey.ionsH.visFrac, lBins);
         S.expectedLProfile(snap.dstStar, lExp);
         if (!lifeDone && byKey.ionsH && byKey.ionsO) {
@@ -1243,6 +1329,7 @@ if (globe) {
             `recycles <b>${rate != null ? Math.round(rate).toLocaleString('en-US') : '—'}</b>/sim-h` +
             `${win.e + win.p > 0 ? ` · ENA <b>${Math.round(100 * win.e / (win.e + win.p))}%</b> · precip <b>${Math.round(100 * win.p / (win.e + win.p))}%</b>` : ''}`;
         drawSpec();
+        drawSpectro();
         drawLProf();
         if (lifeDone) drawLife();
         drawDeaths();
