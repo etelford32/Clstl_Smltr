@@ -515,6 +515,7 @@ export function oxygenFraction(dstStar) {
 export const SPECIES_MASS_KG = Object.freeze({
     ion:      1.67262192369e-27,   // proton
     proton:   1.67262192369e-27,
+    helium:   6.6465e-27,          // He⁺ (4.0026 u) — bounce √4 = 2× slower than H⁺
     oxygen:   2.6567e-26,          // O⁺ (15.999 u)
     electron: 9.1093837015e-31,
 });
