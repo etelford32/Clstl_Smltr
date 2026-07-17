@@ -78,9 +78,15 @@ export default async function handler(req) {
         ? _combine(vortex, teleco)
         : _partial(vortex, teleco);
 
+    // Freshness = the STALEST input driving the outlook. Both upstreams
+    // report age_min; the status probe reads it (status.html _probeProxy),
+    // so this row stops showing "no freshness info".
+    const inputAges = [vortex?.age_min, teleco?.age_min].filter(Number.isFinite);
+
     return jsonOk({
         source: 'Parkers Physics surface-outlook · vortex × AO/NAO combiner',
         as_of:  new Date().toISOString(),
+        age_min: inputAges.length ? Math.max(...inputAges) : null,
         degraded: !haveBoth,
         degraded_reason: haveBoth ? null
             : !vortex ? 'polar-vortex unavailable'
