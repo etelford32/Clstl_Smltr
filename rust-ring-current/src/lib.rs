@@ -138,3 +138,19 @@ pub extern "C" fn rc_ena_ptr() -> *const f32 {
     s.fill_ena();
     s.out_map.as_ptr()
 }
+
+/// EMIC proton-precipitation rate map (content/s) — the proton-aurora source.
+#[no_mangle]
+pub extern "C" fn rc_precip_ptr() -> *const f32 {
+    let s = sim();
+    s.fill_precip();
+    s.out_map.as_ptr()
+}
+
+/// Proton anisotropy map A = ΣMH/ΣC over EMIC-resonant channels.
+#[no_mangle]
+pub extern "C" fn rc_anisotropy_ptr() -> *const f32 {
+    let s = sim();
+    s.fill_anisotropy();
+    s.out_map.as_ptr()
+}

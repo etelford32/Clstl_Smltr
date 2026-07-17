@@ -144,6 +144,34 @@ const DEFAULTS = Object.freeze({
     // bar auto-scales to the live peak regardless. Set with sourceNorm in
     // tests/ring-current-transport.mjs.
     pressCal: 0.04,
+    // ── Pitch-angle / EMIC parameters (anisotropy-moment reduced model) ──────
+    // Injected plasma-sheet protons arrive perpendicular-anisotropic (A ≈ 0.6,
+    // T⊥/T∥ − 1); background scattering isotropizes with τ_PA; EMIC waves fire
+    // where the LOCAL anisotropy exceeds A_crit inside the plasmapause-overlap
+    // band, draining protons ≥ emicEminKev with τ_EMIC and relaxing A back
+    // toward A_crit with τ_EMIC_A (the self-limiting feedback). Storm-time and
+    // dusk localization are EMERGENT: only a storm's fast convection delivers
+    // still-anisotropic protons to the band before τ_PA erases the memory.
+    aInject:     0.6,
+    tauPaH:      12,
+    emicTauH:    2.5,
+    emicTauAH:   1.0,
+    emicACrit:   0.25,
+    emicAScale:  0.35,
+    emicEminKev: 50,
+    emicBandIn:  0.6,    // band = [Lpp − emicBandIn, Lpp + emicBandOut] all MLT…
+    emicBandOut: 0.4,
+    emicPlumeOut: 2.0,   // …extended to Lpp + emicPlumeOut in the dusk PLUME
+    emicPlumeMlt: [12, 20],   // sector (storm plumes wrap sunward through dusk)
+    emicPlumeLMax: 6.0,  // plume is INNER-magnetosphere cold plasma: never
+                         // reaches the plasma-sheet injection boundary (L≈6.9)
+                         // — without this cap quiet-time EMIC drains the
+                         // source row itself, which is an artifact.
+    // Wave growth needs hot-proton pressure (β), not just anisotropy: the
+    // drain scales with min(1, P⊥H/emicPRefNPa). A thin quiet ring cannot
+    // excite the waves a storm ring can — the storm/quiet contrast is
+    // carried by this factor together with anisotropy delivery.
+    emicPRefNPa: 2,
 });
 
 export class RingCurrentTransport {
@@ -173,6 +201,13 @@ export class RingCurrentTransport {
             for (let k = 0; k < this.nE; k++) perE.push(new Float64Array(c.nL * c.nMlt));
             this.C.push(perE);
         }
+        // Proton anisotropy tracer MH[k] = C·A (anisotropy-weighted content,
+        // hydrogen only — the species whose anisotropy drives H⁺-band EMIC
+        // growth; O⁺/He⁺ anisotropy has no consumer, so it is not carried).
+        // Advected/diffused with the SAME conservative operators as C, so
+        // A = MH/C obeys the max principle and stays bounded.
+        this.MH = [];
+        for (let k = 0; k < this.nE; k++) this.MH.push(new Float64Array(c.nL * c.nMlt));
         // Scratch for the diffusion pass (one L-column).
         this._col = new Float64Array(c.nL);
         this._flux = new Float64Array(c.nL + 1);
@@ -192,6 +227,7 @@ export class RingCurrentTransport {
     /** Reset to an empty magnetosphere. */
     reset() {
         for (const perE of this.C) for (const arr of perE) arr.fill(0);
+        for (const arr of this.MH) arr.fill(0);
         this.tSec = 0;
     }
 
@@ -283,97 +319,144 @@ export class RingCurrentTransport {
      * inflow supplied only by _source.
      */
     _advect(dt) {
-        const { nL, nMlt, dL, dAz } = this;
         for (let k = 0; k < this.nE; k++) {
             const vLf = this._vLf[k], vAf = this._vAf[k];
             for (let s = 0; s < this.nS; s++) {
-                const C = this.C[s][k];
-                const out = new Float64Array(C.length);
-                // Radial faces f=0..nL for each MLT column.
-                for (let j = 0; j < nMlt; j++) {
-                    for (let f = 0; f <= nL; f++) {
-                        const v = vLf[f * nMlt + j];
-                        if (v === 0) continue;
-                        const cF = v * dt / dL;
-                        // Donor: outward(v>0) → inner cell f−1; inward → cell f.
-                        const donor = v > 0 ? f - 1 : f;
-                        if (donor < 0 || donor >= nL) continue;    // wall, no source here
-                        const flux = cF * C[this.idx(donor, j)];
-                        if (f - 1 >= 0) out[this.idx(f - 1, j)] -= flux;
-                        if (f < nL)     out[this.idx(f, j)]     += flux;
-                    }
-                }
-                // Azimuthal faces j (between cells j−1 and j), periodic.
-                for (let i = 0; i < nL; i++) {
-                    for (let j = 0; j < nMlt; j++) {
-                        const v = vAf[i * nMlt + j];
-                        if (v === 0) continue;
-                        const cA = v * dt / dAz;
-                        const jm = (j - 1 + nMlt) % nMlt;
-                        const donor = v > 0 ? jm : j;
-                        const flux = cA * C[this.idx(i, donor)];
-                        out[this.idx(i, jm)] -= flux;
-                        out[this.idx(i, j)]  += flux;
-                    }
-                }
-                for (let n = 0; n < C.length; n++) {
-                    C[n] += out[n];
-                    if (C[n] < 0) C[n] = 0;
-                }
+                this._advectField(this.C[s][k], vLf, vAf, dt);
             }
+            // The proton anisotropy tracer rides the SAME proton velocities —
+            // A = MH/C is a passively advected quantity (donor-cell keeps it
+            // within the max principle).
+            this._advectField(this.MH[k], vLf, vAf, dt);
+        }
+    }
+
+    /** One donor-cell pass over a single field (content or tracer). */
+    _advectField(C, vLf, vAf, dt) {
+        const { nL, nMlt, dL, dAz } = this;
+        const out = new Float64Array(C.length);
+        // Radial faces f=0..nL for each MLT column.
+        for (let j = 0; j < nMlt; j++) {
+            for (let f = 0; f <= nL; f++) {
+                const v = vLf[f * nMlt + j];
+                if (v === 0) continue;
+                const cF = v * dt / dL;
+                // Donor: outward(v>0) → inner cell f−1; inward → cell f.
+                const donor = v > 0 ? f - 1 : f;
+                if (donor < 0 || donor >= nL) continue;    // wall, no source here
+                const flux = cF * C[this.idx(donor, j)];
+                if (f - 1 >= 0) out[this.idx(f - 1, j)] -= flux;
+                if (f < nL)     out[this.idx(f, j)]     += flux;
+            }
+        }
+        // Azimuthal faces j (between cells j−1 and j), periodic.
+        for (let i = 0; i < nL; i++) {
+            for (let j = 0; j < nMlt; j++) {
+                const v = vAf[i * nMlt + j];
+                if (v === 0) continue;
+                const cA = v * dt / dAz;
+                const jm = (j - 1 + nMlt) % nMlt;
+                const donor = v > 0 ? jm : j;
+                const flux = cA * C[this.idx(i, donor)];
+                out[this.idx(i, jm)] -= flux;
+                out[this.idx(i, j)]  += flux;
+            }
+        }
+        for (let n = 0; n < C.length; n++) {
+            C[n] += out[n];
+            if (C[n] < 0) C[n] = 0;
         }
     }
 
     // ── Radial diffusion: conservative explicit FV on each MLT column ─────────
     _diffuse(dt) {
+        for (let s = 0; s < this.nS; s++) {
+            for (let k = 0; k < this.nE; k++) this._diffuseField(this.C[s][k], dt);
+        }
+        for (let k = 0; k < this.nE; k++) this._diffuseField(this.MH[k], dt);
+    }
+
+    /** One conservative explicit-FV radial-diffusion pass over a field. */
+    _diffuseField(C, dt) {
         const { nL, nMlt, dL } = this;
         const D0 = this.cfg.dllPerDay0 / 86400;   // per second
         const n  = this.cfg.dllPow;
-        // Face diffusion coefficients D_LL(L_face) for faces 1..nL-1.
-        for (let s = 0; s < this.nS; s++) {
-            for (let k = 0; k < this.nE; k++) {
-                const C = this.C[s][k];
-                for (let j = 0; j < nMlt; j++) {
-                    for (let i = 0; i < nL; i++) this._col[i] = C[this.idx(i, j)];
-                    // Fluxes at interior faces: F = D·(f_{i+1}−f_i)/dL. No-flux
-                    // at i=−1/2 and i=nL−1/2 (walls) → conserves Σ over column.
-                    this._flux[0] = 0; this._flux[nL] = 0;
-                    for (let f = 1; f < nL; f++) {
-                        const Lf = this.cfg.lMin + f * dL;
-                        const D = D0 * Math.pow(Lf / 6.6, n);
-                        this._flux[f] = D * (this._col[f] - this._col[f - 1]) / dL;
-                    }
-                    for (let i = 0; i < nL; i++) {
-                        C[this.idx(i, j)] = this._col[i] +
-                            dt * (this._flux[i + 1] - this._flux[i]) / dL;
-                        if (C[this.idx(i, j)] < 0) C[this.idx(i, j)] = 0;
-                    }
-                }
+        for (let j = 0; j < nMlt; j++) {
+            for (let i = 0; i < nL; i++) this._col[i] = C[this.idx(i, j)];
+            // Fluxes at interior faces: F = D·(f_{i+1}−f_i)/dL. No-flux
+            // at i=−1/2 and i=nL−1/2 (walls) → conserves Σ over column.
+            this._flux[0] = 0; this._flux[nL] = 0;
+            for (let f = 1; f < nL; f++) {
+                const Lf = this.cfg.lMin + f * dL;
+                const D = D0 * Math.pow(Lf / 6.6, n);
+                this._flux[f] = D * (this._col[f] - this._col[f - 1]) / dL;
+            }
+            for (let i = 0; i < nL; i++) {
+                C[this.idx(i, j)] = this._col[i] +
+                    dt * (this._flux[i + 1] - this._flux[i]) / dL;
+                if (C[this.idx(i, j)] < 0) C[this.idx(i, j)] = 0;
             }
         }
     }
 
     // ── Charge-exchange (+ bulk loss-cone) drain, per species/energy/L ────────
-    // Plus EMIC-driven precipitation (reduced bounce-averaged treatment):
-    // H⁺-band EMIC waves grow where hot anisotropic ring protons overlap the
-    // cold plasmasphere — the DUSK PLUME just inside/at the plasmapause — and
-    // pitch-angle-scatter energetic protons into the loss cone within hours
-    // during storm-time convection (Jordanova et al. 2001-style). Modeled as
-    // an extra e-folding: τ_EMIC = 2.5 h at full gate, Kp-gated 4.5→7,
-    // protons only, E ≥ 50 keV, MLT 12–20, L ∈ [Lpp−0.6, Lpp+0.4]. The gates
-    // ARE the physics claim (wave growth needs the overlap + the anisotropy);
-    // outside them charge exchange remains the exact e^(−t/τ) the tests pin.
+    // Plus EMIC-driven precipitation via the ANISOTROPY-MOMENT model: H⁺-band
+    // EMIC waves grow where hot anisotropic protons overlap the cold
+    // plasmasphere. The overlap band [Lpp − emicBandIn, Lpp + emicBandOut] and
+    // the resonance threshold (E ≥ emicEminKev) are prescribed; everything
+    // else is EMERGENT from the local anisotropy A = MH/C: the gate is
+    // g = clamp((A − A_crit)/A_scale), the drain is e^(−g·dt/τ_EMIC), and the
+    // scattering that drains also RELAXES A toward A_crit (τ_EMIC_A) — the
+    // self-limiting wave feedback. Storm-time/dusk localization falls out of
+    // transport: only fast storm convection delivers still-anisotropic
+    // protons (injected at A_inject, isotropizing with τ_PA) into the band.
+    // Charge exchange and Coulomb are pitch-angle-blind here: they scale C
+    // and MH by the SAME factor, leaving A untouched (tests pin this).
     // MIRRORED in rust-ring-current/src/transport.rs — CHANGE TOGETHER.
+    /** Is (L, mltHours) inside the EMIC cold-plasma overlap region? The
+     *  plasmapause band at all MLT, extended outward through the dusk PLUME
+     *  sector (storm plumes wrap sunward through dusk). */
+    _emicOverlap(L, mltH, ppl) {
+        const cf = this.cfg;
+        if (L < ppl - cf.emicBandIn) return false;
+        if (L <= ppl + cf.emicBandOut) return true;
+        return mltH >= cf.emicPlumeMlt[0] && mltH <= cf.emicPlumeMlt[1]
+            && L <= Math.min(ppl + cf.emicPlumeOut, cf.emicPlumeLMax);
+    }
+
+    /** Hot-proton P⊥ (nPa) per cell — the wave-growth β factor. Same energy-
+     *  density → nPa conversion as pressureMap, protons only. */
+    _protonPressureNPa() {
+        const { nL, nMlt } = this;
+        const out = new Float64Array(nL * nMlt);
+        const cal = this.cfg.pressCal;
+        for (let k = 0; k < this.nE; k++) {
+            const C = this.C[0][k], E = this.eKev[k];
+            for (let n = 0; n < out.length; n++) out[n] += C[n] * E;
+        }
+        for (let i = 0; i < nL; i++) {
+            const vCell = this.L[i] * this.dAz * this.dL * R_E * R_E * R_E;
+            const kNpa = KEV_J / vCell * 1e9 * cal;
+            for (let j = 0; j < nMlt; j++) out[this.idx(i, j)] *= kNpa;
+        }
+        return out;
+    }
+
     _loss(dt) {
         const { nL, nMlt } = this;
+        const cf = this.cfg;
         const ppl = plasmapauseL(this.driver.kp);
-        const emicG = Math.max(0, Math.min(1, (this.driver.kp - 4.5) / 2.5));
-        const emicDecay = emicG > 0 ? Math.exp(-emicG * dt / (2.5 * 3600)) : 1;
+        const paDecay = Math.exp(-dt / (cf.tauPaH * 3600));         // isotropization
+        const aRelax  = Math.exp(-dt / (cf.emicTauAH * 3600));      // EMIC A-relax
+        // β gate: EMIC growth needs hot-proton pressure. Computed once per
+        // loss pass from the pre-drain state.
+        const pH = this._protonPressureNPa();
         for (let s = 0; s < this.nS; s++) {
             const sp = SPECIES[s];
             for (let k = 0; k < this.nE; k++) {
                 const E = this.eKev[k];
                 const C = this.C[s][k];
+                const MH = s === 0 ? this.MH[k] : null;
                 for (let i = 0; i < nL; i++) {
                     const L = this.L[i];
                     let tauH = chargeExchangeLifetimeHours(E, L, sp.cxKey);
@@ -385,19 +468,74 @@ export class RingCurrentTransport {
                     // constant bleed, deliberately conservative.
                     const invTau = 1 / (tauH * 3600) + (L < ppl ? 1 / (72 * 3600) : 0);
                     const decay = Math.exp(-invTau * dt);
-                    const emicHere = emicDecay < 1 && s === 0 && E >= 50
-                        && L >= ppl - 0.6 && L <= ppl + 0.4;
+                    const emicE = MH && E >= cf.emicEminKev;
                     for (let j = 0; j < nMlt; j++) {
-                        let v = C[this.idx(i, j)] * decay;
-                        if (emicHere) {
-                            const mlt = this.az[j] * 12 / Math.PI;   // az → MLT hours
-                            if (mlt >= 12 && mlt <= 20) v *= emicDecay;
+                        const n = this.idx(i, j);
+                        let c = C[n] * decay;
+                        if (MH) {
+                            let m = MH[n] * decay * paDecay;
+                            if (emicE && c > 1e-30 && this._emicOverlap(L, this.mlt[j], ppl)) {
+                                const A = m / c;
+                                const gA = Math.max(0, Math.min(1, (A - cf.emicACrit) / cf.emicAScale));
+                                const g = gA * Math.min(1, pH[n] / cf.emicPRefNPa);
+                                if (g > 0) {
+                                    c *= Math.exp(-g * dt / (cf.emicTauH * 3600));
+                                    const A2 = cf.emicACrit + (A - cf.emicACrit) * aRelax;
+                                    m = c * A2;
+                                }
+                            }
+                            MH[n] = m;
                         }
-                        C[this.idx(i, j)] = v;
+                        C[n] = c;
                     }
                 }
             }
         }
+    }
+
+    /** Instantaneous EMIC proton-precipitation rate map (content/s, nL×nMlt):
+     *  Σ over resonant channels of C·g(A)/τ_EMIC inside the overlap band —
+     *  the flux the waves are scattering into the loss cone RIGHT NOW. This
+     *  is the source for the proton-aurora visual channel. Read-only. */
+    emicPrecipitationMap() {
+        const { nL, nMlt } = this;
+        const cf = this.cfg;
+        const ppl = plasmapauseL(this.driver.kp);
+        const out = new Float64Array(nL * nMlt);
+        const invTau = 1 / (cf.emicTauH * 3600);
+        const pH = this._protonPressureNPa();
+        for (let k = 0; k < this.nE; k++) {
+            if (this.eKev[k] < cf.emicEminKev) continue;
+            const C = this.C[0][k], MH = this.MH[k];
+            for (let i = 0; i < nL; i++) {
+                const L = this.L[i];
+                for (let j = 0; j < nMlt; j++) {
+                    if (!this._emicOverlap(L, this.mlt[j], ppl)) continue;
+                    const n = this.idx(i, j);
+                    if (C[n] <= 1e-30) continue;
+                    const A = MH[n] / C[n];
+                    const gA = Math.max(0, Math.min(1, (A - cf.emicACrit) / cf.emicAScale));
+                    const g = gA * Math.min(1, pH[n] / cf.emicPRefNPa);
+                    if (g > 0) out[n] += C[n] * g * invTau;
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Proton anisotropy map A = ΣMH/ΣC over the EMIC-resonant channels
+     *  (nL×nMlt; 0 where empty). The emergent field that gates the waves. */
+    anisotropyMap() {
+        const { nL, nMlt } = this;
+        const out = new Float64Array(nL * nMlt);
+        const csum = new Float64Array(nL * nMlt);
+        for (let k = 0; k < this.nE; k++) {
+            if (this.eKev[k] < this.cfg.emicEminKev) continue;
+            const C = this.C[0][k], MH = this.MH[k];
+            for (let n = 0; n < out.length; n++) { out[n] += MH[n]; csum[n] += C[n]; }
+        }
+        for (let n = 0; n < out.length; n++) out[n] = csum[n] > 1e-30 ? out[n] / csum[n] : 0;
+        return out;
     }
 
     // ── Plasma-sheet injection at the outer boundary (nightside) ─────────────
@@ -426,8 +564,13 @@ export class RingCurrentTransport {
             for (let k = 0; k < this.nE; k++) {
                 const add = rate * fs * this._spec[k];
                 const C = this.C[s][k];
+                const MH = s === 0 ? this.MH[k] : null;
                 for (let j = 0; j < nMlt; j++) {
-                    C[this.idx(iOut, j)] += add * (w[j] / (wSum || 1));
+                    const dC = add * (w[j] / (wSum || 1));
+                    C[this.idx(iOut, j)] += dC;
+                    // Fresh plasma-sheet protons arrive perpendicular-
+                    // anisotropic — the free energy EMIC waves later tap.
+                    if (MH) MH[this.idx(iOut, j)] += dC * this.cfg.aInject;
                 }
             }
         }

@@ -90,37 +90,94 @@ const approx = (a, b, rel = 1e-6, msg = '') =>
     ok('charge-exchange decay matches e^(-t/τ); O⁺ faster than H⁺');
 }
 
-// ── 3b. EMIC-driven precipitation: dusk plume band, protons, storm-gated ─────
+// ── 3b. EMIC precipitation: anisotropy-gated, band-bound, self-limiting ──────
 {
     const t = new RingCurrentTransport();
-    t.setDriver({ kp: 7 });                      // gate fully open: g = 1
-    const ppl = 5.6 - 0.46 * 7;                  // Carpenter–Anderson, unclamped here
-    // An L cell inside the EMIC band [Lpp−0.6, Lpp+0.4].
+    t.setDriver({ kp: 7 });                      // sets the band via Lpp only
+    const cf = t.cfg;
+    const ppl = 5.6 - 0.46 * 7;
     const iL = t.L.findIndex(L => L >= ppl - 0.2);
-    assert.ok(t.L[iL] <= ppl + 0.4, 'test cell is inside the EMIC band');
-    const jDusk = 35, jDawn = 11;                // MLT 17.75 (in 12–20) / 5.75 (out)
+    assert.ok(t.L[iL] <= ppl + cf.emicBandOut, 'test cell is inside the EMIC band');
+    const iOut = t.L.findIndex(L => L >= ppl + cf.emicBandOut + 0.5);   // outside band
+    const jA = 35, jB = 11;                      // two MLT cells — MLT no longer gates
     const kHi = 4, kLo = 2;                      // 176 keV (≥50) / 42 keV (<50)
-    for (const [s, k] of [[0, kHi], [0, kLo], [1, kHi]]) {
-        t.C[s][k][t.idx(iL, jDusk)] = 1;
-        t.C[s][k][t.idx(iL, jDawn)] = 1;
-    }
+    // Anisotropic protons at jA (A = aInject), ISOTROPIC protons at jB (A = 0);
+    // plus low-E protons, O⁺, and an out-of-band anisotropic cell. SEED is
+    // large enough that the cell's proton P⊥ keeps the β gate SATURATED
+    // (≥ emicPRefNPa) through the whole drain, so the expected ratio below
+    // needs only the anisotropy dynamics.
+    const SEED = 6e26;
+    t.C[0][kHi][t.idx(iL, jA)] = SEED; t.MH[kHi][t.idx(iL, jA)] = SEED * cf.aInject;
+    t.C[0][kHi][t.idx(iL, jB)] = SEED;                         // MH = 0 (isotropic ref)
+    t.C[0][kLo][t.idx(iL, jA)] = SEED; t.MH[kLo][t.idx(iL, jA)] = SEED * cf.aInject;
+    t.C[0][kLo][t.idx(iL, jB)] = SEED;                         // within-channel ref
+    t.C[1][kHi][t.idx(iL, jA)] = SEED;
+    t.C[1][kHi][t.idx(iL, jB)] = SEED;                         // within-species ref
+    // Out-of-band probe at DAWN (jB): outside the all-MLT band AND outside
+    // the dusk plume sector (a dusk cell at this L would now be plume!).
+    t.C[0][kHi][t.idx(iOut, jB)] = SEED; t.MH[kHi][t.idx(iOut, jB)] = SEED * cf.aInject;
     const dt = 1800;
+    // Expected drain over one _loss call, replicated from the model formulas
+    // (order: cx/Coulomb decay → pa-decay on MH → gate on A → drain → relax A).
+    const expectRatio = (steps) => {
+        let c = 1, m = cf.aInject;
+        const paD = Math.exp(-dt / (cf.tauPaH * 3600));
+        const aR = Math.exp(-dt / (cf.emicTauAH * 3600));
+        for (let n = 0; n < steps; n++) {
+            m *= paD;                            // decay factors cancel in c-ratio
+            const A = m / c;
+            const g = Math.max(0, Math.min(1, (A - cf.emicACrit) / cf.emicAScale));
+            c *= Math.exp(-g * dt / (cf.emicTauH * 3600));
+            m = c * (cf.emicACrit + (A - cf.emicACrit) * aR);
+        }
+        return c;
+    };
     for (let n = 0; n < 4; n++) t._loss(dt);     // 2 h total
-    const r = (s, k) => t.C[s][k][t.idx(iL, jDusk)] / t.C[s][k][t.idx(iL, jDawn)];
-    // Dusk H⁺ ≥50 keV carries the extra EMIC e-folding exactly; charge
-    // exchange + Coulomb are MLT-uniform so they cancel in the ratio.
-    approx(r(0, kHi), Math.exp(-4 * dt / (2.5 * 3600)), 1e-9, 'EMIC extra decay at dusk');
+    // Within-channel jA/jB ratios: cx + Coulomb are identical across MLT, so
+    // they cancel exactly and only the EMIC term remains.
+    const r = (s, k) => t.C[s][k][t.idx(iL, jA)] / t.C[s][k][t.idx(iL, jB)];
+    approx(r(0, kHi), expectRatio(4), 1e-9, 'anisotropic cell drains per model');
+    assert.ok(r(0, kHi) < 0.75, 'drain is substantial over 2 h');
     approx(r(0, kLo), 1, 1e-12, 'sub-50 keV protons untouched');
     approx(r(1, kHi), 1, 1e-12, 'O⁺ untouched (H⁺-band waves)');
-    // Below the Kp gate the term is off entirely.
-    const q = new RingCurrentTransport();
-    q.setDriver({ kp: 4 });
-    q.C[0][kHi][q.idx(iL, jDusk)] = 1;
-    q.C[0][kHi][q.idx(iL, jDawn)] = 1;
-    for (let n = 0; n < 4; n++) q._loss(dt);
-    approx(q.C[0][kHi][q.idx(iL, jDusk)] / q.C[0][kHi][q.idx(iL, jDawn)], 1, 1e-12,
-        'EMIC off below Kp 4.5');
-    ok('EMIC precipitation: dusk-band protons only, storm-gated, exact e-folding');
+    // Out-of-band cell keeps only cx decay — compare against the isotropic
+    // in-band cell after removing the differing cx/Coulomb factors: instead
+    // pin that its MH kept the pa-decay only (no EMIC relax toward A_crit).
+    const aOutEnd = t.MH[kHi][t.idx(iOut, jB)] / t.C[0][kHi][t.idx(iOut, jB)];
+    approx(aOutEnd, cf.aInject * Math.exp(-4 * dt / (cf.tauPaH * 3600)), 1e-9,
+        'outside the band A only isotropizes');
+    // Self-limiting: the drained cell's anisotropy relaxed toward A_crit.
+    const aEnd = t.MH[kHi][t.idx(iL, jA)] / t.C[0][kHi][t.idx(iL, jA)];
+    assert.ok(aEnd < cf.aInject && aEnd > 0.9 * cf.emicACrit * Math.exp(-4 * dt / (cf.tauPaH * 3600)),
+        `A relaxed toward crit (${aEnd.toFixed(3)})`);
+    ok('EMIC precipitation: anisotropy-gated, band-bound, self-limiting');
+}
+
+// ── 3c. Anisotropy is emergent: storms deliver it, quiet does not ────────────
+{
+    const storm = new RingCurrentTransport();
+    storm.setDriver({ kp: 7, vbs: 8 });
+    for (let h = 0; h < 12; h++) storm.step(3600);
+    const pStorm = storm.emicPrecipitationMap();
+    const totStorm = pStorm.reduce((a, b) => a + b, 0);
+    assert.ok(totStorm > 0, 'storm drives EMIC precipitation');
+    const quiet = new RingCurrentTransport();
+    quiet.setDriver({ kp: 1, vbs: 0 });
+    for (let h = 0; h < 12; h++) quiet.step(3600);
+    const pQuiet = quiet.emicPrecipitationMap();
+    const totQuiet = pQuiet.reduce((a, b) => a + b, 0);
+    // Storm precipitates far more in ABSOLUTE terms (more content AND more
+    // anisotropy delivered). Note the per-energy rate can invert: the quiet
+    // band (Lpp≈5.1) sits next to the injection boundary — quiet-time
+    // subauroral proton arcs are a real phenomenon, not a bug.
+    assert.ok(totStorm > 3 * totQuiet,
+        `storm precip ≫ quiet absolute (${totStorm.toExponential(1)} vs ${totQuiet.toExponential(1)})`);
+    // The anisotropy field is populated where protons are.
+    const aMap = storm.anisotropyMap();
+    let aMax = 0;
+    for (const v of aMap) if (v > aMax) aMax = v;
+    assert.ok(aMax > 0.05 && aMax <= 1.5, `anisotropy field sane (max ${aMax.toFixed(2)})`);
+    ok('EMIC storm/quiet contrast is emergent from anisotropy transport');
 }
 
 // ── 4. Azimuthal advection conserves content (MLT periodic) ──────────────────

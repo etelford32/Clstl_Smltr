@@ -22,6 +22,22 @@ const E0_KEV: f64 = 12.0;
 const HELIUM_FRACTION: f64 = 0.04;
 const PRESS_CAL: f64 = 0.04;
 
+// Pitch-angle / EMIC parameters (anisotropy-moment reduced model) — the JS
+// DEFAULTS block is the reference; CHANGE TOGETHER.
+const A_INJECT: f64 = 0.6;
+const TAU_PA_H: f64 = 12.0;
+const EMIC_TAU_H: f64 = 2.5;
+const EMIC_TAU_A_H: f64 = 1.0;
+const EMIC_A_CRIT: f64 = 0.25;
+const EMIC_A_SCALE: f64 = 0.35;
+const EMIC_EMIN_KEV: f64 = 50.0;
+const EMIC_BAND_IN: f64 = 0.6;
+const EMIC_BAND_OUT: f64 = 0.4;
+const EMIC_PLUME_OUT: f64 = 2.0;
+const EMIC_PLUME_MLT: (f64, f64) = (12.0, 20.0);
+const EMIC_PLUME_LMAX: f64 = 6.0;
+const EMIC_P_REF_NPA: f64 = 2.0;
+
 /// Charge-exchange key per species index (H⁺, O⁺, He⁺). He⁺ uses the proton
 /// cross-section (approx) and an extra ×0.7 lifetime factor, as in the JS.
 const SPECIES_CX: [Cx; NS] = [Cx::Ion, Cx::Oxygen, Cx::Ion];
@@ -34,6 +50,97 @@ fn gidx(i: usize, j: usize) -> usize {
 #[inline]
 fn cbase(s: usize, k: usize) -> usize {
     (s * NE + k) * NL * NMLT
+}
+#[inline]
+fn mbase(k: usize) -> usize {
+    k * NL * NMLT
+}
+
+/// EMIC cold-plasma overlap region: the plasmapause band at all MLT, extended
+/// outward through the dusk plume sector, capped below the injection boundary.
+#[inline]
+fn emic_overlap(l: f64, mlt_h: f64, ppl: f64) -> bool {
+    if l < ppl - EMIC_BAND_IN {
+        return false;
+    }
+    if l <= ppl + EMIC_BAND_OUT {
+        return true;
+    }
+    mlt_h >= EMIC_PLUME_MLT.0
+        && mlt_h <= EMIC_PLUME_MLT.1
+        && l <= (ppl + EMIC_PLUME_OUT).min(EMIC_PLUME_LMAX)
+}
+
+/// One donor-cell (upwind) advection pass over a single field — content or
+/// the anisotropy tracer. `out` is caller-provided scratch (NL×NMLT).
+fn advect_field(c: &mut [f64], vlf: &[f64], vaf: &[f64], dt: f64, dl: f64, daz: f64, out: &mut [f64]) {
+    out.iter_mut().for_each(|o| *o = 0.0);
+    // Radial faces f=0..NL per MLT column.
+    for j in 0..NMLT {
+        for f in 0..=NL {
+            let v = vlf[f * NMLT + j];
+            if v == 0.0 {
+                continue;
+            }
+            let cf = v * dt / dl;
+            let donor = if v > 0.0 { f as isize - 1 } else { f as isize };
+            if donor < 0 || donor >= NL as isize {
+                continue;
+            }
+            let flux = cf * c[gidx(donor as usize, j)];
+            if f >= 1 {
+                out[gidx(f - 1, j)] -= flux;
+            }
+            if f < NL {
+                out[gidx(f, j)] += flux;
+            }
+        }
+    }
+    // Azimuthal faces j (between cells j−1 and j), periodic.
+    for i in 0..NL {
+        for j in 0..NMLT {
+            let v = vaf[i * NMLT + j];
+            if v == 0.0 {
+                continue;
+            }
+            let ca = v * dt / daz;
+            let jm = (j + NMLT - 1) % NMLT;
+            let donor = if v > 0.0 { jm } else { j };
+            let flux = ca * c[gidx(i, donor)];
+            out[gidx(i, jm)] -= flux;
+            out[gidx(i, j)] += flux;
+        }
+    }
+    for n in 0..NL * NMLT {
+        c[n] += out[n];
+        if c[n] < 0.0 {
+            c[n] = 0.0;
+        }
+    }
+}
+
+/// One conservative explicit-FV radial-diffusion pass over a single field.
+fn diffuse_field(c: &mut [f64], dt: f64, dl: f64, col: &mut [f64; NL], flux: &mut [f64; NL + 1]) {
+    let d0 = DLL_PER_DAY0 / 86400.0;
+    for j in 0..NMLT {
+        for i in 0..NL {
+            col[i] = c[gidx(i, j)];
+        }
+        flux[0] = 0.0;
+        flux[NL] = 0.0;
+        for f in 1..NL {
+            let lf = LMIN + f as f64 * dl;
+            let d = d0 * (lf / 6.6).powi(DLL_POW);
+            flux[f] = d * (col[f] - col[f - 1]) / dl;
+        }
+        for i in 0..NL {
+            let mut v = col[i] + dt * (flux[i + 1] - flux[i]) / dl;
+            if v < 0.0 {
+                v = 0.0;
+            }
+            c[gidx(i, j)] = v;
+        }
+    }
 }
 
 /// Guiding-centre drift at (L, az) for a proton of energy `e_kev` — the exact
@@ -55,6 +162,7 @@ fn drift_at(l: f64, az: f64, e_kev: f64, conv_a: f64) -> (f64, f64) {
 
 pub struct Sim {
     pub content: Vec<f64>, // NS*NE*NL*NMLT
+    pub m_h: Vec<f64>,     // NE*NL*NMLT — proton anisotropy tracer M = C·A
     l: [f64; NL],
     az: [f64; NMLT],
     mlt: [f64; NMLT],
@@ -108,6 +216,7 @@ impl Sim {
         }
         Sim {
             content: vec![0.0; NS * NE * NL * NMLT],
+            m_h: vec![0.0; NE * NL * NMLT],
             l,
             az,
             mlt,
@@ -129,6 +238,7 @@ impl Sim {
 
     pub fn reset(&mut self) {
         self.content.iter_mut().for_each(|c| *c = 0.0);
+        self.m_h.iter_mut().for_each(|m| *m = 0.0);
         self.t_sec = 0.0;
     }
 
@@ -215,109 +325,103 @@ impl Sim {
         let vaf = std::mem::take(&mut self.vaf);
         let mut out = vec![0.0f64; NL * NMLT];
         for k in 0..NE {
-            let vlbase = k * (NL + 1) * NMLT;
-            let vabase = k * NL * NMLT;
+            let vl = &vlf[k * (NL + 1) * NMLT..(k + 1) * (NL + 1) * NMLT];
+            let va = &vaf[k * NL * NMLT..(k + 1) * NL * NMLT];
             for s in 0..NS {
                 let base = cbase(s, k);
-                let c = &mut self.content[base..base + NL * NMLT];
-                out.iter_mut().for_each(|o| *o = 0.0);
-                // Radial faces f=0..NL per MLT column.
-                for j in 0..NMLT {
-                    for f in 0..=NL {
-                        let v = vlf[vlbase + f * NMLT + j];
-                        if v == 0.0 {
-                            continue;
-                        }
-                        let cf = v * dt / self.dl;
-                        let donor = if v > 0.0 { f as isize - 1 } else { f as isize };
-                        if donor < 0 || donor >= NL as isize {
-                            continue;
-                        }
-                        let flux = cf * c[gidx(donor as usize, j)];
-                        if f >= 1 {
-                            out[gidx(f - 1, j)] -= flux;
-                        }
-                        if f < NL {
-                            out[gidx(f, j)] += flux;
-                        }
-                    }
-                }
-                // Azimuthal faces j (between cells j−1 and j), periodic.
-                for i in 0..NL {
-                    for j in 0..NMLT {
-                        let v = vaf[vabase + i * NMLT + j];
-                        if v == 0.0 {
-                            continue;
-                        }
-                        let ca = v * dt / self.daz;
-                        let jm = (j + NMLT - 1) % NMLT;
-                        let donor = if v > 0.0 { jm } else { j };
-                        let flux = ca * c[gidx(i, donor)];
-                        out[gidx(i, jm)] -= flux;
-                        out[gidx(i, j)] += flux;
-                    }
-                }
-                for n in 0..NL * NMLT {
-                    c[n] += out[n];
-                    if c[n] < 0.0 {
-                        c[n] = 0.0;
-                    }
-                }
+                advect_field(
+                    &mut self.content[base..base + NL * NMLT],
+                    vl,
+                    va,
+                    dt,
+                    self.dl,
+                    self.daz,
+                    &mut out,
+                );
             }
+            // The proton anisotropy tracer rides the SAME (species-blind)
+            // velocities — A = MH/C stays within the max principle.
+            let mb = mbase(k);
+            advect_field(
+                &mut self.m_h[mb..mb + NL * NMLT],
+                vl,
+                va,
+                dt,
+                self.dl,
+                self.daz,
+                &mut out,
+            );
         }
         self.vlf = vlf;
         self.vaf = vaf;
     }
 
     fn diffuse(&mut self, dt: f64) {
-        let d0 = DLL_PER_DAY0 / 86400.0;
         let mut col = [0.0f64; NL];
         let mut flux = [0.0f64; NL + 1];
         for s in 0..NS {
             for k in 0..NE {
                 let base = cbase(s, k);
-                let c = &mut self.content[base..base + NL * NMLT];
-                for j in 0..NMLT {
-                    for i in 0..NL {
-                        col[i] = c[gidx(i, j)];
-                    }
-                    flux[0] = 0.0;
-                    flux[NL] = 0.0;
-                    for f in 1..NL {
-                        let lf = LMIN + f as f64 * self.dl;
-                        let d = d0 * (lf / 6.6).powi(DLL_POW);
-                        flux[f] = d * (col[f] - col[f - 1]) / self.dl;
-                    }
-                    for i in 0..NL {
-                        let mut v = col[i] + dt * (flux[i + 1] - flux[i]) / self.dl;
-                        if v < 0.0 {
-                            v = 0.0;
-                        }
-                        c[gidx(i, j)] = v;
-                    }
-                }
+                diffuse_field(
+                    &mut self.content[base..base + NL * NMLT],
+                    dt,
+                    self.dl,
+                    &mut col,
+                    &mut flux,
+                );
             }
+        }
+        for k in 0..NE {
+            let mb = mbase(k);
+            diffuse_field(
+                &mut self.m_h[mb..mb + NL * NMLT],
+                dt,
+                self.dl,
+                &mut col,
+                &mut flux,
+            );
         }
     }
 
+    /// Hot-proton P⊥ (nPa) per cell — the EMIC wave-growth β factor. Same
+    /// energy-density → nPa conversion as fill_pressure, protons only.
+    fn proton_pressure_npa(&self) -> Vec<f64> {
+        let mut out = vec![0.0f64; NL * NMLT];
+        for k in 0..NE {
+            let base = cbase(0, k);
+            let e = self.ekev[k];
+            for (n, o) in out.iter_mut().enumerate() {
+                *o += self.content[base + n] * e;
+            }
+        }
+        for i in 0..NL {
+            let v_cell = self.l[i] * self.daz * self.dl * R_E * R_E * R_E;
+            let k_npa = KEV_J / v_cell * 1e9 * PRESS_CAL;
+            for j in 0..NMLT {
+                out[gidx(i, j)] *= k_npa;
+            }
+        }
+        out
+    }
+
     /// Charge-exchange (+ Coulomb bleed) drain, plus EMIC-driven precipitation
-    /// in the dusk plasmapause-overlap band (reduced bounce-averaged model:
-    /// τ_EMIC = 2.5 h at full gate, Kp-gated 4.5→7, protons only, E ≥ 50 keV,
-    /// MLT 12–20, L ∈ [Lpp−0.6, Lpp+0.4]). MIRROR of the JS reference
-    /// (js/ring-current-transport.js _loss) — CHANGE TOGETHER.
+    /// via the ANISOTROPY-MOMENT model: gates are the cold-plasma overlap
+    /// (emic_overlap), the resonance threshold (E ≥ EMIC_EMIN_KEV), the LOCAL
+    /// anisotropy A = MH/C vs A_crit, and the hot-proton β (P⊥/P_ref). The
+    /// scattering that drains also relaxes A toward A_crit — self-limiting.
+    /// MIRROR of the JS reference (js/ring-current-transport.js _loss) —
+    /// CHANGE TOGETHER.
     fn loss(&mut self, dt: f64) {
         let ppl = plasmapause_l(self.kp);
-        let emic_g = ((self.kp - 4.5) / 2.5).clamp(0.0, 1.0);
-        let emic_decay = if emic_g > 0.0 {
-            (-emic_g * dt / (2.5 * 3600.0)).exp()
-        } else {
-            1.0
-        };
+        let pa_decay = (-dt / (TAU_PA_H * 3600.0)).exp();
+        let a_relax = (-dt / (EMIC_TAU_A_H * 3600.0)).exp();
+        let p_h = self.proton_pressure_npa();
         for s in 0..NS {
             let cx = SPECIES_CX[s];
             for k in 0..NE {
                 let e = self.ekev[k];
                 let base = cbase(s, k);
+                let mb = mbase(k);
                 for i in 0..NL {
                     let l = self.l[i];
                     let mut tau_h = cx_lifetime_hours(e, l, cx);
@@ -330,17 +434,25 @@ impl Sim {
                     let inv_tau =
                         1.0 / (tau_h * 3600.0) + if l < ppl { 1.0 / (72.0 * 3600.0) } else { 0.0 };
                     let decay = (-inv_tau * dt).exp();
-                    let emic_here =
-                        emic_decay < 1.0 && s == 0 && e >= 50.0 && l >= ppl - 0.6 && l <= ppl + 0.4;
+                    let emic_e = s == 0 && e >= EMIC_EMIN_KEV;
                     for j in 0..NMLT {
-                        let mut v = self.content[base + gidx(i, j)] * decay;
-                        if emic_here {
-                            let mlt = self.az[j] * 12.0 / core::f64::consts::PI;
-                            if (12.0..=20.0).contains(&mlt) {
-                                v *= emic_decay;
+                        let n = gidx(i, j);
+                        let mut c = self.content[base + n] * decay;
+                        if s == 0 {
+                            let mut m = self.m_h[mb + n] * decay * pa_decay;
+                            if emic_e && c > 1e-30 && emic_overlap(l, self.mlt[j], ppl) {
+                                let a = m / c;
+                                let g_a = ((a - EMIC_A_CRIT) / EMIC_A_SCALE).clamp(0.0, 1.0);
+                                let g = g_a * (p_h[n] / EMIC_P_REF_NPA).min(1.0);
+                                if g > 0.0 {
+                                    c *= (-g * dt / (EMIC_TAU_H * 3600.0)).exp();
+                                    let a2 = EMIC_A_CRIT + (a - EMIC_A_CRIT) * a_relax;
+                                    m = c * a2;
+                                }
                             }
+                            self.m_h[mb + n] = m;
                         }
-                        self.content[base + gidx(i, j)] = v;
+                        self.content[base + n] = c;
                     }
                 }
             }
@@ -375,8 +487,15 @@ impl Sim {
             for k in 0..NE {
                 let add = rate * fs * self.spec[k];
                 let base = cbase(s, k);
+                let mb = mbase(k);
                 for j in 0..NMLT {
-                    self.content[base + gidx(i_out, j)] += add * (w[j] / wsum);
+                    let dc = add * (w[j] / wsum);
+                    self.content[base + gidx(i_out, j)] += dc;
+                    // Fresh plasma-sheet protons arrive perpendicular-
+                    // anisotropic — the free energy EMIC waves later tap.
+                    if s == 0 {
+                        self.m_h[mb + gidx(i_out, j)] += dc * A_INJECT;
+                    }
                 }
             }
         }
@@ -454,6 +573,66 @@ impl Sim {
     }
 
     /// Fill out_map (f32) with the perpendicular pressure (nPa) for the selection.
+    /// EMIC proton-precipitation rate map (content/s) — MIRROR of the JS
+    /// emicPrecipitationMap(): Σ over resonant channels of C·g/τ_EMIC with
+    /// the same overlap + anisotropy + β gates.
+    pub fn fill_precip(&mut self) {
+        let ppl = plasmapause_l(self.kp);
+        let inv_tau = 1.0 / (EMIC_TAU_H * 3600.0);
+        let p_h = self.proton_pressure_npa();
+        let mut acc = [0.0f64; NL * NMLT];
+        for k in 0..NE {
+            if self.ekev[k] < EMIC_EMIN_KEV {
+                continue;
+            }
+            let base = cbase(0, k);
+            let mb = mbase(k);
+            for i in 0..NL {
+                let l = self.l[i];
+                for j in 0..NMLT {
+                    if !emic_overlap(l, self.mlt[j], ppl) {
+                        continue;
+                    }
+                    let n = gidx(i, j);
+                    let c = self.content[base + n];
+                    if c <= 1e-30 {
+                        continue;
+                    }
+                    let a = self.m_h[mb + n] / c;
+                    let g_a = ((a - EMIC_A_CRIT) / EMIC_A_SCALE).clamp(0.0, 1.0);
+                    let g = g_a * (p_h[n] / EMIC_P_REF_NPA).min(1.0);
+                    if g > 0.0 {
+                        acc[n] += c * g * inv_tau;
+                    }
+                }
+            }
+        }
+        for n in 0..NL * NMLT {
+            self.out_map[n] = acc[n] as f32;
+        }
+    }
+
+    /// Proton anisotropy map A = ΣMH/ΣC over the EMIC-resonant channels —
+    /// MIRROR of the JS anisotropyMap().
+    pub fn fill_anisotropy(&mut self) {
+        let mut msum = [0.0f64; NL * NMLT];
+        let mut csum = [0.0f64; NL * NMLT];
+        for k in 0..NE {
+            if self.ekev[k] < EMIC_EMIN_KEV {
+                continue;
+            }
+            let base = cbase(0, k);
+            let mb = mbase(k);
+            for n in 0..NL * NMLT {
+                msum[n] += self.m_h[mb + n];
+                csum[n] += self.content[base + n];
+            }
+        }
+        for n in 0..NL * NMLT {
+            self.out_map[n] = if csum[n] > 1e-30 { (msum[n] / csum[n]) as f32 } else { 0.0 };
+        }
+    }
+
     pub fn fill_pressure(&mut self, sel: u32) {
         let mut edens = [0.0f64; NL * NMLT];
         for s in 0..NS {
@@ -565,45 +744,83 @@ mod tests {
     }
 
     #[test]
-    fn emic_dusk_band_protons_only() {
-        // Mirror of the JS pin 3b: at Kp 7 (gate g=1), a proton ≥50 keV in
-        // the dusk EMIC band carries exactly the extra e-folding; low-E,
-        // O⁺, dawn, and the sub-gate Kp are all untouched. Charge exchange +
-        // Coulomb are MLT-uniform, so they cancel in the dusk/dawn ratio.
+    fn emic_anisotropy_gated() {
+        // Mirror of the JS pin 3b: anisotropic (A = A_INJECT) protons ≥50 keV
+        // in the overlap band drain per the anisotropy dynamics; isotropic
+        // cells, sub-50 keV, O⁺, and out-of-region cells are untouched.
+        // SEED keeps the β gate saturated through the whole drain.
         let mut s = Sim::new();
         s.set_driver(7.0, 0.0);
         let ppl = 5.6 - 0.46 * 7.0;
         let i_l = (0..NL).find(|&i| s.l[i] >= ppl - 0.2).unwrap();
-        assert!(s.l[i_l] <= ppl + 0.4, "test cell inside the EMIC band");
-        let (j_dusk, j_dawn) = (35, 11); // MLT 17.75 (in 12–20) / 5.75 (out)
+        assert!(s.l[i_l] <= ppl + EMIC_BAND_OUT, "cell inside the band");
+        let i_out = (0..NL)
+            .find(|&i| s.l[i] >= ppl + EMIC_BAND_OUT + 0.5)
+            .unwrap();
+        let (j_a, j_b) = (35, 11); // MLT 17.75 / 5.75 (dawn = out of plume)
         let (k_hi, k_lo) = (4, 2); // 176 keV (≥50) / 42 keV (<50)
-        for (sp, k) in [(0, k_hi), (0, k_lo), (1, k_hi)] {
-            s.content[cbase(sp, k) + gidx(i_l, j_dusk)] = 1.0;
-            s.content[cbase(sp, k) + gidx(i_l, j_dawn)] = 1.0;
-        }
+        const SEED: f64 = 6e26;
+        s.content[cbase(0, k_hi) + gidx(i_l, j_a)] = SEED;
+        s.m_h[mbase(k_hi) + gidx(i_l, j_a)] = SEED * A_INJECT;
+        s.content[cbase(0, k_hi) + gidx(i_l, j_b)] = SEED; // isotropic ref
+        s.content[cbase(0, k_lo) + gidx(i_l, j_a)] = SEED;
+        s.m_h[mbase(k_lo) + gidx(i_l, j_a)] = SEED * A_INJECT;
+        s.content[cbase(0, k_lo) + gidx(i_l, j_b)] = SEED;
+        s.content[cbase(1, k_hi) + gidx(i_l, j_a)] = SEED;
+        s.content[cbase(1, k_hi) + gidx(i_l, j_b)] = SEED;
+        // Out-of-region probe at DAWN (a dusk cell at this L would be plume).
+        s.content[cbase(0, k_hi) + gidx(i_out, j_b)] = SEED;
+        s.m_h[mbase(k_hi) + gidx(i_out, j_b)] = SEED * A_INJECT;
         let dt = 1800.0;
+        // Expected drain, replicated from the model formulas (β saturated).
+        let expect = {
+            let (mut c, mut m) = (1.0f64, A_INJECT);
+            let pa_d = (-dt / (TAU_PA_H * 3600.0)).exp();
+            let a_r = (-dt / (EMIC_TAU_A_H * 3600.0)).exp();
+            for _ in 0..4 {
+                m *= pa_d;
+                let a = m / c;
+                let g = ((a - EMIC_A_CRIT) / EMIC_A_SCALE).clamp(0.0, 1.0);
+                c *= (-g * dt / (EMIC_TAU_H * 3600.0)).exp();
+                m = c * (EMIC_A_CRIT + (a - EMIC_A_CRIT) * a_r);
+            }
+            c
+        };
         for _ in 0..4 {
             s.loss(dt);
         }
         let ratio = |sp: usize, k: usize| {
-            s.content[cbase(sp, k) + gidx(i_l, j_dusk)]
-                / s.content[cbase(sp, k) + gidx(i_l, j_dawn)]
+            s.content[cbase(sp, k) + gidx(i_l, j_a)] / s.content[cbase(sp, k) + gidx(i_l, j_b)]
         };
-        let expect = (-4.0 * dt / (2.5 * 3600.0)).exp();
         assert!((ratio(0, k_hi) - expect).abs() < 1e-9, "{}", ratio(0, k_hi));
+        assert!(ratio(0, k_hi) < 0.75, "drain substantial");
         assert!((ratio(0, k_lo) - 1.0).abs() < 1e-12, "sub-50 keV untouched");
         assert!((ratio(1, k_hi) - 1.0).abs() < 1e-12, "O⁺ untouched");
-        // Below the Kp gate the term is off.
-        let mut q = Sim::new();
-        q.set_driver(4.0, 0.0);
-        q.content[cbase(0, k_hi) + gidx(i_l, j_dusk)] = 1.0;
-        q.content[cbase(0, k_hi) + gidx(i_l, j_dawn)] = 1.0;
-        for _ in 0..4 {
-            q.loss(dt);
-        }
-        let rq = q.content[cbase(0, k_hi) + gidx(i_l, j_dusk)]
-            / q.content[cbase(0, k_hi) + gidx(i_l, j_dawn)];
-        assert!((rq - 1.0).abs() < 1e-12, "EMIC off below Kp 4.5");
+        // Outside the region A only isotropizes (no relax toward A_crit).
+        let a_out = s.m_h[mbase(k_hi) + gidx(i_out, j_b)]
+            / s.content[cbase(0, k_hi) + gidx(i_out, j_b)];
+        let a_expect = A_INJECT * (-4.0 * dt / (TAU_PA_H * 3600.0)).exp();
+        assert!((a_out - a_expect).abs() < 1e-9, "{a_out} vs {a_expect}");
+    }
+
+    #[test]
+    fn emic_storm_quiet_contrast() {
+        // Mirror of JS pin 3c: absolute precipitation is far larger in a
+        // driven storm than in quiet — emergent from anisotropy delivery +
+        // the β gate, not a prescribed Kp switch.
+        let total = |kp: f64, vbs: f64| {
+            let mut s = Sim::new();
+            s.set_driver(kp, vbs);
+            for _ in 0..12 {
+                s.step(3600.0);
+            }
+            s.fill_precip();
+            s.out_map.iter().map(|&v| v as f64).sum::<f64>()
+        };
+        let storm = total(7.0, 8.0);
+        let quiet = total(1.0, 0.0);
+        assert!(storm > 0.0, "storm precipitates");
+        assert!(storm > 3.0 * quiet, "storm ≫ quiet ({storm:e} vs {quiet:e})");
     }
 
     #[test]

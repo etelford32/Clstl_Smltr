@@ -66,6 +66,15 @@ check('ENA emissivity peak agrees (<2%)', rel(peak(eW), peak(eJ)) < 0.02,
 check('ENA map matches everywhere (<2% of peak)', maxAbsDiff(eW, eJ) < 0.02 * peak(eJ),
     `max Δ ${(maxAbsDiff(eW, eJ) / peak(eJ) * 100).toFixed(3)}% of peak`);
 
+// EMIC precipitation + anisotropy parity (the pitch-angle-moment surface).
+const prW = wasm.emicPrecipitationMap(), prJ = js.emicPrecipitationMap();
+check('EMIC precip map is live in the storm', peak(prJ) > 0, `js peak ${peak(prJ).toExponential(2)}`);
+check('EMIC precip map matches (<2% of peak)', maxAbsDiff(prW, prJ) < 0.02 * peak(prJ),
+    `max Δ ${(maxAbsDiff(prW, prJ) / (peak(prJ) || 1) * 100).toFixed(3)}% of peak`);
+const aW = wasm.anisotropyMap(), aJ = js.anisotropyMap();
+check('anisotropy map matches (<2% of peak)', maxAbsDiff(aW, aJ) < 0.02 * Math.max(peak(aJ), 0.1),
+    `max Δ ${maxAbsDiff(aW, aJ).toExponential(2)} (peak ${peak(aJ).toFixed(3)})`);
+
 // ── Recovery step still tracks ───────────────────────────────────────────────
 wasm.setDriver({ kp: 1, vbs: 0 });
 js.setDriver({ kp: 1, vbs: 0 });

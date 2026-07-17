@@ -69,6 +69,8 @@ export async function loadRingCurrentKernel(source) {
             return readMap(x.rc_equatorial_ptr(sp(species), kind === 'energy' ? 1 : 0));
         },
         enaEmissivityMap() { return readMap(x.rc_ena_ptr()); },
+        emicPrecipitationMap() { return readMap(x.rc_precip_ptr()); },
+        anisotropyMap() { return readMap(x.rc_anisotropy_ptr()); },
         peakPressureNPa(species = 'all') {
             const m = this.pressureMap(species);
             let mx = 0;
