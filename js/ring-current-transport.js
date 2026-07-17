@@ -161,6 +161,12 @@ const DEFAULTS = Object.freeze({
     emicEminKev: 50,
     emicBandIn:  0.6,    // band = [Lpp − emicBandIn, Lpp + emicBandOut] all MLT…
     emicBandOut: 0.4,
+    // He⁺-band EMIC: the SAME proton free energy also generates waves below
+    // the He⁺ gyrofrequency that scatter He⁺ itself (heavy-ion band). Slower
+    // than the proton drain (heavier ion, weaker resonance): τ = 4 h at full
+    // wave gate. The gate is the COLLECTIVE wave-activity field (see
+    // emicWaveGateMap), not the per-channel proton gate.
+    emicTauHeH:  4.0,
     emicPlumeOut: 2.0,   // …extended to Lpp + emicPlumeOut in the dusk PLUME
     emicPlumeMlt: [12, 20],   // sector (storm plumes wrap sunward through dusk)
     emicPlumeLMax: 6.0,  // plume is INNER-magnetosphere cold plasma: never
@@ -442,6 +448,38 @@ export class RingCurrentTransport {
         return out;
     }
 
+    /** COLLECTIVE EMIC wave-activity gate per cell, 0..1: the resonant-
+     *  channel-summed proton anisotropy against A_crit, times the β factor,
+     *  inside the cold-plasma overlap; 0 elsewhere. One wave field drives
+     *  every consumer — the proton drain uses its per-channel refinement,
+     *  He⁺ and the radiation-belt electron layer use THIS map. Public:
+     *  mirrored by the WASM kernel (rc_wave_gate_ptr). */
+    emicWaveGateMap(pH = this._protonPressureNPa()) {
+        const { nL, nMlt } = this;
+        const cf = this.cfg;
+        const ppl = plasmapauseL(this.driver.kp);
+        const out = new Float64Array(nL * nMlt);
+        const msum = new Float64Array(nL * nMlt);
+        const csum = new Float64Array(nL * nMlt);
+        for (let k = 0; k < this.nE; k++) {
+            if (this.eKev[k] < cf.emicEminKev) continue;
+            const C = this.C[0][k], MH = this.MH[k];
+            for (let n = 0; n < out.length; n++) { msum[n] += MH[n]; csum[n] += C[n]; }
+        }
+        for (let i = 0; i < nL; i++) {
+            const L = this.L[i];
+            for (let j = 0; j < nMlt; j++) {
+                if (!this._emicOverlap(L, this.mlt[j], ppl)) continue;
+                const n = this.idx(i, j);
+                if (csum[n] <= 1e-30) continue;
+                const A = msum[n] / csum[n];
+                const gA = Math.max(0, Math.min(1, (A - cf.emicACrit) / cf.emicAScale));
+                out[n] = gA * Math.min(1, pH[n] / cf.emicPRefNPa);
+            }
+        }
+        return out;
+    }
+
     _loss(dt) {
         const { nL, nMlt } = this;
         const cf = this.cfg;
@@ -451,6 +489,9 @@ export class RingCurrentTransport {
         // β gate: EMIC growth needs hot-proton pressure. Computed once per
         // loss pass from the pre-drain state.
         const pH = this._protonPressureNPa();
+        // Collective wave field (pre-drain state) — drives the He⁺-band drain.
+        const waveG = this.emicWaveGateMap(pH);
+        const heK = dt / (cf.emicTauHeH * 3600);
         for (let s = 0; s < this.nS; s++) {
             const sp = SPECIES[s];
             for (let k = 0; k < this.nE; k++) {
@@ -469,6 +510,7 @@ export class RingCurrentTransport {
                     const invTau = 1 / (tauH * 3600) + (L < ppl ? 1 / (72 * 3600) : 0);
                     const decay = Math.exp(-invTau * dt);
                     const emicE = MH && E >= cf.emicEminKev;
+                    const heE = sp.key === 'helium' && E >= cf.emicEminKev;
                     for (let j = 0; j < nMlt; j++) {
                         const n = this.idx(i, j);
                         let c = C[n] * decay;
@@ -485,6 +527,10 @@ export class RingCurrentTransport {
                                 }
                             }
                             MH[n] = m;
+                        } else if (heE && waveG[n] > 0) {
+                            // He⁺-band: the proton-driven wave field scatters
+                            // He⁺ itself (its own loss channel, slower τ).
+                            c *= Math.exp(-waveG[n] * heK);
                         }
                         C[n] = c;
                     }

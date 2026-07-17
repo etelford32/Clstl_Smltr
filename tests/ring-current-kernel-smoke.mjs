@@ -74,6 +74,9 @@ check('EMIC precip map matches (<2% of peak)', maxAbsDiff(prW, prJ) < 0.02 * pea
 const aW = wasm.anisotropyMap(), aJ = js.anisotropyMap();
 check('anisotropy map matches (<2% of peak)', maxAbsDiff(aW, aJ) < 0.02 * Math.max(peak(aJ), 0.1),
     `max Δ ${maxAbsDiff(aW, aJ).toExponential(2)} (peak ${peak(aJ).toFixed(3)})`);
+const gW = wasm.emicWaveGateMap(), gJ = js.emicWaveGateMap();
+check('wave-gate map matches (<2%)', maxAbsDiff(gW, gJ) < 0.02,
+    `max Δ ${maxAbsDiff(gW, gJ).toExponential(2)} (peak ${peak(gJ).toFixed(3)})`);
 
 // ── Recovery step still tracks ───────────────────────────────────────────────
 wasm.setDriver({ kp: 1, vbs: 0 });

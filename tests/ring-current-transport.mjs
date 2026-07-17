@@ -113,25 +113,35 @@ const approx = (a, b, rel = 1e-6, msg = '') =>
     t.C[0][kLo][t.idx(iL, jB)] = SEED;                         // within-channel ref
     t.C[1][kHi][t.idx(iL, jA)] = SEED;
     t.C[1][kHi][t.idx(iL, jB)] = SEED;                         // within-species ref
+    // He⁺ riders: the proton-driven wave field at jA should scatter them; at
+    // jB the protons are isotropic → no waves → untouched.
+    t.C[2][kHi][t.idx(iL, jA)] = SEED;
+    t.C[2][kHi][t.idx(iL, jB)] = SEED;
+    t.C[2][kLo][t.idx(iL, jA)] = SEED;                         // sub-resonant He⁺
+    t.C[2][kLo][t.idx(iL, jB)] = SEED;
     // Out-of-band probe at DAWN (jB): outside the all-MLT band AND outside
     // the dusk plume sector (a dusk cell at this L would now be plume!).
     t.C[0][kHi][t.idx(iOut, jB)] = SEED; t.MH[kHi][t.idx(iOut, jB)] = SEED * cf.aInject;
     const dt = 1800;
-    // Expected drain over one _loss call, replicated from the model formulas
-    // (order: cx/Coulomb decay → pa-decay on MH → gate on A → drain → relax A).
-    const expectRatio = (steps) => {
-        let c = 1, m = cf.aInject;
+    // Expected drains over `steps` _loss calls, replicated from the model
+    // formulas. The proton gate samples A AFTER the in-pass isotropization;
+    // the collective WAVE gate (He⁺ consumer) samples the PASS-START state —
+    // both sequences are tracked. cx/Coulomb factors cancel in the ratios.
+    const expectDrains = (steps) => {
+        let cP = 1, a = cf.aInject, cHe = 1;
         const paD = Math.exp(-dt / (cf.tauPaH * 3600));
         const aR = Math.exp(-dt / (cf.emicTauAH * 3600));
         for (let n = 0; n < steps; n++) {
-            m *= paD;                            // decay factors cancel in c-ratio
-            const A = m / c;
-            const g = Math.max(0, Math.min(1, (A - cf.emicACrit) / cf.emicAScale));
-            c *= Math.exp(-g * dt / (cf.emicTauH * 3600));
-            m = c * (cf.emicACrit + (A - cf.emicACrit) * aR);
+            const gWave = Math.max(0, Math.min(1, (a - cf.emicACrit) / cf.emicAScale));
+            cHe *= Math.exp(-gWave * dt / (cf.emicTauHeH * 3600));
+            const aIn = a * paD;
+            const g = Math.max(0, Math.min(1, (aIn - cf.emicACrit) / cf.emicAScale));
+            cP *= Math.exp(-g * dt / (cf.emicTauH * 3600));
+            a = cf.emicACrit + (aIn - cf.emicACrit) * aR;
         }
-        return c;
+        return { h: cP, he: cHe };
     };
+    const expectRatio = (steps) => expectDrains(steps).h;
     for (let n = 0; n < 4; n++) t._loss(dt);     // 2 h total
     // Within-channel jA/jB ratios: cx + Coulomb are identical across MLT, so
     // they cancel exactly and only the EMIC term remains.
@@ -140,6 +150,12 @@ const approx = (a, b, rel = 1e-6, msg = '') =>
     assert.ok(r(0, kHi) < 0.75, 'drain is substantial over 2 h');
     approx(r(0, kLo), 1, 1e-12, 'sub-50 keV protons untouched');
     approx(r(1, kHi), 1, 1e-12, 'O⁺ untouched (H⁺-band waves)');
+    // He⁺-band: the proton-driven wave field scatters He⁺ at jA exactly per
+    // the collective-gate sequence; no waves at jB (isotropic protons) and
+    // no resonance below 50 keV.
+    approx(r(2, kHi), expectDrains(4).he, 1e-9, 'He⁺ drains with the wave field');
+    assert.ok(r(2, kHi) < 0.9, 'He⁺ drain is visible over 2 h');
+    approx(r(2, kLo), 1, 1e-12, 'sub-resonant He⁺ untouched');
     // Out-of-band cell keeps only cx decay — compare against the isotropic
     // in-band cell after removing the differing cx/Coulomb factors: instead
     // pin that its MH kept the pa-decay only (no EMIC relax toward A_crit).

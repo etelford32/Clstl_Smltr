@@ -154,3 +154,11 @@ pub extern "C" fn rc_anisotropy_ptr() -> *const f32 {
     s.fill_anisotropy();
     s.out_map.as_ptr()
 }
+
+/// Collective EMIC wave-activity gate (0..1 per cell).
+#[no_mangle]
+pub extern "C" fn rc_wave_gate_ptr() -> *const f32 {
+    let s = sim();
+    s.fill_wave_gate();
+    s.out_map.as_ptr()
+}

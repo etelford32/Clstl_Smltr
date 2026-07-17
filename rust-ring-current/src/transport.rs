@@ -37,6 +37,7 @@ const EMIC_PLUME_OUT: f64 = 2.0;
 const EMIC_PLUME_MLT: (f64, f64) = (12.0, 20.0);
 const EMIC_PLUME_LMAX: f64 = 6.0;
 const EMIC_P_REF_NPA: f64 = 2.0;
+const EMIC_TAU_HE_H: f64 = 4.0;
 
 /// Charge-exchange key per species index (H⁺, O⁺, He⁺). He⁺ uses the proton
 /// cross-section (approx) and an extra ×0.7 lifetime factor, as in the JS.
@@ -404,11 +405,59 @@ impl Sim {
         out
     }
 
+    /// COLLECTIVE EMIC wave-activity gate per cell — MIRROR of the JS
+    /// emicWaveGateMap(): resonant-channel-summed proton anisotropy vs
+    /// A_crit × β, inside the overlap; 0 elsewhere. He⁺ and the radiation-
+    /// belt layer consume this one wave field.
+    fn wave_gate_map(&self, p_h: &[f64]) -> Vec<f64> {
+        let ppl = plasmapause_l(self.kp);
+        let mut out = vec![0.0f64; NL * NMLT];
+        let mut msum = [0.0f64; NL * NMLT];
+        let mut csum = [0.0f64; NL * NMLT];
+        for k in 0..NE {
+            if self.ekev[k] < EMIC_EMIN_KEV {
+                continue;
+            }
+            let base = cbase(0, k);
+            let mb = mbase(k);
+            for n in 0..NL * NMLT {
+                msum[n] += self.m_h[mb + n];
+                csum[n] += self.content[base + n];
+            }
+        }
+        for i in 0..NL {
+            let l = self.l[i];
+            for j in 0..NMLT {
+                if !emic_overlap(l, self.mlt[j], ppl) {
+                    continue;
+                }
+                let n = gidx(i, j);
+                if csum[n] <= 1e-30 {
+                    continue;
+                }
+                let a = msum[n] / csum[n];
+                let g_a = ((a - EMIC_A_CRIT) / EMIC_A_SCALE).clamp(0.0, 1.0);
+                out[n] = g_a * (p_h[n] / EMIC_P_REF_NPA).min(1.0);
+            }
+        }
+        out
+    }
+
+    /// Public fill of the wave-gate map into out_map (rc_wave_gate_ptr).
+    pub fn fill_wave_gate(&mut self) {
+        let p_h = self.proton_pressure_npa();
+        let g = self.wave_gate_map(&p_h);
+        for n in 0..NL * NMLT {
+            self.out_map[n] = g[n] as f32;
+        }
+    }
+
     /// Charge-exchange (+ Coulomb bleed) drain, plus EMIC-driven precipitation
     /// via the ANISOTROPY-MOMENT model: gates are the cold-plasma overlap
     /// (emic_overlap), the resonance threshold (E ≥ EMIC_EMIN_KEV), the LOCAL
     /// anisotropy A = MH/C vs A_crit, and the hot-proton β (P⊥/P_ref). The
     /// scattering that drains also relaxes A toward A_crit — self-limiting.
+    /// He⁺ ≥ 50 keV drains from the COLLECTIVE wave field (He⁺-band, τ = 4 h).
     /// MIRROR of the JS reference (js/ring-current-transport.js _loss) —
     /// CHANGE TOGETHER.
     fn loss(&mut self, dt: f64) {
@@ -416,6 +465,8 @@ impl Sim {
         let pa_decay = (-dt / (TAU_PA_H * 3600.0)).exp();
         let a_relax = (-dt / (EMIC_TAU_A_H * 3600.0)).exp();
         let p_h = self.proton_pressure_npa();
+        let wave_g = self.wave_gate_map(&p_h);
+        let he_k = dt / (EMIC_TAU_HE_H * 3600.0);
         for s in 0..NS {
             let cx = SPECIES_CX[s];
             for k in 0..NE {
@@ -435,6 +486,7 @@ impl Sim {
                         1.0 / (tau_h * 3600.0) + if l < ppl { 1.0 / (72.0 * 3600.0) } else { 0.0 };
                     let decay = (-inv_tau * dt).exp();
                     let emic_e = s == 0 && e >= EMIC_EMIN_KEV;
+                    let he_e = s == HELIUM_IDX && e >= EMIC_EMIN_KEV;
                     for j in 0..NMLT {
                         let n = gidx(i, j);
                         let mut c = self.content[base + n] * decay;
@@ -451,6 +503,10 @@ impl Sim {
                                 }
                             }
                             self.m_h[mb + n] = m;
+                        } else if he_e && wave_g[n] > 0.0 {
+                            // He⁺-band: the proton-driven wave field scatters
+                            // He⁺ itself (its own loss channel, slower τ).
+                            c *= (-wave_g[n] * he_k).exp();
                         }
                         self.content[base + n] = c;
                     }
@@ -768,23 +824,31 @@ mod tests {
         s.content[cbase(0, k_lo) + gidx(i_l, j_b)] = SEED;
         s.content[cbase(1, k_hi) + gidx(i_l, j_a)] = SEED;
         s.content[cbase(1, k_hi) + gidx(i_l, j_b)] = SEED;
+        // He⁺ riders: drained by the collective wave field at j_a only.
+        s.content[cbase(2, k_hi) + gidx(i_l, j_a)] = SEED;
+        s.content[cbase(2, k_hi) + gidx(i_l, j_b)] = SEED;
+        s.content[cbase(2, k_lo) + gidx(i_l, j_a)] = SEED;
+        s.content[cbase(2, k_lo) + gidx(i_l, j_b)] = SEED;
         // Out-of-region probe at DAWN (a dusk cell at this L would be plume).
         s.content[cbase(0, k_hi) + gidx(i_out, j_b)] = SEED;
         s.m_h[mbase(k_hi) + gidx(i_out, j_b)] = SEED * A_INJECT;
         let dt = 1800.0;
-        // Expected drain, replicated from the model formulas (β saturated).
-        let expect = {
-            let (mut c, mut m) = (1.0f64, A_INJECT);
+        // Expected drains, replicated from the model formulas (β saturated).
+        // The proton gate samples A after the in-pass isotropization; the
+        // collective wave gate (He⁺) samples the pass-start state.
+        let (expect, expect_he) = {
+            let (mut c, mut a, mut c_he) = (1.0f64, A_INJECT, 1.0f64);
             let pa_d = (-dt / (TAU_PA_H * 3600.0)).exp();
             let a_r = (-dt / (EMIC_TAU_A_H * 3600.0)).exp();
             for _ in 0..4 {
-                m *= pa_d;
-                let a = m / c;
-                let g = ((a - EMIC_A_CRIT) / EMIC_A_SCALE).clamp(0.0, 1.0);
+                let g_wave = ((a - EMIC_A_CRIT) / EMIC_A_SCALE).clamp(0.0, 1.0);
+                c_he *= (-g_wave * dt / (EMIC_TAU_HE_H * 3600.0)).exp();
+                let a_in = a * pa_d;
+                let g = ((a_in - EMIC_A_CRIT) / EMIC_A_SCALE).clamp(0.0, 1.0);
                 c *= (-g * dt / (EMIC_TAU_H * 3600.0)).exp();
-                m = c * (EMIC_A_CRIT + (a - EMIC_A_CRIT) * a_r);
+                a = EMIC_A_CRIT + (a_in - EMIC_A_CRIT) * a_r;
             }
-            c
+            (c, c_he)
         };
         for _ in 0..4 {
             s.loss(dt);
@@ -796,6 +860,13 @@ mod tests {
         assert!(ratio(0, k_hi) < 0.75, "drain substantial");
         assert!((ratio(0, k_lo) - 1.0).abs() < 1e-12, "sub-50 keV untouched");
         assert!((ratio(1, k_hi) - 1.0).abs() < 1e-12, "O⁺ untouched");
+        assert!(
+            (ratio(2, k_hi) - expect_he).abs() < 1e-9,
+            "He⁺ drains with the wave field: {} vs {expect_he}",
+            ratio(2, k_hi)
+        );
+        assert!(ratio(2, k_hi) < 0.9, "He⁺ drain visible");
+        assert!((ratio(2, k_lo) - 1.0).abs() < 1e-12, "sub-resonant He⁺ untouched");
         // Outside the region A only isotropizes (no relax toward A_crit).
         let a_out = s.m_h[mbase(k_hi) + gidx(i_out, j_b)]
             / s.content[cbase(0, k_hi) + gidx(i_out, j_b)];
