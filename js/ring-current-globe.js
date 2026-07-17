@@ -1201,6 +1201,7 @@ export class RingCurrentGlobe {
         this._sun.position.set(TRANSIT.X_SUN + 8, 0, 0);
         this._sun.scale.setScalar(11);
         this._scene.add(this._sun);
+        this._buildSunCorona();
 
         // Transit parcel points (positions/colors filled per frame).
         this._streamDensity = 1;   // ×1 | ×2 | ×4 — page control
@@ -1410,12 +1411,112 @@ export class RingCurrentGlobe {
     }
 
     /**
-     * Repaint the Sun sprite from the feed's sunLag ledger: corona glow,
-     * limb-darkened photosphere, HEK coronal holes at TODAY's Stonyhurst
-     * positions (catalog Carrington lon − live L0; dark, as they appear in
-     * EUV), and the back-mapped source marker of the wind arriving now —
-     * a teal ring that has rotated stonyhurstNowDeg toward the west limb
-     * since the plasma left (dashed once it passes behind the limb). A few
+     * Live shader corona — the Sun's EMISSION, animated. Flickering radial
+     * streamers (angular multi-harmonic noise), an equatorial streamer BELT
+     * that elongates the glow along the ecliptic, and brightness/extent
+     * driven by the LIVE GOES X-ray flux (page calls setSolarActivity from
+     * the same fetch that feeds the R-scale chip): the corona visibly
+     * breathes with real solar activity — quiet A-level is a tight faint
+     * glow, an X-flare day flares wide and hot. The glow fades IN at the
+     * limb so the canvas disk (photosphere, holes, source rings) stays
+     * crisp underneath; additive, so the bloom pass picks it up.
+     */
+    _buildSunCorona() {
+        this._sunAct = 0.25;          // eased activity 0..1 (B-level default)
+        this._sunActTarget = 0.25;
+        const mat = new THREE.ShaderMaterial({
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+            uniforms: { uTime: { value: 0 }, uAct: { value: this._sunAct } },
+            vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+            fragmentShader: `
+                precision highp float;
+                varying vec2 vUv;
+                uniform float uTime, uAct;
+                void main() {
+                    vec2 p = (vUv - 0.5) * 2.0;           // −1..1, disk at origin
+                    float r = length(p);
+                    float th = atan(p.y, p.x);
+                    // World disk radius ≈1.98 over plane half-size 15 → 0.132.
+                    const float R0 = 0.132;
+                    // Streamers: three angular harmonics with independent slow
+                    // drifts — irregular rays that shear against each other.
+                    float a1 = sin(th * 7.0  + uTime * 0.15);
+                    float a2 = sin(th * 13.0 - uTime * 0.23 + 1.7);
+                    float a3 = sin(th * 23.0 + uTime * 0.11 + 4.2);
+                    float ray = 0.55 + 0.45 * (0.5 * a1 + 0.3 * a2 + 0.2 * a3);
+                    ray = pow(clamp(ray, 0.0, 1.0), 1.6);
+                    // Streamer belt: elongate the glow along the ecliptic (±x)
+                    // at larger radii — the classic eclipse-photo shape.
+                    float belt = exp(-(p.y * p.y) / (0.06 + 0.10 * r));
+                    float elong = mix(1.0, 1.0 + 2.0 * belt, smoothstep(0.18, 0.55, r));
+                    // Radial falloff: activity pushes the corona OUT.
+                    float k = mix(10.0, 4.8, uAct);
+                    float fall = exp(-max(0.0, r - R0) * k);
+                    // Fade in at the limb — the disk canvas owns the interior.
+                    float lim = smoothstep(R0 * 0.92, R0 * 1.3, r);
+                    // Subtle flicker.
+                    float flick = 1.0 + 0.06 * sin(uTime * 3.1 + th * 3.0)
+                                      + 0.04 * sin(uTime * 5.7 - th * 5.0);
+                    float I = lim * fall * ray * elong * (0.45 + 0.95 * uAct) * flick;
+                    // Warm → hotter/whiter with activity.
+                    vec3 col = mix(vec3(1.0, 0.72, 0.38), vec3(1.0, 0.92, 0.78), uAct);
+                    gl_FragColor = vec4(col * I, I);
+                }`,
+        });
+        this._corona = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), mat);
+        this._corona.position.copy(this._sun.position);
+        this._corona.frustumCulled = false;
+        this._scene.add(this._corona);
+    }
+
+    /** Live GOES X-ray long-band flux (W/m²) → corona activity target.
+     *  A=1e-8 → 0, X=1e-4 → 1 on a log scale; eased in tick so flare rise
+     *  and decay read as motion, not a jump cut. */
+    setSolarActivity(xrayWm2) {
+        if (!Number.isFinite(xrayWm2) || xrayWm2 <= 0) return;
+        this._sunActTarget = Math.max(0, Math.min(1, (Math.log10(xrayWm2) + 8) / 4));
+    }
+
+    /**
+     * Parker-spiral connection line: from the back-mapped source region on
+     * the disk (the teal ring — offset toward the west limb, world +Z from
+     * this vantage) curving to the corridor's Earth end. Explains WHY the
+     * source sits west of the Sun–Earth line: the wind travels radially
+     * while the Sun rotates under it. Rebuilt per feed state.
+     */
+    _updateParkerSpiral(sl) {
+        const west = sl?.stonyhurstNowDeg;
+        if (!Number.isFinite(west)) { if (this._spiral) this._spiral.visible = false; return; }
+        if (!this._spiral) {
+            this._spiralMat = new THREE.LineDashedMaterial({
+                color: 0x7fe6c3, transparent: true, opacity: 0.32,
+                dashSize: 0.9, gapSize: 0.7, depthWrite: false,
+            });
+            this._spiral = new THREE.Line(new THREE.BufferGeometry(), this._spiralMat);
+            this._scene.add(this._spiral);
+        }
+        const sunX = TRANSIT.X_SUN + 8;
+        const z0 = Math.sin(Math.min(west, 88) * Math.PI / 180) * 2.0;   // disk-scale west offset
+        const start = new THREE.Vector3(sunX - 1.2, 0, z0);
+        const ctrl  = new THREE.Vector3((sunX + TRANSIT.X_MP) / 2, 0, z0 * 2.4);
+        const end   = new THREE.Vector3(TRANSIT.X_MP + 1, 0, 0);
+        const pts = new THREE.QuadraticBezierCurve3(start, ctrl, end).getPoints(48);
+        this._spiral.geometry.dispose();
+        this._spiral.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+        this._spiral.computeLineDistances();
+        this._spiral.visible = true;
+    }
+
+    /**
+     * Repaint the Sun sprite from the feed's sunLag ledger: limb-darkened
+     * photosphere, HEK coronal holes at TODAY's Stonyhurst positions
+     * (catalog Carrington lon − live L0; dark, as they appear in EUV),
+     * fast-wind FANS off the holes whose streams matter (the connected
+     * source in teal, <5-day recurrence arrivals in amber), and the
+     * back-mapped source marker of the wind arriving now — a teal ring that
+     * has rotated stonyhurstNowDeg toward the west limb since the plasma
+     * left (dashed once it passes behind the limb). The corona glow itself
+     * is the live SHADER plane (_buildSunCorona), not baked here. A few
      * dozen 2D calls per feed state (~30 s) — negligible.
      */
     _drawSunDisk(sl) {
@@ -1423,11 +1524,12 @@ export class RingCurrentGlobe {
         const C = 128, R = 46;                       // center, disk radius (px)
         const d2r = Math.PI / 180;
         g.clearRect(0, 0, 256, 256);
-        // Corona glow out to the sprite edge.
-        let grad = g.createRadialGradient(C, C, R * 0.75, C, C, 128);
-        grad.addColorStop(0.00, 'rgba(255,214,120,0.85)');
-        grad.addColorStop(0.35, 'rgba(255,150,60,0.25)');
-        grad.addColorStop(1.00, 'rgba(255,120,40,0)');
+        // (The corona glow is the live SHADER plane now — see
+        // _buildSunCorona. Only a thin chromosphere rim stays baked so the
+        // limb doesn't look clipped when the shader corona is dim.)
+        let grad = g.createRadialGradient(C, C, R * 0.9, C, C, R * 1.35);
+        grad.addColorStop(0.00, 'rgba(255,200,110,0.55)');
+        grad.addColorStop(1.00, 'rgba(255,140,50,0)');
         g.fillStyle = grad;
         g.fillRect(0, 0, 256, 256);
         // Photosphere with limb darkening.
@@ -1473,6 +1575,20 @@ export class RingCurrentGlobe {
                 }
             }
             g.restore();
+            // Fast-wind FANS (outside the disk clip): holes whose streams
+            // matter emit a visible radial fan beyond the limb — amber for
+            // <5-day recurrence arrivals. Radial from disk centre through the
+            // hole: the actual outflow direction.
+            for (const h of sl.holes ?? []) {
+                if (!Number.isFinite(h?.lon_carrington_deg)) continue;
+                if (!soon.has(Math.round(h.lon_carrington_deg))) continue;
+                const lon = ((h.lon_carrington_deg - l0) % 360 + 540) % 360 - 180;
+                const lat = h.lat_deg ?? 0;
+                if (Math.abs(lon) > 85 || Math.abs(lat) > 80) continue;
+                this._drawWindFan(g, C, R,
+                    C + R * Math.sin(lon * d2r) * Math.cos(lat * d2r),
+                    C - R * Math.sin(lat * d2r), 'rgba(255,210,122,');
+            }
         }
         // Back-mapped source of the wind arriving NOW.
         const west = sl?.stonyhurstNowDeg;
@@ -1481,6 +1597,9 @@ export class RingCurrentGlobe {
             const lon = Math.min(west, 88);
             const x = C + R * Math.sin(lon * d2r) * Math.cos(lat * d2r);
             const y = C - R * Math.sin(lat * d2r);
+            // The stream CURRENTLY hitting Earth gets its fan in teal —
+            // matching the source ring and the Parker-spiral line.
+            if (west <= 88) this._drawWindFan(g, C, R, x, y, 'rgba(127,230,195,');
             g.strokeStyle = '#7fe6c3';
             g.lineWidth = 2;
             if (west > 88) g.setLineDash([3, 3]);    // already behind the limb
@@ -1496,6 +1615,32 @@ export class RingCurrentGlobe {
             g.stroke();
         }
         this._sunTex.needsUpdate = true;
+    }
+
+    /** A tapering fast-wind fan on the disk canvas: from just outside the
+     *  limb, radially outward through (x, y), fading with distance. `tint`
+     *  is an 'rgba(r,g,b,' prefix — teal for the connected stream, amber
+     *  for <5-day recurrence arrivals. */
+    _drawWindFan(g, C, R, x, y, tint) {
+        const dx = x - C, dy = y - C;
+        const d = Math.hypot(dx, dy) || 1;
+        const ux = dx / d, uy = dy / d;              // outward unit vector
+        const px = -uy, py = ux;                     // perpendicular
+        const r0 = R + 3, r1 = R + 52;               // fan span beyond the limb
+        const w0 = 5, w1 = 16;                       // width taper (outward spread)
+        const ax = C + ux * r0, ay = C + uy * r0;
+        const bx = C + ux * r1, by = C + uy * r1;
+        const grad = g.createLinearGradient(ax, ay, bx, by);
+        grad.addColorStop(0, `${tint}0.34)`);
+        grad.addColorStop(1, `${tint}0)`);
+        g.fillStyle = grad;
+        g.beginPath();
+        g.moveTo(ax + px * w0, ay + py * w0);
+        g.lineTo(bx + px * w1, by + py * w1);
+        g.lineTo(bx - px * w1, by - py * w1);
+        g.lineTo(ax - px * w0, ay - py * w0);
+        g.closePath();
+        g.fill();
     }
 
     /** The named view last selected via setView ('earth'|'sun'|'river').
@@ -2779,7 +2924,7 @@ export class RingCurrentGlobe {
             ], '#9ecbff');
         }
         // Live solar disk: coronal holes + the back-mapped source marker.
-        if (sl) this._drawSunDisk(sl);
+        if (sl) { this._drawSunDisk(sl); this._updateParkerSpiral(sl); }
         // Solar-origin emission wiring: where on the disk the puffs are
         // born, the live drivers that set their cadence, and the schematic
         // Parker-spiral streamline source → gate.
@@ -3031,6 +3176,16 @@ export class RingCurrentGlobe {
         this._gateMat.uniforms.uPulse.value =
             Math.max(0, this._gateMat.uniforms.uPulse.value - dt / 1.2);
         this._gateMat.uniforms.uTime.value = this._tView;
+        // Live corona: billboard toward the camera, advance the streamer
+        // clock, and ease activity toward the latest GOES X-ray level so
+        // flare rise/decay reads as motion.
+        if (this._corona) {
+            this._corona.quaternion.copy(this._camera.quaternion);
+            this._sunAct += (this._sunActTarget - this._sunAct) * (1 - Math.exp(-dt / 3));
+            const u = this._corona.material.uniforms;
+            u.uTime.value = this._tView;
+            u.uAct.value = this._sunAct;
+        }
         this._l1Craft.position.set(
             TRANSIT.X_SUN + 0.3,
             3.4 * Math.sin(this._tView / 41),

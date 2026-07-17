@@ -572,6 +572,7 @@ body {
             <span class="rc-dot" style="background:#9ecbff"></span>L1 plane &mdash; pulse = new 1-min sample &middot; dot = DSCOVR/ACE halo orbit<br>
             <span class="rc-dot" style="background:#ffd27a"></span>Sun disk &mdash; dark = HEK coronal holes &middot; teal ring = source of the wind arriving now<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;amber ring = stream forecast at Earth within 5 d (27-d persistence)</span><br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;corona breathes with live GOES X-ray &middot; fans = fast wind off holes &middot; teal arc = Parker-spiral connection</span><br>
             <span class="rc-dot" style="background:#ffc890"></span>CME front &mdash; DONKI cone in ballistic transit, label = live ETA &plusmn; band<br>
             <span class="rc-dot" style="background:#7fb4ff"></span>Magnetopause (Shue98, live) &middot; <span class="rc-dot" style="background:#59e0d8"></span>bow shock<br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;arrivals deflect &mdash; the sheath river parts around the boundary</span><br>
@@ -1989,6 +1990,9 @@ function renderSituation() {
     const G = noaaGScale(s?.now?.kp);
     const E = geoChargingRisk(aux.e2?.flux);
     setChip('rc-chip-r', R.level, aux.xray ? R.label : 'R —');
+    // Drive the 3D corona from the SAME live X-ray flux the R chip reads —
+    // the Sun in the scene breathes with real solar activity.
+    globe?.setSolarActivity(aux.xray?.flux);
     setChip('rc-chip-s', S.level, aux.p10 ? S.label : 'S —');
     setChip('rc-chip-g', G.level, Number.isFinite(s?.now?.kp) ? G.label : 'G —');
     setChip('rc-chip-e', E.level, aux.e2 ? `GEO e⁻ ${E.label}` : 'GEO e⁻ —');
