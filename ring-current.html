@@ -220,6 +220,15 @@ body {
 .rc-v.rc-north { color:#7fe6c3; }
 
 .rc-energy { font-size:1.5rem; font-weight:800; color:#ffd700; padding:2px 0 6px; font-variant-numeric:tabular-nums; }
+/* Dst budget — signed diverging bars around a zero line (center of track). */
+.rc-decomp { margin:6px 0 4px; padding:7px 0 3px; border-top:1px dashed rgba(255,255,255,.08); }
+.rc-decomp-title { font-size:.62rem; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:#8b94ad; margin-bottom:5px; cursor:help; }
+.rc-decomp-row { display:flex; align-items:center; gap:7px; padding:1.5px 0; }
+.rc-decomp-k { flex:0 0 118px; font-size:.68rem; color:#8b94ad; }
+.rc-decomp-track { flex:1; position:relative; height:8px; background:rgba(255,255,255,.05); border-radius:4px; overflow:hidden; }
+.rc-decomp-track::after { content:''; position:absolute; left:50%; top:0; bottom:0; width:1px; background:rgba(255,255,255,.22); }
+.rc-decomp-bar { position:absolute; top:1px; bottom:1px; border-radius:3px; transition:left .4s, width .4s; }
+.rc-decomp-v { flex:0 0 52px; text-align:right; font-size:.7rem; font-weight:650; color:#e8edf7; font-variant-numeric:tabular-nums; }
 .rc-storm-badge {
     display:inline-block; font-size:.72rem; font-weight:800; letter-spacing:.05em;
     border-radius:6px; padding:3px 9px; margin-top:2px;
@@ -572,6 +581,13 @@ body {
             <div class="rc-kv"><span class="rc-k">Dst observed (Kyoto)</span><span class="rc-v" id="rc-dst-obs">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">Dst model</span><span class="rc-v" id="rc-dst-model">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">Dst* (pressure-corrected)</span><span class="rc-v" id="rc-dst-star">&mdash;</span></div>
+            <div class="rc-decomp" id="rc-decomp" hidden>
+                <div class="rc-decomp-title" title="O'Brien&ndash;McPherron decomposition: Dst = Dst* + b&radic;Pdyn &minus; c. The residual vs Kyoto is what the ring+magnetopause model does NOT carry: tail current, substorms, induction &mdash; and model error.">Dst budget &mdash; who carries the nT</div>
+                <div class="rc-decomp-row"><span class="rc-decomp-k">ring current (Dst*)</span><div class="rc-decomp-track"><span class="rc-decomp-bar" id="rc-dec-ring"></span></div><span class="rc-decomp-v" id="rc-dec-ring-v">&mdash;</span></div>
+                <div class="rc-decomp-row"><span class="rc-decomp-k">magnetopause +b&radic;P</span><div class="rc-decomp-track"><span class="rc-decomp-bar" id="rc-dec-mp"></span></div><span class="rc-decomp-v" id="rc-dec-mp-v">&mdash;</span></div>
+                <div class="rc-decomp-row"><span class="rc-decomp-k">quiet baseline &minus;c</span><div class="rc-decomp-track"><span class="rc-decomp-bar" id="rc-dec-base"></span></div><span class="rc-decomp-v" id="rc-dec-base-v">&mdash;</span></div>
+                <div class="rc-decomp-row"><span class="rc-decomp-k">unmodeled (tail&hellip;)</span><div class="rc-decomp-track"><span class="rc-decomp-bar" id="rc-dec-resid"></span></div><span class="rc-decomp-v" id="rc-dec-resid-v">&mdash;</span></div>
+            </div>
             <div class="rc-kv"><span class="rc-k">peak current shell</span><span class="rc-v" id="rc-peakl">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">dusk asymmetry</span><span class="rc-v" id="rc-asym">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">composition (energy)</span><span class="rc-v" id="rc-ofrac">&mdash;</span></div>
@@ -744,7 +760,7 @@ body {
     <div class="rc-chart-panel">
         <div class="rc-chart-head">
             <h2 id="rc-chart-title">Dst &mdash; model vs observed, 24 h + forecast</h2>
-            <span class="rc-skill">model skill: RMSE <b id="rc-rmse">&mdash;</b> &middot; bias <b id="rc-bias">&mdash;</b></span>
+            <span class="rc-skill">model skill: RMSE <b id="rc-rmse">&mdash;</b> &middot; bias <b id="rc-bias">&mdash;</b> &middot; r <b id="rc-corr" title="Pearson correlation, model vs Kyoto over the plotted window">&mdash;</b></span>
             <button class="rc-replay-btn" id="rc-replay">&#9654; Replay Gannon G5 (May 2024)</button>
             <span class="rc-skill"><span class="rc-dot" style="background:#59e0d8"></span>observed
                 <span class="rc-dot" style="background:#ff9a3d;margin-left:10px"></span>model
@@ -782,7 +798,7 @@ body {
 <script type="module">
 import { RingCurrentFeed, omniToReplay, computeReplayState, parseLatestFlux } from './js/ring-current-feed.js?v=20260711';
 import {
-    newellCoupling, earthOrbit,
+    newellCoupling, earthOrbit, OBM,
     noaaRScale, noaaSScale, noaaGScale, geoChargingRisk,
 } from './js/ring-current-model.js?v=20260711';
 import { SimClock, TAU_DEFAULT, simSecondsForRealMinutes } from './js/sim-clock.js?v=20260712';
@@ -1462,6 +1478,30 @@ function renderHud(s) {
     $('rc-dst-obs').textContent   = fmt(s.now.dstObserved, 0, ' nT');
     $('rc-dst-model').textContent = fmt(s.now.dstModel, 1, ' nT');
     $('rc-dst-star').textContent  = fmt(s.now.dstStarModel, 1, ' nT');
+    // Dst budget — the O'Brien–McPherron decomposition, live:
+    //   Dst_model = Dst* (ring) + b·√Pdyn (magnetopause) − c (quiet baseline)
+    //   residual  = Dst_obs − Dst_model  (tail current, substorms, error —
+    //               everything the ring+MP model does NOT carry).
+    if (Number.isFinite(s.now.dstStarModel) && Number.isFinite(s.drivers?.pdyn)) {
+        const terms = [
+            ['ring',  s.now.dstStarModel,                        '#ffa040'],
+            ['mp',    OBM.B_NT_SQRT * Math.sqrt(s.drivers.pdyn), '#7fb4ff'],
+            ['base',  -OBM.C_NT,                                 '#8b94ad'],
+            ['resid', Number.isFinite(s.now.dstObserved) && Number.isFinite(s.now.dstModel)
+                          ? s.now.dstObserved - s.now.dstModel : null, null],
+        ];
+        const span = Math.max(25, ...terms.map(([, v]) => Math.abs(v ?? 0)));
+        for (const [key, v, color] of terms) {
+            const bar = $(`rc-dec-${key}`), val = $(`rc-dec-${key}-v`);
+            if (!Number.isFinite(v)) { bar.style.width = '0'; val.textContent = '—'; continue; }
+            const frac = Math.min(1, Math.abs(v) / span) * 50;   // % of half-track
+            bar.style.left  = v < 0 ? `${50 - frac}%` : '50%';
+            bar.style.width = `${frac}%`;
+            bar.style.background = color ?? (v <= 0 ? '#ff7d66' : '#7fe6c3');
+            val.textContent = `${v > 0 ? '+' : ''}${v.toFixed(0)} nT`;
+        }
+        $('rc-decomp').hidden = false;
+    }
     $('rc-peakl').textContent     = fmt(s.now.peakL, 2, ' Rᴇ');
     $('rc-asym').textContent      = Number.isFinite(s.now.asymmetry?.amplitude)
         ? `${Math.round(s.now.asymmetry.amplitude * 100)}% @ ${s.now.asymmetry.mltPeakHours} MLT` : '—';
@@ -1613,6 +1653,31 @@ function renderHud(s) {
         $('rc-rmse').textContent = fmt(s.skill?.rmse, 1, ' nT');
         $('rc-bias').textContent = Number.isFinite(s.skill?.bias)
             ? `${s.skill.bias >= 0 ? '+' : ''}${s.skill.bias.toFixed(1)} nT` : '—';
+        // Pearson correlation over the plotted window: pair each hourly Kyoto
+        // sample with the nearest model sample (≤45 min). RMSE says "how far
+        // off"; r says "does the model track the SHAPE" — a storm can have a
+        // good RMSE while missing every turn, and r catches that.
+        $('rc-corr').textContent = (() => {
+            const model = s.series?.model ?? [], obs = s.series?.observed ?? [];
+            if (model.length < 3 || obs.length < 3) return '—';
+            const xs = [], ys = [];
+            let mi = 0;
+            for (const o of obs) {
+                while (mi < model.length - 1 && model[mi].t < o.t) mi++;
+                const near = mi > 0 && (o.t - model[mi - 1].t) < (model[mi].t - o.t) ? model[mi - 1] : model[mi];
+                if (Math.abs(near.t - o.t) > 45 * 60e3) continue;
+                if (Number.isFinite(near.dst) && Number.isFinite(o.dst)) { xs.push(near.dst); ys.push(o.dst); }
+            }
+            const n = xs.length;
+            if (n < 3) return '—';
+            const mx = xs.reduce((a, b) => a + b) / n, my = ys.reduce((a, b) => a + b) / n;
+            let sxy = 0, sxx = 0, syy = 0;
+            for (let i = 0; i < n; i++) {
+                const dx = xs[i] - mx, dy = ys[i] - my;
+                sxy += dx * dy; sxx += dx * dx; syy += dy * dy;
+            }
+            return sxx > 0 && syy > 0 ? (sxy / Math.sqrt(sxx * syy)).toFixed(2) : '—';
+        })();
     }
 
     // Predictive threshold alert — the 30–90 min lead users ask for.
