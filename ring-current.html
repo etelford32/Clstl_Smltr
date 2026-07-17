@@ -486,6 +486,7 @@ body {
                 <div class="rc-dock-lab"><b>energy spectrum</b> keV, log &middot;
                     <span><span class="rc-dot" style="background:#ffa040"></span>H&#8314;</span>
                     <span><span class="rc-dot" style="background:#94ff57"></span>O&#8314;</span>
+                    <span><span class="rc-dot" style="background:#b48cff"></span>He&#8314;</span>
                     <span><span class="rc-dot" style="background:#59baff"></span>e&#8315;</span>
                 </div>
                 <canvas id="rc-dock-spec" title="Energy spectrum of the drawn particles, 20–250 keV log bins, by species"></canvas>
@@ -516,6 +517,7 @@ body {
         <div class="rc-legend-body" id="rc-legend-body">
             <span class="rc-legend-pop" data-pop="ionsH" role="button" tabindex="0" aria-pressed="true" title="Show / hide H⁺ particles"><span class="rc-dot" style="background:#ffa040"></span>H&#8314; ions &mdash; drift west, true-rate bounce</span><br>
             <span class="rc-legend-pop" data-pop="ionsO" role="button" tabindex="0" aria-pressed="true" title="Show / hide O⁺ particles"><span class="rc-dot" style="background:#94ff57"></span>O&#8314; ions &mdash; ionospheric, dies ~10&times; sooner (two-phase decay)</span><br>
+            <span class="rc-legend-pop" data-pop="ionsHe" role="button" tabindex="0" aria-pressed="true" title="Show / hide He⁺ particles"><span class="rc-dot" style="background:#b48cff"></span>He&#8314; ions &mdash; minor accent, &radic;4 slower bounce</span><br>
             <span class="rc-legend-pop" data-pop="electrons" role="button" tabindex="0" aria-pressed="true" title="Show / hide electron particles"><span class="rc-dot" style="background:#59baff"></span>Electrons &mdash; drift east</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;opposite drifts = one westward current</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;tint = energy: pale ≈250 keV laps deep ≈20 keV (dispersion)</span><br>
@@ -1111,7 +1113,7 @@ if (globe) {
 
     // Buffers, allocated once (plan guardrail: no per-sample allocations).
     const NB = 16;
-    const spec = { ionsH: new Float32Array(NB), ionsO: new Float32Array(NB), electrons: new Float32Array(NB) };
+    const spec = { ionsH: new Float32Array(NB), ionsO: new Float32Array(NB), ionsHe: new Float32Array(NB), electrons: new Float32Array(NB) };
     const lBins = new Float32Array(16), lExp = new Float32Array(32);
     const lifeBins = { ionsH: new Float32Array(14), ionsO: new Float32Array(14) };
     let lifeDone = false;
@@ -1119,7 +1121,7 @@ if (globe) {
     const tallyOut = { ena: 0, precip: 0 };
     const samples = [];                    // rolling {dSimH, ena, precip}, ≤40
     let lastSimH = null;
-    const SPECIES_COLOR = { ionsH: '#ffa040', ionsO: '#94ff57', electrons: '#59baff' };
+    const SPECIES_COLOR = { ionsH: '#ffa040', ionsO: '#94ff57', ionsHe: '#b48cff', electrons: '#59baff' };
 
     function prepChart(id) {
         const cv = $(id);
@@ -1150,8 +1152,8 @@ if (globe) {
     }
     function drawSpec() {
         const { g, w, h } = prepChart('rc-dock-spec');
-        const max = Math.max(1, ...spec.ionsH, ...spec.ionsO, ...spec.electrons);
-        for (const key of ['ionsH', 'ionsO', 'electrons']) {
+        const max = Math.max(1, ...spec.ionsH, ...spec.ionsO, ...spec.ionsHe, ...spec.electrons);
+        for (const key of ['ionsH', 'ionsO', 'ionsHe', 'electrons']) {
             stepLine(g, w, h, spec[key], max, SPECIES_COLOR[key]);
         }
     }
@@ -1236,7 +1238,7 @@ if (globe) {
                                        byKey.ionsO.pop, byKey.ionsO.visFrac)
             : null;
         countsEl.innerHTML =
-            `drawn <b>${visN.ionsH ?? 0}</b> H⁺ · <b>${visN.ionsO ?? 0}</b> O⁺ · <b>${visN.electrons ?? 0}</b> e⁻<br>` +
+            `drawn <b>${visN.ionsH ?? 0}</b> H⁺ · <b>${visN.ionsO ?? 0}</b> O⁺ · <b>${visN.ionsHe ?? 0}</b> He⁺ · <b>${visN.electrons ?? 0}</b> e⁻<br>` +
             `O⁺ energy — model <b>${snap.oxygenModelFrac != null ? Math.round(snap.oxygenModelFrac * 100) + '%' : '—'}</b> (steers brightness) · build <b>${share != null ? Math.round(share * 100) + '%' : '—'}</b><br>` +
             `recycles <b>${rate != null ? Math.round(rate).toLocaleString('en-US') : '—'}</b>/sim-h` +
             `${win.e + win.p > 0 ? ` · ENA <b>${Math.round(100 * win.e / (win.e + win.p))}%</b> · precip <b>${Math.round(100 * win.p / (win.e + win.p))}%</b>` : ''}`;
