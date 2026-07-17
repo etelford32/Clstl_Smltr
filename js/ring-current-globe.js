@@ -897,28 +897,72 @@ export class RingCurrentGlobe {
         this._earthTilt.add(axisLine(1.38, 0xdfe8ff, 0.5));
     }
 
+    /** Dipole field lines that DEFORM with the storm: nightside lines stretch
+     *  tailward and pinch toward the current sheet as the ring energises
+     *  (|Dst*| + injection), dayside lines compress under a low Shue standoff.
+     *  The base shape is the exact dipole r = L·cos²λ; the deformation is a
+     *  VISUAL cue keyed to live state, not a field model — labeled as such.
+     *  Base positions are kept; _updateFieldLines rewrites the buffers in
+     *  place (~3k points, trivial) whenever the drivers move. */
     _buildFieldLines() {
         const group = new THREE.Group();
-        const mat = new THREE.LineBasicMaterial({
+        this._fieldMat = new THREE.LineBasicMaterial({
             color: 0x5f79b8, transparent: true, opacity: 0.20,
             blending: THREE.AdditiveBlending, depthWrite: false,
         });
         const SEGS = 48;
+        this._fieldLines = [];
         for (const L of [2, 3, 4, 5, 6]) {
             const lamMax = Math.acos(Math.sqrt(1 / L));   // field line reaches r = 1
             for (let m = 0; m < 12; m++) {
                 const th = (m / 12) * 2 * Math.PI;
-                const pts = [];
+                const base = new Float32Array((SEGS + 1) * 3);
                 for (let s = 0; s <= SEGS; s++) {
                     const lam = -lamMax + (2 * lamMax * s) / SEGS;
                     const r = L * Math.cos(lam) ** 2;
                     const req = r * Math.cos(lam);
-                    pts.push(new THREE.Vector3(req * Math.cos(th), r * Math.sin(lam), req * Math.sin(th)));
+                    base[s * 3]     = req * Math.cos(th);
+                    base[s * 3 + 1] = r * Math.sin(lam);
+                    base[s * 3 + 2] = req * Math.sin(th);
                 }
-                group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position',
+                    new THREE.BufferAttribute(base.slice(), 3).setUsage(THREE.DynamicDrawUsage));
+                group.add(new THREE.Line(geo, this._fieldMat));
+                // dayW/nightW are per-line (azimuth is constant along a line).
+                this._fieldLines.push({ geo, base, L,
+                    dayW: Math.max(0, Math.cos(th)), nightW: Math.max(0, -Math.cos(th)) });
             }
         }
         this._magGroup.add(group);
+        this._fieldDeform = { s: -1, cmp: -1 };   // last applied (force first update)
+    }
+
+    /** Apply the live deformation. stretch s∈[0,1] (storm tail), cmp∈[0,~0.45]
+     *  (dayside compression from the Shue standoff). Skips when neither moved. */
+    _updateFieldLines(s, cmp) {
+        if (!this._fieldLines) return;
+        const last = this._fieldDeform;
+        if (Math.abs(s - last.s) < 0.02 && Math.abs(cmp - last.cmp) < 0.02) return;
+        this._fieldDeform = { s, cmp };
+        for (const fl of this._fieldLines) {
+            const { base, geo, dayW, nightW } = fl;
+            const arr = geo.attributes.position.array;
+            for (let i = 0; i < base.length; i += 3) {
+                const px = base[i], py = base[i + 1], pz = base[i + 2];
+                const r = Math.sqrt(px * px + py * py + pz * pz);
+                const f = (r / 6) * (r / 6);                       // outer-line weight
+                // Tail: anti-sunward pull + pinch toward the current sheet.
+                arr[i]     = px - s * nightW * 2.2 * f * r / 6;
+                arr[i + 1] = py * (1 - 0.30 * s * nightW * Math.min(1, f));
+                // Day: compress toward Earth under a low standoff.
+                arr[i]    *= (1 - cmp * dayW * Math.min(1, f));
+                arr[i + 2] = pz;
+            }
+            geo.attributes.position.needsUpdate = true;
+        }
+        // The stretched, loaded field reads slightly brighter.
+        this._fieldMat.opacity = 0.20 + 0.10 * s;
     }
 
     /**
@@ -2998,6 +3042,11 @@ export class RingCurrentGlobe {
         let tNow = performance.now();
         blend('state', tMark, tNow); tMark = tNow;
         this._updateBoundaries(dt);
+        // Field-line deformation from the SAME eased state the boundaries use
+        // (storm tail stretch; dayside squash under a low Shue standoff).
+        this._updateFieldLines(
+            Math.min(1, Math.abs(this._state.dstStar) / 150 + 0.3 * this._state.injection),
+            Math.max(0, Math.min(0.45, (10.5 - this._mpR0) / 12)));
         this._updateTransit(simNow, wallNow);
         this._detectArrivals(simNow);
         this._lastSimNow = simNow;
