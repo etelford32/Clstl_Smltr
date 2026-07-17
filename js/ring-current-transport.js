@@ -354,8 +354,21 @@ export class RingCurrentTransport {
     }
 
     // ── Charge-exchange (+ bulk loss-cone) drain, per species/energy/L ────────
+    // Plus EMIC-driven precipitation (reduced bounce-averaged treatment):
+    // H⁺-band EMIC waves grow where hot anisotropic ring protons overlap the
+    // cold plasmasphere — the DUSK PLUME just inside/at the plasmapause — and
+    // pitch-angle-scatter energetic protons into the loss cone within hours
+    // during storm-time convection (Jordanova et al. 2001-style). Modeled as
+    // an extra e-folding: τ_EMIC = 2.5 h at full gate, Kp-gated 4.5→7,
+    // protons only, E ≥ 50 keV, MLT 12–20, L ∈ [Lpp−0.6, Lpp+0.4]. The gates
+    // ARE the physics claim (wave growth needs the overlap + the anisotropy);
+    // outside them charge exchange remains the exact e^(−t/τ) the tests pin.
+    // MIRRORED in rust-ring-current/src/transport.rs — CHANGE TOGETHER.
     _loss(dt) {
         const { nL, nMlt } = this;
+        const ppl = plasmapauseL(this.driver.kp);
+        const emicG = Math.max(0, Math.min(1, (this.driver.kp - 4.5) / 2.5));
+        const emicDecay = emicG > 0 ? Math.exp(-emicG * dt / (2.5 * 3600)) : 1;
         for (let s = 0; s < this.nS; s++) {
             const sp = SPECIES[s];
             for (let k = 0; k < this.nE; k++) {
@@ -370,9 +383,18 @@ export class RingCurrentTransport {
                     if (!Number.isFinite(tauH) || tauH <= 0) continue;
                     // Weak extra loss inside the plasmasphere (Coulomb) — a small
                     // constant bleed, deliberately conservative.
-                    const invTau = 1 / (tauH * 3600) + (L < plasmapauseL(this.driver.kp) ? 1 / (72 * 3600) : 0);
+                    const invTau = 1 / (tauH * 3600) + (L < ppl ? 1 / (72 * 3600) : 0);
                     const decay = Math.exp(-invTau * dt);
-                    for (let j = 0; j < nMlt; j++) C[this.idx(i, j)] *= decay;
+                    const emicHere = emicDecay < 1 && s === 0 && E >= 50
+                        && L >= ppl - 0.6 && L <= ppl + 0.4;
+                    for (let j = 0; j < nMlt; j++) {
+                        let v = C[this.idx(i, j)] * decay;
+                        if (emicHere) {
+                            const mlt = this.az[j] * 12 / Math.PI;   // az → MLT hours
+                            if (mlt >= 12 && mlt <= 20) v *= emicDecay;
+                        }
+                        C[this.idx(i, j)] = v;
+                    }
                 }
             }
         }

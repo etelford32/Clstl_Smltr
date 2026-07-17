@@ -90,6 +90,39 @@ const approx = (a, b, rel = 1e-6, msg = '') =>
     ok('charge-exchange decay matches e^(-t/τ); O⁺ faster than H⁺');
 }
 
+// ── 3b. EMIC-driven precipitation: dusk plume band, protons, storm-gated ─────
+{
+    const t = new RingCurrentTransport();
+    t.setDriver({ kp: 7 });                      // gate fully open: g = 1
+    const ppl = 5.6 - 0.46 * 7;                  // Carpenter–Anderson, unclamped here
+    // An L cell inside the EMIC band [Lpp−0.6, Lpp+0.4].
+    const iL = t.L.findIndex(L => L >= ppl - 0.2);
+    assert.ok(t.L[iL] <= ppl + 0.4, 'test cell is inside the EMIC band');
+    const jDusk = 35, jDawn = 11;                // MLT 17.75 (in 12–20) / 5.75 (out)
+    const kHi = 4, kLo = 2;                      // 176 keV (≥50) / 42 keV (<50)
+    for (const [s, k] of [[0, kHi], [0, kLo], [1, kHi]]) {
+        t.C[s][k][t.idx(iL, jDusk)] = 1;
+        t.C[s][k][t.idx(iL, jDawn)] = 1;
+    }
+    const dt = 1800;
+    for (let n = 0; n < 4; n++) t._loss(dt);     // 2 h total
+    const r = (s, k) => t.C[s][k][t.idx(iL, jDusk)] / t.C[s][k][t.idx(iL, jDawn)];
+    // Dusk H⁺ ≥50 keV carries the extra EMIC e-folding exactly; charge
+    // exchange + Coulomb are MLT-uniform so they cancel in the ratio.
+    approx(r(0, kHi), Math.exp(-4 * dt / (2.5 * 3600)), 1e-9, 'EMIC extra decay at dusk');
+    approx(r(0, kLo), 1, 1e-12, 'sub-50 keV protons untouched');
+    approx(r(1, kHi), 1, 1e-12, 'O⁺ untouched (H⁺-band waves)');
+    // Below the Kp gate the term is off entirely.
+    const q = new RingCurrentTransport();
+    q.setDriver({ kp: 4 });
+    q.C[0][kHi][q.idx(iL, jDusk)] = 1;
+    q.C[0][kHi][q.idx(iL, jDawn)] = 1;
+    for (let n = 0; n < 4; n++) q._loss(dt);
+    approx(q.C[0][kHi][q.idx(iL, jDusk)] / q.C[0][kHi][q.idx(iL, jDawn)], 1, 1e-12,
+        'EMIC off below Kp 4.5');
+    ok('EMIC precipitation: dusk-band protons only, storm-gated, exact e-folding');
+}
+
 // ── 4. Azimuthal advection conserves content (MLT periodic) ──────────────────
 {
     const t = new RingCurrentTransport();

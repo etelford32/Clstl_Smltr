@@ -300,8 +300,19 @@ impl Sim {
         }
     }
 
+    /// Charge-exchange (+ Coulomb bleed) drain, plus EMIC-driven precipitation
+    /// in the dusk plasmapause-overlap band (reduced bounce-averaged model:
+    /// τ_EMIC = 2.5 h at full gate, Kp-gated 4.5→7, protons only, E ≥ 50 keV,
+    /// MLT 12–20, L ∈ [Lpp−0.6, Lpp+0.4]). MIRROR of the JS reference
+    /// (js/ring-current-transport.js _loss) — CHANGE TOGETHER.
     fn loss(&mut self, dt: f64) {
         let ppl = plasmapause_l(self.kp);
+        let emic_g = ((self.kp - 4.5) / 2.5).clamp(0.0, 1.0);
+        let emic_decay = if emic_g > 0.0 {
+            (-emic_g * dt / (2.5 * 3600.0)).exp()
+        } else {
+            1.0
+        };
         for s in 0..NS {
             let cx = SPECIES_CX[s];
             for k in 0..NE {
@@ -319,8 +330,17 @@ impl Sim {
                     let inv_tau =
                         1.0 / (tau_h * 3600.0) + if l < ppl { 1.0 / (72.0 * 3600.0) } else { 0.0 };
                     let decay = (-inv_tau * dt).exp();
+                    let emic_here =
+                        emic_decay < 1.0 && s == 0 && e >= 50.0 && l >= ppl - 0.6 && l <= ppl + 0.4;
                     for j in 0..NMLT {
-                        self.content[base + gidx(i, j)] *= decay;
+                        let mut v = self.content[base + gidx(i, j)] * decay;
+                        if emic_here {
+                            let mlt = self.az[j] * 12.0 / core::f64::consts::PI;
+                            if (12.0..=20.0).contains(&mlt) {
+                                v *= emic_decay;
+                            }
+                        }
+                        self.content[base + gidx(i, j)] = v;
                     }
                 }
             }
@@ -542,6 +562,48 @@ mod tests {
         let a6 = convection_amplitude(6.0);
         assert!(drift_at(4.0, 0.0, 100.0, a6).0 < 0.0);
         assert!(drift_at(4.0, PI, 100.0, a6).0 > 0.0);
+    }
+
+    #[test]
+    fn emic_dusk_band_protons_only() {
+        // Mirror of the JS pin 3b: at Kp 7 (gate g=1), a proton ≥50 keV in
+        // the dusk EMIC band carries exactly the extra e-folding; low-E,
+        // O⁺, dawn, and the sub-gate Kp are all untouched. Charge exchange +
+        // Coulomb are MLT-uniform, so they cancel in the dusk/dawn ratio.
+        let mut s = Sim::new();
+        s.set_driver(7.0, 0.0);
+        let ppl = 5.6 - 0.46 * 7.0;
+        let i_l = (0..NL).find(|&i| s.l[i] >= ppl - 0.2).unwrap();
+        assert!(s.l[i_l] <= ppl + 0.4, "test cell inside the EMIC band");
+        let (j_dusk, j_dawn) = (35, 11); // MLT 17.75 (in 12–20) / 5.75 (out)
+        let (k_hi, k_lo) = (4, 2); // 176 keV (≥50) / 42 keV (<50)
+        for (sp, k) in [(0, k_hi), (0, k_lo), (1, k_hi)] {
+            s.content[cbase(sp, k) + gidx(i_l, j_dusk)] = 1.0;
+            s.content[cbase(sp, k) + gidx(i_l, j_dawn)] = 1.0;
+        }
+        let dt = 1800.0;
+        for _ in 0..4 {
+            s.loss(dt);
+        }
+        let ratio = |sp: usize, k: usize| {
+            s.content[cbase(sp, k) + gidx(i_l, j_dusk)]
+                / s.content[cbase(sp, k) + gidx(i_l, j_dawn)]
+        };
+        let expect = (-4.0 * dt / (2.5 * 3600.0)).exp();
+        assert!((ratio(0, k_hi) - expect).abs() < 1e-9, "{}", ratio(0, k_hi));
+        assert!((ratio(0, k_lo) - 1.0).abs() < 1e-12, "sub-50 keV untouched");
+        assert!((ratio(1, k_hi) - 1.0).abs() < 1e-12, "O⁺ untouched");
+        // Below the Kp gate the term is off.
+        let mut q = Sim::new();
+        q.set_driver(4.0, 0.0);
+        q.content[cbase(0, k_hi) + gidx(i_l, j_dusk)] = 1.0;
+        q.content[cbase(0, k_hi) + gidx(i_l, j_dawn)] = 1.0;
+        for _ in 0..4 {
+            q.loss(dt);
+        }
+        let rq = q.content[cbase(0, k_hi) + gidx(i_l, j_dusk)]
+            / q.content[cbase(0, k_hi) + gidx(i_l, j_dawn)];
+        assert!((rq - 1.0).abs() < 1e-12, "EMIC off below Kp 4.5");
     }
 
     #[test]
