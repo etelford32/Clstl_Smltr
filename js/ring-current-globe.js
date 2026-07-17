@@ -1576,10 +1576,20 @@ export class RingCurrentGlobe {
                     // fading toward its tip. Envelope points (wide cross-
                     // section) carry their radial fade.
                     const tFrac = visible > 1 ? k / (visible - 1) : 0;
-                    const fade = (1 - 0.62 * tFrac) * this._transitEnv[slot * stride + k];
+                    // Comet-filament taper: the sunward trail draws IN toward
+                    // the flow axis as it recedes, so each parcel reads as a
+                    // streak pointing Earthward instead of a static fuzzy
+                    // cylinder. The Earthward head (tFrac→0) keeps the full
+                    // engulfing cross-section — Earth still sits inside the
+                    // front, only the receding tail narrows.
+                    const taper = 1 - 0.5 * tFrac;
+                    // Head glow: the leading (Earthward) edge runs a touch
+                    // hotter than the tail, reinforcing the flow direction.
+                    const fade = (1 - 0.62 * tFrac) * this._transitEnv[slot * stride + k]
+                                 * (1 + 0.22 * (1 - tFrac));
                     pos[j]     = x + off[j] * 0.5 + tFrac * trail;
-                    pos[j + 1] = off[j + 1];
-                    pos[j + 2] = off[j + 2];
+                    pos[j + 1] = off[j + 1] * taper;
+                    pos[j + 2] = off[j + 2] * taper;
                     col[j]     = R * bright * fade;
                     col[j + 1] = G * bright * fade;
                     col[j + 2] = B * bright * fade;
@@ -2619,8 +2629,10 @@ export class RingCurrentGlobe {
         if (best.kind === 'ring') {
             const { pop } = best.P, i = best.i, q = best.q;
             const names = { ionsH: ['H⁺ ion', '#ffa040'], ionsO: ['O⁺ ion', '#94ff57'],
-                            electrons: ['Electron', '#59baff'] };
-            const [name, color] = names[best.key];
+                            ionsHe: ['He⁺ ion', '#b48cff'], electrons: ['Electron', '#59baff'] };
+            // Defensive default: a population added to the sim without a tooltip
+            // entry (as He⁺ once was) must not throw inside the animation loop.
+            const [name, color] = names[best.key] ?? ['Ion', '#c8d0e0'];
             const L = pop.seed[i * 3], lt = pop.life[i * 4 + 1];
             const T = driftPeriodHours(pop.eKev[i], L);
             const fate = pop.life[i * 4 + 2] === 0
