@@ -3347,8 +3347,12 @@ export class RingCurrentGlobe {
 
     /** Colour for the active ring-plasma layer at normalised value v∈[0,1].
      *  'All' keeps the scientific rainbow P⊥ contour (GEMSIS-style); a single
-     *  species is drawn in its identity hue via _speciesRamp. */
+     *  species is drawn in its identity hue via _speciesRamp; the wave-field
+     *  views get dedicated tints — EMIC crimson (matching the proton arc +
+     *  belt shading) and anisotropy teal. */
     _activeRamp(v) {
+        if (this._heatQuantity === 'waves') return this._speciesRamp({ r: 1.0, g: 0.30, b: 0.45 }, v);
+        if (this._heatQuantity === 'aniso') return this._speciesRamp({ r: 0.35, g: 0.90, b: 0.76 }, v);
         const M = this._HEAT_SP_COLOR || (this._HEAT_SP_COLOR = {
             hydrogen: ION_COLOR, oxygen: ION_O_COLOR, helium: ION_HE_COLOR,
             electrons: ELECTRON_COLOR,
@@ -3505,6 +3509,7 @@ export class RingCurrentGlobe {
               .rc-heat-seg button{flex:1;font:10px system-ui;color:#aeb6c8;background:rgba(255,255,255,.05);
                 border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:2px 0;cursor:pointer}
               .rc-heat-seg button.rc-on{color:#fff;background:rgba(120,160,255,.22);border-color:rgba(120,160,255,.5)}
+              .rc-heat-sp.rc-dim{opacity:.35;pointer-events:none}
               .rc-heat-canvas{width:100%;height:9px;border-radius:2px;display:block;margin-top:2px}
               .rc-heat-scale{display:flex;justify-content:space-between;font:9px system-ui;color:#8b93a7;margin-top:1px}
               .rc-merid-toggle{font:10px system-ui;color:#aeb6c8;background:rgba(255,255,255,.05);
@@ -3550,7 +3555,9 @@ export class RingCurrentGlobe {
                 '<button data-sp="all" class="rc-on">All</button><button data-sp="hydrogen">H⁺</button>' +
                 '<button data-sp="oxygen">O⁺</button><button data-sp="helium">He⁺</button></div>' +
               '<div class="rc-heat-seg rc-heat-q">' +
-                '<button data-q="pressure" class="rc-on">P⊥</button><button data-q="flux">Flux</button></div>' +
+                '<button data-q="pressure" class="rc-on">P⊥</button><button data-q="flux">Flux</button>' +
+                '<button data-q="aniso" title="Proton pitch-angle anisotropy A = T⊥/T∥−1 — the EMIC free-energy field. Watch it arrive with injections and erode where the waves fire.">A</button>' +
+                '<button data-q="waves" title="EMIC wave-activity gate (0–1) — where the waves are scattering ring protons, He⁺, and MeV electrons RIGHT NOW. Crimson matches the proton-aurora arc and the belt panel shading.">Waves</button></div>' +
               '<canvas class="rc-heat-canvas" width="150" height="9"></canvas>' +
               '<div class="rc-heat-scale"><span>0</span><span class="rc-heat-max">— nPa</span></div>' +
               '<button class="rc-merid-toggle' + (meridOn ? ' rc-on' : '') +
@@ -3597,15 +3604,29 @@ export class RingCurrentGlobe {
     /** Re-bake the data texture from the transport's current (L,MLT) field. */
     _updateRcHeatmap() {
         if (!this._heatGroup) return;
-        const field = this._heatQuantity === 'flux'
-            ? this._transport.equatorialMap(this._heatSpecies, 'content')
-            : this._transport.pressureMap(this._heatSpecies);
-        let mx = 0;
-        for (let n = 0; n < field.length; n++) if (field[n] > mx) mx = field[n];
-        const floor = this._heatQuantity === 'flux' ? 1e-30 : 0.05;   // nPa / rel floor
-        mx = Math.max(mx, floor);
-        // Eased colour-bar top so it tracks the storm without flickering.
-        this._heatMax = this._heatMax ? this._heatMax + (mx - this._heatMax) * 0.1 : mx;
+        const q = this._heatQuantity;
+        // Wave-field views are FIXED-SCALE (the gate IS 0..1; anisotropy tops
+        // out near A_inject) so evolution reads as real change, not renorm.
+        let field, fixed = null;
+        if (q === 'waves' && typeof this._transport.emicWaveGateMap === 'function') {
+            field = this._transport.emicWaveGateMap(); fixed = 1;
+        } else if (q === 'aniso' && typeof this._transport.anisotropyMap === 'function') {
+            field = this._transport.anisotropyMap(); fixed = 0.7;
+        } else {
+            field = q === 'flux'
+                ? this._transport.equatorialMap(this._heatSpecies, 'content')
+                : this._transport.pressureMap(this._heatSpecies);
+        }
+        if (fixed != null) {
+            this._heatMax = fixed;
+        } else {
+            let mx = 0;
+            for (let n = 0; n < field.length; n++) if (field[n] > mx) mx = field[n];
+            const floor = q === 'flux' ? 1e-30 : 0.05;   // nPa / rel floor
+            mx = Math.max(mx, floor);
+            // Eased colour-bar top so it tracks the storm without flickering.
+            this._heatMax = this._heatMax ? this._heatMax + (mx - this._heatMax) * 0.1 : mx;
+        }
         const inv = 1 / this._heatMax;
         const data = this._heatData;
         for (let n = 0; n < field.length; n++) {
@@ -3617,8 +3638,11 @@ export class RingCurrentGlobe {
         }
         this._heatTex.needsUpdate = true;
         if (this._heatMaxEl) {
-            this._heatMaxEl.textContent = this._heatQuantity === 'flux'
-                ? 'rel. flux' : `${this._heatMax.toFixed(1)} nPa`;
+            this._heatMaxEl.textContent =
+                q === 'waves' ? 'wave gate 0–1'
+                : q === 'aniso' ? 'anisotropy 0–0.7'
+                : q === 'flux' ? 'rel. flux'
+                : `${this._heatMax.toFixed(1)} nPa`;
         }
     }
 
@@ -3766,6 +3790,11 @@ export class RingCurrentGlobe {
     setHeatmapQuantity(q) {
         this._heatQuantity = q; this._heatMax = 0;
         this._heatMark('rc-heat-q', 'q', q);
+        // Wave-field views are proton-collective — the species selector does
+        // not apply there; dim it so the UI says so.
+        this._heatPanel?.querySelector('.rc-heat-sp')
+            ?.classList.toggle('rc-dim', q === 'waves' || q === 'aniso');
+        this._paintHeatBar();
         this._updateRcHeatmap();
     }
 
