@@ -137,9 +137,12 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { CopyShader } from 'three/addons/shaders/CopyShader.js';
 
-const ION_COLOR      = new THREE.Color(1.00, 0.62, 0.22);   // H⁺ (solar wind)
-const ION_O_COLOR    = new THREE.Color(0.58, 1.00, 0.34);   // O⁺ (ionospheric outflow)
-const ELECTRON_COLOR = new THREE.Color(0.35, 0.75, 1.00);
+// One canonical palette shared with the legend + analytics dots in
+// ring-current.html and the population toggles — H⁺ #ffa040, O⁺ #94ff57,
+// e⁻ #59baff — so a species reads the same colour everywhere.
+const ION_COLOR      = new THREE.Color(1.000, 0.627, 0.251);   // H⁺ (#ffa040, solar wind)
+const ION_O_COLOR    = new THREE.Color(0.580, 1.000, 0.341);   // O⁺ (#94ff57, ionospheric outflow)
+const ELECTRON_COLOR = new THREE.Color(0.349, 0.729, 1.000);   // e⁻ (#59baff)
 
 // Fraction of ion PARTICLES built as O⁺ (POPULATIONS in
 // js/ring-current-particles.js). Fixed at build time (species can't flip
@@ -326,12 +329,13 @@ function trappedPointsMaterial(size, opacity, color) {
                 float r = length(gl_PointCoord - vec2(0.5)) * 2.0;
                 float a = exp(-4.5 * r * r) - 0.011;
                 if (a <= 0.0) discard;
-                // Energy tint within the species color: 20 keV = deeper and
-                // dimmer, 250 keV = paler, pushed toward white. Subtle — the
-                // species hue still dominates.
-                vec3 c = mix(uColor * 0.78,
-                             min(vec3(1.0), uColor * 1.18 + vec3(0.22, 0.18, 0.12)),
-                             vE);
+                // Energy tint, expressed IDENTICALLY across species so 20 keV
+                // reads equally deep and 250 keV equally pale for H⁺/O⁺/e⁻:
+                // cold = the species hue, dimmed; hot = brightened and
+                // desaturated toward NEUTRAL white (not a warm bias, which used
+                // to pull blue electrons and orange ions to different whites).
+                vec3 hot = min(vec3(1.0), mix(uColor, vec3(1.0), 0.42) * 1.55);
+                vec3 c = mix(uColor * 0.75, hot, vE);
                 gl_FragColor = vec4(c * (1.0 + 0.7 * (1.0 - r)) * vW, a * uOpacity);
             }`,
     });
@@ -936,6 +940,11 @@ export class RingCurrentGlobe {
             this._popPoints[key] = this._makePoints(pop, styles[key].color, styles[key].size);
             this._popList.push(this._popPoints[key]);
             this._setCompositionMix(this._pendingMix);
+            // Honor a visibility choice made before this population finished
+            // building on the worker (toggles set via the interactive legend).
+            if (this._popVisible && this._popVisible[key] === false) {
+                this.setPopulationVisible(key, false);
+            }
         };
         const buildInline = () => {
             for (const [key, spec] of Object.entries(POPULATIONS)) {
@@ -976,6 +985,23 @@ export class RingCurrentGlobe {
         };
         setMix(this._popPoints?.ionsO, Math.min(1.8, f / O_BUILD_FRACTION));
         setMix(this._popPoints?.ionsH, Math.min(1.3, (1 - f) / (1 - O_BUILD_FRACTION)));
+    }
+
+    /**
+     * Show/hide one trapped population (ionsH / ionsO / electrons) — its main
+     * points and its drift-trail echoes (echoes still respect the quality
+     * tier). The choice is recorded in `_popVisible` so it survives the async
+     * worker build (a toggle set before the buffers arrive is applied on
+     * arrival — see addPop).
+     */
+    setPopulationVisible(key, on) {
+        if (!this._popVisible) this._popVisible = {};
+        this._popVisible[key] = !!on;
+        const P = this._popPoints?.[key];
+        if (!P) return;
+        P.points.visible = !!on;
+        const echoOn = !!on && (this._perf?.tier ?? 0) < 2;
+        for (const e of P.echoes) e.points.visible = echoOn;
     }
 
     /** Static-attribute Points: position=(L, θ_birth, λ_m), kin, life.
