@@ -3532,7 +3532,12 @@ export class RingCurrentGlobe {
                 border:1px solid rgba(255,255,255,.16);border-radius:4px;padding:2px 6px;cursor:pointer;white-space:nowrap}
               .rc-ena-play.rc-on{color:#9ecbff;border-color:rgba(158,203,255,.5);background:rgba(158,203,255,.14)}
               .rc-ena-slider{flex:1;max-width:118px;height:12px;cursor:pointer;accent-color:#9ecbff}
-              .rc-ena-frame{position:absolute;z-index:41;cursor:grab;border-radius:6px;
+              /* z-index 1 is LOAD-BEARING: above the WebGL canvas, BELOW every
+                 HTML panel (legend/dock z5, heat panel/caption z40). At 41 the
+                 invisible drag square blanketed the panels wherever the imager
+                 sat and blocked all their buttons. Pointer capture keeps drags
+                 working even when the cursor crosses higher panels. */
+              .rc-ena-frame{position:absolute;z-index:1;cursor:grab;border-radius:6px;
                 border:1px solid rgba(120,160,255,0);box-shadow:0 0 0 0 rgba(120,160,255,0);
                 transition:border-color .15s,box-shadow .15s;touch-action:none}
               .rc-ena-frame:hover{border-color:rgba(120,160,255,.4);box-shadow:0 0 0 1px rgba(120,160,255,.18)}
