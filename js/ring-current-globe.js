@@ -135,6 +135,7 @@ import { EarthSkin } from './earth-skin.js';
 import { RingCurrentTransport } from './ring-current-transport.js';
 import { driftPathBundle, alfvenLayer, convectionAmplitude } from './ring-current-drift-paths.js';
 import { psdCapable, psdProfile, psdShape } from './ring-current-psd.js';
+import { RadiationBeltElectrons, waveGateProfile } from './radiation-belt-electrons.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { CopyShader } from 'three/addons/shaders/CopyShader.js';
@@ -837,6 +838,12 @@ export class RingCurrentGlobe {
         // (opts.transport = loadRingCurrentKernel(...)) — same interface, both
         // pinned equal by tests/ring-current-kernel-smoke.mjs.
         this._transport = opts.transport ?? new RingCurrentTransport();
+        // Drift-averaged MeV-electron belt (radiation-belt connection): reads
+        // the transport's EMIC wave field + the live driver, contributes
+        // nothing back — one-way coupled, no Rust-mirror obligations.
+        this._radBelt = new RadiationBeltElectrons();
+        this._radBeltGate = null;
+        this._radBeltSpinup = true;
 
         this._buildEarth();
         this._buildFieldLines();
@@ -2934,7 +2941,8 @@ export class RingCurrentGlobe {
         }
         // Drift-path overlay tracks the live convection strength (debounced;
         // recomputes only when Kp actually moves).
-        this._scheduleDriftPaths(Number.isFinite(now.kp) ? now.kp : 1);
+        this._kpNow = Number.isFinite(now.kp) ? now.kp : 1;
+        this._scheduleDriftPaths(this._kpNow);
         this._setCompositionMix(now.oxygenFraction);
         for (const p of this._popList ?? []) {
             this._syncStateUniforms(p.mat);
@@ -3632,9 +3640,38 @@ export class RingCurrentGlobe {
         }
         if (simStep > 0) this._transport.step(simStep);
         this._heatWallAcc = 0; this._heatSimAcc = 0;
+        // MeV-electron belt rides the same sim time and the LIVE wave field.
+        if (this._radBelt && simStep > 0) {
+            const drv = {
+                kp: this._kpNow ?? 1,
+                vbs: this._driverVbs ?? 0,
+                mpR0: this._mpR0 ?? 10.5,
+            };
+            if (this._radBeltSpinup) {
+                // Belts build over days: pre-run 72 h at the current driver so
+                // the profile arrives populated (≈100k flops — one-off).
+                this._radBeltSpinup = false;
+                this._radBelt.step(72 * 3600, drv, null);
+            }
+            this._radBeltGate = waveGateProfile(this._transport);
+            this._radBelt.step(simStep, drv, this._radBeltGate);
+        }
         if (this._heatEnabled && this._heatGroup) this._updateRcHeatmap();
         if (this._enaEnabled && this._enaPanel) this._updateEnaImager();
         this._updateProtonArc();
+    }
+
+    /** Radiation-belt snapshot for the analytics dock: the radial profile,
+     *  GEO flux, and the MLT-averaged EMIC gate the electrons feel. */
+    getRadBeltSnapshot() {
+        if (!this._radBelt) return null;
+        return {
+            L: this._radBelt.L,
+            f: this._radBelt.profile(),
+            geo: this._radBelt.geoFlux(),
+            gate: this._radBeltGate,
+            shadowL: (this._mpR0 ?? 10.5) - this._radBelt.cfg.mpBufferRe,
+        };
     }
 
     // ── Proton aurora — the EMIC precipitation made visible ──────────────────

@@ -520,6 +520,12 @@ body {
                     <span id="rc-psd-shape" style="color:#6a7285"></span>
                 </div>
                 <canvas id="rc-dock-psd" title="Phase-space density at fixed first invariant μ vs L-shell (transport core, MLT-averaged). Rising outward = inward radial diffusion from the plasma-sheet source; an interior peak = local acceleration; gaps = μ outside the energy ladder." hidden></canvas>
+                <div class="rc-dock-lab"><b>MeV e&#8315; belt</b> vs L, log &middot;
+                    <span><span class="rc-dot" style="background:#59baff"></span>flux</span>
+                    <span><span class="rc-dot" style="background:#ff4d73"></span>EMIC waves</span>
+                    <span id="rc-belt-geo" style="color:#6a7285"></span>
+                </div>
+                <canvas id="rc-dock-belt" title="Drift-averaged MeV-electron radial profile (Brautigam–Albert D_LL, chorus-seeded boundary). Pink shading = the EMIC wave gate the electrons feel (MLT-averaged) — the dropout mechanism that bites inside the belt; dashed line = magnetopause-shadowing edge; tick at GEO L=6.6."></canvas>
                 <div class="rc-dock-lab"><b>L shell</b> R&#7431; &middot;
                     <span><span class="rc-dot" style="background:#59e0d8"></span>drawn</span>
                     <span><span class="rc-dot" style="background:#ffd27a"></span>model (Dst*)</span>
@@ -802,6 +808,10 @@ body {
     pitch-angle anisotropy exceeds threshold inside the plasmapause/dusk-plume overlap
     (anisotropy-moment treatment after Jordanova et al.; &tau; &asymp; 2.5 h, self-limiting,
     &beta;-gated) &mdash; the scattered flux lights the crimson subauroral proton arc on the globe.
+    The same wave field scatters He&#8314; (heavy-ion band, &tau; &asymp; 4 h) and MeV radiation-belt
+    electrons: the belt panel evolves a drift-averaged profile under Brautigam&ndash;Albert (2000)
+    radial diffusion with magnetopause shadowing and EMIC scattering &mdash; the two dropout
+    mechanisms &mdash; seeded at the boundary by chorus-accelerated electrons.
     Time &amp; scale: one simulation clock &tau; drives every population at its true physical
     velocity. The near-Earth region is spatially linear (1 unit = 1 R&#7431; = 6,371 km); the
     L1&rarr;magnetopause corridor is compressed &asymp;5.5&times; (1 unit &asymp; 34,900 km), so the
@@ -1296,6 +1306,54 @@ if (globe) {
         const verdicts = { 'inward-diffusion': '→ inward diffusion', 'local-peak': '→ local acceleration', flat: '' };
         $('rc-psd-shape').textContent = verdicts[snap[1].shape] ?? '';
     }
+    function drawBelt() {
+        const snap = globe.getRadBeltSnapshot?.();
+        if (!snap) return;
+        const { g, w, h } = prepChart('rc-dock-belt');
+        const { L, f, gate, shadowL, geo } = snap;
+        const lMin = L[0], lMax = L[L.length - 1];
+        const X = (Lv) => ((Lv - lMin) / (lMax - lMin)) * w;
+        // EMIC wave gate: pink shading under the curve region (the dropout
+        // mechanism the electrons feel, MLT-averaged).
+        if (gate) {
+            g.fillStyle = 'rgba(255,77,115,.20)';
+            for (let i = 0; i < L.length; i++) {
+                if (gate[i] > 0.02) {
+                    const bw = w / L.length;
+                    g.fillRect(X(L[i]) - bw / 2, 2, bw, h - 7);
+                }
+            }
+        }
+        // Magnetopause-shadowing edge (dashed) when it intrudes on the grid.
+        if (shadowL < lMax) {
+            g.strokeStyle = 'rgba(255,154,92,.6)';
+            g.setLineDash([3, 3]);
+            g.beginPath(); g.moveTo(X(shadowL), 2); g.lineTo(X(shadowL), h - 2); g.stroke();
+            g.setLineDash([]);
+        }
+        // GEO tick.
+        g.strokeStyle = 'rgba(255,255,255,.25)';
+        g.beginPath(); g.moveTo(X(6.6), h - 8); g.lineTo(X(6.6), h - 2); g.stroke();
+        // Flux profile, 3-decade log scale.
+        let mx = 0;
+        for (const v of f) if (v > mx) mx = v;
+        if (mx > 0) {
+            const lo = Math.log10(mx) - 3;
+            g.strokeStyle = '#59baff';
+            g.lineWidth = 1.5;
+            g.beginPath();
+            let pen = false;
+            for (let i = 0; i < L.length; i++) {
+                if (f[i] <= 0) { pen = false; continue; }
+                const y = h - 2 - Math.max(0, Math.min(1, (Math.log10(f[i]) - lo) / 3)) * (h - 7);
+                pen ? g.lineTo(X(L[i]), y) : g.moveTo(X(L[i]), y);
+                pen = true;
+            }
+            g.stroke();
+        }
+        $('rc-belt-geo').textContent = mx > 0
+            ? `GEO ${Math.round(100 * geo / mx)}% of peak` : '';
+    }
     function drawSpectro() {
         const { g, w, h } = prepChart('rc-dock-spectro');
         if (!spectro.length) return;
@@ -1407,6 +1465,7 @@ if (globe) {
         drawSpec();
         drawSpectro();
         drawPsd();
+        drawBelt();
         drawLProf();
         if (lifeDone) drawLife();
         drawDeaths();
