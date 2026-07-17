@@ -133,6 +133,7 @@ import {
 import { SimClock, SCALE, apparentUnitsPerSec } from './sim-clock.js';
 import { EarthSkin } from './earth-skin.js';
 import { RingCurrentTransport } from './ring-current-transport.js';
+import { driftPathBundle, alfvenLayer, convectionAmplitude } from './ring-current-drift-paths.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { CopyShader } from 'three/addons/shaders/CopyShader.js';
@@ -835,6 +836,7 @@ export class RingCurrentGlobe {
         this._buildParticles();
         this._buildRings();
         this._buildRcHeatmap();
+        this._buildDriftPaths();
         this._buildEnaImager();
         this._buildSunAndTransit();
         this._buildBoundaries();
@@ -2865,6 +2867,9 @@ export class RingCurrentGlobe {
             });
             if (!this._heatSpunUp) { this._heatSpunUp = true; this._heatSpinup = 3 * 3600; }
         }
+        // Drift-path overlay tracks the live convection strength (debounced;
+        // recomputes only when Kp actually moves).
+        this._scheduleDriftPaths(Number.isFinite(now.kp) ? now.kp : 1);
         this._setCompositionMix(now.oxygenFraction);
         for (const p of this._popList ?? []) {
             this._syncStateUniforms(p.mat);
@@ -3426,6 +3431,11 @@ export class RingCurrentGlobe {
               .rc-merid-toggle{font:10px system-ui;color:#aeb6c8;background:rgba(255,255,255,.05);
                 border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:3px 0;cursor:pointer;width:100%;margin-top:5px}
               .rc-merid-toggle.rc-on{color:#fff;background:rgba(120,160,255,.22);border-color:rgba(120,160,255,.5)}
+              .rc-drift-toggle{font:10px system-ui;color:#aeb6c8;background:rgba(255,255,255,.05);
+                border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:3px 0;cursor:pointer;width:100%;margin-top:5px}
+              .rc-drift-toggle.rc-on{color:#ffd27a;background:rgba(255,210,122,.14);border-color:rgba(255,210,122,.45)}
+              .rc-drift-e{margin-top:4px}
+              .rc-drift-status{font:9px system-ui;color:#8b93a7;margin-top:3px;text-align:center;font-variant-numeric:tabular-nums}
               .rc-ena-toggle{font:600 11px system-ui;color:#cdd5e4;background:rgba(255,255,255,.06);
                 border:1px solid rgba(255,255,255,.14);border-radius:5px;padding:3px 8px;cursor:pointer;width:100%;margin-bottom:5px}
               .rc-ena-toggle.rc-on{color:#9ecbff;border-color:rgba(158,203,255,.4);background:rgba(158,203,255,.1)}
@@ -3448,6 +3458,7 @@ export class RingCurrentGlobe {
         const params = new URLSearchParams(location.search);
         const enaOn = params.get('ena') !== '0';
         const meridOn = params.get('merid') !== '0';
+        const driftOn = params.get('drift') !== '0';
         const panel = document.createElement('div');
         panel.className = 'rc-heat-panel' + (this._heatEnabled ? '' : ' rc-off');
         panel.innerHTML =
@@ -3465,6 +3476,12 @@ export class RingCurrentGlobe {
               '<div class="rc-heat-scale"><span>0</span><span class="rc-heat-max">— nPa</span></div>' +
               '<button class="rc-merid-toggle' + (meridOn ? ' rc-on' : '') +
                 '" title="Noon–midnight meridian cross-section (GEMSIS-style)">◨ Meridian slice</button>' +
+              '<button class="rc-drift-toggle' + (driftOn ? ' rc-on' : '') +
+                '" title="Equatorial guiding-centre drift paths: blue closed (trapped), orange open (convected out), gold trapping boundary (Alfvén layer / magnetopause shadowing), cyan zero-energy layer (plasmapause-forming)">⊚ Drift paths</button>' +
+              '<div class="rc-heat-seg rc-drift-e">' +
+                '<button data-ekev="5">5</button><button data-ekev="30">30</button>' +
+                '<button data-ekev="100" class="rc-on">100</button><button data-ekev="300">300 keV</button></div>' +
+              '<div class="rc-drift-status">boundary —</div>' +
             '</div>';
         this._container.appendChild(panel);
         this._heatPanel = panel;
@@ -3484,6 +3501,11 @@ export class RingCurrentGlobe {
         this._enaTogEl.addEventListener('click', () => this.setEnaEnabled(!this._enaEnabled));
         this._meridTogEl = panel.querySelector('.rc-merid-toggle');
         this._meridTogEl.addEventListener('click', () => this.setMeridianEnabled(!this._meridEnabled));
+        this._driftTogEl = panel.querySelector('.rc-drift-toggle');
+        this._driftTogEl.addEventListener('click', () => this.setDriftPathsEnabled(!this._driftEnabled));
+        this._driftStatusEl = panel.querySelector('.rc-drift-status');
+        panel.querySelectorAll('.rc-drift-e button').forEach(b =>
+            b.addEventListener('click', () => this.setDriftEnergy(Number(b.dataset.ekev))));
     }
 
     /** Highlight the active button in a panel segment (keeps UI ↔ state synced
@@ -3567,6 +3589,102 @@ export class RingCurrentGlobe {
         this._heatQuantity = q; this._heatMax = 0;
         this._heatMark('rc-heat-q', 'q', q);
         this._updateRcHeatmap();
+    }
+
+    // ── Drift paths + trapping boundary (Alfvén layer) ───────────────────────
+    //
+    // WHY the ring builds: guiding-centre drift paths in the equatorial plane
+    // under the SAME potential the transport advects with (corotation +
+    // shielded Volland–Stern + grad–curv), traced by js/ring-current-drift-
+    // paths.js (node-tested; a READ-ONLY consumer of the transport's exported
+    // physics — the Rust/WASM kernel parity is untouched). Blue = closed
+    // (trapped, the ring); orange = open (convected to the magnetopause);
+    // gold = the trapping boundary — an X-point Alfvén layer at low energy,
+    // drift-shell SHADOWING at ring energies; cyan = the zero-energy layer,
+    // the plasmapause-forming flow boundary (why it hugs the cyan ring).
+
+    _buildDriftPaths() {
+        this._driftEnabled = new URLSearchParams(location.search).get('drift') !== '0';
+        this._driftEkev = 100;              // page-selectable energy
+        this._driftKp = null;               // Kp of the last computed bundle
+        this._driftGroup = new THREE.Group();
+        this._driftGroup.visible = this._driftEnabled;
+        this._magGroup.add(this._driftGroup);
+        this._driftMats = {
+            closed:   new THREE.LineBasicMaterial({ color: 0x6f9fd8, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false }),
+            open:     new THREE.LineBasicMaterial({ color: 0xff9a5c, transparent: true, opacity: 0.42, blending: THREE.AdditiveBlending, depthWrite: false }),
+            boundary: new THREE.LineBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0.9,  blending: THREE.AdditiveBlending, depthWrite: false }),
+            zero:     new THREE.LineBasicMaterial({ color: 0x59e0d8, transparent: true, opacity: 0.5,  blending: THREE.AdditiveBlending, depthWrite: false }),
+        };
+        // Initial compute at a quiet default so the layer exists pre-feed.
+        this._scheduleDriftPaths(2, true);
+    }
+
+    /** (L, az) polyline → a Line in magGroup coords (θ_world = π − az, so
+     *  x = −L·cos az, z = L·sin az — pinned to the ENA/heat shader mapping). */
+    _driftLine(pts, n, mat) {
+        const arr = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) {
+            const L = pts[2 * i], az = pts[2 * i + 1];
+            arr[3 * i]     = -L * Math.cos(az);
+            arr[3 * i + 1] = 0;
+            arr[3 * i + 2] = L * Math.sin(az);
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+        return new THREE.Line(g, mat);
+    }
+
+    /** Debounced recompute: the tracer costs tens of ms, so it runs OFF the
+     *  frame (timeout) and only when Kp actually moved (or on demand). */
+    _scheduleDriftPaths(kp, force = false) {
+        if (!this._driftGroup) return;
+        if (!force && this._driftKp != null && Math.abs(kp - this._driftKp) < 0.25) return;
+        this._driftKpPending = kp;
+        if (this._driftTimer) return;
+        this._driftTimer = setTimeout(() => {
+            this._driftTimer = null;
+            this._computeDriftPaths(this._driftKpPending);
+        }, 150);
+    }
+
+    _computeDriftPaths(kp) {
+        if (this._disposed || !this._driftGroup) return;
+        this._driftKp = kp;
+        for (const c of [...this._driftGroup.children]) {
+            this._driftGroup.remove(c);
+            c.geometry.dispose();
+        }
+        const bundle = driftPathBundle(this._driftEkev, kp, 'ion');
+        for (const p of bundle.paths) {
+            if (p.n > 1) this._driftGroup.add(this._driftLine(p.pts, p.n, this._driftMats[p.kind]));
+        }
+        if (bundle.layer && bundle.layer.n > 1) {
+            this._driftGroup.add(this._driftLine(bundle.layer.pts, bundle.layer.n, this._driftMats.boundary));
+        }
+        // Zero-energy (plasmapause-forming) Alfvén layer for context.
+        const zl = alfvenLayer(0, convectionAmplitude(kp));
+        if (zl && zl.n > 1) {
+            this._driftGroup.add(this._driftLine(zl.pts, zl.n, this._driftMats.zero));
+        }
+        if (this._driftStatusEl) {
+            const b = bundle.layer;
+            this._driftStatusEl.textContent = b
+                ? `boundary L≈${b.Ls.toFixed(1)} · ${b.mode === 'xpoint' ? 'Alfvén X-point' : 'MP shadowing'} · Kp ${kp.toFixed(1)}`
+                : `no trapping boundary in range · Kp ${kp.toFixed(1)}`;
+        }
+    }
+
+    setDriftPathsEnabled(on) {
+        this._driftEnabled = !!on;
+        if (this._driftGroup) this._driftGroup.visible = this._driftEnabled;
+        this._driftTogEl?.classList.toggle('rc-on', this._driftEnabled);
+    }
+
+    setDriftEnergy(eKev) {
+        this._driftEkev = eKev;
+        this._heatMark('rc-drift-e', 'ekev', String(eKev));
+        this._scheduleDriftPaths(this._driftKp ?? 2, true);
     }
 
     // ── ENA imager (Stage 3 — Roelof & Williams 1988) ────────────────────────
@@ -3895,6 +4013,7 @@ export class RingCurrentGlobe {
     dispose() {
         this._disposed = true;
         cancelAnimationFrame(this._raf);
+        clearTimeout(this._driftTimer);
         window.removeEventListener('resize', this._onResize);
         this._renderer.domElement.removeEventListener('pointermove', this._onPointerMove);
         this._renderer.domElement.removeEventListener('pointerleave', this._onPointerLeave);
