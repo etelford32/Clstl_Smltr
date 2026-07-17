@@ -110,14 +110,23 @@ REVOKE EXECUTE ON FUNCTION public.record_solar_wind_backfill(jsonb, text) FROM a
 REVOKE EXECUTE ON FUNCTION public.record_solar_wind_backfill(jsonb, text) FROM authenticated;
 
 -- ── 2. Observed geomagnetic indices (Kyoto Dst hourly + Kp) ─────────────────
+-- 'e2_mev' joined the kind list 2026-07-13: api/cron/sync-dataset.js archives
+-- native-cadence GOES ≥2 MeV electron flux here (NOAA's 1-day file rolls
+-- off; this doesn't). The original two-value CHECK rejected those rows with
+-- 23514 errors on every sync run until the constraint was widened in prod.
 CREATE TABLE IF NOT EXISTS public.geomag_indices (
-    kind        text        NOT NULL CHECK (kind IN ('dst', 'kp')),
+    kind        text        NOT NULL CHECK (kind IN ('dst', 'kp', 'e2_mev')),
     t           timestamptz NOT NULL,
     value       double precision NOT NULL,
     source      text        NOT NULL DEFAULT 'noaa-swpc',
     ingested_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (kind, t)
 );
+-- Idempotent widen for databases created before 2026-07-13 (CREATE TABLE IF
+-- NOT EXISTS won't touch an existing table's constraint).
+ALTER TABLE public.geomag_indices DROP CONSTRAINT IF EXISTS geomag_indices_kind_check;
+ALTER TABLE public.geomag_indices ADD CONSTRAINT geomag_indices_kind_check
+    CHECK (kind IN ('dst', 'kp', 'e2_mev'));
 ALTER TABLE public.geomag_indices ENABLE ROW LEVEL SECURITY;
 -- Zero policies on purpose: service-role-only (see header note).
 

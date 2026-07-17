@@ -158,7 +158,7 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 <script type="module">
 // ── Auth gate: superadmin only ──────────────────────────────────────────────
 import { auth } from './js/auth.js';
-import { PIPELINES, CATEGORIES, pipelinesByCategory } from './js/pipeline-registry.js';
+import { PIPELINES, CATEGORIES, pipelinesByCategory, HEARTBEAT_PIPELINES } from './js/pipeline-registry.js';
 // EARTH_OBS_LAYERS is the single source of truth for which NASA GIBS
 // products earth.html renders. Status page imports it directly so adding
 // a layer there auto-registers a probe row here.
@@ -282,12 +282,11 @@ async function check(url) {
 // runs through the shared supabase-config client; here we do the same thing
 // directly so a bug in admin-analytics can't take the status page down too.
 
-// Cadence-aware staleness thresholds — matches admin.html Pipeline Health
-// card so both UIs agree on what "healthy" means.
-const PIPELINE_SPECS = [
-    { key: 'solar_wind',   label: 'Solar Wind',   warnMin:  5, critMin:  60 },
-    { key: 'weather_grid', label: 'Weather Grid', warnMin: 45, critMin: 180 },
-];
+// Cadence-aware staleness thresholds — shared with admin.html via
+// pipeline-registry.js so both UIs agree on what "healthy" means. Every
+// heartbeat pipeline is listed there with thresholds derived from its
+// actual cron cadence; unlisted rows fall back to 15 m/60 m below.
+const PIPELINE_SPECS = HEARTBEAT_PIPELINES;
 
 function _rtFmtRel(iso) {
     if (!iso) return 'never';
@@ -383,18 +382,24 @@ const PROXY_PROBES = PIPELINES.map(p => ({
     key:       p.id,
     label:     p.label,
     endpoint:  p.endpoint,
+    // probePath overrides the probed URL for endpoints that REQUIRE query
+    // params (e.g. per-location forecast — a bare GET 400s by design).
+    // The rendered endpoint label stays `endpoint`; prewarm crons ignore this.
+    probePath: p.probePath ?? p.endpoint,
     category:  p.category,
     upstream:  p.upstream,
     warnAgeS:  p.warnAgeS,
     critAgeS:  p.critAgeS,
     prewarm:   p.prewarm,
+    probeTimeoutMs:  p.probeTimeoutMs ?? 8000,
+    freshnessExempt: p.freshnessExempt === true,
 }));
 
 async function _probeProxy(spec) {
     const t0 = performance.now();
     let status = null, body = null, netErr = null;
     try {
-        const res = await fetch(spec.endpoint, { signal: AbortSignal.timeout(8000), cache: 'no-store' });
+        const res = await fetch(spec.probePath, { signal: AbortSignal.timeout(spec.probeTimeoutMs), cache: 'no-store' });
         status = res.status;
         try { body = await res.json(); } catch { /* non-JSON */ }
     } catch (e) {
@@ -404,6 +409,10 @@ async function _probeProxy(spec) {
 
     let ageSec = null;
     if (Number.isFinite(body?.age_seconds)) ageSec = body.age_seconds;
+    // Most first-party endpoints report age_min (minutes) — accept it so
+    // forecast-3day / polar-vortex / teleconnections rows aren't stuck on
+    // "no freshness info" despite declaring their age.
+    else if (Number.isFinite(body?.age_min)) ageSec = Math.max(0, Math.round(body.age_min * 60));
     else if (body?.fetched_at)       { const t = Date.parse(body.fetched_at);       if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
     // CelesTrak proxies (TLE + Aristotle/SOCRATES) and many SWPC feeds
     // emit a top-level `fetched` ISO-8601 instead of `fetched_at`. NHC
@@ -427,6 +436,9 @@ function _rtProxyHealth(p) {
     if (p.status >= 500)     return { color:'#ff5555', label:`HTTP ${p.status} · ${p.body?.error ?? 'error'}` };
     if (p.status >= 400)     return { color:'#ff5555', label:`HTTP ${p.status}` };
     if (p.body?.error)       return { color:'#ff5555', label: String(p.body.error) };
+    // Computed-at-request endpoints (seed-grid lookups, per-location
+    // passthroughs) have no meaningful "age" — a 200 is healthy.
+    if (p.ageSec == null && p.spec.freshnessExempt) return { color:'#4eff91', label:'healthy' };
     if (p.ageSec == null)    return { color:'#ffd700', label:'no freshness info' };
     if (p.ageSec > p.spec.critAgeS) return { color:'#ff5555', label:'critical (stale)' };
     if (p.ageSec > p.spec.warnAgeS) return { color:'#ffd700', label:'warning (stale)' };

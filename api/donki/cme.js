@@ -24,7 +24,11 @@ export const config = { runtime: 'edge' };
 
 const DONKI_CME_BASE = 'https://api.nasa.gov/DONKI/CMEAnalysis';
 const CACHE_TTL      = 900;   // 15 min
-const CACHE_SWR      = 120;
+// Long SWR (30 min, matching the prewarm-medium cron cadence): api.nasa.gov
+// routinely takes 8-15 s cold. With SWR >= the prewarm interval the CDN can
+// ALWAYS serve the previous body instantly and revalidate in background —
+// visitors and the status probe never eat NASA's latency directly.
+const CACHE_SWR      = 1800;
 const DEFAULT_DAYS   = 7;
 const MAX_DAYS       = 30;
 
@@ -84,6 +88,24 @@ export default async function handler(request) {
 
     const donkiURL = `${DONKI_CME_BASE}?startDate=${fmt(start)}&endDate=${fmt(end)}&api_key=${nasaKey}`;
 
+    // WSA-ENLIL fetch starts NOW, in parallel with CMEAnalysis. It was
+    // previously awaited sequentially after the CME parse, stacking two
+    // slow NASA round-trips (10 s + 12 s worst case = 22 s) — enough to
+    // blow the status probe's timeout and pin real visitors. Best-effort:
+    // resolves to null on any failure, never rejects (an abandoned promise
+    // after an early return below must not surface as unhandled).
+    const enlilURL = `https://api.nasa.gov/DONKI/WSAEnlilSimulations?startDate=${fmt(start)}&endDate=${fmt(end)}&api_key=${nasaKey}`;
+    const enlilPromise = (async () => {
+        try {
+            const eres = await fetchWithTimeout(enlilURL, {
+                headers: { Accept: 'application/json' }, timeoutMs: 12_000,
+            });
+            if (!eres.ok) return null;
+            const sims = await eres.json();
+            return Array.isArray(sims) ? sims : null;
+        } catch { return null; }
+    })();
+
     let raw;
     try {
         const res = await fetchWithTimeout(donkiURL, { headers: { Accept: 'application/json' } });
@@ -137,43 +159,38 @@ export default async function handler(request) {
 
     // WSA-ENLIL modeled Earth arrivals for the same window — NOAA-grade
     // ETAs the client PREFERS over ballistic (which stays visible as the
-    // cross-check). Best-effort: any failure degrades to ballistic-only.
-    try {
-        const enlilURL = `https://api.nasa.gov/DONKI/WSAEnlilSimulations?startDate=${fmt(start)}&endDate=${fmt(end)}&api_key=${nasaKey}`;
-        const eres = await fetchWithTimeout(enlilURL, {
-            headers: { Accept: 'application/json' }, timeoutMs: 12_000,
-        });
-        if (eres.ok) {
-            const sims = await eres.json();
-            if (Array.isArray(sims)) {
-                // cme_id → the newest simulation carrying an Earth shock arrival.
-                const byCme = new Map();
-                for (const s of sims) {
-                    if (!s?.estimatedShockArrivalTime) continue;
-                    for (const inp of s.cmeInputs ?? []) {
-                        if (!inp?.cmeid) continue;
-                        const prev = byCme.get(inp.cmeid);
-                        if (!prev || String(s.modelCompletionTime ?? '') > String(prev.modelCompletionTime ?? '')) {
-                            byCme.set(inp.cmeid, s);
-                        }
+    // cross-check). Fetched in parallel above; null on any failure means
+    // we degrade to ballistic-only.
+    {
+        const sims = await enlilPromise;
+        if (sims) {
+            // cme_id → the newest simulation carrying an Earth shock arrival.
+            const byCme = new Map();
+            for (const s of sims) {
+                if (!s?.estimatedShockArrivalTime) continue;
+                for (const inp of s.cmeInputs ?? []) {
+                    if (!inp?.cmeid) continue;
+                    const prev = byCme.get(inp.cmeid);
+                    if (!prev || String(s.modelCompletionTime ?? '') > String(prev.modelCompletionTime ?? '')) {
+                        byCme.set(inp.cmeid, s);
                     }
                 }
-                for (const c of cmes) {
-                    const s = c.cme_id ? byCme.get(c.cme_id) : null;
-                    if (!s) continue;
-                    c.enlil = {
-                        shock_arrival: isoTag(s.estimatedShockArrivalTime),
-                        duration_h:    s.estimatedDuration != null ? parseFloat(s.estimatedDuration) : null,
-                        kp_90:         s.kp_90  ?? null,
-                        kp_135:        s.kp_135 ?? null,
-                        kp_180:        s.kp_180 ?? null,
-                        earth_gb:      s.isEarthGB === true,
-                        completed:     isoTag(s.modelCompletionTime),
-                    };
-                }
+            }
+            for (const c of cmes) {
+                const s = c.cme_id ? byCme.get(c.cme_id) : null;
+                if (!s) continue;
+                c.enlil = {
+                    shock_arrival: isoTag(s.estimatedShockArrivalTime),
+                    duration_h:    s.estimatedDuration != null ? parseFloat(s.estimatedDuration) : null,
+                    kp_90:         s.kp_90  ?? null,
+                    kp_135:        s.kp_135 ?? null,
+                    kp_180:        s.kp_180 ?? null,
+                    earth_gb:      s.isEarthGB === true,
+                    completed:     isoTag(s.modelCompletionTime),
+                };
             }
         }
-    } catch { /* ballistic-only fallback */ }
+    }
 
     const earthCme = cmes.find(c => c.earth_directed) ?? null;
     const isHistorical = !!(explicitStart && explicitEnd);

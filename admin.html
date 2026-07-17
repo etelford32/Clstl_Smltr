@@ -1108,6 +1108,7 @@ import { GA_MEASUREMENT_ID } from './js/analytics.js';
 import { EXPERIMENTS, EXPERIMENT_GOALS } from './js/experiments.js';
 import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchSyntheticJourneys, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchAuthFunnelSummary, fetchAuthFunnelTopDrops, fetchFunnelVisitorSummary, fetchFunnelFailureCodes, fetchFunnelDimensionConversion, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, fetchDailyRetentionCurve, fetchStickiness, fetchFeatureReturnRates, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
+import { HEARTBEAT_PIPELINES } from './js/pipeline-registry.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
 document.getElementById('tabs').addEventListener('click', e => {
@@ -3212,14 +3213,14 @@ loadEmailActivity();
 // function after the upstream result is validated, so it's the honest
 // "is the feed alive?" signal.
 //
-// Staleness thresholds are intentionally generous (15 min warning, 60 min
-// critical) because the solar_wind pipeline normally writes every ~2 min
-// and the weather_grid every ~30 min — anything older than 60 min for the
-// slowest feed is a real incident. Tighten if the cron cadence changes.
-const HB_PIPELINES = [
-    { key: 'solar_wind',   label: 'Solar Wind',   expectMin: 5,  expectMax: 60  },
-    { key: 'weather_grid', label: 'Weather Grid', expectMin: 45, expectMax: 180 },
-];
+// Staleness thresholds are cadence-aware and SHARED with status.html via
+// pipeline-registry.js (HEARTBEAT_PIPELINES) — one list, both UIs agree.
+// warnMin/critMin are derived from each pipeline's actual cron schedule;
+// see the registry for the derivation notes. Rows the registry doesn't
+// know about fall back to 15 min warn / 60 min crit below.
+const HB_PIPELINES = HEARTBEAT_PIPELINES.map(p => ({
+    key: p.key, label: p.label, expectMin: p.warnMin, expectMax: p.critMin,
+}));
 
 function _hbAgeMin(iso) {
     if (!iso) return null;
