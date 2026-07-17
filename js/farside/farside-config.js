@@ -128,8 +128,14 @@ export const SERIES_LEN = 6; // 6 × 12 h ≈ 3 days of history
  * and the demo's synthetic-history window.
  */
 export const BACKTEST = Object.freeze({
-    matchLonDeg: 18,        // a detected track within this Carrington-lon gap of a
-    matchLatDeg: 18,        //   ground-truth region counts as the same region
+    // A detected track matches a ground-truth region when its PREDICTED east-limb
+    // emergence lands within matchDays of the real crossing and its latitude is
+    // within matchLatDeg. Date-based matching is the physically meaningful test
+    // ("did we forecast an emergence when one really happened") and is robust to
+    // longitude bookkeeping drift between the truth record and the detector.
+    matchDays: 4,
+    matchLatDeg: 18,
+    matchLonDeg: 25,        // fallback spatial gate (used only if a track lacks a date)
     windowDays: 16,         // synthetic history span before each truth crossing
     cadenceHours: 12,       // GONG cadence
     // Far-side seismic sensitivity vs central-meridian distance: best near the

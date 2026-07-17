@@ -14,11 +14,12 @@
 import { auth } from './auth.js';
 import {
     getLatestMap, getMapSeries, getStoredFrames,
+    getArchiveFrames, getTruth,
     detectSignatures,
     farSideWatchList, farSideWatchListFromFrames,
-    dispatchEmergenceAlerts,
+    dispatchEmergenceAlerts, notifyEngine,
     renderFlatMap, renderTopDown,
-    runSyntheticBacktest,
+    runSyntheticBacktest, runArchiveBacktest,
     SOURCES,
 } from './farside/index.js';
 
@@ -124,6 +125,17 @@ function renderBacktest() {
     const r = _state.backtest;
     if (!r) return;
     const pct = (x) => `${(x * 100).toFixed(0)}%`;
+
+    const pill = $('fsw-bt-pill');
+    if (pill) {
+        if (r.synthetic === false && r.windowsCovered > 0) {
+            pill.textContent = `● LIVE — archive (${r.windowsCovered}/${r.windows} windows)`;
+            pill.className = 'fsw-pill fsw-pill--live';
+        } else {
+            pill.textContent = '⚠ SYNTHETIC';
+            pill.className = 'fsw-pill fsw-pill--synthetic';
+        }
+    }
     if ($('fsw-bt-detect')) $('fsw-bt-detect').textContent = pct(r.detectionRate);
     if ($('fsw-bt-lead'))   $('fsw-bt-lead').textContent = r.medianLeadDays != null ? `${r.medianLeadDays.toFixed(1)}d` : '—';
     if ($('fsw-bt-far'))    $('fsw-bt-far').textContent = pct(r.falseAlarmRate);
@@ -229,9 +241,22 @@ export async function initFarSideWatch() {
         _state.watch = farSideWatchList(await getMapSeries('gong'));
     }
 
-    // Phase-5 backtest: synthetic history today; swaps to the real farside_maps
-    // archive once it has a few rotations covering a known emergence.
-    try { _state.backtest = runSyntheticBacktest(); } catch (_) { _state.backtest = null; }
+    // Phase-5 backtest: use the REAL farside_maps archive vs. farside_truth when
+    // any case window has stored coverage; otherwise fall back to the labelled
+    // synthetic demo.
+    try {
+        const truth = await getTruth('gong');
+        if (truth) {
+            const live = await runArchiveBacktest({
+                truth, fetchFrames: (from, to) => getArchiveFrames('gong', from, to),
+            });
+            _state.backtest = live.windowsCovered > 0 ? live : runSyntheticBacktest();
+        } else {
+            _state.backtest = runSyntheticBacktest();
+        }
+    } catch (_) {
+        try { _state.backtest = runSyntheticBacktest(); } catch (_) { _state.backtest = null; }
+    }
 
     setSourcePill(map);
     paintCanvases();
@@ -239,8 +264,13 @@ export async function initFarSideWatch() {
     renderWatchList();
     renderBacktest();
 
-    // Fire emergence alerts once for signed-in users (de-duped in the module).
-    if (_state.signedIn) dispatchEmergenceAlerts(_state.watch);
+    // Fire emergence alerts once for signed-in users (de-duped in the module),
+    // and hand the watch list to any running AlertEngine for the pref-gated,
+    // cooldown-managed "region rotating into view" alert.
+    if (_state.signedIn) {
+        dispatchEmergenceAlerts(_state.watch);
+        notifyEngine(_state.watch);
+    }
 
     // Try to drop the upstream image in as a backdrop; hide on failure.
     const img = $('fsw-img');

@@ -61,3 +61,14 @@ export function dispatchEmergenceAlerts(watchList, { force = false } = {}) {
     }
     return alerts;
 }
+
+/**
+ * Hand the latest watch list to a running AlertEngine (dashboard/earth pages).
+ * The engine applies the user's `notify_region_emergence` preference, the
+ * Advanced-tier gate, cooldown, DB write, and email — see js/alert-engine.js.
+ * This is the canonical path; `dispatchEmergenceAlerts` above is the local,
+ * page-only toast used by the Far-Side Watch "test" button.
+ */
+export function notifyEngine(watchList) {
+    window.dispatchEvent(new CustomEvent('farside-watch-update', { detail: { watch: watchList } }));
+}

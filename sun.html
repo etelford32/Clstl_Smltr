@@ -7835,6 +7835,32 @@ const sunLight = new THREE.PointLight(0xffcc44, 4, 80);
 scene.add(sunLight);
 scene.add(new THREE.AmbientLight(0x100800, 0.3));
 
+// ── Far-Side Watch overlay (Tier 5) ───────────────────────────────────────
+// Far-side detections + east-limb "horizon" on the solar globe. Self-contained
+// and fully guarded so it never affects the core scene if far-side data is
+// absent. Far-side markers sit at negative Z (behind the photosphere) and are
+// occluded until the camera orbits around — "rotating into view" made literal.
+(async function mountFarSideOverlay() {
+    try {
+        const [{ createFarSideOverlay }, fs] = await Promise.all([
+            import('./js/farside/farside-globe-overlay.js'),
+            import('./js/farside/index.js'),
+        ]);
+        const overlay = createFarSideOverlay(THREE, { radius: 1.0 });
+        scene.add(overlay.group);
+        window.__farsideOverlay = overlay;   // co-rotation + toggle hook
+
+        // Prefer the real stored archive; fall back to the labelled synthetic field.
+        let tracks = [];
+        const frames = await fs.getStoredFrames('gong');
+        if (frames && frames.length) tracks = fs.farSideWatchListFromFrames(frames);
+        else tracks = fs.farSideWatchList(await fs.getMapSeries('gong'));
+        overlay.update({ tracks });
+    } catch (e) {
+        console.warn('[sun] far-side overlay unavailable:', e?.message ?? e);
+    }
+})();
+
 // Toggles
 document.getElementById('tog-spots').addEventListener('change',  e => { uniforms.u_showSpots.value  = e.target.checked ? 1.0 : 0.0; });
 document.getElementById('tog-flares').addEventListener('change', e => { uniforms.u_showFlares.value = e.target.checked ? 1.0 : 0.0; });
@@ -8216,6 +8242,9 @@ function animate() {
 
     // Rotate region marker group with the photosphere texture
     const t = uniforms.u_time.value;
+    // Far-Side Watch overlay co-rotates with the photosphere (guarded no-op
+    // until the overlay mounts) so far-side markers track into view coherently.
+    if (window.__farsideOverlay) window.__farsideOverlay.group.rotation.y = solarRotAngle;
     if (regionGroup) {
         regionGroup.rotation.y = solarRotAngle;
         // Drive marker animation: gentle breath on rings/cross/spike, +

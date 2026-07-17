@@ -91,22 +91,35 @@ export default async function handler(req) {
         }, 200, `public, s-maxage=1800`);
     }
 
-    // ── series: recent detections for tracking ─────────────────────
+    // ── series: detections for tracking / backtest windows ─────────
+    // Optional from/to (ISO) bound a historical window (Tier-2 backtest);
+    // without them it returns the most recent `limit` maps (live watch-list).
     if (format === 'series') {
-        const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '6', 10) || 6, 24);
-        const rows = await sbGet(
-            `farside_maps?source=eq.${source}&order=observed_at.desc&limit=${limit}`
-            + `&select=observed_at,carrington_l0,carrington_b0,detections`,
-        );
-        if (!rows?.length) {
-            return jsonResponse({ error: 'series_not_available' }, 501);
-        }
+        const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '6', 10) || 6, 200);
+        const from = url.searchParams.get('from');
+        const to   = url.searchParams.get('to');
+        let q = `farside_maps?source=eq.${source}&order=observed_at.desc&limit=${limit}`
+              + `&select=observed_at,carrington_l0,carrington_b0,detections`;
+        if (from) q += `&observed_at=gte.${encodeURIComponent(from)}`;
+        if (to)   q += `&observed_at=lte.${encodeURIComponent(to)}`;
+        const rows = await sbGet(q);
+        if (!rows?.length) return jsonResponse({ error: 'series_not_available' }, 501);
         // Oldest → newest for the tracker.
         const frames = rows.reverse().map((r) => ({
             timestamp: r.observed_at, L0: r.carrington_l0, B0: r.carrington_b0,
             dets: Array.isArray(r.detections) ? r.detections : [],
         }));
         return jsonResponse({ source, frames }, 200, `public, s-maxage=1800`);
+    }
+
+    // ── truth: ground-truth emergence record for the backtest ──────
+    if (format === 'truth') {
+        const rows = await sbGet(
+            `farside_truth?order=east_limb_crossing.asc`
+            + `&select=case_id,noaa_region,label,east_limb_crossing,carrington_lon,carrington_lat,flare_productive,notes`,
+        );
+        if (!rows) return jsonResponse({ error: 'truth_unavailable' }, 501);
+        return jsonResponse({ truth: rows }, 200, `public, s-maxage=3600`);
     }
 
     // ── image (default): stream the upstream picture ───────────────

@@ -285,8 +285,11 @@ async function check(url) {
 // Cadence-aware staleness thresholds — matches admin.html Pipeline Health
 // card so both UIs agree on what "healthy" means.
 const PIPELINE_SPECS = [
-    { key: 'solar_wind',   label: 'Solar Wind',   warnMin:  5, critMin:  60 },
-    { key: 'weather_grid', label: 'Weather Grid', warnMin: 45, critMin: 180 },
+    { key: 'solar_wind',     label: 'Solar Wind',      warnMin:  5, critMin:  60 },
+    { key: 'weather_grid',   label: 'Weather Grid',    warnMin: 45, critMin: 180 },
+    // Far-Side Watch ingest runs every 12 h (01:30 / 13:30 UTC): stale a little
+    // past one cycle, critical past two.
+    { key: 'farside_ingest', label: 'Far-Side Watch',  warnMin: 800, critMin: 1560 },
 ];
 
 function _rtFmtRel(iso) {

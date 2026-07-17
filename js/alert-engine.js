@@ -35,6 +35,7 @@ import { geo, RAD } from './geo/coords.js';
 // api/weather/forecast.js for the full rationale.
 const WEATHER_API = '/api/weather/forecast';
 const WEATHER_POLL_MS = 30 * 60_000;  // 30 minutes
+const FARSIDE_POLL_MS = 30 * 60_000;  // 30 min — far-side maps refresh every 12 h
 
 // Match the proxy's lat/lon quantization so alert-engine's cache keys align
 // with trip-planner's — a dashboard open on the same location pre-warms the
@@ -375,6 +376,42 @@ const ALERT_DEFS = [
         },
     },
 
+    // ── Far-Side region rotating into view (Advanced/operator) ───────────────
+    // Extends the forecast horizon from hours (inbound CME) to days. Fires when
+    // a tracked far-side signature is forecast to cross the east limb within the
+    // user's lead window. Source 'farside' is evaluated on farside-watch-update.
+    {
+        key: 'notify_region_emergence',
+        type: 'flare',   // alert_history allowed types: conjunction|aurora|storm|flare|pass
+        tier: 'advanced',
+        source: 'farside',
+        evaluate(_state, prefs, ctx) {
+            const watch = ctx.farsideWatch;
+            if (!Array.isArray(watch) || !watch.length) return null;
+            const leadMax = prefs.region_emergence_lead_days ?? 5;
+            const cands = watch
+                .filter(t => !t.onDisc && t.etaDays <= leadMax && t.latestStrength >= 1.2)
+                .sort((a, b) => a.etaDays - b.etaDays);
+            if (!cands.length) return null;
+            const t = cands[0];
+            const when = t.etaDays < 1 ? 'within 24 h' : `in ~${t.etaDays.toFixed(1)} days`;
+            return {
+                fire: true,
+                title: t.strong ? 'Strong region rotating into view' : 'Region rotating into view',
+                body: `A ${t.strong ? 'strong ' : ''}far-side signature at Carrington `
+                    + `L${t.lon.toFixed(0)}°, lat ${t.lat.toFixed(0)}° is forecast to cross the `
+                    + `east limb ${when} (±${t.etaBandDays.toFixed(1)} d). `
+                    + `Integrated strength ${t.latestStrength.toFixed(2)}.`,
+                severity: t.strong ? 'warning' : 'info',
+                metadata: {
+                    carrington_lon: t.lon, carrington_lat: t.lat,
+                    eta_days: t.etaDays, emergence_utc: t.emergenceUTC,
+                    strength: t.latestStrength, source: 'far-side-watch',
+                },
+            };
+        },
+    },
+
     // ── Satellite Pass (ISS by default) ──────────────────────────────────────
     {
         key: 'notify_sat_pass',
@@ -608,6 +645,12 @@ export class AlertEngine {
         this._onEarthForecast = this._onEarthForecast.bind(this);
         this._onUserLoc       = this._onUserLoc.bind(this);
         this._onLocationsChg  = this._onLocationsChg.bind(this);
+        this._onFarSide       = this._onFarSide.bind(this);
+
+        /** @type {Array<object>} latest Far-Side Watch list (from farside-watch-update) */
+        this._farsideWatch = [];
+        /** Far-Side Watch poll timer (advanced + opted-in only) */
+        this._farsideTimer = null;
     }
 
     /** Start listening to events and polling weather. */
@@ -618,6 +661,9 @@ export class AlertEngine {
         window.addEventListener('conjunction-alert', this._onConjunction);
         window.addEventListener('earth-forecast-update', this._onEarthForecast);
         window.addEventListener('user-location-changed', this._onUserLoc);
+        // Far-Side Watch: any page showing far-side data dispatches this; the
+        // engine also self-polls below so the alert fires without visiting it.
+        window.addEventListener('farside-watch-update', this._onFarSide);
         this._unsubLocations = onLocationsChanged(this._onLocationsChg);
         this._loadRecentFromDB();
         this._refreshLocations().then(() => this._pollWeather());
@@ -626,6 +672,15 @@ export class AlertEngine {
         // Start conjunction monitor for advanced users
         if (auth.canUseAdvancedAlerts()) {
             this._conjMonitor = new ConjunctionMonitor().start();
+        }
+
+        // Far-Side Watch self-poll: advanced users who opted in get emergence
+        // alerts on any page running the engine (dashboard/earth), not only the
+        // Far-Side Watch page. Lazy import keeps the far-side bundle off everyone
+        // else. 12 h cadence → poll every 30 min is ample.
+        if (auth.canUseAdvancedAlerts() && auth.getAlertPrefs()?.notify_region_emergence) {
+            this._pollFarSide();
+            this._farsideTimer = setInterval(() => this._pollFarSide(), FARSIDE_POLL_MS);
         }
 
         return this;
@@ -638,8 +693,10 @@ export class AlertEngine {
         window.removeEventListener('conjunction-alert', this._onConjunction);
         window.removeEventListener('earth-forecast-update', this._onEarthForecast);
         window.removeEventListener('user-location-changed', this._onUserLoc);
+        window.removeEventListener('farside-watch-update', this._onFarSide);
         this._unsubLocations?.();
         clearInterval(this._weatherTimer);
+        clearInterval(this._farsideTimer);
         this._conjMonitor?.stop();
     }
 
@@ -688,6 +745,31 @@ export class AlertEngine {
 
     _onUserLoc()       { this._refreshLocations().then(() => this._pollWeather()); }
     _onLocationsChg()  { this._refreshLocations().then(() => this._pollWeather()); }
+
+    /**
+     * Far-Side Watch list arrived (from the page or our self-poll). Cache it and
+     * run the 'farside' alert defs through the standard fire/cooldown/DB/email
+     * path — identical treatment to every other alert source.
+     */
+    _onFarSide(ev) {
+        if (!auth.isSignedIn() || !auth.canUseAlerts()) return;
+        const watch = ev?.detail?.watch;
+        if (Array.isArray(watch)) this._farsideWatch = watch;
+        this._evaluateAllLocations(this._lastSwpcState ?? {}, 'farside');
+    }
+
+    /** Lazily fetch the latest Far-Side Watch list and self-dispatch. */
+    async _pollFarSide() {
+        if (!auth.canUseAdvancedAlerts()) return;
+        if (!auth.getAlertPrefs()?.notify_region_emergence) return;
+        try {
+            const { getStoredFrames, farSideWatchListFromFrames } = await import('./farside/index.js');
+            const frames = await getStoredFrames('gong');
+            if (!frames) return;            // nothing stored yet
+            const watch = farSideWatchListFromFrames(frames);
+            window.dispatchEvent(new CustomEvent('farside-watch-update', { detail: { watch } }));
+        } catch (_) { /* non-fatal — far-side is an opportunistic feed */ }
+    }
 
     /** Get unread count. */
     getUnreadCount() {
@@ -822,6 +904,7 @@ export class AlertEngine {
                 cmeEvents:      this._cmeEvents,
                 recurrence:     this._recurrence,
                 earthForecast:  this._earthForecast,
+                farsideWatch:   this._farsideWatch,
                 location:       loc,
             };
 

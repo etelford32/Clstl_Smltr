@@ -12,11 +12,25 @@
 
 // Best-known "latest far-side map" URLs (honest priority order: GONG always,
 // imagers when geometry cooperates, HMI as a seismic cross-check).
+//
+// VERIFIED domains (NSO/Stanford publish far-side maps every 12 h and feed them
+// to NOAA SWPC): the canonical far-side site is `farside.nso.edu`; Stanford
+// mirrors at `jsoc.stanford.edu/data/farside/` and `soi.stanford.edu/data/full_farside/`;
+// composite far-side IMAGES also appear at `sdo.gsfc.nasa.gov/data/`. The exact
+// "latest" FITS filename is product-specific and shifts, so set the precise URL
+// per deployment via the env override below — the defaults are the directory/
+// landing path and a known image fallback, not a guaranteed numeric-grid file.
 export const DEFAULT_UPSTREAM = Object.freeze({
-    gong:   'https://gong.nso.edu/data/farside/farside_latest.fits',
+    gong:   'https://farside.nso.edu/oQR/fqo/latest.fits',          // set exact file via FARSIDE_GONG_URL
     solo:   'https://www.sidc.be/EUI/data/lastingestednonop/L2/farside_latest.fits',
     stereo: 'https://stereo-ssc.nascom.nasa.gov/beacon/latest_256/ahead_euvi_195_latest.fits',
     hmi:    'http://jsoc.stanford.edu/data/farside/farside_latest.fits',
+});
+
+// Image-only fallback for the page backdrop when no numeric FITS is configured.
+// sdo.gsfc.nasa.gov is already reachable in prod (see api/solar/aia.js).
+export const IMAGE_FALLBACK = Object.freeze({
+    gong: 'https://sdo.gsfc.nasa.gov/assets/img/farside/farside_latest.png',
 });
 
 export const ENV_KEY = Object.freeze({
