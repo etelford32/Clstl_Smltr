@@ -92,10 +92,15 @@ function alertLevel(speed, bz) {
     return 'QUIET';
 }
 
+// Thresholds account for the full publication chain, not just our cron:
+// NOAA RTSW itself publishes 2-5 min behind real time, the pg_cron writer
+// adds up to 60 s, and the edge cache holds a copy up to ~90 s. A 6-8 min
+// observed age is the NORMAL steady state — calling that "stale" (the old
+// fresh<5 line) kept the status board amber for a healthy pipeline.
 function freshnessStatus(ageMin) {
     if (ageMin == null) return 'missing';
-    if (ageMin < 5)     return 'fresh';
-    if (ageMin < 20)    return 'stale';
+    if (ageMin < 10)    return 'fresh';
+    if (ageMin < 30)    return 'stale';
     return 'expired';
 }
 

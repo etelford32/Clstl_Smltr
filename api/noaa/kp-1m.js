@@ -41,10 +41,14 @@ function stormLevel(kp) {
 /** Normalize Kp 0–9 → 0–1. */
 const kpNorm = v => Math.max(0, Math.min(1, v / 9));
 
+// The 1-min Kp product publishes ~1-3 min behind real time and the edge
+// cache + 5-min prewarm add up to ~5 min more — an age of 5-8 min is the
+// normal steady state, not staleness. fresh<10 keeps the label honest
+// without amber-flagging a healthy feed (was fresh<5).
 function freshnessStatus(ageMin) {
     if (ageMin == null) return 'missing';
-    if (ageMin < 5)     return 'fresh';
-    if (ageMin < 20)    return 'stale';
+    if (ageMin < 10)    return 'fresh';
+    if (ageMin < 30)    return 'stale';
     return 'expired';
 }
 
