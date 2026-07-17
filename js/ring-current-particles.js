@@ -64,6 +64,7 @@ import {
 export const POPULATIONS = Object.freeze({
     ionsH:     { count: 2100, species: 'ion' },
     ionsO:     { count: 1100, species: 'oxygen' },
+    ionsHe:    { count: 520,  species: 'helium' },   // minor accent (~4% ion energy)
     electrons: { count: 1400, species: 'electron' },
 });
 

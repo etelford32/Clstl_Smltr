@@ -89,9 +89,15 @@ const kinCol = (pop, c) => Array.from({ length: pop.count }, (_, i) => pop.kin[i
         const ratio = h.kin[i * 3 + 1] / o.kin[i * 3 + 1];
         assert.ok(Math.abs(ratio - 3.985) < 0.02, `per-particle H⁺/O⁺ rate ratio = ${ratio}`);
     }
+    // He⁺ (4.0026 u): √(m_He/m_H) = √3.974 ≈ 1.993× slower per particle.
+    const he = buildPopulation(400, 'helium', rng32(42));
+    for (let i = 0; i < 400; i++) {
+        const ratio = h.kin[i * 3 + 1] / he.kin[i * 3 + 1];
+        assert.ok(Math.abs(ratio - 1.993) < 0.02, `per-particle H⁺/He⁺ rate ratio = ${ratio}`);
+    }
     const e = buildPopulation(400, 'electron', rng32(42));
     assert.ok(mean(kinCol(e, 1)) / mean(kinCol(h, 1)) > 20, 'electrons ≫ faster bounce');
-    ok('bounce: O⁺ √(m_O/m_H) ≈ 3.99× slower per particle; electrons ≫ ions');
+    ok('bounce: O⁺ ≈3.99× / He⁺ ≈1.99× slower per particle; electrons ≫ ions');
 }
 
 // ── 5. determinism + POPULATIONS spec ────────────────────────────────────────
@@ -102,7 +108,7 @@ const kinCol = (pop, c) => Array.from({ length: pop.count }, (_, i) => pop.kin[i
     assert.deepEqual(Array.from(a.kin), Array.from(b.kin));
     assert.deepEqual(Array.from(a.life), Array.from(b.life));
     const keys = Object.keys(POPULATIONS);
-    assert.deepEqual(keys.sort(), ['electrons', 'ionsH', 'ionsO']);
+    assert.deepEqual(keys.sort(), ['electrons', 'ionsH', 'ionsHe', 'ionsO']);
     assert.ok(Object.values(POPULATIONS).every(p => p.count > 0 && p.species));
     ok('deterministic under injected rng; POPULATIONS spec sane');
 }

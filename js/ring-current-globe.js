@@ -142,6 +142,7 @@ import { CopyShader } from 'three/addons/shaders/CopyShader.js';
 // e⁻ #59baff — so a species reads the same colour everywhere.
 const ION_COLOR      = new THREE.Color(1.000, 0.627, 0.251);   // H⁺ (#ffa040, solar wind)
 const ION_O_COLOR    = new THREE.Color(0.580, 1.000, 0.341);   // O⁺ (#94ff57, ionospheric outflow)
+const ION_HE_COLOR   = new THREE.Color(0.706, 0.549, 1.000);   // He⁺ (#b48cff, minor ion)
 const ELECTRON_COLOR = new THREE.Color(0.349, 0.729, 1.000);   // e⁻ (#59baff)
 
 // Fraction of ion PARTICLES built as O⁺ (POPULATIONS in
@@ -933,6 +934,7 @@ export class RingCurrentGlobe {
         const styles = {
             ionsH:     { color: ION_COLOR,      size: 0.085 },
             ionsO:     { color: ION_O_COLOR,    size: 0.095 },
+            ionsHe:    { color: ION_HE_COLOR,   size: 0.088 },
             electrons: { color: ELECTRON_COLOR, size: 0.060 },
         };
         const addPop = (key, pop) => {
@@ -985,6 +987,8 @@ export class RingCurrentGlobe {
         };
         setMix(this._popPoints?.ionsO, Math.min(1.8, f / O_BUILD_FRACTION));
         setMix(this._popPoints?.ionsH, Math.min(1.3, (1 - f) / (1 - O_BUILD_FRACTION)));
+        // He⁺ is a minor fixed-fraction accent — not composition-steered.
+        setMix(this._popPoints?.ionsHe, 0.85);
     }
 
     /**
