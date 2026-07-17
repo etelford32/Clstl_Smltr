@@ -218,6 +218,7 @@ function trappedPointsMaterial(size, opacity, color) {
             uVisFrac:    { value: 0.45 },   // visible-count fraction (Dst-coupled)
             uMinPx:      { value: 1.4 },    // LOD floor — raised as camera recedes
             uFarBoost:   { value: 0 },      // LOD brightness lift for clamped points
+            uEHi:        { value: -1 },     // energy-highlight target in vE space (−1 = off)
         },
         vertexShader: `
             uniform float uSize, uDriftHours, uBounceSec, uDstStar,
@@ -325,7 +326,7 @@ function trappedPointsMaterial(size, opacity, color) {
                 gl_Position = projectionMatrix * mv;
             }`,
         fragmentShader: `
-            uniform vec3 uColor; uniform float uOpacity;
+            uniform vec3 uColor; uniform float uOpacity, uEHi;
             varying float vW;
             varying float vE;
             void main() {
@@ -339,7 +340,12 @@ function trappedPointsMaterial(size, opacity, color) {
                 // to pull blue electrons and orange ions to different whites).
                 vec3 hot = min(vec3(1.0), mix(uColor, vec3(1.0), 0.42) * 1.55);
                 vec3 c = mix(uColor * 0.75, hot, vE);
-                gl_FragColor = vec4(c * (1.0 + 0.7 * (1.0 - r)) * vW, a * uOpacity);
+                // Drift-panel energy highlight: particles near the selected
+                // energy (vE space) brighten, the rest recede — the drift
+                // paths and the population they govern light up together.
+                float sel = uEHi < 0.0 ? 1.0
+                    : 0.55 + 1.45 * (1.0 - smoothstep(0.10, 0.28, abs(vE - uEHi)));
+                gl_FragColor = vec4(c * sel * (1.0 + 0.7 * (1.0 - r)) * vW, a * uOpacity);
             }`,
     });
 }
@@ -3541,7 +3547,7 @@ export class RingCurrentGlobe {
                 '" title="Noon–midnight meridian cross-section (GEMSIS-style)">◨ Meridian slice</button>' +
               '<button class="rc-drift-toggle' + (driftOn ? ' rc-on' : '') +
                 '" title="Equatorial guiding-centre drift paths: blue closed (trapped), orange open (convected out), gold trapping boundary (Alfvén layer / magnetopause shadowing), cyan zero-energy layer (plasmapause-forming)">⊚ Drift paths</button>' +
-              '<div class="rc-heat-seg rc-drift-e">' +
+              '<div class="rc-heat-seg rc-drift-e" title="Drift-path energy. Also highlights trapped particles near this energy (re-click to clear the highlight; 5/300 clamp to the drawn 20–250 keV band).">' +
                 '<button data-ekev="5">5</button><button data-ekev="30">30</button>' +
                 '<button data-ekev="100" class="rc-on">100</button><button data-ekev="300">300 keV</button></div>' +
               '<div class="rc-drift-status">boundary —</div>' +
@@ -3742,12 +3748,35 @@ export class RingCurrentGlobe {
         this._driftEnabled = !!on;
         if (this._driftGroup) this._driftGroup.visible = this._driftEnabled;
         this._driftTogEl?.classList.toggle('rc-on', this._driftEnabled);
+        if (!this._driftEnabled) { this._driftEHiOn = false; this._applyEnergyHighlight(); }
     }
 
+    /** Selecting an energy re-traces the paths AND highlights the trapped
+     *  particles near that energy (re-click the active button to clear the
+     *  highlight; the paths stay). 5/300 keV clamp to the drawn 20–250 band —
+     *  "the closest drawn energies", which is what vE space encodes. */
     setDriftEnergy(eKev) {
-        this._driftEkev = eKev;
-        this._heatMark('rc-drift-e', 'ekev', String(eKev));
-        this._scheduleDriftPaths(this._driftKp ?? 2, true);
+        if (eKev === this._driftEkev) {
+            this._driftEHiOn = !this._driftEHiOn;      // toggle on re-click
+        } else {
+            this._driftEkev = eKev;
+            this._driftEHiOn = true;
+            this._heatMark('rc-drift-e', 'ekev', String(eKev));
+            this._scheduleDriftPaths(this._driftKp ?? 2, true);
+        }
+        this._applyEnergyHighlight();
+    }
+
+    /** Push the highlight target (vE space — the shader's log 20–250 keV
+     *  normalisation) to every trapped material, echoes included. */
+    _applyEnergyHighlight() {
+        const vE = this._driftEnabled && this._driftEHiOn
+            ? Math.max(0, Math.min(1, Math.log(this._driftEkev / 20) / 2.5257))
+            : -1;
+        for (const p of this._popList ?? []) {
+            p.mat.uniforms.uEHi.value = vE;
+            for (const e of p.echoes) e.mat.uniforms.uEHi.value = vE;
+        }
     }
 
     // ── ENA imager (Stage 3 — Roelof & Williams 1988) ────────────────────────
