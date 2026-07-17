@@ -3238,6 +3238,47 @@ export class RingCurrentGlobe {
         return [S[S.length - 1][1], S[S.length - 1][2], S[S.length - 1][3]];
     }
 
+    /** Species-identity ramp: a single population is painted in ITS OWN hue
+     *  (the legend-dot / 3D-particle colour) with brightness ∝ value and the
+     *  hottest cells blooming toward white. This is what makes the species
+     *  toggle legible — before, every species was re-normalised and pushed
+     *  through the SAME rainbow, so H⁺/O⁺/He⁺ looked identical (only the
+     *  magnitude differed, and the disc self-normalises that away). Now the
+     *  storm's COMPOSITION is visible, not just its magnitude. */
+    _speciesRamp(base, v) {
+        const x = Math.max(0, Math.min(1, v));
+        const k = Math.pow(x, 0.7);                       // tinted intensity
+        const white = Math.max(0, (x - 0.72) / 0.28);     // hot-core bloom band
+        const wl = white * white * 0.85;
+        const ch = (c) => { const s = c * k; return 255 * (s + (1 - s) * wl); };
+        return [ch(base.r), ch(base.g), ch(base.b)];
+    }
+
+    /** Colour for the active ring-plasma layer at normalised value v∈[0,1].
+     *  'All' keeps the scientific rainbow P⊥ contour (GEMSIS-style); a single
+     *  species is drawn in its identity hue via _speciesRamp. */
+    _activeRamp(v) {
+        const M = this._HEAT_SP_COLOR || (this._HEAT_SP_COLOR = {
+            hydrogen: ION_COLOR, oxygen: ION_O_COLOR, helium: ION_HE_COLOR,
+            electrons: ELECTRON_COLOR,
+        });
+        const base = M[this._heatSpecies];
+        return base ? this._speciesRamp(base, v) : this._heatColormap(v);
+    }
+
+    /** (Re)paint the panel colour-bar swatch with the ACTIVE ramp, so the key
+     *  matches whatever species/quantity is selected. */
+    _paintHeatBar() {
+        const cv = this._heatPanel?.querySelector('.rc-heat-canvas');
+        if (!cv) return;
+        const cx = cv.getContext('2d');
+        for (let x = 0; x < cv.width; x++) {
+            const [r, g, b] = this._activeRamp(x / (cv.width - 1));
+            cx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+            cx.fillRect(x, 0, 1, cv.height);
+        }
+    }
+
     _buildRcHeatmap() {
         const t = this._transport;
         this._heatEnabled = new URLSearchParams(location.search).get('heat') !== '0';
@@ -3364,7 +3405,12 @@ export class RingCurrentGlobe {
               .rc-ena-play{font:10px system-ui;color:#cdd5e4;background:rgba(255,255,255,.08);
                 border:1px solid rgba(255,255,255,.16);border-radius:4px;padding:2px 6px;cursor:pointer;white-space:nowrap}
               .rc-ena-play.rc-on{color:#9ecbff;border-color:rgba(158,203,255,.5);background:rgba(158,203,255,.14)}
-              .rc-ena-slider{flex:1;max-width:118px;height:12px;cursor:pointer;accent-color:#9ecbff}`;
+              .rc-ena-slider{flex:1;max-width:118px;height:12px;cursor:pointer;accent-color:#9ecbff}
+              .rc-ena-frame{position:absolute;z-index:41;cursor:grab;border-radius:6px;
+                border:1px solid rgba(120,160,255,0);box-shadow:0 0 0 0 rgba(120,160,255,0);
+                transition:border-color .15s,box-shadow .15s;touch-action:none}
+              .rc-ena-frame:hover{border-color:rgba(120,160,255,.4);box-shadow:0 0 0 1px rgba(120,160,255,.18)}
+              .rc-ena-frame.rc-grab{cursor:grabbing;border-color:rgba(158,203,255,.65);box-shadow:0 0 0 1px rgba(158,203,255,.3)}`;
             document.head.appendChild(st);
         }
         const params = new URLSearchParams(location.search);
@@ -3391,14 +3437,8 @@ export class RingCurrentGlobe {
         this._container.appendChild(panel);
         this._heatPanel = panel;
         this._heatMaxEl = panel.querySelector('.rc-heat-max');
-        // Colour-bar swatch.
-        const cv = panel.querySelector('.rc-heat-canvas');
-        const cx = cv.getContext('2d');
-        for (let x = 0; x < cv.width; x++) {
-            const [r, g, b] = this._heatColormap(x / (cv.width - 1));
-            cx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
-            cx.fillRect(x, 0, 1, cv.height);
-        }
+        // Colour-bar swatch — repainted with the active ramp on species change.
+        this._paintHeatBar();
         // Wiring.
         panel.querySelector('.rc-heat-toggle').addEventListener('click', (e) => {
             this.setHeatmapEnabled(!this._heatEnabled);
@@ -3437,7 +3477,7 @@ export class RingCurrentGlobe {
         const data = this._heatData;
         for (let n = 0; n < field.length; n++) {
             let v = field[n] * inv; if (v < 0) v = 0; else if (v > 1) v = 1;
-            const c = this._heatColormap(v);
+            const c = this._activeRamp(v);
             const o = n * 4;
             data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2];
             data[o + 3] = Math.round(255 * Math.pow(v, 0.85));   // faint low → opaque high
@@ -3487,6 +3527,7 @@ export class RingCurrentGlobe {
     setHeatmapSpecies(key) {
         this._heatSpecies = key; this._heatMax = 0;
         this._heatMark('rc-heat-sp', 'sp', key);
+        this._paintHeatBar();
         this._updateRcHeatmap();
     }
 
@@ -3624,6 +3665,7 @@ export class RingCurrentGlobe {
         this._magGroup.add(grp);
 
         this._buildEnaCaption();
+        this._buildEnaFrame();
         this._layoutEna();
         this._updateEnaPose();
         this._updateEnaImager();
@@ -3709,21 +3751,80 @@ export class RingCurrentGlobe {
         });
     }
 
-    /** Position the screen-space ENA panel (kept square) + its caption. Sits
-     *  bottom-CENTRE of the stage: the WebGL overlay draws under the HTML docks
-     *  (legend top-right, analytics right, heat panel bottom-left), so it must
-     *  live in the clear strip between them. */
+    /** A transparent DOM frame over the WebGL ENA panel that makes the imager
+     *  draggable. The imager itself is a screen-space WebGL overlay (drawn on
+     *  the main canvas, so it can't be a DOM panel); this frame is the drag
+     *  surface, and both the overlay and the caption follow `_enaCenter`. */
+    _buildEnaFrame() {
+        try {
+            const s = JSON.parse(localStorage.getItem('pp_rc_ena_pos') || 'null');
+            if (s && Number.isFinite(s.x) && Number.isFinite(s.y)) this._enaCenter = { x: s.x, y: s.y };
+        } catch { /* fresh */ }
+        const f = document.createElement('div');
+        f.className = 'rc-ena-frame';
+        f.title = 'Drag to move the ENA imager';
+        f.style.display = this._enaEnabled ? 'block' : 'none';
+        this._container.appendChild(f);
+        this._enaFrame = f;
+        const W = () => this._container.clientWidth || 1280;
+        const H = () => this._container.clientHeight || 800;
+        let drag = false, sx0 = 0, sy0 = 0, cx0 = 0, cy0 = 0;
+        f.addEventListener('pointerdown', (e) => {
+            drag = true; f.classList.add('rc-grab');
+            try { f.setPointerCapture(e.pointerId); } catch { /* older */ }
+            sx0 = e.clientX; sy0 = e.clientY;
+            cx0 = this._enaCenter.x; cy0 = this._enaCenter.y;
+            e.preventDefault(); e.stopPropagation();
+        });
+        f.addEventListener('pointermove', (e) => {
+            if (!drag) return;
+            this._enaCenter = { x: cx0 + (e.clientX - sx0) / W(), y: cy0 + (e.clientY - sy0) / H() };
+            this._layoutEna();
+        });
+        const end = (e) => {
+            if (!drag) return;
+            drag = false; f.classList.remove('rc-grab');
+            try { f.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+            try { localStorage.setItem('pp_rc_ena_pos', JSON.stringify(this._enaCenter)); } catch { /* quota */ }
+        };
+        f.addEventListener('pointerup', end);
+        f.addEventListener('pointercancel', end);
+    }
+
+    /** Position the screen-space ENA panel (kept square), its drag frame, and
+     *  its caption from `_enaCenter` (stage fractions, x from left / y from
+     *  top). Defaults to the LEFT-centre clear strip; the WebGL overlay draws
+     *  under the HTML docks, and the center is clamped so a drag/resize can't
+     *  strand it off-canvas. */
     _layoutEna() {
         if (!this._enaPanel) return;
         const w = this._container.clientWidth || 1280, h = this._container.clientHeight || 800;
         const px = Math.max(140, Math.min(230, Math.min(w, h) * 0.30));
         const sx = px / w, sy = px / h;
-        const cx = 0.45;                 // centre fraction, clear of both docks
+        if (!this._enaCenter) this._enaCenter = { x: 0.15, y: 0.42 };  // left-centre default
+        // Clamp the center so the square panel stays fully on the stage.
+        const mx = sx / 2 + 6 / w, my = sy / 2 + 6 / h;
+        const cx = Math.max(mx, Math.min(1 - mx, this._enaCenter.x));
+        const cy = Math.max(my, Math.min(1 - my, this._enaCenter.y));
+        this._enaCenter.x = cx; this._enaCenter.y = cy;
+        // Ortho panel: cam is (0,1,1,0) so y runs bottom→top ⇒ flip cy.
         this._enaPanel.scale.set(sx, sy, 1);
-        this._enaPanel.position.set(cx, 12 / h + sy / 2, 0);
+        this._enaPanel.position.set(cx, 1 - cy, 0);
+        const leftPx = cx * w - px / 2, topPx = cy * h - px / 2;
+        if (this._enaFrame) {
+            this._enaFrame.style.left = leftPx + 'px';
+            this._enaFrame.style.top = topPx + 'px';
+            this._enaFrame.style.width = px + 'px';
+            this._enaFrame.style.height = px + 'px';
+        }
         if (this._enaCap) {
-            this._enaCap.style.right = ((1 - (cx + sx / 2)) * w) + 'px';
-            this._enaCap.style.bottom = (px + 16) + 'px';
+            // Caption above the panel, or below it when near the top edge.
+            const below = topPx < 40;
+            this._enaCap.style.left = leftPx + 'px';
+            this._enaCap.style.top = (below ? topPx + px + 4 : topPx - 34) + 'px';
+            this._enaCap.style.right = 'auto';
+            this._enaCap.style.bottom = 'auto';
+            this._enaCap.style.textAlign = 'left';
             this._enaCap.style.width = px + 'px';
         }
     }
@@ -3755,6 +3856,7 @@ export class RingCurrentGlobe {
         this._enaEnabled = !!on;
         if (this._enaMarker) this._enaMarker.visible = this._enaEnabled;
         if (this._enaCap) this._enaCap.style.display = this._enaEnabled ? 'block' : 'none';
+        if (this._enaFrame) this._enaFrame.style.display = this._enaEnabled ? 'block' : 'none';
         this._enaTogEl?.classList.toggle('rc-on', this._enaEnabled);
     }
 
@@ -3780,6 +3882,7 @@ export class RingCurrentGlobe {
         this._enaPanel?.geometry?.dispose?.();
         this._enaPanel?.material?.dispose?.();
         this._enaCap?.remove();
+        this._enaFrame?.remove();
         this._renderer.dispose();
         this._renderer.domElement.remove();
     }
