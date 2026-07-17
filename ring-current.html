@@ -967,7 +967,7 @@ function makeStageDraggable(panel, handle, onPlaced) {
 //    data panels + chart instead of blanking the page. ─────────────────────
 let globe = null;
 try {
-    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260712');
+    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260717');
     // Optional Rust/WASM transport core — byte-identical to the JS reference
     // (pinned by tests/ring-current-kernel-smoke.mjs). Opt in with ?rcwasm=1;
     // any load failure falls back to the JS core transparently.
