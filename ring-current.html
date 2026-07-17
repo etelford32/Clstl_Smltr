@@ -507,6 +507,13 @@ body {
                     <span style="color:#6a7285">low&rarr;high &uarr; &middot; now &rarr;</span>
                 </div>
                 <canvas id="rc-dock-spectro" title="Energy-vs-time waterfall: each column is one sample, rows are 20–250 keV log bins, colour = flux. Watch the spectrum harden during injection and soften through recovery."></canvas>
+                <div class="rc-dock-lab" id="rc-dock-psd-lab" hidden><b>PSD f(&mu;)</b> vs L, log &middot;
+                    <span><span class="rc-dot" style="background:#ffd27a"></span>40</span>
+                    <span><span class="rc-dot" style="background:#ff9a5c"></span>80</span>
+                    <span><span class="rc-dot" style="background:#ff5c47"></span>160 keV@4.5</span>
+                    <span id="rc-psd-shape" style="color:#6a7285"></span>
+                </div>
+                <canvas id="rc-dock-psd" title="Phase-space density at fixed first invariant μ vs L-shell (transport core, MLT-averaged). Rising outward = inward radial diffusion from the plasma-sheet source; an interior peak = local acceleration; gaps = μ outside the energy ladder." hidden></canvas>
                 <div class="rc-dock-lab"><b>L shell</b> R&#7431; &middot;
                     <span><span class="rc-dot" style="background:#59e0d8"></span>drawn</span>
                     <span><span class="rc-dot" style="background:#ffd27a"></span>model (Dst*)</span>
@@ -589,6 +596,7 @@ body {
                 <div class="rc-decomp-row"><span class="rc-decomp-k">unmodeled (tail&hellip;)</span><div class="rc-decomp-track"><span class="rc-decomp-bar" id="rc-dec-resid"></span></div><span class="rc-decomp-v" id="rc-dec-resid-v">&mdash;</span></div>
             </div>
             <div class="rc-kv"><span class="rc-k">peak current shell</span><span class="rc-v" id="rc-peakl">&mdash;</span></div>
+            <div class="rc-kv"><span class="rc-k" title="Equatorial dipole loss cone at the peak shell: sin²α = 1/√(4L⁶−3L⁵). Particles mirroring below α precipitate; the foot latitude is where they hit the atmosphere — the auroral connection.">loss cone @ peak L</span><span class="rc-v" id="rc-losscone">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">dusk asymmetry</span><span class="rc-v" id="rc-asym">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">composition (energy)</span><span class="rc-v" id="rc-ofrac">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">charge-exchange &tau; (50 keV @ peak L)</span><span class="rc-v" id="rc-celife">&mdash;</span></div>
@@ -1154,6 +1162,12 @@ if (globe) {
     const SPECT_COLS = 96;
     const spectro = [];        // ring of Float32Array(NB), newest last
     let spectMax = 0;          // eased normalisation top (brightening stays real)
+    // PSD μ set: first invariants that land 40/80/160 keV at L=4.5 (mid-ring).
+    // B_eq(4.5) = 31100/4.5³ nT; μ = E/B. Availability is capability-checked —
+    // the WASM kernel exposes only summed maps, so the panel hides there.
+    const PSD_B45 = 31100 / (4.5 ** 3);
+    const PSD_MUS = [40 / PSD_B45, 80 / PSD_B45, 160 / PSD_B45];
+    const PSD_COLORS = ['#ffd27a', '#ff9a5c', '#ff5c47'];
 
     function prepChart(id) {
         const cv = $(id);
@@ -1237,6 +1251,37 @@ if (globe) {
             }
         }
         return [S2[4][1], S2[4][2], S2[4][3]];
+    }
+    function drawPsd() {
+        const snap = globe.getPsdSnapshot(PSD_MUS);
+        if (!snap) return;                             // WASM kernel — stays hidden
+        $('rc-dock-psd-lab').hidden = false;
+        $('rc-dock-psd').hidden = false;
+        const { g, w, h } = prepChart('rc-dock-psd');
+        // Shared log scale across the three μ traces (3 decades below max).
+        let mx = 0;
+        for (const p of snap) for (const v of p.f) if (Number.isFinite(v) && v > mx) mx = v;
+        if (!(mx > 0)) return;
+        const lo = Math.log10(mx) - 3, span = 3;
+        const lMin = snap[0].L[0], lMax = snap[0].L[snap[0].L.length - 1];
+        snap.forEach((p, si) => {
+            g.strokeStyle = PSD_COLORS[si];
+            g.lineWidth = 1.4;
+            g.beginPath();
+            let pen = false;                           // NaN gaps lift the pen
+            for (let i = 0; i < p.L.length; i++) {
+                const v = p.f[i];
+                if (!Number.isFinite(v) || v <= 0) { pen = false; continue; }
+                const x = ((p.L[i] - lMin) / (lMax - lMin)) * w;
+                const y = h - 2 - Math.max(0, Math.min(1, (Math.log10(v) - lo) / span)) * (h - 7);
+                pen ? g.lineTo(x, y) : g.moveTo(x, y);
+                pen = true;
+            }
+            g.stroke();
+        });
+        // Shape verdict from the middle-μ trace — the analysis in one word.
+        const verdicts = { 'inward-diffusion': '→ inward diffusion', 'local-peak': '→ local acceleration', flat: '' };
+        $('rc-psd-shape').textContent = verdicts[snap[1].shape] ?? '';
     }
     function drawSpectro() {
         const { g, w, h } = prepChart('rc-dock-spectro');
@@ -1348,6 +1393,7 @@ if (globe) {
             `${win.e + win.p > 0 ? ` · ENA <b>${Math.round(100 * win.e / (win.e + win.p))}%</b> · precip <b>${Math.round(100 * win.p / (win.e + win.p))}%</b>` : ''}`;
         drawSpec();
         drawSpectro();
+        drawPsd();
         drawLProf();
         if (lifeDone) drawLife();
         drawDeaths();
@@ -1503,6 +1549,17 @@ function renderHud(s) {
         $('rc-decomp').hidden = false;
     }
     $('rc-peakl').textContent     = fmt(s.now.peakL, 2, ' Rᴇ');
+    // Equatorial dipole loss cone at the peak shell (pitch-angle geometry):
+    // sin²α_lc = 1/√(4L⁶ − 3L⁵); foot latitude λ = acos(√(1/L)) — where the
+    // precipitation channel actually lands. Pure dipole math, live with peakL.
+    $('rc-losscone').textContent = (() => {
+        const L = s.now.peakL;
+        if (!Number.isFinite(L) || L <= 1) return '—';
+        const sin2 = 1 / Math.sqrt(4 * L ** 6 - 3 * L ** 5);
+        const aDeg = Math.asin(Math.sqrt(Math.min(1, sin2))) * 180 / Math.PI;
+        const footDeg = Math.acos(Math.sqrt(1 / L)) * 180 / Math.PI;
+        return `α ${aDeg.toFixed(1)}° · foot ${footDeg.toFixed(1)}°λ`;
+    })();
     $('rc-asym').textContent      = Number.isFinite(s.now.asymmetry?.amplitude)
         ? `${Math.round(s.now.asymmetry.amplitude * 100)}% @ ${s.now.asymmetry.mltPeakHours} MLT` : '—';
     const fO = s.now.oxygenFraction;

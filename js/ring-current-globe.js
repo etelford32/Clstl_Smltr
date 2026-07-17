@@ -134,6 +134,7 @@ import { SimClock, SCALE, apparentUnitsPerSec } from './sim-clock.js';
 import { EarthSkin } from './earth-skin.js';
 import { RingCurrentTransport } from './ring-current-transport.js';
 import { driftPathBundle, alfvenLayer, convectionAmplitude } from './ring-current-drift-paths.js';
+import { psdCapable, psdProfile, psdShape } from './ring-current-psd.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { CopyShader } from 'three/addons/shaders/CopyShader.js';
@@ -2633,6 +2634,19 @@ export class RingCurrentGlobe {
                 key, pop: P.pop, visFrac: P.mat.uniforms.uVisFrac.value,
             })),
         };
+    }
+
+    /** Phase-space-density radial profiles f(μ; L) from the live transport —
+     *  the RBSP-style transport-vs-acceleration diagnostic. Returns null when
+     *  the active kernel doesn't expose per-channel state (the WASM opt-in
+     *  path: summed maps only), so the dock hides the panel instead of lying.
+     *  READ-ONLY on the transport. */
+    getPsdSnapshot(mus) {
+        if (!psdCapable(this._transport)) return null;
+        return mus.map((mu) => {
+            const p = psdProfile(this._transport, mu);
+            return { mu, L: p.L, f: p.f, shape: psdShape(p) };
+        });
     }
 
     /** Dashed ghost marker at a predicted pose (magGroup-local coords). */
