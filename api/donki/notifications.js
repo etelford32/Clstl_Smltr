@@ -16,7 +16,10 @@ export const config = { runtime: 'edge' };
 
 const DONKI_NOTIFY_BASE = 'https://api.nasa.gov/DONKI/notifications';
 const CACHE_TTL         = 900;
-const CACHE_SWR         = 120;
+// Long SWR (30 min, matching the prewarm-medium cadence) — same rationale
+// as cme.js: api.nasa.gov is slow cold; with SWR >= the prewarm interval
+// the CDN always has a serveable copy and refreshes in background.
+const CACHE_SWR         = 1800;
 const DEFAULT_DAYS      = 7;
 const FREE_LIMIT        = 5;
 

@@ -163,6 +163,24 @@ function rowAgeHours(row) {
     return isNaN(ms) ? null : (Date.now() - ms) / 3_600_000;
 }
 
+/**
+ * Sort rows oldest→newest by parsed date, dropping unparseable dates.
+ * CRITICAL: every consumer below indexes `rows[rows.length-1]` as "the
+ * current reading" and slices `-TREND_WIN`/`-RECENT_N` off the tail. That
+ * previously ASSUMED NOAA serves the file oldest-first; when the upstream
+ * order flipped (or for any feed served newest-first), the handler
+ * reported the OLDEST row in the file as "current" — the status board's
+ * "HTTP 200 with 41-day-old flux" incident. Sorting here makes the
+ * handler order-agnostic for both the primary and fallback feeds.
+ */
+function sortAscending(rows) {
+    return rows
+        .map(r => ({ r, ms: new Date(isoDate(r.date)).getTime() }))
+        .filter(x => Number.isFinite(x.ms))
+        .sort((a, b) => a.ms - b.ms)
+        .map(x => x.r);
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 export default async function handler() {
     // Try primary first; if it fails OR returns stale data, retry against the
@@ -172,7 +190,7 @@ export default async function handler() {
     let primaryErr;
 
     try {
-        rows = await fetchPrimary();
+        rows = sortAscending(await fetchPrimary());
     } catch (e) {
         primaryErr = e.message;
     }
@@ -182,7 +200,7 @@ export default async function handler() {
 
     if (primaryStale) {
         try {
-            const fallbackRows = await fetchFallback();
+            const fallbackRows = sortAscending(await fetchFallback());
             if (fallbackRows.length) {
                 const fallbackAge = rowAgeHours(fallbackRows[fallbackRows.length - 1]);
                 if (fallbackAge != null && (primaryAge == null || fallbackAge < primaryAge)) {

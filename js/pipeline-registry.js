@@ -26,6 +26,17 @@
  *               event-driven only). Cron jobs filter on this.
  *   warnAgeS    age above which the status pill goes amber
  *   critAgeS    age above which the status pill goes red
+ *   probePath   optional override URL for the status-page probe. Use when
+ *               the endpoint REQUIRES query params (e.g. per-location
+ *               forecast) — the probe would otherwise 400 by design.
+ *               Pre-warm crons keep using `endpoint`.
+ *   probeTimeoutMs  optional per-endpoint probe timeout (default 8000).
+ *               NASA DONKI regularly takes 8-15s on a cold cache — an 8s
+ *               probe abort reads as "network error" when the endpoint is
+ *               merely slow.
+ *   freshnessExempt  true = a 200 with no freshness metadata is healthy.
+ *               For computed-at-request endpoints (seed-grid lookups,
+ *               per-location passthroughs) "age" has no meaning.
  *   notes       optional one-liner — why this exists, gotchas
  */
 
@@ -56,11 +67,14 @@ export const PIPELINES = [
       cadence_s: 300,   prewarm: 'hot',
       warnAgeS:  60 * 60, critAgeS: 240 * 60 },
 
+    // Kyoto quicklook Dst is an HOURLY product — a 60-75 min age is its
+    // normal steady state, so the warn line sits at 2.5 h (missed update),
+    // not 1 h (previous setting amber-flagged every probe).
     { id: 'noaa-dst',           label: 'NOAA Dst index',
       endpoint: '/api/noaa/dst',
       category: 'space-weather', upstream: 'NOAA SWPC',
-      cadence_s: 300,   prewarm: 'hot',
-      warnAgeS:  60 * 60, critAgeS: 240 * 60 },
+      cadence_s: 3_600, prewarm: 'hot',
+      warnAgeS:  150 * 60, critAgeS: 360 * 60 },
 
     { id: 'noaa-radio-flux',    label: 'NOAA F10.7 cm flux',
       endpoint: '/api/noaa/radio-flux',
@@ -112,34 +126,37 @@ export const PIPELINES = [
       warnAgeS:  10 * 60, critAgeS: 30 * 60 },
 
     // ── DONKI · NASA event feeds ───────────────────────────────────────────
+    // probeTimeoutMs 16000 on all five: api.nasa.gov regularly takes 8-15 s
+    // on a cold edge cache. The default 8 s probe abort was reporting
+    // "network error" for endpoints that were healthy-but-slow.
     { id: 'donki-cme',          label: 'DONKI CME analysis',
       endpoint: '/api/donki/cme',
       category: 'events', upstream: 'NASA DONKI',
-      cadence_s: 1_800, prewarm: 'medium',
+      cadence_s: 1_800, prewarm: 'medium', probeTimeoutMs: 16_000,
       warnAgeS:  60 * 60, critAgeS: 360 * 60 },
 
     { id: 'donki-flares',       label: 'DONKI flares',
       endpoint: '/api/donki/flares',
       category: 'events', upstream: 'NASA DONKI',
-      cadence_s: 1_800, prewarm: 'medium',
+      cadence_s: 1_800, prewarm: 'medium', probeTimeoutMs: 16_000,
       warnAgeS:  60 * 60, critAgeS: 360 * 60 },
 
     { id: 'donki-gst',          label: 'DONKI geomag storms',
       endpoint: '/api/donki/gst',
       category: 'events', upstream: 'NASA DONKI',
-      cadence_s: 1_800, prewarm: 'medium',
+      cadence_s: 1_800, prewarm: 'medium', probeTimeoutMs: 16_000,
       warnAgeS:  60 * 60, critAgeS: 360 * 60 },
 
     { id: 'donki-sep',          label: 'DONKI SEP events',
       endpoint: '/api/donki/sep',
       category: 'events', upstream: 'NASA DONKI',
-      cadence_s: 1_800, prewarm: 'medium',
+      cadence_s: 1_800, prewarm: 'medium', probeTimeoutMs: 16_000,
       warnAgeS:  60 * 60, critAgeS: 360 * 60 },
 
     { id: 'donki-notifications',label: 'DONKI notifications',
       endpoint: '/api/donki/notifications',
       category: 'events', upstream: 'NASA DONKI',
-      cadence_s: 1_800, prewarm: 'medium',
+      cadence_s: 1_800, prewarm: 'medium', probeTimeoutMs: 16_000,
       warnAgeS:  60 * 60, critAgeS: 360 * 60 },
 
     // ── Atmosphere · SPARTA DSMC surrogate ──────────────────────────────
@@ -150,14 +167,14 @@ export const PIPELINES = [
     { id: 'atmosphere-profile', label: 'SPARTA · upper-atm profile',
       endpoint: '/api/atmosphere/profile',
       category: 'atmosphere', upstream: 'SPARTA DSMC · seed grid',
-      cadence_s: 21_600, prewarm: 'cold',
+      cadence_s: 21_600, prewarm: 'cold', freshnessExempt: true,
       warnAgeS:  12 * 3600, critAgeS: 48 * 3600,
       notes: 'Bootstrap climatology served until the SPARTA DSMC build replaces the seed grid.' },
 
     { id: 'atmosphere-snapshot',label: 'SPARTA · upper-atm snapshot',
       endpoint: '/api/atmosphere/snapshot',
       category: 'atmosphere', upstream: 'SPARTA DSMC · seed grid',
-      cadence_s: 21_600, prewarm: 'cold',
+      cadence_s: 21_600, prewarm: 'cold', freshnessExempt: true,
       warnAgeS:  12 * 3600, critAgeS: 48 * 3600 },
 
     // ── Weather · GFS + NOAA CPC ───────────────────────────────────────────
@@ -170,8 +187,13 @@ export const PIPELINES = [
 
     { id: 'weather-forecast',   label: 'Weather forecast',
       endpoint: '/api/weather/forecast',
+      // Endpoint REQUIRES ?type&lat&lon — a bare probe 400s by design.
+      // Probe with a fixed canonical coord (KSC) so the status row
+      // exercises the real path; the response is raw Open-Meteo JSON with
+      // no top-level timestamp, hence freshnessExempt.
+      probePath: '/api/weather/forecast?type=point&lat=28.39&lon=-80.6',
       category: 'weather', upstream: 'Open-Meteo + NWS',
-      cadence_s: 1_800, prewarm: null,
+      cadence_s: 1_800, prewarm: null, freshnessExempt: true,
       warnAgeS:  60 * 60, critAgeS: 240 * 60,
       notes: 'Per-location query; not pre-warmable — each call is unique.' },
 
@@ -279,3 +301,40 @@ export const CATEGORIES = [
 export function pipelinesByCategory(catId) {
     return PIPELINES.filter(p => p.category === catId);
 }
+
+/**
+ * HEARTBEAT_PIPELINES — cadence-aware staleness thresholds for every row in
+ * the Supabase `pipeline_heartbeat` table. Shared by status.html and
+ * admin.html so both UIs agree on what "healthy" means.
+ *
+ * warnMin / critMin are MINUTES since last_success_at. Each is derived from
+ * the pipeline's actual schedule (vercel.json crons + Supabase pg_cron):
+ * warn ≈ one missed run + margin, crit ≈ several missed runs. Before this
+ * list existed, everything not named solar_wind/weather_grid fell into a
+ * 15 m/60 m default — which flagged the 6-hourly aurora outlook and the
+ * daily/weekly synthetic-auth journeys "critical" while they were running
+ * exactly on schedule.
+ *
+ * A heartbeat row NOT listed here still renders (with the conservative
+ * 15 m/60 m default) — that's deliberate: a new pipeline shows up
+ * amber/red until someone registers its cadence, which is the prompt to
+ * add it.
+ */
+export const HEARTBEAT_PIPELINES = [
+    // vercel.json: * * * * * (every minute)
+    { key: 'solar_wind',              label: 'Solar Wind',              warnMin: 5,      critMin: 60 },
+    // vercel.json: 0 * * * * (hourly)
+    { key: 'weather_grid',            label: 'Weather Grid',            warnMin: 75,     critMin: 180 },
+    // vercel.json: */10 * * * *
+    { key: 'sync_dataset',            label: 'Sync Dataset (SW⇄geomag)',warnMin: 25,     critMin: 60 },
+    // Supabase pg_cron omni_hourly_refresh: 0 * * * * (CDAWeb HAPI)
+    { key: 'omni_hourly',             label: 'OMNI hourly (CDAWeb)',    warnMin: 75,     critMin: 240 },
+    // vercel.json: 0 */6 * * *
+    { key: 'aurora_outlook',          label: 'Aurora 30-day Outlook',   warnMin: 7 * 60, critMin: 25 * 60 },
+    // vercel.json: */30 * * * *
+    { key: 'refresh_saved_locations', label: 'Saved-Location Prewarm',  warnMin: 45,     critMin: 120 },
+    // vercel.json: 30 12 * * * (daily)
+    { key: 'synthetic_auth_daily',    label: 'Synthetic Auth (daily)',  warnMin: 25 * 60, critMin: 49 * 60 },
+    // vercel.json: 40 12 * * 1 (weekly, Monday)
+    { key: 'synthetic_auth_weekly',   label: 'Synthetic Auth (weekly)', warnMin: 8 * 1440, critMin: 15 * 1440 },
+];
