@@ -18,6 +18,11 @@
 --
 -- Privacy: email + UTM only. No IP, no fingerprint — matches the privacy floor
 -- in ANALYTICS.md. Keep it that way.
+--
+-- SUPERSEDED IN PART: supabase-aurora-alert-prefs-migration.sql adds
+-- kp_threshold/lat/lon/city columns and REPLACES subscribe_aurora() with a
+-- 7-arg signature (the 3-arg one below is dropped there). This file remains
+-- the record of the table + confirm/unsubscribe RPCs.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 create table if not exists public.aurora_subscribers (

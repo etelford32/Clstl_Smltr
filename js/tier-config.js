@@ -61,7 +61,7 @@ export const TIERS = Object.freeze([
     Object.freeze({
         id: 'basic',
         label: 'Basic',
-        priceUsd: 10,
+        priceUsd: 9.99,
         seats: 1,
         locationLimit: 5,
         badgeClass: 'plan-basic',

@@ -26,7 +26,8 @@
  *
  * ── Env vars required ────────────────────────────────────────────────────────
  *   STRIPE_SECRET_KEY            — sk_live_... or sk_test_...
- *   STRIPE_BASIC_PRICE_ID        — price_... for Basic $10/mo
+ *   STRIPE_BASIC_PRICE_ID        — price_... for Basic $9.99/mo
+ *   STRIPE_BASIC_YEARLY_PRICE_ID — price_... for Basic $59/yr (annual link)
  *   STRIPE_EDUCATOR_PRICE_ID     — price_... for Educator $25/mo
  *   STRIPE_ADVANCED_PRICE_ID     — price_... for Advanced $100/mo
  *   STRIPE_INSTITUTION_PRICE_ID  — price_... for Institution $500/mo
@@ -66,7 +67,7 @@ const PRICE_MAP = {
 // still on "educator" — the yearly slug is just a billing cadence.
 function basePlan(plan) {
     if (typeof plan !== 'string') return plan;
-    return plan.replace(/-yearly$/, '');
+    return plan.replace(/-(yearly|annual)$/, '');
 }
 
 // Tiers that are NEVER self-serve. enterprise = custom contract; free = no
@@ -232,7 +233,12 @@ export default async function handler(req) {
     let body;
     try { body = await req.json(); } catch { return json({ error: 'invalid_body' }, 400, origin); }
 
-    const plan = body.plan;
+    // '-annual' is the marketing-facing spelling of the yearly cadence
+    // (pricing.html links signup.html?plan=basic-annual). Normalize it to
+    // the canonical '-yearly' slug so both resolve to the same price env.
+    const plan = typeof body.plan === 'string'
+        ? body.plan.replace(/-annual$/, '-yearly')
+        : body.plan;
     if (NON_SELFSERVE_TIERS.has(plan)) {
         return json({
             error: 'contact_required',

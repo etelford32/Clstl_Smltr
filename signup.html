@@ -355,7 +355,7 @@
                     <label class="plan-pill basic" id="pill-basic">
                         <input type="radio" name="plan" value="basic">
                         <span class="plan-pill-name">⭐ Basic</span>
-                        <span class="plan-pill-price">$10 / mo</span>
+                        <span class="plan-pill-price">$9.99 / mo</span>
                     </label>
                     <label class="plan-pill educator" id="pill-educator">
                         <input type="radio" name="plan" value="educator">
@@ -606,7 +606,13 @@
     const _rawUrlPlan = (new URLSearchParams(location.search).get('plan') || 'free').toLowerCase();
     // AurOracle intro + legacy 'intro' invite codes map to the Basic tier.
     const _aliasedPlan = (_rawUrlPlan === 'auroracle' || _rawUrlPlan === 'intro') ? 'basic' : _rawUrlPlan;
-    const urlPlan     = _aliasedPlan === 'enterprise' ? 'advanced' : _aliasedPlan;
+    // '-annual'/'-yearly' suffixes (e.g. pricing.html's basic-annual link)
+    // select the base tier's pill; the cadence is remembered and re-applied
+    // at checkout time — but only if the user still has that tier selected.
+    const _urlYearly  = /-(annual|yearly)$/.test(_aliasedPlan);
+    const _dealiased  = _aliasedPlan.replace(/-(annual|yearly)$/, '');
+    const urlPlan     = _dealiased === 'enterprise' ? 'advanced' : _dealiased;
+    window._ppYearlyPlan = _urlYearly ? urlPlan : null;
     const planMap = {
         free:        'pill-free',
         basic:       'pill-basic',
@@ -636,7 +642,7 @@
             ],
         },
         basic: {
-            name: '⭐ Basic', price: '$10 / mo',
+            name: '⭐ Basic', price: '$9.99 / mo',
             tag: 'The whole platform, fully unlocked.',
             items: [
                 'All 17 simulations in full 3D (WebGL)',
@@ -686,10 +692,14 @@
         const el = document.getElementById('plan-summary');
         if (!el) return;
         const f = PLAN_FEATURES[val] || PLAN_FEATURES.free;
+        // Annual-cadence arrivals (?plan=basic-annual) see the price they
+        // clicked, not the monthly figure. Only Basic has an annual SKU.
+        const price = (window._ppYearlyPlan === val && val === 'basic')
+            ? '$59 / yr — 2 months free' : f.price;
         el.className = 'plan-summary' + (val !== 'free' ? ' ' + val : '');
         el.innerHTML =
             '<div class="ps-head"><span class="ps-name">' + f.name + '</span>' +
-            '<span class="ps-price">' + f.price + '</span></div>' +
+            '<span class="ps-price">' + price + '</span></div>' +
             '<div class="ps-tag">' + f.tag + '</div>' +
             '<ul>' + f.items.map(i =>
                 '<li><span class="ck">✓</span><span>' + i + '</span></li>').join('') +
@@ -1064,10 +1074,15 @@
                         // and silently drops anything else, so this is safe to
                         // pass through verbatim.
                         const trial = (new URLSearchParams(location.search).get('trial') || '').slice(0, 64);
+                        // Annual-cadence link (?plan=basic-annual): upgrade the
+                        // slug only if the user still has that tier selected —
+                        // switching pills mid-signup falls back to monthly.
+                        const checkoutPlan = (window._ppYearlyPlan && window._ppYearlyPlan === plan)
+                            ? plan + '-yearly' : plan;
                         const res = await fetch('/api/stripe/checkout', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-                            body: JSON.stringify(trial ? { plan, trial } : { plan }),
+                            body: JSON.stringify(trial ? { plan: checkoutPlan, trial } : { plan: checkoutPlan }),
                         });
                         const data = await res.json();
                         if (data.url) { window.location.href = data.url; return; }
