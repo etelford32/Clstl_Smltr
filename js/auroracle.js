@@ -815,7 +815,11 @@ function initAlerts() {
     try {
       const r = await fetch('/api/subscribe/aurora', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: addr, source: 'auroracle', utm: readUtm(), company: '' }),
+        body: JSON.stringify({
+          email: addr, source: 'auroracle', utm: readUtm(), company: '',
+          kp: parseFloat(kp?.value || '5'),
+          lat: state.user.lat, lon: state.user.lon, city: state.user.name,
+        }),
       });
       if (r.ok || r.status === 202) {
         if (status) { status.innerHTML = `✓ Alert set. We’ll email <b>${addr}</b> when activity crosses your threshold. Check your inbox to confirm.`; status.className = 'au-alert-status ok'; }
