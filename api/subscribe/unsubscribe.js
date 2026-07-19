@@ -5,8 +5,10 @@
  *
  *   GET /api/subscribe/unsubscribe?token=<confirm_token>
  *     → unsubscribe_aurora() flips the row to 'unsubscribed' and returns the
- *       email → we also flip the matching Resend Audience contact so the two
- *       stores agree → 302 to /welcome.html?aurora=unsubscribed.
+ *       email → we also flip the matching global Resend contact (2026 model:
+ *       contacts are account-global, `unsubscribed` is an account-wide
+ *       boolean — mirroring what Resend's own native one-click unsubscribe
+ *       sets) so the two stores agree → 302 to /welcome.html?aurora=unsubscribed.
  *
  * Note: storm broadcasts use Resend's NATIVE one-click unsubscribe (handled by
  * api/subscribe/resend-webhook.js on the way back). This endpoint is the
@@ -22,9 +24,8 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABAS
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const SITE_URL     = process.env.SITE_URL || 'https://parkersphysics.com';
 
-const RESEND_AUDIENCES = 'https://api.resend.com/audiences';
+const RESEND_CONTACTS = 'https://api.resend.com/contacts';
 const RESEND_KEY   = process.env.RESEND_API_KEY || '';
-const AUDIENCE_ID  = process.env.AURORA_AUDIENCE_ID || '';
 
 const redirect = (path) => new Response(null, {
     status: 302,
@@ -49,10 +50,10 @@ export default async function handler(req) {
         return redirect('/welcome.html?aurora=error');
     }
 
-    // Flip the Resend Audience contact too (idempotent; addressed by email).
-    if (email && RESEND_KEY && AUDIENCE_ID) {
+    // Flip the global Resend contact too (idempotent; addressed by email).
+    if (email && RESEND_KEY) {
         try {
-            await fetch(`${RESEND_AUDIENCES}/${AUDIENCE_ID}/contacts/${encodeURIComponent(email)}`, {
+            await fetch(`${RESEND_CONTACTS}/${encodeURIComponent(email)}`, {
                 method: 'PATCH',
                 headers: { Authorization: `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ unsubscribed: true }),

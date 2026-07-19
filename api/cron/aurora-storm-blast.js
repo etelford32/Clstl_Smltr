@@ -6,7 +6,7 @@
  * recurring, on-demand returning traffic:
  *
  *   read NOAA Kp → if Kp ≥ 6 (G2+) → claim a debounced slot →
- *   fire ONE Resend Broadcast to AURORA_AUDIENCE_ID →
+ *   fire ONE Resend Broadcast to the AURORA_SEGMENT_ID segment →
  *   "The sky's lighting up — watch it live: parkersphysics.com/earth.html"
  *
  * ── Debounce ─────────────────────────────────────────────────────────────
@@ -29,7 +29,9 @@
  *   SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)
  *   SUPABASE_SERVICE_KEY (or SUPABASE_SECRET_KEY) — service_role
  *   RESEND_API_KEY
- *   AURORA_AUDIENCE_ID                      — the Resend Audience to blast
+ *   AURORA_SEGMENT_ID                       — the Resend Segment to blast
+ *                                             (AURORA_AUDIENCE_ID honored as
+ *                                             a legacy fallback name)
  *   AURORA_FROM_EMAIL (optional, default 'Parkers Physics <aurora@parkersphysics.com>')
  *   SITE_URL (optional, default 'https://parkersphysics.com')
  *   CRON_SECRET (optional but recommended)
@@ -49,7 +51,10 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABAS
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const RESEND_BROADCASTS = 'https://api.resend.com/broadcasts';
 const RESEND_KEY   = process.env.RESEND_API_KEY || '';
-const AUDIENCE_ID  = process.env.AURORA_AUDIENCE_ID || '';
+// Resend renamed audiences → segments (2026); broadcasts now target
+// segment_id. Old env var name accepted so a stale Vercel config degrades
+// to a clear 501 rather than a silent misfire.
+const SEGMENT_ID   = process.env.AURORA_SEGMENT_ID || process.env.AURORA_AUDIENCE_ID || '';
 const FROM_EMAIL   = process.env.AURORA_FROM_EMAIL || 'Parkers Physics <aurora@parkersphysics.com>';
 const SITE_URL     = process.env.SITE_URL || 'https://parkersphysics.com';
 const CRON_SECRET  = process.env.CRON_SECRET || '';
@@ -173,7 +178,7 @@ async function fireBroadcast(kp, label) {
         timeoutMs: 12_000,
         headers: { Authorization: `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            audience_id: AUDIENCE_ID,
+            segment_id:  SEGMENT_ID,
             from:        FROM_EMAIL,
             subject:     `Aurora alert: ${label} storm — watch it live`,
             name:        `Aurora storm blast Kp ${kp} ${new Date().toISOString().slice(0, 16)}`,
@@ -206,7 +211,7 @@ export default async function handler(req) {
     if (!isAuthorized(req)) return jsonResp({ error: 'unauthorized' }, 401);
     if (!SUPABASE_URL || !SUPABASE_KEY) return jsonResp({ error: 'supabase_not_configured' }, 500);
     if (!RESEND_KEY)  return jsonResp({ error: 'resend_not_configured' }, 501);
-    if (!AUDIENCE_ID) return jsonResp({ error: 'audience_not_configured' }, 501);
+    if (!SEGMENT_ID)  return jsonResp({ error: 'segment_not_configured' }, 501);
 
     const url    = new URL(req.url);
     const dryRun = url.searchParams.get('dry') === '1';
