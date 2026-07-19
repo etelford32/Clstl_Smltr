@@ -112,6 +112,18 @@ export default async function handler(req) {
     const utm    = (body.utm && typeof body.utm === 'object') ? body.utm : null;
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: 'invalid_email' }, 400, origin);
 
+    // Alert prefs (all optional — legacy capture forms send none of these).
+    // kp clamps to 3–9: below 3 the sender would fire on near-every forecast,
+    // above 9 it would never fire. Bad lat/lon/city degrade to null rather
+    // than rejecting — the email capture is the part that must not fail.
+    const num = v => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+    const kpRaw = num(body.kp);
+    const kp    = kpRaw == null ? null : Math.min(9, Math.max(3, kpRaw));
+    const latRaw = num(body.lat), lonRaw = num(body.lon);
+    const lat = latRaw == null || Math.abs(latRaw) > 90  ? null : latRaw;
+    const lon = lonRaw == null || Math.abs(lonRaw) > 180 ? null : lonRaw;
+    const city = body.city ? String(body.city).slice(0, 80) : null;
+
     // 1) RPC: create/refresh pending row, get confirm token.
     let rpc;
     try {
@@ -122,7 +134,10 @@ export default async function handler(req) {
                 Authorization: `Bearer ${SUPABASE_KEY}`,
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ p_email: email, p_source: source, p_utm: utm }),
+            body: JSON.stringify({
+                p_email: email, p_source: source, p_utm: utm,
+                p_kp: kp, p_lat: lat, p_lon: lon, p_city: city,
+            }),
             signal: AbortSignal.timeout(5000),
         });
         if (!r.ok) return json({ error: 'rpc_failed', status: r.status }, 502, origin);
