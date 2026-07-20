@@ -66,7 +66,15 @@
  *   electrons      ~1400 points, EASTWARD, same trapped-motion geometry
  *   ringTorus      symmetric glow at the model's peak L (|Dst*|-driven)
  *   partialArc     dusk-centred arc — the partial ring current bulge
- *   plasmapause    thin cyan ring at Carpenter–Anderson Lpp(Kp)
+ *   plasmapause    teardrop = last closed equipotential of the SHIELDED
+ *                  convection + corotation field (ring-current-efield.js —
+ *                  dusk bulge through the stagnation point); faint circle =
+ *                  Carpenter–Anderson Lpp(Kp) kept as a validation overlay
+ *   ionosphere     630 nm airglow shell (Appleton crest bands snaking the
+ *                  dip equator, plasma-bubble bite-outs) + fountain
+ *                  streamlines — js/ring-current-ionosphere.js rendering
+ *                  the js/ionosphere-fountain.js kernel, penetration-coupled
+ *                  to the shielding ODE (the M-I story on screen)
  *   sun + transit  Sun sprite at +X and the incoming solar wind stream:
  *                  every not-yet-arrived L1 parcel (feed state.transit)
  *                  rendered at its REAL time-to-arrival along the corridor,
@@ -133,6 +141,14 @@ import {
 import { SimClock, SCALE, apparentUnitsPerSec } from './sim-clock.js';
 import { EarthSkin } from './earth-skin.js';
 import { RingCurrentTransport } from './ring-current-transport.js';
+import { ConvectionEField, boundaryL } from './ring-current-efield.js';
+import { IonosphereFountain, N_CELLS as IONO_LON_CELLS, dipEquatorLat } from './ionosphere-fountain.js';
+import { IonosphereCells, STATES as CELL_STATES, magLatDeg } from './ionosphere-cells.js';
+import { IonosphereLayer } from './ring-current-ionosphere.js';
+import {
+    exaggeration, engagement, realAltitudeKm, groundSpeedKmS, columnProfile,
+    FL_BLEND_LO, FL_BLEND_HI, FL_LIFT_CAP, EXAG_MAX,
+} from './ionosphere-descent.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { CopyShader } from 'three/addons/shaders/CopyShader.js';
@@ -799,7 +815,10 @@ export class RingCurrentGlobe {
         this._controls = new OrbitControls(this._camera, this._renderer.domElement);
         this._controls.enableDamping = true;
         this._controls.dampingFactor = 0.06;
-        this._controls.minDistance = 2.5;
+        // 1.28 (was 2.5 pre-Track-C): zooming in IS the descent — below
+        // ~3 Rᴇ the disclosed vertical exaggeration engages and the floor
+        // becomes the low-orbit altitude band (~100 km real at full ×18).
+        this._controls.minDistance = 1.28;
         this._controls.maxDistance = 140;   // far enough to frame the Sun corridor
         // Named default views (CAM_VIEWS / setView). Any user grab cancels an
         // in-progress flight — the presets are starting points, not a cage.
@@ -830,10 +849,32 @@ export class RingCurrentGlobe {
         // pinned equal by tests/ring-current-kernel-smoke.mjs.
         this._transport = opts.transport ?? new RingCurrentTransport();
 
+        // M-I coupling field core (Track 0) + equatorial fountain kernel
+        // (Track A) — both pure, node-tested, stepped on THIS SimClock from
+        // the same live Kp/VBs driver as the transport core. The efield's
+        // penetration ΔA is the fountain's storm input: the HUD bars, the
+        // plasmapause teardrop, and the airglow all move together.
+        this._efield = opts.efield ?? new ConvectionEField();
+        this._iono = opts.ionosphere ?? new IonosphereFountain();
+        if (!opts.ionosphere) {
+            // Spin-up: pre-run the diurnal state (crests, hF, this evening's
+            // hash-seeded bubbles) through the last 30 sim-h so the airglow
+            // arrives already reflecting "now" — a ×1 visitor would otherwise
+            // stare at a cold dark shell for hours (same reason as the
+            // transport's _heatSpinup). Quiet-driver history (dA = 0, default
+            // Kp) — the live feed takes over from the first state event.
+            const nowMs = this._clock.now();
+            const STEP = 300;
+            for (let t = nowMs - 30 * 3600e3 + STEP * 1e3; t <= nowMs; t += STEP * 1e3) {
+                this._iono.tick(t, STEP, { dA: 0 });
+            }
+        }
+
         this._buildEarth();
         this._buildFieldLines();
         this._buildParticles();
         this._buildRings();
+        this._buildIonosphere();
         this._buildRcHeatmap();
         this._buildEnaImager();
         this._buildSunAndTransit();
@@ -897,10 +938,38 @@ export class RingCurrentGlobe {
 
     _buildFieldLines() {
         const group = new THREE.Group();
-        const mat = new THREE.LineBasicMaterial({
-            color: 0x5f79b8, transparent: true, opacity: 0.20,
-            blending: THREE.AdditiveBlending, depthWrite: false,
+        // Line shader = the field-line branch of the Track C descent remap
+        // (js/ionosphere-descent.js remapFieldLineRadius, constants INJECTED
+        // from the kernel so GLSL can't drift from the node-tested JS):
+        // saturating tanh lift at the footpoints so the cage meets the
+        // exaggerated atmosphere — and the aurora curtains, which use the
+        // same remap — released across the blend band, identity above.
+        const mat = new THREE.ShaderMaterial({
+            transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            uniforms: { uExag: { value: 1 } },
+            vertexShader: `
+                uniform float uExag;
+                void main() {
+                    float r = length(position);
+                    float w = 1.0 - smoothstep(${FL_BLEND_LO.toFixed(4)},
+                        ${FL_BLEND_HI.toFixed(4)}, r);
+                    // tanh via exp, argument CLAMPED: cage radii reach
+                    // r ≈ 6.5 → x ≈ 117 → exp(234) overflows float and the
+                    // Inf/NaN positions send software rasterizers into
+                    // pathological clipping. tanh saturates ≈ 1 by x = 10.
+                    float x = clamp((r - 1.0) / ${FL_LIFT_CAP.toFixed(6)}, 0.0, 10.0);
+                    float e2 = exp(2.0 * x);
+                    float lift = (uExag - 1.0) * ${FL_LIFT_CAP.toFixed(6)}
+                        * (e2 - 1.0) / (e2 + 1.0);
+                    float rNew = r + lift * w;
+                    gl_Position = projectionMatrix * modelViewMatrix
+                        * vec4(position * (rNew / max(r, 1e-6)), 1.0);
+                }`,
+            fragmentShader: `
+                void main() { gl_FragColor = vec4(0.373, 0.475, 0.722, 0.20); }`,
         });
+        this._cageMat = mat;
         const SEGS = 48;
         for (const L of [2, 3, 4, 5, 6]) {
             const lamMax = Math.acos(Math.sqrt(1 / L));   // field line reaches r = 1
@@ -1073,12 +1142,31 @@ export class RingCurrentGlobe {
         this._arc   = null;
         this._rebuildTorus(this._state.peakL);
 
+        // Plasmapause, two curves (IONOSPHERE_EXPLORATION_PLAN.md Track 0):
+        //   · the GEOMETRY is the last closed equipotential of the SHIELDED
+        //     convection + corotation potential — a teardrop with the dusk
+        //     bulge, from ring-current-efield.js, rebuilt as A_sh evolves
+        //   · the old circular Carpenter–Anderson Lpp(Kp) ring stays as a
+        //     faint VALIDATION overlay (the two hugging each other is the
+        //     model check, live) — do not delete it in favor of the teardrop.
         this._ppMat = new THREE.MeshBasicMaterial({
-            color: 0x59e0d8, transparent: true, opacity: 0.35, depthWrite: false,
+            color: 0x59e0d8, transparent: true, opacity: 0.12, depthWrite: false,
         });
         this._plasmapause = new THREE.Mesh(new THREE.TorusGeometry(4.7, 0.018, 8, 160), this._ppMat);
         this._plasmapause.rotation.x = Math.PI / 2;
         this._magGroup.add(this._plasmapause);
+
+        const TEAR_N = 180;
+        this._tearPos = new Float32Array(TEAR_N * 3);
+        const tearGeo = new THREE.BufferGeometry();
+        tearGeo.setAttribute('position', new THREE.BufferAttribute(this._tearPos, 3));
+        this._ppTear = new THREE.LineLoop(tearGeo, new THREE.LineBasicMaterial({
+            color: 0x59e0d8, transparent: true, opacity: 0.75,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        this._magGroup.add(this._ppTear);
+        this._builtAsh = -1;
+        this._updateTeardrop(this._efield.state().A_sh);
 
         // Dipole axis — tilts with the magnetosphere; compare against the
         // white geographic axis to watch the real daily wobble between them.
@@ -1118,6 +1206,185 @@ export class RingCurrentGlobe {
         this._arc.rotation.z = -7 * Math.PI / 12 - ARC / 2;
         this._magGroup.add(this._arc);
         this._builtPeakL = peakL;
+    }
+
+    /** Refill the teardrop polyline from the efield boundary at amplitude
+     *  aSh. Scene mapping: efield φ (0 = noon, +π/2 = dusk) → θ = −φ, so
+     *  (x, z) = (L·cosφ, −L·sinφ) — dusk bulge lands on −Z. */
+    _updateTeardrop(aSh) {
+        if (!(aSh > 0) || Math.abs(aSh - this._builtAsh) < 0.02 * Math.max(0.05, this._builtAsh)) return;
+        this._builtAsh = aSh;
+        const n = this._tearPos.length / 3;
+        for (let i = 0; i < n; i++) {
+            const phi = (i / n) * 2 * Math.PI;
+            const L = boundaryL(phi, aSh);
+            const j = i * 3;
+            this._tearPos[j]     = L * Math.cos(phi);
+            this._tearPos[j + 1] = 0;
+            this._tearPos[j + 2] = -L * Math.sin(phi);
+        }
+        const attr = this._ppTear.geometry.getAttribute('position');
+        attr.needsUpdate = true;
+        this._ppTear.geometry.computeBoundingSphere();
+    }
+
+    /** Track A render layer (airglow shell + fountain streamlines) plus the
+     *  Track B regional-state map — all Earth-fixed (children of the spin
+     *  group so the bands snake with the real dip equator under the
+     *  terminator, and the WFC map's texels stay geographic). */
+    _buildIonosphere() {
+        this._cells = new IonosphereCells();
+        this._cellsKp = 1;
+        this._cellsEpochN = -1;
+        this._cellsCrest = new Float32Array(IONO_LON_CELLS);
+        this._cellsBubExt = new Float32Array(IONO_LON_CELLS);
+        this._cellsPrecip = new Float32Array(36 * 24);
+        this._precipScratch = {};
+        this._ionoLayer = new IonosphereLayer(this._iono, this._cells);
+        this._earthSpin.add(this._ionoLayer.group);
+    }
+
+    /**
+     * Bin the ring current's PRECIPITATION deaths into (maglat, MLT) aurora
+     * flux for the WFC priors — "ring current deaths literally seed aurora
+     * priors" (plan §B.2, M4). Scans every population with the same
+     * particlePose reference the tooltip pick uses: a particle in its death
+     * window on the precipitation channel is sliding down its field line to
+     * the footpoint at ±acos(1/√L) maglat, at its current drift MLT. Runs
+     * at epoch cadence (10 sim-min ⇒ every ~2 wall-s at ×300) — one scan
+     * costs about one tooltip pick.
+     */
+    _binPrecipitation() {
+        const p = this._cellsPrecip;
+        p.fill(0);
+        const PRECIP_REF = 3;   // deaths per cell that saturate the prior
+        for (const P of this._popList ?? []) {
+            const pop = P.pop;
+            for (let i = 0; i < pop.count; i++) {
+                const q = particlePose(pop, i, this._simHours, this._tView, this._precipScratch);
+                if (q.mode === 0 || q.dying <= 0.1) continue;
+                const L = pop.seed[i * 3];
+                const latDeg = Math.sign(q.mode)
+                    * Math.acos(1 / Math.sqrt(L)) * 180 / Math.PI;
+                const mlt = ((12 - q.theta * 12 / Math.PI) % 24 + 24) % 24;
+                const li = Math.max(0, Math.min(35, Math.floor((latDeg + 90) / 5)));
+                const mi = Math.max(0, Math.min(23, Math.floor(mlt)));
+                p[li * 24 + mi] += 1;
+            }
+        }
+        for (let c = 0; c < p.length; c++) p[c] = Math.min(1, p[c] / PRECIP_REF);
+    }
+
+    /** Fly down to the strongest live plasma bubble — the situation chip's
+     *  "Go see" action (plan §A.3/M4). false when no bubbles are alive. */
+    descendToBubble() {
+        const bubs = this._iono.allBubbles();
+        if (!bubs.length) return false;
+        bubs.sort((a, b) => b.strength * b.fade - a.strength * a.fade);
+        const lonR = bubs[0].lonDeg * Math.PI / 180;
+        const latR = dipEquatorLat(lonR);
+        const cl = Math.cos(latR);
+        const local = this._tmpV.set(
+            cl * Math.cos(lonR), Math.sin(latR), -cl * Math.sin(lonR)).clone();
+        const world = this._ionoLayer.group.localToWorld(local);
+        return this.setView('surface', { anchorWorldDir: world.normalize() });
+    }
+
+    /** Step the field core + fountain kernel on the sim clock and refresh
+     *  their visuals. dSimH = 0 while paused, so the shielding ODE, the
+     *  fountain, and every pulse cue hold with the rest of the scene. The
+     *  WFC cell engine runs on 10-sim-min epochs whose number derives from
+     *  ABSOLUTE sim time — a scrub or sweep wrap that revisits an epoch
+     *  re-collapses it identically (deterministic RNG per (cell, epoch)). */
+    _stepIonosphere(dt, dSimH, simNow) {
+        const dSimSec = dSimH * 3600;
+        if (dSimSec > 0) {
+            this._efield.step(dSimSec);
+            this._iono.tick(simNow, dSimSec, { dA: this._efield.state().dA });
+        }
+        this._updateTeardrop(this._efield.state().A_sh);
+        // Track C: the disclosed vertical exaggeration follows the camera
+        // (rendering-only — nothing above this line ever sees it).
+        const E = exaggeration(this._camera.position.length());
+        this._lastExag = E;
+        this._ionoLayer.setExaggeration(E);
+        this._cageMat.uniforms.uExag.value = E;
+        const utH = (simNow / 3.6e6) % 24;
+        const epochN = Math.floor(simNow / 600e3);
+        if (epochN !== this._cellsEpochN) {
+            this._cellsEpochN = epochN;
+            // Live fields snapshot: fountain crests per lon; live bubbles
+            // binned to their lon cell as a max field-aligned extent.
+            for (let i = 0; i < IONO_LON_CELLS; i++) {
+                this._cellsCrest[i] = this._iono.cells[i].crest;
+                this._cellsBubExt[i] = 0;
+            }
+            for (const b of this._iono.allBubbles()) {
+                const i = Math.max(0, Math.min(IONO_LON_CELLS - 1,
+                    Math.floor((b.lonDeg + 180) / (360 / IONO_LON_CELLS))));
+                if (b.latExtentDeg > this._cellsBubExt[i]) this._cellsBubExt[i] = b.latExtentDeg;
+            }
+            this._binPrecipitation();
+            const ef = this._efield.state();
+            this._cells.epoch({
+                kp: this._cellsKp, utH,
+                crest: this._cellsCrest, bubbleExtent: this._cellsBubExt,
+                dA: ef.dA, dyn: this._iono.dynamo,
+                precip: this._cellsPrecip,
+            }, epochN);
+            this._ionoLayer.setDrivers(ef.A_sh, ef.dA);
+            this._ionoLayer.markMapDirty();
+        }
+        this._ionoLayer.update(dt, dSimSec, this._tView, subsolarPoint(simNow), utH,
+            this._camera.position);
+    }
+
+    /** Live descent readout for the page HUD — the DISCLOSURE surface:
+     *  the exaggeration factor, the TRUE altitude it corresponds to, and
+     *  the ground-track speed (×τ gives the apparent rate on screen). */
+    descentState() {
+        const d = this._camera.position.length();
+        const E = this._lastExag ?? 1;
+        this._tmpV.copy(this._camera.position);
+        this._ionoLayer.group.worldToLocal(this._tmpV);
+        const latDeg = Math.asin(Math.max(-1,
+            Math.min(1, this._tmpV.y / (this._tmpV.length() || 1)))) * 180 / Math.PI;
+        return {
+            exag: E,
+            engaged: E > 1.05,
+            altKmReal: realAltitudeKm(d, E),
+            groundKmS: groundSpeedKmS(latDeg),
+            tau: this._clock.tau,
+            view: this._activeView,
+            details: this._ionoLayer.detailActive,
+        };
+    }
+
+    /**
+     * Regional-state inspector: WFC cell under a world-space point on the
+     * map shell → { state, maglat, mlt, why } (null off-shell). Exposed for
+     * the hover tooltip AND the smoke test — the conversion math is the
+     * part worth pinning.
+     */
+    cellInfoAt(worldPoint) {
+        const shell = this._ionoLayer?.mapShell;
+        if (!shell || !this._cells) return null;
+        const p = shell.worldToLocal(this._tmpV.copy(worldPoint));
+        const r = p.length();
+        if (r < 1e-6) return null;
+        const latDeg = Math.asin(Math.max(-1, Math.min(1, p.y / r))) * 180 / Math.PI;
+        const lonDeg = Math.atan2(-p.z, p.x) * 180 / Math.PI;   // coords.js frame
+        const maglat = magLatDeg(latDeg, lonDeg);
+        const utH = (this._clock.now() / 3.6e6) % 24;
+        const mlt = ((utH + lonDeg / 15) % 24 + 24) % 24;
+        const i = Math.max(0, Math.min(35, Math.floor((maglat + 90) / 5)));
+        const j = Math.max(0, Math.min(23, Math.floor(mlt)));
+        const c = i * 24 + j;
+        return {
+            state: CELL_STATES[this._cells.state[c]],
+            maglat, mlt, latDeg, lonDeg,
+            why: this._cells.why[c] ?? [],
+        };
     }
 
     _buildSunAndTransit() {
@@ -1452,7 +1719,45 @@ export class RingCurrentGlobe {
      * prefers-reduced-motion or {instant:true}. Returns false on an
      * unknown name so callers can validate persisted values.
      */
-    setView(name, { instant = false } = {}) {
+    setView(name, { instant = false, anchorWorldDir = null } = {}) {
+        // 'surface' (Track C) is DYNAMIC, not a CAM_VIEWS pose: glide
+        // straight down over the current sub-point — or a tapped WFC
+        // cell's direction — to drawn r = 1.42, which at full ×18
+        // exaggeration is ~150 km TRUE altitude, between the E and F
+        // shells. The orbit target stays the ORIGIN: navigation at the
+        // bottom is a low orbit (controls.minDistance is the altitude
+        // floor), and zooming back out ascends the same continuous path.
+        if (name === 'surface') {
+            const cur = this._camera.position.clone().normalize();
+            const dir = (anchorWorldDir ? anchorWorldDir.clone() : cur.clone()).normalize();
+            // Arrive ~20° off the anchor, tilted back toward the approach
+            // side: the tapped region then stands mid-frame against the
+            // horizon (curtains in profile, limb flattening visible)
+            // instead of a featureless nadir patch.
+            let axis = new THREE.Vector3().crossVectors(dir, cur);
+            if (axis.lengthSq() < 1e-6) {
+                axis.set(0, 1, 0).cross(dir);
+                if (axis.lengthSq() < 1e-6) axis.set(1, 0, 0);
+            }
+            dir.applyQuaternion(new THREE.Quaternion()
+                .setFromAxisAngle(axis.normalize(), 0.35));
+            this._activeView = 'surface';
+            const p1 = dir.multiplyScalar(1.42);
+            const t1 = new THREE.Vector3(0, 0, 0);
+            if (instant || this._reducedMotion) {
+                this._flight = null;
+                this._camera.position.copy(p1);
+                this._controls.target.copy(t1);
+                this._controls.update();
+                return true;
+            }
+            this._flight = {
+                t: 0, dur: 2.0,
+                p0: this._camera.position.clone(), p1,
+                t0: this._controls.target.clone(), t1,
+            };
+            return true;
+        }
         const v = CAM_VIEWS[name];
         if (!v) return false;
         this._activeView = name;
@@ -2472,6 +2777,23 @@ export class RingCurrentGlobe {
             const hit = this._pickRingAt(e.clientX - rect.left, e.clientY - rect.top);
             if (hit) this.pinParticle(hit.key, hit.i);
             else if (this._pinned) this.unpinParticle();
+            else {
+                // Tapped WFC cell → descend over that region (plan §C.3's
+                // "Go see"). Only when the map layer is shown; the flight
+                // is the same eased glide as the view presets.
+                const shell = this._ionoLayer?.mapShell;
+                if (shell && shell.visible && this._ionoLayer.group.visible) {
+                    this._ndc.set(
+                        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+                        -((e.clientY - rect.top) / rect.height) * 2 + 1);
+                    this._ray.setFromCamera(this._ndc, this._camera);
+                    const mHit = this._ray.intersectObject(shell)[0];
+                    if (mHit) {
+                        this.setView('surface',
+                            { anchorWorldDir: mHit.point.clone().normalize() });
+                    }
+                }
+            }
         };
         this._pinned = null;
         this.onSelect = null;   // page hook: fires with getPinnedInfo() | null
@@ -2622,6 +2944,17 @@ export class RingCurrentGlobe {
             if (!best) best = { kind: 'parcel', p };
             break;
         }
+        // WFC regional-state map: last-priority pick (particles and parcels
+        // win), only while the map layer is shown. The `why` array IS the
+        // M2 inspector — every region explains itself on hover.
+        const mapShell = this._ionoLayer?.mapShell;
+        if (!best && mapShell && mapShell.visible && this._ionoLayer.group.visible) {
+            const hit = this._ray.intersectObject(mapShell)[0];
+            if (hit) {
+                const info = this.cellInfoAt(hit.point);
+                if (info) best = { kind: 'cell', info };
+            }
+        }
 
         if (!best) { this._tipEl.style.display = 'none'; return; }
         const fmt = (x, d, u) => Number.isFinite(x) ? `${x.toFixed(d)}${u}` : '—';
@@ -2646,6 +2979,35 @@ export class RingCurrentGlobe {
             html = `<b style="color:${color}">${name}</b> · ${pop.eKev[i].toFixed(0)} keV` +
                 `<br>L ${L.toFixed(2)} Rᴇ · drift ${fmt(T, 1, ' h')}/lap ` +
                 `${best.key === 'electrons' ? 'eastward' : 'westward'}${status}`;
+        } else if (best.kind === 'cell') {
+            // The M2 inspector: state + the priors that argued for it.
+            const info = best.info;
+            const COL = { quiet: '#8b94ad', crest: '#ff5c47', bubble: '#ff8894',
+                          arc: '#40ff80', diffuse: '#37e0a0', trough: '#5d8cff',
+                          saps: '#ff8c3a', patch: '#bfe8ff', toi: '#e8f4ff',
+                          sed: '#ffd27a', depleted: '#c96a4a' };
+            const why = info.why.length
+                ? info.why.map(w => `${w.state} ${w.w}`).join(' · ')
+                : '—';
+            html = `<b style="color:${COL[info.state] ?? '#e8edf7'}">` +
+                `${info.state.toUpperCase()}</b> — ionospheric regime` +
+                `<br>${Math.abs(info.maglat).toFixed(0)}°${info.maglat >= 0 ? 'N' : 'S'} maglat` +
+                ` · ${info.mlt.toFixed(1)} MLT` +
+                `<br><span style="color:#8b94ad">why: ${why}</span>`;
+            // Descended: the inspector gains COLUMN MODE (plan §C.3e) — the
+            // local vertical D/E/F stack at this spot, live. lt ≈ MLT (the
+            // same mean-sun map both kernels use at these latitudes).
+            if ((this._lastExag ?? 1) > 4) {
+                const blocks = '▁▂▃▄▅▆▇█';
+                const prof = columnProfile(info.mlt, this._cellsKp).reverse();
+                const line = prof.map(l => l.density <= 0.01
+                    ? `${l.key} —`
+                    : `${l.key} ${l.altKm} km ${blocks[Math.min(7, Math.round(l.density * 7))]}`)
+                    .join(' · ');
+                html += `<br><span style="color:#b9c2d9">column: ${line}</span>`;
+            }
+            html += `<br><span style="color:#5d6684">WFC regional map · 5°×1h` +
+                ` · epoch 10 sim-min · click to descend</span>`;
         } else {
             const p = best.p;
             const etaMin = Math.max(0, Math.round((p.tArrive - wallNow) / 60_000));
@@ -2865,6 +3227,13 @@ export class RingCurrentGlobe {
             });
             if (!this._heatSpunUp) { this._heatSpunUp = true; this._heatSpinup = 3 * 3600; }
         }
+        // Same live driver into the M-I field core and the fountain — one
+        // input, three coupled readouts (HUD bars, teardrop, airglow).
+        this._efield.setDriver({
+            kp: Number.isFinite(now.kp) ? now.kp : undefined,
+            vbs: this._driverVbs,
+        });
+        this._iono.setDriver({ kp: Number.isFinite(now.kp) ? now.kp : undefined });
         this._setCompositionMix(now.oxygenFraction);
         for (const p of this._popList ?? []) {
             this._syncStateUniforms(p.mat);
@@ -2906,6 +3275,24 @@ export class RingCurrentGlobe {
     /** The shared SimClock — the page's τ UI drives this same instance. */
     get clock() { return this._clock; }
 
+    /** Live M-I shielding state { A_drv, A_sh, dA, stagnationL } — the
+     *  page's driver-panel bars read this every UI tick. */
+    efieldState() { return this._efield.state(); }
+
+    /** The fountain kernel (read-only use: bubble counts, situation text). */
+    get ionosphere() { return this._iono; }
+
+    /** The WFC cell engine (read-only: stats, states, why — smoke probes). */
+    get cells() { return this._cells; }
+
+    /** Show/hide the Track A ionosphere visuals (airglow + streamlines) —
+     *  the teardrop plasmapause is magnetosphere furniture and stays. */
+    setIonosphereVisible(on) { this._ionoLayer.setVisible(on); }
+
+    /** Show/hide the Track B regional-state map shell (its hover inspector
+     *  gates on the same flag). Independent of the airglow toggle. */
+    setCellsMapVisible(on) { this._ionoLayer.setMapVisible(on); }
+
     /** Legacy spelling kept for probes/back-compat: sets the SimClock τ. */
     setTimeCompression(x) {
         this._clock.setTau(x);
@@ -2939,6 +3326,7 @@ export class RingCurrentGlobe {
         this._simHours += dSimH;
         this._lastDt = dt;
         this._stepTransportLayers(dt, dSimH);
+        this._stepIonosphere(dt, dSimH, simNow);
         if (this._enaEnabled && this._enaSweep) {
             this._enaPhase = (this._enaPhase + dt * this._enaSweepRate) % (2 * Math.PI);
             if (this._enaSliderEl) this._enaSliderEl.value = String(Math.round(this._enaPhase / (2 * Math.PI) * 1000));
@@ -3089,6 +3477,7 @@ export class RingCurrentGlobe {
             tier: p.tier,
             pixelRatio: this._renderer.getPixelRatio(),
             drawCalls: r.calls, triangles: r.triangles, points: r.points,
+            cells: this._ionoLayer?.detailActive ?? 0,   // active LOD details (§C.4)
         };
     }
 
@@ -3776,6 +4165,7 @@ export class RingCurrentGlobe {
         this._bloomBlit?.dispose?.();
         this._heatTex?.dispose?.();
         this._heatPanel?.remove();
+        this._ionoLayer?.dispose?.();
         this._enaTex?.dispose?.();
         this._enaPanel?.geometry?.dispose?.();
         this._enaPanel?.material?.dispose?.();

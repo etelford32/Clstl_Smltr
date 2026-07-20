@@ -236,6 +236,25 @@ body {
 .rc-balance-dec { background:linear-gradient(90deg,#2fd3a8,#59e0d8); height:100%; }
 .rc-balance-lab { display:flex; justify-content:space-between; font-size:.66rem; color:#8b94ad; margin-top:3px; }
 
+/* M-I shielding readout (Track 0) — driver / shielded / penetration bars.
+   The penetration track is CENTER-zeroed: fill grows right (orange,
+   undershielding/eastward) or left (blue, overshielding/westward). */
+.rc-efield { margin-top:9px; padding-top:7px; border-top:1px solid rgba(255,255,255,.07); }
+.rc-ef-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:3px; }
+.rc-ef-row { display:flex; align-items:center; gap:7px; margin-top:3px; }
+.rc-ef-row > span { flex:0 0 52px; font-size:.64rem; color:#8b94ad; text-align:right; }
+.rc-ef-track { flex:1; height:5px; border-radius:3px; background:rgba(255,255,255,.06); position:relative; overflow:hidden; }
+.rc-ef-fill { height:100%; width:0%; border-radius:3px; background:linear-gradient(90deg,#ffb066,#ff9a3d); transition:width .18s linear; }
+.rc-ef-sh { background:linear-gradient(90deg,#3ba9a2,#59e0d8); }
+.rc-ef-mid::before {
+    content:''; position:absolute; left:50%; top:-2px; bottom:-2px; width:1px;
+    background:rgba(255,255,255,.35);
+}
+.rc-ef-mid .rc-ef-fill { position:absolute; top:0; transition:width .18s linear, left .18s linear; }
+.rc-ef-pen-east { left:50%; background:linear-gradient(90deg,#ff9a3d,#ff5c47); }
+.rc-ef-pen-west { background:linear-gradient(270deg,#59baff,#4d7dff); }
+.rc-ef-foot { font-size:.64rem; color:#5d6684; margin-top:4px; line-height:1.45; }
+
 .rc-chart-wrap { padding:0 22px 8px; }
 .rc-chart-panel {
     background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.08);
@@ -392,6 +411,34 @@ body {
     font-variant-numeric:tabular-nums;
 }
 .rc-perf.rc-perf-warn { color:#ffb066; border-color:rgba(255,176,102,.3); }
+
+/* Track C descent disclosure — the honesty line for the vertical
+   exaggeration (same contract as the ×1 bounce exception's legend note). */
+.rc-descent {
+    position:absolute; left:50%; transform:translateX(-50%); bottom:8px;
+    z-index:4; pointer-events:none;
+    font:600 10.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color:#9fd8c8; background:rgba(3,14,10,.62);
+    border:1px solid rgba(47,211,168,.28); border-radius:5px; padding:3px 9px;
+    font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+
+/* Situation chip: live bubble outbreak + the "Go see" flight (plan §A.3).
+   Sits under the sim-time HUD — the bottom-left corner belongs to the
+   layer-toggle panel. */
+.rc-gosee {
+    position:absolute; left:12px; top:258px; z-index:5;
+    display:flex; align-items:center; gap:8px;
+    font:600 11px system-ui; color:#ffd9b0;
+    background:rgba(20,8,2,.72); border:1px solid rgba(255,154,61,.4);
+    border-radius:6px; padding:5px 9px; max-width:340px; line-height:1.4;
+}
+.rc-gosee button {
+    flex:none; font:700 10.5px system-ui; color:#1a0d02;
+    background:linear-gradient(90deg,#ffb066,#ff9a3d); border:0;
+    border-radius:4px; padding:3px 9px; cursor:pointer;
+}
+.rc-gosee button:hover { filter:brightness(1.15); }
 .rc-mode-btn.rc-on { background:rgba(255,154,61,.22); border-color:rgba(255,154,61,.55); color:#ffd9b0; }
 .rc-ctl .rc-v { font-size:.72rem; }
 
@@ -459,6 +506,7 @@ body {
             <button class="rc-view-btn rc-on" data-view="earth" title="Near-Earth framing &mdash; ring current, aurora, boundaries">&#127757; Earth</button>
             <button class="rc-view-btn" data-view="sun" title="Solar disk close-up &mdash; coronal holes, emission puffs, the arriving wind&rsquo;s source">&#9728;&#65039; Sun</button>
             <button class="rc-view-btn" data-view="river" title="The full Sun&rarr;Earth corridor &mdash; every population and readout in one frame">&#127754; River</button>
+            <button class="rc-view-btn" data-view="surface" title="Descend to low orbit over the current sub-point &mdash; the atmosphere inflates under a DISCLOSED vertical exaggeration (the HUD shows the live factor); aurora curtains and bubble volumes instantiate below you. Click any region of the WFC map to descend there instead.">&#128760; Surface</button>
         </div>
         <div class="rc-insp" id="rc-insp" hidden>
             <div class="rc-insp-head" id="rc-insp-head">
@@ -508,6 +556,11 @@ body {
             </div>
         </div>
         <div class="rc-perf" id="rc-perf" hidden>&mdash;</div>
+        <div class="rc-descent" id="rc-descent" hidden>&mdash;</div>
+        <div class="rc-gosee" id="rc-gosee" hidden>
+            <span id="rc-gosee-txt">&mdash;</span>
+            <button id="rc-gosee-btn" title="Fly down to the strongest live bubble (Surface view)">&#9654; go see</button>
+        </div>
         <div class="rc-legend" id="rc-legend">
         <div class="rc-legend-head" id="rc-legend-head">
             <span class="rc-legend-grip" aria-hidden="true">&#10495;</span>
@@ -525,7 +578,13 @@ body {
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;stretching tether = the charge separation that IS the current</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;deaths: fade-out = ENA escape &middot; surface streak = precipitation</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;faint equatorial haze = ENA glow (how imagers see the ring)</span><br>
-            <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause (Kp)<br>
+            <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause &mdash; teardrop = last closed equipotential (dusk bulge, shielded E&times;B + corotation)<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;faint circle = Carpenter&ndash;Anderson Lpp(Kp), kept as the validation check</span><br>
+            <span class="rc-legend-pop" data-pop="iono" role="button" tabindex="0" aria-pressed="true" title="Show / hide the ionosphere layer (airglow, bubbles, fountain streamlines)"><span class="rc-dot" style="background:#ff5e45"></span>Ionosphere &mdash; 630 nm airglow: Appleton crest bands snake the dip equator (night side)</span><br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;dark bite-outs = plasma bubbles (rise, drift east, shimmer = GPS scintillation)</span><br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;cyan arcs = fountain streamlines &mdash; pulse rate &prop; true E&times;B drift (cue, not to scale); undershielding surges them</span><br>
+            <span class="rc-legend-pop" data-pop="cells" role="button" tabindex="0" aria-pressed="true" title="Show / hide the regional-state map (WFC cell engine, 5°&times;1h magnetic grid, 10-sim-min epochs) — hover any region for its state and the priors behind it; every state renders its own flow-noise texture, advected by the live convection"><span class="rc-dot" style="background:#5d8cff"></span>Regional states &mdash; WFC map: trough &middot; diffuse &middot; arc &middot; <span style="color:#ff8c3a">SAPS jet</span> (westward streaks) &middot; <span style="color:#bfe8ff">patches</span>/<span style="color:#e8f4ff">TOI</span> (antisunward) &middot; <span style="color:#ffd27a">SED</span> &middot; <span style="color:#c96a4a">O/N&#8322; depletion</span> &mdash; hover for <b>why</b></span><br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;texture motion = convection-advected noise on the sim clock; SAPS streak rate &asymp; the real 1 km/s jet; ring-current precipitation deaths seed the aurora priors</span><br>
             <span class="rc-dot" style="background:#dfe8ff"></span>Spin axis &middot; <span class="rc-dot" style="background:#ff9a3d"></span>dipole axis &mdash; watch the daily wobble<br>
             <span class="rc-dot" style="background:#37e0a0"></span>Aurora oval &mdash; live Kp/Bz at the magnetic pole<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
@@ -540,7 +599,7 @@ body {
             <span style="color:#5d6684">trail length &prop; speed &middot; flash &prop; VBs on arrival</span>
         </div>
         </div>
-        <div class="rc-stage-hint">views top-center &middot; drag to orbit &middot; <b>click a ring particle to inspect &amp; predict it</b> &middot; pause / scrub the clock top-left &middot; one clock drives everything &middot; GSM frame</div>
+        <div class="rc-stage-hint">views top-center &middot; drag to orbit &middot; <b>click a ring particle to inspect &amp; predict it</b> &middot; zoom into Earth (or click a map region) to descend &mdash; vertical exaggeration disclosed on screen &middot; pause / scrub the clock top-left &middot; one clock drives everything &middot; GSM frame</div>
     </div>
 
     <div class="rc-col">
@@ -588,6 +647,13 @@ body {
             <div class="rc-kv"><span class="rc-k">Newell d&Phi;/dt</span><span class="rc-v" id="rc-newell">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">decay time &tau;</span><span class="rc-v" id="rc-tau">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">Kp / plasmapause</span><span class="rc-v" id="rc-kp">&mdash;</span></div>
+            <div class="rc-efield" title="M&ndash;I shielding state (Volland&ndash;Stern amplitude, kV/R&#7431;&sup2;): the region-2 currents take ~25 min to shield a driver change; until they do, the difference penetrates to the equatorial ionosphere. Eastward (orange) = undershielding &rarr; super-fountain &amp; bubbles; westward (blue) = overshielding &rarr; suppression. Watch the airglow and the streamlines move with this bar.">
+                <div class="rc-ef-head"><span class="rc-k">convection E-field &mdash; M&ndash;I coupling</span><span class="rc-v" id="rc-ef-vals">&mdash;</span></div>
+                <div class="rc-ef-row"><span>driver</span><div class="rc-ef-track"><div class="rc-ef-fill" id="rc-ef-drv"></div></div></div>
+                <div class="rc-ef-row"><span>shielded</span><div class="rc-ef-track"><div class="rc-ef-fill rc-ef-sh" id="rc-ef-sh"></div></div></div>
+                <div class="rc-ef-row"><span>penetr.</span><div class="rc-ef-track rc-ef-mid"><div class="rc-ef-fill" id="rc-ef-pen"></div></div></div>
+                <div class="rc-ef-foot" id="rc-ef-iono">&mdash;</div>
+            </div>
         </section>
 
         <section class="rc-panel">
@@ -607,6 +673,7 @@ body {
                 <a href="/sun.html" title="Solar surface twin — where this wind left the Sun">&#9728;&#65039; Sun twin</a>
                 <a href="/space-weather.html" title="Full space-weather dashboard">&#9889; Dashboard</a>
                 <a href="/upper-atmosphere.html" title="Thermosphere twin — where this energy ends up as satellite drag">&#127777;&#65039; Upper Atmosphere twin</a>
+                <a href="/shielding-lab.html" title="Shielding Lab — the ionospheric potential solver: what this page's penetration field does at SAPS latitudes (same 25-min shielding physics, solved on a real conductance grid)">&#128268; Shielding Lab (SAPS)</a>
             </div>
             <div style="font-size:.68rem;color:#5d6684;margin-top:6px;line-height:1.5;">
                 The incoming stream in the 3D view is real matter measured at L1
@@ -967,7 +1034,7 @@ function makeStageDraggable(panel, handle, onPlaced) {
 //    data panels + chart instead of blanking the page. ─────────────────────
 let globe = null;
 try {
-    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260717');
+    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260720');
     // Optional Rust/WASM transport core — byte-identical to the JS reference
     // (pinned by tests/ring-current-kernel-smoke.mjs). Opt in with ?rcwasm=1;
     // any load failure falls back to the JS core transparently.
@@ -1023,7 +1090,12 @@ if (globe) {
         const apply = (on) => {
             el.classList.toggle('rc-off', !on);
             el.setAttribute('aria-pressed', on ? 'true' : 'false');
-            globe.setPopulationVisible(key, on);
+            // 'iono' / 'cells' are scene layers (airglow + streamlines /
+            // WFC state map), not particle populations — different
+            // switches, same legend UX.
+            if (key === 'iono') globe.setIonosphereVisible(on);
+            else if (key === 'cells') globe.setCellsMapVisible(on);
+            else globe.setPopulationVisible(key, on);
         };
         apply(!hidden[key]);                         // restore persisted state
         const toggle = () => {
@@ -1037,6 +1109,71 @@ if (globe) {
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
         });
     });
+}
+
+// ── M-I shielding readout (Track 0): driver / shielded / penetration bars.
+//    Reads the globe's efield state on its own interval (NOT the clock-HUD
+//    one: that interval is armed before `globe` initializes). The shielding
+//    ODE runs on sim time, so at high τ the penetration bar visibly relaxes
+//    within seconds — the single storyline the ionosphere layer follows. ──
+if (globe) {
+    const efVals = $('rc-ef-vals'), efDrv = $('rc-ef-drv'), efSh = $('rc-ef-sh'),
+          efPen = $('rc-ef-pen'), efIono = $('rc-ef-iono');
+    const A_FS = 1.5;      // bar full scale (kV/Rᴇ² — ≈ Kp 9 driving)
+    const PEN_FS = 0.6;    // centered-bar full scale for |ΔA|
+    const updateEfield = () => {
+        const s = globe.efieldState();
+        efDrv.style.width = `${Math.min(100, s.A_drv / A_FS * 100)}%`;
+        efSh.style.width  = `${Math.min(100, s.A_sh / A_FS * 100)}%`;
+        const east = s.dA >= 0;
+        const w = Math.min(50, Math.abs(s.dA) / PEN_FS * 50);
+        efPen.className = 'rc-ef-fill ' + (east ? 'rc-ef-pen-east' : 'rc-ef-pen-west');
+        efPen.style.width = `${w}%`;
+        efPen.style.left = east ? '50%' : `${50 - w}%`;
+        efVals.textContent =
+            `A ${s.A_drv.toFixed(2)} → ${s.A_sh.toFixed(2)} kV/Rᴇ² · Lₛ ${s.stagnationL.toFixed(1)} Rᴇ`;
+        const nBub = globe.ionosphere.allBubbles().length;
+        const mode = s.dA > 0.08 ? 'undershielding — super-fountain window'
+            : s.dA < -0.08 ? 'overshielding — fountain suppressed'
+            : 'shielded — climatological fountain';
+        efIono.textContent =
+            `ΔA ${s.dA >= 0 ? '+' : ''}${s.dA.toFixed(2)} · ${mode} · ${nBub} bubble${nBub === 1 ? '' : 's'} active`;
+        // Situation chip (plan §A.3, M4): live bubble outbreak with the
+        // "Go see" flight to the strongest one. Longitude quoted at the
+        // outbreak's center; scintillation is the operational stake.
+        const goEl = $('rc-gosee');
+        const bubs = globe.ionosphere.allBubbles();
+        if (bubs.length) {
+            goEl.hidden = false;
+            const strongest = bubs.reduce((m, b) =>
+                b.strength * b.fade > m.strength * m.fade ? b : m, bubs[0]);
+            const lon = Math.round(strongest.lonDeg);
+            const lonTxt = `${Math.abs(lon)}°${lon >= 0 ? 'E' : 'W'}`;
+            $('rc-gosee-txt').textContent =
+                `${bubs.length} plasma bubble${bubs.length === 1 ? '' : 's'} active` +
+                ` near ${lonTxt} — GPS scintillation likely`;
+        } else {
+            goEl.hidden = true;
+        }
+        // Track C disclosure line — REQUIRED while the vertical exaggeration
+        // is engaged (the same honesty contract as the ×1 bounce exception).
+        const ds = globe.descentState();
+        const descEl = $('rc-descent');
+        if (ds.engaged) {
+            descEl.hidden = false;
+            const x = ds.exag < 10 ? ds.exag.toFixed(1) : Math.round(ds.exag);
+            descEl.textContent =
+                `⛰ descent · vertical ×${x} — the atmosphere is really 1/${x} this thick` +
+                ` · alt ≈ ${Math.round(ds.altKmReal)} km (real)` +
+                ` · ground track ${ds.groundKmS.toFixed(2)} km/s, ×${ds.tau} on screen` +
+                (ds.details ? ` · ${ds.details} detail cells` : '');
+        } else {
+            descEl.hidden = true;
+        }
+    };
+    updateEfield();
+    setInterval(() => { if (!document.hidden) updateEfield(); }, 250);
+    $('rc-gosee-btn').addEventListener('click', () => globe.descendToBubble());
 }
 
 // ── Particle inspector (Phase 1 — RING_CURRENT_ANALYTICS_PLAN.md) ──────────
@@ -1269,6 +1406,7 @@ if (globe) {
         perfEl.textContent =
             `${p.fps.toFixed(0)} fps · ${p.frameMs.toFixed(1)} ms (p95 ${p.p95Ms.toFixed(0)})` +
             ` · dpr ${p.pixelRatio.toFixed(2)} · ${p.drawCalls} draws` +
+            (p.cells ? ` · ${p.cells} cells` : '') +
             (p.tier ? ` · quality −${p.tier}` : '');
         perfEl.classList.toggle('rc-perf-warn', p.frameMs > 26 || p.tier > 0);
     }, 1000);
