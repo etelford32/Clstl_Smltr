@@ -26,7 +26,12 @@ a hard prerequisite for everything else.*
 > (10-sim-min epochs, deterministic per epoch number), the bake is the
 > global regional-state shell on ring-current.html (crest/bubble muted —
 > the analytic airglow owns them), and the per-cell `why` inspector rides
-> the globe's hover tooltip. M3 (descent) and M4 (full vocabulary) open.
+> the globe's hover tooltip.
+>
+> **Fourth patch: M3 COMPLETE** — the descent camera (see the M3 milestone
+> note below for what shipped and where the plan's §C.2 blend was amended).
+> Only M4 (full state vocabulary + precipitation binning + situation-chip
+> actions) remains open.
 
 ---
 
@@ -284,7 +289,26 @@ draw-count already in the debug HUD — add a `cells` counter.
   cell's state + `why` priors through the globe tooltip. Legend row
   `data-pop="cells"` toggles it independently of the airglow.)*
 - **M3** Track C descent: exaggeration tween, Surface view, LOD instancing for
-  arcs + bubbles, column inspector.
+  arcs + bubbles, column inspector. *(DONE 2026-07-20 — `js/ionosphere-descent.js`
+  pure kernel (E(d) tween 1→×18 across 3→1.5 Rᴇ, radius remaps, column
+  profile) + `tests/ionosphere-descent.mjs`. The field-line remap is NOT the
+  naive full-remap-then-blend from §C.2 — that map provably folds (hairpins)
+  at ×18; the shipped map is a saturating tanh lift (slope E at the
+  footpoint, capped at ~300 km worth of altitude, released over 1.2–2.6 Rᴇ,
+  strictly monotone — test-pinned), and the CURTAINS use the same remap so
+  they meet their arcs exactly by construction. Zooming in IS the descent
+  (controls floor 1.28); the Surface view button / a tapped WFC cell flies
+  an eased glide to ~150 km true altitude, arriving ~20° off-nadir so the
+  region stands against the horizon. D/E/F nested shells fade in with real
+  day/night behavior (D day-only, E weak-night, F persists); LOD pool = 6
+  curtain ribbons + 6 bubble wedges assigned 4 Hz to the cells/bubbles
+  nearest the camera ground point; `cells` counter in the perf chip; the
+  disclosure HUD line shows the live factor, TRUE altitude, and ground
+  speed ×τ; the WFC hover tooltip gains column mode (D/E/F stack) when
+  descended. SCALE.ATMOSPHERE_VERTICAL registry entry, pinned to EXAG_MAX.
+  GLSL note for future sessions: the cage shader's tanh-via-exp must keep
+  its argument clamp — unclamped exp(2x) overflows at cage radii and the
+  Inf positions drove SwiftShader into ~14 s/frame pathological clipping.)*
 - **M4** Full state vocabulary (SAPS, patches, TOI, SED, storm O/N₂ depletion),
   precipitation binning from death channels, situation-chip "Go see" actions.
 

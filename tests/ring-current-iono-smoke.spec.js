@@ -139,7 +139,59 @@ test('ionosphere layer boots, teardrop bulges duskward, penetration reaches the 
     await mapRow.click();
     expect(await page.evaluate(() => window.rcGlobe._ionoLayer.mapShell.visible)).toBe(true);
 
-    // 6. Clean run.
+    // 6. M3 — the descent camera. Surface view (instant, aimed at the
+    //    auroral zone so the LOD pool has arc cells to instantiate) engages
+    //    the disclosed exaggeration: shells inflate via uExag, the D/E/F
+    //    stack fades in, detail curtains assign, and descentState reports
+    //    the TRUE altitude the HUD discloses.
+    const m3 = await page.evaluate(() => {
+        const g = window.rcGlobe;
+        const dir = g._tmpV.set(0.30, 0.92, 0.25).clone().normalize();
+        const okView = g.setView('surface', { instant: true, anchorWorldDir: dir });
+        return { okView, camDist: g._camera.position.length(), view: g.view };
+    });
+    expect(m3.okView).toBe(true);
+    expect(m3.view).toBe('surface');
+    expect(m3.camDist).toBeCloseTo(1.42, 1);
+    // Let a few ticks + one 4 Hz detail sync + the 250 ms HUD interval run.
+    await page.waitForTimeout(1200);
+    const engaged = await page.evaluate(() => {
+        const g = window.rcGlobe;
+        const ds = g.descentState();
+        return {
+            ds,
+            uExagShell: g._ionoLayer._shellMat.uniforms.uExag.value,
+            uExagCage: g._cageMat.uniforms.uExag.value,
+            layerShellsOn: g._ionoLayer._layerShells.filter(L => L.mesh.visible).length,
+            perfCells: g.perf.cells,
+            hud: document.getElementById('rc-descent'),
+            hudText: document.getElementById('rc-descent')?.textContent ?? '',
+            hudHidden: document.getElementById('rc-descent')?.hidden,
+        };
+    });
+    expect(engaged.ds.engaged).toBe(true);
+    expect(engaged.ds.exag).toBe(18);
+    expect(engaged.uExagShell).toBe(18);
+    expect(engaged.uExagCage).toBe(18);
+    expect(engaged.ds.altKmReal).toBeGreaterThan(120);
+    expect(engaged.ds.altKmReal).toBeLessThan(180);
+    expect(engaged.layerShellsOn).toBe(3);           // D/E/F stack visible
+    expect(engaged.ds.details).toBeGreaterThan(0);   // curtains over the oval
+    expect(engaged.perfCells).toBe(engaged.ds.details);
+    expect(engaged.hudHidden).toBe(false);
+    expect(engaged.hudText).toMatch(/vertical ×18/);
+    expect(engaged.hudText).toMatch(/km \(real\)/);
+    // Ascend back out: exaggeration disengages and the HUD line goes away.
+    await page.evaluate(() => window.rcGlobe.setView('earth', { instant: true }));
+    await page.waitForTimeout(600);
+    const out = await page.evaluate(() => ({
+        exag: window.rcGlobe.descentState().exag,
+        hudHidden: document.getElementById('rc-descent').hidden,
+    }));
+    expect(out.exag).toBe(1);
+    expect(out.hudHidden).toBe(true);
+
+    // 7. Clean run.
     expect(shaderErrors).toEqual([]);
     expect(pageErrors).toEqual([]);
 });

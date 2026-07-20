@@ -145,6 +145,10 @@ import { ConvectionEField, boundaryL } from './ring-current-efield.js';
 import { IonosphereFountain, N_CELLS as IONO_LON_CELLS } from './ionosphere-fountain.js';
 import { IonosphereCells, STATES as CELL_STATES, magLatDeg } from './ionosphere-cells.js';
 import { IonosphereLayer } from './ring-current-ionosphere.js';
+import {
+    exaggeration, engagement, realAltitudeKm, groundSpeedKmS, columnProfile,
+    FL_BLEND_LO, FL_BLEND_HI, FL_LIFT_CAP, EXAG_MAX,
+} from './ionosphere-descent.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { CopyShader } from 'three/addons/shaders/CopyShader.js';
@@ -811,7 +815,10 @@ export class RingCurrentGlobe {
         this._controls = new OrbitControls(this._camera, this._renderer.domElement);
         this._controls.enableDamping = true;
         this._controls.dampingFactor = 0.06;
-        this._controls.minDistance = 2.5;
+        // 1.28 (was 2.5 pre-Track-C): zooming in IS the descent — below
+        // ~3 Rᴇ the disclosed vertical exaggeration engages and the floor
+        // becomes the low-orbit altitude band (~100 km real at full ×18).
+        this._controls.minDistance = 1.28;
         this._controls.maxDistance = 140;   // far enough to frame the Sun corridor
         // Named default views (CAM_VIEWS / setView). Any user grab cancels an
         // in-progress flight — the presets are starting points, not a cage.
@@ -931,10 +938,38 @@ export class RingCurrentGlobe {
 
     _buildFieldLines() {
         const group = new THREE.Group();
-        const mat = new THREE.LineBasicMaterial({
-            color: 0x5f79b8, transparent: true, opacity: 0.20,
-            blending: THREE.AdditiveBlending, depthWrite: false,
+        // Line shader = the field-line branch of the Track C descent remap
+        // (js/ionosphere-descent.js remapFieldLineRadius, constants INJECTED
+        // from the kernel so GLSL can't drift from the node-tested JS):
+        // saturating tanh lift at the footpoints so the cage meets the
+        // exaggerated atmosphere — and the aurora curtains, which use the
+        // same remap — released across the blend band, identity above.
+        const mat = new THREE.ShaderMaterial({
+            transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            uniforms: { uExag: { value: 1 } },
+            vertexShader: `
+                uniform float uExag;
+                void main() {
+                    float r = length(position);
+                    float w = 1.0 - smoothstep(${FL_BLEND_LO.toFixed(4)},
+                        ${FL_BLEND_HI.toFixed(4)}, r);
+                    // tanh via exp, argument CLAMPED: cage radii reach
+                    // r ≈ 6.5 → x ≈ 117 → exp(234) overflows float and the
+                    // Inf/NaN positions send software rasterizers into
+                    // pathological clipping. tanh saturates ≈ 1 by x = 10.
+                    float x = clamp((r - 1.0) / ${FL_LIFT_CAP.toFixed(6)}, 0.0, 10.0);
+                    float e2 = exp(2.0 * x);
+                    float lift = (uExag - 1.0) * ${FL_LIFT_CAP.toFixed(6)}
+                        * (e2 - 1.0) / (e2 + 1.0);
+                    float rNew = r + lift * w;
+                    gl_Position = projectionMatrix * modelViewMatrix
+                        * vec4(position * (rNew / max(r, 1e-6)), 1.0);
+                }`,
+            fragmentShader: `
+                void main() { gl_FragColor = vec4(0.373, 0.475, 0.722, 0.20); }`,
         });
+        this._cageMat = mat;
         const SEGS = 48;
         for (const L of [2, 3, 4, 5, 6]) {
             const lamMax = Math.acos(Math.sqrt(1 / L));   // field line reaches r = 1
@@ -1220,6 +1255,12 @@ export class RingCurrentGlobe {
             this._iono.tick(simNow, dSimSec, { dA: this._efield.state().dA });
         }
         this._updateTeardrop(this._efield.state().A_sh);
+        // Track C: the disclosed vertical exaggeration follows the camera
+        // (rendering-only — nothing above this line ever sees it).
+        const E = exaggeration(this._camera.position.length());
+        this._lastExag = E;
+        this._ionoLayer.setExaggeration(E);
+        this._cageMat.uniforms.uExag.value = E;
         const utH = (simNow / 3.6e6) % 24;
         const epochN = Math.floor(simNow / 600e3);
         if (epochN !== this._cellsEpochN) {
@@ -1241,7 +1282,29 @@ export class RingCurrentGlobe {
             }, epochN);
             this._ionoLayer.markMapDirty();
         }
-        this._ionoLayer.update(dt, dSimSec, this._tView, subsolarPoint(simNow), utH);
+        this._ionoLayer.update(dt, dSimSec, this._tView, subsolarPoint(simNow), utH,
+            this._camera.position);
+    }
+
+    /** Live descent readout for the page HUD — the DISCLOSURE surface:
+     *  the exaggeration factor, the TRUE altitude it corresponds to, and
+     *  the ground-track speed (×τ gives the apparent rate on screen). */
+    descentState() {
+        const d = this._camera.position.length();
+        const E = this._lastExag ?? 1;
+        this._tmpV.copy(this._camera.position);
+        this._ionoLayer.group.worldToLocal(this._tmpV);
+        const latDeg = Math.asin(Math.max(-1,
+            Math.min(1, this._tmpV.y / (this._tmpV.length() || 1)))) * 180 / Math.PI;
+        return {
+            exag: E,
+            engaged: E > 1.05,
+            altKmReal: realAltitudeKm(d, E),
+            groundKmS: groundSpeedKmS(latDeg),
+            tau: this._clock.tau,
+            view: this._activeView,
+            details: this._ionoLayer.detailActive,
+        };
     }
 
     /**
@@ -1603,7 +1666,45 @@ export class RingCurrentGlobe {
      * prefers-reduced-motion or {instant:true}. Returns false on an
      * unknown name so callers can validate persisted values.
      */
-    setView(name, { instant = false } = {}) {
+    setView(name, { instant = false, anchorWorldDir = null } = {}) {
+        // 'surface' (Track C) is DYNAMIC, not a CAM_VIEWS pose: glide
+        // straight down over the current sub-point — or a tapped WFC
+        // cell's direction — to drawn r = 1.42, which at full ×18
+        // exaggeration is ~150 km TRUE altitude, between the E and F
+        // shells. The orbit target stays the ORIGIN: navigation at the
+        // bottom is a low orbit (controls.minDistance is the altitude
+        // floor), and zooming back out ascends the same continuous path.
+        if (name === 'surface') {
+            const cur = this._camera.position.clone().normalize();
+            const dir = (anchorWorldDir ? anchorWorldDir.clone() : cur.clone()).normalize();
+            // Arrive ~20° off the anchor, tilted back toward the approach
+            // side: the tapped region then stands mid-frame against the
+            // horizon (curtains in profile, limb flattening visible)
+            // instead of a featureless nadir patch.
+            let axis = new THREE.Vector3().crossVectors(dir, cur);
+            if (axis.lengthSq() < 1e-6) {
+                axis.set(0, 1, 0).cross(dir);
+                if (axis.lengthSq() < 1e-6) axis.set(1, 0, 0);
+            }
+            dir.applyQuaternion(new THREE.Quaternion()
+                .setFromAxisAngle(axis.normalize(), 0.35));
+            this._activeView = 'surface';
+            const p1 = dir.multiplyScalar(1.42);
+            const t1 = new THREE.Vector3(0, 0, 0);
+            if (instant || this._reducedMotion) {
+                this._flight = null;
+                this._camera.position.copy(p1);
+                this._controls.target.copy(t1);
+                this._controls.update();
+                return true;
+            }
+            this._flight = {
+                t: 0, dur: 2.0,
+                p0: this._camera.position.clone(), p1,
+                t0: this._controls.target.clone(), t1,
+            };
+            return true;
+        }
         const v = CAM_VIEWS[name];
         if (!v) return false;
         this._activeView = name;
@@ -2623,6 +2724,23 @@ export class RingCurrentGlobe {
             const hit = this._pickRingAt(e.clientX - rect.left, e.clientY - rect.top);
             if (hit) this.pinParticle(hit.key, hit.i);
             else if (this._pinned) this.unpinParticle();
+            else {
+                // Tapped WFC cell → descend over that region (plan §C.3's
+                // "Go see"). Only when the map layer is shown; the flight
+                // is the same eased glide as the view presets.
+                const shell = this._ionoLayer?.mapShell;
+                if (shell && shell.visible && this._ionoLayer.group.visible) {
+                    this._ndc.set(
+                        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+                        -((e.clientY - rect.top) / rect.height) * 2 + 1);
+                    this._ray.setFromCamera(this._ndc, this._camera);
+                    const mHit = this._ray.intersectObject(shell)[0];
+                    if (mHit) {
+                        this.setView('surface',
+                            { anchorWorldDir: mHit.point.clone().normalize() });
+                    }
+                }
+            }
         };
         this._pinned = null;
         this.onSelect = null;   // page hook: fires with getPinnedInfo() | null
@@ -2820,8 +2938,21 @@ export class RingCurrentGlobe {
                 `${info.state.toUpperCase()}</b> — ionospheric regime` +
                 `<br>${Math.abs(info.maglat).toFixed(0)}°${info.maglat >= 0 ? 'N' : 'S'} maglat` +
                 ` · ${info.mlt.toFixed(1)} MLT` +
-                `<br><span style="color:#8b94ad">why: ${why}</span>` +
-                `<br><span style="color:#5d6684">WFC regional map · 5°×1h · epoch 10 sim-min</span>`;
+                `<br><span style="color:#8b94ad">why: ${why}</span>`;
+            // Descended: the inspector gains COLUMN MODE (plan §C.3e) — the
+            // local vertical D/E/F stack at this spot, live. lt ≈ MLT (the
+            // same mean-sun map both kernels use at these latitudes).
+            if ((this._lastExag ?? 1) > 4) {
+                const blocks = '▁▂▃▄▅▆▇█';
+                const prof = columnProfile(info.mlt, this._cellsKp).reverse();
+                const line = prof.map(l => l.density <= 0.01
+                    ? `${l.key} —`
+                    : `${l.key} ${l.altKm} km ${blocks[Math.min(7, Math.round(l.density * 7))]}`)
+                    .join(' · ');
+                html += `<br><span style="color:#b9c2d9">column: ${line}</span>`;
+            }
+            html += `<br><span style="color:#5d6684">WFC regional map · 5°×1h` +
+                ` · epoch 10 sim-min · click to descend</span>`;
         } else {
             const p = best.p;
             const etaMin = Math.max(0, Math.round((p.tArrive - wallNow) / 60_000));
@@ -3291,6 +3422,7 @@ export class RingCurrentGlobe {
             tier: p.tier,
             pixelRatio: this._renderer.getPixelRatio(),
             drawCalls: r.calls, triangles: r.triangles, points: r.points,
+            cells: this._ionoLayer?.detailActive ?? 0,   // active LOD details (§C.4)
         };
     }
 

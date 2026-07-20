@@ -411,6 +411,17 @@ body {
     font-variant-numeric:tabular-nums;
 }
 .rc-perf.rc-perf-warn { color:#ffb066; border-color:rgba(255,176,102,.3); }
+
+/* Track C descent disclosure — the honesty line for the vertical
+   exaggeration (same contract as the ×1 bounce exception's legend note). */
+.rc-descent {
+    position:absolute; left:50%; transform:translateX(-50%); bottom:8px;
+    z-index:4; pointer-events:none;
+    font:600 10.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+    color:#9fd8c8; background:rgba(3,14,10,.62);
+    border:1px solid rgba(47,211,168,.28); border-radius:5px; padding:3px 9px;
+    font-variant-numeric:tabular-nums; white-space:nowrap;
+}
 .rc-mode-btn.rc-on { background:rgba(255,154,61,.22); border-color:rgba(255,154,61,.55); color:#ffd9b0; }
 .rc-ctl .rc-v { font-size:.72rem; }
 
@@ -478,6 +489,7 @@ body {
             <button class="rc-view-btn rc-on" data-view="earth" title="Near-Earth framing &mdash; ring current, aurora, boundaries">&#127757; Earth</button>
             <button class="rc-view-btn" data-view="sun" title="Solar disk close-up &mdash; coronal holes, emission puffs, the arriving wind&rsquo;s source">&#9728;&#65039; Sun</button>
             <button class="rc-view-btn" data-view="river" title="The full Sun&rarr;Earth corridor &mdash; every population and readout in one frame">&#127754; River</button>
+            <button class="rc-view-btn" data-view="surface" title="Descend to low orbit over the current sub-point &mdash; the atmosphere inflates under a DISCLOSED vertical exaggeration (the HUD shows the live factor); aurora curtains and bubble volumes instantiate below you. Click any region of the WFC map to descend there instead.">&#128760; Surface</button>
         </div>
         <div class="rc-insp" id="rc-insp" hidden>
             <div class="rc-insp-head" id="rc-insp-head">
@@ -527,6 +539,7 @@ body {
             </div>
         </div>
         <div class="rc-perf" id="rc-perf" hidden>&mdash;</div>
+        <div class="rc-descent" id="rc-descent" hidden>&mdash;</div>
         <div class="rc-legend" id="rc-legend">
         <div class="rc-legend-head" id="rc-legend-head">
             <span class="rc-legend-grip" aria-hidden="true">&#10495;</span>
@@ -564,7 +577,7 @@ body {
             <span style="color:#5d6684">trail length &prop; speed &middot; flash &prop; VBs on arrival</span>
         </div>
         </div>
-        <div class="rc-stage-hint">views top-center &middot; drag to orbit &middot; <b>click a ring particle to inspect &amp; predict it</b> &middot; pause / scrub the clock top-left &middot; one clock drives everything &middot; GSM frame</div>
+        <div class="rc-stage-hint">views top-center &middot; drag to orbit &middot; <b>click a ring particle to inspect &amp; predict it</b> &middot; zoom into Earth (or click a map region) to descend &mdash; vertical exaggeration disclosed on screen &middot; pause / scrub the clock top-left &middot; one clock drives everything &middot; GSM frame</div>
     </div>
 
     <div class="rc-col">
@@ -1103,6 +1116,21 @@ if (globe) {
             : 'shielded — climatological fountain';
         efIono.textContent =
             `ΔA ${s.dA >= 0 ? '+' : ''}${s.dA.toFixed(2)} · ${mode} · ${nBub} bubble${nBub === 1 ? '' : 's'} active`;
+        // Track C disclosure line — REQUIRED while the vertical exaggeration
+        // is engaged (the same honesty contract as the ×1 bounce exception).
+        const ds = globe.descentState();
+        const descEl = $('rc-descent');
+        if (ds.engaged) {
+            descEl.hidden = false;
+            const x = ds.exag < 10 ? ds.exag.toFixed(1) : Math.round(ds.exag);
+            descEl.textContent =
+                `⛰ descent · vertical ×${x} — the atmosphere is really 1/${x} this thick` +
+                ` · alt ≈ ${Math.round(ds.altKmReal)} km (real)` +
+                ` · ground track ${ds.groundKmS.toFixed(2)} km/s, ×${ds.tau} on screen` +
+                (ds.details ? ` · ${ds.details} detail cells` : '');
+        } else {
+            descEl.hidden = true;
+        }
     };
     updateEfield();
     setInterval(() => { if (!document.hidden) updateEfield(); }, 250);
@@ -1338,6 +1366,7 @@ if (globe) {
         perfEl.textContent =
             `${p.fps.toFixed(0)} fps · ${p.frameMs.toFixed(1)} ms (p95 ${p.p95Ms.toFixed(0)})` +
             ` · dpr ${p.pixelRatio.toFixed(2)} · ${p.drawCalls} draws` +
+            (p.cells ? ` · ${p.cells} cells` : '') +
             (p.tier ? ` · quality −${p.tier}` : '');
         perfEl.classList.toggle('rc-perf-warn', p.frameMs > 26 || p.tier > 0);
     }, 1000);

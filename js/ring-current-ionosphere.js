@@ -58,8 +58,25 @@
 
 import * as THREE from 'three';
 import { AIRGLOW_ALT_KM, N_CELLS, CELL_DEG, dipEquatorLat } from './ionosphere-fountain.js';
-import { BAKE_W, BAKE_H } from './ionosphere-cells.js';
+import { BAKE_W, BAKE_H, S as CELL_S, N_LAT, N_MLT, latCenter, mltCenter, magLatDeg } from './ionosphere-cells.js';
+import {
+    engagement, remapRadius, remapFieldLineRadius,
+} from './ionosphere-descent.js';
 import { GEOMAG_NORTH_LAT_2025, GEOMAG_NORTH_LON_2025 } from './geo/coords.js';
+
+// Shared vertex shader for every atmosphere-anchored shell/line: the Track C
+// DISCLOSED vertical exaggeration (js/ionosphere-descent.js) applied on the
+// GPU — geometry is built at TRUE radii and inflated per frame by uExag, so
+// physics/state never sees the transform (the §C.2 contract).
+const EXAG_VERTEX = `
+    uniform float uExag;
+    varying vec3 vN;
+    void main() {
+        float r0 = length(position);
+        vN = position / r0;
+        float r = 1.0 + (r0 - 1.0) * uExag;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(vN * r, 1.0);
+    }`;
 
 const R_E_KM = 6371;
 const MAX_BUBBLES = 24;   // GW-seeded evenings pack up to 3 crests per cell
@@ -83,21 +100,19 @@ function airglowMaterial(cellTex) {
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
-        side: THREE.FrontSide,
+        // DoubleSide: at full descent the camera flies INSIDE this shell —
+        // back faces are the view (FrontSide would cull the sky away).
+        side: THREE.DoubleSide,
         uniforms: {
             uCells:   { value: cellTex },
             uMagPole: { value: latLonToVec(GEOMAG_NORTH_LAT_2025, GEOMAG_NORTH_LON_2025, new THREE.Vector3()) },
             uSunDir:  { value: new THREE.Vector3(1, 0, 0) },   // Earth-local, set per frame
             uTime:    { value: 0 },
             uGain:    { value: 1 },
+            uExag:    { value: 1 },
             uBub:     { value: Array.from({ length: MAX_BUBBLES }, () => new THREE.Vector4()) },
         },
-        vertexShader: `
-            varying vec3 vN;
-            void main() {
-                vN = normalize(position);
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }`,
+        vertexShader: EXAG_VERTEX,
         fragmentShader: `
             uniform sampler2D uCells;
             uniform vec3 uMagPole, uSunDir;
@@ -146,13 +161,18 @@ function streamlineMaterial() {
         uniforms: {
             uPhase: { value: 0 },
             uAmp:   { value: 0 },
+            uExag:  { value: 1 },
         },
         vertexShader: `
             attribute float aT;
             varying float vT;
+            uniform float uExag;
             void main() {
                 vT = aT;
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                float r0 = length(position);
+                float r = 1.0 + (r0 - 1.0) * uExag;
+                gl_Position = projectionMatrix * modelViewMatrix
+                    * vec4(position * (r / r0), 1.0);
             }`,
         fragmentShader: `
             uniform float uPhase, uAmp;
@@ -204,6 +224,141 @@ export class IonosphereLayer {
 
         this._buildStreamlines();
         if (this._cells) this._buildStateMap();
+        this._buildLayerShells();
+        this._buildDetailPool();
+        this._exag = 1;
+        this._engage = 0;
+        this._detailExagAt = 1;
+        this._camLocal = new THREE.Vector3();
+        this.detailActive = 0;   // perf-HUD `cells` counter (plan §C.4)
+    }
+
+    /** Track C descent: the D/E/F stack as nested translucent surfaces that
+     *  fade in with engagement and separate under the vertical exaggeration
+     *  — "the layer diagram you fly between". Day/night behavior is real:
+     *  D exists in daylight only, E keeps a weak night residual, F2
+     *  persists (uNightFloor 0 / 0.25 / 1). A faint 15° graticule makes
+     *  each surface legible as a surface from inside. */
+    _buildLayerShells() {
+        const defs = [
+            { alt: 75,  color: [0.75, 0.55, 0.35], floor: 0.0,  label: 'D' },
+            { alt: 108, color: [0.35, 0.80, 0.75], floor: 0.25, label: 'E' },
+            { alt: 300, color: [0.55, 0.55, 1.00], floor: 1.0,  label: 'F' },
+        ];
+        this._layerShells = [];
+        for (const d of defs) {
+            const mat = new THREE.ShaderMaterial({
+                transparent: true, depthWrite: false, side: THREE.DoubleSide,
+                uniforms: {
+                    uExag: { value: 1 }, uEngage: { value: 0 },
+                    uSunDir: { value: new THREE.Vector3(1, 0, 0) },
+                    uColor: { value: new THREE.Vector3(...d.color) },
+                    uNightFloor: { value: d.floor },
+                },
+                vertexShader: EXAG_VERTEX,
+                fragmentShader: `
+                    uniform float uEngage, uNightFloor;
+                    uniform vec3 uSunDir, uColor;
+                    varying vec3 vN;
+                    const float PI = 3.14159265358979;
+                    void main() {
+                        vec3 n = normalize(vN);
+                        float dayF = smoothstep(0.0, 0.25, dot(n, uSunDir));
+                        float presence = mix(uNightFloor, 1.0, dayF);
+                        float latDeg = degrees(asin(clamp(n.y, -1.0, 1.0)));
+                        float lonDeg = degrees(atan(-n.z, n.x));
+                        float gLat = smoothstep(0.44, 0.5, abs(fract(latDeg / 15.0) - 0.5));
+                        float gLon = smoothstep(0.44, 0.5, abs(fract(lonDeg / 15.0) - 0.5));
+                        float grid = max(gLat, gLon);
+                        float a = uEngage * presence * (0.05 + 0.11 * grid);
+                        gl_FragColor = vec4(uColor, a);
+                    }`,
+            });
+            const mesh = new THREE.Mesh(
+                new THREE.SphereGeometry(1 + d.alt / R_E_KM, 72, 36), mat);
+            mesh.renderOrder = 2;
+            mesh.visible = false;
+            this.group.add(mesh);
+            this._layerShells.push({ mesh, mat });
+        }
+    }
+
+    /** LOD detail pool (plan §C.4: pooled geometry, ~a dozen active cells,
+     *  noise in-shader, no per-frame allocation): 6 aurora-curtain ribbons
+     *  + 6 bubble wedges, assigned at sync time to the cells/bubbles
+     *  nearest the camera's ground point. Curtain radii use the FIELD-LINE
+     *  remap so curtains meet their (remapped) arcs exactly. */
+    _buildDetailPool() {
+        this._curtains = [];
+        this._wedges = [];
+        this._scratch = {
+            e: new THREE.Vector3(), u: new THREE.Vector3(), n: new THREE.Vector3(),
+            p: new THREE.Vector3(), s: new THREE.Vector3(), m: new THREE.Matrix4(),
+        };
+        for (let k = 0; k < 6; k++) {
+            const mat = new THREE.ShaderMaterial({
+                transparent: true, depthWrite: false, side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending,
+                uniforms: { uTime: { value: 0 }, uAmp: { value: 0 } },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }`,
+                fragmentShader: `
+                    uniform float uTime, uAmp;
+                    varying vec2 vUv;
+                    void main() {
+                        // Vertical ray striations, drifting slowly — the
+                        // all-sky-camera curtain look, noise in-shader.
+                        float x = vUv.x * 7.0;
+                        float rays = 0.42
+                            + 0.34 * sin(x * 9.0 + sin(x * 3.7 + uTime * 0.9) * 2.2)
+                            + 0.24 * sin(x * 23.0 - uTime * 1.7);
+                        rays = clamp(rays, 0.0, 1.0);
+                        // 557.7 nm green low, 630 nm red topside.
+                        vec3 col = mix(vec3(0.25, 1.0, 0.5), vec3(1.0, 0.32, 0.36),
+                                       smoothstep(0.55, 1.0, vUv.y));
+                        float vert = smoothstep(0.0, 0.08, vUv.y) * (1.0 - 0.6 * vUv.y);
+                        float a = uAmp * rays * vert;
+                        gl_FragColor = vec4(col * a, a);
+                    }`,
+            });
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 1, 1), mat);
+            mesh.matrixAutoUpdate = false;
+            mesh.renderOrder = 4;
+            mesh.visible = false;
+            this.group.add(mesh);
+            this._curtains.push({ mesh, mat });
+        }
+        for (let k = 0; k < 6; k++) {
+            const mat = new THREE.MeshBasicMaterial({
+                color: 0x160309, transparent: true, opacity: 0,
+                depthWrite: false,
+            });
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), mat);
+            mesh.matrixAutoUpdate = false;
+            mesh.renderOrder = 4;
+            mesh.visible = false;
+            this.group.add(mesh);
+            this._wedges.push({ mesh, mat });
+        }
+    }
+
+    /** Per-frame from the globe: the disclosed vertical exaggeration. */
+    setExaggeration(E) {
+        if (Math.abs(E - this._exag) < 1e-4) return;
+        this._exag = E;
+        this._engage = engagement(E);
+        this._shellMat.uniforms.uExag.value = E;
+        if (this._mapMat) this._mapMat.uniforms.uExag.value = E;
+        for (const st of this._streams) st.mat.uniforms.uExag.value = E;
+        for (const L of this._layerShells) {
+            L.mat.uniforms.uExag.value = E;
+            L.mat.uniforms.uEngage.value = this._engage;
+            L.mesh.visible = this._engage > 0.02 && this.group.visible;
+        }
     }
 
     /** The Track B regional-state map shell (see header). */
@@ -218,13 +373,9 @@ export class IonosphereLayer {
         this._mapMat = new THREE.ShaderMaterial({
             transparent: true,
             depthWrite: false,
-            uniforms: { uMap: { value: this._mapTex } },
-            vertexShader: `
-                varying vec3 vN;
-                void main() {
-                    vN = normalize(position);
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }`,
+            side: THREE.DoubleSide,   // visible from inside at full descent
+            uniforms: { uMap: { value: this._mapTex }, uExag: { value: 1 } },
+            vertexShader: EXAG_VERTEX,
             fragmentShader: `
                 uniform sampler2D uMap;
                 varying vec3 vN;
@@ -317,14 +468,21 @@ export class IonosphereLayer {
      * terminator does. utH (sim UT hours) places the sun-fixed WFC map
      * under the Earth-fixed texels.
      */
-    update(dtWall, dSimSec, tView, subsolar, utH = 0) {
+    update(dtWall, dSimSec, tView, subsolar, utH = 0, camWorld = null) {
         if (!this.group.visible) return;
         const cells = this._fountain.cells;
         this._shellMat.uniforms.uTime.value = tView;
         if (subsolar) {
-            latLonToVec(subsolar.latDeg * Math.PI / 180, subsolar.lonDeg * Math.PI / 180,
-                this._shellMat.uniforms.uSunDir.value);
+            const sun = latLonToVec(subsolar.latDeg * Math.PI / 180,
+                subsolar.lonDeg * Math.PI / 180, this._shellMat.uniforms.uSunDir.value);
+            for (const L of this._layerShells) L.mat.uniforms.uSunDir.value.copy(sun);
         }
+        // Curtain shimmer clock + an out-of-band detail refresh when the
+        // exaggeration moved a lot between 4 Hz syncs (fast zoom).
+        for (const c of this._curtains) {
+            if (c.mesh.visible) c.mat.uniforms.uTime.value = tView;
+        }
+        if (Math.abs(this._exag - this._detailExagAt) > 0.2) this._syncT = 0;
         // Streamline pulse-trains: rate ∝ the cell's true drift, advancing
         // on SIM time (τ-honest, pause-frozen, direction-honest).
         for (const st of this._streams) {
@@ -347,6 +505,14 @@ export class IonosphereLayer {
             this._mapUtH = utH;
             this._cells.bake(utH, this._mapData, MAP_PALETTE);
             this._mapTex.needsUpdate = true;
+        }
+        // LOD detail pool: camera ground point in the Earth-local frame
+        // (matrixWorld is last frame's — one frame stale, invisible at 4 Hz).
+        if (camWorld) {
+            this._camLocal.copy(camWorld);
+            this.group.worldToLocal(this._camLocal).normalize();
+            this._detailExagAt = this._exag;
+            this._updateDetail(utH);
         }
         for (let i = 0; i < N_CELLS; i++) {
             const c = cells[i];
@@ -374,6 +540,106 @@ export class IonosphereLayer {
                 // the GW-seeded ~100–400 km spacing read as separate bites.
                 (0.6 + 0.9 * b.rise01) * Math.PI / 180,
             );
+        }
+    }
+
+    /** Geographic latitude whose centered-dipole maglat equals the target
+     *  at this longitude — bisection on the monotone branch (|lat| kept
+     *  below 80° where ∂maglat/∂lat stays positive). null if out of range. */
+    _geoLatForMagLat(magTarget, lonDeg) {
+        let lo = Math.max(-80, magTarget - 15), hi = Math.min(80, magTarget + 15);
+        if (magLatDeg(lo, lonDeg) > magTarget || magLatDeg(hi, lonDeg) < magTarget) return null;
+        for (let it = 0; it < 22; it++) {
+            const mid = 0.5 * (lo + hi);
+            if (magLatDeg(mid, lonDeg) < magTarget) lo = mid; else hi = mid;
+        }
+        return 0.5 * (lo + hi);
+    }
+
+    /** Assign the pooled curtains/wedges to the arc-diffuse cells and live
+     *  bubbles nearest the camera ground point (4 Hz; modest short-lived
+     *  arrays here are the same budget the bubble sync already spends). */
+    _updateDetail(utH) {
+        const { e, u, n, m } = this._scratch;
+        this.detailActive = 0;
+        const engaged = this._cells && this._engage > 0.3 && this.group.visible;
+        const cam = this._camLocal;
+        const DEG = Math.PI / 180;
+
+        // ── Aurora curtains over arc/diffuse cells ──
+        const cand = [];
+        if (engaged) {
+            for (let i = 0; i < N_LAT; i++) {
+                const mlat = latCenter(i);
+                if (Math.abs(mlat) < 45 || Math.abs(mlat) > 78) continue;
+                for (let j = 0; j < N_MLT; j++) {
+                    const s = this._cells.state[i * N_MLT + j];
+                    if (s !== CELL_S.ARC && s !== CELL_S.DIFFUSE) continue;
+                    const lonDeg = (((mltCenter(j) - utH) * 15) % 360 + 540) % 360 - 180;
+                    const latDeg = this._geoLatForMagLat(mlat, lonDeg);
+                    if (latDeg === null) continue;
+                    const d = latLonToVec(latDeg * DEG, lonDeg * DEG, u).dot(cam);
+                    if (d < 0.55) continue;   // beyond ~57° of ground distance
+                    cand.push({ d, latDeg, lonDeg, arc: s === CELL_S.ARC });
+                }
+            }
+            cand.sort((a, b) => b.d - a.d);
+        }
+        const rBase = remapFieldLineRadius(1 + 100 / R_E_KM, this._exag);
+        const rTop = remapFieldLineRadius(1 + 280 / R_E_KM, this._exag);
+        for (let k = 0; k < this._curtains.length; k++) {
+            const slot = this._curtains[k], c = cand[k];
+            if (!c) { slot.mesh.visible = false; slot.mat.uniforms.uAmp.value = 0; continue; }
+            const latR = c.latDeg * DEG, lonR = c.lonDeg * DEG;
+            latLonToVec(latR, lonR, u);
+            e.set(-Math.sin(lonR), 0, -Math.cos(lonR));   // local east (coords frame)
+            n.crossVectors(u, e).normalize();
+            const h = rTop - rBase, w = c.arc ? 0.085 : 0.13;
+            m.makeBasis(e, u, n);
+            const el = m.elements;                        // column-scale (w, h, 1)
+            el[0] *= w; el[1] *= w; el[2] *= w;
+            el[4] *= h; el[5] *= h; el[6] *= h;
+            const rc = rBase + h / 2;
+            m.setPosition(u.x * rc, u.y * rc, u.z * rc);
+            slot.mesh.matrix.copy(m);
+            slot.mesh.visible = true;
+            slot.mat.uniforms.uAmp.value = this._engage * (c.arc ? 0.85 : 0.4);
+            this.detailActive++;
+        }
+
+        // ── Bubble wedges (shell remap — they live among the layers) ──
+        const bubs = engaged
+            ? this._fountain.allBubbles()
+                .map(b => {
+                    const lonR = b.lonDeg * DEG;
+                    const latR = dipEquatorLat(lonR);
+                    return { b, latR, lonR, d: latLonToVec(latR, lonR, u).dot(cam) };
+                })
+                .filter(x => x.d > 0.55)
+                .sort((a, b) => b.d - a.d)
+            : [];
+        for (let k = 0; k < this._wedges.length; k++) {
+            const slot = this._wedges[k], x = bubs[k];
+            if (!x) { slot.mesh.visible = false; slot.mat.opacity = 0; continue; }
+            latLonToVec(x.latR, x.lonR, u);
+            e.set(-Math.sin(x.lonR), 0, -Math.cos(x.lonR));
+            n.crossVectors(u, e).normalize();
+            const rB = remapRadius(1 + 250 / R_E_KM, this._exag);
+            const rT = remapRadius(1 + x.b.apexKm / R_E_KM, this._exag);
+            const radial = Math.max(0.012, (rT - rB) / 2);
+            const wLon = Math.max(0.008, (0.6 + 0.9 * x.b.rise01) * DEG * 0.9);
+            const wLat = Math.max(0.012, x.b.latExtentDeg * DEG);
+            m.makeBasis(e, u, n);
+            const el = m.elements;
+            el[0] *= wLon; el[1] *= wLon; el[2] *= wLon;
+            el[4] *= radial; el[5] *= radial; el[6] *= radial;
+            el[8] *= wLat; el[9] *= wLat; el[10] *= wLat;
+            const rc = (rB + rT) / 2;
+            m.setPosition(u.x * rc, u.y * rc, u.z * rc);
+            slot.mesh.matrix.copy(m);
+            slot.mesh.visible = true;
+            slot.mat.opacity = 0.5 * this._engage * x.b.strength * x.b.fade;
+            this.detailActive++;
         }
     }
 

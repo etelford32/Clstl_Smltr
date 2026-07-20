@@ -73,6 +73,16 @@ export const SCALE = Object.freeze({
         SPAN:      CORRIDOR_X_SUN - CORRIDOR_X_MP,
         kmPerUnit: CORRIDOR_REAL_KM / (CORRIDOR_X_SUN - CORRIDOR_X_MP),
     }),
+    /** Ring-current descent camera (Track C, js/ionosphere-descent.js):
+     *  below ~3 R_E camera distance the ATMOSPHERE's radial axis renders
+     *  with a DISCLOSED vertical exaggeration tweening 1 → maxFactor —
+     *  kmPerUnit here is the fully engaged vertical scale; the page HUD
+     *  discloses the live factor while it tweens. Rendering-only: no
+     *  physics state ever sees it (horizontal scale stays NEAR_EARTH). */
+    ATMOSPHERE_VERTICAL: Object.freeze({
+        maxFactor: 18,
+        kmPerUnit: (PHYS.R_E_M / 1000) / 18,
+    }),
 });
 
 /**
