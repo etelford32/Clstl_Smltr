@@ -26,6 +26,8 @@ import assert from 'node:assert/strict';
 import {
     N_CELLS, climatologyDrift, climatologyHF, penetrationGate, rtGrowthRate,
     verticalDrift, dipEquatorLat, IonosphereFountain, K_PEN, AIRGLOW_ALT_KM,
+    gravityWaveSeed, gravityWaveModes, GW_LAMBDA_MIN_KM, GW_LAMBDA_MAX_KM,
+    KM_PER_DEG,
 } from '../js/ionosphere-fountain.js';
 
 let passed = 0;
@@ -184,4 +186,82 @@ function run(model, fromMs, hours, dtS, drivers = {}) {
     ok('determinism per (cell, sim-date); eastward drift; rise; TTL; hF bounded');
 }
 
-console.log(`\nionosphere-fountain: ${passed}/5 groups passed`);
+// ── 6. Gravity-wave spectral seeding (2026-07-20 decision, Q3) ───────────────
+{
+    const dayN = 20649;   // any fixed sim-day
+    const modes = gravityWaveModes(dayN);
+    assert.equal(modes.length, 6, 'six modes');
+    for (const m of modes) {
+        assert.ok(m.lambdaKm >= GW_LAMBDA_MIN_KM && m.lambdaKm <= GW_LAMBDA_MAX_KM,
+            `mode wavelength ${m.lambdaKm} in band`);
+    }
+    // Determinism per day; different days re-draw the spectrum.
+    assert.equal(gravityWaveSeed(37.3, dayN), gravityWaveSeed(37.3, dayN), 'seed deterministic');
+    assert.notEqual(gravityWaveSeed(37.3, dayN), gravityWaveSeed(37.3, dayN + 1),
+        'different day, different field');
+
+    // Crest-to-crest spacing of the field itself sits in the observed band.
+    const spacings = [];
+    let lastCrest = null;
+    for (let lon = -60; lon <= 60; lon += 0.05) {
+        const a = gravityWaveSeed(lon - 0.05, dayN, modes);
+        const b = gravityWaveSeed(lon, dayN, modes);
+        const c = gravityWaveSeed(lon + 0.05, dayN, modes);
+        if (b > a && b >= c) {
+            if (lastCrest !== null) spacings.push((lon - lastCrest) * KM_PER_DEG);
+            lastCrest = lon;
+        }
+    }
+    spacings.sort((x, y) => x - y);
+    const median = spacings[Math.floor(spacings.length / 2)];
+    assert.ok(median >= GW_LAMBDA_MIN_KM * 0.6 && median <= GW_LAMBDA_MAX_KM * 1.2,
+        `median crest spacing ${median.toFixed(0)} km in/near the 100–400 band`);
+
+    // Bubbles land on crests, and in-cell pairs carry the wave spacing.
+    // Accumulate BIRTH positions during the run (bubbles die on 1–2 h TTLs
+    // and drift east afterward — an end-of-run census sees neither the full
+    // population nor the spawn longitudes).
+    const m2 = new IonosphereFountain({ kp: 3 });
+    for (let s = 1; s <= 17 * 60; s++) m2.tick(T0 + s * 60000, 60, { dA: 0.6 });
+    const t2 = T0 + 17 * 3600e3;
+    const births = new Map();   // id → { lonDeg at first sight, cell, gwDay }
+    for (let s = 1; s <= 7 * 120; s++) {
+        m2.tick(t2 + s * 30000, 30, { dA: 0.6 });
+        if (s % 2 === 0) {      // every sim-min: drift since birth ≤ ~7 km
+            for (const b of m2.allBubbles()) {
+                // Record the GW day IN EFFECT at birth — the run crosses UT
+                // midnight, where the spectrum redraws; checking a bubble
+                // against the wrong day's field is meaningless.
+                if (!births.has(b.id)) {
+                    births.set(b.id, { lonDeg: b.lonDeg, cell: b.cell, gwDay: m2._gwDay });
+                }
+            }
+        }
+    }
+    assert.ok(births.size >= 30, `driven evening bubbles (${births.size})`);
+    let onCrest = 0;
+    for (const b of births.values()) if (gravityWaveSeed(b.lonDeg, b.gwDay) > 0) onCrest++;
+    assert.ok(onCrest / births.size > 0.8,
+        `${onCrest}/${births.size} bubbles born on positive seed (crest side)`);
+    const byCell = new Map();
+    for (const b of births.values()) {
+        if (!byCell.has(b.cell)) byCell.set(b.cell, []);
+        byCell.get(b.cell).push(b.lonDeg);
+    }
+    const inCell = [];
+    for (const lons of byCell.values()) {
+        if (lons.length < 2) continue;
+        lons.sort((x, y) => x - y);
+        for (let i = 1; i < lons.length; i++) {
+            inCell.push((lons[i] - lons[i - 1]) * KM_PER_DEG);
+        }
+    }
+    assert.ok(inCell.length >= 5, `multi-bubble cells present (${inCell.length} pairs)`);
+    inCell.sort((x, y) => x - y);
+    const medCell = inCell[Math.floor(inCell.length / 2)];
+    assert.ok(medCell >= 60 && medCell <= 450,
+        `median in-cell bubble spacing ${medCell.toFixed(0)} km ≈ observed 100–400`);
+    ok(`gravity-wave seeding: spectrum in band, bubbles on crests, in-cell spacing ${medCell.toFixed(0)} km`);
+}
+
+console.log(`\nionosphere-fountain: ${passed}/6 groups passed`);

@@ -13,7 +13,14 @@ a hard prerequisite for everything else.*
 > bite-outs, fountain streamlines) with the HUD driver/shielded/penetration
 > bars in the Live-drivers panel. Node tests: `tests/ring-current-efield.mjs`,
 > `tests/ionosphere-fountain.mjs`; browser smoke:
-> `tests/ring-current-iono-smoke.spec.js`. M2–M4 (Tracks B and C) are open.
+> `tests/ring-current-iono-smoke.spec.js`.
+>
+> **Same day, second patch:** bubble seeding upgraded to hash + GRAVITY-WAVE
+> spectral seed (Q3 decision — thresholds dip on wave crests, bubbles spawn
+> on crests; in-cell spacing lands ~100–400 km, test-pinned), and the Track B
+> STARTER kernel shipped as `js/ionosphere-cells.js` + `tests/
+> ionosphere-cells.mjs` (6 states, priors, adjacency, incremental jittered-
+> argmax collapse, 288×192 bake). M2 render integration, M3, M4 remain open.
 
 ---
 
@@ -262,7 +269,9 @@ draw-count already in the debug HUD — add a `cells` counter.
   coupling. First visible "regions interact" moment. *(the showpiece —
   DONE 2026-07-20)*
 - **M2** Track B cell engine with 6 starter states (quiet, crest, bubble-active,
-  arc, diffuse, trough) + inspector `why`. Global map bake.
+  arc, diffuse, trough) + inspector `why`. Global map bake. *(kernel + bake +
+  perf experiment DONE 2026-07-20 — `js/ionosphere-cells.js`; page render
+  integration still open)*
 - **M3** Track C descent: exaggeration tween, Surface view, LOD instancing for
   arcs + bubbles, column inspector.
 - **M4** Full state vocabulary (SAPS, patches, TOI, SED, storm O/N₂ depletion),
@@ -274,13 +283,35 @@ core, so JS/WASM byte-parity is unaffected. If the fountain or cell tick ever
 gets hot, they are candidates for the same opt-in WASM treatment (`?rcwasm=1`
 precedent) — but JS-first.
 
-## Open questions (decide before M2)
+## Open questions — DECIDED 2026-07-20
 
-1. Grid resolution vs mobile perf — 5°×1 h is 864 cells; is the bake cheap
-   enough per epoch on a phone? (Prototype the bake first.)
-2. Does the E-region state need its own shell render at global zoom, or only
-   under descent? (Lean: descent-only; globally the F shell + oval carry it.)
-3. Bubble seeding richness: pure hash, or hash + gravity-wave spectral seed so
-   bubble spacing has the observed ~100–400 km periodicity?
-4. Where does the SAPS standalone page share code? `ring-current-efield.js`
-   should be written as the shared module from day one.
+1. **Grid resolution vs mobile perf — experiment ran, 5°×1 h is cheap.**
+   `tests/ionosphere-cells.mjs` group 6 measures the starter kernel: full
+   864-cell collapse ≈ 16 ms (worst case — storm onset re-opens everything),
+   incremental epoch ≈ 2 ms, steady 288×192 bake ≈ 0.3 ms on desktop node.
+   At a 10-sim-min epoch cadence even a 5×-slower phone has order-of-
+   magnitude headroom; 2.5° lat would still fit if M4 ever wants it. (The
+   full-collapse path is O(n²) in open cells — fine at 864; revisit before
+   any resolution increase.)
+2. **E-region shell: descent-only.** Globally the F shell + aurora oval
+   carry the story; E-states stay in the cell vocabulary (M4) and only get
+   their own render under the Track C descent camera. Priority stays on
+   realistic physics over extra layers.
+3. **Bubble seeding: hash + gravity-wave spectral seed — SHIPPED.** Six
+   zonal modes per sim-day, log-uniform 100–400 km, mildly red, hash
+   phases (`gravityWaveModes` / `gravityWaveSeed` in ionosphere-fountain).
+   Thresholds dip on crests, spawns land ON crests; median in-cell spacing
+   ~260 km, test-pinned to the observed band.
+4. **SAPS is a SEPARATE simulation.** The Shielding Lab
+   (shielding-lab.html, rust-shielding/) *is* that simulation — the real
+   conductance-grid solver. `ring-current-efield.js` stays the page-side
+   shared core (its τ_sh = 25 min deliberately equals the lab's τ_s
+   default; A_drv ↔ I_R1, A_sh ↔ I_R2, ΔA ↔ penetration E) and the two
+   pages now cross-link (rc-bridge-links ↔ sl footer). SAPS-bridge items
+   for later patches: (a) the Gannon shielding replay bundle still needs
+   one networked baker run — verified 2026-07-20 that the agent sandbox
+   proxy denies CONNECT to SPDF *and* to parkersphysics.com, so it must
+   run elsewhere (`scripts/build-shielding-gannon-replay.mjs`); (b) the
+   INTERMAGNET equatorial ΔH row (blocked on GSA pipeline data); (c) a
+   possible shared driver module if the lab ever wants Kp/VBs driving in
+   addition to Kan–Lee.

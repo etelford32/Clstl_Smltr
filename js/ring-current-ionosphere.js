@@ -48,7 +48,7 @@ import { AIRGLOW_ALT_KM, N_CELLS, CELL_DEG, dipEquatorLat } from './ionosphere-f
 import { GEOMAG_NORTH_LAT_2025, GEOMAG_NORTH_LON_2025 } from './geo/coords.js';
 
 const R_E_KM = 6371;
-const MAX_BUBBLES = 16;
+const MAX_BUBBLES = 24;   // GW-seeded evenings pack up to 3 crests per cell
 const STREAM_COUNT = 12;
 const STREAM_MAX_MAGLAT = 16 * Math.PI / 180;
 const STREAM_APEX_L = 1.115;               // arc apex ≈ 730 km — "up and over"
@@ -278,7 +278,10 @@ export class IonosphereLayer {
                 b.lonDeg * Math.PI / 180,
                 b.latExtentDeg * Math.PI / 180,
                 Math.min(1, b.strength * b.fade),
-                (1.6 + 1.4 * b.rise01) * Math.PI / 180,   // wedge widens as it rises
+                // Wedge widens as it rises — 0.6° → 1.5° (≈ 65–165 km), the
+                // observed depletion width; keeping it narrow is what lets
+                // the GW-seeded ~100–400 km spacing read as separate bites.
+                (0.6 + 0.9 * b.rise01) * Math.PI / 180,
             );
         }
     }

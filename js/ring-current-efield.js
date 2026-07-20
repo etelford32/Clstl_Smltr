@@ -54,7 +54,16 @@
 export const COROTATION_KV = 92.4;
 
 /** Shielding reconfiguration time (sim-seconds) — region-2 FAC response,
- *  tens of minutes (Senior & Blanc 1984 give ~20–30 min). */
+ *  tens of minutes (Senior & Blanc 1984 give ~20–30 min).
+ *
+ *  SAPS BRIDGE: the Shielding Lab (shielding-lab.html, rust-shielding/)
+ *  solves the same relaxation on the region-2 CURRENT — its
+ *  `tau_s_min: 25.0` default (rust-shielding/src/state.rs) deliberately
+ *  equals this constant, so the two pages tell one shielding story:
+ *  A_drv ↔ I_R1 driving, A_sh ↔ I_R2 (α·I_R1 equilibrium), ΔA ↔ its
+ *  penetration-E strip chart. SAPS itself stays a SEPARATE simulation
+ *  (2026-07-20 decision) — this module is the page-side shared core a
+ *  standalone SAPS view consumes, not a place to grow a conductance grid. */
 export const TAU_SHIELD_S = 25 * 60;
 
 /** VBs → A scaling (kV/R_E² per mV/m) with a soft Hill–Siscoe-style

@@ -49,8 +49,11 @@
  * ν_in falls exponentially with height, so a PRE- or penetration-lofted
  * bottomside (larger hF) grows orders faster — bubbles follow the lifted
  * evenings, which is exactly the coupling the plan wants visible. Bubble
- * seeding is a deterministic hash of (cell, sim-date): the same evening
- * replays identically at any τ or frame rate.
+ * seeding is a deterministic hash of (cell, sim-date) PLUS the day's
+ * gravity-wave spectral field (see GW_MODES below): thresholds dip on wave
+ * crests and bubbles spawn ON crests, so inter-bubble spacing carries the
+ * observed ~100–400 km periodicity. The same evening replays identically
+ * at any τ or frame rate.
  *
  * ── References (shapes, not solvers — this is a VIZ-grade kernel) ───────────
  *   Scherliess & Fejer (1999) JGR 104 6829 — quiet-time vertical drift climo
@@ -87,8 +90,9 @@ export const DD_KP_QUIET = 2;    // dynamo only winds up above this Kp
 // β_rec ≈ 5.5×10⁻⁴ s⁻¹ recombination. CALIBRATION (the storm/quiet contrast
 // the page renders; re-derive with tests/ionosphere-fountain.mjs group 3):
 // the quiet PRE loft peaks hF ≈ 326 ⇒ γ up to ~8×10⁻⁴ s⁻¹ for a ~3.1-e-fold
-// evening, right AT the bottom of the seeded 3–6 threshold band — quiet
-// nights bubble in a few hash-picked sectors only. A +0.6 kV/R_E²
+// evening, right AT the bottom of the effective threshold band (base 4.1
+// + 3·hash − GW crest term, i.e. ~2.5–7) — quiet nights bubble in a few
+// hash-and-crest-picked sectors only (≈15 spawns globally). A +0.6 kV/R_E²
 // undershielding step lofts hF to ~350 ⇒ γ ≈ 1.6×10⁻³ s⁻¹ (~10 min e-fold,
 // ~7 e-folds) — the dusk swath erupts. Overshielding pins the loft down:
 // γ never clears recombination, zero bubbles. The settled night layer
@@ -104,6 +108,22 @@ const DEG_PER_M = 1 / 111320;    // equatorial metres → degrees longitude
 /** 630 nm airglow shell altitude (km) — the surface the bubbles bite into. */
 export const AIRGLOW_ALT_KM = 250;
 const R_E_KM = 6371;
+
+// ── Gravity-wave seed spectrum (2026-07-20 decision: hash + spectral seed,
+//    not pure hash) ──────────────────────────────────────────────────────────
+// Bottomside undulations from tropospheric gravity waves are the accepted
+// seed for R-T growth, and the observed inter-bubble spacing clusters at
+// ~100–400 km (Tsunoda 2005; Huang & Kelley 1996). Six zonal modes per
+// sim-day, wavelengths log-uniform in that band, mildly red (a ∝ λ^0.7),
+// hash phases — deterministic per (sim-day), so an evening replays
+// identically. The field modulates the spawn THRESHOLD (crests lofted ⇒
+// fewer e-folds needed) and places each bubble ON a crest, so spacing
+// inherits the wave's periodicity instead of the 5° cell quantization.
+export const GW_MODES = 6;
+export const GW_LAMBDA_MIN_KM = 100;
+export const GW_LAMBDA_MAX_KM = 400;
+export const GW_GAIN = 0.9;              // threshold e-folds per unit seed
+export const KM_PER_DEG = 111.32;        // equatorial km per degree longitude
 
 // ── Pure pieces (unit-tested directly) ───────────────────────────────────────
 
@@ -152,6 +172,36 @@ export function penetrationGate(lt) {
 export function rtGrowthRate(hFKm) {
     const nu = NU0 * Math.exp(-(hFKm - NU_REF_KM) / NU_H_KM);
     return G_E / (nu * L_N_M) - BETA_REC;
+}
+
+/** The day's gravity-wave mode table: GW_MODES × { lambdaKm, amp, phase },
+ *  amplitudes pre-normalized to unit field RMS. Deterministic per dayN. */
+export function gravityWaveModes(dayN) {
+    const modes = [];
+    let sumSq = 0;
+    for (let k = 0; k < GW_MODES; k++) {
+        const hL = hash1(dayN * 61.7 + k * 17.93 + 3.11);
+        const lambdaKm = GW_LAMBDA_MIN_KM *
+            Math.pow(GW_LAMBDA_MAX_KM / GW_LAMBDA_MIN_KM, hL);   // log-uniform
+        const amp = Math.pow(lambdaKm / GW_LAMBDA_MAX_KM, 0.7);  // mildly red
+        const phase = 2 * Math.PI * hash1(dayN * 61.7 + k * 29.31 + 7.77);
+        modes.push({ lambdaKm, amp, phase });
+        sumSq += amp * amp;
+    }
+    const norm = Math.sqrt(sumSq / 2);                            // RMS of Σ a·cos
+    for (const m of modes) m.amp /= norm;
+    return modes;
+}
+
+/** Gravity-wave seed field s(lon) — unit RMS, zonal, deterministic per
+ *  sim-day. Positive = crest (lofted bottomside, easier R-T breakthrough). */
+export function gravityWaveSeed(lonDeg, dayN, modes = gravityWaveModes(dayN)) {
+    const xKm = lonDeg * KM_PER_DEG;
+    let s = 0;
+    for (const m of modes) {
+        s += m.amp * Math.cos(2 * Math.PI * xKm / m.lambdaKm + m.phase);
+    }
+    return s;
 }
 
 /** Total vertical drift (m/s) at LT under penetration ΔA (kV/R_E²) and
@@ -221,6 +271,13 @@ export class IonosphereFountain {
 
         const utH = (simMs / 3.6e6) % 24;
         const dayN = Math.floor(simMs / 86400000);
+        // The day's gravity-wave mode table (cells arm against it at their
+        // local sunset; a UT-midnight swap mid-evening is a deterministic,
+        // minor discontinuity — same trade the daily threshold hash makes).
+        if (this._gwDay !== dayN) {
+            this._gwDay = dayN;
+            this._gwModes = gravityWaveModes(dayN);
+        }
 
         for (const c of this.cells) {
             const lt = (utH + c.lonDeg / 15 + 24) % 24;
@@ -249,9 +306,17 @@ export class IonosphereFountain {
             if (postSunset) {
                 if (c.nextThreshold === null) {
                     // Arm at sunset: threshold ~ ln(1/seed) e-folds, hash-
-                    // jittered per (cell, sim-date) — same evening, same seeds.
+                    // jittered per (cell, sim-date), LOWERED where the day's
+                    // gravity-wave field crests inside this cell (a lofted
+                    // bottomside needs fewer e-folds to break through) —
+                    // eruption longitudes inherit the wave envelope.
                     const h = hash1(c.i * 13.37 + dayN * 61.7);
-                    c.nextThreshold = 3 + 3 * h;
+                    // Base 4.1 (was 3 pre-GW): the crest term hands back
+                    // ~0.9–1.8 e-folds to cells sitting on strong crests, so
+                    // the base rises to keep quiet evenings sparse — see the
+                    // CALIBRATION block above and test group 3.
+                    c.nextThreshold = Math.max(1.5,
+                        4.1 + 3 * h - GW_GAIN * this._gwCrest(c).s);
                     c.spawnCount = 0;
                 }
                 c.growth += Math.max(0, rtGrowthRate(c.hF)) * dtS;
@@ -280,12 +345,40 @@ export class IonosphereFountain {
         }
     }
 
+    /** Gravity-wave crests inside a cell: local maxima of s(lon) sampled at
+     *  0.25° (≈28 km), sorted strongest-first. Returns the best crest value
+     *  (for threshold arming) and the full list (for spawn placement). */
+    _gwCrest(c) {
+        const modes = this._gwModes ?? gravityWaveModes(this._gwDay ?? 0);
+        const STEP = 0.25, half = CELL_DEG / 2;
+        const n = Math.round(CELL_DEG / STEP);
+        const lons = [], vals = [];
+        for (let i = 0; i <= n; i++) {
+            const lon = c.lonDeg - half + i * STEP;
+            lons.push(lon);
+            vals.push(gravityWaveSeed(lon, this._gwDay ?? 0, modes));
+        }
+        const crests = [];
+        for (let i = 1; i < n; i++) {
+            if (vals[i] > vals[i - 1] && vals[i] >= vals[i + 1]) {
+                crests.push({ lonDeg: lons[i], s: vals[i] });
+            }
+        }
+        crests.sort((a, b) => b.s - a.s);
+        if (!crests.length) crests.push({ lonDeg: c.lonDeg, s: vals[Math.floor(n / 2)] });
+        return { s: crests[0].s, crests };
+    }
+
     _spawnBubble(c, simMs, dayN) {
         c.spawnCount++;
         const h = hash1(c.i * 29.17 + dayN * 61.7 + c.spawnCount * 11.3);
+        // Place ON a gravity-wave crest — successive spawns in one cell take
+        // successive crests, so in-cell spacing is the wave's ~100–400 km.
+        const { crests } = this._gwCrest(c);
+        const crest = crests[(c.spawnCount - 1) % crests.length];
         c.bubbles.push({
             id: `${dayN}-${c.i}-${c.spawnCount}`,
-            lonDeg: c.lonDeg + (h - 0.5) * CELL_DEG,   // jitter within the cell
+            lonDeg: crest.lonDeg + (h - 0.5) * 0.2,     // ±0.1° de-gridding
             apexKm: c.hF + 30,
             ageS: 0,
             ttlS: 3600 + 3600 * hash1(h * 97.3),        // 1–2 h
