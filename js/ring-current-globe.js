@@ -142,7 +142,7 @@ import { SimClock, SCALE, apparentUnitsPerSec } from './sim-clock.js';
 import { EarthSkin } from './earth-skin.js';
 import { RingCurrentTransport } from './ring-current-transport.js';
 import { ConvectionEField, boundaryL } from './ring-current-efield.js';
-import { IonosphereFountain, N_CELLS as IONO_LON_CELLS } from './ionosphere-fountain.js';
+import { IonosphereFountain, N_CELLS as IONO_LON_CELLS, dipEquatorLat } from './ionosphere-fountain.js';
 import { IonosphereCells, STATES as CELL_STATES, magLatDeg } from './ionosphere-cells.js';
 import { IonosphereLayer } from './ring-current-ionosphere.js';
 import {
@@ -1238,8 +1238,56 @@ export class RingCurrentGlobe {
         this._cellsEpochN = -1;
         this._cellsCrest = new Float32Array(IONO_LON_CELLS);
         this._cellsBubExt = new Float32Array(IONO_LON_CELLS);
+        this._cellsPrecip = new Float32Array(36 * 24);
+        this._precipScratch = {};
         this._ionoLayer = new IonosphereLayer(this._iono, this._cells);
         this._earthSpin.add(this._ionoLayer.group);
+    }
+
+    /**
+     * Bin the ring current's PRECIPITATION deaths into (maglat, MLT) aurora
+     * flux for the WFC priors — "ring current deaths literally seed aurora
+     * priors" (plan §B.2, M4). Scans every population with the same
+     * particlePose reference the tooltip pick uses: a particle in its death
+     * window on the precipitation channel is sliding down its field line to
+     * the footpoint at ±acos(1/√L) maglat, at its current drift MLT. Runs
+     * at epoch cadence (10 sim-min ⇒ every ~2 wall-s at ×300) — one scan
+     * costs about one tooltip pick.
+     */
+    _binPrecipitation() {
+        const p = this._cellsPrecip;
+        p.fill(0);
+        const PRECIP_REF = 3;   // deaths per cell that saturate the prior
+        for (const P of this._popList ?? []) {
+            const pop = P.pop;
+            for (let i = 0; i < pop.count; i++) {
+                const q = particlePose(pop, i, this._simHours, this._tView, this._precipScratch);
+                if (q.mode === 0 || q.dying <= 0.1) continue;
+                const L = pop.seed[i * 3];
+                const latDeg = Math.sign(q.mode)
+                    * Math.acos(1 / Math.sqrt(L)) * 180 / Math.PI;
+                const mlt = ((12 - q.theta * 12 / Math.PI) % 24 + 24) % 24;
+                const li = Math.max(0, Math.min(35, Math.floor((latDeg + 90) / 5)));
+                const mi = Math.max(0, Math.min(23, Math.floor(mlt)));
+                p[li * 24 + mi] += 1;
+            }
+        }
+        for (let c = 0; c < p.length; c++) p[c] = Math.min(1, p[c] / PRECIP_REF);
+    }
+
+    /** Fly down to the strongest live plasma bubble — the situation chip's
+     *  "Go see" action (plan §A.3/M4). false when no bubbles are alive. */
+    descendToBubble() {
+        const bubs = this._iono.allBubbles();
+        if (!bubs.length) return false;
+        bubs.sort((a, b) => b.strength * b.fade - a.strength * a.fade);
+        const lonR = bubs[0].lonDeg * Math.PI / 180;
+        const latR = dipEquatorLat(lonR);
+        const cl = Math.cos(latR);
+        const local = this._tmpV.set(
+            cl * Math.cos(lonR), Math.sin(latR), -cl * Math.sin(lonR)).clone();
+        const world = this._ionoLayer.group.localToWorld(local);
+        return this.setView('surface', { anchorWorldDir: world.normalize() });
     }
 
     /** Step the field core + fountain kernel on the sim clock and refresh
@@ -1276,10 +1324,15 @@ export class RingCurrentGlobe {
                     Math.floor((b.lonDeg + 180) / (360 / IONO_LON_CELLS))));
                 if (b.latExtentDeg > this._cellsBubExt[i]) this._cellsBubExt[i] = b.latExtentDeg;
             }
+            this._binPrecipitation();
+            const ef = this._efield.state();
             this._cells.epoch({
                 kp: this._cellsKp, utH,
                 crest: this._cellsCrest, bubbleExtent: this._cellsBubExt,
+                dA: ef.dA, dyn: this._iono.dynamo,
+                precip: this._cellsPrecip,
             }, epochN);
+            this._ionoLayer.setDrivers(ef.A_sh, ef.dA);
             this._ionoLayer.markMapDirty();
         }
         this._ionoLayer.update(dt, dSimSec, this._tView, subsolarPoint(simNow), utH,
@@ -2930,7 +2983,9 @@ export class RingCurrentGlobe {
             // The M2 inspector: state + the priors that argued for it.
             const info = best.info;
             const COL = { quiet: '#8b94ad', crest: '#ff5c47', bubble: '#ff8894',
-                          arc: '#40ff80', diffuse: '#37e0a0', trough: '#5d8cff' };
+                          arc: '#40ff80', diffuse: '#37e0a0', trough: '#5d8cff',
+                          saps: '#ff8c3a', patch: '#bfe8ff', toi: '#e8f4ff',
+                          sed: '#ffd27a', depleted: '#c96a4a' };
             const why = info.why.length
                 ? info.why.map(w => `${w.state} ${w.w}`).join(' · ')
                 : '—';

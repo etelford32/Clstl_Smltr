@@ -30,8 +30,14 @@ a hard prerequisite for everything else.*
 >
 > **Fourth patch: M3 COMPLETE** — the descent camera (see the M3 milestone
 > note below for what shipped and where the plan's §C.2 blend was amended).
-> Only M4 (full state vocabulary + precipitation binning + situation-chip
-> actions) remains open.
+>
+> **Fifth patch: M4 COMPLETE — the plan is fully landed, M0 through M4.**
+> Full 11-state vocabulary, death-channel precipitation seeding the aurora
+> priors, the §B.5 per-state flow-noise shader dispatch, and the bubble
+> situation chip with its "Go see" flight (details in the M4 milestone
+> note). Remaining ideas live in the milestone notes as future work: WFC
+> LOD geometry for the M4 states under descent, the post-midnight
+> reversed-polarity bubble channel, and the SAPS-bridge pipeline items.
 
 ---
 
@@ -311,6 +317,26 @@ draw-count already in the debug HUD — add a `cells` counter.
   Inf positions drove SwiftShader into ~14 s/frame pathological clipping.)*
 - **M4** Full state vocabulary (SAPS, patches, TOI, SED, storm O/N₂ depletion),
   precipitation binning from death channels, situation-chip "Go see" actions.
+  *(DONE 2026-07-20 — 11-state kernel (indices STABLE; COMPAT rows are
+  Uint16 — a Uint8 row silently truncates states ≥ 8, which is exactly the
+  bug the quiet-universal test caught). New priors gate on the fields the
+  page already computes: SAPS on overshielding ΔA < 0 OR the wound-up
+  dynamo (recovery), patches/TOI on strong driving in the cap, SED on
+  undershielding afternoons, depletion on the dynamo integral. One 5°-grid
+  amendment: SAPS may abut the arc directly (the diffuse buffer is
+  geometrically impossible in adjacent 5° rows; real SAPS abuts the
+  equatorward auroral boundary) — the trough–arc buffer stays pinned.
+  Precipitation: the globe bins DEATH-CHANNEL footpoints (particlePose
+  scan at epoch cadence, ±acos(1/√L) maglat × drift MLT) into a per-cell
+  flux that multiplies diffuse ×(1+2.2p) and arc ×(1+0.8p). §B.5 SHADERS:
+  the map bake now carries STATE IDS (NEAREST-filtered) and the map
+  fragment shader is the per-state program registry — 3-octave fbm
+  spectral noise per state, ADVECTED on the sim clock with speeds scaled
+  by the live shielded amplitude; the SAPS streak rate is drawn ≈1:1 with
+  the real ~1 km/s westward jet. Situation chip: live bubble count +
+  longitude + scintillation warning, "Go see" flies the Surface glide to
+  the strongest bubble (globe.descendToBubble). Tests: cells group 7,
+  smoke sections 7–8.)*
 
 Every module lands as a pure node-tested kernel first (particles-kernel
 pattern); THREE integration second. Nothing in this plan touches the transport

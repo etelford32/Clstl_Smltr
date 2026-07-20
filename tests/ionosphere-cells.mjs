@@ -207,4 +207,104 @@ const FIELDS = (kp, extra = {}) => ({
     ok('perf probe within budget — see timings above');
 }
 
-console.log(`\nionosphere-cells: ${passed}/6 groups passed`);
+// ── 7. M4 vocabulary: SAPS / patch / TOI / SED / depleted + precip priors ────
+{
+    const grid = (fields, epoch = 11) => {
+        const eng = new IonosphereCells();
+        eng.epoch(fields, epoch);
+        return eng;
+    };
+    const cellsOf = (eng, s) => {
+        const out = [];
+        for (let c = 0; c < N_GRID; c++) {
+            if (eng.state[c] === s) {
+                out.push({ i: Math.floor(c / N_MLT), j: c % N_MLT,
+                    alat: Math.abs(latCenter(Math.floor(c / N_MLT))), mlt: mltCenter(c % N_MLT) });
+            }
+        }
+        return out;
+    };
+
+    // SAPS: overshielding gate, dusk-premidnight subauroral channel; the
+    // recovery (dynamo) gate opens it too; undershielding alone does not.
+    const over = grid(FIELDS(6, { dA: -0.4 }));
+    const saps = cellsOf(over, S.SAPS);
+    assert.ok(saps.length > 3, `SAPS present under overshielding (${saps.length})`);
+    for (const c of saps) {
+        assert.ok(c.mlt >= 15 && c.mlt <= 23, `SAPS MLT ${c.mlt}`);
+        assert.ok(c.alat > 45 && c.alat < 68, `SAPS |maglat| ${c.alat}`);
+        // SAPS may abut arc/diffuse poleward (5° bins put the stack in
+        // adjacent rows) but must NEVER sit poleward of the trough's band —
+        // i.e. its equatorward neighbor is trough/quiet/depleted, not arc.
+        const north = latCenter(c.i) > 0;
+        const eq = north ? c.i - 1 : c.i + 1;
+        if (eq >= 0 && eq < N_LAT) {
+            assert.notEqual(over.state[eq * N_MLT + c.j], S.ARC, 'arc equatorward of SAPS');
+        }
+    }
+    assert.equal(cellsOf(grid(FIELDS(6, { dA: +0.4 })), S.SAPS).length, 0,
+        'no SAPS under pure undershielding');
+    assert.ok(cellsOf(grid(FIELDS(6, { dA: 0, dyn: 4 })), S.SAPS).length > 0,
+        'recovery (dynamo) gate opens SAPS');
+
+    // Patches: polar cap only, strong driving only.
+    const stormCap = grid(FIELDS(7, { dA: 0.3 }));
+    const patches = cellsOf(stormCap, S.PATCH);
+    assert.ok(patches.length > 4, `patches under strong driving (${patches.length})`);
+    for (const c of patches) {
+        assert.ok(c.alat > ovalCenterMaglat(c.mlt, 7), `patch in the cap (${c.alat})`);
+    }
+    assert.equal(cellsOf(grid(FIELDS(1, { dA: 0 })), S.PATCH).length, 0, 'no quiet patches');
+
+    // TOI: cap cells hugging the noon/midnight meridians under undershielding.
+    const toi = cellsOf(stormCap, S.TOI);
+    assert.ok(toi.length > 0, `TOI present (${toi.length})`);
+    for (const c of toi) {
+        const nearNoon = Math.abs(c.mlt - 12) <= 2.5;
+        const nearMidnight = c.mlt >= 21.5 || c.mlt <= 2.5;
+        assert.ok(nearNoon || nearMidnight, `TOI on the noon–midnight axis (${c.mlt})`);
+    }
+
+    // SED: afternoon mid-lat plume, undershielding storms only.
+    const sed = cellsOf(stormCap, S.SED);
+    assert.ok(sed.length > 2, `SED plume present (${sed.length})`);
+    for (const c of sed) {
+        assert.ok(c.mlt >= 11 && c.mlt <= 20, `SED MLT ${c.mlt}`);
+        assert.ok(c.alat > 35 && c.alat < 62, `SED |maglat| ${c.alat}`);
+    }
+    assert.equal(cellsOf(grid(FIELDS(6, { dA: -0.4 })), S.SED).length, 0,
+        'no SED under overshielding');
+
+    // Depleted: needs the wound-up dynamo (hours of Joule heating).
+    assert.ok(cellsOf(grid(FIELDS(5, { dyn: 5 })), S.DEPLETED).length > 4, 'O/N₂ damage');
+    assert.equal(cellsOf(grid(FIELDS(5, { dyn: 0 })), S.DEPLETED).length, 0, 'fresh storm: none');
+
+    // Precipitation binning seeds the aurora priors: a synthetic hotspot in
+    // the diffuse band pulls that cell to DIFFUSE (weights are pure — check
+    // both the prior and the collapsed map).
+    const precip = new Float32Array(N_GRID);
+    const hotJ = 2;   // 02:30 MLT
+    const center = ovalCenterMaglat(mltCenter(hotJ), 3);
+    const hotI = Math.floor(((center - 4) + 90) / 5);
+    precip[hotI * N_MLT + hotJ] = 1;
+    const w0 = priorWeights(hotI, hotJ, FIELDS(3));
+    const w1 = priorWeights(hotI, hotJ, FIELDS(3, { precip }));
+    assert.ok(w1[S.DIFFUSE] > 2.5 * w0[S.DIFFUSE], 'precip multiplies diffuse prior');
+    assert.ok(w1[S.ARC] > w0[S.ARC], 'precip lifts arc prior too');
+    const hot = grid(FIELDS(3, { precip }), 13);
+    assert.equal(hot.state[hotI * N_MLT + hotJ], S.DIFFUSE,
+        'death-channel hotspot collapses to diffuse aurora');
+
+    // The full-vocabulary storm sweep stays contradiction-free.
+    const eng = new IonosphereCells();
+    const arc = [
+        { kp: 1, dA: 0 }, { kp: 3, dA: 0.4 }, { kp: 6, dA: 0.6 }, { kp: 8, dA: 0.2, dyn: 1 },
+        { kp: 8, dA: -0.3, dyn: 3 }, { kp: 6, dA: -0.1, dyn: 5 }, { kp: 4, dA: 0, dyn: 5 },
+        { kp: 2, dA: 0, dyn: 3 }, { kp: 1, dA: 0, dyn: 1 },
+    ];
+    arc.forEach((f, e) => eng.epoch(FIELDS(f.kp, { ...f, utH: (e * 2.7) % 24 }), 100 + e));
+    assert.equal(eng.stats.contradictions, 0, 'storm sweep contradiction-free');
+    ok(`M4 vocabulary: SAPS ${saps.length} · patch ${patches.length} · TOI ${toi.length} · SED ${sed.length} · precip seeds aurora`);
+}
+
+console.log(`\nionosphere-cells: ${passed}/7 groups passed`);

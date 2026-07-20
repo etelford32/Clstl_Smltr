@@ -69,10 +69,18 @@ import { hash1, N_CELLS as N_LON_CELLS } from './ionosphere-fountain.js';
 export const N_LAT = 36;                 // 5° maglat bins, centers −87.5…+87.5
 export const N_MLT = 24;                 // 1 h MLT bins, centers 0.5…23.5
 export const N_GRID = N_LAT * N_MLT;     // 864
-export const STATES = Object.freeze(['quiet', 'crest', 'bubble', 'arc', 'diffuse', 'trough']);
-export const S = Object.freeze({ QUIET: 0, CREST: 1, BUBBLE: 2, ARC: 3, DIFFUSE: 4, TROUGH: 5 });
+// M4 (2026-07-20): the full F-state vocabulary. Indices are STABLE — the
+// bake palettes and the map shader's state-id dispatch key off them.
+export const STATES = Object.freeze([
+    'quiet', 'crest', 'bubble', 'arc', 'diffuse', 'trough',
+    'saps', 'patch', 'toi', 'sed', 'depleted',
+]);
+export const S = Object.freeze({
+    QUIET: 0, CREST: 1, BUBBLE: 2, ARC: 3, DIFFUSE: 4, TROUGH: 5,
+    SAPS: 6, PATCH: 7, TOI: 8, SED: 9, DEPLETED: 10,
+});
 const N_S = STATES.length;
-const ALL_MASK = (1 << N_S) - 1;
+const ALL_MASK = (1 << N_S) - 1;         // 11 bits — still inside Uint16
 
 export const latCenter = (i) => -90 + 2.5 + i * 5;      // signed maglat (deg)
 export const mltCenter = (j) => j + 0.5;                // MLT hours
@@ -96,8 +104,9 @@ export function magLatDeg(latDeg, lonDeg) {
 }
 
 /** Default bake palette (RGBA per state, prototype legibility). Callers may
- *  pass their own — ring-current.html mutes crest/bubble to alpha 0 because
- *  the analytic airglow shell already owns those two states on the globe. */
+ *  pass their own — ring-current.html passes a STATE-ID encoding so its map
+ *  shader can dispatch per-state programs (and mutes crest/bubble, which
+ *  the analytic airglow shell already owns on the globe). */
 export const BAKE_PALETTE = Uint8Array.from([
     10, 12, 24, 30,       // quiet: near-transparent deep blue
     255, 92, 56, 200,     // crest: 630 nm red-orange
@@ -105,6 +114,11 @@ export const BAKE_PALETTE = Uint8Array.from([
     64, 255, 128, 220,    // arc: auroral green
     40, 160, 90, 150,     // diffuse: dim green
     60, 120, 255, 130,    // trough: dim blue
+    255, 140, 58, 210,    // saps: the westward jet, hot orange
+    190, 232, 255, 170,   // patch: cold dense blobs
+    232, 244, 255, 180,   // toi: the pale tongue
+    255, 210, 122, 190,   // sed: warm dense plume
+    120, 62, 44, 150,     // depleted: O/N₂ damage, red-brown
 ]);
 
 // ── Priors ───────────────────────────────────────────────────────────────────
@@ -135,16 +149,27 @@ function mltWindow(mlt, a, b, soft = 0.75) {
  *   crest[72]             — fountain per-lon crest intensity (0..~1)
  *   bubbleExtent[72]      — live max |maglat| extent of bubbles per lon (deg,
  *                           0 = none), from the fountain's allBubbles()
- * Writes into `out` (Float32Array length 6) and returns it.
+ *   dA                    — penetration ΔA from the shielding ODE (kV/R_E²;
+ *                           < 0 = OVERSHIELDING — the SAPS gate)
+ *   dyn                   — disturbance-dynamo state (fountain.dynamo — a
+ *                           low-passed Kp excess ≈ hours of Joule heating:
+ *                           the recovery/hot-ion-overlap AND O/N₂ proxy)
+ *   precip[N_GRID]        — ring-current precipitation flux per cell
+ *                           (0..~1), binned from the DEATH CHANNELS by the
+ *                           globe — deaths literally seed the aurora priors
+ * Writes into `out` (Float32Array length N_S) and returns it.
  */
 export function priorWeights(latIdx, mltIdx, fields, out = new Float32Array(N_S)) {
     const lat = latCenter(latIdx);
     const alat = Math.abs(lat);
     const mlt = mltCenter(mltIdx);
     const kp = Number.isFinite(fields.kp) ? fields.kp : 1;
+    const dA = Number.isFinite(fields.dA) ? fields.dA : 0;
+    const dyn = Number.isFinite(fields.dyn) ? Math.max(0, fields.dyn) : 0;
     const night = nightness(mlt);
     const center = ovalCenterMaglat(mlt, kp);
     const kpN = Math.max(0, Math.min(1, kp / 9));
+    const precip = fields.precip ? fields.precip[latIdx * N_MLT + mltIdx] : 0;
 
     // Geographic longitude under this MLT column right now (mean sun).
     const lonDeg = (((mlt - (fields.utH ?? 0)) * 15) % 360 + 540) % 360 - 180;
@@ -160,10 +185,46 @@ export function priorWeights(latIdx, mltIdx, fields, out = new Float32Array(N_S)
         * mltWindow(mlt, 19, 2) * Math.min(1, bubExt / 5);
     // Day floors keep the oval CONTINUOUS through noon (the cusp-side oval
     // is real; a ring that opens on the dayside is a rules bug, test-pinned).
-    out[S.ARC] = (0.25 + 1.35 * kpN) * (0.42 + 0.58 * night) * gauss(alat - center, 2);
-    out[S.DIFFUSE] = (0.2 + 1.2 * kpN) * (0.35 + 0.65 * night) * gauss(alat - (center - 4), 2.5);
+    // Precipitation binned from the ring-current death channels multiplies
+    // the aurora: DIFFUSE is literally ring-current precipitation, so it
+    // takes the strong factor; discrete arc a milder one.
+    out[S.ARC] = (0.25 + 1.35 * kpN) * (0.42 + 0.58 * night)
+        * gauss(alat - center, 2) * (1 + 0.8 * precip);
+    out[S.DIFFUSE] = (0.2 + 1.2 * kpN) * (0.35 + 0.65 * night)
+        * gauss(alat - (center - 4), 2.5) * (1 + 2.2 * precip);
     out[S.TROUGH] = 0.9 * Math.min(1, kp / 6) * mltWindow(mlt, 18, 6)
         * (alat > center - 12 && alat < center - 5 ? 1 : 0);
+
+    // ── M4 storm-time vocabulary ────────────────────────────────────────────
+    // SAPS: subauroral channel on the trough's poleward edge, dusk-to-
+    // premidnight, when the shield OVERSHOOTS (ΔA < 0) or during recovery
+    // with hot-ion overlap (wound-up dynamo = hours past onset).
+    const sapsGate = Math.max(
+        Math.min(1, Math.max(0, -dA - 0.05) / 0.25),
+        0.7 * Math.min(1, dyn / 3));
+    // Amp 1.5: when the gate is open the jet must DOMINATE its (narrow,
+    // ~1-bin — real SAPS is 2–3.5° wide) band over the trough it rides on,
+    // beyond the ±15% collapse jitter — group-7 pins the channel forms.
+    out[S.SAPS] = 1.5 * sapsGate * Math.min(1, kp / 4)
+        * mltWindow(mlt, 16, 22) * gauss(alat - (center - 5), 1.8);
+    // Polar-cap patches: dayside plasma chopped into blobs and dragged
+    // antisunward under strong convection.
+    const drive = Math.min(1, kp / 5 + Math.max(0, dA));
+    const cap = Math.min(1, Math.max(0, (alat - center - 4) / 6));
+    out[S.PATCH] = 0.9 * drive * cap;
+    // Tongue of ionization: the unbroken dayside stream entering through
+    // the cusp and crossing the cap along the noon–midnight axis.
+    const meridian = Math.max(mltWindow(mlt, 10.5, 13.5), mltWindow(mlt, 22.5, 1.5));
+    out[S.TOI] = 1.1 * Math.min(1, Math.max(0, dA) / 0.25 + Math.max(0, kp - 5) / 3)
+        * cap * meridian;
+    // SED plume: storm-enhanced density, afternoon mid-latitudes streaming
+    // toward the cusp during UNDERSHIELDING storms.
+    out[S.SED] = 1.2 * Math.min(1, Math.max(0, dA - 0.05) / 0.25) * Math.min(1, kp / 5)
+        * mltWindow(mlt, 12, 19) * gauss(alat - (center - 10), 3.5);
+    // Storm O/N₂ depletion: composition damage after hours of Joule
+    // heating (the dynamo low-pass IS that integral), mid-to-subauroral.
+    out[S.DEPLETED] = 0.85 * Math.min(1, dyn / 4)
+        * (alat > 40 && alat < center - 2 ? 1 : 0) * (0.45 + 0.55 * night);
     return out;
 }
 
@@ -171,7 +232,9 @@ export function priorWeights(latIdx, mltIdx, fields, out = new Float32Array(N_S)
 // Directions: 0 = poleward, 1 = equatorward, 2 = east (+MLT), 3 = west.
 // Built from pair rules with automatic reciprocity; QUIET is universal.
 const COMPAT = (() => {
-    const m = Array.from({ length: N_S }, () => new Uint8Array(4));
+    // Uint16 rows: the masks carry N_S = 11 state bits — a Uint8 row would
+    // silently truncate states ≥ 8 (toi/sed/depleted) out of every rule.
+    const m = Array.from({ length: N_S }, () => new Uint16Array(4));
     const allowAll = (s) => { for (let d = 0; d < 4; d++) m[s][d] = ALL_MASK; };
     // Start from nothing-allowed except self+quiet, then open pairs.
     for (let s = 0; s < N_S; s++) {
@@ -189,8 +252,30 @@ const COMPAT = (() => {
     mltPair(S.ARC, S.DIFFUSE);       // oval chains along MLT
     mltPair(S.DIFFUSE, S.TROUGH);
     mltPair(S.BUBBLE, S.CREST);      // wave-train neighbors
-    // NOT opened, deliberately: (TROUGH poleward→ARC) — diffuse must
-    // intervene between trough and arc; that gap is test-pinned.
+    // ── M4 states ──
+    latPair(S.TROUGH, S.SAPS);       // SAPS rides the trough's POLEWARD edge
+    latPair(S.SAPS, S.DIFFUSE);      // …with diffuse above it…
+    latPair(S.SAPS, S.ARC);          // …or the arc directly: at 5° bins the
+                                     // arc/SAPS stack occupies adjacent rows
+                                     // (real SAPS abuts the equatorward
+                                     // auroral boundary — Foster & Vo 2002)
+    mltPair(S.SAPS, S.TROUGH);       // channel ends feather into the trough
+    mltPair(S.SAPS, S.DIFFUSE);
+    latPair(S.ARC, S.PATCH);         // patches just poleward of the oval
+    latPair(S.ARC, S.TOI);           // the tongue crosses the oval at entry
+    latPair(S.PATCH, S.TOI);         // patches flank the tongue
+    mltPair(S.PATCH, S.TOI);
+    latPair(S.SED, S.ARC);           // SED plume feeds the dayside cusp
+    latPair(S.SED, S.DIFFUSE);
+    mltPair(S.SED, S.TROUGH);        // afternoon plume meets the dusk trough
+    latPair(S.DEPLETED, S.TROUGH);   // O/N₂ damage sits under the trough…
+    latPair(S.DEPLETED, S.DIFFUSE);  // …and the diffuse flank
+    latPair(S.DEPLETED, S.SED);      // shares the mid-lat band with SED
+    latPair(S.SED, S.DEPLETED);
+    mltPair(S.SED, S.DEPLETED);
+    mltPair(S.DEPLETED, S.TROUGH);
+    // NOT opened, deliberately: (TROUGH poleward→ARC) — diffuse or SAPS
+    // must intervene between trough and arc; that gap is test-pinned.
     return m;
 })();
 

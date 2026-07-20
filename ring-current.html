@@ -422,6 +422,23 @@ body {
     border:1px solid rgba(47,211,168,.28); border-radius:5px; padding:3px 9px;
     font-variant-numeric:tabular-nums; white-space:nowrap;
 }
+
+/* Situation chip: live bubble outbreak + the "Go see" flight (plan §A.3).
+   Sits under the sim-time HUD — the bottom-left corner belongs to the
+   layer-toggle panel. */
+.rc-gosee {
+    position:absolute; left:12px; top:258px; z-index:5;
+    display:flex; align-items:center; gap:8px;
+    font:600 11px system-ui; color:#ffd9b0;
+    background:rgba(20,8,2,.72); border:1px solid rgba(255,154,61,.4);
+    border-radius:6px; padding:5px 9px; max-width:340px; line-height:1.4;
+}
+.rc-gosee button {
+    flex:none; font:700 10.5px system-ui; color:#1a0d02;
+    background:linear-gradient(90deg,#ffb066,#ff9a3d); border:0;
+    border-radius:4px; padding:3px 9px; cursor:pointer;
+}
+.rc-gosee button:hover { filter:brightness(1.15); }
 .rc-mode-btn.rc-on { background:rgba(255,154,61,.22); border-color:rgba(255,154,61,.55); color:#ffd9b0; }
 .rc-ctl .rc-v { font-size:.72rem; }
 
@@ -540,6 +557,10 @@ body {
         </div>
         <div class="rc-perf" id="rc-perf" hidden>&mdash;</div>
         <div class="rc-descent" id="rc-descent" hidden>&mdash;</div>
+        <div class="rc-gosee" id="rc-gosee" hidden>
+            <span id="rc-gosee-txt">&mdash;</span>
+            <button id="rc-gosee-btn" title="Fly down to the strongest live bubble (Surface view)">&#9654; go see</button>
+        </div>
         <div class="rc-legend" id="rc-legend">
         <div class="rc-legend-head" id="rc-legend-head">
             <span class="rc-legend-grip" aria-hidden="true">&#10495;</span>
@@ -562,7 +583,8 @@ body {
             <span class="rc-legend-pop" data-pop="iono" role="button" tabindex="0" aria-pressed="true" title="Show / hide the ionosphere layer (airglow, bubbles, fountain streamlines)"><span class="rc-dot" style="background:#ff5e45"></span>Ionosphere &mdash; 630 nm airglow: Appleton crest bands snake the dip equator (night side)</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;dark bite-outs = plasma bubbles (rise, drift east, shimmer = GPS scintillation)</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;cyan arcs = fountain streamlines &mdash; pulse rate &prop; true E&times;B drift (cue, not to scale); undershielding surges them</span><br>
-            <span class="rc-legend-pop" data-pop="cells" role="button" tabindex="0" aria-pressed="true" title="Show / hide the regional-state map (WFC cell engine, 5°&times;1h magnetic grid, 10-sim-min epochs) — hover any region for its state and the priors behind it"><span class="rc-dot" style="background:#5d8cff"></span>Regional states &mdash; WFC map: trough (blue) &middot; diffuse flank (dim green) &middot; arc cells &mdash; hover to inspect <b>why</b></span><br>
+            <span class="rc-legend-pop" data-pop="cells" role="button" tabindex="0" aria-pressed="true" title="Show / hide the regional-state map (WFC cell engine, 5°&times;1h magnetic grid, 10-sim-min epochs) — hover any region for its state and the priors behind it; every state renders its own flow-noise texture, advected by the live convection"><span class="rc-dot" style="background:#5d8cff"></span>Regional states &mdash; WFC map: trough &middot; diffuse &middot; arc &middot; <span style="color:#ff8c3a">SAPS jet</span> (westward streaks) &middot; <span style="color:#bfe8ff">patches</span>/<span style="color:#e8f4ff">TOI</span> (antisunward) &middot; <span style="color:#ffd27a">SED</span> &middot; <span style="color:#c96a4a">O/N&#8322; depletion</span> &mdash; hover for <b>why</b></span><br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;texture motion = convection-advected noise on the sim clock; SAPS streak rate &asymp; the real 1 km/s jet; ring-current precipitation deaths seed the aurora priors</span><br>
             <span class="rc-dot" style="background:#dfe8ff"></span>Spin axis &middot; <span class="rc-dot" style="background:#ff9a3d"></span>dipole axis &mdash; watch the daily wobble<br>
             <span class="rc-dot" style="background:#37e0a0"></span>Aurora oval &mdash; live Kp/Bz at the magnetic pole<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
@@ -1116,6 +1138,23 @@ if (globe) {
             : 'shielded — climatological fountain';
         efIono.textContent =
             `ΔA ${s.dA >= 0 ? '+' : ''}${s.dA.toFixed(2)} · ${mode} · ${nBub} bubble${nBub === 1 ? '' : 's'} active`;
+        // Situation chip (plan §A.3, M4): live bubble outbreak with the
+        // "Go see" flight to the strongest one. Longitude quoted at the
+        // outbreak's center; scintillation is the operational stake.
+        const goEl = $('rc-gosee');
+        const bubs = globe.ionosphere.allBubbles();
+        if (bubs.length) {
+            goEl.hidden = false;
+            const strongest = bubs.reduce((m, b) =>
+                b.strength * b.fade > m.strength * m.fade ? b : m, bubs[0]);
+            const lon = Math.round(strongest.lonDeg);
+            const lonTxt = `${Math.abs(lon)}°${lon >= 0 ? 'E' : 'W'}`;
+            $('rc-gosee-txt').textContent =
+                `${bubs.length} plasma bubble${bubs.length === 1 ? '' : 's'} active` +
+                ` near ${lonTxt} — GPS scintillation likely`;
+        } else {
+            goEl.hidden = true;
+        }
         // Track C disclosure line — REQUIRED while the vertical exaggeration
         // is engaged (the same honesty contract as the ×1 bounce exception).
         const ds = globe.descentState();
@@ -1134,6 +1173,7 @@ if (globe) {
     };
     updateEfield();
     setInterval(() => { if (!document.hidden) updateEfield(); }, 250);
+    $('rc-gosee-btn').addEventListener('click', () => globe.descendToBubble());
 }
 
 // ── Particle inspector (Phase 1 — RING_CURRENT_ANALYTICS_PLAN.md) ──────────

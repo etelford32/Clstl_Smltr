@@ -188,15 +188,20 @@ function streamlineMaterial() {
     });
 }
 
-// Page palette for the WFC map bake: crest + bubble muted (see header).
-const MAP_PALETTE = Uint8Array.from([
-    10, 12, 24, 16,       // quiet: whisper of deep blue
-    0, 0, 0, 0,           // crest: analytic airglow owns it
-    0, 0, 0, 0,           // bubble: analytic airglow owns it
-    64, 255, 128, 105,    // arc: discrete auroral cells (EarthSkin glows above)
-    40, 160, 90, 95,      // diffuse: equatorward flank
-    60, 120, 255, 110,    // trough: subauroral depletion band
-]);
+// Page palette for the WFC map bake — a STATE-ID encoding (M4, plan §B.5):
+// R = state id × 20 (decoded in the fragment shader, which dispatches a
+// per-state program: color ramp + spectral flow noise), A = 0 mutes a state
+// off the map entirely (crest/bubble — the analytic airglow owns them).
+// The map texture is NEAREST-filtered: ids must never interpolate.
+const ID_STEP = 20;
+const MAP_PALETTE = Uint8Array.from((() => {
+    const MUTED = new Set([1, 2]);              // crest, bubble
+    const out = [];
+    for (let id = 0; id < 11; id++) {
+        out.push(id * ID_STEP, 255, 0, MUTED.has(id) ? 0 : 255);
+    }
+    return out;
+})());
 
 export class IonosphereLayer {
     /**
@@ -366,29 +371,115 @@ export class IonosphereLayer {
         this._mapData = new Uint8Array(BAKE_W * BAKE_H * 4);
         this._mapTex = new THREE.DataTexture(this._mapData, BAKE_W, BAKE_H, THREE.RGBAFormat);
         this._mapTex.wrapS = THREE.RepeatWrapping;
-        this._mapTex.magFilter = THREE.LinearFilter;
-        this._mapTex.minFilter = THREE.LinearFilter;
+        // NEAREST, not linear: the texels carry STATE IDS for the shader
+        // dispatch — interpolated ids decode to garbage states at borders.
+        // The per-state noise programs supply all the visual softening.
+        this._mapTex.magFilter = THREE.NearestFilter;
+        this._mapTex.minFilter = THREE.NearestFilter;
         this._mapDirty = true;
         this._mapUtH = -1;
+        this._simH = 0;
+        // The M4 per-state shader dispatch (plan §B.5 realized): the texture
+        // carries STATE IDS; this fragment shader is the "program registry" —
+        // each state gets a color ramp + power-law (fbm) spectral noise
+        // ADVECTED by the convection physics. Advection runs on SIM time
+        // (uSimH accumulates dSim: pause freezes every texture's motion) and
+        // its speed scales with the LIVE shielded amplitude uAsh — patches
+        // and the tongue stream antisunward faster as convection strengthens,
+        // and the SAPS channel streaks westward at its honest jet rate
+        // (~0.5 MLT-h per hour at 1 km/s — the one motion drawn 1:1).
         this._mapMat = new THREE.ShaderMaterial({
             transparent: true,
             depthWrite: false,
             side: THREE.DoubleSide,   // visible from inside at full descent
-            uniforms: { uMap: { value: this._mapTex }, uExag: { value: 1 } },
+            uniforms: {
+                uMap: { value: this._mapTex },
+                uExag: { value: 1 },
+                uMagPole: { value: latLonToVec(GEOMAG_NORTH_LAT_2025, GEOMAG_NORTH_LON_2025, new THREE.Vector3()) },
+                uUtH: { value: 0 },
+                uSimH: { value: 0 },
+                uAsh: { value: 0.1 },
+            },
             vertexShader: EXAG_VERTEX,
             fragmentShader: `
                 uniform sampler2D uMap;
+                uniform vec3 uMagPole;
+                uniform float uUtH, uSimH, uAsh;
                 varying vec3 vN;
                 const float PI = 3.14159265358979;
+                // Hash → value noise → 3-octave fbm (power-law amplitudes) —
+                // the plan's spectral noise, cheap enough for software GL.
+                float h21(vec2 p) {
+                    p = fract(p * vec2(123.34, 456.21));
+                    p += dot(p, p + 45.32);
+                    return fract(p.x * p.y);
+                }
+                float vnoise(vec2 p) {
+                    vec2 i = floor(p), f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    return mix(
+                        mix(h21(i), h21(i + vec2(1, 0)), f.x),
+                        mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y);
+                }
+                float fbm(vec2 p) {
+                    float s = 0.55 * vnoise(p);
+                    p *= 2.13; s += 0.28 * vnoise(p);
+                    p *= 2.11; s += 0.17 * vnoise(p);
+                    return s;
+                }
                 void main() {
                     vec3 n = normalize(vN);
-                    // Same frame as the airglow shader: lon 0 → +X, east → −Z.
-                    // Bake rows run north → south, DataTexture v=0 = row 0.
-                    float lon = atan(-n.z, n.x);
+                    float lon = atan(-n.z, n.x);                  // coords.js frame
                     float v = (PI * 0.5 - asin(clamp(n.y, -1.0, 1.0))) / PI;
-                    vec4 c = texture2D(uMap, vec2(lon / (2.0 * PI) + 0.5, v));
-                    if (c.a < 0.01) discard;
-                    gl_FragColor = c;
+                    vec4 tex = texture2D(uMap, vec2(lon / (2.0 * PI) + 0.5, v));
+                    if (tex.a < 0.5) discard;
+                    float id = floor(tex.r * 255.0 / ${ID_STEP}.0 + 0.5);
+                    float magLat = degrees(asin(clamp(dot(n, uMagPole), -1.0, 1.0)));
+                    float mlt = mod(uUtH + degrees(lon) / 15.0, 24.0);
+                    float ashN = clamp(uAsh / 1.2, 0.0, 1.0);     // storm-normalized
+                    // Noise domain: MLT-hours × maglat-degrees (sun-fixed, so
+                    // advection velocities are physical directions).
+                    vec2 q = vec2(mlt * 2.2, magLat * 0.45);
+                    float antisun = (mlt < 12.0 ? -1.0 : 1.0);    // away from noon
+                    vec3 col; float a;
+                    if (id < 0.5) {                               // quiet
+                        col = vec3(0.04, 0.05, 0.10); a = 0.05;
+                    } else if (id < 3.5) {                        // arc
+                        float s = fbm(vec2(q.x * 6.0 - uSimH * (0.6 + 1.4 * ashN), q.y * 1.3));
+                        col = mix(vec3(0.10, 0.75, 0.30), vec3(0.45, 1.0, 0.55), s);
+                        a = 0.22 + 0.42 * s;
+                    } else if (id < 4.5) {                        // diffuse
+                        float s = fbm(q * 0.9 - vec2(uSimH * 0.25, 0.0));
+                        col = vec3(0.14, 0.55, 0.32); a = 0.24 + 0.22 * s;
+                    } else if (id < 5.5) {                        // trough — a dark HOLE
+                        float s = fbm(q * 0.6);
+                        col = vec3(0.06, 0.10, 0.30); a = 0.42 + 0.10 * s;
+                    } else if (id < 6.5) {                        // SAPS — westward jet
+                        // Elongated streaks racing WESTWARD (−MLT); the drawn
+                        // rate ≈ the real 1 km/s jet (≈0.5 MLT-h per hour).
+                        vec2 qs = vec2(q.x * 0.55 + uSimH * (0.25 + 0.45 * ashN), q.y * 3.2);
+                        float s = fbm(qs);
+                        col = mix(vec3(0.75, 0.22, 0.06), vec3(1.0, 0.62, 0.20), s);
+                        a = 0.34 + 0.42 * s;
+                    } else if (id < 7.5) {                        // patches — blobs antisunward
+                        vec2 qp = q * 1.25 - vec2(antisun * uSimH * (0.3 + 1.2 * ashN), 0.0);
+                        float b = smoothstep(0.52, 0.72, fbm(qp));
+                        col = vec3(0.70, 0.88, 1.0); a = 0.10 + 0.55 * b;
+                    } else if (id < 8.5) {                        // TOI — the streaming tongue
+                        vec2 qt = vec2(q.x * 1.6, q.y * 0.5)
+                            - vec2(antisun * uSimH * (0.4 + 1.3 * ashN), 0.0);
+                        float s = fbm(qt);
+                        col = vec3(0.82, 0.92, 1.0); a = 0.20 + 0.34 * s;
+                    } else if (id < 9.5) {                        // SED plume — toward the cusp
+                        vec2 qd = q - vec2(uSimH * 0.2, -uSimH * (0.15 + 0.35 * ashN));
+                        float s = fbm(qd * 1.1);
+                        col = mix(vec3(0.85, 0.60, 0.20), vec3(1.0, 0.85, 0.45), s);
+                        a = 0.22 + 0.32 * s;
+                    } else {                                      // storm O/N₂ depletion
+                        float s = fbm(q * 0.45 - vec2(uSimH * 0.08, 0.0));
+                        col = vec3(0.35, 0.16, 0.10); a = 0.28 + 0.26 * s;
+                    }
+                    gl_FragColor = vec4(col, a);
                 }`,
         });
         // Just under the airglow shell (renderOrder 2 < 3) so bite-outs and
@@ -401,6 +492,15 @@ export class IonosphereLayer {
 
     /** The globe signals a fresh WFC epoch — rebake on the next sync. */
     markMapDirty() { this._mapDirty = true; }
+
+    /** Live shielded amplitude (+ ΔA, reserved) → the map shader's flow
+     *  speeds: patches/TOI stream antisunward faster as convection
+     *  strengthens; the SAPS streak rate rides the same drive. */
+    setDrivers(ash) {
+        if (this._mapMat && Number.isFinite(ash)) {
+            this._mapMat.uniforms.uAsh.value = ash;
+        }
+    }
 
     /** The map shell mesh — the globe raycasts it for the cell inspector. */
     get mapShell() { return this._mapShell ?? null; }
@@ -483,6 +583,13 @@ export class IonosphereLayer {
             if (c.mesh.visible) c.mat.uniforms.uTime.value = tView;
         }
         if (Math.abs(this._exag - this._detailExagAt) > 0.2) this._syncT = 0;
+        // Map-shader advection clock: SIM hours (pause freezes every state's
+        // texture motion with the rest of the scene — one clock, always).
+        this._simH += dSimSec / 3600;
+        if (this._mapMat) {
+            this._mapMat.uniforms.uSimH.value = this._simH % 4096;
+            this._mapMat.uniforms.uUtH.value = utH;
+        }
         // Streamline pulse-trains: rate ∝ the cell's true drift, advancing
         // on SIM time (τ-honest, pause-frozen, direction-honest).
         for (const st of this._streams) {

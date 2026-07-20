@@ -128,7 +128,8 @@ test('ionosphere layer boots, teardrop bulges duskward, penetration reaches the 
     expect(wfc.mapVisible).toBe(true);
     expect(wfc.painted).toBeGreaterThan(200);
     expect(wfc.info).not.toBeNull();
-    expect(['quiet', 'crest', 'bubble', 'arc', 'diffuse', 'trough']).toContain(wfc.info.state);
+    expect(['quiet', 'crest', 'bubble', 'arc', 'diffuse', 'trough',
+        'saps', 'patch', 'toi', 'sed', 'depleted']).toContain(wfc.info.state);
     expect(Math.abs(wfc.info.maglat)).toBeGreaterThan(65);
     expect(wfc.info.why.length).toBeGreaterThan(0);
 
@@ -191,7 +192,54 @@ test('ionosphere layer boots, teardrop bulges duskward, penetration reaches the 
     expect(out.exag).toBe(1);
     expect(out.hudHidden).toBe(true);
 
-    // 7. Clean run.
+    // 7. M4 — the full vocabulary reaches the shader dispatch. Pause the
+    //    clock (freezes the live epoch cadence so it can't overwrite the
+    //    fixture), drive the kernel with an overshielding-recovery storm,
+    //    and confirm the new states collapse AND their IDs land in the
+    //    NEAREST-filtered bake the flow-noise shader dispatches on.
+    const m4 = await page.evaluate(() => {
+        const g = window.rcGlobe;
+        g.clock.pause();
+        const crest = new Float32Array(72).fill(0.35);
+        g.cells.epoch({
+            kp: 7, utH: 3, crest, bubbleExtent: new Float32Array(72),
+            dA: -0.35, dyn: 4,
+        }, 9999);
+        g._ionoLayer.markMapDirty();
+        const count = {};
+        for (const s of g.cells.state) count[s] = (count[s] ?? 0) + 1;
+        return count;
+    });
+    expect(m4[6] ?? 0).toBeGreaterThan(0);    // saps channel
+    expect(m4[7] ?? 0).toBeGreaterThan(0);    // polar-cap patches
+    expect(m4[10] ?? 0).toBeGreaterThan(0);   // O/N₂ depletion
+    await page.waitForTimeout(500);           // one 4 Hz rebake
+    const bakedIds = await page.evaluate(() => {
+        const d = window.rcGlobe._ionoLayer._mapData;
+        const seen = new Set();
+        for (let i = 0; i < d.length; i += 4) {
+            if (d[i + 3] > 128) seen.add(Math.round(d[i] / 20));
+        }
+        window.rcGlobe.clock.resume();
+        return [...seen].sort((a, b) => a - b);
+    });
+    expect(bakedIds).toContain(6);            // SAPS texels in the ID bake
+    expect(bakedIds).toContain(7);            // patch texels
+
+    // 8. The situation chip: a live bubble raises it; "Go see" flies there.
+    await page.evaluate(() => {
+        window.rcGlobe.ionosphere.cells[30].bubbles.push({
+            id: 'probe-gosee', lonDeg: -27.5, apexKm: 800,
+            ageS: 500, ttlS: 5400, strength: 1,
+        });
+    });
+    await page.waitForFunction(() => !document.getElementById('rc-gosee').hidden,
+        null, { timeout: 2_000 });
+    expect(await page.locator('#rc-gosee-txt').textContent()).toMatch(/bubble.*scintillation/);
+    await page.locator('#rc-gosee-btn').click();
+    expect(await page.evaluate(() => window.rcGlobe.view)).toBe('surface');
+
+    // 9. Clean run.
     expect(shaderErrors).toEqual([]);
     expect(pageErrors).toEqual([]);
 });
