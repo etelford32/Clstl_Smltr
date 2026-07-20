@@ -236,6 +236,25 @@ body {
 .rc-balance-dec { background:linear-gradient(90deg,#2fd3a8,#59e0d8); height:100%; }
 .rc-balance-lab { display:flex; justify-content:space-between; font-size:.66rem; color:#8b94ad; margin-top:3px; }
 
+/* M-I shielding readout (Track 0) — driver / shielded / penetration bars.
+   The penetration track is CENTER-zeroed: fill grows right (orange,
+   undershielding/eastward) or left (blue, overshielding/westward). */
+.rc-efield { margin-top:9px; padding-top:7px; border-top:1px solid rgba(255,255,255,.07); }
+.rc-ef-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:3px; }
+.rc-ef-row { display:flex; align-items:center; gap:7px; margin-top:3px; }
+.rc-ef-row > span { flex:0 0 52px; font-size:.64rem; color:#8b94ad; text-align:right; }
+.rc-ef-track { flex:1; height:5px; border-radius:3px; background:rgba(255,255,255,.06); position:relative; overflow:hidden; }
+.rc-ef-fill { height:100%; width:0%; border-radius:3px; background:linear-gradient(90deg,#ffb066,#ff9a3d); transition:width .18s linear; }
+.rc-ef-sh { background:linear-gradient(90deg,#3ba9a2,#59e0d8); }
+.rc-ef-mid::before {
+    content:''; position:absolute; left:50%; top:-2px; bottom:-2px; width:1px;
+    background:rgba(255,255,255,.35);
+}
+.rc-ef-mid .rc-ef-fill { position:absolute; top:0; transition:width .18s linear, left .18s linear; }
+.rc-ef-pen-east { left:50%; background:linear-gradient(90deg,#ff9a3d,#ff5c47); }
+.rc-ef-pen-west { background:linear-gradient(270deg,#59baff,#4d7dff); }
+.rc-ef-foot { font-size:.64rem; color:#5d6684; margin-top:4px; line-height:1.45; }
+
 .rc-chart-wrap { padding:0 22px 8px; }
 .rc-chart-panel {
     background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.08);
@@ -525,7 +544,11 @@ body {
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;stretching tether = the charge separation that IS the current</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;deaths: fade-out = ENA escape &middot; surface streak = precipitation</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;faint equatorial haze = ENA glow (how imagers see the ring)</span><br>
-            <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause (Kp)<br>
+            <span class="rc-dot" style="background:#59e0d8"></span>Plasmapause &mdash; teardrop = last closed equipotential (dusk bulge, shielded E&times;B + corotation)<br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;faint circle = Carpenter&ndash;Anderson Lpp(Kp), kept as the validation check</span><br>
+            <span class="rc-legend-pop" data-pop="iono" role="button" tabindex="0" aria-pressed="true" title="Show / hide the ionosphere layer (airglow, bubbles, fountain streamlines)"><span class="rc-dot" style="background:#ff5e45"></span>Ionosphere &mdash; 630 nm airglow: Appleton crest bands snake the dip equator (night side)</span><br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;dark bite-outs = plasma bubbles (rise, drift east, shimmer = GPS scintillation)</span><br>
+            <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;cyan arcs = fountain streamlines &mdash; pulse rate &prop; true E&times;B drift (cue, not to scale); undershielding surges them</span><br>
             <span class="rc-dot" style="background:#dfe8ff"></span>Spin axis &middot; <span class="rc-dot" style="background:#ff9a3d"></span>dipole axis &mdash; watch the daily wobble<br>
             <span class="rc-dot" style="background:#37e0a0"></span>Aurora oval &mdash; live Kp/Bz at the magnetic pole<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
@@ -588,6 +611,13 @@ body {
             <div class="rc-kv"><span class="rc-k">Newell d&Phi;/dt</span><span class="rc-v" id="rc-newell">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">decay time &tau;</span><span class="rc-v" id="rc-tau">&mdash;</span></div>
             <div class="rc-kv"><span class="rc-k">Kp / plasmapause</span><span class="rc-v" id="rc-kp">&mdash;</span></div>
+            <div class="rc-efield" title="M&ndash;I shielding state (Volland&ndash;Stern amplitude, kV/R&#7431;&sup2;): the region-2 currents take ~25 min to shield a driver change; until they do, the difference penetrates to the equatorial ionosphere. Eastward (orange) = undershielding &rarr; super-fountain &amp; bubbles; westward (blue) = overshielding &rarr; suppression. Watch the airglow and the streamlines move with this bar.">
+                <div class="rc-ef-head"><span class="rc-k">convection E-field &mdash; M&ndash;I coupling</span><span class="rc-v" id="rc-ef-vals">&mdash;</span></div>
+                <div class="rc-ef-row"><span>driver</span><div class="rc-ef-track"><div class="rc-ef-fill" id="rc-ef-drv"></div></div></div>
+                <div class="rc-ef-row"><span>shielded</span><div class="rc-ef-track"><div class="rc-ef-fill rc-ef-sh" id="rc-ef-sh"></div></div></div>
+                <div class="rc-ef-row"><span>penetr.</span><div class="rc-ef-track rc-ef-mid"><div class="rc-ef-fill" id="rc-ef-pen"></div></div></div>
+                <div class="rc-ef-foot" id="rc-ef-iono">&mdash;</div>
+            </div>
         </section>
 
         <section class="rc-panel">
@@ -967,7 +997,7 @@ function makeStageDraggable(panel, handle, onPlaced) {
 //    data panels + chart instead of blanking the page. ─────────────────────
 let globe = null;
 try {
-    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260717');
+    const { RingCurrentGlobe } = await import('./js/ring-current-globe.js?v=20260720');
     // Optional Rust/WASM transport core — byte-identical to the JS reference
     // (pinned by tests/ring-current-kernel-smoke.mjs). Opt in with ?rcwasm=1;
     // any load failure falls back to the JS core transparently.
@@ -1023,7 +1053,10 @@ if (globe) {
         const apply = (on) => {
             el.classList.toggle('rc-off', !on);
             el.setAttribute('aria-pressed', on ? 'true' : 'false');
-            globe.setPopulationVisible(key, on);
+            // 'iono' is a scene layer (airglow + streamlines), not a
+            // particle population — different switch, same legend UX.
+            if (key === 'iono') globe.setIonosphereVisible(on);
+            else globe.setPopulationVisible(key, on);
         };
         apply(!hidden[key]);                         // restore persisted state
         const toggle = () => {
@@ -1037,6 +1070,38 @@ if (globe) {
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
         });
     });
+}
+
+// ── M-I shielding readout (Track 0): driver / shielded / penetration bars.
+//    Reads the globe's efield state on its own interval (NOT the clock-HUD
+//    one: that interval is armed before `globe` initializes). The shielding
+//    ODE runs on sim time, so at high τ the penetration bar visibly relaxes
+//    within seconds — the single storyline the ionosphere layer follows. ──
+if (globe) {
+    const efVals = $('rc-ef-vals'), efDrv = $('rc-ef-drv'), efSh = $('rc-ef-sh'),
+          efPen = $('rc-ef-pen'), efIono = $('rc-ef-iono');
+    const A_FS = 1.5;      // bar full scale (kV/Rᴇ² — ≈ Kp 9 driving)
+    const PEN_FS = 0.6;    // centered-bar full scale for |ΔA|
+    const updateEfield = () => {
+        const s = globe.efieldState();
+        efDrv.style.width = `${Math.min(100, s.A_drv / A_FS * 100)}%`;
+        efSh.style.width  = `${Math.min(100, s.A_sh / A_FS * 100)}%`;
+        const east = s.dA >= 0;
+        const w = Math.min(50, Math.abs(s.dA) / PEN_FS * 50);
+        efPen.className = 'rc-ef-fill ' + (east ? 'rc-ef-pen-east' : 'rc-ef-pen-west');
+        efPen.style.width = `${w}%`;
+        efPen.style.left = east ? '50%' : `${50 - w}%`;
+        efVals.textContent =
+            `A ${s.A_drv.toFixed(2)} → ${s.A_sh.toFixed(2)} kV/Rᴇ² · Lₛ ${s.stagnationL.toFixed(1)} Rᴇ`;
+        const nBub = globe.ionosphere.allBubbles().length;
+        const mode = s.dA > 0.08 ? 'undershielding — super-fountain window'
+            : s.dA < -0.08 ? 'overshielding — fountain suppressed'
+            : 'shielded — climatological fountain';
+        efIono.textContent =
+            `ΔA ${s.dA >= 0 ? '+' : ''}${s.dA.toFixed(2)} · ${mode} · ${nBub} bubble${nBub === 1 ? '' : 's'} active`;
+    };
+    updateEfield();
+    setInterval(() => { if (!document.hidden) updateEfield(); }, 250);
 }
 
 // ── Particle inspector (Phase 1 — RING_CURRENT_ANALYTICS_PLAN.md) ──────────

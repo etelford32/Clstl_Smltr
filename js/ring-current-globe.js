@@ -66,7 +66,15 @@
  *   electrons      ~1400 points, EASTWARD, same trapped-motion geometry
  *   ringTorus      symmetric glow at the model's peak L (|Dst*|-driven)
  *   partialArc     dusk-centred arc — the partial ring current bulge
- *   plasmapause    thin cyan ring at Carpenter–Anderson Lpp(Kp)
+ *   plasmapause    teardrop = last closed equipotential of the SHIELDED
+ *                  convection + corotation field (ring-current-efield.js —
+ *                  dusk bulge through the stagnation point); faint circle =
+ *                  Carpenter–Anderson Lpp(Kp) kept as a validation overlay
+ *   ionosphere     630 nm airglow shell (Appleton crest bands snaking the
+ *                  dip equator, plasma-bubble bite-outs) + fountain
+ *                  streamlines — js/ring-current-ionosphere.js rendering
+ *                  the js/ionosphere-fountain.js kernel, penetration-coupled
+ *                  to the shielding ODE (the M-I story on screen)
  *   sun + transit  Sun sprite at +X and the incoming solar wind stream:
  *                  every not-yet-arrived L1 parcel (feed state.transit)
  *                  rendered at its REAL time-to-arrival along the corridor,
@@ -133,6 +141,9 @@ import {
 import { SimClock, SCALE, apparentUnitsPerSec } from './sim-clock.js';
 import { EarthSkin } from './earth-skin.js';
 import { RingCurrentTransport } from './ring-current-transport.js';
+import { ConvectionEField, boundaryL } from './ring-current-efield.js';
+import { IonosphereFountain } from './ionosphere-fountain.js';
+import { IonosphereLayer } from './ring-current-ionosphere.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { CopyShader } from 'three/addons/shaders/CopyShader.js';
@@ -830,10 +841,32 @@ export class RingCurrentGlobe {
         // pinned equal by tests/ring-current-kernel-smoke.mjs.
         this._transport = opts.transport ?? new RingCurrentTransport();
 
+        // M-I coupling field core (Track 0) + equatorial fountain kernel
+        // (Track A) — both pure, node-tested, stepped on THIS SimClock from
+        // the same live Kp/VBs driver as the transport core. The efield's
+        // penetration ΔA is the fountain's storm input: the HUD bars, the
+        // plasmapause teardrop, and the airglow all move together.
+        this._efield = opts.efield ?? new ConvectionEField();
+        this._iono = opts.ionosphere ?? new IonosphereFountain();
+        if (!opts.ionosphere) {
+            // Spin-up: pre-run the diurnal state (crests, hF, this evening's
+            // hash-seeded bubbles) through the last 30 sim-h so the airglow
+            // arrives already reflecting "now" — a ×1 visitor would otherwise
+            // stare at a cold dark shell for hours (same reason as the
+            // transport's _heatSpinup). Quiet-driver history (dA = 0, default
+            // Kp) — the live feed takes over from the first state event.
+            const nowMs = this._clock.now();
+            const STEP = 300;
+            for (let t = nowMs - 30 * 3600e3 + STEP * 1e3; t <= nowMs; t += STEP * 1e3) {
+                this._iono.tick(t, STEP, { dA: 0 });
+            }
+        }
+
         this._buildEarth();
         this._buildFieldLines();
         this._buildParticles();
         this._buildRings();
+        this._buildIonosphere();
         this._buildRcHeatmap();
         this._buildEnaImager();
         this._buildSunAndTransit();
@@ -1073,12 +1106,31 @@ export class RingCurrentGlobe {
         this._arc   = null;
         this._rebuildTorus(this._state.peakL);
 
+        // Plasmapause, two curves (IONOSPHERE_EXPLORATION_PLAN.md Track 0):
+        //   · the GEOMETRY is the last closed equipotential of the SHIELDED
+        //     convection + corotation potential — a teardrop with the dusk
+        //     bulge, from ring-current-efield.js, rebuilt as A_sh evolves
+        //   · the old circular Carpenter–Anderson Lpp(Kp) ring stays as a
+        //     faint VALIDATION overlay (the two hugging each other is the
+        //     model check, live) — do not delete it in favor of the teardrop.
         this._ppMat = new THREE.MeshBasicMaterial({
-            color: 0x59e0d8, transparent: true, opacity: 0.35, depthWrite: false,
+            color: 0x59e0d8, transparent: true, opacity: 0.12, depthWrite: false,
         });
         this._plasmapause = new THREE.Mesh(new THREE.TorusGeometry(4.7, 0.018, 8, 160), this._ppMat);
         this._plasmapause.rotation.x = Math.PI / 2;
         this._magGroup.add(this._plasmapause);
+
+        const TEAR_N = 180;
+        this._tearPos = new Float32Array(TEAR_N * 3);
+        const tearGeo = new THREE.BufferGeometry();
+        tearGeo.setAttribute('position', new THREE.BufferAttribute(this._tearPos, 3));
+        this._ppTear = new THREE.LineLoop(tearGeo, new THREE.LineBasicMaterial({
+            color: 0x59e0d8, transparent: true, opacity: 0.75,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        this._magGroup.add(this._ppTear);
+        this._builtAsh = -1;
+        this._updateTeardrop(this._efield.state().A_sh);
 
         // Dipole axis — tilts with the magnetosphere; compare against the
         // white geographic axis to watch the real daily wobble between them.
@@ -1118,6 +1170,47 @@ export class RingCurrentGlobe {
         this._arc.rotation.z = -7 * Math.PI / 12 - ARC / 2;
         this._magGroup.add(this._arc);
         this._builtPeakL = peakL;
+    }
+
+    /** Refill the teardrop polyline from the efield boundary at amplitude
+     *  aSh. Scene mapping: efield φ (0 = noon, +π/2 = dusk) → θ = −φ, so
+     *  (x, z) = (L·cosφ, −L·sinφ) — dusk bulge lands on −Z. */
+    _updateTeardrop(aSh) {
+        if (!(aSh > 0) || Math.abs(aSh - this._builtAsh) < 0.02 * Math.max(0.05, this._builtAsh)) return;
+        this._builtAsh = aSh;
+        const n = this._tearPos.length / 3;
+        for (let i = 0; i < n; i++) {
+            const phi = (i / n) * 2 * Math.PI;
+            const L = boundaryL(phi, aSh);
+            const j = i * 3;
+            this._tearPos[j]     = L * Math.cos(phi);
+            this._tearPos[j + 1] = 0;
+            this._tearPos[j + 2] = -L * Math.sin(phi);
+        }
+        const attr = this._ppTear.geometry.getAttribute('position');
+        attr.needsUpdate = true;
+        this._ppTear.geometry.computeBoundingSphere();
+    }
+
+    /** Track A render layer — airglow shell + fountain streamlines, Earth-
+     *  fixed (children of the spin group so the bands snake with the real
+     *  dip equator under the terminator). */
+    _buildIonosphere() {
+        this._ionoLayer = new IonosphereLayer(this._iono);
+        this._earthSpin.add(this._ionoLayer.group);
+    }
+
+    /** Step the field core + fountain kernel on the sim clock and refresh
+     *  their visuals. dSimH = 0 while paused, so the shielding ODE, the
+     *  fountain, and every pulse cue hold with the rest of the scene. */
+    _stepIonosphere(dt, dSimH, simNow) {
+        const dSimSec = dSimH * 3600;
+        if (dSimSec > 0) {
+            this._efield.step(dSimSec);
+            this._iono.tick(simNow, dSimSec, { dA: this._efield.state().dA });
+        }
+        this._updateTeardrop(this._efield.state().A_sh);
+        this._ionoLayer.update(dt, dSimSec, this._tView, subsolarPoint(simNow));
     }
 
     _buildSunAndTransit() {
@@ -2865,6 +2958,13 @@ export class RingCurrentGlobe {
             });
             if (!this._heatSpunUp) { this._heatSpunUp = true; this._heatSpinup = 3 * 3600; }
         }
+        // Same live driver into the M-I field core and the fountain — one
+        // input, three coupled readouts (HUD bars, teardrop, airglow).
+        this._efield.setDriver({
+            kp: Number.isFinite(now.kp) ? now.kp : undefined,
+            vbs: this._driverVbs,
+        });
+        this._iono.setDriver({ kp: Number.isFinite(now.kp) ? now.kp : undefined });
         this._setCompositionMix(now.oxygenFraction);
         for (const p of this._popList ?? []) {
             this._syncStateUniforms(p.mat);
@@ -2906,6 +3006,17 @@ export class RingCurrentGlobe {
     /** The shared SimClock — the page's τ UI drives this same instance. */
     get clock() { return this._clock; }
 
+    /** Live M-I shielding state { A_drv, A_sh, dA, stagnationL } — the
+     *  page's driver-panel bars read this every UI tick. */
+    efieldState() { return this._efield.state(); }
+
+    /** The fountain kernel (read-only use: bubble counts, situation text). */
+    get ionosphere() { return this._iono; }
+
+    /** Show/hide the Track A ionosphere visuals (airglow + streamlines) —
+     *  the teardrop plasmapause is magnetosphere furniture and stays. */
+    setIonosphereVisible(on) { this._ionoLayer.setVisible(on); }
+
     /** Legacy spelling kept for probes/back-compat: sets the SimClock τ. */
     setTimeCompression(x) {
         this._clock.setTau(x);
@@ -2939,6 +3050,7 @@ export class RingCurrentGlobe {
         this._simHours += dSimH;
         this._lastDt = dt;
         this._stepTransportLayers(dt, dSimH);
+        this._stepIonosphere(dt, dSimH, simNow);
         if (this._enaEnabled && this._enaSweep) {
             this._enaPhase = (this._enaPhase + dt * this._enaSweepRate) % (2 * Math.PI);
             if (this._enaSliderEl) this._enaSliderEl.value = String(Math.round(this._enaPhase / (2 * Math.PI) * 1000));
@@ -3776,6 +3888,7 @@ export class RingCurrentGlobe {
         this._bloomBlit?.dispose?.();
         this._heatTex?.dispose?.();
         this._heatPanel?.remove();
+        this._ionoLayer?.dispose?.();
         this._enaTex?.dispose?.();
         this._enaPanel?.geometry?.dispose?.();
         this._enaPanel?.material?.dispose?.();
