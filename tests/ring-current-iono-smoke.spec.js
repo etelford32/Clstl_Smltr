@@ -98,7 +98,48 @@ test('ionosphere layer boots, teardrop bulges duskward, penetration reaches the 
     await row.click();
     expect(await page.evaluate(() => window.rcGlobe._ionoLayer.group.visible)).toBe(true);
 
-    // 5. Clean run.
+    // 5. M2: the WFC cell engine runs on the sim clock and its bake is the
+    //    global shell texture; the hover inspector's conversion math
+    //    (world point → maglat/MLT → cell → state + why) is pinned via
+    //    cellInfoAt with a point minted over the north polar/auroral zone.
+    const wfc = await page.evaluate(() => {
+        const g = window.rcGlobe;
+        let painted = 0;
+        const d = g._ionoLayer._mapData;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 40) painted++;
+        // Local shell point at geographic 62.5°N, 72.68°W (the dipole-pole
+        // meridian → maglat ≈ 72°), pushed through the live world matrix.
+        const lat = 62.5 * Math.PI / 180, lon = -72.68 * Math.PI / 180, r = 1.03;
+        const local = g._tmpV.set(
+            r * Math.cos(lat) * Math.cos(lon),
+            r * Math.sin(lat),
+            -r * Math.cos(lat) * Math.sin(lon)).clone();
+        const world = g._ionoLayer.mapShell.localToWorld(local);
+        const info = g.cellInfoAt(world);
+        return {
+            epochs: g.cells.stats.epochs,
+            contradictions: g.cells.stats.contradictions,
+            mapVisible: g._ionoLayer.mapShell.visible,
+            painted, info,
+        };
+    });
+    expect(wfc.epochs).toBeGreaterThan(0);
+    expect(wfc.contradictions).toBe(0);
+    expect(wfc.mapVisible).toBe(true);
+    expect(wfc.painted).toBeGreaterThan(200);
+    expect(wfc.info).not.toBeNull();
+    expect(['quiet', 'crest', 'bubble', 'arc', 'diffuse', 'trough']).toContain(wfc.info.state);
+    expect(Math.abs(wfc.info.maglat)).toBeGreaterThan(65);
+    expect(wfc.info.why.length).toBeGreaterThan(0);
+
+    // Map toggle is independent of the airglow toggle.
+    const mapRow = page.locator('.rc-legend-pop[data-pop="cells"]');
+    await mapRow.click();
+    expect(await page.evaluate(() => window.rcGlobe._ionoLayer.mapShell.visible)).toBe(false);
+    await mapRow.click();
+    expect(await page.evaluate(() => window.rcGlobe._ionoLayer.mapShell.visible)).toBe(true);
+
+    // 6. Clean run.
     expect(shaderErrors).toEqual([]);
     expect(pageErrors).toEqual([]);
 });

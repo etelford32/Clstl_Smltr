@@ -182,6 +182,21 @@ const FIELDS = (kp, extra = {}) => ({
     for (let i = 3; i < tex.length; i += 4) if (tex[i] > 40) painted++;
     assert.ok(painted > 500, `bake painted non-quiet texels (${painted})`);
 
+    // Caller palette is honored (ring-current.html mutes crest/bubble so
+    // the analytic airglow never gets double-painted).
+    const muted = Uint8Array.from([
+        0, 0, 0, 0,   0, 0, 0, 0,   0, 0, 0, 0,
+        64, 255, 128, 77,   40, 160, 90, 77,   60, 120, 255, 77,
+    ]);
+    const tex2 = eng.bake(3.4, new Uint8Array(BAKE_W * BAKE_H * 4), muted);
+    let a77 = 0, aOther = 0;
+    for (let i = 3; i < tex2.length; i += 4) {
+        if (tex2[i] === 77) a77++;
+        else if (tex2[i] !== 0) aOther++;
+    }
+    assert.ok(a77 > 200, `custom palette painted (${a77})`);
+    assert.equal(aOther, 0, 'no texel outside the custom palette alphas');
+
     console.log(`  · perf @ node: full epoch ${tFull.toFixed(1)} ms · ` +
         `incremental ${tIncr.toFixed(1)} ms · bake first ${tBake0.toFixed(1)} ms / ` +
         `steady ${tBake.toFixed(2)} ms (${N_GRID} cells, ${BAKE_W}×${BAKE_H})`);

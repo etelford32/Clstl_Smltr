@@ -20,7 +20,13 @@ a hard prerequisite for everything else.*
 > on crests; in-cell spacing lands ~100–400 km, test-pinned), and the Track B
 > STARTER kernel shipped as `js/ionosphere-cells.js` + `tests/
 > ionosphere-cells.mjs` (6 states, priors, adjacency, incremental jittered-
-> argmax collapse, 288×192 bake). M2 render integration, M3, M4 remain open.
+> argmax collapse, 288×192 bake).
+>
+> **Third patch: M2 COMPLETE** — the cell engine runs live on the SimClock
+> (10-sim-min epochs, deterministic per epoch number), the bake is the
+> global regional-state shell on ring-current.html (crest/bubble muted —
+> the analytic airglow owns them), and the per-cell `why` inspector rides
+> the globe's hover tooltip. M3 (descent) and M4 (full vocabulary) open.
 
 ---
 
@@ -269,9 +275,14 @@ draw-count already in the debug HUD — add a `cells` counter.
   coupling. First visible "regions interact" moment. *(the showpiece —
   DONE 2026-07-20)*
 - **M2** Track B cell engine with 6 starter states (quiet, crest, bubble-active,
-  arc, diffuse, trough) + inspector `why`. Global map bake. *(kernel + bake +
-  perf experiment DONE 2026-07-20 — `js/ionosphere-cells.js`; page render
-  integration still open)*
+  arc, diffuse, trough) + inspector `why`. Global map bake. *(DONE 2026-07-20 —
+  `js/ionosphere-cells.js` kernel + perf experiment, then wired: the engine
+  steps on the SimClock at 10-sim-min epochs (epoch number = ⌊simMs/10min⌋,
+  so scrubs/wraps re-collapse identically), the bake renders as an Earth-
+  fixed shell under the airglow with crest/bubble texels MUTED (the analytic
+  layer owns those — no double-painting), and hovering the map shows the
+  cell's state + `why` priors through the globe tooltip. Legend row
+  `data-pop="cells"` toggles it independently of the airglow.)*
 - **M3** Track C descent: exaggeration tween, Surface view, LOD instancing for
   arcs + bubbles, column inspector.
 - **M4** Full state vocabulary (SAPS, patches, TOI, SED, storm O/N₂ depletion),

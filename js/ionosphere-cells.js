@@ -80,6 +80,33 @@ export const mltCenter = (j) => j + 0.5;                // MLT hours
 // Bake target — plan C.4's global shell texture.
 export const BAKE_W = 288, BAKE_H = 192;
 
+// IGRF-13 dipole pole (epoch 2025.0) — same constants as coords.js / the
+// fountain kernel (literal: this module stays THREE-free).
+const POLE_LAT = 80.65 * Math.PI / 180;
+const POLE_LON = -72.68 * Math.PI / 180;
+
+/** Centered-tilted-dipole magnetic latitude (deg) of a geographic point —
+ *  the SAME mapping the bake's static texel table uses; exported so the
+ *  page-side cell inspector converts identically. */
+export function magLatDeg(latDeg, lonDeg) {
+    const lat = latDeg * Math.PI / 180, lon = lonDeg * Math.PI / 180;
+    const sinMag = Math.sin(lat) * Math.sin(POLE_LAT)
+        + Math.cos(lat) * Math.cos(POLE_LAT) * Math.cos(lon - POLE_LON);
+    return Math.asin(Math.max(-1, Math.min(1, sinMag))) * 180 / Math.PI;
+}
+
+/** Default bake palette (RGBA per state, prototype legibility). Callers may
+ *  pass their own — ring-current.html mutes crest/bubble to alpha 0 because
+ *  the analytic airglow shell already owns those two states on the globe. */
+export const BAKE_PALETTE = Uint8Array.from([
+    10, 12, 24, 30,       // quiet: near-transparent deep blue
+    255, 92, 56, 200,     // crest: 630 nm red-orange
+    40, 8, 16, 235,       // bubble: dark bite
+    64, 255, 128, 220,    // arc: auroral green
+    40, 160, 90, 150,     // diffuse: dim green
+    60, 120, 255, 130,    // trough: dim blue
+]);
+
 // ── Priors ───────────────────────────────────────────────────────────────────
 
 /** Feldstein-flavored auroral oval center |maglat| (deg). Kp 1 midnight
@@ -376,35 +403,22 @@ export class IonosphereCells {
      * pole) and precomputed on first use; per-epoch cost is pure lookups.
      * `utH` places the sun-fixed MLT grid under the geographic texels.
      */
-    bake(utH, out = new Uint8Array(BAKE_W * BAKE_H * 4)) {
+    bake(utH, out = new Uint8Array(BAKE_W * BAKE_H * 4), PAL = BAKE_PALETTE) {
         if (!this._texLatIdx) {
             this._texLatIdx = new Uint8Array(BAKE_W * BAKE_H);
             this._texLon = new Float32Array(BAKE_W);
-            const pLat = 80.65 * Math.PI / 180, pLon = -72.68 * Math.PI / 180;
-            const sinP = Math.sin(pLat), cosP = Math.cos(pLat);
             for (let x = 0; x < BAKE_W; x++) {
                 this._texLon[x] = -180 + (x + 0.5) * (360 / BAKE_W);
             }
             for (let y = 0; y < BAKE_H; y++) {
-                const lat = (90 - (y + 0.5) * (180 / BAKE_H)) * Math.PI / 180;
+                const lat = 90 - (y + 0.5) * (180 / BAKE_H);
                 for (let x = 0; x < BAKE_W; x++) {
-                    const lon = this._texLon[x] * Math.PI / 180;
-                    const sinMag = Math.sin(lat) * sinP + Math.cos(lat) * cosP * Math.cos(lon - pLon);
-                    const maglat = Math.asin(Math.max(-1, Math.min(1, sinMag))) * 180 / Math.PI;
+                    const maglat = magLatDeg(lat, this._texLon[x]);
                     this._texLatIdx[y * BAKE_W + x] =
                         Math.max(0, Math.min(N_LAT - 1, Math.floor((maglat + 90) / 5)));
                 }
             }
         }
-        // State → RGBA palette (prototype: legibility over beauty).
-        const PAL = [
-            10, 12, 24, 30,       // quiet: near-transparent deep blue
-            255, 92, 56, 200,     // crest: 630 nm red-orange
-            40, 8, 16, 235,       // bubble: dark bite
-            64, 255, 128, 220,    // arc: auroral green
-            40, 160, 90, 150,     // diffuse: dim green
-            60, 120, 255, 130,    // trough: dim blue
-        ];
         for (let x = 0; x < BAKE_W; x++) {
             const mltIdx = Math.floor((((utH + this._texLon[x] / 15) % 24) + 24) % 24);
             for (let y = 0; y < BAKE_H; y++) {

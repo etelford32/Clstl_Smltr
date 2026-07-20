@@ -549,6 +549,7 @@ body {
             <span class="rc-legend-pop" data-pop="iono" role="button" tabindex="0" aria-pressed="true" title="Show / hide the ionosphere layer (airglow, bubbles, fountain streamlines)"><span class="rc-dot" style="background:#ff5e45"></span>Ionosphere &mdash; 630 nm airglow: Appleton crest bands snake the dip equator (night side)</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;dark bite-outs = plasma bubbles (rise, drift east, shimmer = GPS scintillation)</span><br>
             <span style="color:#5d6684">&nbsp;&nbsp;&nbsp;cyan arcs = fountain streamlines &mdash; pulse rate &prop; true E&times;B drift (cue, not to scale); undershielding surges them</span><br>
+            <span class="rc-legend-pop" data-pop="cells" role="button" tabindex="0" aria-pressed="true" title="Show / hide the regional-state map (WFC cell engine, 5°&times;1h magnetic grid, 10-sim-min epochs) — hover any region for its state and the priors behind it"><span class="rc-dot" style="background:#5d8cff"></span>Regional states &mdash; WFC map: trough (blue) &middot; diffuse flank (dim green) &middot; arc cells &mdash; hover to inspect <b>why</b></span><br>
             <span class="rc-dot" style="background:#dfe8ff"></span>Spin axis &middot; <span class="rc-dot" style="background:#ff9a3d"></span>dipole axis &mdash; watch the daily wobble<br>
             <span class="rc-dot" style="background:#37e0a0"></span>Aurora oval &mdash; live Kp/Bz at the magnetic pole<br>
             <span class="rc-dot" style="background:#ff5c47"></span>Incoming wind &mdash; southward Bz<br>
@@ -1054,9 +1055,11 @@ if (globe) {
         const apply = (on) => {
             el.classList.toggle('rc-off', !on);
             el.setAttribute('aria-pressed', on ? 'true' : 'false');
-            // 'iono' is a scene layer (airglow + streamlines), not a
-            // particle population — different switch, same legend UX.
+            // 'iono' / 'cells' are scene layers (airglow + streamlines /
+            // WFC state map), not particle populations — different
+            // switches, same legend UX.
             if (key === 'iono') globe.setIonosphereVisible(on);
+            else if (key === 'cells') globe.setCellsMapVisible(on);
             else globe.setPopulationVisible(key, on);
         };
         apply(!hidden[key]);                         // restore persisted state

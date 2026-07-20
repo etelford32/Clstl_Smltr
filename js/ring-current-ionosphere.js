@@ -37,6 +37,19 @@
  *                   scale)" — the same disclosed-exception pattern as the
  *                   ×1 bounce.
  *
+ *   WFC STATE MAP   the Track B cell engine's 288×192 equirect bake
+ *                   (ionosphere-cells.js) on its own translucent shell —
+ *                   the "what regime is this region in" overlay: trough
+ *                   band, diffuse-aurora flank, discrete arc cells. Muted
+ *                   palette on THIS page: crest/bubble texels bake to
+ *                   alpha 0 because the analytic airglow above already
+ *                   draws those two states continuously — the map never
+ *                   double-paints them. Rebaked when the globe signals an
+ *                   epoch (markMapDirty) or when Earth has rotated ~0.1 h
+ *                   under the sun-fixed MLT pattern; NormalBlending (it is
+ *                   an overlay legend, not a light source). Hover the map
+ *                   on the page for the per-cell `why` inspector.
+ *
  * Perf: shell = 1 draw call + one 72-texel texture upload at 4 Hz; lines =
  * 12 draw calls with 2 scalar uniforms each per frame. Bubble uniforms cap
  * at 16 strongest (the kernel may carry more; selection at the 4 Hz sync —
@@ -45,6 +58,7 @@
 
 import * as THREE from 'three';
 import { AIRGLOW_ALT_KM, N_CELLS, CELL_DEG, dipEquatorLat } from './ionosphere-fountain.js';
+import { BAKE_W, BAKE_H } from './ionosphere-cells.js';
 import { GEOMAG_NORTH_LAT_2025, GEOMAG_NORTH_LON_2025 } from './geo/coords.js';
 
 const R_E_KM = 6371;
@@ -154,12 +168,24 @@ function streamlineMaterial() {
     });
 }
 
+// Page palette for the WFC map bake: crest + bubble muted (see header).
+const MAP_PALETTE = Uint8Array.from([
+    10, 12, 24, 16,       // quiet: whisper of deep blue
+    0, 0, 0, 0,           // crest: analytic airglow owns it
+    0, 0, 0, 0,           // bubble: analytic airglow owns it
+    64, 255, 128, 105,    // arc: discrete auroral cells (EarthSkin glows above)
+    40, 160, 90, 95,      // diffuse: equatorward flank
+    60, 120, 255, 110,    // trough: subauroral depletion band
+]);
+
 export class IonosphereLayer {
     /**
      * @param {import('./ionosphere-fountain.js').IonosphereFountain} fountain
+     * @param {import('./ionosphere-cells.js').IonosphereCells} [cells]
      */
-    constructor(fountain) {
+    constructor(fountain, cells = null) {
         this._fountain = fountain;
+        this._cells = cells;
         this.group = new THREE.Group();
         this._syncT = 0;
 
@@ -177,6 +203,59 @@ export class IonosphereLayer {
         this.group.add(this._shell);
 
         this._buildStreamlines();
+        if (this._cells) this._buildStateMap();
+    }
+
+    /** The Track B regional-state map shell (see header). */
+    _buildStateMap() {
+        this._mapData = new Uint8Array(BAKE_W * BAKE_H * 4);
+        this._mapTex = new THREE.DataTexture(this._mapData, BAKE_W, BAKE_H, THREE.RGBAFormat);
+        this._mapTex.wrapS = THREE.RepeatWrapping;
+        this._mapTex.magFilter = THREE.LinearFilter;
+        this._mapTex.minFilter = THREE.LinearFilter;
+        this._mapDirty = true;
+        this._mapUtH = -1;
+        this._mapMat = new THREE.ShaderMaterial({
+            transparent: true,
+            depthWrite: false,
+            uniforms: { uMap: { value: this._mapTex } },
+            vertexShader: `
+                varying vec3 vN;
+                void main() {
+                    vN = normalize(position);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform sampler2D uMap;
+                varying vec3 vN;
+                const float PI = 3.14159265358979;
+                void main() {
+                    vec3 n = normalize(vN);
+                    // Same frame as the airglow shader: lon 0 → +X, east → −Z.
+                    // Bake rows run north → south, DataTexture v=0 = row 0.
+                    float lon = atan(-n.z, n.x);
+                    float v = (PI * 0.5 - asin(clamp(n.y, -1.0, 1.0))) / PI;
+                    vec4 c = texture2D(uMap, vec2(lon / (2.0 * PI) + 0.5, v));
+                    if (c.a < 0.01) discard;
+                    gl_FragColor = c;
+                }`,
+        });
+        // Just under the airglow shell (renderOrder 2 < 3) so bite-outs and
+        // crest bands draw over the regime map, never the reverse.
+        this._mapShell = new THREE.Mesh(
+            new THREE.SphereGeometry(1 + (AIRGLOW_ALT_KM - 60) / R_E_KM, 96, 48), this._mapMat);
+        this._mapShell.renderOrder = 2;
+        this.group.add(this._mapShell);
+    }
+
+    /** The globe signals a fresh WFC epoch — rebake on the next sync. */
+    markMapDirty() { this._mapDirty = true; }
+
+    /** The map shell mesh — the globe raycasts it for the cell inspector. */
+    get mapShell() { return this._mapShell ?? null; }
+
+    setMapVisible(on) {
+        if (this._mapShell) this._mapShell.visible = !!on;
     }
 
     /** 12 up-and-over dipole arcs anchored to the SNAKING dip equator —
@@ -235,9 +314,10 @@ export class IonosphereLayer {
      * Per-frame update. dSimSec is the SimClock delta (0 while paused);
      * subsolar {latDeg, lonDeg} comes from the globe's existing
      * subsolarPoint call — the shell's night gate uses the same sun the
-     * terminator does.
+     * terminator does. utH (sim UT hours) places the sun-fixed WFC map
+     * under the Earth-fixed texels.
      */
-    update(dtWall, dSimSec, tView, subsolar) {
+    update(dtWall, dSimSec, tView, subsolar, utH = 0) {
         if (!this.group.visible) return;
         const cells = this._fountain.cells;
         this._shellMat.uniforms.uTime.value = tView;
@@ -257,6 +337,17 @@ export class IonosphereLayer {
         this._syncT -= dtWall;
         if (this._syncT > 0) return;
         this._syncT = 0.25;
+        // WFC map rebake: on a fresh epoch, or once Earth has rotated far
+        // enough (~0.1 h ≈ 1.5° lon ≈ one texel) that the sun-fixed MLT
+        // pattern has visibly slid under the geographic texels. Steady bake
+        // ≈ 0.3 ms (perf-probed) — cheap at this cadence.
+        if (this._mapShell && this._mapShell.visible &&
+            (this._mapDirty || Math.abs(utH - this._mapUtH) > 0.1)) {
+            this._mapDirty = false;
+            this._mapUtH = utH;
+            this._cells.bake(utH, this._mapData, MAP_PALETTE);
+            this._mapTex.needsUpdate = true;
+        }
         for (let i = 0; i < N_CELLS; i++) {
             const c = cells[i];
             const j = i * 4;
@@ -288,6 +379,7 @@ export class IonosphereLayer {
 
     dispose() {
         this._cellTex.dispose();
+        this._mapTex?.dispose();
         // Geometries/materials are disposed by the globe's scene traversal.
     }
 }

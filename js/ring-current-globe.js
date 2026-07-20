@@ -142,7 +142,8 @@ import { SimClock, SCALE, apparentUnitsPerSec } from './sim-clock.js';
 import { EarthSkin } from './earth-skin.js';
 import { RingCurrentTransport } from './ring-current-transport.js';
 import { ConvectionEField, boundaryL } from './ring-current-efield.js';
-import { IonosphereFountain } from './ionosphere-fountain.js';
+import { IonosphereFountain, N_CELLS as IONO_LON_CELLS } from './ionosphere-fountain.js';
+import { IonosphereCells, STATES as CELL_STATES, magLatDeg } from './ionosphere-cells.js';
 import { IonosphereLayer } from './ring-current-ionosphere.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
@@ -1192,17 +1193,26 @@ export class RingCurrentGlobe {
         this._ppTear.geometry.computeBoundingSphere();
     }
 
-    /** Track A render layer — airglow shell + fountain streamlines, Earth-
-     *  fixed (children of the spin group so the bands snake with the real
-     *  dip equator under the terminator). */
+    /** Track A render layer (airglow shell + fountain streamlines) plus the
+     *  Track B regional-state map — all Earth-fixed (children of the spin
+     *  group so the bands snake with the real dip equator under the
+     *  terminator, and the WFC map's texels stay geographic). */
     _buildIonosphere() {
-        this._ionoLayer = new IonosphereLayer(this._iono);
+        this._cells = new IonosphereCells();
+        this._cellsKp = 1;
+        this._cellsEpochN = -1;
+        this._cellsCrest = new Float32Array(IONO_LON_CELLS);
+        this._cellsBubExt = new Float32Array(IONO_LON_CELLS);
+        this._ionoLayer = new IonosphereLayer(this._iono, this._cells);
         this._earthSpin.add(this._ionoLayer.group);
     }
 
     /** Step the field core + fountain kernel on the sim clock and refresh
      *  their visuals. dSimH = 0 while paused, so the shielding ODE, the
-     *  fountain, and every pulse cue hold with the rest of the scene. */
+     *  fountain, and every pulse cue hold with the rest of the scene. The
+     *  WFC cell engine runs on 10-sim-min epochs whose number derives from
+     *  ABSOLUTE sim time — a scrub or sweep wrap that revisits an epoch
+     *  re-collapses it identically (deterministic RNG per (cell, epoch)). */
     _stepIonosphere(dt, dSimH, simNow) {
         const dSimSec = dSimH * 3600;
         if (dSimSec > 0) {
@@ -1210,7 +1220,55 @@ export class RingCurrentGlobe {
             this._iono.tick(simNow, dSimSec, { dA: this._efield.state().dA });
         }
         this._updateTeardrop(this._efield.state().A_sh);
-        this._ionoLayer.update(dt, dSimSec, this._tView, subsolarPoint(simNow));
+        const utH = (simNow / 3.6e6) % 24;
+        const epochN = Math.floor(simNow / 600e3);
+        if (epochN !== this._cellsEpochN) {
+            this._cellsEpochN = epochN;
+            // Live fields snapshot: fountain crests per lon; live bubbles
+            // binned to their lon cell as a max field-aligned extent.
+            for (let i = 0; i < IONO_LON_CELLS; i++) {
+                this._cellsCrest[i] = this._iono.cells[i].crest;
+                this._cellsBubExt[i] = 0;
+            }
+            for (const b of this._iono.allBubbles()) {
+                const i = Math.max(0, Math.min(IONO_LON_CELLS - 1,
+                    Math.floor((b.lonDeg + 180) / (360 / IONO_LON_CELLS))));
+                if (b.latExtentDeg > this._cellsBubExt[i]) this._cellsBubExt[i] = b.latExtentDeg;
+            }
+            this._cells.epoch({
+                kp: this._cellsKp, utH,
+                crest: this._cellsCrest, bubbleExtent: this._cellsBubExt,
+            }, epochN);
+            this._ionoLayer.markMapDirty();
+        }
+        this._ionoLayer.update(dt, dSimSec, this._tView, subsolarPoint(simNow), utH);
+    }
+
+    /**
+     * Regional-state inspector: WFC cell under a world-space point on the
+     * map shell → { state, maglat, mlt, why } (null off-shell). Exposed for
+     * the hover tooltip AND the smoke test — the conversion math is the
+     * part worth pinning.
+     */
+    cellInfoAt(worldPoint) {
+        const shell = this._ionoLayer?.mapShell;
+        if (!shell || !this._cells) return null;
+        const p = shell.worldToLocal(this._tmpV.copy(worldPoint));
+        const r = p.length();
+        if (r < 1e-6) return null;
+        const latDeg = Math.asin(Math.max(-1, Math.min(1, p.y / r))) * 180 / Math.PI;
+        const lonDeg = Math.atan2(-p.z, p.x) * 180 / Math.PI;   // coords.js frame
+        const maglat = magLatDeg(latDeg, lonDeg);
+        const utH = (this._clock.now() / 3.6e6) % 24;
+        const mlt = ((utH + lonDeg / 15) % 24 + 24) % 24;
+        const i = Math.max(0, Math.min(35, Math.floor((maglat + 90) / 5)));
+        const j = Math.max(0, Math.min(23, Math.floor(mlt)));
+        const c = i * 24 + j;
+        return {
+            state: CELL_STATES[this._cells.state[c]],
+            maglat, mlt, latDeg, lonDeg,
+            why: this._cells.why[c] ?? [],
+        };
     }
 
     _buildSunAndTransit() {
@@ -2715,6 +2773,17 @@ export class RingCurrentGlobe {
             if (!best) best = { kind: 'parcel', p };
             break;
         }
+        // WFC regional-state map: last-priority pick (particles and parcels
+        // win), only while the map layer is shown. The `why` array IS the
+        // M2 inspector — every region explains itself on hover.
+        const mapShell = this._ionoLayer?.mapShell;
+        if (!best && mapShell && mapShell.visible && this._ionoLayer.group.visible) {
+            const hit = this._ray.intersectObject(mapShell)[0];
+            if (hit) {
+                const info = this.cellInfoAt(hit.point);
+                if (info) best = { kind: 'cell', info };
+            }
+        }
 
         if (!best) { this._tipEl.style.display = 'none'; return; }
         const fmt = (x, d, u) => Number.isFinite(x) ? `${x.toFixed(d)}${u}` : '—';
@@ -2739,6 +2808,20 @@ export class RingCurrentGlobe {
             html = `<b style="color:${color}">${name}</b> · ${pop.eKev[i].toFixed(0)} keV` +
                 `<br>L ${L.toFixed(2)} Rᴇ · drift ${fmt(T, 1, ' h')}/lap ` +
                 `${best.key === 'electrons' ? 'eastward' : 'westward'}${status}`;
+        } else if (best.kind === 'cell') {
+            // The M2 inspector: state + the priors that argued for it.
+            const info = best.info;
+            const COL = { quiet: '#8b94ad', crest: '#ff5c47', bubble: '#ff8894',
+                          arc: '#40ff80', diffuse: '#37e0a0', trough: '#5d8cff' };
+            const why = info.why.length
+                ? info.why.map(w => `${w.state} ${w.w}`).join(' · ')
+                : '—';
+            html = `<b style="color:${COL[info.state] ?? '#e8edf7'}">` +
+                `${info.state.toUpperCase()}</b> — ionospheric regime` +
+                `<br>${Math.abs(info.maglat).toFixed(0)}°${info.maglat >= 0 ? 'N' : 'S'} maglat` +
+                ` · ${info.mlt.toFixed(1)} MLT` +
+                `<br><span style="color:#8b94ad">why: ${why}</span>` +
+                `<br><span style="color:#5d6684">WFC regional map · 5°×1h · epoch 10 sim-min</span>`;
         } else {
             const p = best.p;
             const etaMin = Math.max(0, Math.round((p.tArrive - wallNow) / 60_000));
@@ -3013,9 +3096,16 @@ export class RingCurrentGlobe {
     /** The fountain kernel (read-only use: bubble counts, situation text). */
     get ionosphere() { return this._iono; }
 
+    /** The WFC cell engine (read-only: stats, states, why — smoke probes). */
+    get cells() { return this._cells; }
+
     /** Show/hide the Track A ionosphere visuals (airglow + streamlines) —
      *  the teardrop plasmapause is magnetosphere furniture and stays. */
     setIonosphereVisible(on) { this._ionoLayer.setVisible(on); }
+
+    /** Show/hide the Track B regional-state map shell (its hover inspector
+     *  gates on the same flag). Independent of the airglow toggle. */
+    setCellsMapVisible(on) { this._ionoLayer.setMapVisible(on); }
 
     /** Legacy spelling kept for probes/back-compat: sets the SimClock τ. */
     setTimeCompression(x) {
