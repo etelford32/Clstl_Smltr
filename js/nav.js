@@ -63,6 +63,7 @@ const NAV_DROPDOWNS = [
             { href: 'auroracle.html', label: 'AurOracle', sub: 'Predict the aurora · 7-night + 30-day outlook', tier: 'public', icon: '🌌', badge: 'NEW', id: 'auroracle' },
             { href: 'ring-current.html', label: 'Ring Current', sub: 'Live Dst digital twin · L1-driven forecast', tier: 'public', icon: '🧲', badge: 'NEW', id: 'ring-current' },
             { href: 'shielding-lab.html', label: 'Shielding Lab', sub: 'M–I coupling · SAPS + penetration E-fields', tier: 'public', icon: '🛡️', badge: 'NEW', id: 'shielding-lab' },
+            { href: 'flux-rope.html', label: 'Flux Rope Simulator', sub: 'CME Bz forecasting · ensemble Sun→Earth', tier: 'public', icon: '🌀', badge: 'NEW', id: 'flux-rope' },
             { href: 'far-side-watch.html', label: 'Far-Side Watch', sub: 'Regions rotating in · days-to-weeks horizon', tier: 'public', icon: '🌗', badge: 'NEW', id: 'far-side-watch' },
             { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
             { section: 'Planetary systems' },

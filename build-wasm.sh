@@ -122,6 +122,22 @@ else
     echo "WARN: rust-ring-current build failed — serving committed js/ring-current-wasm binary."
 fi
 
+# ── Build Flux Rope Simulator forecasting engine ─────────────
+# Dependency-free extern "C" module (no wasm-bindgen needed): plain cargo
+# build, artifact copied verbatim. The committed binary at
+# js/flux-rope-wasm/flux_rope_core.wasm serves as the fallback if this
+# build ever fails on Vercel's toolchain. Physics is gated by `cargo test`
+# in rust-flux-rope/ (spec: FLUX_ROPE_PHYSICS_SPEC.md); the St. Patrick's
+# 2015 validation is pinned by node tests/flux-rope-kernel-smoke.mjs.
+echo "Building flux-rope-core WASM (CME flux-rope forecasting engine)..."
+if (cd rust-flux-rope && cargo build --release --target wasm32-unknown-unknown); then
+    mkdir -p js/flux-rope-wasm
+    cp rust-flux-rope/target/wasm32-unknown-unknown/release/flux_rope_core.wasm \
+       js/flux-rope-wasm/flux_rope_core.wasm
+else
+    echo "WARN: rust-flux-rope build failed — serving committed js/flux-rope-wasm binary."
+fi
+
 # ── Build star renderer (solar flare sim) ─────────────────────
 # NOT built on Vercel. The Bevy dep graph (~479 crates) is too fragile for
 # Vercel's older rustc — a transitive `constant_time_eq 0.4.3` release broke

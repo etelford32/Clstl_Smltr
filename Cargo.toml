@@ -20,7 +20,8 @@ resolver = "2"
 #   rust-gravity/  Gravity Lab N-body + test-particle kernel (build-wasm.sh)
 #   rust-shielding/ Shielding Lab ionospheric potential solver (build-wasm.sh)
 #   rust-ring-current/ Ring-current transport core (build-wasm.sh)
-exclude  = ["rust", "rust-sstar", "rust-forecast", "rust-sgp4", "rust-sunfield", "rust-sirius", "rust-abell85", "rust-gravity", "rust-shielding", "rust-ring-current"]
+#   rust-flux-rope/ Flux Rope Simulator CME forecasting engine (build-wasm.sh)
+exclude  = ["rust", "rust-sstar", "rust-forecast", "rust-sgp4", "rust-sunfield", "rust-sirius", "rust-abell85", "rust-gravity", "rust-shielding", "rust-ring-current", "rust-flux-rope"]
 
 [profile.release]
 opt-level        = 3

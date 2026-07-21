@@ -2047,6 +2047,14 @@ nav {
             O'Brien &amp; McPherron (2002) Dst injection ·
             Yashiro et al. (2006) flare&ndash;CME statistics
         </div>
+
+        <!-- ── FLUX-ROPE Bz FORECAST (the "next" to the ticker's "now") ── -->
+        <!-- Self-mounting, fail-quiet: js/flux-rope-dashboard.js runs the
+             SAME flux-rope-core WASM ensemble as flux-rope.html on the
+             latest Earth-directed DONKI analysis, conditioned on live
+             DSCOVR/ACE Bz (particle filter). The section above forecasts
+             WHEN a CME arrives; this one forecasts WHAT ITS Bz DOES. -->
+        <div id="flux-rope-forecast-panel" data-lab-panel="flux-rope-forecast"></div>
     </div>
 
     <!-- ── EARTH-SIDE SPACE WEATHER FORECAST ────────────────────────────── -->
@@ -5942,6 +5950,12 @@ try {
         variantsUrl: 'data/layout-variants/space-weather.json',
     });
 } catch (e) { console.warn('[layout-lab] disabled:', e); }
+</script>
+
+<!-- Flux-rope Bz forecast panel (fail-quiet; see js/flux-rope-dashboard.js) -->
+<script type="module">
+import { mountFluxRopeDashboard } from './js/flux-rope-dashboard.js';
+mountFluxRopeDashboard('flux-rope-forecast-panel');
 </script>
 
 </body>
