@@ -132,6 +132,10 @@ pub struct EnsembleResult {
     pub member_bz: Vec<f32>,
     /// Full per-member |B| series, same layout.
     pub member_bt: Vec<f32>,
+    /// Per-member Bz at the AUXILIARY observer (STEREO-A, spec §13) — same
+    /// [step][member] layout; EMPTY when no aux observer was set for the
+    /// run. Pre-arrival conditioning scores members against this.
+    pub member_bz_aux: Vec<f32>,
     /// Importance weights (normalized). None = uniform (prior). Some after
     /// assimilate() — every statistic above is then weight-weighted.
     pub weights: Option<Vec<f64>>,
@@ -186,6 +190,9 @@ fn percentile_sorted(a: &[f32], q: f64) -> f32 {
 /// part of the determinism contract), keeps each rope's launch offset from
 /// the fit, and flies the observer through the superposed train (spec §10).
 /// A 1-rope train reproduces the v1 single-rope ensemble draw-for-draw.
+/// `aux`: optional second observer position (STEREO-A). Recording it draws
+/// NOTHING from the RNG and never touches the primary statistics — the same
+/// seed yields a bit-identical L1 prior with or without it (pinned by test).
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     fits: &[RopeEntry],
@@ -196,12 +203,14 @@ pub fn run(
     dt_s: f64,
     n_steps: usize,
     obs: V3,
+    aux: Option<V3>,
 ) -> EnsembleResult {
     let mut rng = Rng::new(seed);
     let n_ropes = fits.len().max(1);
     // Per-step member samples: NaN = outside. Column layout [step][member].
     let mut bz = vec![f32::NAN; n_steps * n_members];
     let mut bt = vec![f32::NAN; n_steps * n_members];
+    let mut bz_aux = if aux.is_some() { vec![f32::NAN; n_steps * n_members] } else { Vec::new() };
     let mut arrival_h = vec![f32::NAN; n_members];
     let mut min_bz = vec![f32::NAN; n_members];
     let mut member_params = vec![0.0f32; n_members * n_ropes * MEMBER_STRIDE];
@@ -243,6 +252,15 @@ pub fn run(
                     member_min = bz_i;
                 }
             }
+            if let Some(aux_pos) = aux {
+                let (ba, ca) = field_at_set(&train, t, aux_pos);
+                if ca > 0 {
+                    // Same GSE z-component convention as the primary (§2 —
+                    // valid for observers near the Earth longitude; STA at
+                    // ±20° keeps the error small vs the 4 nT obs sigma).
+                    bz_aux[i * n_members + m] = to_gse(ba)[2] as f32;
+                }
+            }
         }
         if !member_arr.is_nan() {
             hit_members += 1;
@@ -263,6 +281,7 @@ pub fn run(
         member_params,
         member_bz: bz,
         member_bt: bt,
+        member_bz_aux: bz_aux,
         weights: None,
         ess: n_members as f64,
         temperature: 1.0,
@@ -447,13 +466,27 @@ pub fn assimilate(
     sigma_nt: f64,
     ess_floor_frac: f64,
 ) -> f64 {
-    let n_members = r.n_members;
-    if n_members == 0 {
-        return 0.0;
+    assimilate_joint(r, obs, i0, i1, sigma_nt, &[], 0, 0, sigma_nt, ess_floor_frac)
+}
+
+/// Accumulate Gaussian log-likelihood terms from one observer's series
+/// matrix ([step][member], NaN = model-outside → predicts 0 nT) into `logw`.
+/// Returns the number of finite observations consumed.
+fn accumulate_loglik(
+    series: &[f32],
+    n_members: usize,
+    n_steps: usize,
+    obs: &[f32],
+    i0: usize,
+    i1: usize,
+    sigma_nt: f64,
+    logw: &mut [f64],
+) -> usize {
+    if series.is_empty() {
+        return 0;
     }
-    let i1 = i1.min(r.n_steps).min(obs.len());
+    let i1 = i1.min(n_steps).min(obs.len());
     let inv2s2 = 0.5 / (sigma_nt * sigma_nt).max(1e-12);
-    let mut logw = vec![0.0f64; n_members];
     let mut n_obs = 0usize;
     for i in i0..i1 {
         let y = obs[i];
@@ -461,13 +494,47 @@ pub fn assimilate(
             continue;
         }
         n_obs += 1;
-        let row = &r.member_bz[i * n_members..(i + 1) * n_members];
+        let row = &series[i * n_members..(i + 1) * n_members];
         for m in 0..n_members {
             let pred = if row[m].is_nan() { 0.0 } else { row[m] as f64 };
             let d = pred - y as f64;
             logw[m] -= d * d * inv2s2;
         }
     }
+    n_obs
+}
+
+/// JOINT assimilation over the primary (L1) and auxiliary (STEREO-A, spec
+/// §13) observers: independent observations, so the log-likelihoods ADD,
+/// and the degeneracy guard tempers the JOINT likelihood once — the
+/// Bayesian combination, not two sequential filters. The aux terms use the
+/// member series recorded when the ensemble ran with an aux observer set;
+/// with no aux recording or an empty aux window this reduces exactly to the
+/// primary-only update (pinned by test).
+#[allow(clippy::too_many_arguments)]
+pub fn assimilate_joint(
+    r: &mut EnsembleResult,
+    obs: &[f32],
+    i0: usize,
+    i1: usize,
+    sigma_nt: f64,
+    obs_aux: &[f32],
+    aux_i0: usize,
+    aux_i1: usize,
+    aux_sigma_nt: f64,
+    ess_floor_frac: f64,
+) -> f64 {
+    let n_members = r.n_members;
+    if n_members == 0 {
+        return 0.0;
+    }
+    let mut logw = vec![0.0f64; n_members];
+    let mut n_obs = accumulate_loglik(
+        &r.member_bz, n_members, r.n_steps, obs, i0, i1, sigma_nt, &mut logw,
+    );
+    n_obs += accumulate_loglik(
+        &r.member_bz_aux, n_members, r.n_steps, obs_aux, aux_i0, aux_i1, aux_sigma_nt, &mut logw,
+    );
     if n_obs == 0 {
         // Nothing observed: stay on the prior (uniform), bit-identical stats.
         r.weights = None;
@@ -540,8 +607,8 @@ mod tests {
     #[test]
     fn same_seed_bitwise_reproducible() {
         let obs = observer_pos(1.0, 0.0, 0.0);
-        let a = run(&fit(), &spreads(), 42, 64, 0.0, 3600.0, 120, obs);
-        let b = run(&fit(), &spreads(), 42, 64, 0.0, 3600.0, 120, obs);
+        let a = run(&fit(), &spreads(), 42, 64, 0.0, 3600.0, 120, obs, None);
+        let b = run(&fit(), &spreads(), 42, 64, 0.0, 3600.0, 120, obs, None);
         // Bit-pattern compare: arrival/min arrays legitimately contain NaN
         // (miss members), and NaN != NaN under assert_eq.
         let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
@@ -549,14 +616,14 @@ mod tests {
         assert_eq!(bits(&a.arrival_h), bits(&b.arrival_h));
         assert_eq!(a.p_hit, b.p_hit);
         // A different seed must actually change the draw.
-        let c = run(&fit(), &spreads(), 43, 64, 0.0, 3600.0, 120, obs);
+        let c = run(&fit(), &spreads(), 43, 64, 0.0, 3600.0, 120, obs, None);
         assert_ne!(bits(&a.arrival_h), bits(&c.arrival_h));
     }
 
     #[test]
     fn zero_spread_collapses_to_deterministic_run() {
         let obs = observer_pos(1.0, 0.0, 0.0);
-        let r = run(&fit(), &Spreads::default(), 7, 32, 0.0, 1800.0, 300, obs);
+        let r = run(&fit(), &Spreads::default(), 7, 32, 0.0, 1800.0, 300, obs, None);
         assert!((r.p_hit - 1.0).abs() < 1e-12, "head-on zero-spread must always hit");
         // All members identical → the 5th and 95th percentile fans coincide.
         for i in 0..r.n_steps {
@@ -572,7 +639,7 @@ mod tests {
     #[test]
     fn spread_widens_the_fan_and_loses_some_members() {
         let obs = observer_pos(1.0, 0.0, 0.0);
-        let r = run(&fit(), &spreads(), 1234, 300, 0.0, 1800.0, 300, obs);
+        let r = run(&fit(), &spreads(), 1234, 300, 0.0, 1800.0, 300, obs, None);
         assert!(r.p_hit > 0.5 && r.p_hit <= 1.0, "p_hit {}", r.p_hit);
         // Somewhere mid-storm the 5–95 fan must be genuinely open.
         let mut max_width = 0.0f32;
@@ -594,7 +661,7 @@ mod tests {
         let obs = observer_pos(1.0, 0.0, 0.0);
         let p = RopeParams { v0_kms: 1400.0, tilt_deg: 90.0, ..Default::default() };
         let train = vec![RopeEntry::new(p, 0.0), RopeEntry::new(p, 24.0 * 3600.0)];
-        let r = run(&train, &spreads(), 99, 100, 0.0, 1800.0, 500, obs);
+        let r = run(&train, &spreads(), 99, 100, 0.0, 1800.0, 500, obs, None);
         assert_eq!(r.ropes_per_member, 2);
         assert_eq!(r.member_params.len(), 100 * 2 * MEMBER_STRIDE);
         // The two ropes of one member are DIFFERENT draws (independent).
@@ -602,13 +669,13 @@ mod tests {
         let b = &r.member_params[MEMBER_STRIDE..2 * MEMBER_STRIDE];
         assert!(a != b, "per-rope draws must be independent");
         // Deterministic under the same seed.
-        let r2 = run(&train, &spreads(), 99, 100, 0.0, 1800.0, 500, obs);
+        let r2 = run(&train, &spreads(), 99, 100, 0.0, 1800.0, 500, obs, None);
         let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&r.bz_pct), bits(&r2.bz_pct));
         assert_eq!(bits(&r.member_params), bits(&r2.member_params));
         // Two chances to hit can only help: the joint train p_hit must beat
         // a single-rope ensemble of either rope under the same priors.
-        let solo = run(&train[..1], &spreads(), 99, 100, 0.0, 1800.0, 500, obs);
+        let solo = run(&train[..1], &spreads(), 99, 100, 0.0, 1800.0, 500, obs, None);
         assert!(r.p_hit >= solo.p_hit, "train {} < solo {}", r.p_hit, solo.p_hit);
         assert!(r.p_hit > 0.6, "p_hit {}", r.p_hit);
     }
@@ -616,7 +683,7 @@ mod tests {
     #[test]
     fn assimilation_collapses_onto_truth() {
         let obs_pos = observer_pos(1.0, 0.0, 0.0);
-        let mut r = run(&fit(), &spreads(), 4242, 200, 0.0, 1800.0, 300, obs_pos);
+        let mut r = run(&fit(), &spreads(), 4242, 200, 0.0, 1800.0, 300, obs_pos, None);
         let n = r.n_members;
         // Synthetic truth: a member that genuinely HITS with signal inside
         // the observed window (a missing member predicts 0 everywhere and
@@ -664,7 +731,7 @@ mod tests {
     #[test]
     fn assimilation_with_no_observations_is_the_prior() {
         let obs_pos = observer_pos(1.0, 0.0, 0.0);
-        let mut r = run(&fit(), &spreads(), 99, 100, 0.0, 1800.0, 200, obs_pos);
+        let mut r = run(&fit(), &spreads(), 99, 100, 0.0, 1800.0, 200, obs_pos, None);
         let prior_pct = r.bz_pct.clone();
         let prior_phit = r.p_hit;
         let ess = assimilate(&mut r, &vec![f32::NAN; 200], 0, 200, 4.0, 0.1);
@@ -678,7 +745,7 @@ mod tests {
     #[test]
     fn assimilation_deterministic_and_resettable() {
         let obs_pos = observer_pos(1.0, 0.0, 0.0);
-        let mut r = run(&fit(), &spreads(), 7, 100, 0.0, 1800.0, 200, obs_pos);
+        let mut r = run(&fit(), &spreads(), 7, 100, 0.0, 1800.0, 200, obs_pos, None);
         let prior_pct = r.bz_pct.clone();
         let obs: Vec<f32> = (0..200)
             .map(|i| if (80..120).contains(&i) { -12.0 } else { f32::NAN })
@@ -696,12 +763,119 @@ mod tests {
     }
 
     #[test]
+    fn aux_observer_recording_never_touches_the_primary_prior() {
+        let l1 = observer_pos(1.0, 0.0, 0.0);
+        let sta = observer_pos(0.96, 14.0, 0.0);
+        let plain = run(&fit(), &spreads(), 77, 100, 0.0, 1800.0, 300, l1, None);
+        let with_aux = run(&fit(), &spreads(), 77, 100, 0.0, 1800.0, 300, l1, Some(sta));
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&plain.bz_pct), bits(&with_aux.bz_pct), "L1 prior must be bit-identical");
+        assert_eq!(bits(&plain.arrival_h), bits(&with_aux.arrival_h));
+        assert!(plain.member_bz_aux.is_empty());
+        assert_eq!(with_aux.member_bz_aux.len(), 300 * 100);
+        // The flank observer genuinely sees some members.
+        let aux_hits = with_aux.member_bz_aux.iter().filter(|v| !v.is_nan()).count();
+        assert!(aux_hits > 0, "STA at +14 deg must catch flanks");
+    }
+
+    /// The OSSE (Observing System Simulation Experiment) at the core of the
+    /// STEREO-A claim (spec §13): condition on the aux observer's data from
+    /// BEFORE the truth reaches L1, and the L1 forecast must sharpen.
+    #[test]
+    fn osse_sta_pre_arrival_conditioning_sharpens_the_l1_forecast() {
+        let l1 = observer_pos(1.0, 0.0, 0.0);
+        let sta = observer_pos(0.96, 14.0, 0.0);
+        // Launch aimed between Earth and STA so flanks brush both.
+        let fits = vec![RopeEntry::new(
+            RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, lon_deg: 6.0, ..Default::default() },
+            0.0,
+        )];
+        let mut r = run(&fits, &spreads(), 2468, 300, 0.0, 1800.0, 300, l1, Some(sta));
+        let n = r.n_members;
+        // Truth: a member that hits BOTH observers, STA first.
+        let first_aux = |m: usize| {
+            (0..r.n_steps).find(|i| !r.member_bz_aux[i * n + m].is_nan())
+        };
+        let first_l1 = |m: usize| {
+            (0..r.n_steps).find(|i| !r.member_bz[i * n + m].is_nan())
+        };
+        let tm = (0..n)
+            .find(|m| {
+                matches!((first_aux(*m), first_l1(*m)), (Some(a), Some(l)) if a + 4 < l)
+                    && r.min_bz[*m] < -8.0
+            })
+            .expect("some member must brush STA clearly before L1");
+        let ia = first_aux(tm).unwrap();
+        let il = first_l1(tm).unwrap();
+        // Observe ONLY the aux signal, ending BEFORE the truth reaches L1.
+        let obs_aux: Vec<f32> = (0..r.n_steps)
+            .map(|i| {
+                if i < il - 2 {
+                    let v = r.member_bz_aux[i * n + tm];
+                    if v.is_nan() { 0.0 } else { v }
+                } else {
+                    f32::NAN
+                }
+            })
+            .collect();
+        // Prior L1 median over the truth's storm passage (all held out).
+        let held: Vec<usize> = (il..(il + 40).min(r.n_steps)).collect();
+        let prior_med: Vec<f32> = held.iter().map(|&i| r.bz_pct[2 * r.n_steps + i]).collect();
+        let prior_p10 = r.p_min_bz_below(-10.0);
+
+        let ess = assimilate_joint(&mut r, &[], 0, 0, 4.0, &obs_aux, ia, il - 2, 1.5, 0.0);
+        assert!(ess < n as f64 / 3.0, "STA flank data must collapse the posterior: ESS {}", ess);
+        let w = r.weights.as_ref().unwrap();
+        let best = (0..n).max_by(|a, b| w[*a].partial_cmp(&w[*b]).unwrap()).unwrap();
+        assert_eq!(best, tm, "the generating member must dominate");
+        // The ENTIRE L1 storm is still in the future — and the forecast for
+        // it must beat the prior. This is the pre-arrival lead-time claim.
+        let (mut err_post, mut err_prior) = (0.0f64, 0.0f64);
+        for (k, &i) in held.iter().enumerate() {
+            let t = {
+                let v = r.member_bz[i * n + tm];
+                if v.is_nan() { 0.0 } else { v }
+            } as f64;
+            err_post += (r.bz_pct[2 * r.n_steps + i] as f64 - t).abs();
+            err_prior += (prior_med[k] as f64 - t).abs();
+        }
+        assert!(err_prior > 1.0, "held-out storm must have signal");
+        assert!(
+            err_post < err_prior,
+            "pre-arrival STA conditioning must sharpen the L1 forecast: post {} vs prior {}",
+            err_post,
+            err_prior
+        );
+        // And the storm call moves toward the truth's severity.
+        let post_p10 = r.p_min_bz_below(-10.0);
+        if r.min_bz[tm] < -10.0 {
+            assert!(post_p10 > prior_p10, "P(<-10): post {} vs prior {}", post_p10, prior_p10);
+        }
+    }
+
+    #[test]
+    fn joint_with_empty_aux_window_equals_primary_only() {
+        let l1 = observer_pos(1.0, 0.0, 0.0);
+        let sta = observer_pos(0.96, 14.0, 0.0);
+        let mut r1 = run(&fit(), &spreads(), 7, 100, 0.0, 1800.0, 200, l1, Some(sta));
+        let mut r2 = run(&fit(), &spreads(), 7, 100, 0.0, 1800.0, 200, l1, Some(sta));
+        let obs: Vec<f32> = (0..200)
+            .map(|i| if (80..120).contains(&i) { -12.0 } else { f32::NAN })
+            .collect();
+        let e1 = assimilate(&mut r1, &obs, 0, 200, 4.0, 0.1);
+        let e2 = assimilate_joint(&mut r2, &obs, 0, 200, 4.0, &[], 0, 0, 4.0, 0.1);
+        assert_eq!(e1, e2);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&r1.bz_pct), bits(&r2.bz_pct));
+    }
+
+    #[test]
     fn tempering_holds_the_ess_floor_and_reports_temperature() {
         // Overconfident likelihood (hundreds of tight obs) must NOT collapse
         // to one member when a floor is requested — and the applied
         // temperature must be surfaced.
         let obs_pos = observer_pos(1.0, 0.0, 0.0);
-        let mut r = run(&fit(), &spreads(), 4242, 200, 0.0, 1800.0, 300, obs_pos);
+        let mut r = run(&fit(), &spreads(), 4242, 200, 0.0, 1800.0, 300, obs_pos, None);
         let n = r.n_members;
         let tm = (0..n)
             .find(|m| r.arrival_h[*m].is_finite() && r.min_bz[*m] < -8.0)

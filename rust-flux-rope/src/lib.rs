@@ -49,6 +49,10 @@ struct Engine {
     /// Observation INPUT buffer for assimilation: JS writes observed Bz
     /// (NaN = gap) aligned with the ensemble grid, then calls fr_assimilate.
     obs: Box<[f32; MAX_STEPS]>,
+    /// Auxiliary-observer (STEREO-A, spec §13) observation INPUT buffer.
+    obs_aux: Box<[f32; MAX_STEPS]>,
+    /// Auxiliary observer position (r_au, lon_deg, lat_deg); None = unset.
+    aux_observer: Option<[f64; 3]>,
     /// f32 mirror of the (f64) importance weights for the UI.
     weights_f32: Vec<f32>,
     field_probe: [f32; 4],
@@ -62,6 +66,8 @@ impl Engine {
             spreads: Spreads::default(),
             series: Box::new([0.0; 4 * MAX_STEPS]),
             obs: Box::new([f32::NAN; MAX_STEPS]),
+            obs_aux: Box::new([f32::NAN; MAX_STEPS]),
+            aux_observer: None,
             weights_f32: Vec::new(),
             field_probe: [0.0; 4],
             ens: None,
@@ -381,6 +387,7 @@ pub extern "C" fn fr_ens_run(
     let n_m = (n_members as usize).clamp(1, MAX_MEMBERS);
     let n_s = (n_steps as usize).min(MAX_STEPS);
     let obs = observer_pos(obs_r_au, obs_lon_deg, obs_lat_deg);
+    let aux = e.aux_observer.map(|a| observer_pos(a[0], a[1], a[2]));
     let res = ensemble::run(
         &e.ropes,
         &e.spreads,
@@ -390,11 +397,82 @@ pub extern "C" fn fr_ens_run(
         dt_s,
         n_s,
         obs,
+        aux,
     );
     let n = res.n_members as u32;
     e.ens = Some(res);
     e.weights_f32.clear(); // fresh (uniform) ensemble → stale weights gone
     n
+}
+
+// ── Auxiliary observer (STEREO-A, spec §13) ──────────────────────────────────
+
+/// Set the auxiliary observer for SUBSEQUENT fr_ens_run calls: its member
+/// Bz series is recorded alongside the primary's so fr_assimilate_joint can
+/// condition on off-Sun–Earth-line data. Recording draws nothing from the
+/// RNG — the primary prior is bit-identical with or without it.
+#[no_mangle]
+pub extern "C" fn fr_aux_set(r_au: f64, lon_deg: f64, lat_deg: f64) {
+    engine().aux_observer = Some([r_au, lon_deg, lat_deg]);
+}
+
+#[no_mangle]
+pub extern "C" fn fr_aux_clear() {
+    engine().aux_observer = None;
+}
+
+/// Auxiliary observation input buffer (MAX_STEPS f32, NaN = gap) — same grid
+/// and write discipline as fr_obs_ptr.
+#[no_mangle]
+pub extern "C" fn fr_obs_aux_ptr() -> *mut f32 {
+    engine().obs_aux.as_mut_ptr()
+}
+
+/// JOINT particle-filter update (spec §13): primary (L1) observations over
+/// [i0, i1) PLUS auxiliary (STEREO-A) observations over [aux_i0, aux_i1),
+/// log-likelihoods summed and tempered ONCE against the ESS floor. Reduces
+/// exactly to fr_assimilate when the aux window is empty or the ensemble
+/// ran without an aux observer. Returns ESS.
+#[allow(clippy::too_many_arguments)]
+#[no_mangle]
+pub extern "C" fn fr_assimilate_joint(
+    i0: u32,
+    i1: u32,
+    sigma_nt: f64,
+    aux_i0: u32,
+    aux_i1: u32,
+    aux_sigma_nt: f64,
+    ess_floor_frac: f64,
+) -> f64 {
+    let e = engine();
+    match e.ens.as_mut() {
+        None => 0.0,
+        Some(r) => {
+            let ess = ensemble::assimilate_joint(
+                r,
+                &e.obs[..],
+                i0 as usize,
+                i1 as usize,
+                sigma_nt,
+                &e.obs_aux[..],
+                aux_i0 as usize,
+                aux_i1 as usize,
+                aux_sigma_nt,
+                ess_floor_frac.clamp(0.0, 0.9),
+            );
+            e.weights_f32 = match &r.weights {
+                Some(w) => w.iter().map(|x| *x as f32).collect(),
+                None => vec![1.0 / r.n_members.max(1) as f32; r.n_members],
+            };
+            ess
+        }
+    }
+}
+
+/// 1 if the stored ensemble carries auxiliary-observer member series.
+#[no_mangle]
+pub extern "C" fn fr_ens_has_aux() -> u32 {
+    (!ens().member_bz_aux.is_empty()) as u32
 }
 
 fn ens() -> &'static EnsembleResult {
@@ -410,6 +488,7 @@ fn ens() -> &'static EnsembleResult {
         member_params: Vec::new(),
         member_bz: Vec::new(),
         member_bt: Vec::new(),
+        member_bz_aux: Vec::new(),
         weights: None,
         ess: 0.0,
         temperature: 1.0,
@@ -683,6 +762,39 @@ mod abi_tests {
         );
         assert_eq!(fr_rope_count(), 1);
         assert_eq!(fr_rope_t_launch_s(0), 0.0);
+    }
+
+    /// Drive the aux-observer (STEREO-A) surface the way the page does.
+    #[test]
+    fn abi_aux_observer_end_to_end() {
+        let _guard = ABI_LOCK.lock().unwrap();
+        fr_init();
+        fr_set_rope(
+            6.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0,
+        );
+        fr_set_spreads(8.0, 5.0, 15.0, 80.0, 0.2, 0.15, 0.3, 0.8, 0.05);
+        // No aux set → no aux series, joint call degrades to primary-only.
+        fr_ens_run(3.0, 100, 0.0, 1800.0, 300, 0.99, 0.0, 0.0);
+        assert_eq!(fr_ens_has_aux(), 0);
+        // Aux set → recorded; joint conditioning on an aux-only window works.
+        fr_aux_set(0.96, 14.0, 0.0);
+        fr_ens_run(3.0, 100, 0.0, 1800.0, 300, 0.99, 0.0, 0.0);
+        assert_eq!(fr_ens_has_aux(), 1);
+        let ap = fr_obs_aux_ptr();
+        for i in 0..300usize {
+            // A plausible flank signature: brief southward pulse mid-window.
+            unsafe {
+                *ap.add(i) = if (90..130).contains(&i) { -8.0 } else { f32::NAN }
+            };
+        }
+        let ess = fr_assimilate_joint(0, 0, 4.0, 0, 300, 2.0, 0.1);
+        assert!(ess > 1.0 && ess < 100.0, "aux-only joint ESS {}", ess);
+        assert!(fr_assim_temperature() <= 1.0);
+        fr_assim_reset();
+        assert_eq!(fr_ens_ess(), 100.0);
+        fr_aux_clear();
+        fr_ens_run(3.0, 100, 0.0, 1800.0, 300, 0.99, 0.0, 0.0);
+        assert_eq!(fr_ens_has_aux(), 0);
     }
 
     /// Drive the assimilation surface the way js/flux-rope-kernel.js does.

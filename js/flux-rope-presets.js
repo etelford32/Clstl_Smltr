@@ -68,6 +68,53 @@ export const GANNON_FIT = Object.freeze({
     ]),
 });
 
+/**
+ * OSSE_STA — an Observing System Simulation Experiment (spec §13): a
+ * SYNTHETIC event demonstrating STEREO-A pre-arrival conditioning. `truth`
+ * is the rope that "really" happened; the page synthesizes its in situ
+ * signatures at BOTH observers, hands them to the particle filter as
+ * "observations", and starts you from the deliberately-off `rope` prior.
+ * Kernel-verified geometry: the truth grazes STEREO-A at +38.5 h (−18 nT
+ * flank signal, 20 h dwell) while L1 stays silent until +41.2 h — scrub
+ * into that gap and the posterior collapses on data Earth hasn't seen:
+ * ESS drops to the floor with mild tempering (λ ≈ 0.6 — real information,
+ * not overconfidence) and P(Earth hit) rises before L1 measures anything.
+ * Depth (P(min Bz < −10)) firms only as the flank crossing deepens — the
+ * honest information ordering of a graze: arrival first, amplitude later.
+ *
+ * Pinned to the May-2024-era geometry (STA ≈ +15° ahead, from
+ * staPositionApprox at the synthetic epoch) because that is when the
+ * flank-graze configuration was real; today's STA sits much farther from
+ * the Sun–Earth line. Everything here is labeled synthetic — no validation
+ * claims attached.
+ */
+export const OSSE_STA = Object.freeze({
+    id: 'osse-sta',
+    label: 'OSSE · STEREO-A flank graze (synthetic)',
+    launchIso: '2024-05-01T00:00:00Z',
+    bundleUrl: null,
+    osse: true,
+    // The forecaster's PRIOR: DONKI-class direction/speed knowledge, wide
+    // magnetic uncertainty (what you'd have from a cone fit alone).
+    rope: Object.freeze({
+        lonDeg: 6, latDeg: 0, tiltDeg: 90, handedness: 1,
+        twistTurns: 4, b1AuNt: 20, sigma1AuAu: 0.115,
+        v0Kms: 1000, gammaPerKm: 0.2e-7, wKms: 400,
+    }),
+    // What "really" happened — offset in direction, tilt, size and speed.
+    // (Low tilt keeps the croissant legs near the ecliptic so the +15° STA
+    // flank graze is real — kernel-verified, see header.)
+    truth: Object.freeze({
+        lonDeg: 7, latDeg: -2, tiltDeg: 20, handedness: 1,
+        twistTurns: 4.5, b1AuNt: 30, sigma1AuAu: 0.15,
+        v0Kms: 1150, gammaPerKm: 0.2e-7, wKms: 400,
+    }),
+    spreads: Object.freeze({
+        sigLonDeg: 8, sigLatDeg: 5, sigTiltDeg: 30, sigV0Kms: 120,
+        lnsigB: 0.3, lnsigSigma: 0.2, lnsigGamma: 0.4, sigTwist: 1.2, pFlip: 0.3,
+    }),
+});
+
 /** Illustrative synthetic scenarios — no validation claims attached. */
 export const SCENARIOS = Object.freeze([
     Object.freeze({

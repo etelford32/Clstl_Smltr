@@ -3,7 +3,10 @@
 //
 //   node tests/flux-rope-live.mjs
 
-import { parseDonkiCmes, donkiToPreset, parseRtsw, rtswDriver } from '../js/flux-rope-live.js';
+import {
+    parseDonkiCmes, donkiToPreset, parseRtsw, rtswDriver,
+    staPositionApprox, stereoBeaconDriver,
+} from '../js/flux-rope-live.js';
 
 let failures = 0;
 function check(label, ok, detail = '') {
@@ -66,6 +69,26 @@ check('rtsw driver: interpolates continuous channels',
     Math.abs(drv.at(Date.parse('2026-07-21T10:00:30Z')).bx - (-1.1)) < 1e-9);
 check('rtsw driver: never interpolates THROUGH a gap (contract honesty)',
     Number.isNaN(drv.at(Date.parse('2026-07-21T10:01:30Z')).v));
+
+// ── STEREO-A ephemeris + beacon (spec §13) ───────────────────────────────────
+const atConj = staPositionApprox(Date.UTC(2023, 7, 12));
+check('sta: zero longitude at the 2023-08 conjunction', Math.abs(atConj.lonDeg) < 0.2,
+    `${atConj.lonDeg}°`);
+const atGannon = staPositionApprox(Date.UTC(2024, 4, 10));
+check('sta: Gannon-epoch position matches the literature within tolerance',
+    atGannon.lonDeg > 11 && atGannon.lonDeg < 18, `+${atGannon.lonDeg}° (lit ≈ +13°)`);
+check('sta: drifts ahead of Earth over time',
+    staPositionApprox(Date.UTC(2026, 6, 21)).lonDeg > atGannon.lonDeg);
+check('sta: approximation is labeled', atGannon.approx === true && atGannon.rAu === 0.96);
+
+const staDrv = stereoBeaconDriver([
+    { time_tag: '2026-07-21T09:00:00', bx_gsm: 0.5, by_gsm: -2.0, bz_gsm: -6.5 },
+    { time_tag: '2026-07-21T09:01:00', bx_gsm: 0.4, by_gsm: -2.1, bz_gsm: -9999 },
+]);
+check('sta beacon driver: labeled + observed + mag-only (plasma NaN)',
+    staDrv.meta.label === 'STEREO-A beacon' && staDrv.meta.source === 'observed'
+    && staDrv.samples[0].bz === -6.5 && Number.isNaN(staDrv.samples[0].v));
+check('sta beacon driver: fill values → NaN', Number.isNaN(staDrv.samples[1].bz));
 
 console.log(failures ? `\n${failures} failure(s)` : '\nall flux-rope live-input checks passed');
 process.exit(failures ? 1 : 0);

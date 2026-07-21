@@ -353,3 +353,48 @@ climatological defaults with deliberately WIDE priors (tilt σ 40°,
 chirality flip probability 0.5 = "unknown"): that honest prior is the
 starting posterior the §11 filter narrows as STEREO-A / L1 data arrives.
 Ambient wind `w` is seeded from the live RTSW plasma mean when available.
+
+## 13. STEREO-A pre-arrival conditioning (Phase 3 close-out)
+
+The off-Sun–Earth-line constraint: a spacecraft the CME's flank brushes
+hours before L1 turns the §11 filter into a genuine EARLY-WARNING update.
+
+**Auxiliary observer.** The ensemble run optionally records each member's
+Bz at ONE auxiliary position (STEREO-A) alongside the primary L1 series.
+Recording draws nothing from the PRNG and never touches the primary
+statistics — the L1 prior is bit-identical with or without it (pinned).
+The §2 GSE z-mapping is reused at the aux position; at STA offsets of
+±20° the frame error is small against the 4 nT observation sigma.
+
+**Joint update.** L1 and STA observations are independent, so their
+log-likelihoods ADD, and the §11 degeneracy guard tempers the JOINT
+likelihood once — a Bayesian combination, not two chained filters. An
+empty aux window (or a run without aux recording) reduces bit-exactly to
+the primary-only update. ABI: `fr_aux_set/clear`, `fr_obs_aux_ptr`,
+`fr_assimilate_joint(i0, i1, σ, aux_i0, aux_i1, σ_aux, floor)`.
+
+**Ephemeris.** STA's assumed position comes from a disclosed drift
+approximation (`staPositionApprox`): anchored at the 2023-08-12 Earth
+conjunction, +0.0549°/day ahead, r 0.96 AU, good to ≈ ±3° over 2023–2028
+(Gannon epoch: +14.9° vs ≈ +13° in the event literature). The page
+DISPLAYS the assumption and lets the user edit it; live beacon data rides
+the same fixture-gated parser as RTSW with a fail-quiet candidate-URL
+fetcher (SWPC unreachable from the dev sandbox — see js/flux-rope-live.js).
+
+**Validation — the OSSE.** With no committed STA fixture for the hindcast
+events, the claim is validated as an Observing System Simulation
+Experiment (standard practice, labeled synthetic everywhere): a truth rope
+(OSSE_STA.truth, kernel-verified to graze STA at +38.5 h with −18 nT and
+reach L1 only at +41.2 h) generates "observations" at both spacecraft;
+conditioning the deliberately-off prior on the pre-arrival window pins,
+in cargo AND against the committed WASM:
+- the posterior collapses (ESS → floor, λ ≈ 0.2–0.6 — information, not
+  noise) with the truth member carrying the top weight;
+- P(Earth hit) RISES before L1 measures anything (0.51 → 0.60);
+- the forecast median for the entirely-in-the-future L1 storm moves
+  toward the truth (Σ|median − truth| 774 → 342 nT);
+- depth probabilities firm only as the flank crossing deepens — the
+  honest information ordering of a graze: arrival first, amplitude later.
+Real-storm STA validation (Gannon-era beacon archive → a committed
+fixture bundle) is the natural follow-on once archived beacon data is
+baked, and slots into this exact machinery unchanged.

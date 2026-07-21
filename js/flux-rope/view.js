@@ -389,6 +389,11 @@ export class HeliosphereView {
         this.weights = w;
     }
 
+    /** Auxiliary-observer marker (STEREO-A): world [x,y,z] AU, or null. */
+    setStaMarker(p) {
+        this.staPos = p;
+    }
+
     resize() {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         for (const c of [this.glCanvas, this.overlay]) {
@@ -529,6 +534,20 @@ export class HeliosphereView {
         label([0, 0, 0], 'Sun');
         label([1, 0, 0], 'Earth · L1');
         label([0.5, 0, 0], '0.5 AU', 'rgba(140, 155, 185, 0.5)');
+        if (this.staPos) {
+            const s = this._project(this.staPos, cam);
+            if (s) {
+                // Diamond marker — the off-Sun–Earth-line constraint.
+                ctx.save();
+                ctx.translate(s[0], s[1]);
+                ctx.rotate(Math.PI / 4);
+                ctx.fillStyle = 'rgba(127, 230, 195, 0.9)';
+                ctx.fillRect(-3.5 * dpr, -3.5 * dpr, 7 * dpr, 7 * dpr);
+                ctx.restore();
+                ctx.fillStyle = 'rgba(127, 230, 195, 0.85)';
+                ctx.fillText('STEREO-A', s[0] + 8 * dpr, s[1] - 8 * dpr);
+            }
+        }
         ctx.fillStyle = 'rgba(120, 132, 160, 0.55)';
         ctx.fillText('drag to orbit · scroll to zoom · double-click to reset',
             10 * dpr, h - 10 * dpr);

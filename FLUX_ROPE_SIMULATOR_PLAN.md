@@ -99,8 +99,16 @@ the same crate.
   time discipline (sim time = τ × wall clock, ×1/×100/×1000/×10000),
   true-3D raymarched WebGL2 heliosphere with orbit camera, and the first
   space-weather.html insertion (`js/flux-rope-dashboard.js` — the fail-quiet
-  "next" panel under the arrival-only DBM section). STEREO-A pre-arrival
-  conditioning and resample-move remain open Phase 3+ items.
+  "next" panel under the arrival-only DBM section).
+  ✅ STEREO-A pre-arrival conditioning (2026-07-21, spec §13): auxiliary
+  observer in the ensemble run (RNG-free — L1 prior bit-identical), JOINT
+  L1+STA likelihood with a single temper, drift ephemeris (disclosed ±3°,
+  editable on the page), fail-quiet beacon fetcher, and the OSSE
+  validation: pre-arrival STA flank data collapses ESS to the floor,
+  raises P(hit) 0.51→0.60 before L1 sees anything, and cuts the future-L1
+  forecast error 774→342 nT. Remaining Phase 3+ items: resample-move for
+  iterated filtering; archived-beacon STA fixture for a real-storm
+  (Gannon-era) STA validation.
 - **Phase 4 — Consumers.** ring-current forecast mode via SolarWindDriver,
   space-weather.html customizable dashboard + rope fan, AurOracle tiered
   alerts (Watch → Warning → Nowcast; alert-sender fix rides along), EarthView

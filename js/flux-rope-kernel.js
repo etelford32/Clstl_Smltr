@@ -222,6 +222,53 @@ export async function loadFluxRopeKernel(source) {
             };
         },
 
+        /**
+         * Auxiliary observer (STEREO-A, spec §13): set BEFORE ensembleRun so
+         * member Bz at that position is recorded for joint conditioning.
+         * Recording is RNG-free — the L1 prior is bit-identical either way.
+         */
+        setAuxObserver({ rAu, lonDeg, latDeg }) { x.fr_aux_set(rAu, lonDeg, latDeg); },
+        clearAuxObserver() { x.fr_aux_clear(); },
+        ensHasAux() { return x.fr_ens_has_aux() === 1; },
+
+        /**
+         * JOINT particle-filter update (spec §13): primary (L1) obs over
+         * [i0, i1) PLUS auxiliary (STEREO-A) obs over [auxI0, auxI1) —
+         * log-likelihoods summed, tempered once. Either window may be empty.
+         * Same result shape as assimilate().
+         */
+        assimilateJoint({
+            obsBz = null, i0 = 0, i1 = 0, sigmaNt = 4,
+            auxObsBz = null, auxI0 = 0, auxI1 = 0, auxSigmaNt = 4,
+            essFloorFrac = 0.1,
+        }) {
+            if (obsBz) {
+                const nW = Math.min(obsBz.length, this.maxSteps);
+                new Float32Array(x.memory.buffer, x.fr_obs_ptr(), nW).set(obsBz.subarray(0, nW));
+                i1 = Math.min(i1, nW);
+            }
+            if (auxObsBz) {
+                const nW = Math.min(auxObsBz.length, this.maxSteps);
+                new Float32Array(x.memory.buffer, x.fr_obs_aux_ptr(), nW).set(auxObsBz.subarray(0, nW));
+                auxI1 = Math.min(auxI1, nW);
+            }
+            const ess = x.fr_assimilate_joint(i0, obsBz ? i1 : 0, sigmaNt,
+                auxI0, auxObsBz ? auxI1 : 0, auxSigmaNt, essFloorFrac);
+            const steps = x.fr_ens_steps();
+            const members = x.fr_ens_members();
+            const pct = (k) => copyF32(x.fr_ens_bz_pct_ptr(k), steps);
+            return {
+                ess, members, steps,
+                temperature: x.fr_assim_temperature(),
+                pHit: x.fr_ens_p_hit(),
+                bzPct: { p5: pct(0), p25: pct(1), p50: pct(2), p75: pct(3), p95: pct(4) },
+                btMed: copyF32(x.fr_ens_bt_med_ptr(), steps),
+                hitFrac: copyF32(x.fr_ens_hit_frac_ptr(), steps),
+                weights: copyF32(x.fr_ens_weights_ptr(), members),
+                pMinBzBelow: (thr) => x.fr_ens_p_minbz_below(thr),
+            };
+        },
+
         /** Drop assimilation weights → uniform prior (bit-identical stats). */
         assimReset() {
             x.fr_assim_reset();

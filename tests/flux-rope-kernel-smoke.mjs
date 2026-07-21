@@ -17,7 +17,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { loadFluxRopeKernel, L1_OBSERVER } from '../js/flux-rope-kernel.js';
-import { GANNON_FIT, ST_PATRICK_FIT } from '../js/flux-rope-presets.js';
+import { GANNON_FIT, OSSE_STA, ST_PATRICK_FIT } from '../js/flux-rope-presets.js';
 
 const wasmPath = fileURLToPath(new URL('../js/flux-rope-wasm/flux_rope_core.wasm', import.meta.url));
 const bundlePath = fileURLToPath(new URL('../data/hindcast/st_patrick_mar_2015_replay.json', import.meta.url));
@@ -292,6 +292,58 @@ const gMins = Array.from(gEns.minBz).filter(Number.isFinite).sort((a, b) => a - 
 check('gannon ensemble: observed min inside member spread',
     gMins[0] < gMinObs && gMinObs < gMins[gMins.length - 1],
     `obs ${gMinObs} in [${gMins[0].toFixed(1)}, ${gMins[gMins.length - 1].toFixed(1)}]`);
+
+// ── STEREO-A pre-arrival conditioning (spec §13) — the OSSE, end to end ──────
+// Drives the committed WASM through the exact flow the page uses for the
+// OSSE preset: synthesize the truth at both observers, condition the prior
+// ensemble on a window that ends BEFORE the truth reaches L1, and require
+// the off-Sun–Earth-line data to do real forecasting work.
+{
+    const STA = { rAu: 0.96, lonDeg: 14.9, latDeg: 0 };
+    const nG = 792, dtG = 600;
+    k.setRope(OSSE_STA.truth);
+    const staTruth = k.series(0, dtG, nG, STA);
+    const l1Truth = k.series(0, dtG, nG);
+    const staArrH = staTruth.inside.findIndex((v) => v > 0) * dtG / 3600;
+    const l1ArrH = l1Truth.inside.findIndex((v) => v > 0) * dtG / 3600;
+    check('osse: truth grazes STEREO-A before L1', staArrH > 0 && staArrH + 2 < l1ArrH,
+        `STA +${staArrH.toFixed(1)} h, L1 +${l1ArrH.toFixed(1)} h`);
+
+    k.setRope(OSSE_STA.rope);
+    k.setSpreads(OSSE_STA.spreads);
+    k.setAuxObserver(STA);
+    const priorO = k.ensembleRun(20260721, 500, 0, dtG, nG);
+    check('osse: aux member series recorded', k.ensHasAux());
+    const priorHit = priorO.pHit;
+
+    // The now-line sits in the gap: STA has data, L1 has only silence.
+    const i1 = Math.floor((l1ArrH - 0.5) * 3600 / dtG);
+    const post = k.assimilateJoint({
+        obsBz: l1Truth.bz, i0: 0, i1, sigmaNt: 4,
+        auxObsBz: staTruth.bz, auxI0: 0, auxI1: i1, auxSigmaNt: 4,
+    });
+    check('osse: pre-arrival STA data collapses the posterior',
+        post.ess < priorO.members / 3, `ESS ${post.ess.toFixed(0)}/${priorO.members}, λ ${post.temperature.toFixed(2)}`);
+    check('osse: P(Earth hit) rises before L1 sees anything',
+        post.pHit > priorHit, `${post.pHit.toFixed(2)} vs prior ${priorHit.toFixed(2)}`);
+    // The L1 storm is entirely in the future — the forecast median for it
+    // must move TOWARD the truth. (Raw fan width is not a sound metric here:
+    // percentiles are inside-member-conditional, and the posterior has MORE
+    // members present in the storm window than the phase-scattered prior.)
+    const iStorm = [Math.floor(l1ArrH * 3600 / dtG), Math.floor((l1ArrH + 12) * 3600 / dtG)];
+    const err = (r) => {
+        let s = 0;
+        for (let i = iStorm[0]; i < Math.min(nG, iStorm[1]); i++) {
+            s += Math.abs(r.bzPct.p50[i] - l1Truth.bz[i]);
+        }
+        return s;
+    };
+    check('osse: the future L1 forecast sharpens on off-line data alone',
+        err(post) < err(priorO),
+        `Σ|median−truth| ${err(post).toFixed(0)} vs prior ${err(priorO).toFixed(0)} nT`);
+    k.assimReset();
+    k.clearAuxObserver();
+}
 
 console.log(failures ? `\n${failures} failure(s)` : '\nall flux-rope kernel checks passed');
 process.exit(failures ? 1 : 0);
