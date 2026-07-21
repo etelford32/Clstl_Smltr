@@ -123,8 +123,20 @@ the same crate.
   SSC (baseline 2.3 h early) with rope-onset error 10.5 → 3.3 h; Gannon
   shock +43.3 vs +43.6 h observed with the rope train untouched. New
   largest documented miss: leading-edge Bz compression asymmetry
-  (deformation/erosion is next). Remaining Phase 5: deformation, CME–CME
-  interaction, EEGGL/SWMF comparison runs, server-side API build.
+  (deformation/erosion is next).
+  ✅ front-compression asymmetry (2026-07-21, spec §15): pileup-flattened
+  front — thinner cross-section, flux-conservation-boosted field, angle-
+  weighted by cos of the anti-Sunward angle. v1.2 St. Patrick fit pinned:
+  min Bz −23.8 vs −24.25 nT (1.9%) at Δ0.5 h timing (v1.1 had the minimum
+  mid-passage, 8–12 h late), shock still on the SSC, minimum lands in the
+  front third of the dwell. Per-event physics, not a universal knob:
+  tested and REJECTED for Gannon (fc = 0 wins 3 of 4 metrics — its min
+  sat 4.5 h into the passage), and the rejection is itself smoke-pinned.
+  Honest residual: rope onset ~4 h early with shock and min both pinned —
+  a Mach-dependent sheath standoff is the candidate fix. Remaining
+  Phase 5: CME–CME interaction (unlocks Gannon rope B's sheath and the
+  compression absorbed into rope A's compact fit), deformation/pancaking,
+  EEGGL/SWMF comparison runs, server-side API build.
 
 ## 5. Data inputs
 

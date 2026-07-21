@@ -38,6 +38,7 @@ export const ROPE_DEFAULTS = Object.freeze({
     sheathDeltaNt: 0,       // ambient Bz variability δ the shock compresses [nT]
     sheathK: 0.8,           // sheath thickness as a fraction of the rope radius
     bAmb1AuNt: 5,           // ambient Parker |B| at 1 AU [nT]
+    frontC: 0,              // leading-edge compression c (spec §15) — 0 = off
 });
 
 export const SPREAD_DEFAULTS = Object.freeze({
@@ -84,7 +85,7 @@ export async function loadFluxRopeKernel(source) {
                 r.b1AuNt, r.sigma1AuAu, r.nB, r.nSigma, r.d0Rsun,
                 r.v0Kms, r.gammaPerKm, r.wKms,
                 r.profile === 'lundquist' ? 1 : 0,
-                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt,
+                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC,
             );
             return r;
         },
@@ -100,7 +101,7 @@ export async function loadFluxRopeKernel(source) {
                 r.b1AuNt, r.sigma1AuAu, r.nB, r.nSigma, r.d0Rsun,
                 r.v0Kms, r.gammaPerKm, r.wKms,
                 r.profile === 'lundquist' ? 1 : 0,
-                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt,
+                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC,
                 r.launchOffsetS,
             );
             return n;

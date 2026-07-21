@@ -214,6 +214,7 @@ body {
             <div class="fr-field"><label>drag Γ</label><input type="range" id="p-gammaE7" min="0.05" max="2" step="0.05"><output>0.20</output></div>
             <div class="fr-field"><label>wind w</label><input type="range" id="p-wKms" min="250" max="700" step="10"><output>400 km/s</output></div>
             <div class="fr-field"><label>sheath δ</label><input type="range" id="p-sheathDeltaNt" min="0" max="6" step="0.5"><output>0 nT</output></div>
+            <div class="fr-field"><label>front compr.</label><input type="range" id="p-frontC" min="0" max="0.6" step="0.05"><output>0</output></div>
             <div class="fr-row2">
                 <div class="fr-field" style="grid-template-columns:88px 1fr;"><label>chirality</label>
                     <select id="p-handedness"><option value="1">right (+)</option><option value="-1">left (−)</option></select></div>
@@ -312,7 +313,7 @@ const kernel = await loadFluxRopeKernel('./js/flux-rope-wasm/flux_rope_core.wasm
 const view = new HeliosphereView($('fr-gl'), $('fr-overlay'));
 
 // Normalize a preset (single `rope` or train `ropes`) into a full train.
-const toRopes = (p) => (p.sheathRopes ?? p.ropes ?? [p.sheathFit?.rope ?? p.rope])
+const toRopes = (p) => (p.sheathRopes ?? p.ropes ?? [p.frontFit?.rope ?? p.sheathFit?.rope ?? p.rope])
     .map((r) => ({ ...ROPE_DEFAULTS, launchOffsetS: 0, ...r }));
 
 /**
@@ -360,10 +361,10 @@ const activeRope = () => state.ropes[state.active];
 // ── Presets ──────────────────────────────────────────────────────────────────
 const PRESETS = [ST_PATRICK_FIT, GANNON_FIT, OSSE_STA, ...SCENARIOS, { id: 'custom', label: 'Custom', rope: null }];
 const PRESET_NOTES = {
-    'st-patrick-2015': 'Hand fit to the 17 Mar 2015 G4 storm — v1.1 forward model with the ' +
-        'sheath: the model shock lands on the observed SSC and the sheath phase shows in ' +
-        'the HUD. Drag the timeline and the particle filter conditions the fan on ' +
-        'everything left of the now-line.',
+    'st-patrick-2015': 'Hand fit to the 17 Mar 2015 G4 storm — v1.2 forward model: sheath + ' +
+        'front compression put the model shock on the observed SSC and the Bz minimum at ' +
+        'the rope leading edge (−23.8 vs −24.25 nT at Δ0.5 h). Drag the timeline and the ' +
+        'particle filter conditions the fan on everything left of the now-line.',
     'gannon-2024': 'The May 2024 G5 CME train as TWO sequential ropes (X1.0 and X2.2 flare ' +
         'launches from AR 13664, +20.25 h apart). The X3.9/X5.8 CMEs and rope–rope ' +
         'compression are honestly unmodeled — that is the v2 roadmap.',
@@ -503,8 +504,8 @@ function renderRopeTabs() {
 }
 
 // ── Parameter panel ──────────────────────────────────────────────────────────
-const SLIDERS = ['lonDeg', 'latDeg', 'tiltDeg', 'twistTurns', 'b1AuNt', 'sigma1AuAu', 'v0Kms', 'wKms', 'sheathDeltaNt'];
-const UNITS = { lonDeg: '°', latDeg: '°', tiltDeg: '°', twistTurns: '', b1AuNt: ' nT', sigma1AuAu: ' AU', v0Kms: ' km/s', wKms: ' km/s', sheathDeltaNt: ' nT' };
+const SLIDERS = ['lonDeg', 'latDeg', 'tiltDeg', 'twistTurns', 'b1AuNt', 'sigma1AuAu', 'v0Kms', 'wKms', 'sheathDeltaNt', 'frontC'];
+const UNITS = { lonDeg: '°', latDeg: '°', tiltDeg: '°', twistTurns: '', b1AuNt: ' nT', sigma1AuAu: ' AU', v0Kms: ' km/s', wKms: ' km/s', sheathDeltaNt: ' nT', frontC: '' };
 
 function syncSliders() {
     const rope = activeRope();

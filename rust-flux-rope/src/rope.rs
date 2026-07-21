@@ -74,6 +74,12 @@ pub struct RopeParams {
     /// Ambient (Parker) field magnitude at 1 AU [nT] — sets the compressed
     /// |B| envelope X·B_amb inside the sheath.
     pub b_amb_1au_nt: f64,
+    // ── Front compression (spec §15, v1.2 — 0 disables) ─────────────────────
+    /// Leading-edge compression factor c ∈ [0, 0.6]: the snowplowed FRONT of
+    /// the cross-section is squeezed to σ·(1−c) with a flux-conservation
+    /// field boost — the mechanism that puts the observed Bz minimum at the
+    /// rope's leading edge.
+    pub front_c: f64,
 }
 
 impl RopeParams {
@@ -107,6 +113,7 @@ impl Default for RopeParams {
             sheath_delta_nt: 0.0, // off by default — every pre-sheath pin holds
             sheath_k: 0.8,
             b_amb_1au_nt: 5.0,
+            front_c: 0.0, // off by default — every pre-v1.2 pin holds
         }
     }
 }
@@ -162,6 +169,56 @@ pub struct FieldSample {
     pub inside: bool,
 }
 
+/// Front-compression distortion factor f ∈ [1−c, 1] (spec §15): the local
+/// boundary is σ_eff = σ·f, thinnest where the cross-section radial points
+/// anti-Sunward (θ = 0, the snowplowed leading edge) and undistorted at the
+/// wake (θ = π). Returns 1 when the mechanism is off, on-axis, or in the
+/// (unphysical) degenerate geometries near the footpoints.
+#[allow(clippy::too_many_arguments)]
+fn front_factor(
+    front_c: f64,
+    frame: &Frame,
+    half_d: f64,
+    psi: f64,
+    qu: f64,
+    w: f64,
+    rho_ip: f64,
+    p: V3,
+    s: f64,
+) -> f64 {
+    if front_c <= 0.0 || s < 1e-6 {
+        return 1.0;
+    }
+    let t_hat = [
+        psi.sin() * frame.e_dir[0] + psi.cos() * frame.e_p[0],
+        psi.sin() * frame.e_dir[1] + psi.cos() * frame.e_p[1],
+        psi.sin() * frame.e_dir[2] + psi.cos() * frame.e_p[2],
+    ];
+    let q_hat_u = qu / rho_ip;
+    let q_hat_w = w / rho_ip;
+    let n_pt = add3(
+        scale(frame.e_dir, half_d + half_d * q_hat_u),
+        scale(frame.e_p, half_d * q_hat_w),
+        [0.0, 0.0, 0.0],
+    );
+    let n_norm = dot(n_pt, n_pt).sqrt();
+    if n_norm < 1e-3 {
+        return 1.0;
+    }
+    let r_hat = scale([p[0] - n_pt[0], p[1] - n_pt[1], p[2] - n_pt[2]], 1.0 / s);
+    let u_hat = scale(n_pt, 1.0 / n_norm);
+    // Anti-Sunward direction projected into the cross-section plane (⊥ t̂).
+    let ut = dot(u_hat, t_hat);
+    let mut o = [u_hat[0] - ut * t_hat[0], u_hat[1] - ut * t_hat[1], u_hat[2] - ut * t_hat[2]];
+    let on = dot(o, o).sqrt();
+    if on < 1e-9 {
+        return 1.0;
+    }
+    o = scale(o, 1.0 / on);
+    let cos_th = dot(r_hat, o);
+    1.0 - front_c.min(0.6) * (1.0 + cos_th) * 0.5
+}
+
 /// Evaluate the rope field at heliocentric point `p` [km], `t_s` seconds
 /// after launch. Returns B in the HELIOCENTRIC frame (§2); callers map to
 /// GSE with `to_gse`.
@@ -193,9 +250,19 @@ pub fn field_at(params: &RopeParams, frame: &Frame, t_s: f64, p: V3) -> FieldSam
     let sigma_apex = sigma_apex_km(params.sigma_1au_au * AU_KM, d, params.n_sigma);
     let taper = (0.5 * psi).sin().powi(2);
     let sigma = sigma_apex * taper;
-    if s >= sigma || sigma <= 0.0 {
+    if sigma <= 0.0 {
         return FieldSample::default();
     }
+    // Front compression (spec §15): compressed boundary σ_eff = σ·f, field
+    // structure mapped to the reference profile via ŝ = s/f with a
+    // flux-conservation boost 1/f. f = 1 when off — bit-identical v1 path.
+    let f_dist = front_factor(params.front_c, frame, half_d, psi, qu, w, rho_ip, p, s);
+    let sigma_eff = sigma * f_dist;
+    if s >= sigma_eff {
+        return FieldSample::default();
+    }
+    let s_ref = s / f_dist;
+    let boost = 1.0 / f_dist;
 
     // Local field frame: tangent, radial, poloidal.
     let t_hat = [
@@ -203,18 +270,18 @@ pub fn field_at(params: &RopeParams, frame: &Frame, t_s: f64, p: V3) -> FieldSam
         psi.sin() * frame.e_dir[1] + psi.cos() * frame.e_p[1],
         psi.sin() * frame.e_dir[2] + psi.cos() * frame.e_p[2],
     ];
-    let b_ax = b_axis_nt(params.b_1au_nt, d, params.n_b);
+    let b_ax = b_axis_nt(params.b_1au_nt, d, params.n_b) * boost;
 
     let (b_axial, b_pol) = match params.profile {
         Profile::GoldHoyle => {
             // Twist per length T = 2τ/d [rad/km] — total turns conserved.
             let t_twist = 2.0 * params.twist_turns / d;
-            let denom = 1.0 + t_twist * t_twist * s * s;
-            (b_ax / denom, params.handedness * b_ax * t_twist * s / denom)
+            let denom = 1.0 + t_twist * t_twist * s_ref * s_ref;
+            (b_ax / denom, params.handedness * b_ax * t_twist * s_ref / denom)
         }
         Profile::Lundquist => {
             let alpha = J0_ZERO1 / sigma;
-            (b_ax * j0(alpha * s), params.handedness * b_ax * j1(alpha * s))
+            (b_ax * j0(alpha * s_ref), params.handedness * b_ax * j1(alpha * s_ref))
         }
     };
 
@@ -281,7 +348,13 @@ pub fn sheath_at(params: &RopeParams, frame: &Frame, t_s: f64, p: V3) -> bool {
     let s = ((rho_ip - half_d).powi(2) + h * h).sqrt();
     let sigma_apex = sigma_apex_km(params.sigma_1au_au * AU_KM, d, params.n_sigma);
     let sigma = sigma_apex * (0.5 * psi).sin().powi(2);
-    if sigma <= 0.0 || s < sigma || s >= sigma * (1.0 + params.sheath_k) {
+    if sigma <= 0.0 {
+        return false;
+    }
+    // The sheath shell rides the front-compressed boundary (spec §15).
+    let f_dist = front_factor(params.front_c, frame, half_d, psi, qu, w, rho_ip, p, s);
+    let sigma_eff = sigma * f_dist;
+    if s < sigma_eff || s >= sigma_eff * (1.0 + params.sheath_k) {
         return false;
     }
     // Front side: farther from the Sun than the local axis point.
@@ -654,6 +727,85 @@ mod tests {
             (0..n).all(|i| (out2[4 * i + 3] as u32) / 100 == 0),
             "sub-magnetosonic rope must have no sheath"
         );
+    }
+
+    #[test]
+    fn front_compression_thins_the_front_and_boosts_its_field() {
+        // At the apex, the FRONT boundary sits at d + σ(1−c) while the back
+        // stays at d − σ; a point inside the compressed front carries a
+        // flux-conservation-boosted field vs the same c = 0 rope.
+        let base = RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, ..Default::default() };
+        let comp = RopeParams { front_c: 0.4, ..base };
+        let fr = Frame::new(0.0, 0.0, 90.0);
+        let t = arrival_time_s(&base, AU_KM);
+        let d = base.dbm().apex_km(t);
+        let sigma = sigma_apex_km(base.sigma_1au_au * AU_KM, d, base.n_sigma);
+        // s = 0.8σ on the FRONT: inside for c = 0, OUTSIDE for c = 0.4
+        // (σ_eff = 0.6σ at the nose).
+        let front_probe = [d + 0.8 * sigma, 0.0, 0.0];
+        assert!(field_at(&base, &fr, t, front_probe).inside);
+        assert!(!field_at(&comp, &fr, t, front_probe).inside);
+        // The BACK boundary is untouched (θ = π → f = 1).
+        let back_probe = [d - 0.9 * sigma, 0.0, 0.0];
+        assert!(field_at(&base, &fr, t, back_probe).inside);
+        assert!(field_at(&comp, &fr, t, back_probe).inside);
+        // Inside the compressed front (s = 0.3σ < 0.6σ): |B| boosted.
+        let mid_front = [d + 0.3 * sigma, 0.0, 0.0];
+        let b0 = field_at(&base, &fr, t, mid_front);
+        let bc = field_at(&comp, &fr, t, mid_front);
+        assert!(b0.inside && bc.inside);
+        let mag = |b: V3| dot(b, b).sqrt();
+        assert!(
+            mag(bc.b) > 1.2 * mag(b0.b),
+            "front field must be compressed-boosted: {} vs {}",
+            mag(bc.b),
+            mag(b0.b)
+        );
+    }
+
+    #[test]
+    fn front_compression_moves_the_bz_minimum_toward_onset() {
+        // THE v1.2 claim (spec §15): the crossing's Bz extremum shifts toward
+        // the leading edge — measured as the min-index fraction of the dwell.
+        let base = RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, ..Default::default() };
+        let comp = RopeParams { front_c: 0.45, ..base };
+        let n = 800;
+        let dt = 900.0;
+        let frac_of_dwell_at_min = |p: RopeParams| {
+            let mut out = vec![0.0f32; 4 * n];
+            synth_series(&[RopeEntry::new(p, 0.0)], 0.0, dt, n, earth(), &mut out);
+            let codes: Vec<u32> = (0..n).map(|i| out[4 * i + 3] as u32 % 100).collect();
+            let first = codes.iter().position(|&c| c > 0).unwrap();
+            let last = codes.iter().rposition(|&c| c > 0).unwrap();
+            let mut i_min = first;
+            for i in first..=last {
+                if out[4 * i + 2] < out[4 * i_min + 2] {
+                    i_min = i;
+                }
+            }
+            (i_min - first) as f64 / (last - first).max(1) as f64
+        };
+        let f0 = frac_of_dwell_at_min(base);
+        let fc = frac_of_dwell_at_min(comp);
+        assert!(
+            fc < f0 - 0.1,
+            "min must move toward the leading edge: {:.2} vs {:.2} of dwell",
+            fc,
+            f0
+        );
+        assert!(fc < 0.35, "compressed rope min must sit in the front third: {:.2}", fc);
+    }
+
+    #[test]
+    fn front_compression_zero_is_bit_identical() {
+        let a = RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, ..Default::default() };
+        let b = RopeParams { front_c: 0.0, ..a };
+        let n = 300;
+        let (mut oa, mut ob) = (vec![0.0f32; 4 * n], vec![0.0f32; 4 * n]);
+        synth_series(&[RopeEntry::new(a, 0.0)], 0.0, 1800.0, n, earth(), &mut oa);
+        synth_series(&[RopeEntry::new(b, 0.0)], 0.0, 1800.0, n, earth(), &mut ob);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&oa), bits(&ob));
     }
 
     #[test]

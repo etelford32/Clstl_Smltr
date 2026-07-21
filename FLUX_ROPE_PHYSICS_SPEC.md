@@ -453,3 +453,48 @@ Storm probabilities never drop vs the sheathless baseline (pinned ≥).
 EDGE (front compression/erosion); the model's minimum sits mid-passage —
 that asymmetry is now the largest remaining structural error, and it is
 the natural next Phase 5 increment (deformation/erosion).
+
+## 15. Front compression (v1.2 — leading-edge asymmetry)
+
+The §14 re-fit measured the next structural miss: the OBSERVED Bz minimum
+hugs the rope's leading edge (St. Patrick's: 10 min before the rope-onset
+boundary) while the symmetric §3–§4 model puts its extremum mid-passage.
+Physics: a decelerating rope snowplows — its front is compressed against
+the ambient wind while its wake is not.
+
+**Model.** One parameter, `front_c = c ∈ [0, 0.6]` (0 = off, bit-identical
+v1 path). The cross-section boundary is distorted by the angle θ between
+the local cross-section radial r̂ and the anti-Sunward direction ô
+(the Sun→axis-point direction projected ⊥ t̂):
+
+```
+f(θ) = 1 − c·(1 + cosθ)/2          σ_eff(θ) = σ(ψ)·f
+```
+
+— thinnest at the nose (θ = 0 → f = 1−c), untouched in the wake (θ = π).
+The field structure maps onto the compressed geometry via the reference
+radius `ŝ = s/f` (boundary → boundary), with a flux-conservation boost
+`B → B/f` (one squeezed dimension, p = 1). The §14 sheath shell rides the
+compressed boundary (σ_eff ≤ s < σ_eff·(1+k)). Degenerate geometries
+(on-axis, footpoints) fall back to f = 1.
+
+**Effect, unit-pinned:** the crossing's Bz extremum moves from mid-passage
+into the front third of the dwell; the front boundary thins (a probe at
+s = 0.8σ ahead of the apex exits the c = 0.4 rope); the front interior
+field is boosted ≥ 1.2×; c = 0 is bit-identical.
+
+**Measured value (pinned) — St. Patrick's `frontFit` (v1.2):** shock still
+on the observed SSC (+51.7 vs +51.55 h), **min Bz −23.8 vs −24.25 nT
+(1.9%) at Δ0.5 h timing** (v1.1: 8–12 h), minimum at 23% of the dwell,
+shape r = 0.635, rope onset 4.1 h early. The geoeffective peak — value AND
+time — moved from the model's weakest point to its strongest.
+
+**Per-event honesty — Gannon:** front compression was tested and REJECTED
+there (fc = 0 wins 3 of 4 metrics; Gannon's minimum sat 4.5 h into the
+passage, not at the front). `front_c` is per-event physics recovered by
+fitting, not a universal knob — and the pinned Gannon preset carries none.
+
+**Remaining structural residual:** rope-onset timing (~4 h early on
+St. Patrick's with shock + minimum both pinned) — the sheath-thickness /
+standoff relation is the next candidate (Mach-dependent standoff), then
+CME–CME interaction for the Gannon train.

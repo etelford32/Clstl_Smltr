@@ -363,6 +363,48 @@ check('gannon ensemble: observed min inside member spread',
     })());
 }
 
+// ── Front compression (spec §15) — v1.2: the geoeffective peak lands ─────────
+// The v1.1 residual was structural: the observed Bz minimum hugs the rope's
+// leading edge while the symmetric model put it mid-passage. The snowplowed
+// front (thinner boundary + flux-conservation boost) closes it.
+{
+    const SSC_H = t0S / 3600 + 16.8;
+    k.setRope(ST_PATRICK_FIT.frontFit.rope);
+    const ff = k.series(t0S, stepS, n, L1_OBSERVER);
+    const tHof = (i) => t0S / 3600 + i * stepS / 3600;
+    const firstSheath = ff.sheath.findIndex((v) => v > 0);
+    let fMin = Infinity, iFMin = -1;
+    let fx = 0, fy = 0, fxx = 0, fyy = 0, fxy = 0;
+    for (let i = 0; i < n; i++) {
+        if (ff.bz[i] < fMin) { fMin = ff.bz[i]; iFMin = i; }
+        const y = obsBz[i];
+        if (!Number.isFinite(y)) continue;
+        fx += ff.bz[i]; fy += y; fxx += ff.bz[i] ** 2; fyy += y * y; fxy += ff.bz[i] * y;
+    }
+    const rFront = (fxy - fx * fy / n) / Math.sqrt((fxx - fx * fx / n) * (fyy - fy * fy / n) || 1);
+    check('front-fit: shock still on the observed SSC (±1.5 h)',
+        firstSheath >= 0 && Math.abs(tHof(firstSheath) - SSC_H) < 1.5,
+        `+${tHof(firstSheath).toFixed(1)} h vs +${SSC_H.toFixed(1)} h`);
+    check('front-fit: min Bz value within ±15% (was ±35%)',
+        Math.abs((fMin - minObs) / minObs) < 0.15,
+        `${fMin.toFixed(1)} vs obs ${minObs.toFixed(1)} nT (Δ ${(100 * Math.abs((fMin - minObs) / minObs)).toFixed(1)}%)`);
+    check('front-fit: min-Bz TIMING within ±2 h (v1.1: 8–12 h)',
+        Math.abs(iFMin - iMinObs) * stepS / 3600 < 2,
+        `Δ ${(Math.abs(iFMin - iMinObs) * stepS / 3600).toFixed(1)} h`);
+    check('front-fit: shape correlation holds (> 0.55)', rFront > 0.55, `r = ${rFront.toFixed(3)}`);
+    // The min must sit in the FRONT third of the rope passage — the whole
+    // point of the mechanism.
+    const fRope = ff.inside.findIndex((v) => v > 0);
+    const lRope = (() => { let l = -1; for (let i = 0; i < n; i++) if (ff.inside[i] > 0) l = i; return l; })();
+    check('front-fit: minimum sits in the front third of the passage',
+        (iFMin - fRope) / Math.max(1, lRope - fRope) < 0.34,
+        `${(100 * (iFMin - fRope) / Math.max(1, lRope - fRope)).toFixed(0)}% of dwell`);
+    // Gannon decision pinned: front compression tested and rejected there —
+    // the preset must NOT carry it (per-event physics, not a global knob).
+    check('gannon: front compression deliberately absent (fc=0 wins 3 of 4 metrics)',
+        !GANNON_FIT.sheathRopes.some((r) => (r.frontC ?? 0) > 0));
+}
+
 // ── STEREO-A pre-arrival conditioning (spec §13) — the OSSE, end to end ──────
 // Drives the committed WASM through the exact flow the page uses for the
 // OSSE preset: synthesize the truth at both observers, condition the prior

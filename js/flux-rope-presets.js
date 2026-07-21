@@ -45,6 +45,21 @@ export const ST_PATRICK_FIT = Object.freeze({
             sheathDeltaNt: 2.5, sheathK: 0.55, bAmb1AuNt: 5,
         }),
     }),
+    // frontFit — the v1.2-generation fit with FRONT COMPRESSION (spec §15)
+    // on top of the sheath: the snowplowed leading edge is thinner and
+    // flux-conservation-boosted, which is what puts the observed Bz minimum
+    // at the rope's front. Pinned: shock +51.7 vs SSC +51.55 h, min Bz
+    // −23.8 vs −24.25 nT (1.9%!) at Δ0.5 h timing (v1.1: 8–12 h), rope
+    // onset 4.1 h early, shape r = 0.635. The geoeffective peak — value AND
+    // time — is now the model's strongest point instead of its weakest.
+    frontFit: Object.freeze({
+        rope: Object.freeze({
+            lonDeg: 0, latDeg: -2, tiltDeg: 50, handedness: 1,
+            twistTurns: 5, b1AuNt: 24, sigma1AuAu: 0.15,
+            v0Kms: 800, gammaPerKm: 0.25e-7, wKms: 400,
+            sheathDeltaNt: 2.5, sheathK: 0.95, bAmb1AuNt: 5, frontC: 0.55,
+        }),
+    }),
 });
 
 /**
@@ -91,6 +106,12 @@ export const GANNON_FIT = Object.freeze({
     // disturbance was 3.1 h late). Rope B left sheathless: its front runs
     // inside rope A's wake where the fresh-upstream assumption is wrong —
     // the honest choice until CME–CME interaction is modeled.
+    //
+    // Front compression (spec §15) was TESTED and REJECTED for this event:
+    // fc = 0 beats fc > 0 on 3 of 4 metrics (shock 0.3 vs 0.8 h, min 0.8 vs
+    // 2.8%, r 0.714 vs 0.701; only min-timing prefers fc, 1.0 → 0.5 h) —
+    // Gannon's min sat 4.5 h into the passage, not at the front. The
+    // parameter is per-event physics, not a universal knob.
     sheathRopes: Object.freeze([
         Object.freeze({
             lonDeg: 0, latDeg: -6, tiltDeg: 60, handedness: 1,
