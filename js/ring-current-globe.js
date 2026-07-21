@@ -1276,7 +1276,15 @@ export class RingCurrentGlobe {
     }
 
     /** Fly down to the strongest live plasma bubble — the situation chip's
-     *  "Go see" action (plan §A.3/M4). false when no bubbles are alive. */
+     *  "Go see" action (plan §A.3/M4). false when no bubbles are alive.
+     *
+     *  Arrival radius 2.05, NOT the curtain default 1.42: the bubbles are
+     *  BITE-OUTS in the airglow shell, which inflates to drawn ~1.5 at
+     *  that distance's exaggeration — an observer below it stares at dark
+     *  nadir ocean while the whole show hangs overhead (exactly the
+     *  "zoomed into the earth" report from the PR preview, 2026-07-21).
+     *  From just above the shell you get the all-sky-imager view: the red
+     *  crest bands with the dark wedges eating through them. */
     descendToBubble() {
         const bubs = this._iono.allBubbles();
         if (!bubs.length) return false;
@@ -1287,7 +1295,7 @@ export class RingCurrentGlobe {
         const local = this._tmpV.set(
             cl * Math.cos(lonR), Math.sin(latR), -cl * Math.sin(lonR)).clone();
         const world = this._ionoLayer.group.localToWorld(local);
-        return this.setView('surface', { anchorWorldDir: world.normalize() });
+        return this.setView('surface', { anchorWorldDir: world.normalize(), radius: 2.05 });
     }
 
     /** Step the field core + fountain kernel on the sim clock and refresh
@@ -1719,14 +1727,18 @@ export class RingCurrentGlobe {
      * prefers-reduced-motion or {instant:true}. Returns false on an
      * unknown name so callers can validate persisted values.
      */
-    setView(name, { instant = false, anchorWorldDir = null } = {}) {
+    setView(name, { instant = false, anchorWorldDir = null, radius = 1.42 } = {}) {
         // 'surface' (Track C) is DYNAMIC, not a CAM_VIEWS pose: glide
         // straight down over the current sub-point — or a tapped WFC
-        // cell's direction — to drawn r = 1.42, which at full ×18
-        // exaggeration is ~150 km TRUE altitude, between the E and F
-        // shells. The orbit target stays the ORIGIN: navigation at the
-        // bottom is a low orbit (controls.minDistance is the altitude
-        // floor), and zooming back out ascends the same continuous path.
+        // cell's direction — to the drawn `radius`. The default 1.42 at
+        // full ×18 exaggeration is ~150 km TRUE altitude, between the E
+        // and F shells — right for standing among aurora curtains. Flights
+        // to BUBBLES pass a larger radius: the airglow shell the bubbles
+        // bite into inflates to drawn ~1.5–1.7, so an observer must stay
+        // ABOVE it to see them (descendToBubble). The orbit target stays
+        // the ORIGIN: navigation at the bottom is a low orbit
+        // (controls.minDistance is the altitude floor), and zooming back
+        // out ascends the same continuous path.
         if (name === 'surface') {
             const cur = this._camera.position.clone().normalize();
             const dir = (anchorWorldDir ? anchorWorldDir.clone() : cur.clone()).normalize();
@@ -1742,7 +1754,7 @@ export class RingCurrentGlobe {
             dir.applyQuaternion(new THREE.Quaternion()
                 .setFromAxisAngle(axis.normalize(), 0.35));
             this._activeView = 'surface';
-            const p1 = dir.multiplyScalar(1.42);
+            const p1 = dir.multiplyScalar(Math.max(1.3, radius));
             const t1 = new THREE.Vector3(0, 0, 0);
             if (instant || this._reducedMotion) {
                 this._flight = null;
@@ -2364,8 +2376,16 @@ export class RingCurrentGlobe {
         for (const p of this._parcels) {
             if (!(p.tArrive > this._lastSimNow && p.tArrive <= simNow)) continue;
             const vbs = couplingVBs(p.v, p.bz) ?? 0;
-            if (flashes < 3) {
+            // ONE flash per frame with a short wall-clock refractory gap
+            // (was 3/frame): at ×300 a dense southward stream lands parcels
+            // every frame, and 3-per-frame across the 8-sprite pool + bloom
+            // stacked into a single saturated fireball at the nose (toned
+            // 2026-07-21 on user feedback). Intensity stays ∝ VBs; the
+            // injection/sheath physics below is untouched — this only
+            // limits the OVERLAP of the visual cue.
+            if (flashes < 1 && this._tView - (this._lastFlashT ?? -1) > 0.12) {
                 this._spawnFlash(vbs, p.bz);
+                this._lastFlashT = this._tView;
                 flashes++;
             }
             if (vbs >= INJECT.VBS_MIN) {
@@ -2512,9 +2532,11 @@ export class RingCurrentGlobe {
             (Math.random() - 0.5) * 2.2,
             (Math.random() - 0.5) * 2.2,
         );
-        f.base = 1.4 + 2.4 * Math.min(1, vbs / 6);
+        // Toned 2026-07-21 (with the 1-per-frame spawn cap): the cue should
+        // read as a coupling pulse at the nose, not a detonation under bloom.
+        f.base = 1.1 + 1.7 * Math.min(1, vbs / 6);
         f.age = 0;
-        f.o0 = south ? 0.85 : 0.4;
+        f.o0 = south ? 0.55 : 0.28;
         f.sp.scale.setScalar(f.base);
         f.mat.opacity = f.o0;
         f.sp.visible = true;
@@ -2526,7 +2548,7 @@ export class RingCurrentGlobe {
             f.age += dt;
             const k = f.age / f.life;
             if (k >= 1) { f.sp.visible = false; f.mat.opacity = 0; continue; }
-            f.sp.scale.setScalar(f.base * (1 + 1.8 * k));
+            f.sp.scale.setScalar(f.base * (1 + 1.4 * k));
             f.mat.opacity = f.o0 * (1 - k) ** 1.4;
         }
     }
@@ -2747,11 +2769,20 @@ export class RingCurrentGlobe {
         const dom = this._renderer.domElement;
         this._onPointerMove = (e) => {
             const rect = dom.getBoundingClientRect();
+            const px = e.clientX - rect.left, py = e.clientY - rect.top;
+            // ENA-panel drag in progress: reposition it, nothing else.
+            if (this._enaDrag) {
+                const h = rect.height;
+                this._enaPos.cx = (px - this._enaDrag.offX) / rect.width;
+                this._enaPos.yb = (h - py) - this._enaDrag.offY;
+                this._layoutEna();
+                return;
+            }
             this._ndc.set(
-                ((e.clientX - rect.left) / rect.width) * 2 - 1,
-                -((e.clientY - rect.top) / rect.height) * 2 + 1,
+                (px / rect.width) * 2 - 1,
+                -(py / rect.height) * 2 + 1,
             );
-            this._pointerPx = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            this._pointerPx = { x: px, y: py };
             this._pointerDirty = true;
         };
         this._onPointerLeave = () => {
@@ -2759,11 +2790,36 @@ export class RingCurrentGlobe {
             this._tipEl.style.display = 'none';
         };
         this._onPointerDown = (e) => {
+            // Grab the ENA imager panel itself (2026-07-21: draggable — it
+            // sits over the action at some angles). Pointer capture keeps
+            // the drag alive off-canvas; OrbitControls pauses for the grab.
+            const rect = dom.getBoundingClientRect();
+            const px = e.clientX - rect.left, py = e.clientY - rect.top;
+            const er = this._enaRectPx();
+            if (er && px >= er.x0 && px <= er.x1 && py >= er.y0 && py <= er.y1) {
+                this._enaDrag = {
+                    offX: px - this._enaPos.cx * rect.width,
+                    offY: (rect.height - py) - this._enaPos.yb,
+                };
+                this._controls.enabled = false;
+                try { dom.setPointerCapture(e.pointerId); } catch { /* touch quirks */ }
+                this._tipEl.style.display = 'none';
+                return;
+            }
             this._dragging = true;
             this._tipEl.style.display = 'none';
             this._downPx = { x: e.clientX, y: e.clientY, t: performance.now() };
         };
         this._onPointerUp = (e) => {
+            // End an ENA-panel drag: persist the spot, wake the controls,
+            // and swallow the gesture (it must never fall through to the
+            // click-to-descend path below).
+            if (this._enaDrag) {
+                this._enaDrag = null;
+                this._controls.enabled = true;
+                this._persistEnaPos();
+                return;
+            }
             this._dragging = false;
             const d = this._downPx;
             this._downPx = null;
@@ -2780,7 +2836,14 @@ export class RingCurrentGlobe {
             else {
                 // Tapped WFC cell → descend over that region (plan §C.3's
                 // "Go see"). Only when the map layer is shown; the flight
-                // is the same eased glide as the view presets.
+                // is the same eased glide as the view presets. NEVER when
+                // the click landed on the ENA imager overlay — that panel
+                // draws above the scene, and letting the click fall through
+                // to the map shell behind it hijacked the camera (found on
+                // the PR preview, 2026-07-21).
+                const px2 = e.clientX - rect.left, py2 = e.clientY - rect.top;
+                const er = this._enaRectPx();
+                if (er && px2 >= er.x0 && px2 <= er.x1 && py2 >= er.y0 && py2 <= er.y1) return;
                 const shell = this._ionoLayer?.mapShell;
                 if (shell && shell.visible && this._ionoLayer.group.visible) {
                     this._ndc.set(
@@ -4096,25 +4159,91 @@ export class RingCurrentGlobe {
             this._enaPhase = (Number(this._enaSliderEl.value) / 1000) * 2 * Math.PI;
             this._updateEnaPose();
         });
+        // Draggable from the caption text rows too (the play/slider row keeps
+        // its own gestures). Same _enaPos source of truth as the panel grab.
+        const title = cap.querySelector('.rc-ena-title');
+        const sub = cap.querySelector('.rc-ena-sub');
+        for (const el of [title, sub]) {
+            el.style.cursor = 'grab';
+            el.title = 'drag to move the imager';
+        }
+        const capMove = (e) => {
+            if (!this._enaCapDrag) return;
+            const rect = this._container.getBoundingClientRect();
+            this._enaPos.cx = (e.clientX - rect.left - this._enaCapDrag.offX) / rect.width;
+            this._enaPos.yb = (rect.height - (e.clientY - rect.top)) - this._enaCapDrag.offY;
+            this._layoutEna();
+        };
+        const capUp = (e) => {
+            if (!this._enaCapDrag) return;
+            this._enaCapDrag = null;
+            this._persistEnaPos();
+            try { cap.releasePointerCapture(e.pointerId); } catch { /* released */ }
+        };
+        for (const el of [title, sub]) {
+            el.addEventListener('pointerdown', (e) => {
+                const rect = this._container.getBoundingClientRect();
+                const px = e.clientX - rect.left, py = e.clientY - rect.top;
+                this._enaCapDrag = {
+                    offX: px - this._enaPos.cx * rect.width,
+                    offY: (rect.height - py) - this._enaPos.yb,
+                };
+                try { cap.setPointerCapture(e.pointerId); } catch { /* touch quirks */ }
+                e.preventDefault();
+            });
+        }
+        cap.addEventListener('pointermove', capMove);
+        cap.addEventListener('pointerup', capUp);
+        cap.addEventListener('pointercancel', capUp);
     }
 
-    /** Position the screen-space ENA panel (kept square) + its caption. Sits
-     *  bottom-CENTRE of the stage: the WebGL overlay draws under the HTML docks
-     *  (legend top-right, analytics right, heat panel bottom-left), so it must
-     *  live in the clear strip between them. */
+    /** Position the screen-space ENA panel (kept square) + its caption.
+     *  DRAGGABLE (2026-07-21, user request — it sits over the action at some
+     *  camera angles): position lives in `_enaPos` {cx fraction, yb px from
+     *  bottom}, persisted to localStorage, moved by grabbing either the
+     *  caption title or the panel itself (see _enaRectPx + pointer handlers).
+     *  Default stays the bottom-centre clear strip. */
     _layoutEna() {
         if (!this._enaPanel) return;
         const w = this._container.clientWidth || 1280, h = this._container.clientHeight || 800;
         const px = Math.max(140, Math.min(230, Math.min(w, h) * 0.30));
         const sx = px / w, sy = px / h;
-        const cx = 0.45;                 // centre fraction, clear of both docks
+        if (!this._enaPos) {
+            this._enaPos = { cx: 0.45, yb: 12 };
+            try {
+                const saved = JSON.parse(localStorage.getItem('pp_rc_ena_pos') || 'null');
+                if (saved && Number.isFinite(saved.cx) && Number.isFinite(saved.yb)) {
+                    this._enaPos = saved;
+                }
+            } catch { /* fresh */ }
+        }
+        // Clamp inside the stage (caption needs ~54 px above the panel).
+        const cx = Math.max(sx / 2 + 0.01, Math.min(1 - sx / 2 - 0.01, this._enaPos.cx));
+        const yb = Math.max(4, Math.min(h - px - 60, this._enaPos.yb));
+        this._enaPos.cx = cx;
+        this._enaPos.yb = yb;
+        this._enaPx = px;
         this._enaPanel.scale.set(sx, sy, 1);
-        this._enaPanel.position.set(cx, 12 / h + sy / 2, 0);
+        this._enaPanel.position.set(cx, yb / h + sy / 2, 0);
         if (this._enaCap) {
             this._enaCap.style.right = ((1 - (cx + sx / 2)) * w) + 'px';
-            this._enaCap.style.bottom = (px + 16) + 'px';
+            this._enaCap.style.bottom = (yb + px + 4) + 'px';
             this._enaCap.style.width = px + 'px';
         }
+    }
+
+    /** The ENA panel's rect in canvas pixels (top-left origin), or null. */
+    _enaRectPx() {
+        if (!this._enaPanel || !this._enaEnabled || !this._enaPos) return null;
+        const w = this._container.clientWidth || 1280, h = this._container.clientHeight || 800;
+        const px = this._enaPx ?? 180;
+        const x0 = this._enaPos.cx * w - px / 2;
+        const y1 = h - this._enaPos.yb;
+        return { x0, x1: x0 + px, y0: y1 - px, y1 };
+    }
+
+    _persistEnaPos() {
+        try { localStorage.setItem('pp_rc_ena_pos', JSON.stringify(this._enaPos)); } catch { /* quota */ }
     }
 
     /** Re-bake the emissivity texture and refresh the imager readout. */

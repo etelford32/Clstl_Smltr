@@ -237,9 +237,60 @@ test('ionosphere layer boots, teardrop bulges duskward, penetration reaches the 
         null, { timeout: 2_000 });
     expect(await page.locator('#rc-gosee-txt').textContent()).toMatch(/bubble.*scintillation/);
     await page.locator('#rc-gosee-btn').click();
-    expect(await page.evaluate(() => window.rcGlobe.view)).toBe('surface');
+    // The bubble flight arrives ABOVE the inflated airglow shell (r≈2.05),
+    // not at the curtain altitude — from below, the bubbles are overhead
+    // and invisible (the PR-preview "zoomed into the earth" bug).
+    await page.waitForFunction(() => {
+        const g = window.rcGlobe;
+        return g.view === 'surface' && !g._flight
+            && Math.abs(g._camera.position.length() - 2.05) < 0.05;
+    }, null, { timeout: 5_000 });
 
-    // 9. Clean run.
+    // 9. The ENA imager is draggable (2026-07-21 request): grab the panel
+    //    surface, drag 120 px left, and the persisted position moves; a
+    //    plain CLICK on the panel must NOT fall through to click-descend.
+    const enaMoved = await page.evaluate(() => new Promise((resolve) => {
+        const g = window.rcGlobe;
+        // Synthetic PointerEvents have no ACTIVE pointer, so OrbitControls'
+        // own setPointerCapture would throw (a test artifact — real input
+        // has active pointers). Its enabled check runs first, so park it.
+        g._controls.enabled = false;
+        const dom = g._renderer.domElement;
+        const rect = dom.getBoundingClientRect();
+        const r = g._enaRectPx();
+        const cx0 = g._enaPos.cx;
+        const sx = rect.left + (r.x0 + r.x1) / 2, sy = rect.top + (r.y0 + r.y1) / 2;
+        const ev = (type, x, y) => dom.dispatchEvent(new PointerEvent(type,
+            { clientX: x, clientY: y, pointerId: 7, bubbles: true }));
+        ev('pointerdown', sx, sy);
+        ev('pointermove', sx - 120, sy - 40);
+        ev('pointerup', sx - 120, sy - 40);
+        setTimeout(() => resolve({
+            dCx: g._enaPos.cx - cx0,
+            saved: localStorage.getItem('pp_rc_ena_pos'),
+            view: g.view,
+        }), 50);
+    }));
+    expect(enaMoved.dCx).toBeLessThan(-0.05);          // moved left
+    expect(enaMoved.saved).toContain('cx');            // persisted
+    const clickThrough = await page.evaluate(() => {
+        const g = window.rcGlobe;
+        g.setView('earth', { instant: true });
+        g._controls.enabled = false;   // same synthetic-pointer parking
+        const dom = g._renderer.domElement;
+        const rect = dom.getBoundingClientRect();
+        const r = g._enaRectPx();
+        const sx = rect.left + (r.x0 + r.x1) / 2, sy = rect.top + (r.y0 + r.y1) / 2;
+        const ev = (type, x, y) => dom.dispatchEvent(new PointerEvent(type,
+            { clientX: x, clientY: y, pointerId: 8, bubbles: true }));
+        ev('pointerdown', sx, sy);
+        ev('pointerup', sx, sy);                        // a plain click, no move
+        g._controls.enabled = true;
+        return g.view;
+    });
+    expect(clickThrough).toBe('earth');                // descend NOT hijacked
+
+    // 10. Clean run.
     expect(shaderErrors).toEqual([]);
     expect(pageErrors).toEqual([]);
 });
