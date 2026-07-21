@@ -1,0 +1,20 @@
+[package]
+name = "flux-rope-core"
+version = "0.1.0"
+edition = "2021"
+description = "Flux Rope Simulator engine: 3DCORE-class semi-empirical CME flux-rope forecasting — tapered-torus geometry, Gold-Hoyle/Lundquist internal field, drag-based (DBM) kinematics, virtual spacecraft synthesis, and a deterministic seeded ensemble layer (percentile Bz fans, arrival distributions). Pure extern-C surface for the browser (no wasm-bindgen); the SAME crate compiles natively for the server-side API path. Normative physics in FLUX_ROPE_PHYSICS_SPEC.md; cargo test is the physics gate; tests/flux-rope-kernel-smoke.mjs pins the committed WASM against the St. Patrick's 2015 hindcast."
+
+[lib]
+# cdylib → the WASM artifact; rlib → native tests + future server API build.
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Keep optimisation on in dev so ensemble tests don't crawl.
+[profile.dev]
+opt-level = 2

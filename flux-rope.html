@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flux Rope Simulator · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/flux-rope.html">
+<meta name="description" content="Browser-native ensemble CME flux-rope forecasting: model the eruption itself, propagate it Sun-to-Earth, and forecast the geoeffective Bz at L1 days ahead — 1,000-member ensembles in milliseconds, validated against the St. Patrick's Day 2015 storm.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/flux-rope.html">
+<meta property="og:title" content="Flux Rope Simulator — forecast Bz days ahead">
+<meta property="og:description" content="A physics-first CME flux-rope engine in your browser: tapered-torus geometry, Gold-Hoyle field, drag-based kinematics, and probabilistic Bz fans at L1 — computed live, not animated.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Flux Rope Simulator — Parkers Physics">
+<meta name="twitter:description" content="Ensemble CME Bz forecasting in WASM: launch a magnetized rope at the Sun, watch it cross L1, read the storm probability.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<!-- Canonical nav: structure + styling owned by js/nav.js + js/nav-styles.css.
+     All page CSS below is fr- prefixed; there is intentionally NO nav styling
+     here (js/nav-styles.css owns it). -->
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+    min-height:100vh;
+    background:#03010e;
+    color:#cdd5e4;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    overflow-x:hidden;
+}
+
+.fr-hero { padding:26px 22px 10px; display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; }
+.fr-hero h1 {
+    font-size:1.45rem; font-weight:800;
+    background:linear-gradient(45deg,#4fc3f7,#c792ea);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.fr-hero .fr-sub { font-size:.85rem; color:#8b94ad; }
+.fr-badge {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:.7rem; font-weight:700; letter-spacing:.08em; color:#c792ea;
+    border:1px solid rgba(199,146,234,.35); border-radius:999px; padding:3px 10px;
+}
+.fr-badge::before {
+    content:''; width:7px; height:7px; border-radius:50%;
+    background:#c792ea; box-shadow:0 0 8px #c792ea;
+}
+
+.fr-wrap { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(290px,1fr); gap:14px; padding:10px 22px 8px; max-width:1500px; margin:0 auto; }
+
+.fr-panel {
+    background:rgba(13,16,38,.72); border:1px solid rgba(90,110,160,.22);
+    border-radius:12px; padding:12px 14px;
+}
+.fr-panel h2 { font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; color:#8b94ad; margin-bottom:8px; }
+
+.fr-stage { position:relative; height:440px; border-radius:12px; overflow:hidden; border:1px solid rgba(90,110,160,.22); background:#04021a; }
+.fr-stage canvas { position:absolute; inset:0; width:100%; height:100%; }
+#fr-overlay { pointer-events:none; }
+
+.fr-hud {
+    position:absolute; top:10px; left:12px; display:flex; gap:8px; flex-wrap:wrap;
+    font-size:.72rem; color:#cdd5e4;
+}
+.fr-hud span {
+    background:rgba(5,8,26,.72); border:1px solid rgba(90,110,160,.3);
+    border-radius:8px; padding:3px 9px;
+}
+.fr-hud b { color:#4fc3f7; font-weight:600; }
+
+.fr-scrub { display:flex; align-items:center; gap:10px; padding:10px 2px 0; }
+.fr-scrub button {
+    background:rgba(79,195,247,.12); color:#4fc3f7; border:1px solid rgba(79,195,247,.4);
+    border-radius:8px; padding:5px 14px; font-size:.85rem; cursor:pointer;
+}
+.fr-scrub button:hover { background:rgba(79,195,247,.22); }
+.fr-scrub input[type=range] { flex:1; accent-color:#4fc3f7; }
+.fr-scrub .fr-t { font-size:.78rem; color:#8b94ad; min-width:150px; text-align:right; font-variant-numeric:tabular-nums; }
+.fr-scrub select {
+    background:#0b0e26; color:#cdd5e4; border:1px solid rgba(90,110,160,.35);
+    border-radius:6px; padding:3px 6px; font-size:.75rem;
+}
+
+.fr-controls { display:flex; flex-direction:column; gap:12px; }
+.fr-field { display:grid; grid-template-columns:88px 1fr 62px; align-items:center; gap:8px; font-size:.76rem; margin-bottom:6px; }
+.fr-field label { color:#8b94ad; }
+.fr-field input[type=range] { width:100%; accent-color:#c792ea; }
+.fr-field output { color:#e4e9f5; text-align:right; font-variant-numeric:tabular-nums; }
+.fr-field select, .fr-field input[type=number] {
+    background:#0b0e26; color:#cdd5e4; border:1px solid rgba(90,110,160,.35);
+    border-radius:6px; padding:4px 6px; font-size:.76rem; width:100%;
+}
+.fr-row2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+
+.fr-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin-top:6px; }
+.fr-stat { background:rgba(5,8,26,.6); border:1px solid rgba(90,110,160,.25); border-radius:10px; padding:8px 10px; }
+.fr-stat .v { font-size:1.05rem; font-weight:700; color:#4fc3f7; font-variant-numeric:tabular-nums; }
+.fr-stat .v.warn { color:#ffb454; }
+.fr-stat .k { font-size:.66rem; color:#8b94ad; letter-spacing:.05em; text-transform:uppercase; margin-top:2px; }
+
+.fr-charts { padding:6px 22px 10px; max-width:1500px; margin:0 auto; display:grid; grid-template-columns:minmax(0,2.4fr) minmax(220px,1fr); gap:14px; }
+.fr-charts canvas { width:100%; display:block; }
+#fr-bz-chart { height:280px; }
+#fr-arrival-hist { height:280px; }
+.fr-note { font-size:.74rem; color:#68718a; padding:0 22px 8px; max-width:1500px; margin:0 auto; line-height:1.5; }
+.fr-note b { color:#8b94ad; }
+
+.fr-info { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; padding:10px 22px 34px; max-width:1500px; margin:0 auto; }
+.fr-info h3 { font-size:.9rem; color:#e4e9f5; margin-bottom:6px; }
+.fr-info p { font-size:.8rem; color:#8b94ad; line-height:1.55; }
+.fr-info a { color:#4fc3f7; text-decoration:none; }
+.fr-info a:hover { text-decoration:underline; }
+
+@media (max-width:900px) {
+    .fr-wrap, .fr-charts { grid-template-columns:1fr; }
+    .fr-stage { height:340px; }
+}
+@media (max-width:768px) {
+    .fr-hero { padding:18px 14px 8px; }
+    .fr-wrap, .fr-charts, .fr-note, .fr-info { padding-left:14px; padding-right:14px; }
+    .fr-scrub .fr-t { min-width:110px; font-size:.7rem; }
+}
+</style>
+</head>
+<body>
+
+<header class="fr-hero">
+    <h1>Flux Rope Simulator</h1>
+    <span class="fr-sub">Model the CME itself · forecast Bz at L1 days ahead of arrival</span>
+    <span class="fr-badge">ENGINE v1 · VALIDATED VS ST. PATRICK'S 2015</span>
+</header>
+
+<main class="fr-wrap">
+    <section>
+        <div class="fr-stage">
+            <canvas id="fr-gl"></canvas>
+            <canvas id="fr-overlay"></canvas>
+            <div class="fr-hud">
+                <span>apex <b id="fr-hud-r">—</b></span>
+                <span>speed <b id="fr-hud-v">—</b></span>
+                <span>σ <b id="fr-hud-sig">—</b></span>
+                <span id="fr-hud-status">launching…</span>
+            </div>
+        </div>
+        <div class="fr-scrub">
+            <button id="fr-play" type="button">❚❚</button>
+            <input id="fr-time" type="range" min="0" max="132" step="0.1" value="0" aria-label="hours after launch">
+            <select id="fr-speed" aria-label="playback speed">
+                <option value="2">2 h/s</option>
+                <option value="4" selected>4 h/s</option>
+                <option value="10">10 h/s</option>
+            </select>
+            <span class="fr-t" id="fr-t-label">t = +0.0 h</span>
+        </div>
+        <div class="fr-stats" id="fr-stats">
+            <div class="fr-stat"><div class="v" id="fr-s-phit">—</div><div class="k">P(Earth hit)</div></div>
+            <div class="fr-stat"><div class="v" id="fr-s-p10">—</div><div class="k">P(min Bz &lt; −10 nT)</div></div>
+            <div class="fr-stat"><div class="v" id="fr-s-p20">—</div><div class="k">P(min Bz &lt; −20 nT)</div></div>
+            <div class="fr-stat"><div class="v" id="fr-s-arr">—</div><div class="k">median arrival</div></div>
+            <div class="fr-stat"><div class="v" id="fr-s-minbz">—</div><div class="k">median min Bz</div></div>
+        </div>
+    </section>
+
+    <aside class="fr-controls">
+        <div class="fr-panel">
+            <h2>Event</h2>
+            <div class="fr-field" style="grid-template-columns:1fr;">
+                <select id="fr-preset" aria-label="event preset"></select>
+            </div>
+            <p style="font-size:.72rem;color:#68718a;line-height:1.45;" id="fr-preset-note"></p>
+        </div>
+
+        <div class="fr-panel">
+            <h2>Rope parameters</h2>
+            <div class="fr-field"><label>longitude</label><input type="range" id="p-lonDeg" min="-60" max="60" step="1"><output>0°</output></div>
+            <div class="fr-field"><label>latitude</label><input type="range" id="p-latDeg" min="-40" max="40" step="1"><output>0°</output></div>
+            <div class="fr-field"><label>tilt</label><input type="range" id="p-tiltDeg" min="-90" max="90" step="1"><output>0°</output></div>
+            <div class="fr-field"><label>twist τ</label><input type="range" id="p-twistTurns" min="0.5" max="12" step="0.5"><output>4</output></div>
+            <div class="fr-field"><label>B @1 AU</label><input type="range" id="p-b1AuNt" min="5" max="60" step="1"><output>20 nT</output></div>
+            <div class="fr-field"><label>σ @1 AU</label><input type="range" id="p-sigma1AuAu" min="0.05" max="0.25" step="0.005"><output>0.115 AU</output></div>
+            <div class="fr-field"><label>launch v₀</label><input type="range" id="p-v0Kms" min="300" max="2500" step="10"><output>800 km/s</output></div>
+            <div class="fr-field"><label>drag Γ</label><input type="range" id="p-gammaE7" min="0.05" max="2" step="0.05"><output>0.20</output></div>
+            <div class="fr-field"><label>wind w</label><input type="range" id="p-wKms" min="250" max="700" step="10"><output>400 km/s</output></div>
+            <div class="fr-row2">
+                <div class="fr-field" style="grid-template-columns:88px 1fr;"><label>chirality</label>
+                    <select id="p-handedness"><option value="1">right (+)</option><option value="-1">left (−)</option></select></div>
+                <div class="fr-field" style="grid-template-columns:60px 1fr;"><label>profile</label>
+                    <select id="p-profile"><option value="gold-hoyle">Gold–Hoyle</option><option value="lundquist">Lundquist</option></select></div>
+            </div>
+        </div>
+
+        <div class="fr-panel">
+            <h2>Ensemble</h2>
+            <div class="fr-row2">
+                <div class="fr-field" style="grid-template-columns:70px 1fr;"><label>members</label>
+                    <select id="e-members"><option>250</option><option selected>500</option><option>1000</option><option>2000</option></select></div>
+                <div class="fr-field" style="grid-template-columns:44px 1fr;"><label>seed</label>
+                    <input type="number" id="e-seed" value="20260721" step="1"></div>
+            </div>
+            <div class="fr-field"><label>uncertainty</label><input type="range" id="e-scale" min="0.3" max="2" step="0.1" value="1"><output>1.0×</output></div>
+            <p style="font-size:.7rem;color:#68718a;line-height:1.45;">
+                Priors sample launch direction, tilt, speed, drag, field strength,
+                size, twist and chirality around the fit; the fan and the
+                probabilities above are recomputed live on every change
+                (<span id="fr-ens-ms">—</span>).
+            </p>
+        </div>
+    </aside>
+</main>
+
+<section class="fr-charts">
+    <canvas id="fr-bz-chart" aria-label="forecast Bz at L1"></canvas>
+    <canvas id="fr-arrival-hist" aria-label="ensemble arrival distribution"></canvas>
+</section>
+<p class="fr-note">
+    <b>Reading the chart:</b> shaded bands are the ensemble 5–95% and 25–75%
+    Bz envelopes at L1; the white trace is the deterministic reference fit and
+    the amber trace is the observed OMNI Bz for hindcast events. The v1 engine
+    models the magnetic rope only — <b>no sheath ahead of it</b> — so the
+    observed sheath interval between shock arrival and rope arrival is an
+    expected, honestly-reported miss (it is the first Phase 5 roadmap item).
+    St. Patrick's 2015 fit quality: min Bz −24.1 vs −24.25 nT observed,
+    min-Bz timing Δ2.1 h, shape correlation 0.66.
+</p>
+
+<section class="fr-info">
+    <div class="fr-panel">
+        <h3>What this is</h3>
+        <p>Every forecast on this platform is driven by the solar wind's Bz —
+        and observed L1 data gives only 30–60 minutes of physical lead time.
+        This engine models the CME itself as a magnetized flux rope (a
+        3DCORE-class tapered torus with a Gold–Hoyle twisted field),
+        propagates it Sun→Earth with drag-based kinematics, and synthesizes
+        the Bz(t) a virtual spacecraft at L1 would measure — <b>days before
+        arrival</b>, with honest probabilities from a real ensemble.</p>
+    </div>
+    <div class="fr-panel">
+        <h3>How it works</h3>
+        <p>The physics runs in a Rust→WASM kernel in your browser — a
+        1,000-member ensemble computes in tens of milliseconds. The
+        heliosphere view is a GLSL port of the same field equations (the
+        kernel is the oracle). Equations and conventions:
+        <a href="https://github.com/etelford32/ParkersPhysics/blob/main/FLUX_ROPE_PHYSICS_SPEC.md">physics spec</a> ·
+        validation is pinned by unit + hindcast gates in the repo.</p>
+    </div>
+    <div class="fr-panel">
+        <h3>Where this goes</h3>
+        <p>Next: live DONKI CME ingestion, particle-filter assimilation that
+        narrows the fan as STEREO-A and L1 data arrive, forecast mode for the
+        <a href="ring-current.html">Ring Current twin</a> via the universal
+        SolarWindDriver contract, tiered <a href="auroracle.html">AurOracle</a>
+        alerts, and a Gannon-train hindcast — physics-first ground truth,
+        not an ML black box.</p>
+    </div>
+</section>
+
+<script type="module">
+import { loadFluxRopeKernel, ROPE_DEFAULTS, SPREAD_DEFAULTS } from './js/flux-rope-kernel.js';
+import { ST_PATRICK_FIT, SCENARIOS } from './js/flux-rope-presets.js';
+import { HeliosphereView } from './js/flux-rope/view.js';
+import { drawBzChart, drawArrivalHist } from './js/flux-rope/charts.js';
+import { fromReplayBundle } from './js/solar-wind-driver.js';
+
+const AU_KM = 1.495978707e8;
+const $ = (id) => document.getElementById(id);
+
+const kernel = await loadFluxRopeKernel('./js/flux-rope-wasm/flux_rope_core.wasm');
+const view = new HeliosphereView($('fr-gl'), $('fr-overlay'));
+
+// ── State ────────────────────────────────────────────────────────────────────
+const GRID = { t0S: 0, dtS: 600, hours: 132 };
+GRID.n = Math.round(GRID.hours * 3600 / GRID.dtS);
+const state = {
+    rope: { ...ROPE_DEFAULTS, ...ST_PATRICK_FIT.rope },
+    launchMs: Date.parse(ST_PATRICK_FIT.launchIso),
+    obs: null,            // { tH, bz } overlay (hindcast presets)
+    det: null, ens: null,
+    tH: Array.from({ length: GRID.n }, (_, i) => (GRID.t0S + i * GRID.dtS) / 3600),
+    cursorH: 0, playing: true,
+};
+
+// ── Presets ──────────────────────────────────────────────────────────────────
+const PRESETS = [ST_PATRICK_FIT, ...SCENARIOS, { id: 'custom', label: 'Custom', rope: null }];
+for (const p of PRESETS) {
+    const opt = document.createElement('option');
+    opt.value = p.id; opt.textContent = p.label;
+    $('fr-preset').appendChild(opt);
+}
+const PRESET_NOTES = {
+    'st-patrick-2015': 'Hand fit to the 17 Mar 2015 G4 storm (DONKI-informed launch). ' +
+        'The amber observed trace is OMNI 5-min Bz from the hindcast bundle.',
+    'fast-halo': 'Synthetic: a 1600 km/s halo eruption aimed at Earth — note the shorter transit and harder Bz.',
+    'slow-glancing': 'Synthetic: a slow flank launch — most ensemble members miss; the fan is wide and shallow.',
+    'custom': 'Free play: every slider redraws the rope, the fan and the probabilities live.',
+};
+
+async function applyPreset(id) {
+    const p = PRESETS.find((x) => x.id === id);
+    $('fr-preset-note').textContent = PRESET_NOTES[id] || '';
+    if (p && p.rope) {
+        state.rope = { ...ROPE_DEFAULTS, ...p.rope };
+        state.launchMs = p.launchIso ? Date.parse(p.launchIso) : null;
+        syncSliders();
+    }
+    state.obs = null;
+    if (p && p.bundleUrl) {
+        try {
+            const bundle = await (await fetch(p.bundleUrl)).json();
+            const drv = fromReplayBundle(bundle);
+            state.obs = {
+                tH: drv.samples.map((s) => (s.t - state.launchMs) / 3600_000),
+                bz: drv.samples.map((s) => s.bz),
+            };
+        } catch (e) {
+            console.warn('flux-rope: observed overlay unavailable', e);
+        }
+    }
+    recompute();
+}
+
+// ── Parameter panel ──────────────────────────────────────────────────────────
+const SLIDERS = ['lonDeg', 'latDeg', 'tiltDeg', 'twistTurns', 'b1AuNt', 'sigma1AuAu', 'v0Kms', 'wKms'];
+const UNITS = { lonDeg: '°', latDeg: '°', tiltDeg: '°', twistTurns: '', b1AuNt: ' nT', sigma1AuAu: ' AU', v0Kms: ' km/s', wKms: ' km/s' };
+
+function syncSliders() {
+    for (const k of SLIDERS) {
+        const el = $(`p-${k}`);
+        el.value = state.rope[k];
+        el.nextElementSibling.textContent = `${state.rope[k]}${UNITS[k]}`;
+    }
+    $('p-gammaE7').value = state.rope.gammaPerKm * 1e7;
+    $('p-gammaE7').nextElementSibling.textContent = (state.rope.gammaPerKm * 1e7).toFixed(2);
+    $('p-handedness').value = String(state.rope.handedness);
+    $('p-profile').value = state.rope.profile;
+}
+
+let debounceId = 0;
+function onParamInput() {
+    for (const k of SLIDERS) {
+        state.rope[k] = parseFloat($(`p-${k}`).value);
+        $(`p-${k}`).nextElementSibling.textContent = `${state.rope[k]}${UNITS[k]}`;
+    }
+    state.rope.gammaPerKm = parseFloat($('p-gammaE7').value) * 1e-7;
+    $('p-gammaE7').nextElementSibling.textContent = parseFloat($('p-gammaE7').value).toFixed(2);
+    state.rope.handedness = parseFloat($('p-handedness').value);
+    state.rope.profile = $('p-profile').value;
+    $('fr-preset').value = 'custom';
+    $('fr-preset-note').textContent = PRESET_NOTES.custom;
+    state.launchMs = null; state.obs = null;   // slider play breaks the hindcast link
+    clearTimeout(debounceId);
+    debounceId = setTimeout(recompute, 120);
+}
+for (const k of [...SLIDERS, 'gammaE7']) $(`p-${k}`).addEventListener('input', onParamInput);
+$('p-handedness').addEventListener('change', onParamInput);
+$('p-profile').addEventListener('change', onParamInput);
+$('e-members').addEventListener('change', () => recompute());
+$('e-seed').addEventListener('change', () => recompute());
+$('e-scale').addEventListener('input', () => {
+    $('e-scale').nextElementSibling.textContent = `${parseFloat($('e-scale').value).toFixed(1)}×`;
+    clearTimeout(debounceId);
+    debounceId = setTimeout(recompute, 120);
+});
+
+// ── Compute ──────────────────────────────────────────────────────────────────
+function recompute() {
+    kernel.setRope(state.rope);
+    view.setRope(state.rope);
+    state.det = kernel.series(GRID.t0S, GRID.dtS, GRID.n);
+
+    const sc = parseFloat($('e-scale').value);
+    kernel.setSpreads(Object.fromEntries(
+        Object.entries(SPREAD_DEFAULTS).map(([k, v]) => [k, k === 'pFlip' ? Math.min(1, v * sc) : v * sc])));
+    const t0 = performance.now();
+    state.ens = kernel.ensembleRun(
+        parseFloat($('e-seed').value) || 1, parseInt($('e-members').value, 10),
+        GRID.t0S, GRID.dtS, GRID.n);
+    $('fr-ens-ms').textContent = `${state.ens.members} members in ${(performance.now() - t0).toFixed(0)} ms`;
+    view.setEnsemble(state.ens);
+
+    // Stats strip.
+    const pct = (v) => `${Math.round(v * 100)}%`;
+    $('fr-s-phit').textContent = pct(state.ens.pHit);
+    $('fr-s-p10').textContent = pct(state.ens.pMinBzBelow(-10));
+    $('fr-s-p20').textContent = pct(state.ens.pMinBzBelow(-20));
+    const arr = Array.from(state.ens.arrivalH).filter(Number.isFinite).sort((a, b) => a - b);
+    $('fr-s-arr').textContent = arr.length
+        ? (state.launchMs
+            ? new Date(state.launchMs + arr[arr.length >> 1] * 3600_000).toISOString().slice(5, 16).replace('T', ' ')
+            : `+${arr[arr.length >> 1].toFixed(0)} h`)
+        : 'miss';
+    const mins = Array.from(state.ens.minBz).filter(Number.isFinite).sort((a, b) => a - b);
+    const medMin = mins.length ? mins[mins.length >> 1] : NaN;
+    $('fr-s-minbz').textContent = Number.isFinite(medMin) ? `${medMin.toFixed(0)} nT` : '—';
+    $('fr-s-minbz').classList.toggle('warn', medMin < -10);
+
+    drawCharts();
+}
+
+function drawCharts() {
+    drawBzChart($('fr-bz-chart'), {
+        tH: state.tH,
+        det: state.det ? state.det.bz : null,
+        fan: state.ens ? { ...state.ens.bzPct, hitFrac: state.ens.hitFrac } : null,
+        obs: state.obs,
+        launchMs: state.launchMs,
+        cursorH: state.cursorH,
+    });
+    const detArr = state.det ? state.det.inside.findIndex((v) => v > 0) : -1;
+    drawArrivalHist($('fr-arrival-hist'), {
+        arrivalH: state.ens ? state.ens.arrivalH : [],
+        launchMs: state.launchMs,
+        detArrivalH: detArr >= 0 ? state.tH[detArr] : null,
+    });
+}
+
+// ── Scrub + playback ─────────────────────────────────────────────────────────
+function fmtT(h) {
+    if (!state.launchMs) return `t = +${h.toFixed(1)} h`;
+    const d = new Date(state.launchMs + h * 3600_000);
+    return `${d.toISOString().slice(5, 16).replace('T', ' ')}Z · +${h.toFixed(1)} h`;
+}
+
+let lastTs = null;
+function tick(ts) {
+    if (state.playing) {
+        const dt = lastTs ? (ts - lastTs) / 1000 : 0;
+        state.cursorH += dt * parseFloat($('fr-speed').value);
+        if (state.cursorH > GRID.hours) state.cursorH = 0;
+        $('fr-time').value = state.cursorH;
+    }
+    lastTs = ts;
+    const tS = state.cursorH * 3600;
+    const apexKm = kernel.apexKm(tS);
+    view.draw(tS, { apexKm, sigmaApexKm: kernel.sigmaApexKm(tS) });
+    $('fr-t-label').textContent = fmtT(state.cursorH);
+    $('fr-hud-r').textContent = `${(apexKm / AU_KM).toFixed(2)} AU`;
+    $('fr-hud-v').textContent = `${kernel.apexVKms(tS).toFixed(0)} km/s`;
+    $('fr-hud-sig').textContent = `${(kernel.sigmaApexKm(tS) / AU_KM).toFixed(3)} AU`;
+    const i = Math.min(GRID.n - 1, Math.max(0, Math.round(tS / GRID.dtS)));
+    const inside = state.det && state.det.inside[i] > 0;
+    $('fr-hud-status').textContent = inside ? '⚡ crossing L1'
+        : apexKm / AU_KM < 0.99 ? 'in transit' : 'passed L1';
+    if (state.playing || state._chartDirty) { drawCharts(); state._chartDirty = false; }
+    requestAnimationFrame(tick);
+}
+
+$('fr-time').addEventListener('input', () => {
+    state.cursorH = parseFloat($('fr-time').value);
+    state._chartDirty = true;
+});
+$('fr-play').addEventListener('click', () => {
+    state.playing = !state.playing;
+    $('fr-play').textContent = state.playing ? '❚❚' : '▶';
+});
+$('fr-preset').addEventListener('change', (e) => applyPreset(e.target.value));
+window.addEventListener('resize', () => { state._chartDirty = true; });
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+$('fr-preset').value = ST_PATRICK_FIT.id;
+syncSliders();
+await applyPreset(ST_PATRICK_FIT.id);
+requestAnimationFrame(tick);
+</script>
+<script type="module">import { initNav } from "./js/nav.js?v=20260714"; initNav("flux-rope");</script>
+</body>
+</html>
