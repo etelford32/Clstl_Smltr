@@ -68,10 +68,11 @@ export async function loadFluxRopeKernel(source) {
 
     return {
         maxSteps: x.fr_max_steps(),
+        maxRopes: x.fr_max_ropes(),
 
         reset() { x.fr_init(); },
 
-        /** Set the rope fit. Accepts a partial object over ROPE_DEFAULTS. */
+        /** Reset to a SINGLE rope launched at t=0 (v1 API, back-compat). */
         setRope(p = {}) {
             const r = { ...ROPE_DEFAULTS, ...p };
             x.fr_set_rope(
@@ -83,25 +84,55 @@ export async function loadFluxRopeKernel(source) {
             return r;
         },
 
-        // Kinematics probes (page HUD + GLSL uniforms). t = seconds after launch.
+        // ── Rope trains (spec §10) ──────────────────────────────────────────
+        clearRopes() { x.fr_clear_ropes(); },
+        /** Append one rope; `launchOffsetS` is seconds after the reference
+         *  epoch (t = 0). Returns the train size (capped at maxRopes). */
+        pushRope(p = {}) {
+            const r = { ...ROPE_DEFAULTS, launchOffsetS: 0, ...p };
+            const n = x.fr_push_rope(
+                r.lonDeg, r.latDeg, r.tiltDeg, r.handedness, r.twistTurns,
+                r.b1AuNt, r.sigma1AuAu, r.nB, r.nSigma, r.d0Rsun,
+                r.v0Kms, r.gammaPerKm, r.wKms,
+                r.profile === 'lundquist' ? 1 : 0,
+                r.launchOffsetS,
+            );
+            return n;
+        },
+        /** Replace the whole train in one call. */
+        setRopes(ropes) {
+            x.fr_clear_ropes();
+            for (const r of ropes) this.pushRope(r);
+            return x.fr_rope_count();
+        },
+        ropeCount() { return x.fr_rope_count(); },
+        ropeLaunchS(i) { return x.fr_rope_t_launch_s(i); },
+
+        // Kinematics probes (page HUD + GLSL uniforms). t = seconds after the
+        // reference epoch; index-free forms probe rope 0.
         apexKm(tS) { return x.fr_apex_km(tS); },
         apexVKms(tS) { return x.fr_apex_v_kms(tS); },
         sigmaApexKm(tS) { return x.fr_sigma_apex_km(tS); },
+        apexKmAt(i, tS) { return x.fr_apex_km_at(i, tS); },
+        apexVKmsAt(i, tS) { return x.fr_apex_v_kms_at(i, tS); },
+        sigmaApexKmAt(i, tS) { return x.fr_sigma_apex_km_at(i, tS); },
 
         /**
-         * Sample the rope field at a heliocentric point [km] (HELIOCENTRIC
-         * frame, not GSE — this is the 3D view's oracle).
-         * → { bx, by, bz, inside }
+         * Sample the TRAIN's superposed field at a heliocentric point [km]
+         * (HELIOCENTRIC frame, not GSE — this is the 3D view's oracle).
+         * → { bx, by, bz, count, inside } — count ≥ 2 flags rope overlap.
          */
         fieldAt(tS, xKm, yKm, zKm) {
             const v = copyF32(x.fr_field_at(tS, xKm, yKm, zKm), 4);
-            return { bx: v[0], by: v[1], bz: v[2], inside: v[3] === 1 };
+            return { bx: v[0], by: v[1], bz: v[2], count: v[3], inside: v[3] >= 1 };
         },
 
         /**
          * Deterministic virtual-spacecraft series: nSteps GSE samples from
-         * t0S (seconds after launch) at dtS spacing.
-         * → { bx, by, bz, inside: Float32Arrays, hits }
+         * t0S (seconds after the reference epoch) at dtS spacing.
+         * → { bx, by, bz, inside: Float32Arrays, hits } — `inside` carries
+         * the per-step rope-containment COUNT (0/1 for single ropes; ≥ 2
+         * marks where the v1 no-interaction assumption breaks on trains).
          */
         series(t0S, dtS, nSteps, obs = L1_OBSERVER) {
             const n = Math.min(nSteps, this.maxSteps);
@@ -138,9 +169,10 @@ export async function loadFluxRopeKernel(source) {
             const members = x.fr_ens_run(seed, nMembers, t0S, dtS, n, obs.rAu, obs.lonDeg, obs.latDeg);
             const steps = x.fr_ens_steps();
             const stride = x.fr_ens_member_stride();
+            const ropesPerMember = x.fr_ens_ropes_per_member();
             const pct = (k) => copyF32(x.fr_ens_bz_pct_ptr(k), steps);
             return {
-                members, steps,
+                members, steps, ropesPerMember,
                 pHit: x.fr_ens_p_hit(),
                 bzPct: { p5: pct(0), p25: pct(1), p50: pct(2), p75: pct(3), p95: pct(4) },
                 btMed: copyF32(x.fr_ens_bt_med_ptr(), steps),
@@ -149,9 +181,10 @@ export async function loadFluxRopeKernel(source) {
                 minBz: copyF32(x.fr_ens_minbz_ptr(), members),
                 // Per-member sampled params for envelope rendering:
                 // [lonDeg, latDeg, tiltDeg, v0Kms, gammaPerKm, sigma1AuAu,
-                //  handedness] × members.
+                //  handedness] × (members × ropesPerMember), member-major —
+                // record (m, r) at (m·ropesPerMember + r)·stride.
                 memberStride: stride,
-                memberParams: copyF32(x.fr_ens_member_params_ptr(), members * stride),
+                memberParams: copyF32(x.fr_ens_member_params_ptr(), members * ropesPerMember * stride),
                 pMinBzBelow: (thr) => x.fr_ens_p_minbz_below(thr),
             };
         },

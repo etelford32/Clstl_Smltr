@@ -17,7 +17,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { loadFluxRopeKernel, L1_OBSERVER } from '../js/flux-rope-kernel.js';
-import { ST_PATRICK_FIT } from '../js/flux-rope-presets.js';
+import { GANNON_FIT, ST_PATRICK_FIT } from '../js/flux-rope-presets.js';
 
 const wasmPath = fileURLToPath(new URL('../js/flux-rope-wasm/flux_rope_core.wasm', import.meta.url));
 const bundlePath = fileURLToPath(new URL('../data/hindcast/st_patrick_mar_2015_replay.json', import.meta.url));
@@ -146,6 +146,94 @@ const mins = Array.from(ensSP.minBz).filter(Number.isFinite).sort((a, b) => a - 
 check('st-patrick ensemble: observed min inside member spread',
     mins[0] < minObs && minObs < mins[mins.length - 1],
     `obs ${minObs} in [${mins[0].toFixed(1)}, ${mins[mins.length - 1].toFixed(1)}]`);
+
+// ── Gannon May 2024 sequential-rope hindcast (spec §10, Phase 2) ─────────────
+// TWO non-interacting ropes vs the observed G5 train. Tolerances are looser
+// than St. Patrick's ON PURPOSE: the unmodeled X3.9/X5.8 CMEs and the
+// absent CME–CME compression are known, documented v1 misses.
+const gBundlePath = fileURLToPath(new URL('../data/hindcast/gannon_may_2024_l1_replay.json', import.meta.url));
+const gBundle = JSON.parse(await readFile(gBundlePath, 'utf8'));
+const gObs = gBundle.series.bz_nt.map((x) => (x === null ? NaN : x));
+const gStepS = gBundle.window.step_minutes * 60;
+const gN = gObs.length;
+const gT0S = (Date.parse(gBundle.window.start) - Date.parse(GANNON_FIT.launchIso)) / 1000;
+const gIdx = (iso) => Math.round((Date.parse(iso) - Date.parse(gBundle.window.start)) / 1000 / gStepS);
+
+let gMinObs = Infinity, gIMinObs = 0, gSouthObsH = 0;
+for (let i = 0; i < gN; i++) {
+    if (Number.isFinite(gObs[i])) {
+        if (gObs[i] < gMinObs) { gMinObs = gObs[i]; gIMinObs = i; }
+        if (gObs[i] < -10) gSouthObsH += gStepS / 3600;
+    }
+}
+
+check('gannon: train preset has 2 ropes with launch offsets',
+    GANNON_FIT.ropes.length === 2 && GANNON_FIT.ropes[1].launchOffsetS > 0);
+k.setRopes(GANNON_FIT.ropes);
+check('gannon: kernel accepts the train', k.ropeCount() === 2);
+const gSeries = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+let gMin = Infinity, gIMin = -1, gSouthH = 0, gInside = 0, gOverlap = 0;
+for (let i = 0; i < gN; i++) {
+    if (gSeries.bz[i] < gMin) { gMin = gSeries.bz[i]; gIMin = i; }
+    if (gSeries.bz[i] < -10) gSouthH += gStepS / 3600;
+    if (gSeries.inside[i] > 0) gInside++;
+    if (gSeries.inside[i] > 1) gOverlap++;
+}
+{
+    let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, c = 0;
+    for (let i = 0; i < gN; i++) {
+        if (!Number.isFinite(gObs[i])) continue;
+        const x = gSeries.bz[i], y = gObs[i];
+        sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; c++;
+    }
+    const gCorr = (sxy - sx * sy / c) / Math.sqrt((sxx - sx * sx / c) * (syy - sy * sy / c) || 1);
+    check('gannon: full-window Bz shape correlation > 0.6', gCorr > 0.6, `r = ${gCorr.toFixed(3)} over ${c} obs samples`);
+}
+check('gannon: global min Bz within ±25% of observed',
+    Math.abs((gMin - gMinObs) / gMinObs) < 0.25,
+    `model ${gMin.toFixed(1)} vs obs ${gMinObs.toFixed(1)} nT (Δ ${(100 * Math.abs((gMin - gMinObs) / gMinObs)).toFixed(1)}%)`);
+check('gannon: min-Bz timing within ±6 h', Math.abs(gIMin - gIMinObs) * gStepS / 3600 < 6,
+    `Δ ${(Math.abs(gIMin - gIMinObs) * gStepS / 3600).toFixed(1)} h`);
+check('gannon: southward dwell (< −10 nT) within factor 1.75',
+    gSouthH > gSouthObsH / 1.75 && gSouthH < gSouthObsH * 1.75,
+    `model ${gSouthH.toFixed(1)} h vs obs ${gSouthObsH.toFixed(1)} h`);
+
+// Both observed southward episodes must be reproduced by the train.
+const e1 = [gIdx('2024-05-10T17:30:00Z'), gIdx('2024-05-11T04:00:00Z')];
+const e2 = [gIdx('2024-05-11T05:00:00Z'), gIdx('2024-05-11T17:00:00Z')];
+const minIn = (lo, hi) => { let m = Infinity; for (let i = lo; i < hi; i++) m = Math.min(m, gSeries.bz[i]); return m; };
+check('gannon: episode 1 (May 10–11 night) reproduced', minIn(...e1) < -35, `${minIn(...e1).toFixed(1)} nT`);
+check('gannon: episode 2 (May 11 day) reproduced', minIn(...e2) < -30, `${minIn(...e2).toFixed(1)} nT`);
+
+// The no-interaction honesty report: the containment-count channel is the
+// diagnostic. For THIS fit the ropes stay disjoint at L1 (overlap 0) — the
+// interaction shows up instead as rope A's compressed fit (σ 0.085 AU,
+// 55 nT at 1 AU). Report the numbers either way; never hide them.
+check('gannon: containment-count channel populated', Math.max(...gSeries.inside) >= 1,
+    `inside ${gInside} steps, overlap ${gOverlap} steps (${(100 * gOverlap / Math.max(1, gInside)).toFixed(1)}% of inside)`);
+
+// Sequential arrivals in launch order (per-rope single runs).
+k.setRopes([GANNON_FIT.ropes[0]]);
+const gA = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+k.setRopes([GANNON_FIT.ropes[1]]);
+const gB = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+const firstIn = (s) => s.inside.findIndex((v) => v > 0);
+check('gannon: ropes arrive in launch order', firstIn(gA) >= 0 && firstIn(gB) > firstIn(gA),
+    `rope A +${(gT0S / 3600 + firstIn(gA) * gStepS / 3600).toFixed(1)} h, rope B +${(gT0S / 3600 + firstIn(gB) * gStepS / 3600).toFixed(1)} h`);
+
+// Joint ensemble over the train.
+k.setRopes(GANNON_FIT.ropes);
+k.setSpreads({});
+const gEns = k.ensembleRun(2024, 500, gT0S, gStepS, gN, L1_OBSERVER);
+check('gannon ensemble: joint train sampling', gEns.ropesPerMember === 2
+    && gEns.memberParams.length === 2 * 7 * gEns.members);
+check('gannon ensemble: P(hit) strong', gEns.pHit > 0.6, `${gEns.pHit.toFixed(2)}`);
+check('gannon ensemble: P(min Bz < −20 nT) calls a severe storm',
+    gEns.pMinBzBelow(-20) > 0.5, `${gEns.pMinBzBelow(-20).toFixed(2)}`);
+const gMins = Array.from(gEns.minBz).filter(Number.isFinite).sort((a, b) => a - b);
+check('gannon ensemble: observed min inside member spread',
+    gMins[0] < gMinObs && gMinObs < gMins[gMins.length - 1],
+    `obs ${gMinObs} in [${gMins[0].toFixed(1)}, ${gMins[gMins.length - 1].toFixed(1)}]`);
 
 console.log(failures ? `\n${failures} failure(s)` : '\nall flux-rope kernel checks passed');
 process.exit(failures ? 1 : 0);

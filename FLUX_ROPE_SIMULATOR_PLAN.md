@@ -77,6 +77,15 @@ the same crate.
   fans, arrival-time distribution, P(min Bz < −10/−20 nT), ensemble envelope
   rendering. Basic percentile machinery ships with Phase 1 (it is cheap in
   Rust); Gannon sequential-rope hindcast completes this phase.
+  ✅ complete (2026-07-21): multi-rope trains in the kernel (spec §10 —
+  superposition + containment-count overlap diagnostic + joint per-member
+  ensemble sampling), `GANNON_FIT` 2-rope hand fit (X1.0 + X2.2 AR 13664
+  launches, +20.25 h apart) vs the baked L1 driver bundle
+  (`scripts/build-gannon-l1-replay.mjs` → `data/hindcast/
+  gannon_may_2024_l1_replay.json`): min Bz −43.8 vs −44.17 nT (0.9%), timing
+  Δ1.0 h, full-window r = 0.71, both southward episodes reproduced.
+  Honest misses on record: X3.9/X5.8 CMEs unmodeled; no rope–rope
+  compression (rope A's compact/strong fit absorbs it) — the Phase 5 case.
 - **Phase 3 — Live + corrections.** DONKI CME ingestion, live DSCOVR overlay,
   sequential importance resampling (particle filter) over the ensemble as L1 /
   STEREO-A data arrives, dashboard fan integration.
@@ -98,11 +107,12 @@ imagery is display-context only until v3+.
 
 ## 6. Validation
 
-Hindcast targets map onto the existing backlog: **St. Patrick's 2015** first
+Hindcast targets map onto the existing backlog: **St. Patrick's 2015** ✅
 (clean single rope — the community benchmark, and the replay bundle already
-carries observed 5-min Bz/V/N), then Gannon May 2024 (CME train — v1 treats it
-as sequential single ropes and reports honestly where the no-interaction
-assumption breaks), Feb 2022 Starlink, Sep 2017. Metrics: arrival-time error,
+carries observed 5-min Bz/V/N), **Gannon May 2024** ✅ (CME train — v1 treats
+it as sequential single ropes and reports honestly where the no-interaction
+assumption breaks; spec §10 records the fit and its misses), then Feb 2022
+Starlink, Sep 2017. Metrics: arrival-time error,
 min-Bz error, rope-duration error, Bz-shape correlation, Dst-through-pipeline
 error, rank histograms for ensemble calibration, skill vs. persistence.
 Publish the numbers, including the misses.

@@ -4,7 +4,7 @@
 //! and WASM — splitmix64 → xoshiro256**, Box–Muller normals, no ambient
 //! entropy anywhere.
 
-use crate::rope::{field_at, to_gse, Frame, RopeParams, V3};
+use crate::rope::{field_at_set, to_gse, RopeEntry, RopeParams, V3};
 
 // ── PRNG ─────────────────────────────────────────────────────────────────────
 
@@ -110,6 +110,9 @@ pub const MEMBER_PARAM_FIELDS: [&str; MEMBER_STRIDE] =
 pub struct EnsembleResult {
     pub n_members: usize,
     pub n_steps: usize,
+    /// Ropes per member (the train size) — member_params carries
+    /// n_members × ropes_per_member records.
+    pub ropes_per_member: usize,
     /// Row-major [pct_idx][step] Bz_GSE percentiles [nT].
     pub bz_pct: Vec<f32>,
     /// Median |B| per step [nT].
@@ -151,9 +154,14 @@ fn percentile_sorted(a: &[f32], q: f64) -> f32 {
     }
 }
 
+/// Run the joint ensemble over a rope TRAIN: each member draws EVERY rope's
+/// parameters independently (sequential draws from one stream — the order is
+/// part of the determinism contract), keeps each rope's launch offset from
+/// the fit, and flies the observer through the superposed train (spec §10).
+/// A 1-rope train reproduces the v1 single-rope ensemble draw-for-draw.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
-    fit: &RopeParams,
+    fits: &[RopeEntry],
     sp: &Spreads,
     seed: u64,
     n_members: usize,
@@ -163,33 +171,39 @@ pub fn run(
     obs: V3,
 ) -> EnsembleResult {
     let mut rng = Rng::new(seed);
+    let n_ropes = fits.len().max(1);
     // Per-step member samples: NaN = outside. Column layout [step][member].
     let mut bz = vec![f32::NAN; n_steps * n_members];
     let mut bt = vec![f32::NAN; n_steps * n_members];
     let mut arrival_h = vec![f32::NAN; n_members];
     let mut min_bz = vec![f32::NAN; n_members];
-    let mut member_params = vec![0.0f32; n_members * MEMBER_STRIDE];
+    let mut member_params = vec![0.0f32; n_members * n_ropes * MEMBER_STRIDE];
     let mut hit_members = 0usize;
+    let mut train: Vec<RopeEntry> = Vec::with_capacity(fits.len());
 
     for m in 0..n_members {
-        let member = sample_member(fit, sp, &mut rng);
-        member_params[m * MEMBER_STRIDE..(m + 1) * MEMBER_STRIDE].copy_from_slice(&[
-            member.lon_deg as f32,
-            member.lat_deg as f32,
-            member.tilt_deg as f32,
-            member.v0_kms as f32,
-            member.gamma_per_km as f32,
-            member.sigma_1au_au as f32,
-            member.handedness as f32,
-        ]);
-        let frame = Frame::new(member.lon_deg, member.lat_deg, member.tilt_deg);
+        train.clear();
+        for (r, fit) in fits.iter().enumerate() {
+            let member = sample_member(&fit.params, sp, &mut rng);
+            let o = (m * n_ropes + r) * MEMBER_STRIDE;
+            member_params[o..o + MEMBER_STRIDE].copy_from_slice(&[
+                member.lon_deg as f32,
+                member.lat_deg as f32,
+                member.tilt_deg as f32,
+                member.v0_kms as f32,
+                member.gamma_per_km as f32,
+                member.sigma_1au_au as f32,
+                member.handedness as f32,
+            ]);
+            train.push(RopeEntry::new(member, fit.t_launch_s));
+        }
         let mut member_min = f32::NAN;
         let mut member_arr = f32::NAN;
         for i in 0..n_steps {
             let t = t0_s + dt_s * i as f64;
-            let fs = field_at(&member, &frame, t, obs);
-            if fs.inside {
-                let g = to_gse(fs.b);
+            let (b, count) = field_at_set(&train, t, obs);
+            if count > 0 {
+                let g = to_gse(b);
                 let bz_i = g[2] as f32;
                 let bt_i =
                     ((g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt()) as f32;
@@ -247,6 +261,7 @@ pub fn run(
     EnsembleResult {
         n_members,
         n_steps,
+        ropes_per_member: n_ropes,
         bz_pct,
         bt_med,
         hit_frac,
@@ -262,8 +277,11 @@ mod tests {
     use super::*;
     use crate::rope::observer_pos;
 
-    fn fit() -> RopeParams {
-        RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, ..Default::default() }
+    fn fit() -> Vec<RopeEntry> {
+        vec![RopeEntry::new(
+            RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, ..Default::default() },
+            0.0,
+        )]
     }
     fn spreads() -> Spreads {
         Spreads {
@@ -329,6 +347,30 @@ mod tests {
         // Storm probability machinery: strongly-south minima exist.
         assert!(r.p_min_bz_below(-10.0) > 0.3);
         assert!(r.p_min_bz_below(-10.0) >= r.p_min_bz_below(-20.0));
+    }
+
+    #[test]
+    fn train_ensemble_samples_every_rope_and_stays_deterministic() {
+        let obs = observer_pos(1.0, 0.0, 0.0);
+        let p = RopeParams { v0_kms: 1400.0, tilt_deg: 90.0, ..Default::default() };
+        let train = vec![RopeEntry::new(p, 0.0), RopeEntry::new(p, 24.0 * 3600.0)];
+        let r = run(&train, &spreads(), 99, 100, 0.0, 1800.0, 500, obs);
+        assert_eq!(r.ropes_per_member, 2);
+        assert_eq!(r.member_params.len(), 100 * 2 * MEMBER_STRIDE);
+        // The two ropes of one member are DIFFERENT draws (independent).
+        let a = &r.member_params[0..MEMBER_STRIDE];
+        let b = &r.member_params[MEMBER_STRIDE..2 * MEMBER_STRIDE];
+        assert!(a != b, "per-rope draws must be independent");
+        // Deterministic under the same seed.
+        let r2 = run(&train, &spreads(), 99, 100, 0.0, 1800.0, 500, obs);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&r.bz_pct), bits(&r2.bz_pct));
+        assert_eq!(bits(&r.member_params), bits(&r2.member_params));
+        // Two chances to hit can only help: the joint train p_hit must beat
+        // a single-rope ensemble of either rope under the same priors.
+        let solo = run(&train[..1], &spreads(), 99, 100, 0.0, 1800.0, 500, obs);
+        assert!(r.p_hit >= solo.p_hit, "train {} < solo {}", r.p_hit, solo.p_hit);
+        assert!(r.p_hit > 0.6, "p_hit {}", r.p_hit);
     }
 
     #[test]

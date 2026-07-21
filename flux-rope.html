@@ -93,6 +93,13 @@ body {
 }
 
 .fr-controls { display:flex; flex-direction:column; gap:12px; }
+.fr-ropetabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+.fr-ropetabs button {
+    background:rgba(90,110,160,.12); color:#8b94ad; border:1px solid rgba(90,110,160,.3);
+    border-radius:7px; padding:4px 10px; font-size:.72rem; cursor:pointer;
+}
+.fr-ropetabs button.active { color:#e4e9f5; border-color:rgba(199,146,234,.6); background:rgba(199,146,234,.14); }
+.fr-ropetabs button.fr-add { color:#7fe6c3; }
 .fr-field { display:grid; grid-template-columns:88px 1fr 62px; align-items:center; gap:8px; font-size:.76rem; margin-bottom:6px; }
 .fr-field label { color:#8b94ad; }
 .fr-field input[type=range] { width:100%; accent-color:#c792ea; }
@@ -183,6 +190,8 @@ body {
 
         <div class="fr-panel">
             <h2>Rope parameters</h2>
+            <div class="fr-ropetabs" id="fr-ropetabs"></div>
+            <div class="fr-field"><label>launch offset</label><input type="range" id="p-launchOffsetH" min="0" max="96" step="0.25"><output>+0 h</output></div>
             <div class="fr-field"><label>longitude</label><input type="range" id="p-lonDeg" min="-60" max="60" step="1"><output>0°</output></div>
             <div class="fr-field"><label>latitude</label><input type="range" id="p-latDeg" min="-40" max="40" step="1"><output>0°</output></div>
             <div class="fr-field"><label>tilt</label><input type="range" id="p-tiltDeg" min="-90" max="90" step="1"><output>0°</output></div>
@@ -227,11 +236,13 @@ body {
     <b>Reading the chart:</b> shaded bands are the ensemble 5–95% and 25–75%
     Bz envelopes at L1; the white trace is the deterministic reference fit and
     the amber trace is the observed OMNI Bz for hindcast events. The v1 engine
-    models the magnetic rope only — <b>no sheath ahead of it</b> — so the
-    observed sheath interval between shock arrival and rope arrival is an
-    expected, honestly-reported miss (it is the first Phase 5 roadmap item).
-    St. Patrick's 2015 fit quality: min Bz −24.1 vs −24.25 nT observed,
-    min-Bz timing Δ2.1 h, shape correlation 0.66.
+    models magnetic ropes only — <b>no sheath, no rope–rope interaction</b> —
+    so the observed sheath interval and train compression are expected,
+    honestly-reported misses (the Phase 5 roadmap). Validated fits:
+    St. Patrick's 2015 (single rope) min Bz −24.1 vs −24.25 nT observed,
+    timing Δ2.1 h, shape r 0.66 · Gannon May 2024 (2-rope train) min Bz
+    −43.8 vs −44.2 nT, timing Δ1.0 h, full-window r 0.71, both southward
+    episodes reproduced.
 </p>
 
 <section class="fr-info">
@@ -259,15 +270,16 @@ body {
         <p>Next: live DONKI CME ingestion, particle-filter assimilation that
         narrows the fan as STEREO-A and L1 data arrive, forecast mode for the
         <a href="ring-current.html">Ring Current twin</a> via the universal
-        SolarWindDriver contract, tiered <a href="auroracle.html">AurOracle</a>
-        alerts, and a Gannon-train hindcast — physics-first ground truth,
-        not an ML black box.</p>
+        SolarWindDriver contract, and tiered <a href="auroracle.html">AurOracle</a>
+        alerts. Then depth: sheath model, CME–CME interaction (the Gannon
+        train's known miss), and the BATS-R-US cross-check — physics-first
+        ground truth, not an ML black box.</p>
     </div>
 </section>
 
 <script type="module">
 import { loadFluxRopeKernel, ROPE_DEFAULTS, SPREAD_DEFAULTS } from './js/flux-rope-kernel.js';
-import { ST_PATRICK_FIT, SCENARIOS } from './js/flux-rope-presets.js';
+import { GANNON_FIT, ST_PATRICK_FIT, SCENARIOS } from './js/flux-rope-presets.js';
 import { HeliosphereView } from './js/flux-rope/view.js';
 import { drawBzChart, drawArrivalHist } from './js/flux-rope/charts.js';
 import { fromReplayBundle } from './js/solar-wind-driver.js';
@@ -278,20 +290,25 @@ const $ = (id) => document.getElementById(id);
 const kernel = await loadFluxRopeKernel('./js/flux-rope-wasm/flux_rope_core.wasm');
 const view = new HeliosphereView($('fr-gl'), $('fr-overlay'));
 
+// Normalize a preset (single `rope` or train `ropes`) into a full train.
+const toRopes = (p) => (p.ropes ?? [p.rope]).map((r) => ({ ...ROPE_DEFAULTS, launchOffsetS: 0, ...r }));
+
 // ── State ────────────────────────────────────────────────────────────────────
 const GRID = { t0S: 0, dtS: 600, hours: 132 };
 GRID.n = Math.round(GRID.hours * 3600 / GRID.dtS);
 const state = {
-    rope: { ...ROPE_DEFAULTS, ...ST_PATRICK_FIT.rope },
+    ropes: toRopes(ST_PATRICK_FIT),
+    active: 0,            // rope tab index
     launchMs: Date.parse(ST_PATRICK_FIT.launchIso),
     obs: null,            // { tH, bz } overlay (hindcast presets)
     det: null, ens: null,
     tH: Array.from({ length: GRID.n }, (_, i) => (GRID.t0S + i * GRID.dtS) / 3600),
     cursorH: 0, playing: true,
 };
+const activeRope = () => state.ropes[state.active];
 
 // ── Presets ──────────────────────────────────────────────────────────────────
-const PRESETS = [ST_PATRICK_FIT, ...SCENARIOS, { id: 'custom', label: 'Custom', rope: null }];
+const PRESETS = [ST_PATRICK_FIT, GANNON_FIT, ...SCENARIOS, { id: 'custom', label: 'Custom', rope: null }];
 for (const p of PRESETS) {
     const opt = document.createElement('option');
     opt.value = p.id; opt.textContent = p.label;
@@ -300,17 +317,22 @@ for (const p of PRESETS) {
 const PRESET_NOTES = {
     'st-patrick-2015': 'Hand fit to the 17 Mar 2015 G4 storm (DONKI-informed launch). ' +
         'The amber observed trace is OMNI 5-min Bz from the hindcast bundle.',
+    'gannon-2024': 'The May 2024 G5 CME train as TWO sequential ropes (X1.0 and X2.2 flare ' +
+        'launches from AR 13664, +20.25 h apart). The X3.9/X5.8 CMEs and rope–rope ' +
+        'compression are honestly unmodeled — that is the v2 roadmap.',
     'fast-halo': 'Synthetic: a 1600 km/s halo eruption aimed at Earth — note the shorter transit and harder Bz.',
     'slow-glancing': 'Synthetic: a slow flank launch — most ensemble members miss; the fan is wide and shallow.',
-    'custom': 'Free play: every slider redraws the rope, the fan and the probabilities live.',
+    'custom': 'Free play: every slider redraws the active rope; add ropes to build a train.',
 };
 
 async function applyPreset(id) {
     const p = PRESETS.find((x) => x.id === id);
     $('fr-preset-note').textContent = PRESET_NOTES[id] || '';
-    if (p && p.rope) {
-        state.rope = { ...ROPE_DEFAULTS, ...p.rope };
+    if (p && (p.rope || p.ropes)) {
+        state.ropes = toRopes(p);
+        state.active = 0;
         state.launchMs = p.launchIso ? Date.parse(p.launchIso) : null;
+        renderRopeTabs();
         syncSliders();
     }
     state.obs = null;
@@ -329,39 +351,91 @@ async function applyPreset(id) {
     recompute();
 }
 
+// ── Rope tabs (train editing, spec §10) ──────────────────────────────────────
+function renderRopeTabs() {
+    const box = $('fr-ropetabs');
+    box.innerHTML = '';
+    state.ropes.forEach((r, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = `Rope ${i + 1} · +${((r.launchOffsetS || 0) / 3600).toFixed(0)}h`;
+        b.className = i === state.active ? 'active' : '';
+        b.addEventListener('click', () => { state.active = i; renderRopeTabs(); syncSliders(); });
+        box.appendChild(b);
+    });
+    if (state.ropes.length < kernel.maxRopes) {
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'fr-add';
+        add.textContent = '+ rope';
+        add.title = 'Add a rope to the train (clones the active rope, +12 h)';
+        add.addEventListener('click', () => {
+            const clone = { ...activeRope() };
+            clone.launchOffsetS = (clone.launchOffsetS || 0) + 12 * 3600;
+            state.ropes.push(clone);
+            state.active = state.ropes.length - 1;
+            markCustom(); renderRopeTabs(); syncSliders(); recompute();
+        });
+        box.appendChild(add);
+    }
+    if (state.ropes.length > 1) {
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.textContent = '− remove';
+        del.title = 'Remove the active rope';
+        del.addEventListener('click', () => {
+            state.ropes.splice(state.active, 1);
+            state.active = Math.max(0, state.active - 1);
+            markCustom(); renderRopeTabs(); syncSliders(); recompute();
+        });
+        box.appendChild(del);
+    }
+}
+
 // ── Parameter panel ──────────────────────────────────────────────────────────
 const SLIDERS = ['lonDeg', 'latDeg', 'tiltDeg', 'twistTurns', 'b1AuNt', 'sigma1AuAu', 'v0Kms', 'wKms'];
 const UNITS = { lonDeg: '°', latDeg: '°', tiltDeg: '°', twistTurns: '', b1AuNt: ' nT', sigma1AuAu: ' AU', v0Kms: ' km/s', wKms: ' km/s' };
 
 function syncSliders() {
+    const rope = activeRope();
     for (const k of SLIDERS) {
         const el = $(`p-${k}`);
-        el.value = state.rope[k];
-        el.nextElementSibling.textContent = `${state.rope[k]}${UNITS[k]}`;
+        el.value = rope[k];
+        el.nextElementSibling.textContent = `${rope[k]}${UNITS[k]}`;
     }
-    $('p-gammaE7').value = state.rope.gammaPerKm * 1e7;
-    $('p-gammaE7').nextElementSibling.textContent = (state.rope.gammaPerKm * 1e7).toFixed(2);
-    $('p-handedness').value = String(state.rope.handedness);
-    $('p-profile').value = state.rope.profile;
+    $('p-launchOffsetH').value = (rope.launchOffsetS || 0) / 3600;
+    $('p-launchOffsetH').nextElementSibling.textContent = `+${((rope.launchOffsetS || 0) / 3600).toFixed(1)} h`;
+    $('p-gammaE7').value = rope.gammaPerKm * 1e7;
+    $('p-gammaE7').nextElementSibling.textContent = (rope.gammaPerKm * 1e7).toFixed(2);
+    $('p-handedness').value = String(rope.handedness);
+    $('p-profile').value = rope.profile;
+}
+
+function markCustom() {
+    $('fr-preset').value = 'custom';
+    $('fr-preset-note').textContent = PRESET_NOTES.custom;
+    state.launchMs = null; state.obs = null;   // editing breaks the hindcast link
 }
 
 let debounceId = 0;
 function onParamInput() {
+    const rope = activeRope();
     for (const k of SLIDERS) {
-        state.rope[k] = parseFloat($(`p-${k}`).value);
-        $(`p-${k}`).nextElementSibling.textContent = `${state.rope[k]}${UNITS[k]}`;
+        rope[k] = parseFloat($(`p-${k}`).value);
+        $(`p-${k}`).nextElementSibling.textContent = `${rope[k]}${UNITS[k]}`;
     }
-    state.rope.gammaPerKm = parseFloat($('p-gammaE7').value) * 1e-7;
+    rope.launchOffsetS = parseFloat($('p-launchOffsetH').value) * 3600;
+    $('p-launchOffsetH').nextElementSibling.textContent = `+${parseFloat($('p-launchOffsetH').value).toFixed(1)} h`;
+    rope.gammaPerKm = parseFloat($('p-gammaE7').value) * 1e-7;
     $('p-gammaE7').nextElementSibling.textContent = parseFloat($('p-gammaE7').value).toFixed(2);
-    state.rope.handedness = parseFloat($('p-handedness').value);
-    state.rope.profile = $('p-profile').value;
-    $('fr-preset').value = 'custom';
-    $('fr-preset-note').textContent = PRESET_NOTES.custom;
-    state.launchMs = null; state.obs = null;   // slider play breaks the hindcast link
+    rope.handedness = parseFloat($('p-handedness').value);
+    rope.profile = $('p-profile').value;
+    markCustom();
+    renderRopeTabs();
     clearTimeout(debounceId);
     debounceId = setTimeout(recompute, 120);
 }
-for (const k of [...SLIDERS, 'gammaE7']) $(`p-${k}`).addEventListener('input', onParamInput);
+for (const k of [...SLIDERS, 'gammaE7', 'launchOffsetH']) $(`p-${k}`).addEventListener('input', onParamInput);
 $('p-handedness').addEventListener('change', onParamInput);
 $('p-profile').addEventListener('change', onParamInput);
 $('e-members').addEventListener('change', () => recompute());
@@ -374,8 +448,8 @@ $('e-scale').addEventListener('input', () => {
 
 // ── Compute ──────────────────────────────────────────────────────────────────
 function recompute() {
-    kernel.setRope(state.rope);
-    view.setRope(state.rope);
+    kernel.setRopes(state.ropes);
+    view.setRopes(state.ropes);
     state.det = kernel.series(GRID.t0S, GRID.dtS, GRID.n);
 
     const sc = parseFloat($('e-scale').value);
@@ -441,16 +515,24 @@ function tick(ts) {
     }
     lastTs = ts;
     const tS = state.cursorH * 3600;
-    const apexKm = kernel.apexKm(tS);
-    view.draw(tS, { apexKm, sigmaApexKm: kernel.sigmaApexKm(tS) });
+    const probes = state.ropes.map((_, r) => ({
+        apexKm: kernel.apexKmAt(r, tS),
+        sigmaApexKm: kernel.sigmaApexKmAt(r, tS),
+    }));
+    view.draw(tS, probes);
     $('fr-t-label').textContent = fmtT(state.cursorH);
-    $('fr-hud-r').textContent = `${(apexKm / AU_KM).toFixed(2)} AU`;
-    $('fr-hud-v').textContent = `${kernel.apexVKms(tS).toFixed(0)} km/s`;
-    $('fr-hud-sig').textContent = `${(kernel.sigmaApexKm(tS) / AU_KM).toFixed(3)} AU`;
+    const a = state.active;
+    const launched = tS > (activeRope().launchOffsetS || 0);
+    $('fr-hud-r').textContent = launched ? `${(probes[a].apexKm / AU_KM).toFixed(2)} AU` : 'pre-launch';
+    $('fr-hud-v').textContent = `${kernel.apexVKmsAt(a, tS).toFixed(0)} km/s`;
+    $('fr-hud-sig').textContent = `${(probes[a].sigmaApexKm / AU_KM).toFixed(3)} AU`;
     const i = Math.min(GRID.n - 1, Math.max(0, Math.round(tS / GRID.dtS)));
-    const inside = state.det && state.det.inside[i] > 0;
-    $('fr-hud-status').textContent = inside ? '⚡ crossing L1'
-        : apexKm / AU_KM < 0.99 ? 'in transit' : 'passed L1';
+    const count = state.det ? state.det.inside[i] : 0;
+    const allPassed = state.ropes.every((rope, r) =>
+        tS > (rope.launchOffsetS || 0) && probes[r].apexKm / AU_KM > 1.05);
+    $('fr-hud-status').textContent = count > 1 ? '⚡ rope overlap at L1'
+        : count > 0 ? '⚡ crossing L1'
+        : allPassed ? 'passed L1' : 'in transit';
     if (state.playing || state._chartDirty) { drawCharts(); state._chartDirty = false; }
     requestAnimationFrame(tick);
 }

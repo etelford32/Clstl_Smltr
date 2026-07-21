@@ -33,16 +33,17 @@ pub mod kinematics;
 pub mod rope;
 
 use ensemble::{EnsembleResult, Spreads, PCTS};
-use rope::{field_at, observer_pos, synth_series, Frame, Profile, RopeParams};
+use rope::{field_at_set, observer_pos, synth_series, Profile, RopeEntry, RopeParams};
 
 /// Series buffer cap: 4 channels × MAX_STEPS samples.
 pub const MAX_STEPS: usize = 4096;
 /// Ensemble member cap (keeps the per-step sample matrix bounded).
 pub const MAX_MEMBERS: usize = 8192;
+/// Rope-train cap (spec §10) — page UX and uniform arrays match this.
+pub const MAX_ROPES: usize = 4;
 
 struct Engine {
-    params: RopeParams,
-    frame: Frame,
+    ropes: Vec<RopeEntry>,
     spreads: Spreads,
     series: Box<[f32; 4 * MAX_STEPS]>,
     field_probe: [f32; 4],
@@ -51,11 +52,8 @@ struct Engine {
 
 impl Engine {
     fn new() -> Engine {
-        let params = RopeParams::default();
-        let frame = Frame::new(params.lon_deg, params.lat_deg, params.tilt_deg);
         Engine {
-            params,
-            frame,
+            ropes: vec![RopeEntry::new(RopeParams::default(), 0.0)],
             spreads: Spreads::default(),
             series: Box::new([0.0; 4 * MAX_STEPS]),
             field_probe: [0.0; 4],
@@ -84,9 +82,45 @@ pub extern "C" fn fr_init() {
     }
 }
 
-/// Set the full rope parameterization (spec §3–§5) in one call. Angles in
-/// degrees; `profile` 0 = Gold-Hoyle, 1 = Lundquist. Invalidates any stored
-/// ensemble result.
+#[allow(clippy::too_many_arguments)]
+fn build_params(
+    lon_deg: f64,
+    lat_deg: f64,
+    tilt_deg: f64,
+    handedness: f64,
+    twist_turns: f64,
+    b_1au_nt: f64,
+    sigma_1au_au: f64,
+    n_b: f64,
+    n_sigma: f64,
+    d0_rsun: f64,
+    v0_kms: f64,
+    gamma_per_km: f64,
+    w_kms: f64,
+    profile: f64,
+) -> RopeParams {
+    RopeParams {
+        lon_deg,
+        lat_deg,
+        tilt_deg,
+        handedness: if handedness < 0.0 { -1.0 } else { 1.0 },
+        twist_turns: twist_turns.max(0.1),
+        b_1au_nt,
+        sigma_1au_au,
+        n_b,
+        n_sigma,
+        d0_rsun,
+        v0_kms,
+        gamma_per_km,
+        w_kms,
+        profile: if profile >= 0.5 { Profile::Lundquist } else { Profile::GoldHoyle },
+    }
+}
+
+/// Reset to a SINGLE rope (spec §3–§5) launched at t = 0 — the v1 API,
+/// kept verbatim so single-event pages and pinned tests are untouched.
+/// Angles in degrees; `profile` 0 = Gold-Hoyle, 1 = Lundquist. Invalidates
+/// any stored ensemble result.
 #[allow(clippy::too_many_arguments)]
 #[no_mangle]
 pub extern "C" fn fr_set_rope(
@@ -106,70 +140,163 @@ pub extern "C" fn fr_set_rope(
     profile: f64,
 ) {
     let e = engine();
-    e.params = RopeParams {
-        lon_deg,
-        lat_deg,
-        tilt_deg,
-        handedness: if handedness < 0.0 { -1.0 } else { 1.0 },
-        twist_turns: twist_turns.max(0.1),
-        b_1au_nt,
-        sigma_1au_au,
-        n_b,
-        n_sigma,
-        d0_rsun,
-        v0_kms,
-        gamma_per_km,
-        w_kms,
-        profile: if profile >= 0.5 { Profile::Lundquist } else { Profile::GoldHoyle },
-    };
-    e.frame = Frame::new(lon_deg, lat_deg, tilt_deg);
+    e.ropes.clear();
+    e.ropes.push(RopeEntry::new(
+        build_params(
+            lon_deg, lat_deg, tilt_deg, handedness, twist_turns, b_1au_nt, sigma_1au_au,
+            n_b, n_sigma, d0_rsun, v0_kms, gamma_per_km, w_kms, profile,
+        ),
+        0.0,
+    ));
     e.ens = None;
 }
 
-// ── Kinematics probes (page HUD + GLSL uniforms) ─────────────────────────────
+/// Empty the rope train (spec §10). Follow with fr_push_rope calls.
+#[no_mangle]
+pub extern "C" fn fr_clear_ropes() {
+    let e = engine();
+    e.ropes.clear();
+    e.ens = None;
+}
 
-/// Apex heliocentric distance [km] at t seconds after launch.
+/// Append a rope to the train, launched `t_launch_s` seconds after the
+/// engine's t = 0 reference epoch. Same 14 leading parameters as
+/// fr_set_rope. Trains are capped at MAX_ROPES (excess pushes are ignored).
+/// Returns the train size.
+#[allow(clippy::too_many_arguments)]
+#[no_mangle]
+pub extern "C" fn fr_push_rope(
+    lon_deg: f64,
+    lat_deg: f64,
+    tilt_deg: f64,
+    handedness: f64,
+    twist_turns: f64,
+    b_1au_nt: f64,
+    sigma_1au_au: f64,
+    n_b: f64,
+    n_sigma: f64,
+    d0_rsun: f64,
+    v0_kms: f64,
+    gamma_per_km: f64,
+    w_kms: f64,
+    profile: f64,
+    t_launch_s: f64,
+) -> u32 {
+    let e = engine();
+    if e.ropes.len() < MAX_ROPES {
+        e.ropes.push(RopeEntry::new(
+            build_params(
+                lon_deg, lat_deg, tilt_deg, handedness, twist_turns, b_1au_nt, sigma_1au_au,
+                n_b, n_sigma, d0_rsun, v0_kms, gamma_per_km, w_kms, profile,
+            ),
+            t_launch_s,
+        ));
+        e.ens = None;
+    }
+    e.ropes.len() as u32
+}
+
+#[no_mangle]
+pub extern "C" fn fr_rope_count() -> u32 {
+    engine().ropes.len() as u32
+}
+
+#[no_mangle]
+pub extern "C" fn fr_max_ropes() -> u32 {
+    MAX_ROPES as u32
+}
+
+// ── Kinematics probes (page HUD + GLSL uniforms) ─────────────────────────────
+// The _at variants take a rope index into the train; the index-free forms
+// probe rope 0 (v1 back-compat). A rope not yet launched (t < t_launch)
+// reports its launch state: apex at d0, launch speed, σ(d0).
+
+fn rope_at(idx: u32) -> Option<&'static RopeEntry> {
+    engine().ropes.get(idx as usize)
+}
+
+/// Apex heliocentric distance [km] of rope `idx` at t seconds after epoch.
+#[no_mangle]
+pub extern "C" fn fr_apex_km_at(idx: u32, t_s: f64) -> f64 {
+    match rope_at(idx) {
+        Some(r) => r.params.dbm().apex_km((t_s - r.t_launch_s).max(0.0)),
+        None => f64::NAN,
+    }
+}
+
+/// Apex speed [km/s] of rope `idx` at t seconds after epoch.
+#[no_mangle]
+pub extern "C" fn fr_apex_v_kms_at(idx: u32, t_s: f64) -> f64 {
+    match rope_at(idx) {
+        Some(r) => r.params.dbm().speed_kms((t_s - r.t_launch_s).max(0.0)),
+        None => f64::NAN,
+    }
+}
+
+/// Apex minor radius σ_apex [km] of rope `idx` at t seconds after epoch.
+#[no_mangle]
+pub extern "C" fn fr_sigma_apex_km_at(idx: u32, t_s: f64) -> f64 {
+    match rope_at(idx) {
+        Some(r) => {
+            let d = r.params.dbm().apex_km((t_s - r.t_launch_s).max(0.0));
+            kinematics::sigma_apex_km(
+                r.params.sigma_1au_au * kinematics::AU_KM,
+                d,
+                r.params.n_sigma,
+            )
+        }
+        None => f64::NAN,
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn fr_apex_km(t_s: f64) -> f64 {
-    engine().params.dbm().apex_km(t_s)
+    fr_apex_km_at(0, t_s)
 }
 
-/// Apex speed [km/s] at t seconds after launch.
 #[no_mangle]
 pub extern "C" fn fr_apex_v_kms(t_s: f64) -> f64 {
-    engine().params.dbm().speed_kms(t_s)
+    fr_apex_v_kms_at(0, t_s)
 }
 
-/// Apex cross-section minor radius σ_apex [km] at t seconds after launch.
 #[no_mangle]
 pub extern "C" fn fr_sigma_apex_km(t_s: f64) -> f64 {
-    let e = engine();
-    let d = e.params.dbm().apex_km(t_s);
-    kinematics::sigma_apex_km(e.params.sigma_1au_au * kinematics::AU_KM, d, e.params.n_sigma)
+    fr_sigma_apex_km_at(0, t_s)
+}
+
+/// Launch offset [s] of rope `idx` (NaN when out of range).
+#[no_mangle]
+pub extern "C" fn fr_rope_t_launch_s(idx: u32) -> f64 {
+    match rope_at(idx) {
+        Some(r) => r.t_launch_s,
+        None => f64::NAN,
+    }
 }
 
 // ── Field sampling ───────────────────────────────────────────────────────────
 
-/// Sample the rope field at heliocentric point (x, y, z) [km] at t seconds
-/// after launch. Fills the 4-slot probe buffer with (Bx, By, Bz, inside) in
-/// the HELIOCENTRIC frame (the 3D view's frame — NOT GSE) and returns its
-/// pointer. The GLSL heliosphere view mirrors this math in-shader; this
-/// export is its oracle.
+/// Sample the TRAIN's superposed field at heliocentric point (x, y, z) [km]
+/// at t seconds after the reference epoch. Fills the 4-slot probe buffer
+/// with (Bx, By, Bz, containment_count) in the HELIOCENTRIC frame (the 3D
+/// view's frame — NOT GSE) and returns its pointer. The GLSL heliosphere
+/// view mirrors this math in-shader; this export is its oracle.
 #[no_mangle]
 pub extern "C" fn fr_field_at(t_s: f64, x_km: f64, y_km: f64, z_km: f64) -> *const f32 {
     let e = engine();
-    let fs = field_at(&e.params, &e.frame, t_s, [x_km, y_km, z_km]);
-    e.field_probe = [fs.b[0] as f32, fs.b[1] as f32, fs.b[2] as f32, fs.inside as u32 as f32];
+    let (b, count) = field_at_set(&e.ropes, t_s, [x_km, y_km, z_km]);
+    e.field_probe = [b[0] as f32, b[1] as f32, b[2] as f32, count as f32];
     e.field_probe.as_ptr()
 }
 
 // ── Virtual spacecraft series ────────────────────────────────────────────────
 
-/// Synthesize the in situ series at an observer (spec §6): `n_steps` samples
-/// from `t0_s` at `dt_s` spacing, observer at (r [AU], lon, lat [deg]).
-/// Fills the series buffer with per-step (Bx, By, Bz, inside) in GSE [nT]
-/// and returns the number of inside samples. `n_steps` is clamped to
-/// MAX_STEPS. Read via fr_series_ptr(); copy immediately.
+/// Synthesize the in situ series at an observer (spec §6, §10): `n_steps`
+/// samples from `t0_s` at `dt_s` spacing, observer at (r [AU], lon, lat
+/// [deg]). Fills the series buffer with per-step (Bx, By, Bz,
+/// containment_count) in GSE [nT] — count ≥ 2 marks where the v1
+/// no-interaction assumption breaks — and returns the number of steps with
+/// count ≥ 1. `n_steps` is clamped to MAX_STEPS. Read via fr_series_ptr();
+/// copy immediately.
 #[no_mangle]
 pub extern "C" fn fr_series(
     t0_s: f64,
@@ -182,7 +309,7 @@ pub extern "C" fn fr_series(
     let e = engine();
     let n = (n_steps as usize).min(MAX_STEPS);
     let obs = observer_pos(obs_r_au, obs_lon_deg, obs_lat_deg);
-    synth_series(&e.params, &e.frame, t0_s, dt_s, n, obs, &mut e.series[..4 * n]) as u32
+    synth_series(&e.ropes, t0_s, dt_s, n, obs, &mut e.series[..4 * n]) as u32
 }
 
 #[no_mangle]
@@ -248,7 +375,7 @@ pub extern "C" fn fr_ens_run(
     let n_s = (n_steps as usize).min(MAX_STEPS);
     let obs = observer_pos(obs_r_au, obs_lon_deg, obs_lat_deg);
     let res = ensemble::run(
-        &e.params,
+        &e.ropes,
         &e.spreads,
         seed.abs().floor() as u64,
         n_m,
@@ -266,6 +393,7 @@ fn ens() -> &'static EnsembleResult {
     static EMPTY: EnsembleResult = EnsembleResult {
         n_members: 0,
         n_steps: 0,
+        ropes_per_member: 0,
         bz_pct: Vec::new(),
         bt_med: Vec::new(),
         hit_frac: Vec::new(),
@@ -316,10 +444,11 @@ pub extern "C" fn fr_ens_minbz_ptr() -> *const f32 {
     if r.n_members == 0 { core::ptr::null() } else { r.min_bz.as_ptr() }
 }
 
-/// Per-member sampled params, fr_ens_member_stride() f32 per member in the
+/// Per-member sampled params, fr_ens_member_stride() f32 per RECORD in the
 /// order lon_deg, lat_deg, tilt_deg, v0_kms, gamma_per_km, sigma_1au_au,
 /// handedness — the heliosphere view draws true member rope geometry from
-/// these. n = fr_ens_members() records.
+/// these. fr_ens_members() × fr_ens_ropes_per_member() records, member-major
+/// (record (m, r) at index (m·R + r)·stride).
 #[no_mangle]
 pub extern "C" fn fr_ens_member_params_ptr() -> *const f32 {
     let r = ens();
@@ -329,6 +458,11 @@ pub extern "C" fn fr_ens_member_params_ptr() -> *const f32 {
 #[no_mangle]
 pub extern "C" fn fr_ens_member_stride() -> u32 {
     ensemble::MEMBER_STRIDE as u32
+}
+
+#[no_mangle]
+pub extern "C" fn fr_ens_ropes_per_member() -> u32 {
+    ens().ropes_per_member as u32
 }
 
 #[no_mangle]
@@ -355,10 +489,16 @@ pub extern "C" fn fr_ens_p_minbz_below(thr_nt: f64) -> f64 {
 #[cfg(test)]
 mod abi_tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// The extern-C surface drives ONE global engine; parallel test threads
+    /// would race it. Every ABI test serializes on this.
+    static ABI_LOCK: Mutex<()> = Mutex::new(());
 
     /// Drive the whole C ABI the way js/flux-rope-kernel.js does.
     #[test]
     fn abi_end_to_end() {
+        let _guard = ABI_LOCK.lock().unwrap();
         fr_init();
         fr_set_rope(
             0.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0,
@@ -398,5 +538,54 @@ mod abi_tests {
         let fp = fr_field_at(t_mid, fr_apex_km(t_mid) * 0.98, 0.0, 0.0);
         let inside = unsafe { *fp.add(3) };
         assert!(inside == 1.0, "apex-adjacent probe should be inside");
+    }
+
+    /// Drive the TRAIN surface the way the multi-rope page does.
+    /// NOTE: the ABI tests share the one global ENGINE, so they must not run
+    /// concurrently — this one takes the same serialization lock.
+    #[test]
+    fn abi_train_end_to_end() {
+        let _guard = ABI_LOCK.lock().unwrap();
+        fr_init();
+        fr_clear_ropes();
+        assert_eq!(fr_rope_count(), 0);
+        let push = |v0: f64, t_launch_h: f64| {
+            fr_push_rope(
+                0.0, 0.0, 90.0, 1.0, 5.0, 24.0, 0.10, 1.64, 1.14, 21.5, v0, 0.2e-7, 400.0,
+                0.0, t_launch_h * 3600.0,
+            )
+        };
+        assert_eq!(push(1400.0, 0.0), 1);
+        assert_eq!(push(1600.0, 20.0), 2);
+        assert_eq!(fr_rope_count(), 2);
+        assert_eq!(fr_rope_t_launch_s(1), 20.0 * 3600.0);
+
+        // Per-rope kinematics probes: rope 1 sits at d0 before its launch.
+        assert!(fr_apex_km_at(1, 10.0 * 3600.0) < fr_apex_km_at(0, 10.0 * 3600.0));
+        assert!(fr_apex_km_at(2, 0.0).is_nan(), "out-of-range rope probe is NaN");
+
+        // The train series has two crossings and both counted in hits.
+        let hits = fr_series(0.0, 1800.0, 500, 0.99, 0.0, 0.0);
+        assert!(hits > 30, "train hits {}", hits);
+        let ptr = fr_series_ptr();
+        let max_count = (0..500)
+            .map(|i| unsafe { *ptr.add(4 * i + 3) })
+            .fold(0.0f32, f32::max);
+        assert!(max_count >= 1.0);
+
+        // Joint ensemble over the train: reproducible, exposes per-rope draws.
+        fr_set_spreads(6.0, 4.0, 15.0, 100.0, 0.2, 0.15, 0.3, 0.8, 0.05);
+        let n = fr_ens_run(7.0, 100, 0.0, 1800.0, 500, 0.99, 0.0, 0.0);
+        assert_eq!(n, 100);
+        assert_eq!(fr_ens_ropes_per_member(), 2);
+        assert!(!fr_ens_member_params_ptr().is_null());
+        assert!(fr_ens_p_hit() > 0.7, "train p_hit {}", fr_ens_p_hit());
+
+        // fr_set_rope resets to a single-rope engine (v1 back-compat).
+        fr_set_rope(
+            0.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0,
+        );
+        assert_eq!(fr_rope_count(), 1);
+        assert_eq!(fr_rope_t_launch_s(0), 0.0);
     }
 }

@@ -45,6 +45,26 @@ test.describe('flux-rope simulator', () => {
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+    test('gannon train preset: rope tabs, joint ensemble, train editing', async ({ page }) => {
+        await expect(page.locator('#fr-s-phit')).not.toHaveText('—', { timeout: 20_000 });
+        await page.locator('#fr-preset').selectOption('gannon-2024');
+        // Two rope tabs render with launch offsets.
+        await expect(page.locator('#fr-ropetabs button.active')).toHaveText(/Rope 1/);
+        await expect(page.locator('#fr-ropetabs button', { hasText: 'Rope 2 · +20h' })).toBeVisible();
+        // Joint train ensemble populates severe-storm odds and a May arrival.
+        await expect(page.locator('#fr-s-arr')).toHaveText(/05-1\d \d\d:\d\d/, { timeout: 15_000 });
+        const p20 = parseInt(await page.locator('#fr-s-p20').textContent(), 10);
+        expect(p20).toBeGreaterThan(40);
+        // Switching tabs retargets the sliders (rope B's fitted v0 = 1300).
+        await page.locator('#fr-ropetabs button', { hasText: 'Rope 2' }).click();
+        await expect(page.locator('#p-v0Kms')).toHaveValue('1300');
+        // Adding a rope grows the train and breaks the hindcast link → custom.
+        await page.locator('#fr-ropetabs button.fr-add').click();
+        await expect(page.locator('#fr-ropetabs button.active')).toHaveText(/Rope 3/);
+        await expect(page.locator('#fr-preset')).toHaveValue('custom');
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
     test('slider edit switches to custom and recomputes live', async ({ page }) => {
         await expect(page.locator('#fr-s-phit')).not.toHaveText('—', { timeout: 20_000 });
         const before = await page.locator('#fr-ens-ms').textContent();

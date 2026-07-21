@@ -236,6 +236,48 @@ pub fn to_gse(b: V3) -> V3 {
     [-b[0], -b[1], b[2]]
 }
 
+/// One rope of a train: parameters + cached frame + launch time offset
+/// [s] relative to the engine's t = 0 reference epoch (spec §10).
+#[derive(Clone, Copy, Debug)]
+pub struct RopeEntry {
+    pub params: RopeParams,
+    pub frame: Frame,
+    pub t_launch_s: f64,
+}
+
+impl RopeEntry {
+    pub fn new(params: RopeParams, t_launch_s: f64) -> RopeEntry {
+        RopeEntry {
+            frame: Frame::new(params.lon_deg, params.lat_deg, params.tilt_deg),
+            params,
+            t_launch_s,
+        }
+    }
+}
+
+/// Evaluate a rope TRAIN at heliocentric point `p` [km], `t_s` seconds after
+/// the reference epoch: field SUPERPOSITION over all launched ropes, plus
+/// the containment count. count ≥ 2 marks exactly where the v1
+/// no-interaction assumption breaks (spec §10) — report it, never hide it.
+pub fn field_at_set(ropes: &[RopeEntry], t_s: f64, p: V3) -> (V3, u32) {
+    let mut b = [0.0, 0.0, 0.0];
+    let mut count = 0u32;
+    for r in ropes {
+        let dt = t_s - r.t_launch_s;
+        if dt <= 0.0 {
+            continue; // not launched yet — DBM is undefined for dt < 0
+        }
+        let fs = field_at(&r.params, &r.frame, dt, p);
+        if fs.inside {
+            count += 1;
+            b[0] += fs.b[0];
+            b[1] += fs.b[1];
+            b[2] += fs.b[2];
+        }
+    }
+    (b, count)
+}
+
 /// Observer heliocentric position from (r [AU], lon, lat [deg]).
 pub fn observer_pos(r_au: f64, lon_deg: f64, lat_deg: f64) -> V3 {
     let (phi, theta) = (lon_deg.to_radians(), lat_deg.to_radians());
@@ -249,12 +291,14 @@ pub fn observer_pos(r_au: f64, lon_deg: f64, lat_deg: f64) -> V3 {
     )
 }
 
-/// Synthesize the virtual-spacecraft series (spec §6): n GSE samples starting
-/// `t0_s` after launch at `dt_s` spacing. Writes (bx, by, bz, inside) per
-/// step into `out` (len ≥ 4·n). Returns the number of inside samples.
+/// Synthesize the virtual-spacecraft series (spec §6, §10): n GSE samples
+/// starting `t0_s` after the reference epoch at `dt_s` spacing, over a rope
+/// TRAIN. Writes (bx, by, bz, containment_count) per step into `out`
+/// (len ≥ 4·n). Returns the number of steps with count ≥ 1. A single-rope
+/// train with `t_launch_s = 0` reproduces the v1 single-rope behavior
+/// exactly (count is 0/1).
 pub fn synth_series(
-    params: &RopeParams,
-    frame: &Frame,
+    ropes: &[RopeEntry],
     t0_s: f64,
     dt_s: f64,
     n: usize,
@@ -264,13 +308,13 @@ pub fn synth_series(
     let mut hits = 0;
     for i in 0..n {
         let t = t0_s + dt_s * i as f64;
-        let fs = field_at(params, frame, t, obs);
-        let g = to_gse(fs.b);
+        let (b, count) = field_at_set(ropes, t, obs);
+        let g = to_gse(b);
         out[4 * i] = g[0] as f32;
         out[4 * i + 1] = g[1] as f32;
         out[4 * i + 2] = g[2] as f32;
-        out[4 * i + 3] = if fs.inside { 1.0 } else { 0.0 };
-        if fs.inside {
+        out[4 * i + 3] = count as f32;
+        if count > 0 {
             hits += 1;
         }
     }
@@ -414,11 +458,10 @@ mod tests {
         // St-Patrick-class rope: ~1 AU crossing at ~600 km/s with σ₁AU=0.115
         // AU should dwell 10–30 h — the Lepping statistical envelope.
         let p = RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, ..Default::default() };
-        let f = Frame::new(0.0, 0.0, 90.0);
         let n = 400;
         let dt = 1800.0;
         let mut out = vec![0.0f32; 4 * n];
-        let hits = synth_series(&p, &f, 0.0, dt, n, earth(), &mut out);
+        let hits = synth_series(&[RopeEntry::new(p, 0.0)], 0.0, dt, n, earth(), &mut out);
         let dwell_h = hits as f64 * dt / 3600.0;
         assert!(
             (10.0..=30.0).contains(&dwell_h),
@@ -433,12 +476,81 @@ mod tests {
     #[test]
     fn far_flank_miss_produces_no_signal() {
         // 90° away in longitude: the rope never reaches the observer.
-        let p = RopeParams::default();
-        let f = Frame::new(90.0, 0.0, 0.0);
+        let p = RopeParams { lon_deg: 90.0, ..Default::default() };
         let n = 400;
         let mut out = vec![0.0f32; 4 * n];
-        let hits = synth_series(&p, &f, 0.0, 1800.0, n, earth(), &mut out);
+        let hits = synth_series(&[RopeEntry::new(p, 0.0)], 0.0, 1800.0, n, earth(), &mut out);
         assert_eq!(hits, 0);
+    }
+
+    #[test]
+    fn train_sequential_ropes_arrive_in_launch_order() {
+        // Two identical head-on ropes launched 30 h apart → two disjoint
+        // crossing intervals in launch order, no overlap (they never share
+        // the observer because the expansion keeps pace with separation).
+        let p = RopeParams { v0_kms: 1400.0, tilt_deg: 90.0, sigma_1au_au: 0.06, ..Default::default() };
+        let train = [RopeEntry::new(p, 0.0), RopeEntry::new(p, 30.0 * 3600.0)];
+        let n = 600;
+        let dt = 1800.0;
+        let mut out = vec![0.0f32; 4 * n];
+        synth_series(&train, 0.0, dt, n, earth(), &mut out);
+        let counts: Vec<u32> = (0..n).map(|i| out[4 * i + 3] as u32).collect();
+        let first_a = counts.iter().position(|&c| c > 0).expect("rope 1 must arrive");
+        let last = counts.iter().rposition(|&c| c > 0).unwrap();
+        // Second crossing exists and there is a clean gap between them.
+        let gap = (first_a..last).any(|i| counts[i] == 0);
+        assert!(gap, "two 30 h-spaced ropes must produce disjoint crossings");
+        // Arrival separation ≈ launch separation (same kinematics): 30 h ± 4 h.
+        let mut edges = vec![];
+        for i in 1..n {
+            if counts[i] > 0 && counts[i - 1] == 0 {
+                edges.push(i as f64 * dt / 3600.0);
+            }
+        }
+        assert_eq!(edges.len(), 2, "exactly two onsets, got {:?}", edges);
+        assert!((edges[1] - edges[0] - 30.0).abs() < 4.0, "onsets {:?}", edges);
+    }
+
+    #[test]
+    fn train_superposition_sums_fields_and_counts_overlap() {
+        // Two ropes launched close together: where both contain the point,
+        // the field is the vector SUM and the count is 2 — the honest
+        // no-interaction diagnostic (spec §10).
+        let p = RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, ..Default::default() };
+        let a = RopeEntry::new(p, 0.0);
+        let b = RopeEntry::new(p, 4.0 * 3600.0);
+        let t = 55.0 * 3600.0;
+        // Find an overlap point near the trailing edge of rope 1.
+        let mut probe = None;
+        for k in 0..200 {
+            let x = (0.5 + 0.5 * k as f64 / 200.0) * AU_KM;
+            let pt = [x, 0.0, 0.0];
+            let ia = field_at(&a.params, &a.frame, t, pt).inside;
+            let ib = field_at(&b.params, &b.frame, t - b.t_launch_s, pt).inside;
+            if ia && ib {
+                probe = Some(pt);
+                break;
+            }
+        }
+        let pt = probe.expect("4 h-spaced identical ropes must overlap somewhere");
+        let fa = field_at(&a.params, &a.frame, t, pt).b;
+        let fb = field_at(&b.params, &b.frame, t - b.t_launch_s, pt).b;
+        let (sum, count) = field_at_set(&[a, b], t, pt);
+        assert_eq!(count, 2);
+        for i in 0..3 {
+            assert!((sum[i] - (fa[i] + fb[i])).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn unlaunched_rope_is_silent() {
+        // Before its launch offset a rope contributes nothing (DBM is
+        // undefined for negative time — the guard must skip, not extrapolate).
+        let p = RopeParams { tilt_deg: 90.0, ..Default::default() };
+        let train = [RopeEntry::new(p, 48.0 * 3600.0)];
+        let (b, count) = field_at_set(&train, 24.0 * 3600.0, earth());
+        assert_eq!(count, 0);
+        assert_eq!(b, [0.0, 0.0, 0.0]);
     }
 
     #[test]

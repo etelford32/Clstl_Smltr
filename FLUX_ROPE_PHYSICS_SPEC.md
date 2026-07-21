@@ -240,8 +240,52 @@ test-gated.
 Single global engine behind `extern "C"` (rust-ring-current precedent): one
 statically-capped output buffer (`MAX_STEPS = 4096` samples × channel), maps
 COPIED out by `js/flux-rope-kernel.js` (`.slice()` — every call refills the
-shared buffer). `fr_set_rope(...)` sets all §3–§5 parameters in one call;
-`fr_series(...)` fills the synthetic in situ series; `fr_field_at(t, x, y, z)`
-samples the field at an arbitrary heliocentric point (the page's GLSL view
-mirrors the same math in-shader; the kernel is the oracle);
-`fr_ens_run(seed, n, ...)` + percentile/arrival/probability getters expose §7.
+shared buffer). `fr_set_rope(...)` resets to a single §3–§5 rope (v1 API);
+`fr_clear_ropes()` / `fr_push_rope(..., t_launch_s)` build a §10 train;
+`fr_series(...)` fills the synthetic in situ series (channel 3 = containment
+count); `fr_field_at(t, x, y, z)` samples the superposed field at an
+arbitrary heliocentric point (the page's GLSL view mirrors the same math
+in-shader; the kernel is the oracle); `fr_ens_run(seed, n, ...)` +
+percentile/arrival/probability getters expose §7, with
+`fr_ens_member_params_ptr` laid out member-major over
+`fr_ens_ropes_per_member()` records.
+
+## 10. Multi-rope trains (v1.1, Phase 2)
+
+A CME **train** is a sequence of up to `MAX_ROPES = 4` ropes, each with its
+own §3–§5 parameterization and a launch offset `t_launch` [s] relative to
+one reference epoch (the first rope's launch by convention). The v1 train
+model makes exactly one assumption, stated loudly:
+
+> **The ropes do not interact.** Each propagates §5 kinematics
+> independently; where two ropes contain the same point, the field is the
+> plain vector **superposition** and the sample's `containment count` is
+> ≥ 2. No momentum exchange, no compression, no deflection, no merging.
+
+A rope contributes nothing before its launch (`t < t_launch` — the DBM is
+undefined for negative time; the guard skips, never extrapolates). The
+containment-count channel replaces the boolean inside flag in the series
+output (0/1 for single ropes — bitwise-compatible with v1 consumers) and is
+the **honest diagnostic**: count ≥ 2 marks exactly where the no-interaction
+assumption breaks. Real trains also break it *without* overlap — the Gannon
+fit's compact, strong rope A (σ 0.085 AU, 55 nT at 1 AU) is absorbing real
+compression by the train behind it — so validation reports state both the
+overlap fraction and the compression-shaped parameter fits. CME–CME
+interaction physics (momentum exchange + compression heuristics) is the
+Phase 5 fix.
+
+The ensemble layer (§7) samples **every rope of the train independently per
+member** (sequential draws from one stream — order is part of the
+determinism contract; launch offsets stay fixed at the fit values), then
+flies the observer through each member's superposed train. A 1-rope train
+reproduces the v1 single-rope ensemble draw-for-draw.
+
+**Gannon May 2024 reference fit** (`GANNON_FIT` in
+`js/flux-rope-presets.js`, pinned by the smoke test against
+`data/hindcast/gannon_may_2024_l1_replay.json` — baked from the SWMF OMNI fixture
+by `scripts/build-gannon-l1-replay.mjs`): two ropes anchored to the AR 13664
+flare catalog (X1.0 2024-05-08T21:08Z → launch 21:30 = epoch; X2.2
+2024-05-09T~17:20Z → launch 17:45, +20.25 h), X3.9/X5.8 CMEs unmodeled.
+Holds: global min Bz −43.8 vs −44.17 nT observed (0.9%), min-Bz timing
+Δ1.0 h, full-window shape r = 0.71, both southward episodes reproduced,
+southward dwell (< −10 nT) 18.5 vs 15.9 h.

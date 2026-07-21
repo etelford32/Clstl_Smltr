@@ -2,21 +2,31 @@
  * flux-rope/view.js — the heliosphere view of the Flux Rope Simulator.
  *
  * GLSL/WASM stack (decision on record in FLUX_ROPE_SIMULATOR_PLAN.md §2):
- * a WebGL fragment shader renders the ecliptic-plane slice of the rope —
- * the SAME tapered-torus + Gold-Hoyle/Lundquist math as the kernel
- * (FLUX_ROPE_PHYSICS_SPEC.md §3–§4), ported to GLSL. The kernel's
- * fr_field_at is the ORACLE for this shader: if you change the field math,
- * change it in rust-flux-rope/src/rope.rs first, re-run the gates, then
- * mirror here. A 2D overlay canvas draws the ensemble envelope (true member
- * axis circles from the kernel's memberParams export), orbit rings, and
- * body markers.
+ * a WebGL fragment shader renders the ecliptic-plane slice of a rope TRAIN
+ * (up to MAX_ROPES = 4, matching the kernel cap) — the SAME tapered-torus +
+ * Gold-Hoyle/Lundquist math as the kernel (FLUX_ROPE_PHYSICS_SPEC.md §3–§4,
+ * §10 superposition), ported to GLSL. The kernel's fr_field_at is the
+ * ORACLE for this shader: if you change the field math, change it in
+ * rust-flux-rope/src/rope.rs first, re-run the gates, then mirror here.
+ * A 2D overlay canvas draws the ensemble envelope (true member axis circles
+ * from the kernel's memberParams export, per rope of the train), orbit
+ * rings, and body markers.
  *
- * Pure rendering: no fetch, no kernel calls — the page feeds it rope
- * params, member params, and the scrub time.
+ * Pure rendering: no fetch, no kernel calls — the page feeds it the rope
+ * train, member params, per-rope kinematic probes, and the scrub time.
  */
 
 const AU_KM = 1.495978707e8;
 const RSUN_KM = 6.957e5;
+export const MAX_VIEW_ROPES = 4;
+
+/** Per-rope accent for the overlay median axes (cyan, violet, amber, green). */
+const ROPE_STROKES = [
+    'rgba(170, 235, 255, 0.5)',
+    'rgba(199, 146, 234, 0.5)',
+    'rgba(255, 180, 84, 0.5)',
+    'rgba(127, 230, 195, 0.5)',
+];
 
 /** Mirror of rust rope::Frame::new (local east/north at the launch dir). */
 export function ropeFrame(lonDeg, latDeg, tiltDeg) {
@@ -61,22 +71,24 @@ attribute vec2 a_pos;
 void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
 `;
 
-// Ecliptic-slice render. Coordinates in AU, z = 0 plane; the rope field is
-// evaluated exactly as in rope.rs (GH + Lundquist via A&S J0/J1 polys).
+// Ecliptic-slice render of the TRAIN. Coordinates in AU, z = 0 plane; each
+// rope's field is evaluated exactly as in rope.rs and SUMMED (spec §10).
 const FRAG = `
 precision highp float;
 uniform vec2  u_res;
-uniform vec2  u_center;     // view center [AU]
+uniform vec2  u_center;        // view center [AU]
 uniform float u_auPerPx;
-uniform vec3  u_eDir;
-uniform vec3  u_eP;
-uniform vec3  u_nHat;
-uniform float u_dAu;        // apex distance [AU]
-uniform float u_sigApexAu;  // apex minor radius [AU]
-uniform float u_tPerAu;     // twist per length T = 2tau/d [rad/AU]
-uniform float u_bAxis;      // axial field at current d [nT]
-uniform float u_hand;       // chirality ±1
-uniform float u_profile;    // 0 GH, 1 Lundquist
+uniform int   u_ropeCount;
+uniform vec3  u_eDir[4];
+uniform vec3  u_eP[4];
+uniform vec3  u_nHat[4];
+uniform float u_dAu[4];        // apex distance [AU] (<= 0 → not launched)
+uniform float u_sigApexAu[4];  // apex minor radius [AU]
+uniform float u_tPerAu[4];     // twist per length T = 2tau/d [rad/AU]
+uniform float u_bAxis[4];      // axial field at current d [nT]
+uniform float u_hand[4];       // chirality ±1
+uniform float u_profile[4];    // 0 GH, 1 Lundquist
+uniform float u_bScale;        // color normalisation [nT]
 
 float j0poly(float x) {
     float y = (x / 3.0) * (x / 3.0);
@@ -100,49 +112,55 @@ void main() {
     col += vec3(0.05, 0.08, 0.12) * smoothstep(0.0025, 0.0, ring) * 0.35;
     col += vec3(0.10, 0.22, 0.30) * smoothstep(0.0035, 0.0, abs(rAu - 1.0)) * 0.6;
 
-    // Rope slice (spec 3-4, mirrored from rope.rs — kernel is the oracle).
-    if (u_dAu > 0.0) {
-        float halfD = 0.5 * u_dAu;
-        float u = dot(p, u_eDir);
-        float w = dot(p, u_eP);
-        float h = dot(p, u_nHat);
+    // Train slice: superpose every launched rope (spec 3-4, 10 — mirrored
+    // from rope.rs, kernel is the oracle).
+    float bzSum = 0.0;
+    float fillMax = 0.0;
+    float rim = 0.0;
+    for (int r = 0; r < 4; r++) {
+        if (r >= u_ropeCount) break;
+        float dAu = u_dAu[r];
+        if (dAu <= 0.0) continue;
+        float halfD = 0.5 * dAu;
+        float u = dot(p, u_eDir[r]);
+        float w = dot(p, u_eP[r]);
+        float h = dot(p, u_nHat[r]);
         float qu = u - halfD;
         float rho = length(vec2(qu, w));
-        if (rho > 1e-6) {
-            float psi = atan(w, -qu);
-            if (psi < 0.0) psi += 6.28318530718;
-            float s = length(vec2(rho - halfD, h));
-            float sinHalf = sin(0.5 * psi);
-            float sig = u_sigApexAu * sinHalf * sinHalf;
-            if (sig > 0.0 && s < sig) {
-                float tz = sin(psi) * u_eDir.z + cos(psi) * u_eP.z;
-                // r_hat.z and phi_hat.z from the lifted nearest-axis point.
-                vec3 nPt = u_eDir * (halfD + halfD * qu / rho) + u_eP * (halfD * w / rho);
-                vec3 rHat = (p - nPt) / max(s, 1e-9);
-                vec3 tHat = sin(psi) * u_eDir + cos(psi) * u_eP;
-                vec3 phiHat = cross(tHat, rHat);
-                float bAxial; float bPol;
-                if (u_profile < 0.5) {
-                    float ts = u_tPerAu * s;
-                    float denom = 1.0 + ts * ts;
-                    bAxial = u_bAxis / denom;
-                    bPol = u_hand * u_bAxis * ts / denom;
-                } else {
-                    float alpha = 2.4048255 / sig;
-                    bAxial = u_bAxis * j0poly(alpha * s);
-                    bPol = u_hand * u_bAxis * j1poly(alpha * s);
-                }
-                float bz = bAxial * tz + bPol * phiHat.z;
-                float mag = clamp(abs(bz) / max(u_bAxis, 1e-6), 0.0, 1.2);
-                vec3 south = vec3(0.95, 0.30, 0.18);
-                vec3 north = vec3(0.15, 0.65, 0.95);
-                vec3 fieldCol = (bz < 0.0 ? south : north) * (0.25 + 0.75 * mag);
-                float fill = smoothstep(1.0, 0.55, s / sig);
-                col = mix(col, fieldCol, 0.28 + 0.45 * fill);
-                // Boundary rim glow.
-                col += vec3(0.7, 0.85, 1.0) * smoothstep(0.06, 0.0, abs(s / sig - 1.0)) * 0.25;
-            }
+        if (rho < 1e-6) continue;
+        float psi = atan(w, -qu);
+        if (psi < 0.0) psi += 6.28318530718;
+        float s = length(vec2(rho - halfD, h));
+        float sinHalf = sin(0.5 * psi);
+        float sig = u_sigApexAu[r] * sinHalf * sinHalf;
+        if (sig <= 0.0 || s >= sig) continue;
+        float tz = sin(psi) * u_eDir[r].z + cos(psi) * u_eP[r].z;
+        vec3 nPt = u_eDir[r] * (halfD + halfD * qu / rho) + u_eP[r] * (halfD * w / rho);
+        vec3 rHat = (p - nPt) / max(s, 1e-9);
+        vec3 tHat = sin(psi) * u_eDir[r] + cos(psi) * u_eP[r];
+        vec3 phiHat = cross(tHat, rHat);
+        float bAxial; float bPol;
+        if (u_profile[r] < 0.5) {
+            float ts = u_tPerAu[r] * s;
+            float denom = 1.0 + ts * ts;
+            bAxial = u_bAxis[r] / denom;
+            bPol = u_hand[r] * u_bAxis[r] * ts / denom;
+        } else {
+            float alpha = 2.4048255 / sig;
+            bAxial = u_bAxis[r] * j0poly(alpha * s);
+            bPol = u_hand[r] * u_bAxis[r] * j1poly(alpha * s);
         }
+        bzSum += bAxial * tz + bPol * phiHat.z;
+        fillMax = max(fillMax, smoothstep(1.0, 0.55, s / sig));
+        rim = max(rim, smoothstep(0.06, 0.0, abs(s / sig - 1.0)));
+    }
+    if (fillMax > 0.0) {
+        float mag = clamp(abs(bzSum) / max(u_bScale, 1e-6), 0.0, 1.2);
+        vec3 south = vec3(0.95, 0.30, 0.18);
+        vec3 north = vec3(0.15, 0.65, 0.95);
+        vec3 fieldCol = (bzSum < 0.0 ? south : north) * (0.25 + 0.75 * mag);
+        col = mix(col, fieldCol, 0.28 + 0.45 * fillMax);
+        col += vec3(0.7, 0.85, 1.0) * rim * 0.25;
     }
 
     // Sun + Earth glows on top.
@@ -164,9 +182,9 @@ export class HeliosphereView {
     constructor(glCanvas, overlay) {
         this.glCanvas = glCanvas;
         this.overlay = overlay;
-        this.rope = null;
-        this.frame = ropeFrame(0, 0, 0);
-        this.ensemble = null;   // { memberParams, memberStride }
+        this.ropes = [];        // [{...ropeParams, launchOffsetS}]
+        this.frames = [];       // matching ropeFrame() per rope
+        this.ensemble = null;   // kernel ensembleRun() result
         this.center = [0.55, 0];
         this.gl = glCanvas.getContext('webgl', { antialias: true, alpha: false })
             || glCanvas.getContext('experimental-webgl');
@@ -199,15 +217,22 @@ export class HeliosphereView {
         gl.enableVertexAttribArray(loc);
         gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
         this.u = {};
-        for (const name of ['u_res', 'u_center', 'u_auPerPx', 'u_eDir', 'u_eP', 'u_nHat',
-            'u_dAu', 'u_sigApexAu', 'u_tPerAu', 'u_bAxis', 'u_hand', 'u_profile']) {
+        for (const name of ['u_res', 'u_center', 'u_auPerPx', 'u_ropeCount', 'u_bScale',
+            'u_eDir', 'u_eP', 'u_nHat', 'u_dAu', 'u_sigApexAu', 'u_tPerAu',
+            'u_bAxis', 'u_hand', 'u_profile']) {
             this.u[name] = gl.getUniformLocation(prog, name);
         }
     }
 
+    /** Replace the rendered train (array of rope params + launchOffsetS). */
+    setRopes(ropes) {
+        this.ropes = ropes.slice(0, MAX_VIEW_ROPES);
+        this.frames = this.ropes.map((r) => ropeFrame(r.lonDeg, r.latDeg, r.tiltDeg));
+    }
+
+    /** Single-rope convenience (v1 call sites). */
     setRope(rope) {
-        this.rope = rope;
-        this.frame = ropeFrame(rope.lonDeg, rope.latDeg, rope.tiltDeg);
+        this.setRopes([{ launchOffsetS: 0, ...rope }]);
     }
 
     /** ens = kernel ensembleRun() result (or null to clear the envelope). */
@@ -237,35 +262,65 @@ export class HeliosphereView {
     }
 
     /**
-     * Render at t seconds after launch. `probes` carries kernel truth:
-     * { apexKm, sigmaApexKm } (the JS mirrors are only used for ensemble
-     * members, where per-member kernel probing would be 100s of calls).
+     * Render at t seconds after the reference epoch. `probes` carries kernel
+     * truth PER ROPE: [{ apexKm, sigmaApexKm }] aligned with setRopes order
+     * (the JS mirrors are only used for ensemble members, where per-member
+     * kernel probing would be thousands of calls).
      */
     draw(tS, probes) {
         this.resize();
-        const rope = this.rope;
-        if (this.gl && rope) {
-            const gl = this.gl;
+        const gl = this.gl;
+        if (gl && this.ropes.length) {
             gl.viewport(0, 0, this.glCanvas.width, this.glCanvas.height);
-            const dAu = probes.apexKm / AU_KM;
-            const sigAu = probes.sigmaApexKm / AU_KM;
-            const tPerAu = 2 * rope.twistTurns / Math.max(dAu, 1e-6);
-            const bAxis = rope.b1AuNt * Math.pow(Math.max(dAu, 1e-6), -rope.nB);
+            const N = MAX_VIEW_ROPES;
+            const eDir = new Float32Array(3 * N), eP = new Float32Array(3 * N), nHat = new Float32Array(3 * N);
+            const dAu = new Float32Array(N), sig = new Float32Array(N), tPer = new Float32Array(N);
+            const bAx = new Float32Array(N), hand = new Float32Array(N), prof = new Float32Array(N);
+            let bScale = 1;
+            this.ropes.forEach((rope, r) => {
+                const pr = probes[r] || { apexKm: 0, sigmaApexKm: 0 };
+                const launched = tS > (rope.launchOffsetS || 0);
+                const d = launched ? pr.apexKm / AU_KM : 0;
+                eDir.set(this.frames[r].eDir, 3 * r);
+                eP.set(this.frames[r].eP, 3 * r);
+                nHat.set(this.frames[r].nHat, 3 * r);
+                dAu[r] = d;
+                sig[r] = pr.sigmaApexKm / AU_KM;
+                tPer[r] = d > 0 ? 2 * rope.twistTurns / d : 0;
+                bAx[r] = d > 0 ? rope.b1AuNt * Math.pow(d, -rope.nB) : 0;
+                hand[r] = rope.handedness;
+                prof[r] = rope.profile === 'lundquist' ? 1 : 0;
+                if (d > 0) bScale = Math.max(bScale, bAx[r]);
+            });
             gl.uniform2f(this.u.u_res, this.glCanvas.width, this.glCanvas.height);
             gl.uniform2f(this.u.u_center, this.center[0], this.center[1]);
             gl.uniform1f(this.u.u_auPerPx, this._auPerPx());
-            gl.uniform3fv(this.u.u_eDir, this.frame.eDir);
-            gl.uniform3fv(this.u.u_eP, this.frame.eP);
-            gl.uniform3fv(this.u.u_nHat, this.frame.nHat);
-            gl.uniform1f(this.u.u_dAu, dAu);
-            gl.uniform1f(this.u.u_sigApexAu, sigAu);
-            gl.uniform1f(this.u.u_tPerAu, tPerAu);
-            gl.uniform1f(this.u.u_bAxis, bAxis);
-            gl.uniform1f(this.u.u_hand, rope.handedness);
-            gl.uniform1f(this.u.u_profile, rope.profile === 'lundquist' ? 1 : 0);
+            gl.uniform1i(this.u.u_ropeCount, this.ropes.length);
+            gl.uniform1f(this.u.u_bScale, bScale);
+            gl.uniform3fv(this.u.u_eDir, eDir);
+            gl.uniform3fv(this.u.u_eP, eP);
+            gl.uniform3fv(this.u.u_nHat, nHat);
+            gl.uniform1fv(this.u.u_dAu, dAu);
+            gl.uniform1fv(this.u.u_sigApexAu, sig);
+            gl.uniform1fv(this.u.u_tPerAu, tPer);
+            gl.uniform1fv(this.u.u_bAxis, bAx);
+            gl.uniform1fv(this.u.u_hand, hand);
+            gl.uniform1fv(this.u.u_profile, prof);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
         }
         this._drawOverlay(tS);
+    }
+
+    _axisPath(ctx, frame, dAu) {
+        ctx.beginPath();
+        for (let i = 0; i <= 72; i++) {
+            const psi = i / 72 * 2 * Math.PI;
+            const half = dAu / 2;
+            const x = half * (1 - Math.cos(psi)) * frame.eDir[0] + half * Math.sin(psi) * frame.eP[0];
+            const y = half * (1 - Math.cos(psi)) * frame.eDir[1] + half * Math.sin(psi) * frame.eP[1];
+            const [px, py] = this._toScreen(x, y);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
     }
 
     _drawOverlay(tS) {
@@ -274,52 +329,42 @@ export class HeliosphereView {
         ctx.clearRect(0, 0, w, h);
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-        // Ensemble envelope: true member axis circles (kernel memberParams).
+        // Ensemble envelope: true member axis circles (kernel memberParams,
+        // member-major, ropesPerMember records per member — spec §10).
         const ens = this.ensemble;
-        const rope = this.rope;
-        if (ens && rope && ens.members > 0) {
+        if (ens && this.ropes.length && ens.members > 0) {
             const stride = ens.memberStride;
+            const R = ens.ropesPerMember || 1;
             const maxDraw = 56;
             const skip = Math.max(1, Math.floor(ens.members / maxDraw));
             ctx.lineWidth = dpr;
+            ctx.strokeStyle = 'rgba(120, 210, 255, 0.05)';
             for (let m = 0; m < ens.members; m += skip) {
-                const o = m * stride;
-                const [lon, lat, tilt, v0, gam, sig] = ens.memberParams.slice(o, o + 6);
-                const fr = ropeFrame(lon, lat, tilt);
-                const dKm = dbmApexKm(rope.d0Rsun * RSUN_KM, v0, rope.wKms, gam, tS);
-                const dAu = dKm / AU_KM;
-                if (!(dAu > 0)) continue;
-                ctx.beginPath();
-                for (let i = 0; i <= 48; i++) {
-                    const psi = i / 48 * 2 * Math.PI;
-                    const half = dAu / 2;
-                    const x = half * (1 - Math.cos(psi)) * fr.eDir[0] + half * Math.sin(psi) * fr.eP[0];
-                    const y = half * (1 - Math.cos(psi)) * fr.eDir[1] + half * Math.sin(psi) * fr.eP[1];
-                    const [px, py] = this._toScreen(x, y);
-                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                for (let r = 0; r < Math.min(R, this.ropes.length); r++) {
+                    const rope = this.ropes[r];
+                    const dt = tS - (rope.launchOffsetS || 0);
+                    if (dt <= 0) continue;
+                    const o = (m * R + r) * stride;
+                    const [lon, lat, tilt, v0, gam] = ens.memberParams.slice(o, o + 5);
+                    const fr = ropeFrame(lon, lat, tilt);
+                    const dAuM = dbmApexKm(rope.d0Rsun * RSUN_KM, v0, rope.wKms, gam, dt) / AU_KM;
+                    if (!(dAuM > 0)) continue;
+                    this._axisPath(ctx, fr, dAuM);
+                    ctx.stroke();
                 }
-                ctx.strokeStyle = 'rgba(120, 210, 255, 0.055)';
-                ctx.stroke();
-                void sig; // reserved for future per-member thickness rendering
             }
         }
 
-        // Median rope axis, brighter.
-        if (rope) {
-            const dAu = dbmApexKm(rope.d0Rsun * RSUN_KM, rope.v0Kms, rope.wKms, rope.gammaPerKm, tS) / AU_KM;
-            ctx.beginPath();
-            for (let i = 0; i <= 72; i++) {
-                const psi = i / 72 * 2 * Math.PI;
-                const half = dAu / 2;
-                const x = half * (1 - Math.cos(psi)) * this.frame.eDir[0] + half * Math.sin(psi) * this.frame.eP[0];
-                const y = half * (1 - Math.cos(psi)) * this.frame.eDir[1] + half * Math.sin(psi) * this.frame.eP[1];
-                const [px, py] = this._toScreen(x, y);
-                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-            }
-            ctx.strokeStyle = 'rgba(170, 235, 255, 0.5)';
+        // Median rope axes, brighter, one accent per rope of the train.
+        this.ropes.forEach((rope, r) => {
+            const dt = tS - (rope.launchOffsetS || 0);
+            if (dt <= 0) return;
+            const dAu = dbmApexKm(rope.d0Rsun * RSUN_KM, rope.v0Kms, rope.wKms, rope.gammaPerKm, dt) / AU_KM;
+            this._axisPath(ctx, this.frames[r], dAu);
+            ctx.strokeStyle = ROPE_STROKES[r % ROPE_STROKES.length];
             ctx.lineWidth = 1.5 * dpr;
             ctx.stroke();
-        }
+        });
 
         // Labels.
         ctx.font = `${11 * dpr}px system-ui, sans-serif`;

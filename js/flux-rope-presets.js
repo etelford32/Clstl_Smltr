@@ -28,6 +28,46 @@ export const ST_PATRICK_FIT = Object.freeze({
     // (Phase 5) — the observed sheath interval is an honest, known miss.
 });
 
+/**
+ * GANNON_FIT — the Phase 2 sequential-rope hindcast (spec §10): the May 2024
+ * G5 CME train treated as TWO non-interacting ropes, hand-fit against the
+ * observed L1 driver bundle (data/hindcast/gannon_may_2024_l1_replay.json, baked by
+ * scripts/build-gannon-l1-replay.mjs from the SWMF OMNI fixture).
+ *
+ * Launch anchors are the repo's AR 13664 flare catalog (api/hindcast/
+ * gannon.js): rope A ← X1.0 flare 2024-05-08T21:08Z (launch ~21:30), rope B
+ * ← X2.2 flare 2024-05-09T~17:20Z (launch ~17:45, +20.25 h). The X3.9 and
+ * X5.8 CMEs are UNMODELED, and CME–CME compression is not modeled at all —
+ * rope A's compact/strong fit (σ 0.085 AU, 55 nT) is absorbing real
+ * compression by the train behind it. Those are the v1 no-interaction
+ * misses, reported honestly; they are the Phase 5 motivation.
+ *
+ * Fit quality (pinned by the smoke test): global min Bz −43.8 vs −44.17 nT
+ * observed (0.9%), min-Bz timing Δ1.0 h, full-window shape r = 0.71, both
+ * southward episodes reproduced (E1 May 10 18:00–May 11 04:00, E2 May 11
+ * 05:00–17:00), southward dwell (< −10 nT) 18.5 vs 15.9 h.
+ */
+export const GANNON_FIT = Object.freeze({
+    id: 'gannon-2024',
+    label: 'Gannon Superstorm May 2024 (2-rope train fit)',
+    launchIso: '2024-05-08T21:30:00Z',
+    bundleUrl: 'data/hindcast/gannon_may_2024_l1_replay.json',
+    ropes: Object.freeze([
+        Object.freeze({
+            lonDeg: 0, latDeg: -6, tiltDeg: 60, handedness: 1,
+            twistTurns: 4, b1AuNt: 55, sigma1AuAu: 0.085,
+            v0Kms: 950, gammaPerKm: 0.2e-7, wKms: 450,
+            launchOffsetS: 0,
+        }),
+        Object.freeze({
+            lonDeg: 0, latDeg: 0, tiltDeg: 45, handedness: -1,
+            twistTurns: 5, b1AuNt: 42, sigma1AuAu: 0.12,
+            v0Kms: 1300, gammaPerKm: 0.2e-7, wKms: 450,
+            launchOffsetS: 72_900,   // +20.25 h → 2024-05-09T17:45Z
+        }),
+    ]),
+});
+
 /** Illustrative synthetic scenarios — no validation claims attached. */
 export const SCENARIOS = Object.freeze([
     Object.freeze({
