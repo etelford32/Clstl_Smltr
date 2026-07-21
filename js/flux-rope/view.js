@@ -1,19 +1,25 @@
 /**
- * flux-rope/view.js — the heliosphere view of the Flux Rope Simulator.
+ * flux-rope/view.js — the 3D heliosphere view of the Flux Rope Simulator.
  *
  * GLSL/WASM stack (decision on record in FLUX_ROPE_SIMULATOR_PLAN.md §2):
- * a WebGL fragment shader renders the ecliptic-plane slice of a rope TRAIN
- * (up to MAX_ROPES = 4, matching the kernel cap) — the SAME tapered-torus +
- * Gold-Hoyle/Lundquist math as the kernel (FLUX_ROPE_PHYSICS_SPEC.md §3–§4,
- * §10 superposition), ported to GLSL. The kernel's fr_field_at is the
- * ORACLE for this shader: if you change the field math, change it in
- * rust-flux-rope/src/rope.rs first, re-run the gates, then mirror here.
- * A 2D overlay canvas draws the ensemble envelope (true member axis circles
- * from the kernel's memberParams export, per rope of the train), orbit
- * rings, and body markers.
+ * a WebGL fragment shader RAYMARCHES the rope train in true 3D — the same
+ * tapered-torus + Gold-Hoyle/Lundquist math as the kernel
+ * (FLUX_ROPE_PHYSICS_SPEC.md §3–§4, §10 superposition), evaluated along
+ * camera rays as a signed distance to the axis circle minus σ(ψ). The
+ * kernel's fr_field_at is the ORACLE for this shader: change the field
+ * math in rust-flux-rope/src/rope.rs first, re-run the gates, then mirror
+ * here. Up to MAX_VIEW_ROPES = 4 ropes (kernel cap), rendered as layered
+ * translucent shells colored by local Bz (red south / blue north).
+ *
+ * Camera: orbit (drag) + zoom (wheel) + double-click reset, z = ecliptic
+ * north. The SAME camera projects the 2D overlay (ensemble member axis
+ * circles — faded by particle-filter weight when assimilation is active —
+ * body labels, hints), so shader and annotations never disagree about
+ * where things are.
  *
  * Pure rendering: no fetch, no kernel calls — the page feeds it the rope
- * train, member params, per-rope kinematic probes, and the scrub time.
+ * train, member params (+ optional weights), per-rope kinematic probes,
+ * and the scrub time.
  */
 
 const AU_KM = 1.495978707e8;
@@ -22,10 +28,10 @@ export const MAX_VIEW_ROPES = 4;
 
 /** Per-rope accent for the overlay median axes (cyan, violet, amber, green). */
 const ROPE_STROKES = [
-    'rgba(170, 235, 255, 0.5)',
-    'rgba(199, 146, 234, 0.5)',
-    'rgba(255, 180, 84, 0.5)',
-    'rgba(127, 230, 195, 0.5)',
+    'rgba(170, 235, 255, 0.55)',
+    'rgba(199, 146, 234, 0.55)',
+    'rgba(255, 180, 84, 0.55)',
+    'rgba(127, 230, 195, 0.55)',
 ];
 
 /** Mirror of rust rope::Frame::new (local east/north at the launch dir). */
@@ -66,29 +72,33 @@ export function sigmaApexKm(sigma1AuAu, dKm, nSigma) {
     return sigma1AuAu * AU_KM * Math.pow(dKm / AU_KM, nSigma);
 }
 
-const VERT = `
-attribute vec2 a_pos;
+const VERT = `#version 300 es
+in vec2 a_pos;
 void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
 `;
 
-// Ecliptic-slice render of the TRAIN. Coordinates in AU, z = 0 plane; each
-// rope's field is evaluated exactly as in rope.rs and SUMMED (spec §10).
-const FRAG = `
+// True-3D raymarch of the train. World units: AU, z = ecliptic north.
+// Rope SDF and field math are verbatim ports of rope.rs (kernel = oracle).
+const FRAG = `#version 300 es
 precision highp float;
+out vec4 outColor;
 uniform vec2  u_res;
-uniform vec2  u_center;        // view center [AU]
-uniform float u_auPerPx;
+uniform vec3  u_camPos;
+uniform vec3  u_camRight;
+uniform vec3  u_camUp;
+uniform vec3  u_camFwd;
+uniform float u_tanHalfFov;
 uniform int   u_ropeCount;
 uniform vec3  u_eDir[4];
 uniform vec3  u_eP[4];
 uniform vec3  u_nHat[4];
-uniform float u_dAu[4];        // apex distance [AU] (<= 0 → not launched)
-uniform float u_sigApexAu[4];  // apex minor radius [AU]
-uniform float u_tPerAu[4];     // twist per length T = 2tau/d [rad/AU]
-uniform float u_bAxis[4];      // axial field at current d [nT]
-uniform float u_hand[4];       // chirality ±1
-uniform float u_profile[4];    // 0 GH, 1 Lundquist
-uniform float u_bScale;        // color normalisation [nT]
+uniform float u_dAu[4];
+uniform float u_sigApexAu[4];
+uniform float u_tPerAu[4];
+uniform float u_bAxis[4];
+uniform float u_hand[4];
+uniform float u_profile[4];
+uniform float u_bScale;
 
 float j0poly(float x) {
     float y = (x / 3.0) * (x / 3.0);
@@ -99,96 +109,169 @@ float j1poly(float x) {
     return x * (0.5 + y*(-0.56249985 + y*(0.21093573 + y*(-0.03954289 + y*(0.00443319 + y*(-0.00031761 + y*0.00001109))))));
 }
 
+// Signed distance to rope r at world point p (negative = inside), plus the
+// local (psi, s, sig) needed for the field sample.
+float ropeSdf(int r, vec3 p, out float psi, out float s, out float sig) {
+    float dAu = u_dAu[r];
+    psi = 0.0; s = 1e9; sig = 0.0;
+    if (dAu <= 0.0) return 1e9;
+    float halfD = 0.5 * dAu;
+    float u = dot(p, u_eDir[r]);
+    float w = dot(p, u_eP[r]);
+    float h = dot(p, u_nHat[r]);
+    float qu = u - halfD;
+    float rho = length(vec2(qu, w));
+    if (rho < 1e-6) return 1e9;
+    psi = atan(w, -qu);
+    if (psi < 0.0) psi += 6.28318530718;
+    s = length(vec2(rho - halfD, h));
+    float sinHalf = sin(0.5 * psi);
+    sig = u_sigApexAu[r] * sinHalf * sinHalf;
+    return s - sig;
+}
+
+// Local Bz (world-z component of the rope field) at p for rope r — the
+// color driver. Mirrors rope.rs field_at.
+float ropeBz(int r, vec3 p, float psi, float s, float sig) {
+    float dAu = u_dAu[r];
+    float halfD = 0.5 * dAu;
+    float u = dot(p, u_eDir[r]);
+    float w = dot(p, u_eP[r]);
+    float qu = u - halfD;
+    float rho = length(vec2(qu, w));
+    vec3 tHat = sin(psi) * u_eDir[r] + cos(psi) * u_eP[r];
+    vec3 nPt = u_eDir[r] * (halfD + halfD * qu / rho) + u_eP[r] * (halfD * w / rho);
+    vec3 rHat = (p - nPt) / max(s, 1e-9);
+    vec3 phiHat = cross(tHat, rHat);
+    float bAxial; float bPol;
+    if (u_profile[r] < 0.5) {
+        float ts = u_tPerAu[r] * s;
+        float denom = 1.0 + ts * ts;
+        bAxial = u_bAxis[r] / denom;
+        bPol = u_hand[r] * u_bAxis[r] * ts / denom;
+    } else {
+        float alpha = 2.4048255 / max(sig, 1e-6);
+        bAxial = u_bAxis[r] * j0poly(alpha * s);
+        bPol = u_hand[r] * u_bAxis[r] * j1poly(alpha * s);
+    }
+    return bAxial * tHat.z + bPol * phiHat.z;
+}
+
+// Distance from the ray to a point (for Sun/Earth glows), clamped behind.
+float rayPointDist(vec3 ro, vec3 rd, vec3 c, out float along) {
+    along = max(dot(c - ro, rd), 0.0);
+    return length(ro + rd * along - c);
+}
+
 void main() {
-    vec2 p2 = (gl_FragCoord.xy - 0.5 * u_res) * u_auPerPx + u_center;
-    vec3 p = vec3(p2, 0.0);
+    vec2 ndc = (gl_FragCoord.xy - 0.5 * u_res) / (0.5 * u_res.y);
+    vec3 rd = normalize(u_camFwd + u_tanHalfFov * (ndc.x * u_camRight + ndc.y * u_camUp));
+    vec3 ro = u_camPos;
 
-    // Background: deep-space vignette.
-    float rAu = length(p2);
-    vec3 col = vec3(0.008, 0.004, 0.035) * (1.0 - 0.35 * length((gl_FragCoord.xy - 0.5*u_res)/u_res));
+    // Background vignette.
+    vec3 col = vec3(0.008, 0.004, 0.035) * (1.0 - 0.25 * length(ndc));
 
-    // Faint AU rings every 0.25 AU + the 1 AU orbit.
-    float ring = abs(fract(rAu / 0.25 + 0.5) - 0.5) * 0.25;
-    col += vec3(0.05, 0.08, 0.12) * smoothstep(0.0025, 0.0, ring) * 0.35;
-    col += vec3(0.10, 0.22, 0.30) * smoothstep(0.0035, 0.0, abs(rAu - 1.0)) * 0.6;
-
-    // Train slice: superpose every launched rope (spec 3-4, 10 — mirrored
-    // from rope.rs, kernel is the oracle).
-    float bzSum = 0.0;
-    float fillMax = 0.0;
-    float rim = 0.0;
-    for (int r = 0; r < 4; r++) {
-        if (r >= u_ropeCount) break;
-        float dAu = u_dAu[r];
-        if (dAu <= 0.0) continue;
-        float halfD = 0.5 * dAu;
-        float u = dot(p, u_eDir[r]);
-        float w = dot(p, u_eP[r]);
-        float h = dot(p, u_nHat[r]);
-        float qu = u - halfD;
-        float rho = length(vec2(qu, w));
-        if (rho < 1e-6) continue;
-        float psi = atan(w, -qu);
-        if (psi < 0.0) psi += 6.28318530718;
-        float s = length(vec2(rho - halfD, h));
-        float sinHalf = sin(0.5 * psi);
-        float sig = u_sigApexAu[r] * sinHalf * sinHalf;
-        if (sig <= 0.0 || s >= sig) continue;
-        float tz = sin(psi) * u_eDir[r].z + cos(psi) * u_eP[r].z;
-        vec3 nPt = u_eDir[r] * (halfD + halfD * qu / rho) + u_eP[r] * (halfD * w / rho);
-        vec3 rHat = (p - nPt) / max(s, 1e-9);
-        vec3 tHat = sin(psi) * u_eDir[r] + cos(psi) * u_eP[r];
-        vec3 phiHat = cross(tHat, rHat);
-        float bAxial; float bPol;
-        if (u_profile[r] < 0.5) {
-            float ts = u_tPerAu[r] * s;
-            float denom = 1.0 + ts * ts;
-            bAxial = u_bAxis[r] / denom;
-            bPol = u_hand[r] * u_bAxis[r] * ts / denom;
-        } else {
-            float alpha = 2.4048255 / sig;
-            bAxial = u_bAxis[r] * j0poly(alpha * s);
-            bPol = u_hand[r] * u_bAxis[r] * j1poly(alpha * s);
+    // Ecliptic reference plane (z = 0): AU rings + 1 AU orbit, distance-faded.
+    float tPlane = -1.0;
+    vec3 gridCol = vec3(0.0);
+    if (abs(rd.z) > 1e-5) {
+        float tp = -ro.z / rd.z;
+        if (tp > 0.0) {
+            tPlane = tp;
+            vec2 pp = ro.xy + rd.xy * tp;
+            float rAu = length(pp);
+            if (rAu < 2.2) {
+                float ring = abs(fract(rAu / 0.25 + 0.5) - 0.5) * 0.25;
+                float fade = exp(-0.35 * tp) * smoothstep(2.2, 1.8, rAu);
+                gridCol += vec3(0.05, 0.08, 0.12) * smoothstep(0.004, 0.0, ring) * 0.5 * fade;
+                gridCol += vec3(0.10, 0.22, 0.30) * smoothstep(0.005, 0.0, abs(rAu - 1.0)) * 0.8 * fade;
+            }
         }
-        bzSum += bAxial * tz + bPol * phiHat.z;
-        fillMax = max(fillMax, smoothstep(1.0, 0.55, s / sig));
-        rim = max(rim, smoothstep(0.06, 0.0, abs(s / sig - 1.0)));
-    }
-    if (fillMax > 0.0) {
-        float mag = clamp(abs(bzSum) / max(u_bScale, 1e-6), 0.0, 1.2);
-        vec3 south = vec3(0.95, 0.30, 0.18);
-        vec3 north = vec3(0.15, 0.65, 0.95);
-        vec3 fieldCol = (bzSum < 0.0 ? south : north) * (0.25 + 0.75 * mag);
-        col = mix(col, fieldCol, 0.28 + 0.45 * fillMax);
-        col += vec3(0.7, 0.85, 1.0) * rim * 0.25;
     }
 
-    // Sun + Earth glows on top.
-    col += vec3(1.0, 0.85, 0.45) * exp(-rAu * rAu / 0.0009);
-    col += vec3(1.0, 0.97, 0.88) * exp(-rAu * rAu / 0.00008);
-    float dEarth = length(p2 - vec2(1.0, 0.0));
-    col += vec3(0.25, 0.55, 1.0) * exp(-dEarth * dEarth / 0.00012);
-    col += vec3(0.8, 0.92, 1.0) * exp(-dEarth * dEarth / 0.00001);
+    // Raymarch the train: translucent shells, up to 3 composited hits.
+    float t = 0.02;
+    float alpha = 0.0;
+    vec3 acc = vec3(0.0);
+    int hits = 0;
+    float firstHitT = 1e9;
+    for (int i = 0; i < 96; i++) {
+        if (t > 6.0 || hits >= 3 || alpha > 0.85) break;
+        vec3 p = ro + rd * t;
+        float dMin = 1e9;
+        int rHit = -1;
+        float psiH; float sH; float sigH;
+        for (int r = 0; r < 4; r++) {
+            if (r >= u_ropeCount) break;
+            float psi_; float s_; float sig_;
+            float d = ropeSdf(r, p, psi_, s_, sig_);
+            if (d < dMin) { dMin = d; rHit = r; psiH = psi_; sH = s_; sigH = sig_; }
+        }
+        if (dMin < 0.002) {
+            firstHitT = min(firstHitT, t);
+            float bz = ropeBz(rHit, p, psiH, sH, max(sigH, 1e-6));
+            float mag = clamp(abs(bz) / max(u_bScale, 1e-6), 0.0, 1.2);
+            vec3 south = vec3(0.95, 0.30, 0.18);
+            vec3 north = vec3(0.15, 0.65, 0.95);
+            vec3 fieldCol = (bz < 0.0 ? south : north) * (0.30 + 0.70 * mag);
+            // Rim brightening from the SDF gradient magnitude proxy.
+            float rim = smoothstep(0.85, 1.0, sH / max(sigH, 1e-6));
+            fieldCol += vec3(0.55, 0.7, 0.9) * rim * 0.35;
+            float a = 0.42 * (1.0 - alpha);
+            acc += fieldCol * a;
+            alpha += a;
+            hits++;
+            // Step THROUGH the shell to catch the far side / next rope.
+            t += max(0.06, sigH * 0.7);
+        } else {
+            t += max(dMin * 0.8, 0.004);
+        }
+    }
 
-    gl_FragColor = vec4(col, 1.0);
+    // Composite: grid behind ropes, glows on top.
+    if (tPlane > 0.0 && tPlane < firstHitT) col += gridCol;
+    col = col * (1.0 - alpha) + acc;
+    if (tPlane > 0.0 && tPlane >= firstHitT) col += gridCol * 0.25;
+
+    float along;
+    float dSun = rayPointDist(ro, rd, vec3(0.0), along);
+    if (along < firstHitT + 0.05) {
+        col += vec3(1.0, 0.85, 0.45) * exp(-dSun * dSun / 0.0016);
+        col += vec3(1.0, 0.97, 0.88) * exp(-dSun * dSun / 0.00012);
+    }
+    float dEarth = rayPointDist(ro, rd, vec3(1.0, 0.0, 0.0), along);
+    if (along < firstHitT + 0.05) {
+        col += vec3(0.25, 0.55, 1.0) * exp(-dEarth * dEarth / 0.00025);
+        col += vec3(0.8, 0.92, 1.0) * exp(-dEarth * dEarth / 0.000018);
+    }
+
+    outColor = vec4(col, 1.0);
 }
 `;
 
 export class HeliosphereView {
     /**
-     * @param {HTMLCanvasElement} glCanvas   shader layer
-     * @param {HTMLCanvasElement} overlay    2D annotation layer (same size)
+     * @param {HTMLCanvasElement} glCanvas   shader layer (receives pointer input)
+     * @param {HTMLCanvasElement} overlay    2D annotation layer (pointer-events:none)
      */
     constructor(glCanvas, overlay) {
         this.glCanvas = glCanvas;
         this.overlay = overlay;
-        this.ropes = [];        // [{...ropeParams, launchOffsetS}]
-        this.frames = [];       // matching ropeFrame() per rope
-        this.ensemble = null;   // kernel ensembleRun() result
-        this.center = [0.55, 0];
-        this.gl = glCanvas.getContext('webgl', { antialias: true, alpha: false })
-            || glCanvas.getContext('experimental-webgl');
+        this.ropes = [];
+        this.frames = [];
+        this.ensemble = null;
+        this.weights = null;    // particle-filter weights (fade spaghetti)
+        // Orbit camera: z = ecliptic north. Start tilted so depth reads
+        // immediately; users orbit freely from here.
+        this.cam = { yaw: -0.35, pitch: 0.95, dist: 2.1, target: [0.5, 0, 0.02] };
+        this._defaultCam = { ...this.cam, target: [...this.cam.target] };
+        this.fovDeg = 42;
+        // WebGL2 (GLSL ES 3.00): required for dynamic uniform-array indexing
+        // inside the raymarch helpers. No WebGL1 fallback — without it the
+        // shader layer stays dark and the 2D overlay still annotates.
+        this.gl = glCanvas.getContext('webgl2', { antialias: true, alpha: false });
         if (this.gl) this._initGl();
+        this._wireInput();
     }
 
     _initGl() {
@@ -217,27 +300,93 @@ export class HeliosphereView {
         gl.enableVertexAttribArray(loc);
         gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
         this.u = {};
-        for (const name of ['u_res', 'u_center', 'u_auPerPx', 'u_ropeCount', 'u_bScale',
+        for (const name of ['u_res', 'u_camPos', 'u_camRight', 'u_camUp', 'u_camFwd',
+            'u_tanHalfFov', 'u_ropeCount', 'u_bScale',
             'u_eDir', 'u_eP', 'u_nHat', 'u_dAu', 'u_sigApexAu', 'u_tPerAu',
             'u_bAxis', 'u_hand', 'u_profile']) {
             this.u[name] = gl.getUniformLocation(prog, name);
         }
     }
 
-    /** Replace the rendered train (array of rope params + launchOffsetS). */
+    _wireInput() {
+        const c = this.glCanvas;
+        let drag = null;
+        c.style.cursor = 'grab';
+        c.addEventListener('pointerdown', (e) => {
+            drag = { x: e.clientX, y: e.clientY };
+            c.setPointerCapture(e.pointerId);
+            c.style.cursor = 'grabbing';
+        });
+        c.addEventListener('pointermove', (e) => {
+            if (!drag) return;
+            this.cam.yaw -= (e.clientX - drag.x) * 0.006;
+            this.cam.pitch = Math.min(1.45, Math.max(-1.45, this.cam.pitch + (e.clientY - drag.y) * 0.006));
+            drag = { x: e.clientX, y: e.clientY };
+        });
+        const end = () => { drag = null; c.style.cursor = 'grab'; };
+        c.addEventListener('pointerup', end);
+        c.addEventListener('pointercancel', end);
+        c.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            this.cam.dist = Math.min(4.5, Math.max(0.5, this.cam.dist * Math.exp(e.deltaY * 0.001)));
+        }, { passive: false });
+        c.addEventListener('dblclick', () => {
+            this.cam = { ...this._defaultCam, target: [...this._defaultCam.target] };
+        });
+    }
+
+    /** Camera basis (right-handed, z-up world). */
+    _camera() {
+        const { yaw, pitch, dist, target } = this.cam;
+        const cp = Math.cos(pitch), sp = Math.sin(pitch);
+        const pos = [
+            target[0] + dist * cp * Math.cos(yaw),
+            target[1] + dist * cp * Math.sin(yaw),
+            target[2] + dist * sp,
+        ];
+        let fwd = [target[0] - pos[0], target[1] - pos[1], target[2] - pos[2]];
+        const fl = Math.hypot(...fwd);
+        fwd = fwd.map((v) => v / fl);
+        let right = [fwd[1] * 1 - fwd[2] * 0, fwd[2] * 0 - fwd[0] * 1, fwd[0] * 0 - fwd[1] * 0]; // fwd × ẑ
+        const rl = Math.hypot(...right) || 1;
+        right = right.map((v) => v / rl);
+        const up = [
+            right[1] * fwd[2] - right[2] * fwd[1],
+            right[2] * fwd[0] - right[0] * fwd[2],
+            right[0] * fwd[1] - right[1] * fwd[0],
+        ];
+        return { pos, right, up, fwd, tanHalfFov: Math.tan(this.fovDeg * Math.PI / 360) };
+    }
+
+    /** World (AU) → overlay pixel through the SAME camera. null = behind. */
+    _project(p, cam) {
+        const v = [p[0] - cam.pos[0], p[1] - cam.pos[1], p[2] - cam.pos[2]];
+        const z = v[0] * cam.fwd[0] + v[1] * cam.fwd[1] + v[2] * cam.fwd[2];
+        if (z <= 0.01) return null;
+        const x = v[0] * cam.right[0] + v[1] * cam.right[1] + v[2] * cam.right[2];
+        const y = v[0] * cam.up[0] + v[1] * cam.up[1] + v[2] * cam.up[2];
+        const halfH = 0.5 * this.overlay.height;
+        const s = halfH / (cam.tanHalfFov * z);
+        return [0.5 * this.overlay.width + x * s, halfH - y * s];
+    }
+
     setRopes(ropes) {
         this.ropes = ropes.slice(0, MAX_VIEW_ROPES);
         this.frames = this.ropes.map((r) => ropeFrame(r.lonDeg, r.latDeg, r.tiltDeg));
     }
 
-    /** Single-rope convenience (v1 call sites). */
     setRope(rope) {
         this.setRopes([{ launchOffsetS: 0, ...rope }]);
     }
 
-    /** ens = kernel ensembleRun() result (or null to clear the envelope). */
     setEnsemble(ens) {
         this.ensemble = ens;
+        this.weights = null;
+    }
+
+    /** Particle-filter weights (Float32Array, per member) — fades spaghetti. */
+    setWeights(w) {
+        this.weights = w;
     }
 
     resize() {
@@ -248,28 +397,14 @@ export class HeliosphereView {
         }
     }
 
-    _auPerPx() {
-        // Fit −0.22 … +1.32 AU horizontally, with a vertical floor.
-        return Math.max(1.54 / this.glCanvas.width, 1.06 / this.glCanvas.height);
-    }
-
-    _toScreen(xAu, yAu) {
-        const s = this._auPerPx();
-        return [
-            this.overlay.width / 2 + (xAu - this.center[0]) / s,
-            this.overlay.height / 2 - (yAu - this.center[1]) / s,
-        ];
-    }
-
     /**
      * Render at t seconds after the reference epoch. `probes` carries kernel
-     * truth PER ROPE: [{ apexKm, sigmaApexKm }] aligned with setRopes order
-     * (the JS mirrors are only used for ensemble members, where per-member
-     * kernel probing would be thousands of calls).
+     * truth PER ROPE: [{ apexKm, sigmaApexKm }] aligned with setRopes order.
      */
     draw(tS, probes) {
         this.resize();
         const gl = this.gl;
+        const cam = this._camera();
         if (gl && this.ropes.length) {
             gl.viewport(0, 0, this.glCanvas.width, this.glCanvas.height);
             const N = MAX_VIEW_ROPES;
@@ -293,8 +428,11 @@ export class HeliosphereView {
                 if (d > 0) bScale = Math.max(bScale, bAx[r]);
             });
             gl.uniform2f(this.u.u_res, this.glCanvas.width, this.glCanvas.height);
-            gl.uniform2f(this.u.u_center, this.center[0], this.center[1]);
-            gl.uniform1f(this.u.u_auPerPx, this._auPerPx());
+            gl.uniform3fv(this.u.u_camPos, cam.pos);
+            gl.uniform3fv(this.u.u_camRight, cam.right);
+            gl.uniform3fv(this.u.u_camUp, cam.up);
+            gl.uniform3fv(this.u.u_camFwd, cam.fwd);
+            gl.uniform1f(this.u.u_tanHalfFov, cam.tanHalfFov);
             gl.uniform1i(this.u.u_ropeCount, this.ropes.length);
             gl.uniform1f(this.u.u_bScale, bScale);
             gl.uniform3fv(this.u.u_eDir, eDir);
@@ -308,38 +446,52 @@ export class HeliosphereView {
             gl.uniform1fv(this.u.u_profile, prof);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
         }
-        this._drawOverlay(tS);
+        this._drawOverlay(tS, cam);
     }
 
-    _axisPath(ctx, frame, dAu) {
+    _axisPath(ctx, frame, dAu, cam) {
         ctx.beginPath();
+        let pen = false;
         for (let i = 0; i <= 72; i++) {
             const psi = i / 72 * 2 * Math.PI;
             const half = dAu / 2;
-            const x = half * (1 - Math.cos(psi)) * frame.eDir[0] + half * Math.sin(psi) * frame.eP[0];
-            const y = half * (1 - Math.cos(psi)) * frame.eDir[1] + half * Math.sin(psi) * frame.eP[1];
-            const [px, py] = this._toScreen(x, y);
-            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            const p = [
+                half * (1 - Math.cos(psi)) * frame.eDir[0] + half * Math.sin(psi) * frame.eP[0],
+                half * (1 - Math.cos(psi)) * frame.eDir[1] + half * Math.sin(psi) * frame.eP[1],
+                half * (1 - Math.cos(psi)) * frame.eDir[2] + half * Math.sin(psi) * frame.eP[2],
+            ];
+            const s = this._project(p, cam);
+            if (!s) { pen = false; continue; }
+            if (!pen) { ctx.moveTo(s[0], s[1]); pen = true; } else ctx.lineTo(s[0], s[1]);
         }
     }
 
-    _drawOverlay(tS) {
+    _drawOverlay(tS, cam) {
         const ctx = this.overlay.getContext('2d');
         const { width: w, height: h } = this.overlay;
         ctx.clearRect(0, 0, w, h);
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-        // Ensemble envelope: true member axis circles (kernel memberParams,
-        // member-major, ropesPerMember records per member — spec §10).
+        // Ensemble envelope: member axis circles through the 3D camera,
+        // alpha ∝ particle-filter weight when assimilation is active.
         const ens = this.ensemble;
         if (ens && this.ropes.length && ens.members > 0) {
             const stride = ens.memberStride;
             const R = ens.ropesPerMember || 1;
-            const maxDraw = 56;
+            const maxDraw = 48;
             const skip = Math.max(1, Math.floor(ens.members / maxDraw));
             ctx.lineWidth = dpr;
-            ctx.strokeStyle = 'rgba(120, 210, 255, 0.05)';
+            const wSum = this.weights ? this.weights.reduce((a, b) => a + b, 0) : 0;
             for (let m = 0; m < ens.members; m += skip) {
+                // Uniform prior alpha 0.05; weighted: scale by w·members
+                // (equal-weight → same 0.05; upweighted members brighten,
+                // killed members vanish — the filter made visible).
+                let a = 0.05;
+                if (this.weights && wSum > 0) {
+                    a = Math.min(0.5, 0.05 * this.weights[m] * ens.members);
+                }
+                if (a < 0.004) continue;
+                ctx.strokeStyle = `rgba(120, 210, 255, ${a.toFixed(3)})`;
                 for (let r = 0; r < Math.min(R, this.ropes.length); r++) {
                     const rope = this.ropes[r];
                     const dt = tS - (rope.launchOffsetS || 0);
@@ -349,7 +501,7 @@ export class HeliosphereView {
                     const fr = ropeFrame(lon, lat, tilt);
                     const dAuM = dbmApexKm(rope.d0Rsun * RSUN_KM, v0, rope.wKms, gam, dt) / AU_KM;
                     if (!(dAuM > 0)) continue;
-                    this._axisPath(ctx, fr, dAuM);
+                    this._axisPath(ctx, fr, dAuM, cam);
                     ctx.stroke();
                 }
             }
@@ -360,21 +512,25 @@ export class HeliosphereView {
             const dt = tS - (rope.launchOffsetS || 0);
             if (dt <= 0) return;
             const dAu = dbmApexKm(rope.d0Rsun * RSUN_KM, rope.v0Kms, rope.wKms, rope.gammaPerKm, dt) / AU_KM;
-            this._axisPath(ctx, this.frames[r], dAu);
+            this._axisPath(ctx, this.frames[r], dAu, cam);
             ctx.strokeStyle = ROPE_STROKES[r % ROPE_STROKES.length];
             ctx.lineWidth = 1.5 * dpr;
             ctx.stroke();
         });
 
-        // Labels.
+        // Labels through the same camera.
         ctx.font = `${11 * dpr}px system-ui, sans-serif`;
-        ctx.fillStyle = 'rgba(180, 195, 220, 0.85)';
-        const [sx, sy] = this._toScreen(0, 0);
-        ctx.fillText('Sun', sx + 8 * dpr, sy - 8 * dpr);
-        const [ex, ey] = this._toScreen(1, 0);
-        ctx.fillText('Earth · L1', ex + 8 * dpr, ey - 8 * dpr);
-        ctx.fillStyle = 'rgba(140, 155, 185, 0.55)';
-        const [ax] = this._toScreen(0.5, 0);
-        ctx.fillText('0.5 AU', ax - 16 * dpr, this._toScreen(0, -0.485)[1]);
+        const label = (p, text, color = 'rgba(180, 195, 220, 0.85)') => {
+            const s = this._project(p, cam);
+            if (!s) return;
+            ctx.fillStyle = color;
+            ctx.fillText(text, s[0] + 8 * dpr, s[1] - 8 * dpr);
+        };
+        label([0, 0, 0], 'Sun');
+        label([1, 0, 0], 'Earth · L1');
+        label([0.5, 0, 0], '0.5 AU', 'rgba(140, 155, 185, 0.5)');
+        ctx.fillStyle = 'rgba(120, 132, 160, 0.55)';
+        ctx.fillText('drag to orbit · scroll to zoom · double-click to reset',
+            10 * dpr, h - 10 * dpr);
     }
 }

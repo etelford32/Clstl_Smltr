@@ -289,3 +289,67 @@ flare catalog (X1.0 2024-05-08T21:08Z → launch 21:30 = epoch; X2.2
 Holds: global min Bz −43.8 vs −44.17 nT observed (0.9%), min-Bz timing
 Δ1.0 h, full-window shape r = 0.71, both southward episodes reproduced,
 southward dwell (< −10 nT) 18.5 vs 15.9 h.
+
+## 11. Assimilation — sequential importance reweighting (Phase 3)
+
+The particle-filter step conditions a stored ensemble (§7) on observed Bz
+without re-running any member. Observations `y_i` [nT, GSM] live on the SAME
+time grid as the run (NaN = gap), over step indices `[i0, i1)` — the page's
+"now-line". Per member m:
+
+```
+log w_m = −(1 / 2σ²) · Σ_i (bz_m(t_i) − y_i)²      (finite y_i only)
+```
+
+with the convention that a member OUTSIDE the rope predicts **0 nT** (the
+engine models no ambient IMF), so `σ` is a combined observation +
+representativeness error — default **4 nT** to absorb the unmodeled ±5 nT
+background and sheath. Weights are normalized via log-sum-exp; every fan
+statistic, hit fraction, P(hit) and P(min Bz < thr) becomes weight-weighted
+(weighted quantiles use the midpoint-CDF convention, with negligible-weight
+members excluded so killed members cannot drag interpolation).
+
+**Degeneracy guard (likelihood tempering).** A product likelihood over
+hundreds of strongly-autocorrelated 5-min samples is wildly overconfident:
+untempered, ESS collapses to ~1 on real data. When ESS would fall below
+`ess_floor_frac · n` (default 0.1), the log-likelihood is annealed —
+`λ · log w`, λ bisected in (0, 1] — to hold ESS at the floor, and **the
+applied temperature λ is stored on the result and shown in the UI**, never
+hidden. λ ≈ 0.05 reads as "these correlated observations carry ≈ 1/20 the
+nominal information."
+
+**Semantics.** Reweight-only, no resampling: every call re-conditions the
+ORIGINAL prior ensemble on the full observed window, so an advancing
+now-line never accumulates degeneracy across calls, and `reset` restores
+bit-identical prior statistics. The unweighted (`weights: None`) statistics
+path is bit-identical to the pre-Phase-3 computation — pinned Phase 1/2
+numbers never move.
+
+**Validated behavior on St. Patrick's 2015** (pinned by the smoke test):
+conditioning on the pre-shock QUIET window kills too-early members and
+raises P(min Bz < −10) from 0.61 to 0.75; conditioning through the sheath
+interval temporarily dips it (**known v1 artifact — the model has no
+sheath**, Phase 5); once the now-line passes the rope front the call
+recovers to 0.80–0.93 and the 5–95% fan over the remaining passage narrows
+from ≈34 to ≈15 nT. Native gates additionally pin: posterior collapse onto
+a synthetic truth member, held-out mid-storm RMSE improvement, uniform
+prior on all-gap windows, and determinism.
+
+## 12. Live launch seeding — DONKI conventions (Phase 3)
+
+NASA DONKI CMEAnalysis cone fits map onto the engine with no unit
+conversion (`js/flux-rope-live.js`, fixture-gated by
+tests/flux-rope-live.mjs):
+
+| DONKI field | Engine parameter |
+|---|---|
+| `time21_5` | launch epoch — the 21.5 R☉ crossing IS the launch surface `d0` |
+| `speed` | `v0` [km/s] (measured at 21.5 R☉) |
+| `latitude`/`longitude` (Stonyhurst; Earth at 0°,0°) | launch `lat`/`lon` |
+| `halfAngle` | apex-size prior: σ₁AU = clamp(0.115 · halfAngle/30°, 0.06, 0.2 AU) |
+
+What a cone fit does NOT constrain — B₁AU, twist, tilt, chirality — gets
+climatological defaults with deliberately WIDE priors (tilt σ 40°,
+chirality flip probability 0.5 = "unknown"): that honest prior is the
+starting posterior the §11 filter narrows as STEREO-A / L1 data arrives.
+Ambient wind `w` is seeded from the live RTSW plasma mean when available.

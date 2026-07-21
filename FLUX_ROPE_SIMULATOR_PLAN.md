@@ -89,6 +89,18 @@ the same crate.
 - **Phase 3 — Live + corrections.** DONKI CME ingestion, live DSCOVR overlay,
   sequential importance resampling (particle filter) over the ensemble as L1 /
   STEREO-A data arrives, dashboard fan integration.
+  ✅ complete (2026-07-21): kernel particle filter (spec §11 — Gaussian
+  reweighting, weighted fans/probabilities, ESS-floor likelihood tempering
+  with the temperature SURFACED, reweight-only so the advancing now-line
+  never degenerates), DONKI seeding conventions (spec §12,
+  `js/flux-rope-live.js` + fixture gate), live RTSW L1 driver via the
+  SolarWindDriver contract, page: the scrub cursor is the now-line (fan
+  narrows live, ESS/λ chip, weight-faded spaghetti, on/off toggle), τ-clock
+  time discipline (sim time = τ × wall clock, ×1/×100/×1000/×10000),
+  true-3D raymarched WebGL2 heliosphere with orbit camera, and the first
+  space-weather.html insertion (`js/flux-rope-dashboard.js` — the fail-quiet
+  "next" panel under the arrival-only DBM section). STEREO-A pre-arrival
+  conditioning and resample-move remain open Phase 3+ items.
 - **Phase 4 — Consumers.** ring-current forecast mode via SolarWindDriver,
   space-weather.html customizable dashboard + rope fan, AurOracle tiered
   alerts (Watch → Warning → Nowcast; alert-sender fix rides along), EarthView

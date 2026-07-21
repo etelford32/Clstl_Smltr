@@ -147,6 +147,64 @@ check('st-patrick ensemble: observed min inside member spread',
     mins[0] < minObs && minObs < mins[mins.length - 1],
     `obs ${minObs} in [${mins[0].toFixed(1)}, ${mins[mins.length - 1].toFixed(1)}]`);
 
+// ── Assimilation vs the real observed storm (spec §11, Phase 3) ──────────────
+// Mid-storm correction on St. Patrick's: condition the ensemble on OBSERVED
+// OMNI Bz up to the observed minimum (the now-line), and require the
+// posterior to behave like a particle filter should.
+{
+    const obsAligned = new Float32Array(n).fill(NaN);
+    for (let i = 0; i < n; i++) if (Number.isFinite(obsBz[i])) obsAligned[i] = obsBz[i];
+    const priorWidth = (() => {
+        let s = 0, c = 0;
+        for (let i = iMinObs; i < Math.min(n, iMinObs + 72); i++) {
+            if (ensSP.hitFrac[i] > 0.1) { s += ensSP.bzPct.p95[i] - ensSP.bzPct.p5[i]; c++; }
+        }
+        return s / Math.max(1, c);
+    })();
+    // Pre-arrival: conditioning on the observed QUIET period before the
+    // shock (16.8 h into the window) kills too-early members and must RAISE
+    // the storm call above the prior.
+    const shockIdx = Math.round(16.8 * 3600 / stepS);
+    const priorP10 = ensSP.pMinBzBelow(-10);
+    const pre = k.assimilate({ obsBz: obsAligned, i0: 0, i1: shockIdx, sigmaNt: 4 });
+    check('assimilation: ESS held at the floor, temperature reported',
+        pre.ess > 1 && pre.ess < ensSP.members && pre.temperature > 0 && pre.temperature < 1,
+        `ESS ${pre.ess.toFixed(0)} / ${ensSP.members}, λ ${pre.temperature.toFixed(3)}`);
+    check('assimilation: weights normalized',
+        Math.abs(Array.from(pre.weights).reduce((a, b) => a + b, 0) - 1) < 1e-3);
+    check('assimilation: pre-arrival conditioning sharpens the storm call',
+        pre.pMinBzBelow(-10) >= priorP10,
+        `P(<−10) ${pre.pMinBzBelow(-10).toFixed(2)} vs prior ${priorP10.toFixed(2)}`);
+
+    // Mid-storm: now-line at the observed min — the fan over the remaining
+    // passage must narrow. (Known v1 artifact, on record: with no sheath
+    // model, conditioning through the choppy sheath interval temporarily
+    // dips P(min Bz < −10) before the rope core restores it — see the
+    // min+3h check below and spec §11.)
+    const post = k.assimilate({ obsBz: obsAligned, i0: 0, i1: iMinObs, sigmaNt: 4 });
+    const postWidth = (() => {
+        let s = 0, c = 0;
+        for (let i = iMinObs; i < Math.min(n, iMinObs + 72); i++) {
+            if (post.hitFrac[i] > 0.1) { s += post.bzPct.p95[i] - post.bzPct.p5[i]; c++; }
+        }
+        return s / Math.max(1, c);
+    })();
+    check('assimilation: fan narrows over the remaining passage',
+        postWidth < priorWidth, `${postWidth.toFixed(1)} vs prior ${priorWidth.toFixed(1)} nT`);
+
+    // Once the now-line passes the rope front, the deep-storm call recovers.
+    const late = k.assimilate({ obsBz: obsAligned, i0: 0, i1: iMinObs + 36, sigmaNt: 4 });
+    check('assimilation: mid-storm correction recovers the deep-storm call',
+        late.pMinBzBelow(-10) > 0.6, `P(<−10) ${late.pMinBzBelow(-10).toFixed(2)}`);
+
+    const late2 = k.assimilate({ obsBz: obsAligned, i0: 0, i1: iMinObs + 36, sigmaNt: 4 });
+    check('assimilation: deterministic', late2.ess === late.ess
+        && late.bzPct.p50.every((v, i) => v === late2.bzPct.p50[i]));
+    k.assimReset();
+    check('assimilation: reset restores the prior', k.ess() === ensSP.members,
+        `ESS ${k.ess()}`);
+}
+
 // ── Gannon May 2024 sequential-rope hindcast (spec §10, Phase 2) ─────────────
 // TWO non-interacting ropes vs the observed G5 train. Tolerances are looser
 // than St. Patrick's ON PURPOSE: the unmodeled X3.9/X5.8 CMEs and the

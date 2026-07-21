@@ -142,6 +142,11 @@ body {
 </head>
 <body>
 
+<!-- Canonical nav SHELL: js/nav.js initNav() populates this element in
+     place — it does NOT create one, so removing this tag silently removes
+     the site navigation (that exact bug shipped once; keep the shell). -->
+<nav></nav>
+
 <header class="fr-hero">
     <h1>Flux Rope Simulator</h1>
     <span class="fr-sub">Model the CME itself · forecast Bz at L1 days ahead of arrival</span>
@@ -163,10 +168,11 @@ body {
         <div class="fr-scrub">
             <button id="fr-play" type="button">❚❚</button>
             <input id="fr-time" type="range" min="0" max="132" step="0.1" value="0" aria-label="hours after launch">
-            <select id="fr-speed" aria-label="playback speed">
-                <option value="2">2 h/s</option>
-                <option value="4" selected>4 h/s</option>
-                <option value="10">10 h/s</option>
+            <select id="fr-speed" aria-label="time compression τ" title="simulated time = τ × wall-clock time — the ring-simulator clock discipline">
+                <option value="1">×1 real</option>
+                <option value="100" selected>×100</option>
+                <option value="1000">×1000</option>
+                <option value="10000">×10000</option>
             </select>
             <span class="fr-t" id="fr-t-label">t = +0.0 h</span>
         </div>
@@ -224,6 +230,13 @@ body {
                 probabilities above are recomputed live on every change
                 (<span id="fr-ens-ms">—</span>).
             </p>
+            <div class="fr-field" style="grid-template-columns:1fr;margin-top:8px;">
+                <label style="display:flex;gap:8px;align-items:center;color:#cdd5e4;cursor:pointer;">
+                    <input type="checkbox" id="a-toggle" checked style="accent-color:#7fe6c3;">
+                    assimilate observed data (particle filter)
+                </label>
+            </div>
+            <p id="fr-assim-status" style="font-size:.7rem;color:#7fe6c3;line-height:1.45;min-height:1em;"></p>
         </div>
     </aside>
 </main>
@@ -283,6 +296,7 @@ import { GANNON_FIT, ST_PATRICK_FIT, SCENARIOS } from './js/flux-rope-presets.js
 import { HeliosphereView } from './js/flux-rope/view.js';
 import { drawBzChart, drawArrivalHist } from './js/flux-rope/charts.js';
 import { fromReplayBundle } from './js/solar-wind-driver.js';
+import { fetchDonkiCmes, donkiToPreset, fetchRtswDriver } from './js/flux-rope-live.js';
 
 const AU_KM = 1.495978707e8;
 const $ = (id) => document.getElementById(id);
@@ -293,61 +307,102 @@ const view = new HeliosphereView($('fr-gl'), $('fr-overlay'));
 // Normalize a preset (single `rope` or train `ropes`) into a full train.
 const toRopes = (p) => (p.ropes ?? [p.rope]).map((r) => ({ ...ROPE_DEFAULTS, launchOffsetS: 0, ...r }));
 
+/**
+ * TauClock — the ring-simulator clock discipline (js/sim-clock.js semantics,
+ * inlined because the ring module carries ring-specific spatial scales):
+ *
+ *   simTime = anchorSim + (wall − anchorWall) · τ
+ *
+ * Simulated seconds advance at EXACTLY τ × wall-clock seconds — never at a
+ * "looks nice" rate — so at ×100 a 50-hour Sun→Earth transit takes a
+ * faithful 30 wall-clock minutes. Scrubs and τ changes re-anchor so the
+ * mapping stays exact across interactions.
+ */
+class TauClock {
+    constructor(tau = 100) { this.tau = tau; this.paused = false; this._aW = performance.now(); this._aS = 0; }
+    simS(now = performance.now()) { return this.paused ? this._aS : this._aS + (now - this._aW) / 1000 * this.tau; }
+    setTau(tau, now = performance.now()) { this._aS = this.simS(now); this._aW = now; this.tau = tau; }
+    scrub(simS, now = performance.now()) { this._aS = simS; this._aW = now; }
+    setPaused(p, now = performance.now()) { this._aS = this.simS(now); this._aW = now; this.paused = p; }
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
 const GRID = { t0S: 0, dtS: 600, hours: 132 };
 GRID.n = Math.round(GRID.hours * 3600 / GRID.dtS);
 const state = {
     ropes: toRopes(ST_PATRICK_FIT),
-    active: 0,            // rope tab index
+    active: 0,             // rope tab index
     launchMs: Date.parse(ST_PATRICK_FIT.launchIso),
-    obs: null,            // { tH, bz } overlay (hindcast presets)
+    obsDriver: null,       // SolarWindDriver (hindcast bundle or live RTSW)
+    obsAligned: null,      // Float32Array on the ensemble grid (NaN = gap)
+    spreadsBase: SPREAD_DEFAULTS,
     det: null, ens: null,
+    assim: null,           // last particle-filter result (null = prior)
     tH: Array.from({ length: GRID.n }, (_, i) => (GRID.t0S + i * GRID.dtS) / 3600),
-    cursorH: 0, playing: true,
+    cursorH: 0,
+    rtsw: null,            // live L1 driver, fetched once at boot
 };
+const clock = new TauClock(parseFloat($('fr-speed').value));
 const activeRope = () => state.ropes[state.active];
 
 // ── Presets ──────────────────────────────────────────────────────────────────
 const PRESETS = [ST_PATRICK_FIT, GANNON_FIT, ...SCENARIOS, { id: 'custom', label: 'Custom', rope: null }];
-for (const p of PRESETS) {
-    const opt = document.createElement('option');
-    opt.value = p.id; opt.textContent = p.label;
-    $('fr-preset').appendChild(opt);
-}
 const PRESET_NOTES = {
     'st-patrick-2015': 'Hand fit to the 17 Mar 2015 G4 storm (DONKI-informed launch). ' +
-        'The amber observed trace is OMNI 5-min Bz from the hindcast bundle.',
+        'The amber observed trace is OMNI 5-min Bz; drag the timeline and the ' +
+        'particle filter conditions the fan on everything left of the now-line.',
     'gannon-2024': 'The May 2024 G5 CME train as TWO sequential ropes (X1.0 and X2.2 flare ' +
         'launches from AR 13664, +20.25 h apart). The X3.9/X5.8 CMEs and rope–rope ' +
         'compression are honestly unmodeled — that is the v2 roadmap.',
     'fast-halo': 'Synthetic: a 1600 km/s halo eruption aimed at Earth — note the shorter transit and harder Bz.',
     'slow-glancing': 'Synthetic: a slow flank launch — most ensemble members miss; the fan is wide and shallow.',
     'custom': 'Free play: every slider redraws the active rope; add ropes to build a train.',
+    'donki': 'Live NASA DONKI cone fit: launch epoch and speed are measured at 21.5 R☉ (the ' +
+        'engine’s launch surface); the magnetic configuration is a wide climatological ' +
+        'prior — chirality genuinely unknown — that live L1 assimilation will narrow.',
 };
+
+function fillPresetSelect() {
+    const sel = $('fr-preset');
+    const cur = sel.value;
+    sel.innerHTML = '';
+    for (const p of PRESETS) {
+        if (p.live && !sel.querySelector('optgroup')) {
+            const og = document.createElement('optgroup');
+            og.label = 'Live · DONKI (last 7 days)';
+            sel.appendChild(og);
+        }
+        const opt = document.createElement('option');
+        opt.value = p.id; opt.textContent = p.label;
+        (p.live ? sel.querySelector('optgroup') : sel).appendChild(opt);
+    }
+    if (cur && PRESETS.some((p) => p.id === cur)) sel.value = cur;
+}
+fillPresetSelect();
 
 async function applyPreset(id) {
     const p = PRESETS.find((x) => x.id === id);
-    $('fr-preset-note').textContent = PRESET_NOTES[id] || '';
+    $('fr-preset-note').textContent = p?.live ? PRESET_NOTES.donki : (PRESET_NOTES[id] || '');
     if (p && (p.rope || p.ropes)) {
         state.ropes = toRopes(p);
         state.active = 0;
         state.launchMs = p.launchIso ? Date.parse(p.launchIso) : null;
+        state.spreadsBase = p.spreads ?? SPREAD_DEFAULTS;
         renderRopeTabs();
         syncSliders();
     }
-    state.obs = null;
+    state.obsDriver = null;
     if (p && p.bundleUrl) {
         try {
             const bundle = await (await fetch(p.bundleUrl)).json();
-            const drv = fromReplayBundle(bundle);
-            state.obs = {
-                tH: drv.samples.map((s) => (s.t - state.launchMs) / 3600_000),
-                bz: drv.samples.map((s) => s.bz),
-            };
+            state.obsDriver = fromReplayBundle(bundle);
         } catch (e) {
             console.warn('flux-rope: observed overlay unavailable', e);
         }
+    } else if (p?.live && state.rtsw?.length) {
+        state.obsDriver = state.rtsw;   // live DSCOVR/ACE overlay + assimilation
     }
+    clock.scrub(0);
     recompute();
 }
 
@@ -414,7 +469,7 @@ function syncSliders() {
 function markCustom() {
     $('fr-preset').value = 'custom';
     $('fr-preset-note').textContent = PRESET_NOTES.custom;
-    state.launchMs = null; state.obs = null;   // editing breaks the hindcast link
+    state.launchMs = null; state.obsDriver = null;   // editing breaks the data link
 }
 
 let debounceId = 0;
@@ -445,6 +500,7 @@ $('e-scale').addEventListener('input', () => {
     clearTimeout(debounceId);
     debounceId = setTimeout(recompute, 120);
 });
+$('a-toggle').addEventListener('change', () => { lastAssimI1 = -1; maybeAssimilate(true); });
 
 // ── Compute ──────────────────────────────────────────────────────────────────
 function recompute() {
@@ -454,7 +510,7 @@ function recompute() {
 
     const sc = parseFloat($('e-scale').value);
     kernel.setSpreads(Object.fromEntries(
-        Object.entries(SPREAD_DEFAULTS).map(([k, v]) => [k, k === 'pFlip' ? Math.min(1, v * sc) : v * sc])));
+        Object.entries(state.spreadsBase).map(([k, v]) => [k, k === 'pFlip' ? Math.min(1, v * sc) : v * sc])));
     const t0 = performance.now();
     state.ens = kernel.ensembleRun(
         parseFloat($('e-seed').value) || 1, parseInt($('e-members').value, 10),
@@ -462,11 +518,74 @@ function recompute() {
     $('fr-ens-ms').textContent = `${state.ens.members} members in ${(performance.now() - t0).toFixed(0)} ms`;
     view.setEnsemble(state.ens);
 
-    // Stats strip.
+    // Observed series aligned to the ensemble grid (assimilation input +
+    // chart overlay). Built from the SolarWindDriver so hindcast bundles
+    // and live RTSW behave identically.
+    state.obsAligned = null;
+    if (state.obsDriver && state.launchMs) {
+        const a = new Float32Array(GRID.n).fill(NaN);
+        for (let i = 0; i < GRID.n; i++) {
+            const t = state.launchMs + (GRID.t0S + i * GRID.dtS) * 1000;
+            if (t < state.obsDriver.tStart || t > state.obsDriver.tEnd) continue;
+            const s = state.obsDriver.at(t);
+            if (s && Number.isFinite(s.bz)) a[i] = s.bz;
+        }
+        state.obsAligned = a;
+    }
+    state.assim = null;
+    view.setWeights(null);
+    lastAssimI1 = -1;
+    maybeAssimilate(true);
+    updateStats();
+    drawCharts();
+}
+
+// ── Assimilation loop (spec §11): the scrub cursor IS the now-line ───────────
+let lastAssimI1 = -1;
+let assimBusyUntil = 0;
+function maybeAssimilate(force = false) {
+    const on = $('a-toggle').checked && state.obsAligned && state.ens;
+    if (!on) {
+        if (state.assim) { kernel.assimReset(); state.assim = null; view.setWeights(null); }
+        $('fr-assim-status').textContent = state.obsAligned
+            ? 'particle filter off — showing the prior fan'
+            : 'no observed data for this event — prior fan only';
+        updateStats(); drawCharts();
+        return;
+    }
+    const i1 = Math.max(0, Math.min(GRID.n, Math.floor(state.cursorH * 3600 / GRID.dtS)));
+    const now = performance.now();
+    if (!force && (i1 === lastAssimI1 || now < assimBusyUntil)) return;
+    lastAssimI1 = i1;
+    assimBusyUntil = now + 250;   // throttle: ≥250 ms between filter updates
+    // Count real observations left of the now-line.
+    let nObs = 0;
+    for (let i = 0; i < i1; i++) if (Number.isFinite(state.obsAligned[i])) nObs++;
+    if (nObs < 3) {
+        if (state.assim) { kernel.assimReset(); state.assim = null; view.setWeights(null); }
+        $('fr-assim-status').textContent = 'particle filter armed — advance the now-line into observed data';
+    } else {
+        state.assim = kernel.assimilate({ obsBz: state.obsAligned, i0: 0, i1, sigmaNt: 4 });
+        view.setWeights(state.assim.weights);
+        const a = state.assim;
+        $('fr-assim-status').textContent =
+            `particle filter · ${nObs} obs · ESS ${a.ess.toFixed(0)}/${a.members}`
+            + (a.temperature < 1 ? ` · λ ${a.temperature.toFixed(3)} (tempered)` : '');
+    }
+    updateStats();
+    drawCharts();
+}
+
+// ── Stats strip (posterior when assimilated, prior otherwise) ────────────────
+function updateStats() {
+    const src = state.assim ?? state.ens;
+    if (!src) return;
     const pct = (v) => `${Math.round(v * 100)}%`;
-    $('fr-s-phit').textContent = pct(state.ens.pHit);
-    $('fr-s-p10').textContent = pct(state.ens.pMinBzBelow(-10));
-    $('fr-s-p20').textContent = pct(state.ens.pMinBzBelow(-20));
+    $('fr-s-phit').textContent = pct(src.pHit);
+    $('fr-s-p10').textContent = pct(src.pMinBzBelow(-10));
+    $('fr-s-p20').textContent = pct(src.pMinBzBelow(-20));
+    // Arrival + min-Bz medians stay ensemble-based (arrival distribution is
+    // not reweighted for display yet — Phase 3 continues).
     const arr = Array.from(state.ens.arrivalH).filter(Number.isFinite).sort((a, b) => a - b);
     $('fr-s-arr').textContent = arr.length
         ? (state.launchMs
@@ -477,16 +596,21 @@ function recompute() {
     const medMin = mins.length ? mins[mins.length >> 1] : NaN;
     $('fr-s-minbz').textContent = Number.isFinite(medMin) ? `${medMin.toFixed(0)} nT` : '—';
     $('fr-s-minbz').classList.toggle('warn', medMin < -10);
-
-    drawCharts();
 }
 
 function drawCharts() {
+    const fanSrc = state.assim ?? state.ens;
+    const obs = (state.obsDriver && state.launchMs)
+        ? {
+            tH: state.obsDriver.samples.map((s) => (s.t - state.launchMs) / 3600_000),
+            bz: state.obsDriver.samples.map((s) => s.bz),
+        }
+        : null;
     drawBzChart($('fr-bz-chart'), {
         tH: state.tH,
         det: state.det ? state.det.bz : null,
-        fan: state.ens ? { ...state.ens.bzPct, hitFrac: state.ens.hitFrac } : null,
-        obs: state.obs,
+        fan: fanSrc ? { ...fanSrc.bzPct, hitFrac: fanSrc.hitFrac } : null,
+        obs,
         launchMs: state.launchMs,
         cursorH: state.cursorH,
     });
@@ -498,29 +622,28 @@ function drawCharts() {
     });
 }
 
-// ── Scrub + playback ─────────────────────────────────────────────────────────
+// ── Clock + render loop ──────────────────────────────────────────────────────
 function fmtT(h) {
-    if (!state.launchMs) return `t = +${h.toFixed(1)} h`;
+    const tau = clock.paused ? '❚❚' : `×${clock.tau}`;
+    if (!state.launchMs) return `t = +${h.toFixed(1)} h · ${tau}`;
     const d = new Date(state.launchMs + h * 3600_000);
-    return `${d.toISOString().slice(5, 16).replace('T', ' ')}Z · +${h.toFixed(1)} h`;
+    return `${d.toISOString().slice(5, 16).replace('T', ' ')}Z · +${h.toFixed(1)} h · ${tau}`;
 }
 
-let lastTs = null;
-function tick(ts) {
-    if (state.playing) {
-        const dt = lastTs ? (ts - lastTs) / 1000 : 0;
-        state.cursorH += dt * parseFloat($('fr-speed').value);
-        if (state.cursorH > GRID.hours) state.cursorH = 0;
-        $('fr-time').value = state.cursorH;
-    }
-    lastTs = ts;
-    const tS = state.cursorH * 3600;
+function tick() {
+    let simH = clock.simS() / 3600;
+    if (simH > GRID.hours) { clock.scrub(0); simH = 0; }
+    if (simH < 0) simH = 0;
+    const scrubbing = document.activeElement === $('fr-time');
+    if (!scrubbing) $('fr-time').value = simH;
+    state.cursorH = simH;
+    const tS = simH * 3600;
     const probes = state.ropes.map((_, r) => ({
         apexKm: kernel.apexKmAt(r, tS),
         sigmaApexKm: kernel.sigmaApexKmAt(r, tS),
     }));
     view.draw(tS, probes);
-    $('fr-t-label').textContent = fmtT(state.cursorH);
+    $('fr-t-label').textContent = fmtT(simH);
     const a = state.active;
     const launched = tS > (activeRope().launchOffsetS || 0);
     $('fr-hud-r').textContent = launched ? `${(probes[a].apexKm / AU_KM).toFixed(2)} AU` : 'pre-launch';
@@ -533,20 +656,49 @@ function tick(ts) {
     $('fr-hud-status').textContent = count > 1 ? '⚡ rope overlap at L1'
         : count > 0 ? '⚡ crossing L1'
         : allPassed ? 'passed L1' : 'in transit';
-    if (state.playing || state._chartDirty) { drawCharts(); state._chartDirty = false; }
+    if (!clock.paused || state._chartDirty) {
+        maybeAssimilate();
+        drawCharts();
+        state._chartDirty = false;
+    }
     requestAnimationFrame(tick);
 }
 
 $('fr-time').addEventListener('input', () => {
+    clock.scrub(parseFloat($('fr-time').value) * 3600);
     state.cursorH = parseFloat($('fr-time').value);
     state._chartDirty = true;
 });
 $('fr-play').addEventListener('click', () => {
-    state.playing = !state.playing;
-    $('fr-play').textContent = state.playing ? '❚❚' : '▶';
+    clock.setPaused(!clock.paused);
+    $('fr-play').textContent = clock.paused ? '▶' : '❚❚';
 });
+$('fr-speed').addEventListener('change', () => clock.setTau(parseFloat($('fr-speed').value)));
 $('fr-preset').addEventListener('change', (e) => applyPreset(e.target.value));
 window.addEventListener('resize', () => { state._chartDirty = true; });
+
+// ── Live inputs (Phase 3): DONKI event picker + RTSW L1 driver ───────────────
+(async () => {
+    try {
+        state.rtsw = await fetchRtswDriver();
+    } catch { /* offline / CORS-blocked dev: hindcasts still work */ }
+    try {
+        const cmes = await fetchDonkiCmes({ days: 7 });
+        // Ambient wind for seeding: mean of the live plasma speed.
+        let wSum = 0, wN = 0;
+        for (const s of state.rtsw?.samples ?? []) {
+            if (Number.isFinite(s.v)) { wSum += s.v; wN++; }
+        }
+        const ambient = wN ? Math.round(wSum / wN) : 400;
+        for (const cme of cmes.slice(0, 8)) {
+            PRESETS.splice(PRESETS.length - 1, 0, donkiToPreset(cme, { ambientWKms: ambient }));
+        }
+        if (cmes.length) fillPresetSelect();
+        $('fr-preset').value = $('fr-preset').value || ST_PATRICK_FIT.id;
+    } catch (e) {
+        console.info('flux-rope: DONKI picker unavailable', e?.message ?? e);
+    }
+})();
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 $('fr-preset').value = ST_PATRICK_FIT.id;

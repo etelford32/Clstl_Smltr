@@ -190,6 +190,47 @@ export async function loadFluxRopeKernel(source) {
         },
 
         /**
+         * Particle-filter assimilation step (spec §11): condition the LAST
+         * ensembleRun on observed Bz over grid indices [i0, i1). `obsBz` is
+         * aligned index-for-index with the run's time grid (NaN = gap).
+         * Gaussian reweighting with observation error sigmaNt (default 4 nT
+         * — must also absorb the unmodeled ambient IMF). Reweight-only:
+         * every call re-conditions the ORIGINAL prior on the full window,
+         * so repeated calls (the advancing now-line) never accumulate
+         * degeneracy. Returns the weighted fan + weights + ESS; call
+         * assimReset() to drop back to the prior (bit-identical stats).
+         */
+        assimilate({ obsBz, i0 = 0, i1 = obsBz.length, sigmaNt = 4, essFloorFrac = 0.1 }) {
+            const nWrite = Math.min(obsBz.length, this.maxSteps);
+            // Fresh view per write — memory growth invalidates held views.
+            new Float32Array(x.memory.buffer, x.fr_obs_ptr(), nWrite).set(obsBz.subarray(0, nWrite));
+            const ess = x.fr_assimilate(i0, Math.min(i1, nWrite), sigmaNt, essFloorFrac);
+            const steps = x.fr_ens_steps();
+            const members = x.fr_ens_members();
+            const pct = (k) => copyF32(x.fr_ens_bz_pct_ptr(k), steps);
+            return {
+                ess, members, steps,
+                // λ ∈ (0,1]: <1 means the correlated-obs likelihood was
+                // annealed to hold the ESS floor — show it, never hide it.
+                temperature: x.fr_assim_temperature(),
+                pHit: x.fr_ens_p_hit(),
+                bzPct: { p5: pct(0), p25: pct(1), p50: pct(2), p75: pct(3), p95: pct(4) },
+                btMed: copyF32(x.fr_ens_bt_med_ptr(), steps),
+                hitFrac: copyF32(x.fr_ens_hit_frac_ptr(), steps),
+                weights: copyF32(x.fr_ens_weights_ptr(), members),
+                pMinBzBelow: (thr) => x.fr_ens_p_minbz_below(thr),
+            };
+        },
+
+        /** Drop assimilation weights → uniform prior (bit-identical stats). */
+        assimReset() {
+            x.fr_assim_reset();
+        },
+
+        /** Current effective sample size (member count when unweighted). */
+        ess() { return x.fr_ens_ess(); },
+
+        /**
          * Bridge to the universal driver contract: median-forecast samples
          * shaped for js/solar-wind-driver.js `fromArrays` (t in epoch ms via
          * launchEpochMs + grid).

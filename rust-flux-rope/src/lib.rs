@@ -46,6 +46,11 @@ struct Engine {
     ropes: Vec<RopeEntry>,
     spreads: Spreads,
     series: Box<[f32; 4 * MAX_STEPS]>,
+    /// Observation INPUT buffer for assimilation: JS writes observed Bz
+    /// (NaN = gap) aligned with the ensemble grid, then calls fr_assimilate.
+    obs: Box<[f32; MAX_STEPS]>,
+    /// f32 mirror of the (f64) importance weights for the UI.
+    weights_f32: Vec<f32>,
     field_probe: [f32; 4],
     ens: Option<EnsembleResult>,
 }
@@ -56,6 +61,8 @@ impl Engine {
             ropes: vec![RopeEntry::new(RopeParams::default(), 0.0)],
             spreads: Spreads::default(),
             series: Box::new([0.0; 4 * MAX_STEPS]),
+            obs: Box::new([f32::NAN; MAX_STEPS]),
+            weights_f32: Vec::new(),
             field_probe: [0.0; 4],
             ens: None,
         }
@@ -386,6 +393,7 @@ pub extern "C" fn fr_ens_run(
     );
     let n = res.n_members as u32;
     e.ens = Some(res);
+    e.weights_f32.clear(); // fresh (uniform) ensemble → stale weights gone
     n
 }
 
@@ -400,9 +408,97 @@ fn ens() -> &'static EnsembleResult {
         arrival_h: Vec::new(),
         min_bz: Vec::new(),
         member_params: Vec::new(),
+        member_bz: Vec::new(),
+        member_bt: Vec::new(),
+        weights: None,
+        ess: 0.0,
+        temperature: 1.0,
         p_hit: 0.0,
     };
     engine().ens.as_ref().unwrap_or(&EMPTY)
+}
+
+// ── Assimilation (spec §11): sequential importance reweighting ───────────────
+
+/// Pointer to the observation input buffer (MAX_STEPS f32). Write observed
+/// Bz_GSM [nT] aligned index-for-index with the ensemble grid (NaN = gap)
+/// BEFORE calling fr_assimilate. Take a fresh view per write — the buffer
+/// address is stable but WASM memory growth invalidates held JS views.
+#[no_mangle]
+pub extern "C" fn fr_obs_ptr() -> *mut f32 {
+    engine().obs.as_mut_ptr()
+}
+
+/// Condition the stored ensemble on the observation buffer over step
+/// indices [i0, i1): Gaussian importance reweighting with observation error
+/// `sigma_nt` (≈4 nT default — must also absorb the unmodeled ambient IMF),
+/// then all fan statistics/probabilities become weight-weighted. Returns the
+/// effective sample size (n_members when nothing observed; 0 with no
+/// ensemble). Reweight-only particle-filter step: each call re-conditions
+/// the ORIGINAL prior on the full window, so repeated calls do not
+/// accumulate degeneracy.
+/// `ess_floor_frac` (0..1): anneal the likelihood so ESS never falls below
+/// this fraction of the ensemble (0 = pure likelihood; 0.1 is the wrapper
+/// default). The applied temperature is readable via fr_assim_temperature.
+#[no_mangle]
+pub extern "C" fn fr_assimilate(i0: u32, i1: u32, sigma_nt: f64, ess_floor_frac: f64) -> f64 {
+    let e = engine();
+    match e.ens.as_mut() {
+        None => 0.0,
+        Some(r) => {
+            let ess = ensemble::assimilate(
+                r,
+                &e.obs[..],
+                i0 as usize,
+                i1 as usize,
+                sigma_nt,
+                ess_floor_frac.clamp(0.0, 0.9),
+            );
+            e.weights_f32 = match &r.weights {
+                Some(w) => w.iter().map(|x| *x as f32).collect(),
+                None => vec![1.0 / r.n_members.max(1) as f32; r.n_members],
+            };
+            ess
+        }
+    }
+}
+
+/// Likelihood temperature λ applied by the last fr_assimilate (1 = none).
+#[no_mangle]
+pub extern "C" fn fr_assim_temperature() -> f64 {
+    ens().temperature
+}
+
+/// Drop assimilation weights: back to the uniform prior (bit-identical
+/// pre-assimilation statistics).
+#[no_mangle]
+pub extern "C" fn fr_assim_reset() {
+    let e = engine();
+    if let Some(r) = e.ens.as_mut() {
+        ensemble::reset_weights(r);
+        e.weights_f32.clear();
+    }
+}
+
+/// Current effective sample size (= member count when unweighted).
+#[no_mangle]
+pub extern "C" fn fr_ens_ess() -> f64 {
+    ens().ess
+}
+
+/// Normalized importance weights, f32[n_members] — uniform 1/n before any
+/// assimilation. The UI fades ensemble spaghetti by these.
+#[no_mangle]
+pub extern "C" fn fr_ens_weights_ptr() -> *const f32 {
+    let e = engine();
+    let n = e.ens.as_ref().map_or(0, |r| r.n_members);
+    if n == 0 {
+        return core::ptr::null();
+    }
+    if e.weights_f32.len() != n {
+        e.weights_f32 = vec![1.0 / n as f32; n];
+    }
+    e.weights_f32.as_ptr()
 }
 
 /// Bz percentile row `which` ∈ {0:P5, 1:P25, 2:P50, 3:P75, 4:P95} — pointer
@@ -587,5 +683,51 @@ mod abi_tests {
         );
         assert_eq!(fr_rope_count(), 1);
         assert_eq!(fr_rope_t_launch_s(0), 0.0);
+    }
+
+    /// Drive the assimilation surface the way js/flux-rope-kernel.js does.
+    #[test]
+    fn abi_assimilation_end_to_end() {
+        let _guard = ABI_LOCK.lock().unwrap();
+        fr_init();
+        fr_set_rope(
+            0.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0,
+        );
+        fr_set_spreads(8.0, 5.0, 15.0, 80.0, 0.2, 0.15, 0.3, 0.8, 0.05);
+        let n = fr_ens_run(11.0, 200, 0.0, 1800.0, 300, 0.99, 0.0, 0.0);
+        assert_eq!(n, 200);
+        assert_eq!(fr_ens_ess(), 200.0, "prior ESS = member count");
+        let w0 = unsafe { *fr_ens_weights_ptr() };
+        assert!((w0 - 1.0 / 200.0).abs() < 1e-9, "uniform prior weights");
+
+        // Feed the deterministic run's own series as observations over the
+        // first 150 steps → the posterior must sharpen around it.
+        let hits = fr_series(0.0, 1800.0, 300, 0.99, 0.0, 0.0);
+        assert!(hits > 0);
+        let sp = fr_series_ptr();
+        let op = fr_obs_ptr();
+        for i in 0..150usize {
+            unsafe { *op.add(i) = *sp.add(4 * i + 2) };
+        }
+        for i in 150..300usize {
+            unsafe { *op.add(i) = f32::NAN };
+        }
+        let ess = fr_assimilate(0, 300, 3.0, 0.1);
+        assert!(ess > 1.0 && ess < 200.0, "informative obs must reweight: ESS {}", ess);
+        assert_eq!(fr_ens_ess(), ess);
+        assert!(fr_assim_temperature() > 0.0 && fr_assim_temperature() <= 1.0);
+        // Weights now non-uniform and sum ≈ 1.
+        let mut sum = 0.0f64;
+        let mut maxw = 0.0f32;
+        for m in 0..200usize {
+            let w = unsafe { *fr_ens_weights_ptr().add(m) };
+            sum += w as f64;
+            maxw = maxw.max(w);
+        }
+        assert!((sum - 1.0).abs() < 1e-3);
+        assert!(maxw as f64 > 2.0 / 200.0, "some member must gain weight");
+        // Reset restores the uniform prior.
+        fr_assim_reset();
+        assert_eq!(fr_ens_ess(), 200.0);
     }
 }

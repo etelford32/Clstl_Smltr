@@ -117,14 +117,30 @@ pub struct EnsembleResult {
     pub bz_pct: Vec<f32>,
     /// Median |B| per step [nT].
     pub bt_med: Vec<f32>,
-    /// Fraction of members inside the rope per step.
+    /// Fraction of members inside the rope per step (weight-weighted after
+    /// assimilation).
     pub hit_frac: Vec<f32>,
     /// Per-member arrival [hours after launch]; NaN = miss.
     pub arrival_h: Vec<f32>,
-    /// Per-member min Bz over the window [nT]; NaN = miss.
+    /// Per-member window-min Bz [nT]; NaN = miss.
     pub min_bz: Vec<f32>,
     /// Per-member sampled params, MEMBER_STRIDE f32 each (envelope rendering).
     pub member_params: Vec<f32>,
+    /// Full per-member Bz series, [step][member] layout (NaN = outside) —
+    /// retained so assimilation (spec §11) can score members against
+    /// observations after the run.
+    pub member_bz: Vec<f32>,
+    /// Full per-member |B| series, same layout.
+    pub member_bt: Vec<f32>,
+    /// Importance weights (normalized). None = uniform (prior). Some after
+    /// assimilate() — every statistic above is then weight-weighted.
+    pub weights: Option<Vec<f64>>,
+    /// Effective sample size 1/Σw² — n_members under uniform weights.
+    pub ess: f64,
+    /// Likelihood temperature λ ∈ (0, 1] applied by the last assimilate()
+    /// (1 = untempered). λ < 1 means the correlated-observation likelihood
+    /// was flattened to keep ESS above the floor — surfaced, never hidden.
+    pub temperature: f64,
     pub p_hit: f64,
 }
 
@@ -133,8 +149,19 @@ impl EnsembleResult {
         if self.n_members == 0 {
             return 0.0;
         }
-        let c = self.min_bz.iter().filter(|v| (**v as f64) < thr_nt).count();
-        c as f64 / self.n_members as f64
+        match &self.weights {
+            None => {
+                let c = self.min_bz.iter().filter(|v| (**v as f64) < thr_nt).count();
+                c as f64 / self.n_members as f64
+            }
+            Some(w) => self
+                .min_bz
+                .iter()
+                .zip(w)
+                .filter(|(v, _)| (**v as f64) < thr_nt)
+                .map(|(_, wi)| wi)
+                .sum(),
+        }
     }
 }
 
@@ -224,52 +251,265 @@ pub fn run(
         min_bz[m] = member_min;
     }
 
-    // Percentiles over INSIDE members only, gated by a minimum hit fraction
-    // (spec §7): below the gate the fan is 0-filled and hit_frac tells the UI.
-    let min_hits = ((0.05 * n_members as f64).ceil() as usize).max(2);
-    let mut bz_pct = vec![0.0f32; PCTS.len() * n_steps];
-    let mut bt_med = vec![0.0f32; n_steps];
-    let mut hit_frac = vec![0.0f32; n_steps];
-    let mut scratch: Vec<f32> = Vec::with_capacity(n_members);
-
-    for i in 0..n_steps {
-        scratch.clear();
-        scratch.extend(
-            bz[i * n_members..(i + 1) * n_members]
-                .iter()
-                .copied()
-                .filter(|v| !v.is_nan()),
-        );
-        hit_frac[i] = scratch.len() as f32 / n_members.max(1) as f32;
-        if scratch.len() >= min_hits {
-            scratch.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            for (k, q) in PCTS.iter().enumerate() {
-                bz_pct[k * n_steps + i] = percentile_sorted(&scratch, *q);
-            }
-            scratch.clear();
-            scratch.extend(
-                bt[i * n_members..(i + 1) * n_members]
-                    .iter()
-                    .copied()
-                    .filter(|v| !v.is_nan()),
-            );
-            scratch.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            bt_med[i] = percentile_sorted(&scratch, 50.0);
-        }
-    }
-
-    EnsembleResult {
+    let mut res = EnsembleResult {
         n_members,
         n_steps,
         ropes_per_member: n_ropes,
-        bz_pct,
-        bt_med,
-        hit_frac,
+        bz_pct: vec![0.0; PCTS.len() * n_steps],
+        bt_med: vec![0.0; n_steps],
+        hit_frac: vec![0.0; n_steps],
         arrival_h,
         min_bz,
         member_params,
+        member_bz: bz,
+        member_bt: bt,
+        weights: None,
+        ess: n_members as f64,
+        temperature: 1.0,
         p_hit: hit_members as f64 / n_members.max(1) as f64,
+    };
+    compute_stats(&mut res);
+    res
+}
+
+/// Recompute the fan statistics from the retained member series, honoring
+/// the current importance weights (spec §7 unweighted / §11 weighted).
+///
+/// The `weights: None` path is bit-identical to the original v1
+/// computation — the weighted path is a strict superset used only after
+/// assimilate(), so the pinned Phase 1/2 numbers never move.
+pub fn compute_stats(r: &mut EnsembleResult) {
+    let (n_members, n_steps) = (r.n_members, r.n_steps);
+    // Gate: minimum effective hit mass, expressed in member-count units so
+    // the uniform case reproduces the original count gate exactly.
+    let min_hits = ((0.05 * n_members as f64).ceil() as usize).max(2);
+    let mut scratch: Vec<f32> = Vec::with_capacity(n_members);
+    let mut wscratch: Vec<(f32, f64)> = Vec::with_capacity(n_members);
+
+    for i in 0..n_steps {
+        let row = &r.member_bz[i * n_members..(i + 1) * n_members];
+        match &r.weights {
+            None => {
+                scratch.clear();
+                scratch.extend(row.iter().copied().filter(|v| !v.is_nan()));
+                r.hit_frac[i] = scratch.len() as f32 / n_members.max(1) as f32;
+                if scratch.len() >= min_hits {
+                    scratch.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    for (k, q) in PCTS.iter().enumerate() {
+                        r.bz_pct[k * n_steps + i] = percentile_sorted(&scratch, *q);
+                    }
+                    scratch.clear();
+                    scratch.extend(
+                        r.member_bt[i * n_members..(i + 1) * n_members]
+                            .iter()
+                            .copied()
+                            .filter(|v| !v.is_nan()),
+                    );
+                    scratch.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    r.bt_med[i] = percentile_sorted(&scratch, 50.0);
+                } else {
+                    for k in 0..PCTS.len() {
+                        r.bz_pct[k * n_steps + i] = 0.0;
+                    }
+                    r.bt_med[i] = 0.0;
+                }
+            }
+            Some(w) => {
+                wscratch.clear();
+                let mut hit_w = 0.0f64;
+                for m in 0..n_members {
+                    let v = row[m];
+                    if !v.is_nan() {
+                        hit_w += w[m];
+                        wscratch.push((v, w[m]));
+                    }
+                }
+                r.hit_frac[i] = hit_w as f32;
+                if hit_w * n_members as f64 >= min_hits as f64 {
+                    wscratch.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+                    for (k, q) in PCTS.iter().enumerate() {
+                        r.bz_pct[k * n_steps + i] = weighted_quantile(&wscratch, *q);
+                    }
+                    wscratch.clear();
+                    for m in 0..n_members {
+                        let v = r.member_bt[i * n_members + m];
+                        if !v.is_nan() {
+                            wscratch.push((v, w[m]));
+                        }
+                    }
+                    wscratch.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+                    r.bt_med[i] = weighted_quantile(&wscratch, 50.0);
+                } else {
+                    for k in 0..PCTS.len() {
+                        r.bz_pct[k * n_steps + i] = 0.0;
+                    }
+                    r.bt_med[i] = 0.0;
+                }
+            }
+        }
     }
+
+    r.p_hit = match &r.weights {
+        None => {
+            r.arrival_h.iter().filter(|a| a.is_finite()).count() as f64
+                / n_members.max(1) as f64
+        }
+        Some(w) => r
+            .arrival_h
+            .iter()
+            .zip(w)
+            .filter(|(a, _)| a.is_finite())
+            .map(|(_, wi)| wi)
+            .sum(),
+    };
+}
+
+/// Weighted quantile of value-sorted (value, weight) pairs: linear
+/// interpolation on the midpoint-convention weighted CDF (reduces to the
+/// inclusive definition as weights → uniform).
+fn weighted_quantile(sorted: &[(f32, f64)], q: f64) -> f32 {
+    let tot_all: f64 = sorted.iter().map(|p| p.1).sum();
+    if tot_all <= 0.0 {
+        return if sorted.is_empty() { 0.0 } else { sorted[sorted.len() / 2].0 };
+    }
+    // Drop negligible-weight entries: a killed member (w ≈ 0) must not drag
+    // the interpolation between the surviving values.
+    let eps = 1e-12 * tot_all;
+    let kept: Vec<(f32, f64)> = sorted.iter().copied().filter(|p| p.1 > eps).collect();
+    let m = kept.len();
+    if m == 0 {
+        return 0.0;
+    }
+    if m == 1 {
+        return kept[0].0;
+    }
+    let tot: f64 = kept.iter().map(|p| p.1).sum();
+    let target = q / 100.0 * tot;
+    // Midpoint CDF: c_k = cum_{k-1} + w_k/2.
+    let mut cum = 0.0f64;
+    let mut prev_c = 0.0f64;
+    let mut prev_v = kept[0].0;
+    for (k, (v, w)) in kept.iter().enumerate() {
+        let c = cum + w / 2.0;
+        if target <= c {
+            if k == 0 {
+                return *v;
+            }
+            let f = ((target - prev_c) / (c - prev_c).max(1e-300)) as f32;
+            return prev_v + (v - prev_v) * f;
+        }
+        cum += w;
+        prev_c = c;
+        prev_v = *v;
+    }
+    kept[m - 1].0
+}
+
+/// Normalized weights + ESS for tempered log-weights λ·logw.
+fn weights_at(logw: &[f64], lambda: f64) -> (Vec<f64>, f64) {
+    let max_lw = logw.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let mut w: Vec<f64> = logw.iter().map(|l| ((l - max_lw) * lambda).exp()).collect();
+    let tot: f64 = w.iter().sum();
+    for wi in w.iter_mut() {
+        *wi /= tot;
+    }
+    let ess = 1.0 / w.iter().map(|wi| wi * wi).sum::<f64>();
+    (w, ess)
+}
+
+/// Sequential-importance assimilation step (spec §11): Gaussian
+/// log-likelihood of each member's Bz series against observations `obs`
+/// (same time grid as the run; NaN = gap) over step indices [i0, i1),
+/// converted to normalized importance weights, then every fan statistic is
+/// recomputed weighted. Model prediction outside the rope is 0 nT (quiet
+/// ambient — `sigma_nt` must absorb the unmodeled ±5 nT background, hence
+/// the 4 nT default at the ABI).
+///
+/// DEGENERACY GUARD (`ess_floor_frac`): a naive product likelihood over
+/// hundreds of 5-min samples is wildly overconfident — real Bz observations
+/// are strongly autocorrelated and the model has irreducible
+/// representativeness error (no sheath, no ambient IMF), so untempered
+/// weights collapse onto one least-bad member. When ESS would fall below
+/// `ess_floor_frac · n_members`, the log-likelihood is annealed (λ·logw,
+/// bisected λ ∈ (0,1]) to hold ESS at the floor, and the applied
+/// temperature is stored on the result — surfaced to the UI, never hidden.
+/// `ess_floor_frac = 0` disables tempering (pure likelihood).
+///
+/// Returns the effective sample size 1/Σw². Deterministic; no RNG.
+/// Reweight-only (no resampling): each call re-conditions the ORIGINAL
+/// prior ensemble on the full observed window, so there is no
+/// weight-degeneracy accumulation across calls.
+pub fn assimilate(
+    r: &mut EnsembleResult,
+    obs: &[f32],
+    i0: usize,
+    i1: usize,
+    sigma_nt: f64,
+    ess_floor_frac: f64,
+) -> f64 {
+    let n_members = r.n_members;
+    if n_members == 0 {
+        return 0.0;
+    }
+    let i1 = i1.min(r.n_steps).min(obs.len());
+    let inv2s2 = 0.5 / (sigma_nt * sigma_nt).max(1e-12);
+    let mut logw = vec![0.0f64; n_members];
+    let mut n_obs = 0usize;
+    for i in i0..i1 {
+        let y = obs[i];
+        if !y.is_finite() {
+            continue;
+        }
+        n_obs += 1;
+        let row = &r.member_bz[i * n_members..(i + 1) * n_members];
+        for m in 0..n_members {
+            let pred = if row[m].is_nan() { 0.0 } else { row[m] as f64 };
+            let d = pred - y as f64;
+            logw[m] -= d * d * inv2s2;
+        }
+    }
+    if n_obs == 0 {
+        // Nothing observed: stay on the prior (uniform), bit-identical stats.
+        r.weights = None;
+        r.ess = n_members as f64;
+        r.temperature = 1.0;
+        compute_stats(r);
+        return r.ess;
+    }
+
+    let floor = (ess_floor_frac * n_members as f64).clamp(0.0, n_members as f64 - 1.0);
+    let (mut w, mut ess) = weights_at(&logw, 1.0);
+    let mut lambda = 1.0;
+    if ess < floor {
+        // Anneal: ESS(λ) is monotone-decreasing in λ; bisect to the floor.
+        let (mut lo, mut hi) = (0.0f64, 1.0f64);
+        for _ in 0..50 {
+            let mid = 0.5 * (lo + hi);
+            let (_, e) = weights_at(&logw, mid);
+            if e < floor {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        lambda = lo;
+        let (wl, el) = weights_at(&logw, lambda);
+        w = wl;
+        ess = el;
+    }
+    r.weights = Some(w);
+    r.ess = ess;
+    r.temperature = lambda;
+    compute_stats(r);
+    ess
+}
+
+/// Drop assimilation: back to the uniform prior (bit-identical stats).
+pub fn reset_weights(r: &mut EnsembleResult) {
+    r.weights = None;
+    r.ess = r.n_members as f64;
+    r.temperature = 1.0;
+    compute_stats(r);
 }
 
 #[cfg(test)]
@@ -371,6 +611,137 @@ mod tests {
         let solo = run(&train[..1], &spreads(), 99, 100, 0.0, 1800.0, 500, obs);
         assert!(r.p_hit >= solo.p_hit, "train {} < solo {}", r.p_hit, solo.p_hit);
         assert!(r.p_hit > 0.6, "p_hit {}", r.p_hit);
+    }
+
+    #[test]
+    fn assimilation_collapses_onto_truth() {
+        let obs_pos = observer_pos(1.0, 0.0, 0.0);
+        let mut r = run(&fit(), &spreads(), 4242, 200, 0.0, 1800.0, 300, obs_pos);
+        let n = r.n_members;
+        // Synthetic truth: a member that genuinely HITS with signal inside
+        // the observed window (a missing member predicts 0 everywhere and
+        // would leave every other quiet member equally weighted).
+        let tm = (0..n)
+            .find(|m| {
+                r.arrival_h[*m].is_finite()
+                    && r.arrival_h[*m] < 55.0
+                    && r.min_bz[*m] < -8.0
+            })
+            .expect("ensemble must contain an early strong hit");
+        let truth: Vec<f32> = (0..r.n_steps)
+            .map(|i| {
+                let v = r.member_bz[i * n + tm];
+                if v.is_nan() { 0.0 } else { v }
+            })
+            .collect();
+        // The mid-storm-correction scenario (the product claim): observe up
+        // to shortly after the truth's FRONT arrival, hold out the rest of
+        // the rope passage, and require the corrected median to beat the
+        // prior median there.
+        let i_arr = (r.arrival_h[tm] as f64 * 3600.0 / 1800.0).round() as usize;
+        let (obs_end, held) = (i_arr + 8, i_arr + 8..(i_arr + 34).min(300));
+        let prior_med: Vec<f32> = held.clone().map(|i| r.bz_pct[2 * r.n_steps + i]).collect();
+        let ess = assimilate(&mut r, &truth, 0, obs_end, 1.0, 0.0);
+        assert!(ess < n as f64 / 4.0, "posterior must collapse: ESS {}", ess);
+        let w = r.weights.as_ref().unwrap();
+        let best = (0..n).max_by(|a, b| w[*a].partial_cmp(&w[*b]).unwrap()).unwrap();
+        assert_eq!(best, tm, "the generating member must carry the top weight");
+        let (mut err_post, mut err_prior) = (0.0f64, 0.0f64);
+        for (k, i) in held.enumerate() {
+            let t = truth[i] as f64;
+            err_post += (r.bz_pct[2 * r.n_steps + i] as f64 - t).abs();
+            err_prior += (prior_med[k] as f64 - t).abs();
+        }
+        assert!(err_prior > 1.0, "held-out storm segment must have real signal");
+        assert!(
+            err_post < err_prior,
+            "mid-storm correction must sharpen the remaining passage: post {} vs prior {}",
+            err_post,
+            err_prior
+        );
+    }
+
+    #[test]
+    fn assimilation_with_no_observations_is_the_prior() {
+        let obs_pos = observer_pos(1.0, 0.0, 0.0);
+        let mut r = run(&fit(), &spreads(), 99, 100, 0.0, 1800.0, 200, obs_pos);
+        let prior_pct = r.bz_pct.clone();
+        let prior_phit = r.p_hit;
+        let ess = assimilate(&mut r, &vec![f32::NAN; 200], 0, 200, 4.0, 0.1);
+        assert_eq!(ess, 100.0, "all-gap obs → uniform ESS");
+        assert!(r.weights.is_none());
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&r.bz_pct), bits(&prior_pct), "prior stats must be bit-identical");
+        assert_eq!(r.p_hit, prior_phit);
+    }
+
+    #[test]
+    fn assimilation_deterministic_and_resettable() {
+        let obs_pos = observer_pos(1.0, 0.0, 0.0);
+        let mut r = run(&fit(), &spreads(), 7, 100, 0.0, 1800.0, 200, obs_pos);
+        let prior_pct = r.bz_pct.clone();
+        let obs: Vec<f32> = (0..200)
+            .map(|i| if (80..120).contains(&i) { -12.0 } else { f32::NAN })
+            .collect();
+        let e1 = assimilate(&mut r, &obs, 0, 200, 4.0, 0.0);
+        let post1 = r.bz_pct.clone();
+        let e2 = assimilate(&mut r, &obs, 0, 200, 4.0, 0.0);
+        assert_eq!(e1, e2);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&r.bz_pct), bits(&post1), "assimilation must be deterministic");
+        assert!(e1 > 1.0 && e1 < 100.0, "informative obs must reweight: ESS {}", e1);
+        reset_weights(&mut r);
+        assert_eq!(bits(&r.bz_pct), bits(&prior_pct), "reset must restore the prior");
+        assert_eq!(r.ess, 100.0);
+    }
+
+    #[test]
+    fn tempering_holds_the_ess_floor_and_reports_temperature() {
+        // Overconfident likelihood (hundreds of tight obs) must NOT collapse
+        // to one member when a floor is requested — and the applied
+        // temperature must be surfaced.
+        let obs_pos = observer_pos(1.0, 0.0, 0.0);
+        let mut r = run(&fit(), &spreads(), 4242, 200, 0.0, 1800.0, 300, obs_pos);
+        let n = r.n_members;
+        let tm = (0..n)
+            .find(|m| r.arrival_h[*m].is_finite() && r.min_bz[*m] < -8.0)
+            .unwrap();
+        let truth: Vec<f32> = (0..r.n_steps)
+            .map(|i| {
+                let v = r.member_bz[i * n + tm];
+                if v.is_nan() { 0.0 } else { v }
+            })
+            .collect();
+        // Untempered: near-total collapse.
+        let e0 = assimilate(&mut r, &truth, 0, 300, 1.0, 0.0);
+        assert!(e0 < 5.0, "untempered ESS should collapse: {}", e0);
+        assert_eq!(r.temperature, 1.0);
+        // Floor at 15%: ESS held at the floor, λ < 1 and REPORTED.
+        let e1 = assimilate(&mut r, &truth, 0, 300, 1.0, 0.15);
+        assert!(
+            e1 >= 0.15 * n as f64 * 0.98,
+            "floor must hold: ESS {} < {}",
+            e1,
+            0.15 * n as f64
+        );
+        assert!(r.temperature < 1.0 && r.temperature > 0.0);
+        // The truth member still carries the top weight after tempering.
+        let w = r.weights.as_ref().unwrap();
+        let best = (0..n).max_by(|a, b| w[*a].partial_cmp(&w[*b]).unwrap()).unwrap();
+        assert_eq!(best, tm);
+    }
+
+    #[test]
+    fn weighted_quantile_reduces_to_inclusive_for_uniform() {
+        let vals = [1.0f32, 2.0, 3.0, 4.0];
+        let wpairs: Vec<(f32, f64)> = vals.iter().map(|v| (*v, 0.25)).collect();
+        // Midpoint convention differs from inclusive by < half a gap at the
+        // extremes; interior quantiles agree.
+        assert!((weighted_quantile(&wpairs, 50.0) - 2.5).abs() < 1e-6);
+        // Degenerate all-weight-on-one collapses to that value.
+        let point: Vec<(f32, f64)> = vec![(1.0, 0.0), (2.0, 1.0), (3.0, 0.0)];
+        assert!((weighted_quantile(&point, 5.0) - 2.0).abs() < 1e-6);
+        assert!((weighted_quantile(&point, 95.0) - 2.0).abs() < 1e-6);
     }
 
     #[test]
