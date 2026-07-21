@@ -34,6 +34,10 @@ export const ROPE_DEFAULTS = Object.freeze({
     gammaPerKm: 0.2e-7,     // DBM drag Γ [km⁻¹]
     wKms: 400,              // ambient wind [km/s]
     profile: 'gold-hoyle',  // 'gold-hoyle' | 'lundquist'
+    // Sheath (spec §14) — 0 δ disables the model entirely.
+    sheathDeltaNt: 0,       // ambient Bz variability δ the shock compresses [nT]
+    sheathK: 0.8,           // sheath thickness as a fraction of the rope radius
+    bAmb1AuNt: 5,           // ambient Parker |B| at 1 AU [nT]
 });
 
 export const SPREAD_DEFAULTS = Object.freeze({
@@ -80,6 +84,7 @@ export async function loadFluxRopeKernel(source) {
                 r.b1AuNt, r.sigma1AuAu, r.nB, r.nSigma, r.d0Rsun,
                 r.v0Kms, r.gammaPerKm, r.wKms,
                 r.profile === 'lundquist' ? 1 : 0,
+                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt,
             );
             return r;
         },
@@ -95,6 +100,7 @@ export async function loadFluxRopeKernel(source) {
                 r.b1AuNt, r.sigma1AuAu, r.nB, r.nSigma, r.d0Rsun,
                 r.v0Kms, r.gammaPerKm, r.wKms,
                 r.profile === 'lundquist' ? 1 : 0,
+                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt,
                 r.launchOffsetS,
             );
             return n;
@@ -139,14 +145,18 @@ export async function loadFluxRopeKernel(source) {
             const hits = x.fr_series(t0S, dtS, n, obs.rAu, obs.lonDeg, obs.latDeg);
             const raw = copyF32(x.fr_series_ptr(), 4 * n);
             const bx = new Float32Array(n), by = new Float32Array(n),
-                bz = new Float32Array(n), inside = new Float32Array(n);
+                bz = new Float32Array(n), inside = new Float32Array(n),
+                sheath = new Float32Array(n);
             for (let i = 0; i < n; i++) {
                 bx[i] = raw[4 * i];
                 by[i] = raw[4 * i + 1];
                 bz[i] = raw[4 * i + 2];
-                inside[i] = raw[4 * i + 3];
+                // count code = rope_count + 100·sheath_count (spec §14).
+                const code = raw[4 * i + 3];
+                inside[i] = code % 100;
+                sheath[i] = Math.floor(code / 100);
             }
-            return { bx, by, bz, inside, hits };
+            return { bx, by, bz, inside, sheath, hits };
         },
 
         /** Set ensemble prior spreads (partial over SPREAD_DEFAULTS). */

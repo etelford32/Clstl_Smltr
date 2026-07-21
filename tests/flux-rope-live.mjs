@@ -41,6 +41,8 @@ check('seed: half-angle scales the size prior',
 check('seed: ambient wind from live L1', preset.rope.wKms === 430);
 check('seed: chirality honestly unknown (pFlip 0.5)', preset.spreads.pFlip === 0.5);
 check('seed: wide tilt prior (cone fits do not constrain tilt)', preset.spreads.sigTiltDeg >= 40);
+check('seed: live forecasts carry the sheath forward model (spec §14)',
+    preset.rope.sheathDeltaNt > 0);
 check('seed: size cap respected',
     donkiToPreset({ ...cmes[1], halfAngleDeg: 90 }).rope.sigma1AuAu <= 0.2);
 

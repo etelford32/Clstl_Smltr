@@ -111,6 +111,9 @@ fn build_params(
     gamma_per_km: f64,
     w_kms: f64,
     profile: f64,
+    sheath_delta_nt: f64,
+    sheath_k: f64,
+    b_amb_1au_nt: f64,
 ) -> RopeParams {
     RopeParams {
         lon_deg,
@@ -127,6 +130,9 @@ fn build_params(
         gamma_per_km,
         w_kms,
         profile: if profile >= 0.5 { Profile::Lundquist } else { Profile::GoldHoyle },
+        sheath_delta_nt: sheath_delta_nt.max(0.0),
+        sheath_k: sheath_k.max(0.0),
+        b_amb_1au_nt: b_amb_1au_nt.max(0.0),
     }
 }
 
@@ -151,6 +157,9 @@ pub extern "C" fn fr_set_rope(
     gamma_per_km: f64,
     w_kms: f64,
     profile: f64,
+    sheath_delta_nt: f64,
+    sheath_k: f64,
+    b_amb_1au_nt: f64,
 ) {
     let e = engine();
     e.ropes.clear();
@@ -158,6 +167,7 @@ pub extern "C" fn fr_set_rope(
         build_params(
             lon_deg, lat_deg, tilt_deg, handedness, twist_turns, b_1au_nt, sigma_1au_au,
             n_b, n_sigma, d0_rsun, v0_kms, gamma_per_km, w_kms, profile,
+            sheath_delta_nt, sheath_k, b_amb_1au_nt,
         ),
         0.0,
     ));
@@ -193,6 +203,9 @@ pub extern "C" fn fr_push_rope(
     gamma_per_km: f64,
     w_kms: f64,
     profile: f64,
+    sheath_delta_nt: f64,
+    sheath_k: f64,
+    b_amb_1au_nt: f64,
     t_launch_s: f64,
 ) -> u32 {
     let e = engine();
@@ -201,6 +214,7 @@ pub extern "C" fn fr_push_rope(
             build_params(
                 lon_deg, lat_deg, tilt_deg, handedness, twist_turns, b_1au_nt, sigma_1au_au,
                 n_b, n_sigma, d0_rsun, v0_kms, gamma_per_km, w_kms, profile,
+                sheath_delta_nt, sheath_k, b_amb_1au_nt,
             ),
             t_launch_s,
         ));
@@ -487,6 +501,7 @@ fn ens() -> &'static EnsembleResult {
         min_bz: Vec::new(),
         member_params: Vec::new(),
         member_bz: Vec::new(),
+        member_bz_clean: Vec::new(),
         member_bt: Vec::new(),
         member_bz_aux: Vec::new(),
         weights: None,
@@ -676,7 +691,7 @@ mod abi_tests {
         let _guard = ABI_LOCK.lock().unwrap();
         fr_init();
         fr_set_rope(
-            0.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0,
+            0.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0, 0.0, 0.8, 5.0,
         );
         // Deterministic series: head-on rope must cross L1.
         let hits = fr_series(0.0, 1800.0, 400, 0.99, 0.0, 0.0);
@@ -727,7 +742,7 @@ mod abi_tests {
         let push = |v0: f64, t_launch_h: f64| {
             fr_push_rope(
                 0.0, 0.0, 90.0, 1.0, 5.0, 24.0, 0.10, 1.64, 1.14, 21.5, v0, 0.2e-7, 400.0,
-                0.0, t_launch_h * 3600.0,
+                0.0, 0.0, 0.8, 5.0, t_launch_h * 3600.0,
             )
         };
         assert_eq!(push(1400.0, 0.0), 1);
@@ -758,7 +773,7 @@ mod abi_tests {
 
         // fr_set_rope resets to a single-rope engine (v1 back-compat).
         fr_set_rope(
-            0.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0,
+            0.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0, 0.0, 0.8, 5.0,
         );
         assert_eq!(fr_rope_count(), 1);
         assert_eq!(fr_rope_t_launch_s(0), 0.0);
@@ -770,7 +785,7 @@ mod abi_tests {
         let _guard = ABI_LOCK.lock().unwrap();
         fr_init();
         fr_set_rope(
-            6.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0,
+            6.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0, 0.0, 0.8, 5.0,
         );
         fr_set_spreads(8.0, 5.0, 15.0, 80.0, 0.2, 0.15, 0.3, 0.8, 0.05);
         // No aux set → no aux series, joint call degrades to primary-only.
@@ -803,7 +818,7 @@ mod abi_tests {
         let _guard = ABI_LOCK.lock().unwrap();
         fr_init();
         fr_set_rope(
-            0.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0,
+            0.0, 0.0, 90.0, 1.0, 4.0, 20.0, 0.115, 1.64, 1.14, 21.5, 1100.0, 0.2e-7, 400.0, 0.0, 0.0, 0.8, 5.0,
         );
         fr_set_spreads(8.0, 5.0, 15.0, 80.0, 0.2, 0.15, 0.3, 0.8, 0.05);
         let n = fr_ens_run(11.0, 200, 0.0, 1800.0, 300, 0.99, 0.0, 0.0);

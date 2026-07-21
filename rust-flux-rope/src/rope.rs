@@ -65,6 +65,15 @@ pub struct RopeParams {
     pub gamma_per_km: f64,
     pub w_kms: f64,
     pub profile: Profile,
+    // ── Sheath (spec §14, all optional — 0 δ disables) ──────────────────────
+    /// Ambient Bz variability δ [nT] the shock compresses into the sheath's
+    /// stochastic Bz (std = X·δ). 0 = no sheath model.
+    pub sheath_delta_nt: f64,
+    /// Sheath thickness as a fraction of the local rope minor radius.
+    pub sheath_k: f64,
+    /// Ambient (Parker) field magnitude at 1 AU [nT] — sets the compressed
+    /// |B| envelope X·B_amb inside the sheath.
+    pub b_amb_1au_nt: f64,
 }
 
 impl RopeParams {
@@ -95,6 +104,9 @@ impl Default for RopeParams {
             gamma_per_km: 0.2e-7,
             w_kms: 400.0,
             profile: Profile::GoldHoyle,
+            sheath_delta_nt: 0.0, // off by default — every pre-sheath pin holds
+            sheath_k: 0.8,
+            b_amb_1au_nt: 5.0,
         }
     }
 }
@@ -236,6 +248,61 @@ pub fn to_gse(b: V3) -> V3 {
     [-b[0], -b[1], b[2]]
 }
 
+/// Is `p` inside this rope's SHEATH (spec §14)? The front-side shell
+/// σ(ψ) ≤ s < σ(ψ)·(1 + k), present only while the apex is
+/// super-magnetosonic (a shock exists) and only SUNWARD-OUTWARD of the
+/// rope surface (|P| > |nearest axis point| — sheaths pile up ahead of the
+/// obstacle, not in its wake).
+pub fn sheath_at(params: &RopeParams, frame: &Frame, t_s: f64, p: V3) -> bool {
+    if params.sheath_delta_nt <= 0.0 || params.sheath_k <= 0.0 {
+        return false;
+    }
+    let dbm = params.dbm();
+    if crate::kinematics::shock_mach(dbm.speed_kms(t_s), params.w_kms) <= 1.0 {
+        return false;
+    }
+    let d = dbm.apex_km(t_s);
+    if d <= 0.0 {
+        return false;
+    }
+    let half_d = 0.5 * d;
+    let u = dot(p, frame.e_dir);
+    let w = dot(p, frame.e_p);
+    let h = dot(p, frame.n_hat);
+    let qu = u - half_d;
+    let rho_ip = (qu * qu + w * w).sqrt();
+    if rho_ip < 1e-6 {
+        return false;
+    }
+    let mut psi = w.atan2(-qu);
+    if psi < 0.0 {
+        psi += core::f64::consts::TAU;
+    }
+    let s = ((rho_ip - half_d).powi(2) + h * h).sqrt();
+    let sigma_apex = sigma_apex_km(params.sigma_1au_au * AU_KM, d, params.n_sigma);
+    let sigma = sigma_apex * (0.5 * psi).sin().powi(2);
+    if sigma <= 0.0 || s < sigma || s >= sigma * (1.0 + params.sheath_k) {
+        return false;
+    }
+    // Front side: farther from the Sun than the local axis point.
+    let q_hat_u = qu / rho_ip;
+    let q_hat_w = w / rho_ip;
+    let n_pt = add3(
+        scale(frame.e_dir, half_d + half_d * q_hat_u),
+        scale(frame.e_p, half_d * q_hat_w),
+        [0.0, 0.0, 0.0],
+    );
+    dot(p, p) > dot(n_pt, n_pt)
+}
+
+/// Count of ropes whose SHEATH contains `p` at train time `t_s`.
+pub fn sheath_count_at_set(ropes: &[RopeEntry], t_s: f64, p: V3) -> u32 {
+    ropes
+        .iter()
+        .filter(|r| t_s > r.t_launch_s && sheath_at(&r.params, &r.frame, t_s - r.t_launch_s, p))
+        .count() as u32
+}
+
 /// One rope of a train: parameters + cached frame + launch time offset
 /// [s] relative to the engine's t = 0 reference epoch (spec §10).
 #[derive(Clone, Copy, Debug)]
@@ -291,12 +358,15 @@ pub fn observer_pos(r_au: f64, lon_deg: f64, lat_deg: f64) -> V3 {
     )
 }
 
-/// Synthesize the virtual-spacecraft series (spec §6, §10): n GSE samples
-/// starting `t0_s` after the reference epoch at `dt_s` spacing, over a rope
-/// TRAIN. Writes (bx, by, bz, containment_count) per step into `out`
-/// (len ≥ 4·n). Returns the number of steps with count ≥ 1. A single-rope
-/// train with `t_launch_s = 0` reproduces the v1 single-rope behavior
-/// exactly (count is 0/1).
+/// Synthesize the virtual-spacecraft series (spec §6, §10, §14): n GSE
+/// samples starting `t0_s` after the reference epoch at `dt_s` spacing,
+/// over a rope TRAIN. Writes (bx, by, bz, count_code) per step into `out`
+/// (len ≥ 4·n), where `count_code = rope_count + 100·sheath_count` —
+/// decode with % 100 (rope containment) and / 100 (sheath containment).
+/// The DETERMINISTIC series carries no sheath field (its Bz is zero-mean
+/// stochastic and lives in the ensemble, spec §14) — only the flags.
+/// Returns the number of steps with rope containment ≥ 1. A single
+/// sheathless rope reproduces the v1 behavior exactly (code is 0/1).
 pub fn synth_series(
     ropes: &[RopeEntry],
     t0_s: f64,
@@ -309,11 +379,12 @@ pub fn synth_series(
     for i in 0..n {
         let t = t0_s + dt_s * i as f64;
         let (b, count) = field_at_set(ropes, t, obs);
+        let sheath = sheath_count_at_set(ropes, t, obs);
         let g = to_gse(b);
         out[4 * i] = g[0] as f32;
         out[4 * i + 1] = g[1] as f32;
         out[4 * i + 2] = g[2] as f32;
-        out[4 * i + 3] = count as f32;
+        out[4 * i + 3] = (count + 100 * sheath) as f32;
         if count > 0 {
             hits += 1;
         }
@@ -540,6 +611,49 @@ mod tests {
         for i in 0..3 {
             assert!((sum[i] - (fa[i] + fb[i])).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn sheath_flags_precede_the_rope_and_need_a_shock() {
+        // Fast rope with sheath: the deterministic series must flag a sheath
+        // interval (count code ≥ 100) BEFORE first rope containment, carry
+        // zero deterministic Bz there, and a sub-magnetosonic rope must
+        // produce no sheath at all.
+        let fast = RopeParams {
+            v0_kms: 1100.0,
+            tilt_deg: 90.0,
+            sheath_delta_nt: 3.0,
+            ..Default::default()
+        };
+        let n = 400;
+        let mut out = vec![0.0f32; 4 * n];
+        synth_series(&[RopeEntry::new(fast, 0.0)], 0.0, 1800.0, n, earth(), &mut out);
+        let codes: Vec<u32> = (0..n).map(|i| out[4 * i + 3] as u32).collect();
+        let first_rope = codes.iter().position(|c| c % 100 > 0).expect("rope must arrive");
+        let first_sheath = codes.iter().position(|c| c / 100 > 0).expect("sheath must exist");
+        assert!(
+            first_sheath < first_rope,
+            "shock/sheath at step {} must precede rope at {}",
+            first_sheath,
+            first_rope
+        );
+        for i in first_sheath..first_rope {
+            if codes[i] / 100 > 0 && codes[i] % 100 == 0 {
+                assert_eq!(out[4 * i + 2], 0.0, "deterministic sheath Bz must be 0");
+            }
+        }
+        // Slow rope (v0 = w + 50 < w + V_MS): no shock, no sheath, ever.
+        let slow = RopeParams {
+            v0_kms: 450.0,
+            sheath_delta_nt: 3.0,
+            ..Default::default()
+        };
+        let mut out2 = vec![0.0f32; 4 * n];
+        synth_series(&[RopeEntry::new(slow, 0.0)], 0.0, 3600.0, n, earth(), &mut out2);
+        assert!(
+            (0..n).all(|i| (out2[4 * i + 3] as u32) / 100 == 0),
+            "sub-magnetosonic rope must have no sheath"
+        );
     }
 
     #[test]

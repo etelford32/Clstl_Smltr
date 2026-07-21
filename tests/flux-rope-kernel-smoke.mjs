@@ -293,6 +293,76 @@ check('gannon ensemble: observed min inside member spread',
     gMins[0] < gMinObs && gMinObs < gMins[gMins.length - 1],
     `obs ${gMinObs} in [${gMins[0].toFixed(1)}, ${gMins[gMins.length - 1].toFixed(1)}]`);
 
+// ── Sheath generation (spec §14) — v1.1 fits vs the same ground truth ────────
+// The sheath's measured value is STRUCTURAL TIMING: the model now has a
+// shock/sheath phase distinct from the rope, so it no longer has to slide
+// the rope into the sheath window to cover it.
+{
+    // St. Patrick's: shock on the SSC, rope on the rope onset.
+    const SSC_H = t0S / 3600 + 16.8;
+    const ROPE_ONSET_H = (Date.parse('2015-03-17T13:00:00Z') - Date.parse(ST_PATRICK_FIT.launchIso)) / 3600e3;
+    k.setRope(ST_PATRICK_FIT.sheathFit.rope);
+    const sf = k.series(t0S, stepS, n, L1_OBSERVER);
+    const tHof = (i) => t0S / 3600 + i * stepS / 3600;
+    const firstSheath = sf.sheath.findIndex((v) => v > 0);
+    const firstRope = sf.inside.findIndex((v) => v > 0);
+    check('sheath-fit: model shock lands on the observed SSC (±1.5 h)',
+        firstSheath >= 0 && Math.abs(tHof(firstSheath) - SSC_H) < 1.5,
+        `+${tHof(firstSheath).toFixed(1)} h vs SSC +${SSC_H.toFixed(1)} h`);
+    // Baseline first-disturbance error (its rope onset — it has no sheath).
+    k.setRope(ST_PATRICK_FIT.rope);
+    const bl = k.series(t0S, stepS, n, L1_OBSERVER);
+    const blOnsetErr = Math.abs(tHof(bl.inside.findIndex((v) => v > 0)) - ROPE_ONSET_H);
+    const sfOnsetErr = Math.abs(tHof(firstRope) - ROPE_ONSET_H);
+    check('sheath-fit: rope-onset error at least halved vs the baseline',
+        sfOnsetErr < 5 && sfOnsetErr < 0.5 * blOnsetErr,
+        `${sfOnsetErr.toFixed(1)} h vs baseline ${blOnsetErr.toFixed(1)} h`);
+    k.setRope(ST_PATRICK_FIT.sheathFit.rope);
+    const sf2 = k.series(t0S, stepS, n, L1_OBSERVER);
+    let sMin = Infinity;
+    let sx2 = 0, sy2 = 0, sxx2 = 0, syy2 = 0, sxy2 = 0;
+    for (let i = 0; i < n; i++) {
+        if (sf2.bz[i] < sMin) sMin = sf2.bz[i];
+        const y = obsBz[i];
+        if (!Number.isFinite(y)) continue;
+        sx2 += sf2.bz[i]; sy2 += y; sxx2 += sf2.bz[i] ** 2; syy2 += y * y; sxy2 += sf2.bz[i] * y;
+    }
+    const rSheath = (sxy2 - sx2 * sy2 / n) / Math.sqrt((sxx2 - sx2 * sx2 / n) * (syy2 - sy2 * sy2 / n) || 1);
+    check('sheath-fit: min Bz within ±35%', Math.abs((sMin - minObs) / minObs) < 0.35,
+        `${sMin.toFixed(1)} vs obs ${minObs.toFixed(1)} nT`);
+    check('sheath-fit: shape correlation holds (> 0.55)', rSheath > 0.55, `r = ${rSheath.toFixed(3)}`);
+
+    // Ensemble with the sheath: deterministic under the seed, and the storm
+    // probability never drops vs the sheathless baseline.
+    k.setRope(ST_PATRICK_FIT.rope);
+    k.setSpreads({});
+    const pBase = k.ensembleRun(1503, 500, t0S, stepS, n, L1_OBSERVER).pMinBzBelow(-10);
+    k.setRope(ST_PATRICK_FIT.sheathFit.rope);
+    k.setSpreads({});
+    const e1 = k.ensembleRun(1503, 500, t0S, stepS, n, L1_OBSERVER);
+    const e2 = k.ensembleRun(1503, 500, t0S, stepS, n, L1_OBSERVER);
+    check('sheath ensemble: seeded-reproducible (OU streams included)',
+        e1.bzPct.p50.every((v, i) => v === e2.bzPct.p50[i]));
+    check('sheath ensemble: storm probability never drops vs baseline',
+        e1.pMinBzBelow(-10) >= pBase - 1e-9,
+        `${e1.pMinBzBelow(-10).toFixed(2)} vs baseline ${pBase.toFixed(2)}`);
+
+    // Gannon v1.1: sheath on rope A only — shock on the observed SSC with
+    // the rope train untouched.
+    const SSC_G_H = (Date.parse('2024-05-10T17:05:00Z') - Date.parse(GANNON_FIT.launchIso)) / 3600e3;
+    k.setRopes(GANNON_FIT.sheathRopes);
+    const gs = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+    const gFirstSheath = gs.sheath.findIndex((v) => v > 0);
+    check('gannon sheath: model shock lands on the observed SSC (±1.5 h)',
+        gFirstSheath >= 0 && Math.abs(gT0S / 3600 + gFirstSheath * gStepS / 3600 - SSC_G_H) < 1.5,
+        `+${(gT0S / 3600 + gFirstSheath * gStepS / 3600).toFixed(1)} h vs SSC +${SSC_G_H.toFixed(1)} h`);
+    check('gannon sheath: rope structure untouched (min Bz gate still holds)', (() => {
+        let m = Infinity;
+        for (let i = 0; i < gN; i++) m = Math.min(m, gs.bz[i]);
+        return Math.abs((m - gMinObs) / gMinObs) < 0.25;
+    })());
+}
+
 // ── STEREO-A pre-arrival conditioning (spec §13) — the OSSE, end to end ──────
 // Drives the committed WASM through the exact flow the page uses for the
 // OSSE preset: synthesize the truth at both observers, condition the prior

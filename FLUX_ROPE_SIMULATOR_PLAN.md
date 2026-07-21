@@ -116,6 +116,15 @@ the same crate.
   vs BATS-R-US through the same Dst pipeline).
 - **Phase 5 — Depth.** Empirical sheath model, cross-section deformation,
   CME–CME interaction, EEGGL/SWMF comparison runs, server-side API build.
+  ✅ sheath model (2026-07-21, spec §14): R–H-compressed front-side shell,
+  phase-flagged deterministic series, per-member zero-mean OU sheath Bz in
+  the ensemble (fan carries the sheath band; the filter scores rope-only
+  structure). v1.1 fits pinned: St. Patrick's model shock ON the observed
+  SSC (baseline 2.3 h early) with rope-onset error 10.5 → 3.3 h; Gannon
+  shock +43.3 vs +43.6 h observed with the rope train untouched. New
+  largest documented miss: leading-edge Bz compression asymmetry
+  (deformation/erosion is next). Remaining Phase 5: deformation, CME–CME
+  interaction, EEGGL/SWMF comparison runs, server-side API build.
 
 ## 5. Data inputs
 

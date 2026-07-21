@@ -398,3 +398,58 @@ in cargo AND against the committed WASM:
 Real-storm STA validation (Gannon-era beacon archive → a committed
 fixture bundle) is the natural follow-on once archived beacon data is
 baked, and slots into this exact machinery unchanged.
+
+## 14. Sheath model (v1.1 — the first Phase 5 increment)
+
+The single biggest documented v1 miss: both hindcasts showed a shocked
+SHEATH between the SSC and the rope onset that the pure rope model could
+not represent, forcing fits to slide the rope into the sheath window.
+
+**Existence + geometry.** A sheath exists only while the apex outruns the
+ambient wind faster than the fast-magnetosonic speed (`V_MS = 70 km/s`
+fixed, §1-class ambient): `M = (v_apex − w)/V_MS > 1`. The sheath is the
+FRONT-SIDE shell around the rope surface,
+
+```
+σ(ψ) ≤ s < σ(ψ)·(1 + k)        (k = sheath_k, default 0.8)
+```
+
+restricted to points farther from the Sun than the local axis (sheaths
+pile up ahead of the obstacle, never in its wake). Thickness rides the
+rope's own taper — thickest at the nose, vanishing at the legs.
+
+**Compression.** Perpendicular fast-shock Rankine–Hugoniot ratio, γ = 5/3:
+
+```
+X(M) = (γ+1)M² / ((γ−1)M² + 2)      → 1 at M = 1, capped at 4
+```
+
+**Sheath field — the honesty decision.** Sheath Bz is compressed upstream
+turbulence: its AMPLITUDE is predictable, its sign/phase is not. So:
+
+- The DETERMINISTIC series carries no sheath Bz — only phase flags
+  (series count code = rope_count + 100·sheath_count).
+- Each ENSEMBLE member gets its own zero-mean Ornstein–Uhlenbeck Bz
+  realization (correlation time 1 h, std X(M)·δ with δ = `sheath_delta_nt`,
+  the ambient variability; compressed |B| envelope X·B_amb for |B|), from
+  SEPARATE per-member seeded streams — parameter draws stay bit-identical
+  with the sheath on or off, and δ = 0 disables everything (every v1 pin
+  holds untouched).
+- Fans, hit fractions, and min-Bz statistics use the FULL series (the fan
+  shows the sheath band; P(min Bz < thr) includes sheath-driven storms);
+  ASSIMILATION scores the rope-only clean series (§11/§13) — the filter
+  matches structure, never each member's private noise.
+
+**Measured value (pinned).** St. Patrick's v1.1 `sheathFit`: the model
+shock lands ON the observed SSC (+51.6 vs +51.55 h; the baseline's first
+disturbance was 2.3 h early) and the rope-onset error drops 10.5 → 3.3 h,
+with min Bz −20.6 (15%) and shape r = 0.62. Gannon `sheathRopes`: sheath
+on rope A only (rope B runs in A's wake, where the fresh-upstream
+assumption fails — honest until CME–CME interaction lands); model shock
++43.3 vs observed SSC +43.6 h with the validated rope train untouched.
+Storm probabilities never drop vs the sheathless baseline (pinned ≥).
+
+**Next miss, on record.** The observed Bz minimum hugs the rope's LEADING
+EDGE (front compression/erosion); the model's minimum sits mid-passage —
+that asymmetry is now the largest remaining structural error, and it is
+the natural next Phase 5 increment (deformation/erosion).

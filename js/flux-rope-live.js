@@ -68,6 +68,9 @@ export function donkiToPreset(cme, { ambientWKms = 400 } = {}) {
             v0Kms: cme.speedKms,
             sigma1AuAu: sigma,
             wKms: ambientWKms,
+            // Live forecasts run the full v1.1 forward model: sheath ON
+            // (spec §14) with climatological ambient variability.
+            sheathDeltaNt: 2.5,
             launchOffsetS: 0,
         },
         spreads: {

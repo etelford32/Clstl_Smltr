@@ -127,9 +127,14 @@ pub struct EnsembleResult {
     /// Per-member sampled params, MEMBER_STRIDE f32 each (envelope rendering).
     pub member_params: Vec<f32>,
     /// Full per-member Bz series, [step][member] layout (NaN = outside) —
-    /// retained so assimilation (spec §11) can score members against
-    /// observations after the run.
+    /// INCLUDES each member's stochastic sheath realization (spec §14), so
+    /// fans, hit fractions and min-Bz statistics carry the sheath band.
     pub member_bz: Vec<f32>,
+    /// Rope-only (sheath-free) Bz series, same layout — what assimilation
+    /// scores against (spec §14: the filter matches structure, never the
+    /// unpredictable sheath noise). EMPTY when no rope has a sheath, in
+    /// which case member_bz IS clean and is used directly.
+    pub member_bz_clean: Vec<f32>,
     /// Full per-member |B| series, same layout.
     pub member_bt: Vec<f32>,
     /// Per-member Bz at the AUXILIARY observer (STEREO-A, spec §13) — same
@@ -207,9 +212,11 @@ pub fn run(
 ) -> EnsembleResult {
     let mut rng = Rng::new(seed);
     let n_ropes = fits.len().max(1);
+    let sheath_on = fits.iter().any(|f| f.params.sheath_delta_nt > 0.0);
     // Per-step member samples: NaN = outside. Column layout [step][member].
     let mut bz = vec![f32::NAN; n_steps * n_members];
     let mut bt = vec![f32::NAN; n_steps * n_members];
+    let mut bz_clean = if sheath_on { vec![f32::NAN; n_steps * n_members] } else { Vec::new() };
     let mut bz_aux = if aux.is_some() { vec![f32::NAN; n_steps * n_members] } else { Vec::new() };
     let mut arrival_h = vec![f32::NAN; n_members];
     let mut min_bz = vec![f32::NAN; n_members];
@@ -233,26 +240,77 @@ pub fn run(
             ]);
             train.push(RopeEntry::new(member, fit.t_launch_s));
         }
+        // Per-rope sheath OU streams (spec §14): SEPARATE seeded generators,
+        // so sheath randomness never perturbs the parameter-draw stream —
+        // sheath on/off leaves every sampled member bit-identical. Unit-std
+        // Ornstein–Uhlenbeck, correlation time 1 h, advanced EVERY step so
+        // consumption is geometry-independent; scaled by X(t)·δ on use.
+        const TAU_SH_S: f64 = 3600.0;
+        let ou_decay = (-dt_s / TAU_SH_S).exp();
+        let ou_kick = (1.0 - ou_decay * ou_decay).sqrt();
+        let mut ou_rngs: Vec<Rng> = (0..train.len())
+            .map(|r| Rng::new(seed ^ 0x5EA7_0000_0000 ^ ((m as u64) << 8) ^ r as u64))
+            .collect();
+        let mut ou_state = vec![0.0f64; train.len()];
+
         let mut member_min = f32::NAN;
         let mut member_arr = f32::NAN;
         for i in 0..n_steps {
             let t = t0_s + dt_s * i as f64;
             let (b, count) = field_at_set(&train, t, obs);
-            if count > 0 {
+            // Sheath contribution at the primary observer (spec §14).
+            let mut bz_sh = 0.0f64;
+            let mut bt_sh_env = 0.0f64;
+            let mut sheath_hits = 0u32;
+            if sheath_on {
+                for (r, entry) in train.iter().enumerate() {
+                    if entry.params.sheath_delta_nt <= 0.0 {
+                        continue;
+                    }
+                    ou_state[r] = ou_state[r] * ou_decay + ou_kick * ou_rngs[r].normal();
+                    let dt_r = t - entry.t_launch_s;
+                    if dt_r > 0.0
+                        && crate::rope::sheath_at(&entry.params, &entry.frame, dt_r, obs)
+                    {
+                        let dbm = entry.params.dbm();
+                        let x = crate::kinematics::compression_ratio(
+                            crate::kinematics::shock_mach(dbm.speed_kms(dt_r), entry.params.w_kms),
+                        );
+                        bz_sh += ou_state[r] * x * entry.params.sheath_delta_nt;
+                        bt_sh_env = bt_sh_env.max(
+                            x * crate::kinematics::b_ambient_nt(
+                                entry.params.b_amb_1au_nt,
+                                dbm.apex_km(dt_r),
+                            ),
+                        );
+                        sheath_hits += 1;
+                    }
+                }
+            }
+            if count > 0 || sheath_hits > 0 {
                 let g = to_gse(b);
-                let bz_i = g[2] as f32;
-                let bt_i =
-                    ((g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt()) as f32;
-                bz[i * n_members + m] = bz_i;
-                bt[i * n_members + m] = bt_i;
-                if member_arr.is_nan() {
+                let bz_rope = g[2] as f32;
+                let bz_full = (g[2] + bz_sh) as f32;
+                let bt_full = if count > 0 {
+                    ((g[0] * g[0] + g[1] * g[1] + (g[2] + bz_sh) * (g[2] + bz_sh)).sqrt()) as f32
+                } else {
+                    ((bz_sh * bz_sh + bt_sh_env * bt_sh_env).sqrt()) as f32
+                };
+                bz[i * n_members + m] = bz_full;
+                bt[i * n_members + m] = bt_full;
+                if sheath_on && count > 0 {
+                    bz_clean[i * n_members + m] = bz_rope;
+                }
+                if count > 0 && member_arr.is_nan() {
                     member_arr = (t / 3600.0) as f32;
                 }
-                if member_min.is_nan() || bz_i < member_min {
-                    member_min = bz_i;
+                if member_min.is_nan() || bz_full < member_min {
+                    member_min = bz_full;
                 }
             }
             if let Some(aux_pos) = aux {
+                // Aux series stays CLEAN rope-only: it exists for the §13
+                // likelihood, which never scores sheath noise (spec §14).
                 let (ba, ca) = field_at_set(&train, t, aux_pos);
                 if ca > 0 {
                     // Same GSE z-component convention as the primary (§2 —
@@ -280,6 +338,7 @@ pub fn run(
         min_bz,
         member_params,
         member_bz: bz,
+        member_bz_clean: bz_clean,
         member_bt: bt,
         member_bz_aux: bz_aux,
         weights: None,
@@ -529,8 +588,11 @@ pub fn assimilate_joint(
         return 0.0;
     }
     let mut logw = vec![0.0f64; n_members];
+    // Spec 14: score the rope-only series when a sheath is modeled — the
+    // filter matches structure, never each member's private sheath noise.
+    let primary: &[f32] = if r.member_bz_clean.is_empty() { &r.member_bz } else { &r.member_bz_clean };
     let mut n_obs = accumulate_loglik(
-        &r.member_bz, n_members, r.n_steps, obs, i0, i1, sigma_nt, &mut logw,
+        primary, n_members, r.n_steps, obs, i0, i1, sigma_nt, &mut logw,
     );
     n_obs += accumulate_loglik(
         &r.member_bz_aux, n_members, r.n_steps, obs_aux, aux_i0, aux_i1, aux_sigma_nt, &mut logw,
@@ -916,6 +978,131 @@ mod tests {
         let point: Vec<(f32, f64)> = vec![(1.0, 0.0), (2.0, 1.0), (3.0, 0.0)];
         assert!((weighted_quantile(&point, 5.0) - 2.0).abs() < 1e-6);
         assert!((weighted_quantile(&point, 95.0) - 2.0).abs() < 1e-6);
+    }
+
+    // ── Sheath (spec §14) ────────────────────────────────────────────────────
+
+    fn sheath_fit() -> Vec<RopeEntry> {
+        vec![RopeEntry::new(
+            RopeParams {
+                v0_kms: 1100.0,
+                tilt_deg: 90.0,
+                sheath_delta_nt: 3.0,
+                ..Default::default()
+            },
+            0.0,
+        )]
+    }
+
+    #[test]
+    fn sheath_off_run_is_bit_identical_to_pre_sheath() {
+        // The sheath RNG streams are separate AND unused when δ = 0: the
+        // whole run must be bit-identical to a default (sheathless) run.
+        let obs = observer_pos(1.0, 0.0, 0.0);
+        let a = run(&fit(), &spreads(), 42, 100, 0.0, 1800.0, 200, obs, None);
+        let b = run(&fit(), &spreads(), 42, 100, 0.0, 1800.0, 200, obs, None);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&a.member_bz), bits(&b.member_bz));
+        assert!(a.member_bz_clean.is_empty(), "no clean matrix without a sheath");
+    }
+
+    #[test]
+    fn sheath_extends_the_disturbance_ahead_of_the_rope() {
+        // Zero-spread ensemble: the sheath must put finite Bz samples BEFORE
+        // the rope arrival, and the clean matrix must stay rope-only.
+        let obs = observer_pos(1.0, 0.0, 0.0);
+        let r = run(&sheath_fit(), &Spreads::default(), 7, 8, 0.0, 1800.0, 300, obs, None);
+        let n = r.n_members;
+        let arr_step = (r.arrival_h[0] as f64 * 2.0).round() as usize; // 1800 s steps
+        let mut pre_arrival_finite = 0;
+        for i in 0..arr_step {
+            if !r.member_bz[i * n].is_nan() {
+                pre_arrival_finite += 1;
+            }
+            assert!(
+                r.member_bz_clean[i * n].is_nan(),
+                "clean series must have NO field before rope arrival (step {})",
+                i
+            );
+        }
+        assert!(
+            pre_arrival_finite >= 3,
+            "sheath must produce a pre-arrival disturbance: {} steps",
+            pre_arrival_finite
+        );
+        // Inside the rope the clean and full series agree on the rope part
+        // (sheath zone excludes the rope interior for the same rope).
+        let mid = arr_step + 10;
+        assert!((r.member_bz[mid * n] - r.member_bz_clean[mid * n]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sheath_bz_is_zero_mean_with_the_advertised_scale() {
+        // Statistical check on the OU realizations across members: mean ≈ 0,
+        // std within a factor of the X·δ envelope.
+        let obs = observer_pos(1.0, 0.0, 0.0);
+        let r = run(&sheath_fit(), &Spreads::default(), 99, 400, 0.0, 1800.0, 300, obs, None);
+        let n = r.n_members;
+        let mut vals: Vec<f64> = Vec::new();
+        for m in 0..n {
+            let arr_step = (r.arrival_h[m] as f64 * 2.0).round() as usize;
+            for i in 0..arr_step {
+                let v = r.member_bz[i * n + m];
+                if !v.is_nan() {
+                    vals.push(v as f64);
+                }
+            }
+        }
+        assert!(vals.len() > 500, "need sheath samples: {}", vals.len());
+        let mean = vals.iter().sum::<f64>() / vals.len() as f64;
+        let std = (vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / vals.len() as f64).sqrt();
+        assert!(mean.abs() < 0.15 * std, "sheath Bz must be ~zero-mean: {mean} vs std {std}");
+        // Envelope: X caps at 4, δ = 3 → std ≤ 12; and it must be compressed
+        // above the raw ambient δ.
+        assert!(std > 3.0 && std < 12.0, "sheath std {} outside X·δ envelope", std);
+    }
+
+    #[test]
+    fn sheath_deepens_min_bz_statistics() {
+        // Same seed, sheath on vs off: southward sheath excursions can only
+        // add storm chances — P(min Bz < −10) must not decrease.
+        let obs = observer_pos(1.0, 0.0, 0.0);
+        let off = run(&fit(), &spreads(), 4242, 300, 0.0, 1800.0, 300, obs, None);
+        let mut fits_on = fit();
+        fits_on[0].params.sheath_delta_nt = 3.0;
+        let on = run(&fits_on, &spreads(), 4242, 300, 0.0, 1800.0, 300, obs, None);
+        assert!(
+            on.p_min_bz_below(-10.0) >= off.p_min_bz_below(-10.0),
+            "sheath must not reduce storm probability: {} vs {}",
+            on.p_min_bz_below(-10.0),
+            off.p_min_bz_below(-10.0)
+        );
+        // Parameter draws are untouched by the sheath streams.
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&on.member_params), bits(&off.member_params));
+    }
+
+    #[test]
+    fn sheath_assimilation_scores_the_clean_series() {
+        // Conditioning on a member's ROPE-ONLY series must recover it even
+        // though every member's full series carries private sheath noise.
+        let obs = observer_pos(1.0, 0.0, 0.0);
+        let mut r = run(&sheath_fit(), &spreads(), 2468, 200, 0.0, 1800.0, 300, obs, None);
+        let n = r.n_members;
+        let tm = (0..n)
+            .find(|m| r.arrival_h[*m].is_finite() && r.min_bz[*m] < -8.0)
+            .unwrap();
+        let truth: Vec<f32> = (0..r.n_steps)
+            .map(|i| {
+                let v = r.member_bz_clean[i * n + tm];
+                if v.is_nan() { 0.0 } else { v }
+            })
+            .collect();
+        let ess = assimilate(&mut r, &truth, 0, 300, 1.0, 0.0);
+        assert!(ess < n as f64 / 4.0, "clean-likelihood must discriminate: ESS {}", ess);
+        let w = r.weights.as_ref().unwrap();
+        let best = (0..n).max_by(|a, b| w[*a].partial_cmp(&w[*b]).unwrap()).unwrap();
+        assert_eq!(best, tm, "the generating member must dominate despite sheath noise");
     }
 
     #[test]

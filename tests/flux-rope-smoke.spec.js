@@ -66,9 +66,13 @@ test.describe('flux-rope simulator', () => {
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
-    test('scrubber drives the HUD through transit and L1 crossing', async ({ page }) => {
+    test('scrubber drives the HUD through transit, sheath and L1 crossing', async ({ page }) => {
         await expect(page.locator('#fr-s-phit')).not.toHaveText('—', { timeout: 20_000 });
         await page.locator('#fr-play').click();
+        // v1.1 sheath fit: shock +51.6 h, rope onset +59.5 h — the HUD walks
+        // transit → sheath → rope.
+        await page.locator('#fr-time').fill('55');
+        await expect(page.locator('#fr-hud-status')).toHaveText(/in sheath/);
         await page.locator('#fr-time').fill('62');
         await expect(page.locator('#fr-hud-status')).toHaveText(/crossing L1/);
         await expect(page.locator('#fr-hud-r')).toHaveText(/AU/);

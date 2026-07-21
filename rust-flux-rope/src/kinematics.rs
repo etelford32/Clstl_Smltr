@@ -49,6 +49,33 @@ pub fn sigma_apex_km(sigma_1au_km: f64, d_km: f64, n_sigma: f64) -> f64 {
     sigma_1au_km * (d_km / AU_KM).powf(n_sigma)
 }
 
+// ── Sheath (spec §14) ────────────────────────────────────────────────────────
+
+/// Fixed ambient fast-magnetosonic speed near 1 AU [km/s] (√(v_A²+c_s²) for
+/// typical B≈5 nT, n≈5 cm⁻³, T≈1e5 K). A shock — and therefore a sheath —
+/// exists only while the apex outruns the ambient wind by more than this.
+pub const V_MS_KMS: f64 = 70.0;
+
+/// Fast-shock magnetosonic Mach number of the apex (0 when sub-magnetosonic).
+pub fn shock_mach(v_apex_kms: f64, w_kms: f64) -> f64 {
+    ((v_apex_kms - w_kms) / V_MS_KMS).max(0.0)
+}
+
+/// Rankine–Hugoniot density/field compression ratio for a perpendicular fast
+/// shock, γ = 5/3: X = (γ+1)M² / ((γ−1)M² + 2), → 1 at M = 1, capped at 4.
+pub fn compression_ratio(mach: f64) -> f64 {
+    if mach <= 1.0 {
+        return 1.0;
+    }
+    let m2 = mach * mach;
+    ((8.0 / 3.0) * m2 / ((2.0 / 3.0) * m2 + 2.0)).min(4.0)
+}
+
+/// Ambient (Parker-spiral) field magnitude at heliocentric distance d [nT].
+pub fn b_ambient_nt(b_amb_1au_nt: f64, d_km: f64) -> f64 {
+    b_amb_1au_nt * (d_km / AU_KM).powf(-1.6)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

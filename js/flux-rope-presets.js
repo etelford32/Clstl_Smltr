@@ -25,7 +25,26 @@ export const ST_PATRICK_FIT = Object.freeze({
     // Validation numbers this fit holds (pinned by the smoke test):
     // min Bz −24.1 vs obs −24.25 nT (0.4%), min-Bz timing Δ2.1 h,
     // Bz shape r = 0.66, southward dwell 16.3 vs 17.8 h. Sheath NOT modeled
-    // (Phase 5) — the observed sheath interval is an honest, known miss.
+    // in THIS baseline fit — kept as the diffable v1 generation; the page
+    // defaults to sheathFit below.
+    //
+    // sheathFit — the v1.1 generation with the spec §14 sheath forward
+    // model. What the sheath buys, measured (pinned): DISTURBANCE (shock)
+    // arrival lands on the observed SSC (+51.6 vs +51.55 h post-launch —
+    // the baseline's first disturbance was 2.3 h early), rope-onset error
+    // drops 10.5 h → 3.4 h (the baseline had to slide the rope INTO the
+    // sheath window to cover it), min Bz −20.6 (15%), shape r = 0.62.
+    // Honest residual, on record: the model's Bz minimum sits mid-passage
+    // while the observed minimum hugs the rope's LEADING EDGE — front
+    // compression/erosion asymmetry is the next unmodeled miss.
+    sheathFit: Object.freeze({
+        rope: Object.freeze({
+            lonDeg: 0, latDeg: -6, tiltDeg: 45, handedness: 1,
+            twistTurns: 6, b1AuNt: 40, sigma1AuAu: 0.13,
+            v0Kms: 760, gammaPerKm: 0.3e-7, wKms: 400,
+            sheathDeltaNt: 2.5, sheathK: 0.55, bAmb1AuNt: 5,
+        }),
+    }),
 });
 
 /**
@@ -64,6 +83,27 @@ export const GANNON_FIT = Object.freeze({
             twistTurns: 5, b1AuNt: 42, sigma1AuAu: 0.12,
             v0Kms: 1300, gammaPerKm: 0.2e-7, wKms: 450,
             launchOffsetS: 72_900,   // +20.25 h → 2024-05-09T17:45Z
+        }),
+    ]),
+    // v1.1 sheath generation (spec §14): the SAME two ropes with a sheath on
+    // rope A — the SSC progenitor. Kernel-verified: model shock +43.3 h vs
+    // the observed SSC +43.6 h (0.3 h; the sheathless train's first
+    // disturbance was 3.1 h late). Rope B left sheathless: its front runs
+    // inside rope A's wake where the fresh-upstream assumption is wrong —
+    // the honest choice until CME–CME interaction is modeled.
+    sheathRopes: Object.freeze([
+        Object.freeze({
+            lonDeg: 0, latDeg: -6, tiltDeg: 60, handedness: 1,
+            twistTurns: 4, b1AuNt: 55, sigma1AuAu: 0.085,
+            v0Kms: 950, gammaPerKm: 0.2e-7, wKms: 450,
+            sheathDeltaNt: 3, sheathK: 0.65, bAmb1AuNt: 5,
+            launchOffsetS: 0,
+        }),
+        Object.freeze({
+            lonDeg: 0, latDeg: 0, tiltDeg: 45, handedness: -1,
+            twistTurns: 5, b1AuNt: 42, sigma1AuAu: 0.12,
+            v0Kms: 1300, gammaPerKm: 0.2e-7, wKms: 450,
+            launchOffsetS: 72_900,
         }),
     ]),
 });
