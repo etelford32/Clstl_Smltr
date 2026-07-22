@@ -494,9 +494,37 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
     status band + forecast/trust panels ARE the shift briefing;
     canvas-heavy sims and chrome drop out; 🖨 button in the header.
     Browser gate: tests/space-weather-d3.spec.js (3).
-- **S3/D4 — Polish & reach.** Attract loop shipped to BOTH the signin
-  gate and the public landing/pricing heroes (DECIDED), layout links,
-  org dashboards, kiosk mode, mobile fallback frames.
+- **S3/D4 — Polish & reach. ✅ ATTRACT + PARITY REVIEW SHIPPED
+  2026-07-22** (still open: layout links, org dashboards, kiosk mode,
+  mobile fallback frames). Landed as:
+  · **Attract loop (decision #6)**: `data-preview-stage` moved from the
+    helio hero to the Stage — `?preview=1` now promotes the Stage; in
+    preview the Stage runs the cinematic (7 s auto-flight cycle through
+    the stations, ENDING on the persona moment: Orbit Ops + "Where will
+    it be when it reaches you?"; reduced-motion holds a static corridor
+    with the line). Shipped to all three touchpoints: the signin gate
+    (fixed backdrop iframe behind the auth card, faded in on the
+    preview's 'preview-ready' post), the landing page ("The storm, on
+    one stage" section + CTA pair incl. request-access), and the
+    pricing hero. All embeds lazy — the pages never wait on them.
+  · **2D pseudo-view PARITY REVIEW — conclusion: gates NOT met, nothing
+    retired.** The honest gap table:
+      – helio hero vs Stage: the Stage lacks the hypothetical-mode
+        scenario dials (Sprint 5), flare-event pips, and planet
+        ephemeris context. Retirement gate: scenario mode + flare pips
+        on the Stage, plus a side-by-side session showing no unique
+        reads left.
+      – transit view vs Stage: the Stage's L1 chip covers the live
+        values, but not the transit view's parcel lead-time readouts
+        and arrival-clock strip. Retirement gate: a corridor-station
+        parcel/lead-time annotation with pass-predictor-grade timing.
+      – globe vs Stage: the Stage Earth has no texture/terminator
+        detail, no aurora texture rendering, and no per-CME impact
+        animation the globe carries. Retirement gate: textured Earth +
+        oval-band visual parity at the My Sky station.
+    The three panels REMAIN in the registry and presets (hidden by
+    default where personas don't need them) — per the standing rule,
+    they retire only when these gates pass, panel by panel.
 
 Each phase is a PR-sized arc with its own gates (pure-model node
 fixtures; Playwright: gate flow, compose/persist, station flights,

@@ -1899,14 +1899,16 @@ try {
          The three 2D pseudo-views below (helio hero, transit, globe) stay
          until the Stage passes parity — retiring them is a later, gated
          step, per the plan's S1 exit criteria. -->
-    <section class="stage-section" data-lab-panel="stage" data-lab-resize="#sw-stage-host">
+    <!-- data-preview-stage moved here from the helio hero (S3/D4,
+         decision #6): the ?preview=1 attract loop IS the Stage now. -->
+    <section class="stage-section" data-preview-stage="1" data-lab-panel="stage" data-lab-resize="#sw-stage-host">
         <div id="sw-stage-host"></div>
     </section>
 
     <!-- ── HELIOSPHERE HERO ────────────────────────────────────────────────── -->
     <!-- 3D inner solar system: real ephemeris orbits, 3D Parker spiral wind,  -->
     <!-- Earth magnetosphere (Shue model), CME shells, flare events.           -->
-    <div class="helio-hero-wrap" data-preview-stage="1" data-lab-panel="helio-hero" data-lab-resize="1">
+    <div class="helio-hero-wrap" data-lab-panel="helio-hero" data-lab-resize="1">
         
         <button class="cv-btn" id="btn-sw-here" title="Current Space Weather" style="top:12px;right:12px;" onclick="document.getElementById('helio-canvas').dispatchEvent(new Event('reset'))">⊙ Reset View</button>
         <!-- Sprint 5 — Hypothetical Mode (badge / dial / watermark / toast) -->

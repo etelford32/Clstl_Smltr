@@ -134,6 +134,15 @@ const CSS = `
 .swst-asset-label { position: absolute; transform: translate(8px, -50%);
     font-size: .56rem; color: #ffd27a; white-space: nowrap; text-shadow: 0 1px 3px #000; }
 .swst-asset-label.picked { color: #fff; font-weight: 700; }
+/* Attract loop (S3/D4): cinematic — interactive chrome drops, the
+   tagline is the persona moment the cycle ends on. */
+html[data-preview] .swst-tau, html[data-preview] .swst-scale,
+html[data-preview] .swst-stations, html[data-preview] .swst-assets { display: none !important; }
+.swst-tagline { position: absolute; left: 0; right: 0; bottom: 16%; text-align: center;
+    font: 300 clamp(1.1rem, 3.2vw, 1.9rem)/1.3 'Segoe UI', system-ui, sans-serif;
+    letter-spacing: .04em; color: #e8f4ff; text-shadow: 0 2px 18px #000;
+    opacity: 0; transition: opacity 1.2s ease; pointer-events: none; }
+.swst-tagline.show { opacity: 1; }
 `;
 
 export function mountStage(hostId = 'sw-stage-host') {
@@ -403,7 +412,7 @@ function mount(host) {
                 [EARTH_S + reToUnits(v[0]), reToUnits(v[1]), reToUnits(v[2])];
             to = { ...to, pos: toStage(p.pos), target: toStage(p.target) };
         }
-        if (!cut && id !== state.station) track('station_change', { station: id });
+        if (!cut && !state.attract && id !== state.station) track('station_change', { station: id });
         state.station = id;
         for (const b of tabs.children) b.classList.toggle('active', b.dataset.station === id);
         assetPanel.classList.toggle('open', id === 'orbit-ops');
@@ -423,6 +432,33 @@ function mount(host) {
     canvas.addEventListener('dblclick', () => flyTo(state.station));
     flyTo('corridor', true);
 
+    // ── Attract loop (S3/D4, decision #6) ─────────────────────────
+    // Under ?preview=1 / iframe (html[data-preview], stamped by
+    // preview-mode.js) the Stage runs the cinematic: an auto-flight
+    // cycle through the stations that ENDS on the persona moment —
+    // Orbit Ops with the hook line. Reduced motion: static corridor
+    // with the tagline held. Interactive chrome is display:none'd by
+    // the attract CSS; preview-mode kills pointer events page-wide.
+    state.attract = document.documentElement.hasAttribute('data-preview');
+    if (state.attract) {
+        const tag = document.createElement('div');
+        tag.className = 'swst-tagline';
+        tag.textContent = 'Where will it be when it reaches you?';
+        wrap.appendChild(tag);
+        if (reduced) {
+            tag.classList.add('show');
+        } else {
+            const CYCLE = ['corridor', 'solar-watch', 'l1-approach',
+                           'magnetosphere', 'orbit-ops'];
+            let ci = 0;
+            setInterval(() => {
+                ci = (ci + 1) % CYCLE.length;
+                flyTo(CYCLE[ci]);
+                tag.classList.toggle('show', CYCLE[ci] === 'orbit-ops');
+            }, 7000);
+        }
+    }
+
     // First-run staged reveal (D2, §11): the onboarding flow stamps the
     // chosen persona; land on that persona's home staging with a flight.
     try {
@@ -439,6 +475,10 @@ function mount(host) {
     const scaleBtn = wrap.querySelector('.swst-truescale');
     scaleBtn.addEventListener('click', () => {
         state.mixTarget = state.mixTarget > 0.5 ? 0 : 1;
+        // Wall-clock-anchored tween: lands in 800 ms regardless of frame
+        // rate (a per-frame decay never converges under starved RAF —
+        // real on slow machines, chronic on software-GL CI).
+        state.mixAnim = { t0: performance.now(), from: state.mix, to: state.mixTarget };
         scaleBtn.setAttribute('aria-pressed', String(state.mixTarget === 1));
         scaleBtn.textContent = state.mixTarget === 1 ? '⇱ Compressed' : '⇲ True scale';
         track('truescale_toggle', { on: state.mixTarget === 1 });
@@ -1043,9 +1083,11 @@ function mount(host) {
     let lastFrame = performance.now();
     function frame(now) {
         requestAnimationFrame(frame);
-        if (state.lost || !state.visible || !state.onScreen) { lastFrame = now; return; }
         const dt = Math.min(100, now - lastFrame);
         lastFrame = now;
+        // STATE always marches — flights, playback, and the scale tween
+        // must settle even while rendering is paused (hidden tab,
+        // scrolled-away panel), so coming back shows the settled scene.
         if (flight) {
             const t = (now - flight.t0) / flight.ms;
             const pose = flightPose(flight.from, flight.to, t);
@@ -1054,10 +1096,16 @@ function mount(host) {
             if (t >= 1) flight = null;
         }
         if (state.playing) setTau(state.tauMs + dt * 1000);   // ×1000
-        if (Math.abs(state.mix - state.mixTarget) > 1e-4) {
-            state.mix += (state.mixTarget - state.mix) * Math.min(1, dt / 300);
+        if (state.mixAnim) {
+            const a = state.mixAnim;
+            const t = Math.min(1, (now - a.t0) / 800);
+            state.mix = a.from + (a.to - a.from) * t;
+            if (t >= 1) state.mixAnim = null;
             updateScene(true);
         }
+        // Only the GL/DOM work pauses when unseen or lost — the perf win
+        // stays; state does not freeze.
+        if (state.lost || !state.visible || !state.onScreen) return;
         controls.update();
         glow.position.copy(sun.position);
         projectLabels();
@@ -1073,6 +1121,7 @@ function mount(host) {
         get assets() { return state.assets.map((a) => a.norad_id); },
         get ovalVisible() { return ovalHemis[0].mesh.visible; },
         get pinVisible() { return pinMarker.visible; },
+        get attract() { return !!state.attract; },
         flyTo, setTau,
     };
     window.__swStage = api;
