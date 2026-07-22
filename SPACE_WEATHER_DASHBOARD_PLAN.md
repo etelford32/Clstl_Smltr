@@ -75,6 +75,13 @@ discipline for anything the GPU draws.
   gate is authentication-only — free signed-in accounts get the full
   customizable console (the growth loop); Basic+ gates cloud sync /
   multi-dashboards; Institution gates org sharing / kiosk.
+  **REVISED 2026-07-22 (author: "a more efficient sign-in gate")**: the
+  gate is now a CLASSIC inline script that runs at parse time — pp_auth
+  mirror (or a raw sb-*-auth-token) checked synchronously, overlay
+  removed before first paint for signed-in visitors, immediate
+  `location.replace` for anonymous ones. The previous module-script gate
+  deferred behind the page's whole module graph (seconds of overlay).
+  Exemptions (preview / OAuth-hash) and the fail-open rule unchanged.
 - **The signed-out moment is a marketing asset, not a wall**: the signin
   page (and pricing/landing embeds) get the Stage's **attract loop** — a
   non-interactive cinematic auto-flight at *current live conditions* via
@@ -86,6 +93,9 @@ discipline for anything the GPU draws.
 - **Funnel instrumentation**: `gate_view → signin_start → signin_done →
   first_layout_touch` through the existing auth-funnel channel; the gate
   is an experiment surface (copy/att­ract variants) via experiments.js.
+  (2026-07-22: the `gate_view` step was dropped with the inline gate —
+  it required importing the funnel module before redirecting, defeating
+  the efficiency goal; signin_start onward still fires on signin.html.)
 - **DECIDED (revised 2026-07-22) — separate surfaces, no absorption.**
   `dashboard.html` REMAINS the account dashboard — the admin/superuser
   home (view-as tier debugging, admin analytics, account management stay
@@ -343,8 +353,11 @@ language identical to the flux-rope charts sitewide; motion restraint
 
 ## 11. Usability program
 
-First-run (post-signin): persona → location → threshold in ≤3 taps →
-staged reveal (attract-style flight lands on your staging). Edit mode:
+~~First-run (post-signin): persona → location → threshold in ≤3 taps →
+staged reveal~~ **REMOVED 2026-07-22 — the author rejected the modal
+flow on sight ("remove the 3 modal questions… not cool"). Standing
+rule from this: no blocking onboarding UI on this surface; personas
+stay one click away in the Layout Lab preset picker.** Edit mode:
 explicit toggle, gallery drawer with live previews, drag/resize/undo/
 reset-to-preset, full keyboard operability + aria-live announcements.
 Mobile: status band sticky, Stage as a swipe-station carousel, single-
@@ -391,8 +404,10 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
   breathing Shue magnetopause at disclosed Earth-local R_E scale, HTML
   overlay annotations, DPR clamp + visibility pause + context-loss
   fallback + reduced-motion cuts). τ contract: the Stage scrubber
-  ([now−24 h, now+72 h], Now, ×1000 play) dispatches `sw-tau`
-  {tauMs, regime}; the flux-rope panel chart cursor follows. The Stage
+  ([now−7 d, now+30 d] since the 2026-07-22 fix round — widened from
+  −24 h/+72 h to match the CME arrival calendar; Now, ×9000 play)
+  dispatches `sw-tau` {tauMs, regime}; the flux-rope panel chart cursor
+  and the calendar's day cursor follow. The Stage
   registers as panel `stage`, first in all five presets. Browser gate:
   tests/space-weather-stage.spec.js (boot, stations, τ contract,
   true-scale toggle — offline, quiet-corridor). **The three 2D
@@ -441,12 +456,14 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
     picks it under 768 px; capture follows "arrange on the device you're
     on" (mergeCapturedOrder preserves the other side from the prior
     doc); chaser + operator presets carry curated single-column orders.
-  · **First-run flow (§11)**: js/sw-first-run.js — once, post-signin,
-    skipped for existing users and previews: persona → location →
-    Kp line in ≤3 taps, writing through the REAL stores (preset layout,
-    saveUserLocation, saveProfile with the alert handoff), then a
-    staged reveal — one reload and the Stage flies to your persona's
-    home staging. Funnel: first_run_view→…→done.
+  · **First-run flow (§11) — REMOVED 2026-07-22 at the author's
+    direction** ("remove the 3 modal questions… not cool"): the
+    persona/location/threshold modal shipped in this arc and was pulled
+    the same week — js/sw-first-run.js deleted, mount + staged-reveal
+    hook removed, spec seeds stripped. The lesson stands in §11: no
+    blocking onboarding UI without an explicit ask. The stores it wrote
+    (presets, saveUserLocation, threshold profile) all remain reachable
+    through the gallery, the header location box, and the band ⚙.
   The earlier core landed as:
   · **Threshold profile (§8)**: `js/threshold-profile.js` — ONE line
     {kp, minBzNt, dstNt, leoAltKm} (gScale DERIVED from kp, never
@@ -518,13 +535,44 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
         values, but not the transit view's parcel lead-time readouts
         and arrival-clock strip. Retirement gate: a corridor-station
         parcel/lead-time annotation with pass-predictor-grade timing.
-      – globe vs Stage: the Stage Earth has no texture/terminator
-        detail, no aurora texture rendering, and no per-CME impact
-        animation the globe carries. Retirement gate: textured Earth +
-        oval-band visual parity at the My Sky station.
+      – globe vs Stage: ~~the Stage Earth has no texture/terminator
+        detail~~ (2026-07-22 fix round: the Stage Earth is now
+        blue-marble day/night textured with a mean-sun terminator,
+        mapped through the SAME earthLocal convention as the pin/oval),
+        but still no aurora TEXTURE rendering and no per-CME impact
+        animation the globe carries. Retirement gate (remaining):
+        oval-band visual parity at the My Sky station + impact animation.
     The three panels REMAIN in the registry and presets (hidden by
     default where personas don't need them) — per the standing rule,
     they retire only when these gates pass, panel by panel.
+- **FIX ROUND — ✅ SHIPPED 2026-07-22** (author's live-testing feedback,
+  same day as the S3/D4 push). Landed as:
+  · **First-run modal REMOVED** (see §11 — author's direction).
+  · **Inline synchronous sign-in gate** (see §3 revision).
+  · **Header location box**: js/sw-location-box.js under the page
+    title — displays/edits the ONE ppx_user_location store through
+    js/user-location.js (profile-mirror seed on first visit); the band,
+    Stage pin, and aurora-spot cards follow via 'user-location-changed'.
+  · **Data-flow hardening**: /api/noaa/passthrough (allowlisted
+    same-origin SWPC mirror) as an automatic fallback in js/swpc-feed.js
+    and js/flux-rope-live.js for clients whose networks block NOAA
+    (the "data isn't flowing" class from the field — root cause was
+    client-side blocking, not the pipeline); plus the previously-missing
+    END-TO-END live-path spec (tests/space-weather-live-path.spec.js:
+    faithful DONKI+RTSW fixtures through the REAL WASM ensemble to
+    panel + Stage + band, and a NOAA-blocked mirror-fallback case).
+  · **CME arrival calendar**: js/cme-calendar.js replaced the event-card
+    row in the cme-forecast panel — rolling −7 d (observed band,
+    visually distinct) … +30 d UTC grid; ⊕ arrival chips (WSA-ENLIL
+    preferred, DBM CmeEvent fallback — SAME oracle as the globe),
+    launch dots, ensemble P10–P90 span + P50 day from the ONE provider
+    run; two-way τ link (day/chip click → __swStage.setTau; sw-tau →
+    day cursor). The Stage τ window widened to [−7 d, +30 d] (×9000
+    play) to match. Node gate tests/cme-calendar.mjs; browser gate
+    tests/cme-calendar.spec.js.
+  · **Stage visuals**: procedural Sun (fbm granulation + limb
+    darkening + corona halo — display dressing, documented) and the
+    textured Earth described in the parity row above.
 
 Each phase is a PR-sized arc with its own gates (pure-model node
 fixtures; Playwright: gate flow, compose/persist, station flights,

@@ -25,7 +25,8 @@
  * — S2); body sizes + compressed distance per stage/scale.js, disclosed
  * in the HUD line and removable via the true-scale toggle.
  *
- * τ-timeline (§5.5): one scrubber, [now−24 h … now+72 h]. Every change
+ * τ-timeline (§5.5): one scrubber, [now−7 d … now+30 d] (matched to the
+ * CME arrival calendar's rolling window). Every change
  * dispatches `sw-tau` {tauMs, regime: 'replay'|'live'|'forecast'} on
  * window — dock instruments (the flux-rope panel's chart cursor) follow
  * it; the contract is one-way, Stage → dock, so a dead listener can
@@ -45,8 +46,9 @@ import { stagePoint, stageRadius, rulerTicks, BODY, EARTH_S, AU_KM, RE_KM, reToU
 import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          wavefrontRadiiAu, shueSurfaceGrid, parkerSpiralPoints,
          stationDefs, flightPose, dynamicPressure,
-         ovalBandGrid, kpBandAt, earthLocal, temeToStageRe,
+         ovalBandGrid, kpBandAt, earthLocal, subsolarLonDeg, temeToStageRe,
          assetOrbitRing, parseTleRaan, mySkyPose } from './model.js';
+import { EARTH_TEXTURES } from '../earth-skin.js';
 import { ropeFrame } from '../flux-rope/view.js';
 import { magneticLatitude, boundaryForKp } from '../verdict-engine.js';
 import { density, kpToAp } from '../upper-atmosphere-engine.js';
@@ -54,7 +56,10 @@ import { propagate } from '../satellite-tracker.js';
 import { loadProfile, CHANGE_EVENT as THRESHOLD_EVENT } from '../threshold-profile.js';
 
 const HOUR = 3.6e6;
-const PAST_MS = 24 * HOUR, FUTURE_MS = 72 * HOUR;
+// τ window [now−7 d … now+30 d] — matched to the CME arrival calendar
+// (js/cme-calendar.js), whose day clicks land inside this range via
+// api.setTau (fix round 2026-07-22; was −24 h/+72 h).
+const PAST_MS = 7 * 24 * HOUR, FUTURE_MS = 30 * 24 * HOUR;
 const CARRINGTON_MS = 25.38 * 86400e3;
 const N_PSI = 44, N_THETA = 18, N_GHOSTS = 14, GHOST_PTS = 56;
 const SOUTH = new THREE.Color(0.95, 0.30, 0.18);
@@ -189,7 +194,7 @@ function mount(host) {
           <input type="range" min="0" max="1000" step="1" aria-label="Timeline scrub">
           <span class="swst-taulabel"></span>
           <button type="button" class="swst-now">Now</button>
-          <button type="button" class="swst-play" aria-pressed="false">▶ ×1000</button>
+          <button type="button" class="swst-play" aria-pressed="false">▶ ×9000</button>
         </div>
         <div class="swst-lost">The 3D stage lost its WebGL context.<br>Reload the page to restart it.</div>
       </div>`;
@@ -228,12 +233,65 @@ function mount(host) {
     const p3 = [0, 0, 0];   // shared remap scratch (used from setTau onward)
 
     /* ── Static scene: Sun, spiral, ruler, L1, Earth+magnetosphere ── */
+    // Sun surface: procedural fbm granulation + limb darkening (display
+    // dressing, like the Parker spirals — no physics claim). Shader math
+    // stays clamped (the ionosphere cage-shader overflow lesson) and
+    // cheap (3 octaves, no derivatives) for software-GL CI.
+    const sunUniforms = { uTime: { value: 0 } };
     const sun = new THREE.Mesh(
-        new THREE.SphereGeometry(BODY.sunRadiusUnits, 40, 24),
-        new THREE.MeshBasicMaterial({ color: 0xffc861 }));
+        new THREE.SphereGeometry(BODY.sunRadiusUnits, 48, 28),
+        new THREE.ShaderMaterial({
+            uniforms: sunUniforms,
+            vertexShader: `
+                varying vec3 vObj; varying vec3 vN; varying vec3 vView;
+                void main() {
+                    vObj = normalize(position);
+                    vN = normalize(normalMatrix * normal);
+                    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                    vView = normalize(-mv.xyz);
+                    gl_Position = projectionMatrix * mv;
+                }`,
+            fragmentShader: `
+                uniform float uTime;
+                varying vec3 vObj; varying vec3 vN; varying vec3 vView;
+                float hash(vec3 p) {
+                    return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
+                }
+                float vnoise(vec3 p) {
+                    vec3 i = floor(p), f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    float a = mix(hash(i),                     hash(i + vec3(1.,0.,0.)), f.x);
+                    float b = mix(hash(i + vec3(0.,1.,0.)),    hash(i + vec3(1.,1.,0.)), f.x);
+                    float c = mix(hash(i + vec3(0.,0.,1.)),    hash(i + vec3(1.,0.,1.)), f.x);
+                    float d = mix(hash(i + vec3(0.,1.,1.)),    hash(i + vec3(1.,1.,1.)), f.x);
+                    return mix(mix(a, b, f.y), mix(c, d, f.y), f.z);
+                }
+                float fbm(vec3 p) {
+                    return 0.55 * vnoise(p) + 0.30 * vnoise(p * 2.31)
+                         + 0.15 * vnoise(p * 5.17);
+                }
+                void main() {
+                    // Granulation drifts slowly; scale chosen so cells read
+                    // at the Stage's default camera distance.
+                    float g = fbm(vObj * 7.0 + vec3(0.0, 0.0, uTime * 0.02));
+                    vec3 deep   = vec3(0.86, 0.42, 0.13);
+                    vec3 mid    = vec3(1.00, 0.78, 0.38);
+                    vec3 bright = vec3(1.00, 0.95, 0.80);
+                    vec3 c = mix(deep, mid, clamp(g * 1.6, 0.0, 1.0));
+                    c = mix(c, bright, clamp((g - 0.55) * 2.2, 0.0, 1.0));
+                    // Limb darkening: μ = cos(view angle), Eddington-ish ramp.
+                    float mu = clamp(dot(normalize(vN), normalize(vView)), 0.0, 1.0);
+                    c *= 0.45 + 0.55 * pow(mu, 0.55);
+                    gl_FragColor = vec4(c, 1.0);
+                }`,
+        }));
     scene.add(sun);
     const glow = makeGlowSprite('#ffd27a', 1.15);
     scene.add(glow);
+    // Wider, fainter corona halo layered behind the core glow.
+    const corona = makeGlowSprite('#ffb95e', 2.4);
+    corona.material.opacity = 0.35;
+    scene.add(corona);
 
     const spiralMat = new THREE.LineBasicMaterial({
         color: 0x2a4a66, transparent: true, opacity: 0.35 });
@@ -260,9 +318,79 @@ function mount(host) {
     const earthGroup = new THREE.Group();
     earthGroup.position.set(EARTH_S, 0, 0);
     scene.add(earthGroup);
-    earthGroup.add(new THREE.Mesh(
-        new THREE.SphereGeometry(BODY.earthRadiusUnits, 32, 20),
-        new THREE.MeshBasicMaterial({ color: 0x2a63c8 })));
+    // Earth surface: day/night textured shader. Geography is mapped
+    // per-fragment through the SAME mean-sun convention as model.js
+    // earthLocal() (poles ±z, subsolar meridian at −x, uSubsolarLon fed
+    // from subsolarLonDeg(τ)) — so the drawn continents, the pin, and
+    // the oval band agree by construction, and the terminator is the
+    // dot with −x for free. Textures are the house version-pinned CDN
+    // set (js/earth-skin.js EARTH_TEXTURES — the globe on this page
+    // already loads the same files); load is fail-quiet with a stylized
+    // procedural fallback, so offline CI renders honestly.
+    const placeholderTex = (() => {
+        const t = new THREE.DataTexture(new Uint8Array([20, 40, 80, 255]), 1, 1,
+            THREE.RGBAFormat);
+        t.needsUpdate = true;
+        return t;
+    })();
+    const earthUniforms = {
+        uDay: { value: placeholderTex }, uNight: { value: placeholderTex },
+        uHasDay: { value: 0 }, uHasNight: { value: 0 },
+        uSubsolarLon: { value: 0 },
+    };
+    const earthMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(BODY.earthRadiusUnits, 48, 32),
+        new THREE.ShaderMaterial({
+            uniforms: earthUniforms,
+            vertexShader: `
+                varying vec3 vObj;
+                void main() {
+                    vObj = normalize(position);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform sampler2D uDay, uNight;
+                uniform float uHasDay, uHasNight, uSubsolarLon;
+                varying vec3 vObj;
+                void main() {
+                    vec3 p = normalize(vObj);
+                    // Inverse of model.js earthLocal():
+                    //   x=−cosφ·cos d, y=−cosφ·sin d, z=sinφ, d=lon−subsolar
+                    float lat = asin(clamp(p.z, -1.0, 1.0));
+                    float lon = atan(-p.y, -p.x) + uSubsolarLon;
+                    vec2 uv = vec2(lon / 6.2831853 + 0.5, lat / 3.14159265 + 0.5);
+                    // Stylized fallback: ocean bands + polar caps.
+                    vec3 procDay = mix(vec3(0.05, 0.18, 0.38), vec3(0.10, 0.31, 0.55),
+                        0.5 + 0.5 * sin(lat * 3.0));
+                    procDay = mix(procDay, vec3(0.82, 0.88, 0.92),
+                        smoothstep(1.15, 1.35, abs(lat)));
+                    vec3 day = mix(procDay, texture2D(uDay, uv).rgb, uHasDay);
+                    vec3 night = mix(vec3(0.012, 0.02, 0.05),
+                        texture2D(uNight, uv).rgb * 1.5, uHasNight);
+                    // Terminator: the subsolar direction is −x in this frame.
+                    float sunDot = clamp(dot(p, vec3(-1.0, 0.0, 0.0)), -1.0, 1.0);
+                    float tw = smoothstep(-0.10, 0.15, sunDot);
+                    vec3 c = mix(night, day * (0.35 + 0.65 * clamp(sunDot, 0.0, 1.0)), tw);
+                    gl_FragColor = vec4(c, 1.0);
+                }`,
+        }));
+    earthGroup.add(earthMesh);
+    {
+        const loader = new THREE.TextureLoader();
+        loader.setCrossOrigin('anonymous');
+        const wire = (url, slot, flag) => loader.load(url, (t) => {
+            t.colorSpace = THREE.SRGBColorSpace;
+            t.wrapS = THREE.RepeatWrapping;
+            // No mips: the atan2 branch cut at the anti-solar meridian
+            // would smear a derivative-picked low mip into a seam line.
+            t.minFilter = THREE.LinearFilter;
+            t.generateMipmaps = false;
+            earthUniforms[slot].value = t;
+            earthUniforms[flag].value = 1;
+        }, undefined, () => {});   // fail-quiet: procedural fallback stands
+        wire(EARTH_TEXTURES.day, 'uDay', 'uHasDay');
+        wire(EARTH_TEXTURES.night, 'uNight', 'uHasNight');
+    }
     const atmo = makeGlowSprite('#4f9be8', BODY.earthRadiusUnits * 5.2);
     earthGroup.add(atmo);
     let mpMesh = null;
@@ -458,18 +586,6 @@ function mount(host) {
             }, 7000);
         }
     }
-
-    // First-run staged reveal (D2, §11): the onboarding flow stamps the
-    // chosen persona; land on that persona's home staging with a flight.
-    try {
-        const reveal = sessionStorage.getItem('sw-first-run-reveal');
-        if (reveal) {
-            sessionStorage.removeItem('sw-first-run-reveal');
-            const home = reveal === 'chaser' ? 'my-sky'
-                : reveal === 'operator' ? 'orbit-ops' : 'corridor';
-            setTimeout(() => flyTo(home), 900);
-        }
-    } catch {}
 
     /* ── True-scale toggle ────────────────────────────────────────── */
     const scaleBtn = wrap.querySelector('.swst-truescale');
@@ -846,6 +962,9 @@ function mount(host) {
 
         // Sun spins at the true Carrington rate under the τ-clock.
         sun.rotation.z = 2 * Math.PI * ((state.tauMs % CARRINGTON_MS) / CARRINGTON_MS);
+        // Earth geography follows the same τ through the mean-sun oracle
+        // the pin/oval use (model.js subsolarLonDeg).
+        earthUniforms.uSubsolarLon.value = subsolarLonDeg(state.tauMs) * Math.PI / 180;
 
         // Remap statics through the current compression mix. (Ruler-tick
         // labels track automatically — their world() closures read state.mix.)
@@ -1095,7 +1214,7 @@ function mount(host) {
             controls.target.set(...pose.target);
             if (t >= 1) flight = null;
         }
-        if (state.playing) setTau(state.tauMs + dt * 1000);   // ×1000
+        if (state.playing) setTau(state.tauMs + dt * 9000);   // ×9000
         if (state.mixAnim) {
             const a = state.mixAnim;
             const t = Math.min(1, (now - a.t0) / 800);
@@ -1108,6 +1227,8 @@ function mount(host) {
         if (state.lost || !state.visible || !state.onScreen) return;
         controls.update();
         glow.position.copy(sun.position);
+        corona.position.copy(sun.position);
+        sunUniforms.uTime.value = now / 1000;   // wall-clock granulation drift
         projectLabels();
         renderer.render(scene, camera);
     }
@@ -1122,6 +1243,10 @@ function mount(host) {
         get ovalVisible() { return ovalHemis[0].mesh.visible; },
         get pinVisible() { return pinMarker.visible; },
         get attract() { return !!state.attract; },
+        get ropeVisible() { return ropeMesh.visible; },
+        get forecastState() {
+            return !state.fc ? 'none' : state.fc.idle ? 'idle' : 'live';
+        },
         flyTo, setTau,
     };
     window.__swStage = api;

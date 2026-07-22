@@ -1,10 +1,11 @@
 // space-weather-d2.spec.js — browser gate for the D2 personalization
 // arc on space-weather.html: the §8 threshold profile (⚙ editor on the
 // status band + Kp-cell escalation + Stage handoff), schema-driven panel
-// config sheets (gallery ⚙ → live apply → persisted boot), and the
-// Basic+ cloud sync against a MOCKED dashboards REST surface (the real
-// table ships as supabase-dashboards-migration.sql, PENDING — the
-// migration-missing path is pinned here too).
+// config sheets (gallery ⚙ → live apply → persisted boot), the header
+// location box (js/sw-location-box.js → the ONE ppx_user_location store),
+// and the Basic+ cloud sync against a MOCKED dashboards REST surface
+// (supabase-dashboards-migration.sql is APPLIED in prod, 2026-07-22 —
+// the migration-missing path stays pinned for other environments).
 
 import { test, expect } from '@playwright/test';
 
@@ -16,7 +17,6 @@ function seed(page, { plan = 'basic', sbToken = true } = {}) {
             signedIn: true, id: 'e2e-d2-user', email: 'e2e@playwright.test',
             plan, role: 'user', provider: 'password',
         }));
-        localStorage.setItem('sw-first-run-done', '1');
         if (sbToken) {
             localStorage.setItem('sb-e2e-auth-token',
                 JSON.stringify({ access_token: 'e2e-'.padEnd(48, 'x') }));
@@ -161,41 +161,35 @@ test.describe('D2 personalization', () => {
             .toBeTruthy();
     });
 
-    test('first-run: persona → location(skip) → threshold, staged reveal lands on your staging', async ({ page }) => {
+    test('header location box: shows the stored pin, typing ↵ re-pins every consumer', async ({ page }) => {
         test.slow();
-        // Fresh signed-in user: NO first-run-done flag, NO personal layout.
+        await seed(page);
         await page.addInitScript(() => {
-            localStorage.setItem('pp_auth', JSON.stringify({
-                signedIn: true, id: 'e2e-fresh', email: 'e2e@playwright.test',
-                plan: 'free', role: 'user', provider: 'password',
-            }));
-            try {
-                localStorage.setItem('pp_consent_v1', JSON.stringify(
-                    { strict: true, functional: true, analytics: false, ts: Date.now(), version: 1 }));
-            } catch {}
+            localStorage.setItem('ppx_user_location', JSON.stringify(
+                { lat: 64.84, lon: -147.72, city: 'Fairbanks' }));
         });
         await page.route(SB_REST, (r) => r.fulfill({ json: [] }));
+        // Nominatim mock: the box geocodes through the shared helper.
+        await page.route('**/nominatim.openstreetmap.org/**', (r) => r.fulfill({
+            json: [{ lat: '69.6492', lon: '18.9553',
+                     display_name: 'Tromsø, Norway',
+                     address: { city: 'Tromsø', country: 'Norway' } }] }));
         await page.goto('/space-weather.html', { waitUntil: 'domcontentloaded' });
 
-        const fr = page.locator('#sw-first-run');
-        await expect(fr).toBeVisible({ timeout: 30_000 });
-        await fr.locator('.fr-options button', { hasText: 'Aurora Chaser' }).click();
-        await fr.locator('.fr-skip').click();                       // skip location
-        await fr.locator('.fr-kp button', { hasText: 'Kp 5' }).click();
+        // Boot: the stored location shows in the header, under the title.
+        const box = page.locator('#sw-loc-box');
+        await expect(box.locator('.swloc-input')).toHaveValue('Fairbanks', { timeout: 30_000 });
+        await expect(box.locator('.swloc-coords')).toHaveText('64.8°N 147.7°W');
 
-        // The flow wrote through the REAL stores and reloads for the reveal.
-        await page.waitForLoadState('domcontentloaded');
-        await expect.poll(() => page.evaluate(() => ({
-            done: localStorage.getItem('sw-first-run-done'),
-            preset: JSON.parse(localStorage.getItem('pp-layout.space-weather') || 'null')?.preset,
-            kp: JSON.parse(localStorage.getItem('pp-threshold-profile') || 'null')?.kp,
-        })), { timeout: 20_000 }).toEqual({ done: '1', preset: 'chaser', kp: 5 });
-        // No overlay on the second boot…
-        await page.waitForSelector('#lab-open', { timeout: 30_000 });
-        await expect(page.locator('#sw-first-run')).toHaveCount(0);
-        // …and the staged reveal flies the Stage to the chaser home.
-        await expect.poll(() => page.evaluate(() => window.__swStage?.station),
-            { timeout: 30_000 }).toBe('my-sky');
+        // Type a new place + ↵ → geocode → saveUserLocation → the ONE
+        // 'user-location-changed' dispatch re-pins the band's tonight cell.
+        await box.locator('.swloc-input').fill('Tromso');
+        await box.locator('.swloc-input').press('Enter');
+        await expect(box.locator('.swloc-coords')).toHaveText('69.6°N 19.0°E', { timeout: 15_000 });
+        expect(await page.evaluate(() =>
+            JSON.parse(localStorage.getItem('ppx_user_location')).city)).toBe('Tromsø');
+        await expect(page.locator('#sw-status-band [data-cell="tonight"] .swb-detail'))
+            .toContainText('Tromsø', { timeout: 15_000 });
     });
 
     test('cloud sync honesty: free tier stays off; missing table self-disables', async ({ page }) => {

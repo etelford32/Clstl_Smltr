@@ -26,7 +26,6 @@ test.describe('space-weather dashboard composition (Layout Lab v2)', () => {
                 signedIn: true, id: 'e2e-compose', email: 'e2e@playwright.test',
                 plan: 'free', role: 'user', provider: 'password',
             }));
-            localStorage.setItem('sw-first-run-done', '1');
             try {
                 localStorage.setItem('pp_consent_v1', JSON.stringify(
                     { strict: true, functional: true, analytics: false, ts: Date.now(), version: 1 }));

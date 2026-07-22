@@ -191,11 +191,25 @@ export async function fetchDonkiCmes({ days = 7 } = {}) {
     return parseDonkiCmes(await resp.json());
 }
 
+// Direct → same-origin mirror fallback, the js/swpc-feed.js fetchNoaa
+// pattern: some client networks block services.swpc.noaa.gov outright;
+// /api/noaa/passthrough re-serves the byte-identical product.
+async function fetchNoaaJson(url) {
+    try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+        if (r.ok) return await r.json();
+    } catch { /* fall through to the mirror */ }
+    const path = url.replace('https://services.swpc.noaa.gov/', '');
+    const m = await fetch(`/api/noaa/passthrough?path=${encodeURIComponent(path)}`,
+        { signal: AbortSignal.timeout(15_000) });
+    return m.ok ? m.json() : [];
+}
+
 /** Fetch the live L1 driver (last ~24 h at 1-min cadence). */
 export async function fetchRtswDriver() {
     const [mag, wind] = await Promise.all([
-        fetch(RTSW_MAG_URL).then((r) => (r.ok ? r.json() : [])),
-        fetch(RTSW_WIND_URL).then((r) => (r.ok ? r.json() : [])),
+        fetchNoaaJson(RTSW_MAG_URL),
+        fetchNoaaJson(RTSW_WIND_URL),
     ]);
     return rtswDriver(mag, wind);
 }

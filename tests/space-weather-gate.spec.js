@@ -21,7 +21,6 @@ const SEED_AUTH = () => {
         signedIn: true, id: 'e2e-gate', email: 'e2e@playwright.test',
         plan: 'free', role: 'user', provider: 'password',
     }));
-    localStorage.setItem('sw-first-run-done', '1');
 };
 
 test.describe('space-weather sign-in gate', () => {
@@ -36,8 +35,8 @@ test.describe('space-weather sign-in gate', () => {
     test('signed-in visitor (pp_auth mirror) gets the page, overlay removed', async ({ page }) => {
         await page.addInitScript(SEED_AUTH);
         await page.goto('/space-weather.html', { waitUntil: 'domcontentloaded' });
-        // The gate module removes the overlay node outright for signed-in
-        // visitors — not just hides it.
+        // The inline parse-time gate removes the overlay node outright for
+        // signed-in visitors — not just hides it.
         await expect(page.locator('#sw-auth-gate')).toHaveCount(0, { timeout: 15_000 });
         expect(page.url()).toContain('/space-weather.html');
         await expect(page.locator('.sw-header .sw-title')).toHaveText('Space Weather');

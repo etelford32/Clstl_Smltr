@@ -14,7 +14,6 @@ test.describe('D3 trust + briefing', () => {
                 signedIn: true, id: 'e2e-d3', email: 'e2e@playwright.test',
                 plan: 'free', role: 'user', provider: 'password',
             }));
-            localStorage.setItem('sw-first-run-done', '1');
             try {
                 localStorage.setItem('pp_consent_v1', JSON.stringify(
                     { strict: true, functional: true, analytics: false, ts: Date.now(), version: 1 }));
