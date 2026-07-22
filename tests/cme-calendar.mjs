@@ -5,7 +5,8 @@
 // placement, ensemble P10–P90 span marking). Run: node tests/cme-calendar.mjs
 
 import { strict as assert } from 'node:assert';
-import { calendarEvents, calendarModel, utcMidnight } from '../js/cme-calendar.js';
+import { calendarEvents, calendarModel, utcMidnight,
+         scorecardModel, validationIndex, fmtErrH, fmtCountdown } from '../js/cme-calendar.js';
 import { CmeEvent } from '../js/cme-propagation.js';
 
 const DAY = 86_400e3;
@@ -99,6 +100,63 @@ test('ensemble span: P10–P90 days marked, P50 day flagged once', () => {
 test('no span: nothing marked', () => {
     const m = calendarModel({ events: [], nowMs: NOW, span: null });
     assert.equal(m.days.some((d) => d.inSpan || d.isP50), false);
+});
+
+/* ── Prediction scorecard (validation-program consumers) ──────────── */
+
+test('scorecardModel: realtime rows win, sorted by MAE, hindcast labeled', () => {
+    const models = [
+        { model_id: 'dbm-v1', is_hindcast: false, n_scored: 7, mae_hours: 9.8,
+          bias_hours: 2.1, hits_12h: 5, false_alarms: 1, misses: 0 },
+        { model_id: 'enlil', is_hindcast: false, n_scored: 4, mae_hours: 7.4,
+          bias_hours: -1.0, hits_12h: 3, false_alarms: 0, misses: 0 },
+        { model_id: 'dbm-v1', is_hindcast: true, n_scored: 13, mae_hours: 10.2 },
+    ];
+    const sc = scorecardModel(models);
+    assert.equal(sc.empty, false);
+    assert.equal(sc.hindcastOnly, false);
+    assert.deepEqual(sc.rows.map((r) => r.modelId), ['enlil', 'dbm-v1']);
+    assert.equal(sc.rows[1].label, 'DBM');
+    assert.ok(Math.abs(sc.rows[1].hitRate - 5 / 7) < 1e-9);
+    // Hindcast-only inputs are still shown, but flagged.
+    const hc = scorecardModel([models[2]]);
+    assert.equal(hc.hindcastOnly, true);
+    assert.equal(hc.rows.length, 1);
+    // Unscored rows are excluded entirely.
+    assert.equal(scorecardModel([{ model_id: 'x', n_scored: 0 }]).empty, true);
+    assert.equal(scorecardModel([]).empty, true);
+});
+
+test('validationIndex: donki-keyed truth + latest per-model predictions', () => {
+    const idx = validationIndex([
+        { donki_id: 'CME-A', forecasts: {
+            'dbm-v1': { predicted: '2026-07-20T06:00Z' },
+            enlil: { predicted: '2026-07-20T09:00Z' } },
+          truth: { arrived: true, shock: '2026-07-20T08:00Z' } },
+        { donki_id: 'CME-B', forecasts: { 'dbm-v1': { predicted: '2026-07-21T00:00Z' } },
+          truth: { arrived: false, shock: null } },
+        { donki_id: 'CME-C', forecasts: {}, truth: null },
+        { forecasts: {} },   // no donki id → skipped
+    ]);
+    assert.equal(idx.size, 3);
+    const a = idx.get('CME-A');
+    assert.equal(a.resolved, true);
+    assert.equal(a.arrived, true);
+    assert.equal(a.actualMs, Date.parse('2026-07-20T08:00Z'));
+    assert.equal(a.models['dbm-v1'], Date.parse('2026-07-20T06:00Z'));
+    const b = idx.get('CME-B');
+    assert.equal(b.resolved, true);
+    assert.equal(b.arrived, false);
+    assert.equal(idx.get('CME-C').resolved, false);
+});
+
+test('fmtErrH sign convention (+ = predicted late) and fmtCountdown', () => {
+    const t = Date.parse('2026-07-20T08:00Z');
+    assert.equal(fmtErrH(t + 2.9 * 3.6e6, t), '+2.9 h');
+    assert.equal(fmtErrH(t - 1.5 * 3.6e6, t), '−1.5 h');
+    assert.equal(fmtCountdown(41 * 3.6e6), 'in 41 h');
+    assert.equal(fmtCountdown(3.4 * 24 * 3.6e6), 'in 3.4 d');
+    assert.equal(fmtCountdown(-5), 'now');
 });
 
 console.log(`${n} passed`);

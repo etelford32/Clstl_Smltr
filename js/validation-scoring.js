@@ -255,6 +255,80 @@ export function scoreCmeArrivals(preds, shockTimes) {
     return out;
 }
 
+// ── CME forecast LOCKING + truth RESOLUTION (validation program §2–3) ──────
+// Pure decision logic for the live loop in api/cron/validation-rerun.js:
+// which forecast rows to issue (record-before-predict — INSERT only, a
+// kinematics revision issues a NEW row, never an UPDATE) and when an
+// event's truth may be resolved. Node-tested by tests/validation-scoring.mjs.
+
+export const CME_LOCK = Object.freeze({
+    REVISION_MIN_H: 1,    // re-issue a model's forecast only when its
+                          // predicted arrival moved by more than this
+    RESOLVE_LAG_H: 12,    // wait this long past the predicted arrival
+                          // before looking for the shock
+    FALSE_ALARM_H: 36,    // no shock this long past the LATEST predicted
+                          // arrival → arrived=false (false-alarm ledger)
+});
+
+/** Deterministic realtime event id from the DONKI activity id — no
+ *  sequence counter, so concurrent cron runs can never split an event. */
+export function rtEventId(donkiId) {
+    return `PP-RT-${String(donkiId).replace(/[^A-Za-z0-9:-]/g, '')}`;
+}
+
+/**
+ * Should a NEW forecast row be issued for (event, model)?
+ * @param {number|null} lastPredictedMs  latest locked row's arrival (null = none yet)
+ * @param {number} predictedMs           the model's current prediction
+ */
+export function needsNewIssue(lastPredictedMs, predictedMs) {
+    if (!Number.isFinite(predictedMs)) return false;
+    if (!Number.isFinite(lastPredictedMs)) return true;
+    return Math.abs(predictedMs - lastPredictedMs) > CME_LOCK.REVISION_MIN_H * 3.6e6;
+}
+
+/**
+ * Resolve one event's L1 truth from detected shocks — or refuse to.
+ * Data-coverage honesty: a false alarm is only recorded when the Pdyn
+ * series actually COVERED the full alarm window; a data gap must read
+ * as 'pending', never as "the CME missed".
+ *
+ * @param {object} a
+ * @param {number[]} a.predictedMsList  all locked predicted arrivals for the event
+ * @param {number[]} a.shocks           detected shock times (ms)
+ * @param {number} a.nowMs
+ * @param {number} a.seriesStartMs      Pdyn series coverage
+ * @param {number} a.seriesEndMs
+ * @param {number} [a.matchH]           shock↔prediction window (default CME_SCORE.MATCH_H)
+ * @returns {{status:'pending'|'arrived'|'no_arrival', shockMs?:number}}
+ */
+export function resolveEventTruth({ predictedMsList, shocks, nowMs,
+                                    seriesStartMs, seriesEndMs,
+                                    matchH = CME_SCORE.MATCH_H }) {
+    const preds = (predictedMsList || []).filter(Number.isFinite);
+    if (!preds.length) return { status: 'pending' };
+    const first = Math.min(...preds), last = Math.max(...preds);
+    // Too early to look at all.
+    if (nowMs < first + CME_LOCK.RESOLVE_LAG_H * 3.6e6) return { status: 'pending' };
+    // Nearest shock to ANY locked prediction, within the match window.
+    let best = null;
+    for (const sh of shocks || []) {
+        for (const p of preds) {
+            const d = Math.abs(sh - p);
+            if (d <= matchH * 3.6e6 && (best === null || d < best.d)) best = { sh, d };
+        }
+    }
+    if (best) return { status: 'arrived', shockMs: best.sh };
+    // No shock: false alarm ONLY once the alarm window has fully passed
+    // AND the series covered it — otherwise we simply don't know yet.
+    const alarmEnd = last + CME_LOCK.FALSE_ALARM_H * 3.6e6;
+    const covered = Number.isFinite(seriesStartMs) && Number.isFinite(seriesEndMs)
+        && seriesStartMs <= first - matchH * 3.6e6
+        && seriesEndMs >= alarmEnd;
+    if (nowMs > alarmEnd && covered) return { status: 'no_arrival' };
+    return { status: 'pending' };
+}
+
 // Re-exported so consumers of the scoring module get the constants they
 // need to build inputs without importing the model directly.
 export { SOLAR, PHYS, carringtonL0, sunDepartureMs };

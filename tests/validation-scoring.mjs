@@ -10,6 +10,7 @@
 import assert from 'node:assert/strict';
 import {
     detectShockArrivals, scoreCmeArrivals, CME_SCORE,
+    rtEventId, needsNewIssue, resolveEventTruth,
 } from '../js/validation-scoring.js';
 
 let n = 0;
@@ -77,6 +78,51 @@ const H = 3.6e6;
     assert.equal(CME_SCORE.MATCH_H, 18);
     assert.equal(CME_SCORE.SHOCK_RATIO, 2);
     ok('CME_SCORE constants pinned (±12 h hit, ±18 h match, 2× shock)');
+}
+
+// ── 4. Forecast locking + truth resolution (live-loop Phases 2–3) ───────────
+{
+    const H = 3.6e6;
+    // Deterministic event id, sanitized.
+    assert.equal(rtEventId('2026-07-20T12:36:00-CME-001'),
+        'PP-RT-2026-07-20T12:36:00-CME-001');
+    assert.equal(rtEventId('weird id/../;'), 'PP-RT-weirdid');
+
+    // Issue discipline: first sight → issue; jitter under 1 h → hold;
+    // real kinematics revision → NEW row.
+    const t0 = Date.parse('2026-07-20T00:00Z');
+    assert.equal(needsNewIssue(null, t0), true);
+    assert.equal(needsNewIssue(t0, t0 + 0.5 * H), false);
+    assert.equal(needsNewIssue(t0, t0 + 3 * H), true);
+    assert.equal(needsNewIssue(t0, NaN), false);
+    ok('rtEventId deterministic; needsNewIssue: first-sight, jitter-hold, revision');
+
+    // Truth resolution: arrived / pending / no_arrival, with the
+    // data-coverage guard (a gap must NEVER become a false alarm).
+    const pred = Date.parse('2026-07-22T06:00Z');
+    const base = { predictedMsList: [pred], seriesStartMs: pred - 10 * 24 * H,
+                   seriesEndMs: pred + 3 * 24 * H };
+    // Shock 5 h after prediction → arrived, matched to that shock.
+    let r = resolveEventTruth({ ...base, shocks: [pred + 5 * H], nowMs: pred + 24 * H });
+    assert.equal(r.status, 'arrived');
+    assert.equal(r.shockMs, pred + 5 * H);
+    // Too early to judge (before predicted + RESOLVE_LAG_H) → pending.
+    r = resolveEventTruth({ ...base, shocks: [], nowMs: pred + 6 * H });
+    assert.equal(r.status, 'pending');
+    // Window passed, series covered, no shock → false alarm.
+    r = resolveEventTruth({ ...base, shocks: [], nowMs: pred + 48 * H });
+    assert.equal(r.status, 'no_arrival');
+    // Same, but the series ENDED before the alarm window closed → pending.
+    r = resolveEventTruth({ ...base, seriesEndMs: pred + 20 * H,
+                            shocks: [], nowMs: pred + 48 * H });
+    assert.equal(r.status, 'pending');
+    // Shock outside the ±MATCH_H window does not count as this event.
+    r = resolveEventTruth({ ...base, shocks: [pred + 30 * H], nowMs: pred + 48 * H });
+    assert.equal(r.status, 'no_arrival');
+    // No locked predictions → nothing to resolve.
+    assert.equal(resolveEventTruth({ predictedMsList: [], shocks: [],
+        nowMs: 0, seriesStartMs: 0, seriesEndMs: 0 }).status, 'pending');
+    ok('resolveEventTruth: arrived/pending/false-alarm + coverage guard');
 }
 
 console.log(`\nvalidation-scoring: all ${n} test groups passed`);

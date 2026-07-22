@@ -28,6 +28,9 @@ test.describe('CME arrival calendar on space-weather.html', () => {
         await page.route('**/services.swpc.noaa.gov/**', (r) => r.abort());
         await page.route('**/api/nasa/**', (r) => r.abort());
         await page.route('**/api/donki/**', (r) => r.abort());
+        // Default: empty validation ledger (per-test routes override — LIFO).
+        await page.route('**/api/cme/skill*', (r) => r.fulfill({
+            json: { data: { models: [], events: [] } } }));
         await page.goto('/space-weather.html', { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('#cme-calendar-host .cal-grid', { timeout: 30_000 });
     });
@@ -67,6 +70,69 @@ test.describe('CME arrival calendar on space-weather.html', () => {
         await expect(page.locator('.cal-day.past .cal-dot')).toHaveCount(1);
         // Earth-directed launch dot is highlighted.
         await expect(page.locator('.cal-dot.ed')).toHaveCount(1);
+    });
+
+    test('scorecard: quiet note, skill strip, predicted-vs-actual, false alarm, countdown', async ({ page }) => {
+        test.slow();
+        // Quiet corridor first: an empty grid must say so, and the empty
+        // ledger arms honestly instead of showing fake numbers.
+        await expect(page.locator('.cal-quiet')).toContainText('corridor is quiet');
+        await expect(page.locator('.cal-skill-arming')).toContainText('ledger arming');
+
+        // Now a populated ledger: two resolved events + one live skill row.
+        const H = 3.6e6;
+        const predA = Date.now() - 3 * DAY;                 // observed band
+        const shockA = predA + 3 * H;                       // we were 3 h early
+        const predB = Date.now() - 5 * DAY;                 // false alarm
+        await page.route('**/api/cme/skill*', (r) => r.fulfill({ json: { data: {
+            models: [{ model_id: 'dbm-v1', is_hindcast: false, n_scored: 7,
+                       mae_hours: 9.8, bias_hours: 2.1, hits_12h: 5,
+                       false_alarms: 1, misses: 0 }],
+            events: [
+                { donki_id: 'CME-VAL', forecasts: { enlil: {
+                    predicted: new Date(predA).toISOString() } },
+                  truth: { arrived: true, shock: new Date(shockA).toISOString() } },
+                { donki_id: 'CME-FAL', forecasts: { enlil: {
+                    predicted: new Date(predB).toISOString() } },
+                  truth: { arrived: false, shock: null } },
+            ],
+        } } }));
+        // The mount fetches the ledger once at boot — reload so the
+        // populated route above is what the fresh boot sees.
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('#cme-calendar-host .cal-grid', { timeout: 30_000 });
+        // Matching CMEs through the real bus (ids line up with donki_id),
+        // plus one future arrival for the countdown chip.
+        await page.evaluate(({ DAY, H }) => {
+            const now = Date.now();
+            const mk = (id, launchMs, arrMs) => ({
+                time: new Date(launchMs).toISOString(), cme_id: id,
+                speed: 800, halfAngle: 40, earthDirected: true,
+                enlil: { shock_arrival: new Date(arrMs).toISOString(), kp_90: 5 } });
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: {
+                recent_cmes: [
+                    mk('CME-VAL', now - 3 * DAY - 40 * H, now - 3 * DAY),
+                    mk('CME-FAL', now - 5 * DAY - 40 * H, now - 5 * DAY),
+                    mk('CME-NEXT', now - 10 * H, now + 41 * H),
+                ],
+            } }));
+        }, { DAY, H });
+
+        // Resolved hit: struck-through prediction, bold actual, +/− error.
+        const scored = page.locator('.cal-ev.scored');
+        await expect(scored).toHaveCount(1, { timeout: 15_000 });
+        await expect(scored.locator('s')).toBeVisible();
+        await expect(scored.locator('.cal-err')).toHaveText('−3.0 h');
+        await expect(scored).toHaveClass(/hit/);
+        // False alarm: marked, never a fake arrival.
+        await expect(page.locator('.cal-ev.falarm')).toContainText('no arrival');
+        // Upcoming arrival carries the live countdown.
+        await expect(page.locator('.cal-ev.next .cal-count')).toHaveText('in 41 h');
+        // Skill strip: real numbers + the honesty line; quiet note gone.
+        await expect(page.locator('.cal-skill-chip')).toContainText('DBM');
+        await expect(page.locator('.cal-skill-chip')).toContainText('9.8 h');
+        await expect(page.locator('.cal-skill-note')).toContainText('skill shown, not claimed');
+        await expect(page.locator('.cal-quiet')).toHaveCount(0);
     });
 
     test('τ link both ways: chip click sets Stage τ; setTau moves the day cursor', async ({ page }) => {
