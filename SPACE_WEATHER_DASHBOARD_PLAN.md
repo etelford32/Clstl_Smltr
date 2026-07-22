@@ -119,6 +119,37 @@ Educator, Casual. Each persona = a **Stage staging** (camera home +
 scene dressing, §5.6) + an **instrument dock preset** + default
 thresholds. Everything remains editable — presets are starting points.
 
+## 4½. THE HOOK — one image, aimed at the pain
+
+The Stage is architecture; the HOOK is the single recurring image every
+touchpoint leads with: **something real, approaching something YOURS,
+with the uncertainty visibly tightening.** Possession + approach +
+countdown — never "here is the solar system."
+
+- **Chaser hook shot**: the aurora oval BAND (p10/p50/p90 edges) sliding
+  toward *your pin* as you scrub to tonight, with one number — "edge
+  ≈ 180 km north of you at 23:40" — and the drive-ring drawing the
+  decision. Pain mapped: wasted drives and missed nights caused by
+  planetary numbers that say nothing about *their* horizon; the band
+  (not a line) is the anti-hype trust repair.
+- **Operator hook shot**: P10/P50/P90 arrival wavefronts bearing down on
+  *your fleet*; the magnetopause breathing toward GEO at arrival; your
+  altitude shell warming through the drag ramp with the Starlink-2022
+  reference scar. Pain mapped: the 2022 blindside (indices ≠ my asset,
+  my altitude, when) and the unanswerable "are we exposed?" — the hook
+  IS the briefing slide (hence the D3 print theme).
+- **Signature move (the differentiator as a feeling)**: ghost ropes
+  pruning and wavefronts pulling together as L1/STEREO data arrives —
+  the user WATCHES the forecast firm up. Storm anxiety is mostly
+  not-knowing-when; the hook shows the not-knowing shrink. Only a
+  client-side ensemble can render this.
+- **Placement rule**: the attract loop ENDS on the persona moment with
+  the line "Where will it be when it reaches you?"; first sign-in lands
+  on your staging with your pin placed; every alert email deep-links to
+  the exact Stage view that fired it. Same image at every distance from
+  the product. Design-review test for any Stage/dock work: does this
+  screen still read as *approach toward something the user owns*?
+
 ## 5. THE STAGE — the 3D presentation architecture
 
 This is the centerpiece. Not "a 3D widget in a card": **one continuous,
