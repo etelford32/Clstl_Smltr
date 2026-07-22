@@ -52,6 +52,15 @@ jobs:
           if [ -d "js" ]; then
             cp -r js build/web/js && echo "Copied js/"
           fi
+          # Copy committed data bundles (layout presets/variants, hindcast
+          # replays, history). The Layout Lab fetches
+          # data/layout-presets/<page>.json and data/layout-variants/ at
+          # runtime — omitting data/ silently emptied the preset picker on
+          # prod while every local test passed (dev server serves the repo
+          # root). Found 2026-07-23; do not remove.
+          if [ -d "data" ]; then
+            cp -r data build/web/data && echo "Copied data/"
+          fi
           # Copy API routes
           if [ -d "api" ]; then
             cp -r api build/web/api && echo "Copied api/"

@@ -1,6 +1,6 @@
 {
   "page": "space-weather",
-  "_howto": "Named starting-point layouts for the space-weather dashboard (SPACE_WEATHER_DASHBOARD_PLAN.md §4/§6, phase D1). Users apply one from the Layout Lab picker and then edit — applying never overwrites a saved personal layout until the user hits Save. Distinct from data/layout-variants/space-weather.json: variants are assigned silently by the A/B experiment; presets are chosen deliberately. Every panel id must exist in js/space-weather-registry.js — tests/space-weather-registry.mjs enforces it, and requires each preset to list EVERY registry panel in its zone orders so application is fully deterministic.",
+  "_howto": "Named starting-point layouts for the space-weather dashboard (SPACE_WEATHER_DASHBOARD_PLAN.md \u00a74/\u00a76, phase D1). Users apply one from the Layout Lab picker and then edit \u2014 applying never overwrites a saved personal layout until the user hits Save. Distinct from data/layout-variants/space-weather.json: variants are assigned silently by the A/B experiment; presets are chosen deliberately. Every panel id must exist in js/space-weather-registry.js \u2014 tests/space-weather-registry.mjs enforces it, and requires each preset to list EVERY registry panel in its zone orders so application is fully deterministic.",
   "presets": {
     "chaser": {
       "label": "Aurora Chaser",
@@ -15,10 +15,10 @@
               "stage",
               "metrics-hero",
               "forecast-timeline",
+              "cme-forecast",
               "earth-forecast",
               "globe",
               "flux-rope-forecast",
-              "cme-forecast",
               "data-grid",
               "imagery",
               "transit",
@@ -41,9 +41,9 @@
               "metrics-hero",
               "earth-forecast",
               "forecast-timeline",
+              "cme-forecast",
               "globe",
               "flux-rope-forecast",
-              "cme-forecast",
               "data-grid",
               "imagery",
               "transit",
@@ -162,7 +162,7 @@
     },
     "forecaster": {
       "label": "Forecaster / Researcher",
-      "blurb": "Everything, forecast-first — nothing hidden.",
+      "blurb": "Everything, forecast-first \u2014 nothing hidden.",
       "layout": {
         "v": 2,
         "page": "space-weather",
@@ -213,7 +213,7 @@
     },
     "educator": {
       "label": "Educator",
-      "blurb": "The system view first: the simulations and the Sun→Earth story.",
+      "blurb": "The system view first: the simulations and the Sun\u2192Earth story.",
       "layout": {
         "v": 2,
         "page": "space-weather",
@@ -275,12 +275,12 @@
               "stage",
               "metrics-hero",
               "earth-forecast",
+              "cme-forecast",
               "globe",
               "imagery",
               "forecast-timeline",
               "data-grid",
               "flux-rope-forecast",
-              "cme-forecast",
               "transit",
               "helio-hero",
               "solar-system-info",
@@ -290,7 +290,6 @@
             ],
             "hidden": [
               "flux-rope-forecast",
-              "cme-forecast",
               "transit",
               "helio-hero",
               "solar-system-info",
