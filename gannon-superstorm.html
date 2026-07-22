@@ -460,6 +460,16 @@ body {
       </div>
     </section>
 
+    <!-- Three-way Dst validation (flux-rope Phase 4 close-out): observed
+         SYM-H vs the SAME integrateDst pipeline driven by observed L1
+         drivers and by the v1.4 flux-rope train; the BATS-R-US GM/IE Dst
+         trace auto-joins when the workstation re-run lands. Self-mounting,
+         fail-quiet (js/gannon-dst-compare.js). -->
+    <section class="gn-panel" style="margin-top:14px;">
+      <h2>Dst — one pipeline, three driver sources</h2>
+      <div id="gn-dst-compare"></div>
+    </section>
+
   </main>
 
   <!-- ── Right: skill + methodology + fleet ──────────── -->
@@ -998,5 +1008,11 @@ function paint(sample) {
 })();
 </script>
 
+<script type="module">
+// Three-way Dst validation — isolated module; must never break the page.
+import('./js/gannon-dst-compare.js')
+    .then((m) => m.mountGannonDstCompare('gn-dst-compare'))
+    .catch(() => { const h = document.getElementById('gn-dst-compare'); if (h) h.style.display = 'none'; });
+</script>
 </body>
 </html>

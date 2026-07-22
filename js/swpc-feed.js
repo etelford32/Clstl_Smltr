@@ -302,9 +302,24 @@ async function _fetchWithRetry(url, label) {
     throw lastErr;
 }
 
-/** Direct browser→NOAA fetch (CORS enabled; WAF only blocks server-side). */
+/** Direct browser→NOAA fetch (CORS enabled), with a same-origin mirror
+ *  FALLBACK (/api/noaa/passthrough) for clients whose network blocks
+ *  services.swpc.noaa.gov (VPNs, corporate filters — the "no successful
+ *  update yet" outage class). Direct stays the primary path — the mirror
+ *  only fires after direct retries are exhausted, and if NOAA's WAF also
+ *  blocks our edge, it fails exactly like direct did (never worse). */
+const NOAA_ORIGIN = 'https://services.swpc.noaa.gov/';
 async function fetchNoaa(url) {
-    return _fetchWithRetry(url, 'NOAA');
+    try {
+        return await _fetchWithRetry(url, 'NOAA');
+    } catch (err) {
+        if (typeof url === 'string' && url.startsWith(NOAA_ORIGIN)) {
+            const path = url.slice(NOAA_ORIGIN.length);
+            return _fetchWithRetry(
+                `/api/noaa/passthrough?path=${encodeURIComponent(path)}`, 'NOAA-mirror');
+        }
+        throw err;
+    }
 }
 
 /** Edge function fetch (DONKI only — NASA key stays server-side). */
@@ -735,6 +750,7 @@ async function fetchDONKICME(state) {
         const hoursUntil = arrivalValid ? (arrival.getTime() - now) / 3.6e6 : null;
         return {
             time:          c.time ?? null,
+            cme_id:        c.cme_id ?? null,
             speed:         speed,
             latitude:      c.latitude_deg   ?? 0,
             longitude:     c.longitude_deg  ?? 0,
@@ -746,6 +762,9 @@ async function fetchDONKICME(state) {
             note:          c.note ?? '',
             lat_rad:       (c.latitude_deg  ?? 0) * Math.PI / 180,
             lon_rad:       (c.longitude_deg ?? 0) * Math.PI / 180,
+            // WSA-ENLIL modeled Earth arrival attached by the edge route
+            // (api/donki/cme.js) — the calendar prefers it over ballistic.
+            enlil:         c.enlil ?? null,
         };
     });
 

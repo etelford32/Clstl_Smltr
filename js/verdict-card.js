@@ -642,6 +642,9 @@ export class VerdictCard {
             iss: this._iss.passes ? { passes: this._iss.passes } : null,
             astro,
             air: air ? { aqi: air.aqi, uvNow: air.uvNow, uvPeak: air.uvPeak, uvPeakHour: air.uvPeakHour } : null,
+            // Flux-rope ensemble summary (Phase 4 outlook row) — the page
+            // fills this asynchronously and refresh()es; null renders no row.
+            fluxRope: safe(() => d.getFluxRope?.()) || null,
         };
     }
 

@@ -34,12 +34,33 @@ export const ROPE_DEFAULTS = Object.freeze({
     gammaPerKm: 0.2e-7,     // DBM drag Γ [km⁻¹]
     wKms: 400,              // ambient wind [km/s]
     profile: 'gold-hoyle',  // 'gold-hoyle' | 'lundquist'
+    // Sheath (spec §14) — 0 δ disables the model entirely.
+    sheathDeltaNt: 0,       // ambient Bz variability δ the shock compresses [nT]
+    sheathK: 0.8,           // sheath thickness as a fraction of the rope radius
+    bAmb1AuNt: 5,           // ambient Parker |B| at 1 AU [nT]
+    frontC: 0,              // leading-edge compression c (spec §15) — 0 = off
+    // Mach-dependent standoff η (spec §17): shell thickness becomes
+    // η·FR(M)·√(σ_eff·d/2) and sheathK is ignored. 0 = legacy fixed-k
+    // shell; literature anchor ≈ 1.1 for a quiet-wind blunt body.
+    sheathEta: 0,
+    // Pancaking aspect A (spec §18): elliptical cross-section with
+    // semi-axes σ/√A (radial) and σ·√A (transverse). Area-preserving —
+    // no field boost. 1 = circular; literature 1 AU aspects ~2–6.
+    pancakeA: 1,
 });
 
 export const SPREAD_DEFAULTS = Object.freeze({
     sigLonDeg: 8, sigLatDeg: 5, sigTiltDeg: 20, sigV0Kms: 100,
     lnsigB: 0.25, lnsigSigma: 0.18, lnsigGamma: 0.4,
     sigTwist: 1.0, pFlip: 0.08,
+});
+
+/** CME–CME interaction config (spec §16) — engine-level, off by default. */
+export const INTERACTION_DEFAULTS = Object.freeze({
+    enabled: false,
+    wakeGammaFrac: 0.5,   // follower drag reduction inside the leader's wake
+    compC: 1.0,           // scale on the R–H-derived rear-compression amplitude
+    compReach: 1.5,       // rear-compression gap ramp reach [units of leader σ̂]
 });
 
 export const L1_OBSERVER = Object.freeze({ rAu: 0.99, lonDeg: 0, latDeg: 0 });
@@ -80,6 +101,7 @@ export async function loadFluxRopeKernel(source) {
                 r.b1AuNt, r.sigma1AuAu, r.nB, r.nSigma, r.d0Rsun,
                 r.v0Kms, r.gammaPerKm, r.wKms,
                 r.profile === 'lundquist' ? 1 : 0,
+                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC, r.sheathEta, r.pancakeA,
             );
             return r;
         },
@@ -95,6 +117,7 @@ export async function loadFluxRopeKernel(source) {
                 r.b1AuNt, r.sigma1AuAu, r.nB, r.nSigma, r.d0Rsun,
                 r.v0Kms, r.gammaPerKm, r.wKms,
                 r.profile === 'lundquist' ? 1 : 0,
+                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC, r.sheathEta, r.pancakeA,
                 r.launchOffsetS,
             );
             return n;
@@ -107,6 +130,24 @@ export async function loadFluxRopeKernel(source) {
         },
         ropeCount() { return x.fr_rope_count(); },
         ropeLaunchS(i) { return x.fr_rope_t_launch_s(i); },
+
+        // ── CME–CME interaction (spec §16) ──────────────────────────────────
+        /**
+         * Configure interaction for ALL subsequent series/probe/ensemble
+         * calls: wake kinematics for followers, dynamic rear compression of
+         * leaders, wake-conditioned follower sheaths. Independent of the
+         * rope list — set it per event; disabled is bit-identical to the
+         * non-interacting train.
+         */
+        setInteraction(cfg = {}) {
+            const c = { ...INTERACTION_DEFAULTS, ...cfg };
+            x.fr_set_interaction(c.enabled ? 1 : 0, c.wakeGammaFrac, c.compC, c.compReach);
+            return c;
+        },
+        /** EFFECTIVE ambient wind [km/s] of rope i (wake speed for a follower). */
+        ropeWEffKms(i) { return x.fr_rope_w_eff_kms(i); },
+        /** EFFECTIVE drag Γ [km⁻¹] of rope i (wake-reduced for a follower). */
+        ropeGammaEff(i) { return x.fr_rope_gamma_eff(i); },
 
         // Kinematics probes (page HUD + GLSL uniforms). t = seconds after the
         // reference epoch; index-free forms probe rope 0.
@@ -139,14 +180,18 @@ export async function loadFluxRopeKernel(source) {
             const hits = x.fr_series(t0S, dtS, n, obs.rAu, obs.lonDeg, obs.latDeg);
             const raw = copyF32(x.fr_series_ptr(), 4 * n);
             const bx = new Float32Array(n), by = new Float32Array(n),
-                bz = new Float32Array(n), inside = new Float32Array(n);
+                bz = new Float32Array(n), inside = new Float32Array(n),
+                sheath = new Float32Array(n);
             for (let i = 0; i < n; i++) {
                 bx[i] = raw[4 * i];
                 by[i] = raw[4 * i + 1];
                 bz[i] = raw[4 * i + 2];
-                inside[i] = raw[4 * i + 3];
+                // count code = rope_count + 100·sheath_count (spec §14).
+                const code = raw[4 * i + 3];
+                inside[i] = code % 100;
+                sheath[i] = Math.floor(code / 100);
             }
-            return { bx, by, bz, inside, hits };
+            return { bx, by, bz, inside, sheath, hits };
         },
 
         /** Set ensemble prior spreads (partial over SPREAD_DEFAULTS). */
@@ -212,6 +257,53 @@ export async function loadFluxRopeKernel(source) {
                 ess, members, steps,
                 // λ ∈ (0,1]: <1 means the correlated-obs likelihood was
                 // annealed to hold the ESS floor — show it, never hide it.
+                temperature: x.fr_assim_temperature(),
+                pHit: x.fr_ens_p_hit(),
+                bzPct: { p5: pct(0), p25: pct(1), p50: pct(2), p75: pct(3), p95: pct(4) },
+                btMed: copyF32(x.fr_ens_bt_med_ptr(), steps),
+                hitFrac: copyF32(x.fr_ens_hit_frac_ptr(), steps),
+                weights: copyF32(x.fr_ens_weights_ptr(), members),
+                pMinBzBelow: (thr) => x.fr_ens_p_minbz_below(thr),
+            };
+        },
+
+        /**
+         * Auxiliary observer (STEREO-A, spec §13): set BEFORE ensembleRun so
+         * member Bz at that position is recorded for joint conditioning.
+         * Recording is RNG-free — the L1 prior is bit-identical either way.
+         */
+        setAuxObserver({ rAu, lonDeg, latDeg }) { x.fr_aux_set(rAu, lonDeg, latDeg); },
+        clearAuxObserver() { x.fr_aux_clear(); },
+        ensHasAux() { return x.fr_ens_has_aux() === 1; },
+
+        /**
+         * JOINT particle-filter update (spec §13): primary (L1) obs over
+         * [i0, i1) PLUS auxiliary (STEREO-A) obs over [auxI0, auxI1) —
+         * log-likelihoods summed, tempered once. Either window may be empty.
+         * Same result shape as assimilate().
+         */
+        assimilateJoint({
+            obsBz = null, i0 = 0, i1 = 0, sigmaNt = 4,
+            auxObsBz = null, auxI0 = 0, auxI1 = 0, auxSigmaNt = 4,
+            essFloorFrac = 0.1,
+        }) {
+            if (obsBz) {
+                const nW = Math.min(obsBz.length, this.maxSteps);
+                new Float32Array(x.memory.buffer, x.fr_obs_ptr(), nW).set(obsBz.subarray(0, nW));
+                i1 = Math.min(i1, nW);
+            }
+            if (auxObsBz) {
+                const nW = Math.min(auxObsBz.length, this.maxSteps);
+                new Float32Array(x.memory.buffer, x.fr_obs_aux_ptr(), nW).set(auxObsBz.subarray(0, nW));
+                auxI1 = Math.min(auxI1, nW);
+            }
+            const ess = x.fr_assimilate_joint(i0, obsBz ? i1 : 0, sigmaNt,
+                auxI0, auxObsBz ? auxI1 : 0, auxSigmaNt, essFloorFrac);
+            const steps = x.fr_ens_steps();
+            const members = x.fr_ens_members();
+            const pct = (k) => copyF32(x.fr_ens_bz_pct_ptr(k), steps);
+            return {
+                ess, members, steps,
                 temperature: x.fr_assim_temperature(),
                 pHit: x.fr_ens_p_hit(),
                 bzPct: { p5: pct(0), p25: pct(1), p50: pct(2), p75: pct(3), p95: pct(4) },

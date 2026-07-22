@@ -324,6 +324,34 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
   </div>
 </section>
 
+<!-- ── ATTRACT LOOP (S3/D4, plan decision #6): the Stage's cinematic,
+     live, at current conditions — the hook image on the landing page.
+     Lazy iframe; fades in on the preview's 'preview-ready' post. -->
+<section class="sw-attract-section" aria-label="Live Sun-to-Earth stage preview"
+    style="padding:64px 20px 72px;text-align:center;background:#03010e">
+  <h2 style="font-size:clamp(1.3rem,3.4vw,2rem);color:#e8f4ff;margin-bottom:10px">
+    The storm, on one stage</h2>
+  <p style="max-width:620px;margin:0 auto 26px;color:#8b94ad;font-size:.95rem;line-height:1.7">
+    The live Sun→Earth corridor: real CME forecasts from our validated flux-rope engine,
+    uncertainty drawn as geometry — not error bars. Where will it be when it reaches you?</p>
+  <div style="position:relative;max-width:960px;margin:0 auto;aspect-ratio:16/9;border-radius:14px;overflow:hidden;border:1px solid rgba(0,198,255,.25);background:#05030f">
+    <iframe class="sw-attract-frame" src="/space-weather.html?preview=1" loading="lazy"
+        title="Live Sun-to-Earth corridor" tabindex="-1"
+        style="position:absolute;inset:0;width:100%;height:100%;border:0;opacity:0;transition:opacity 1.4s ease"></iframe>
+  </div>
+  <div style="margin-top:20px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+    <a href="space-weather.html" class="btn-primary" data-funnel-cta="attract_dashboard">Open the dashboard →</a>
+    <a href="request-access.html" class="btn-secondary" data-funnel-cta="attract_access">Request access</a>
+  </div>
+</section>
+<script>
+window.addEventListener('message', (e) => {
+    if (e.data?.type === 'preview-ready') {
+        document.querySelectorAll('.sw-attract-frame').forEach((f) => { f.style.opacity = '1'; });
+    }
+});
+</script>
+
 <!-- ── S2 · LIVE TICKER — the proof strip ─────────────────────────────────
      Rendered by js/home-ticker.js from the same swpc-update event the hero
      consumes. Consumers read "is tonight the night?"; technical visitors

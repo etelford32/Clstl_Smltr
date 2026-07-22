@@ -20,6 +20,14 @@
  * Pure rendering: no fetch, no kernel calls — the page feeds it the rope
  * train, member params (+ optional weights), per-rope kinematic probes,
  * and the scrub time.
+ *
+ * Documented display-only omissions (the kernel remains the oracle): the
+ * shader renders neither the §14 sheath shell nor the §15/§16/§18
+ * boundary distortions (lobes + pancaking — sections draw circular). §16 wake KINEMATICS are honored — the page passes each
+ * rope's EFFECTIVE w/Γ from the kernel getters (fr_rope_w_eff_kms /
+ * fr_rope_gamma_eff), so follower positions match the kernel; member
+ * spaghetti uses the fit-level effective w with each member's own v0/Γ —
+ * an approximation (a member's true wake depends on its leader's draw).
  */
 
 const AU_KM = 1.495978707e8;
@@ -389,6 +397,11 @@ export class HeliosphereView {
         this.weights = w;
     }
 
+    /** Auxiliary-observer marker (STEREO-A): world [x,y,z] AU, or null. */
+    setStaMarker(p) {
+        this.staPos = p;
+    }
+
     resize() {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         for (const c of [this.glCanvas, this.overlay]) {
@@ -529,6 +542,20 @@ export class HeliosphereView {
         label([0, 0, 0], 'Sun');
         label([1, 0, 0], 'Earth · L1');
         label([0.5, 0, 0], '0.5 AU', 'rgba(140, 155, 185, 0.5)');
+        if (this.staPos) {
+            const s = this._project(this.staPos, cam);
+            if (s) {
+                // Diamond marker — the off-Sun–Earth-line constraint.
+                ctx.save();
+                ctx.translate(s[0], s[1]);
+                ctx.rotate(Math.PI / 4);
+                ctx.fillStyle = 'rgba(127, 230, 195, 0.9)';
+                ctx.fillRect(-3.5 * dpr, -3.5 * dpr, 7 * dpr, 7 * dpr);
+                ctx.restore();
+                ctx.fillStyle = 'rgba(127, 230, 195, 0.85)';
+                ctx.fillText('STEREO-A', s[0] + 8 * dpr, s[1] - 8 * dpr);
+            }
+        }
         ctx.fillStyle = 'rgba(120, 132, 160, 0.55)';
         ctx.fillText('drag to orbit · scroll to zoom · double-click to reset',
             10 * dpr, h - 10 * dpr);

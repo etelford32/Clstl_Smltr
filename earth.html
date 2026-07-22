@@ -13363,10 +13363,14 @@ initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
                 const evAirFeed = new AirQualityFeed();
                 const loc0 = loadUserLocation();
                 evAirFeed.start(loc0 || undefined);
+                // Flux-rope 3-day outlook (Phase 4): filled asynchronously by
+                // the shared forecast provider; null until then (no row).
+                let evFluxRope = null;
                 window.__verdictCard = new VerdictCard(document.getElementById('verdict-host'), {
                     swpc:   swFeed,
                     alerts: nwsAlerts,
                     air:    evAirFeed,
+                    getFluxRope: () => evFluxRope,
                     getLocation: loadUserLocation,
                     sunTimes,
                     solarPos: solarPosition,
@@ -13398,6 +13402,20 @@ initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
                     },
                     flagSource: EV_VERDICT_QUERY === '1' ? 'query' : EV_VERDICT_LS === '1' ? 'ls' : 'default',
                 });
+                // 3-day outlook fill (fail-quiet, off the boot path): the
+                // shared flux-rope provider runs the ensemble engine; its
+                // summary feeds the card's outlook row via getFluxRope.
+                setTimeout(() => {
+                    import('./js/flux-rope-forecast.js')
+                        .then((m) => m.computeFluxRopeForecast({}))
+                        .then((fc) => {
+                            if (fc && !fc.idle) {
+                                evFluxRope = fc.summary;
+                                window.__verdictCard?.refresh?.(true);
+                            }
+                        })
+                        .catch((e) => console.info('[EarthView] flux-rope outlook unavailable:', e?.message ?? e));
+                }, 4000);
             } catch (err) {
                 // The card must never take the globe down with it — and if
                 // it dies, give the classic location UX back.

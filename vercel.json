@@ -74,6 +74,10 @@
       "schedule": "0 */6 * * *"
     },
     {
+      "path": "/api/cron/aurora-alerts",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron/validation-rerun",
       "schedule": "30 6 * * *"
     }
