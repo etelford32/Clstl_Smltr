@@ -1,10 +1,11 @@
 -- supabase-dashboards-migration.sql
 -- ═══════════════════════════════════════════════════════════════════════════
--- STATUS: PENDING — NOT YET APPLIED to project aijsboodkivnhzfstvdq.
--- Apply ONLY on the author's explicit go (house rule since the aurora
--- tiered-alerts migration). Until applied, js/dashboard-sync.js detects
--- the missing relation (REST 404 / PGRST205) and disables itself quietly
--- — the dashboard keeps working localStorage-only.
+-- STATUS: APPLIED 2026-07-22 to project aijsboodkivnhzfstvdq on the
+-- author's explicit go (migration name: dashboards_cloud_sync). Verified
+-- post-apply: table + RLS enabled + 4 ownership policies. The
+-- migration-guard in js/dashboard-sync.js remains as defense for other
+-- environments (a fresh project without this table gets quiet
+-- localStorage-only behavior, never an error).
 -- ═══════════════════════════════════════════════════════════════════════════
 --
 -- Named/versioned per-user dashboards (SPACE_WEATHER_DASHBOARD_PLAN.md §6,

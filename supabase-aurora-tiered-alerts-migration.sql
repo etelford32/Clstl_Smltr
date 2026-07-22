@@ -1,8 +1,9 @@
 -- supabase-aurora-tiered-alerts-migration.sql
--- PENDING — not yet applied to aijsboodkivnhzfstvdq. Apply before (or
--- after) deploying api/cron/aurora-alerts.js: the cron detects the missing
--- ledger columns and responds { error: 'migration_not_applied' } WITHOUT
--- sending anything until this lands, so order does not matter.
+-- APPLIED 2026-07-22 to aijsboodkivnhzfstvdq on the author's explicit go
+-- (migration name: aurora_tiered_alerts_ledger). Verified post-apply:
+-- both ledger columns present, confirm_token backfill complete (0 nulls),
+-- confirmed-status partial index in place. The cron's migration guard
+-- remains as defense for other environments.
 -- (flux-rope Phase 4 — the AurOracle alert-sender fix.)
 --
 -- Per-subscriber ledger for the tiered sender (api/cron/aurora-alerts.js):

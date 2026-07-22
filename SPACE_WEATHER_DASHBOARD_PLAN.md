@@ -536,7 +536,7 @@ timeline sync, a11y), per house workflow.
 |---|---|---|
 | 1 | Relation to `dashboard.html` | **REVISED 2026-07-22: separate surfaces.** dashboard.html stays the account dashboard (admin/superuser home, untouched); this is a re-do of the space-weather page as the signed-in customized dashboard, keeping its own nav identity, linked by a bridge tile — no absorption, no renames, post-signin destination unchanged |
 | 2 | Gate scope | **Authentication-only** — free signed-in accounts get full customization; Basic+ gates cloud sync/multi-dashboards; Institution gates org sharing/kiosk |
-| 3 | Cloud-sync shape | **Named/versioned `dashboards` table** (several per user, org-ready); migration SQL committed, applied only on the author's go |
+| 3 | Cloud-sync shape | **Named/versioned `dashboards` table** (several per user, org-ready); migration SQL committed, **APPLIED 2026-07-22** on the author's go (with the aurora tiered-alerts ledger in the same session) |
 | 4 | Operator asset ingestion | **CelesTrak picker** (name / NORAD ID search over ingested catalogs); no uploads in v1 |
 | 5 | Print/light theme | **Yes — D3 scope** (operator shift briefings) |
 | 6 | Attract-loop placement | **Signin gate + public landing/pricing heroes** |
