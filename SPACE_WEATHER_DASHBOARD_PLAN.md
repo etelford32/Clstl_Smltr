@@ -473,10 +473,27 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
     reload, debounced push on save/config events, self-disables on
     the missing table (PGRST205 → 'migration-pending').
     tests/dashboard-sync.mjs + tests/space-weather-d2.spec.js (4).
-- **D3 — Analytics & trust.** User-facing analytics family, product
-  instrumentation + first tuning pass, density/ops mode, a11y + perf
-  gates, print/light theme for operator shift briefings (DECIDED: in
-  scope).
+- **D3 — Analytics & trust. ✅ CORE SHIPPED 2026-07-22** (trust panels +
+  §9b Stage instrumentation + print briefing; still open within D3:
+  the alert ledger + forecast-vs-actual strips [server-side history
+  needed], density/ops mode, the a11y + perf CI gates, and the first
+  analytics tuning pass). Landed as:
+  · **Validation scorecard** (panel `scorecard`, family trust): the
+    pinned hindcast numbers (St. Patrick's shock 0.0 h / min 1.3% /
+    r 0.686; Gannon leading −0.8 h / internal Δ0.1 h / min 0.3% /
+    r 0.663) AND the documented −280-vs−412 Dst-ceiling miss, with a
+    comment pointing at the enforcing gates.
+  · **Personal storm log** (panel `storm-log`, family trust):
+    js/storm-log.js — rising-edge crossings of YOUR threshold-profile
+    Kp line with hysteresis (one episode, one entry), localStorage
+    ring; tests/storm-log.mjs.
+  · **§9b Stage instrumentation**: recordFeature('sw_stage', …) for
+    station_change, timeline_scrub_future (once/session — the §14
+    engagement metric), stage_pick, truescale_toggle.
+  · **Print briefing** (decision #5): @media print light theme — the
+    status band + forecast/trust panels ARE the shift briefing;
+    canvas-heavy sims and chrome drop out; 🖨 button in the header.
+    Browser gate: tests/space-weather-d3.spec.js (3).
 - **S3/D4 — Polish & reach.** Attract loop shipped to BOTH the signin
   gate and the public landing/pricing heroes (DECIDED), layout links,
   org dashboards, kiosk mode, mobile fallback frames.

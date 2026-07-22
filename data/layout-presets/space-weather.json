@@ -25,6 +25,7 @@
               "helio-hero",
               "solar-system-info",
               "tables",
+              "scorecard",
               "sources"
             ],
             "hidden": [
@@ -49,7 +50,8 @@
               "helio-hero",
               "solar-system-info",
               "tables",
-              "sources"
+              "sources",
+              "scorecard"
             ]
           },
           "grid": {
@@ -63,7 +65,8 @@
               "card-surface",
               "card-vortex",
               "card-gravity-wave",
-              "card-earth-orbit"
+              "card-earth-orbit",
+              "storm-log"
             ],
             "hidden": [
               "card-upper-atmosphere",
@@ -100,6 +103,7 @@
               "globe",
               "imagery",
               "tables",
+              "scorecard",
               "sources",
               "helio-hero",
               "solar-system-info"
@@ -124,7 +128,8 @@
               "tables",
               "sources",
               "helio-hero",
-              "solar-system-info"
+              "solar-system-info",
+              "scorecard"
             ]
           },
           "grid": {
@@ -138,7 +143,8 @@
               "card-ssw",
               "card-surface",
               "card-vortex",
-              "card-gravity-wave"
+              "card-gravity-wave",
+              "storm-log"
             ],
             "hidden": [
               "card-ssw",
@@ -177,6 +183,7 @@
               "tables",
               "helio-hero",
               "solar-system-info",
+              "scorecard",
               "sources"
             ],
             "hidden": [],
@@ -194,7 +201,8 @@
               "card-polar-mag",
               "card-gravity-wave",
               "card-upper-atmosphere",
-              "card-earth-orbit"
+              "card-earth-orbit",
+              "storm-log"
             ],
             "hidden": [],
             "wide": [],
@@ -226,6 +234,7 @@
               "imagery",
               "data-grid",
               "tables",
+              "scorecard",
               "sources"
             ],
             "hidden": [],
@@ -243,7 +252,8 @@
               "card-polar-mag",
               "card-gravity-wave",
               "card-upper-atmosphere",
-              "card-earth-orbit"
+              "card-earth-orbit",
+              "storm-log"
             ],
             "hidden": [],
             "wide": [],
@@ -275,6 +285,7 @@
               "helio-hero",
               "solar-system-info",
               "tables",
+              "scorecard",
               "sources"
             ],
             "hidden": [
@@ -284,7 +295,8 @@
               "helio-hero",
               "solar-system-info",
               "tables",
-              "sources"
+              "sources",
+              "scorecard"
             ],
             "wide": [],
             "size": {}
@@ -300,7 +312,8 @@
               "card-polar-mag",
               "card-gravity-wave",
               "card-upper-atmosphere",
-              "card-earth-orbit"
+              "card-earth-orbit",
+              "storm-log"
             ],
             "hidden": [
               "card-ssw",
@@ -309,7 +322,8 @@
               "card-polar-mag",
               "card-gravity-wave",
               "card-upper-atmosphere",
-              "card-earth-orbit"
+              "card-earth-orbit",
+              "storm-log"
             ],
             "wide": [],
             "size": {}

@@ -142,6 +142,13 @@ export function mountStage(hostId = 'sw-stage-host') {
     catch (e) { console.warn('[stage] disabled:', e); }
 }
 
+// Product instrumentation (plan §9b) — always fail-quiet, never blocking.
+function track(action, meta) {
+    import('../telemetry.js')
+        .then((m) => m.telemetry.recordFeature('sw_stage', action, meta))
+        .catch(() => {});
+}
+
 function mount(host) {
     if (!host) return;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -396,6 +403,7 @@ function mount(host) {
                 [EARTH_S + reToUnits(v[0]), reToUnits(v[1]), reToUnits(v[2])];
             to = { ...to, pos: toStage(p.pos), target: toStage(p.target) };
         }
+        if (!cut && id !== state.station) track('station_change', { station: id });
         state.station = id;
         for (const b of tabs.children) b.classList.toggle('active', b.dataset.station === id);
         assetPanel.classList.toggle('open', id === 'orbit-ops');
@@ -433,6 +441,7 @@ function mount(host) {
         state.mixTarget = state.mixTarget > 0.5 ? 0 : 1;
         scaleBtn.setAttribute('aria-pressed', String(state.mixTarget === 1));
         scaleBtn.textContent = state.mixTarget === 1 ? '⇱ Compressed' : '⇲ True scale';
+        track('truescale_toggle', { on: state.mixTarget === 1 });
     });
 
     /* ── τ-timeline ───────────────────────────────────────────────── */
@@ -451,6 +460,16 @@ function mount(host) {
             Math.max(state.anchorMs - PAST_MS, tauMs));
         if (!fromSlider) slider.value = String(Math.round(tauToSlider(state.tauMs)));
         const r = regime();
+        // §9b: the first scrub into the future per session is the Stage's
+        // core engagement signal (plan §14 success metrics).
+        if (r === 'forecast') {
+            try {
+                if (!sessionStorage.getItem('sw-scrubbed-future')) {
+                    sessionStorage.setItem('sw-scrubbed-future', '1');
+                    track('timeline_scrub_future', {});
+                }
+            } catch {}
+        }
         regimeEl.textContent = r.toUpperCase();
         regimeEl.className = `swst-regime ${r}`;
         tauLabel.textContent = new Date(state.tauMs).toISOString().slice(5, 16).replace('T', ' ') + 'Z';
@@ -735,6 +754,10 @@ function mount(host) {
         for (const o of assetObjs) targets.push(o.dot);
         const hit = raycaster.intersectObjects(targets, false)[0];
         if (!hit) return;
+        track('stage_pick', {
+            type: hit.object === ropeMesh ? 'rope'
+                : hit.object === pinMarker ? 'pin' : 'asset',
+        });
         try {
             if (hit.object === ropeMesh) {
                 window.dispatchEvent(new CustomEvent('sw-pick', { detail: { type: 'rope' } }));

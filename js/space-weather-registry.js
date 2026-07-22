@@ -109,6 +109,10 @@ export const PANELS = Object.freeze([
       title: 'Data sources',
       blurb: 'Every feed on this page, with cadence and provenance.',
       personas: ['forecaster', 'educator'] },
+    { id: 'scorecard', zone: 'main', family: 'trust',
+      title: 'Forecast validation — the receipts',
+      blurb: 'The engine’s pinned hindcast numbers AND its documented miss — every figure test-enforced.',
+      personas: ['operator', 'forecaster'] },
 
     // ── zone: grid (the data-card grid) ─────────────────────────────────
     { id: 'card-wind', zone: 'grid', family: 'live',
@@ -151,6 +155,10 @@ export const PANELS = Object.freeze([
       title: 'Earth orbital state',
       blurb: 'VSOP87D on-device ephemeris for Earth.',
       personas: ['educator'] },
+    { id: 'storm-log', zone: 'grid', family: 'trust',
+      title: 'Personal storm log',
+      blurb: 'Every crossing of YOUR Kp line, recorded while the console is open.',
+      personas: ['chaser', 'operator'] },
 
     // ── Multi-instance panels (D2) ──────────────────────────────────────
     // No static markup — instances ('aurora-spot#n') are built at runtime

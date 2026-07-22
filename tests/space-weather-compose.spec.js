@@ -6,8 +6,12 @@
 // tests/space-weather-registry.mjs; THIS pins that the loop works in-page.
 
 import { test, expect } from '@playwright/test';
+import { PANELS } from '../js/space-weather-registry.js';
 
 const URL = '/space-weather.html';
+// One gallery row per registry entry: static panels get a show/hide row,
+// multi-instance panels get a ＋Add row — total = PANELS.length.
+const GALLERY_ROWS = PANELS.length;
 
 test.describe('space-weather dashboard composition (Layout Lab v2)', () => {
 
@@ -57,7 +61,7 @@ test.describe('space-weather dashboard composition (Layout Lab v2)', () => {
         // panel un-hides it (D1 semantics).
         await page.getByRole('button', { name: /Gallery/ }).click();
         await expect(page.locator('#lab-gallery')).toBeVisible();
-        await expect(page.locator('#lab-gallery .lab-gallery-row')).toHaveCount(24);
+        await expect(page.locator('#lab-gallery .lab-gallery-row')).toHaveCount(GALLERY_ROWS);
         await expect(page.locator('#lab-gallery .lab-gallery-missing')).toHaveCount(0);
         const helioRow = page.locator('#lab-gallery .lab-gallery-row',
             { hasText: 'Heliosphere simulation' });

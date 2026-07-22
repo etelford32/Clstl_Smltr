@@ -1692,6 +1692,46 @@ nav {
 @media (max-width: 700px) { #sw-stage-host { height: 430px; } }
 @media (max-width: 480px) { #sw-stage-host { height: 360px; } }
 
+/* ─── Print briefing theme (D3, decision #5 — operator shift briefings)
+   The printed page IS the briefing: light theme, the status band + the
+   forecast/trust panels; interactive chrome and canvas-heavy sims are
+   dropped. The 🖨 button in the page header triggers it. ─── */
+#sw-print-btn {
+    font: 700 11px/1 system-ui; padding: 6px 11px; border-radius: 7px;
+    cursor: pointer; background: var(--sw-surface-card, rgba(10,16,34,.66));
+    border: 1px solid var(--sw-border, rgba(255,255,255,.09));
+    color: var(--sw-text-muted, #8b94ad); margin-left: 10px;
+}
+#sw-print-btn:hover { color: var(--sw-text-bright, #e8f4ff);
+    border-color: var(--sw-border-focus, rgba(0,198,255,.45)); }
+@media print {
+    :root {
+        --sw-surface-card: #fff; --sw-surface-raised: #fff;
+        --sw-border: #bbb; --sw-border-focus: #999;
+        --sw-text: #111; --sw-text-bright: #000;
+        --sw-text-muted: #444; --sw-text-dim: #666;
+        --sw-accent: #054;
+    }
+    html, body { background: #fff !important; color: #111 !important; }
+    nav, footer, #alerts-bar, #data-status-banner,
+    .stage-section, .helio-hero-wrap, .transit-section, .globe-section,
+    /* single-quoted on purpose: the registry drift gate scans the raw
+       HTML for double-quoted data-lab-panel attributes */
+    .imagery-section, .earth-section[data-lab-panel='solar-system-info'],
+    #sw-print-btn, .swb-gear, .swb-editor,
+    #lab-open, #lab-toolbar, #lab-gallery, #sw-first-run,
+    .lab-resize-handle { display: none !important; }
+    .sw-header .sw-title { color: #000 !important;
+        -webkit-text-fill-color: initial !important; background: none !important; }
+    .swb-cell, .data-card, .earth-section, .cme-prediction-section,
+    .earth-forecast-section, .forecast-timeline-section, .hero-row,
+    .tables-row, .data-sources-panel {
+        background: #fff !important; border-color: #bbb !important;
+        color: #111 !important; box-shadow: none !important;
+        break-inside: avoid;
+    }
+}
+
 /* ─── Sign-in gate overlay (see SPACE_WEATHER_DASHBOARD_PLAN.md §3) ──────
    Present in markup so it covers the page from FIRST PAINT — no flash of
    gated content while the module scripts are still queued. z-index above
@@ -1829,6 +1869,8 @@ try {
             <div class="live-dot"></div>
             <span>LIVE &nbsp;·&nbsp; Updated <span id="last-update">--:--</span> UTC</span>
         </div>
+        <button id="sw-print-btn" type="button" onclick="window.print()"
+            title="Print the shift briefing: status band + forecasts in a light theme">🖨 Briefing</button>
     </div>
 
     <!-- Alerts bar (hidden by default) -->
@@ -3025,6 +3067,15 @@ try {
             </div>
         </div>
 
+        <!-- ── PERSONAL STORM LOG (D3, plan §9a — trust family) ────────
+             Crossings of YOUR Kp line (threshold profile), recorded
+             client-side while the console is open. js/storm-log.js. -->
+        <div class="data-card" id="storm-log-card" data-lab-panel="storm-log">
+            <h3>Personal Storm Log<span class="src-chip live"
+                title="Rising-edge crossings of your threshold-profile Kp line, recorded in this browser">your Kp line</span></h3>
+            <div id="storm-log-body"></div>
+        </div>
+
     </div><!-- /data-grid -->
 
     <!-- ── SDO / SOHO LIVE IMAGERY ──────────────────────────────────────────── -->
@@ -3129,6 +3180,44 @@ try {
     </div>
 
     <!-- ── LIVE DATA SOURCES PANEL ─────────────────────────────────────────── -->
+    <!-- ── VALIDATION SCORECARD (D3, plan §9a — trust family) ──────────
+         The engine's receipts: every number below is PINNED by an
+         automated gate against the committed engine — change the engine
+         and the gates fail before this card can lie. Sources:
+         tests/flux-rope-kernel-smoke.mjs (hindcast generations),
+         tests/gannon-dst-compare.mjs (the Dst pipeline-ceiling miss). -->
+    <div class="earth-section" data-lab-panel="scorecard"
+         style="background:rgba(4,10,8,.6);border-color:rgba(84,224,138,.15)">
+        <div class="earth-section-title" style="color:#8fe9ae">Forecast Validation — the receipts</div>
+        <div style="display:grid;gap:10px;font-size:.78rem;line-height:1.55">
+            <div>
+                <b style="color:var(--sw-text-bright,#e8f4ff)">St. Patrick's Day storm · Mar 2015 (G4)</b><br>
+                Shock arrival error <b>0.0 h</b> · min-Bz depth error <b>1.3%</b> at <b>Δ1.8 h</b> ·
+                waveform r <b>0.686</b> — launch-time CME parameters only, standoff coefficient
+                η = 1.1 straight from the literature, no retuning.
+                <a href="st-patrick-storm.html" style="color:var(--sw-accent,#4fc3f7)">Replay it →</a>
+            </div>
+            <div>
+                <b style="color:var(--sw-text-bright,#e8f4ff)">Gannon superstorm · May 2024 (G5, two-CME train)</b><br>
+                Leading shock <b>−0.8 h</b> · internal shock <b>Δ0.1 h</b> at +48.8 h ·
+                min-Bz depth error <b>0.3%</b> at <b>Δ1.5 h</b> · waveform r <b>0.663</b> —
+                CME–CME interaction physics, not per-event knobs.
+                <a href="gannon-superstorm.html" style="color:var(--sw-accent,#4fc3f7)">Replay it →</a>
+            </div>
+            <div style="border-left:3px solid var(--sw-status-warning,#ff7847);padding-left:10px">
+                <b style="color:var(--sw-status-warning,#ff7847)">The documented miss (kept on purpose)</b><br>
+                At G5 the empirical Dst integrator saturates: driven with the OBSERVED L1 data,
+                it bottoms at <b>−280 nT</b> vs the published <b>−412 nT</b> — a 32% ceiling that
+                no launch-time forecast through this pipeline can beat. That gap is the case for
+                the physics-first MHD leg, and we show it rather than hide it.
+            </div>
+            <div style="font-size:.66rem;color:var(--sw-text-dim,#68718a)">
+                Every figure on this card is enforced by an automated gate against the committed
+                engine · <a href="flux-rope.html" style="color:var(--sw-accent,#4fc3f7)">Flux Rope Simulator →</a>
+            </div>
+        </div>
+    </div>
+
     <!-- Template for the multi-instance aurora-spot cards (D2) — inert
          until js/aurora-spot-card.js clones it; deliberately NOT a
          data-lab-panel (instances get 'aurora-spot#n' ids at runtime). -->
@@ -6150,6 +6239,12 @@ initDashboardSync({ page: 'space-weather' });
 <script type="module">
 import { mountFirstRun } from './js/sw-first-run.js';
 mountFirstRun('space-weather');
+</script>
+
+<!-- Personal storm log (D3; fail-quiet — see js/storm-log.js) -->
+<script type="module">
+import { mountStormLog } from './js/storm-log.js';
+mountStormLog('storm-log-body');
 </script>
 
 </body>
