@@ -60,6 +60,13 @@ export const ST_PATRICK_FIT = Object.freeze({
             sheathDeltaNt: 2.5, sheathK: 0.95, bAmb1AuNt: 5, frontC: 0.55,
         }),
     }),
+    // Pancaking (spec §18) was TESTED and produced NO fit improvement here:
+    // the nose chord is near-degenerate under (σ·√A, A) co-scaling — A = 2
+    // gives r 0.676 vs 0.686 and leaves the minimum at 22% of the dwell —
+    // so the fitted generation stays circular. What A = 2 DOES change is
+    // ensemble geometry: P(hit) 0.54 → 0.83 at identical spreads (the
+    // §18 calibration warning, pinned by the smoke test).
+    //
     // standoffFit — the v1.4 generation with the spec §17 Mach-dependent
     // (Farris–Russell) shock standoff replacing the fixed-fraction shell.
     // η = 1.1 is THE LITERATURE blunt-body coefficient, applied to the
@@ -188,6 +195,11 @@ export const GANNON_FIT = Object.freeze({
             launchOffsetS: 72_900,
         }),
     ]),
+    // Pancaking (spec §18) tested here too and REJECTED: A = 2 co-scaled
+    // trades the minimum (0.3% → 10.1% error) for marginal shape gain
+    // (r +0.006) — the flattening also perturbs the §16 squeeze geometry
+    // through σ̂. The fitted train stays circular.
+    //
     // v1.4 standoff generation (spec §17): the SAME interacting ropes with
     // the Farris–Russell shell replacing both fixed fractions — the ONLY
     // change is k → η, and rope B's admitted k = 2.0 stand-in becomes a

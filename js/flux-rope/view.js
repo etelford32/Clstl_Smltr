@@ -22,8 +22,8 @@
  * and the scrub time.
  *
  * Documented display-only omissions (the kernel remains the oracle): the
- * shader renders neither the §14 sheath shell nor the §15/§16 boundary
- * distortions. §16 wake KINEMATICS are honored — the page passes each
+ * shader renders neither the §14 sheath shell nor the §15/§16/§18
+ * boundary distortions (lobes + pancaking — sections draw circular). §16 wake KINEMATICS are honored — the page passes each
  * rope's EFFECTIVE w/Γ from the kernel getters (fr_rope_w_eff_kms /
  * fr_rope_gamma_eff), so follower positions match the kernel; member
  * spaghetti uses the fit-level effective w with each member's own v0/Γ —

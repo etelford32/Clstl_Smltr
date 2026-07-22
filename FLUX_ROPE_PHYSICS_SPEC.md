@@ -649,3 +649,62 @@ fractions on the interacting train with the rope fields BIT-IDENTICAL
 internal disturbance **+48.8 vs +48.7 h observed**; η_B = 3.0 ≈ 2.7×
 blunt-body (wake pileup, as predicted above), η_A = 0.3 sub-blunt-body
 (the pre-train wind was itself disturbed; documented, not hidden).
+
+## 18. Cross-section pancaking (v1.5 — elliptical deformation)
+
+Real magnetic clouds at 1 AU are not circular: lateral expansion in the
+diverging wind flattens the cross-section perpendicular to the radial
+direction — literature aspect ratios run ~2–6 (Riley & Crooker 2004;
+Savani et al. 2011). The circular §3 section conflates two things a
+flattened one separates: the RADIAL thickness (what one spacecraft's
+dwell measures) and the TRANSVERSE footprint (what decides who gets
+hit). The v1 σ fits carry both jobs in one number.
+
+**Model.** One parameter per rope, `pancake_a = A ≥ 1` (1 = circular,
+bit-identical). The boundary becomes an ellipse in the cross-section
+plane with principal axes along ô (the §15 anti-Sunward projection —
+radial) and ⊥ ô (transverse):
+
+```
+g(θ) = 1 / sqrt(A·cos²θ + sin²θ/A)        (even in cosθ)
+σ_eff(θ) = σ(ψ) · g(θ) · f(θ)              (f = the §15/§16 odd lobes)
+ŝ = s / (g·f)                              boost = 1/f  (NOT 1/(g·f))
+```
+
+— semi-axes σ/√A (radial, thinned) and σ·√A (transverse, widened).
+Deformation factorizes cleanly: `g` is EVEN (pure flattening), `f` is
+ODD (front/rear asymmetry). Pancaking is AREA-PRESERVING (π·σ²/√A·√A =
+π·σ²): flux per unit length is conserved, so it carries NO field boost —
+only the genuinely compressive f lobes do. The §14/§17 sheath shell
+rides the same distorted boundary.
+
+**What it buys, honestly scoped.** For a nose crossing, A is largely
+DEGENERATE with σ in a single time series (both set the radial dwell) —
+one spacecraft cannot measure it alone. Its testable content is
+geometric: at FIXED nose dwell, a pancaked rope has a √A-wider
+transverse footprint (flank observers that a circular rope misses get
+hit — pinned in the kernel tests), flatter duration-vs-impact-parameter,
+and correspondingly different ensemble hit statistics. Hindcast fits may
+therefore accept or reject A per event exactly like §15's front_c; a
+rejection is a result, not a failure.
+
+**Approximations, stated.** A is constant with distance (real pancaking
+GROWS in transit; a distance-dependent A(d) is future work). A is NOT
+ensemble-sampled — the §7 draw order is a determinism contract, and the
+parameter is structural. The GLSL view renders the circular section
+(display-only omission, like the sheath and the lobes — the kernel
+remains the oracle). DONKI live seeds keep A = 1 until a validated
+half-angle → (σ, A) mapping exists.
+
+**Measured value (pinned).** Mechanism: an 8° flank observer misses the
+circular rope and catches A = 2.5 (kernel + WASM pinned); the nose dwell
+shrinks by the thinned radial axis; the on-axis field is boost-free
+(area preservation). Hindcast outcome — REJECTED per event, the §15
+precedent: St. Patrick's co-scaled A = 2 gives r 0.676 vs 0.686 with
+the minimum still at 22% of dwell; Gannon co-scaled A = 2 trades the
+minimum (0.3% → 10.1%) for r +0.006. The fitted presets stay circular.
+The pinned calibration warning: at IDENTICAL spreads, co-scaled A = 2
+lifts ensemble P(hit) 0.54 → 0.83 — the aspect is unconstrained by
+single-point data, and storm-probability calibration inherits that
+sensitivity. Resolving it needs multi-point data (the §13 machinery) or
+a population prior; both are future work, stated.

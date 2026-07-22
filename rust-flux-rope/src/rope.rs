@@ -88,6 +88,12 @@ pub struct RopeParams {
     /// η ≈ 1.1 for a quiet-wind blunt body; wake-immersed followers fit
     /// higher (pileup the flank flow cannot evacuate).
     pub sheath_eta: f64,
+    // ── Pancaking (spec §18, v1.5 — 1 = circular, bit-identical) ────────────
+    /// Cross-section aspect A ≥ 1: elliptical section with semi-axes σ/√A
+    /// (radial — thinned) and σ·√A (transverse — widened). Area-preserving,
+    /// so it carries NO field boost (only the compressive §15/§16 lobes
+    /// do). Literature 1 AU aspect ratios run ~2–6; capped at 6.
+    pub pancake_a: f64,
 }
 
 impl RopeParams {
@@ -123,6 +129,7 @@ impl Default for RopeParams {
             b_amb_1au_nt: 5.0,
             front_c: 0.0,    // off by default — every pre-v1.2 pin holds
             sheath_eta: 0.0, // legacy k mode by default — every pre-v1.4 pin holds
+            pancake_a: 1.0,  // circular by default — every pre-v1.5 pin holds
         }
     }
 }
@@ -178,17 +185,30 @@ pub struct FieldSample {
     pub inside: bool,
 }
 
-/// Boundary distortion factor f (spec §15 front lobe + §16 rear lobe):
-/// the local boundary is σ_eff = σ·f with
-/// f(θ) = 1 − c_front·(1+cosθ)/2 − c_rear·(1−cosθ)/2 — thinnest at the
-/// snowplowed leading edge (θ = 0) for the front lobe, at the
-/// follower-squeezed rear (θ = π) for the rear lobe. Returns 1 when both
+/// Cross-section boundary distortion (spec §15 front lobe + §16 rear lobe
+/// + §18 pancaking). `shape` scales the boundary and the reference mapping
+/// (σ_eff = σ·shape, ŝ = s/shape); `boost` is the flux-conservation field
+/// amplification — carried ONLY by the compressive odd lobes: §18
+/// pancaking is area-preserving and boosts nothing.
+#[derive(Clone, Copy)]
+struct Distortion {
+    shape: f64,
+    boost: f64,
+}
+
+const NO_DISTORTION: Distortion = Distortion { shape: 1.0, boost: 1.0 };
+
+/// f(θ) = 1 − c_front·(1+cosθ)/2 − c_rear·(1−cosθ)/2 (odd lobes — thinnest
+/// at the snowplowed leading edge for the front lobe, at the
+/// follower-squeezed rear for the rear lobe), composed with the even §18
+/// flattening g(θ) = 1/√(A·cos²θ + sin²θ/A). Returns the identity when all
 /// mechanisms are off, on-axis, or in the (unphysical) degenerate
 /// geometries near the footpoints.
 #[allow(clippy::too_many_arguments)]
-fn boundary_factor(
+fn boundary_distortion(
     front_c: f64,
     rear_c: f64,
+    pancake_a: f64,
     frame: &Frame,
     half_d: f64,
     psi: f64,
@@ -197,9 +217,9 @@ fn boundary_factor(
     rho_ip: f64,
     p: V3,
     s: f64,
-) -> f64 {
-    if (front_c <= 0.0 && rear_c <= 0.0) || s < 1e-6 {
-        return 1.0;
+) -> Distortion {
+    if (front_c <= 0.0 && rear_c <= 0.0 && pancake_a <= 1.0) || s < 1e-6 {
+        return NO_DISTORTION;
     }
     let t_hat = [
         psi.sin() * frame.e_dir[0] + psi.cos() * frame.e_p[0],
@@ -215,7 +235,7 @@ fn boundary_factor(
     );
     let n_norm = dot(n_pt, n_pt).sqrt();
     if n_norm < 1e-3 {
-        return 1.0;
+        return NO_DISTORTION;
     }
     let r_hat = scale([p[0] - n_pt[0], p[1] - n_pt[1], p[2] - n_pt[2]], 1.0 / s);
     let u_hat = scale(n_pt, 1.0 / n_norm);
@@ -224,12 +244,22 @@ fn boundary_factor(
     let mut o = [u_hat[0] - ut * t_hat[0], u_hat[1] - ut * t_hat[1], u_hat[2] - ut * t_hat[2]];
     let on = dot(o, o).sqrt();
     if on < 1e-9 {
-        return 1.0;
+        return NO_DISTORTION;
     }
     o = scale(o, 1.0 / on);
     let cos_th = dot(r_hat, o);
-    1.0 - front_c.clamp(0.0, 0.6) * (1.0 + cos_th) * 0.5
-        - rear_c.clamp(0.0, 0.75) * (1.0 - cos_th) * 0.5
+    let f = 1.0 - front_c.clamp(0.0, 0.6) * (1.0 + cos_th) * 0.5
+        - rear_c.clamp(0.0, 0.75) * (1.0 - cos_th) * 0.5;
+    // §18 even flattening: 1/√(A·cos²θ + sin²θ/A) — thinned along ô (θ = 0
+    // and θ = π), widened transverse (θ = ±π/2). Area-preserving.
+    let g = if pancake_a > 1.0 {
+        let a = pancake_a.min(6.0);
+        let c2 = cos_th * cos_th;
+        1.0 / (a * c2 + (1.0 - c2) / a).sqrt()
+    } else {
+        1.0
+    };
+    Distortion { shape: g * f, boost: 1.0 / f }
 }
 
 /// Evaluate the rope field at heliocentric point `p` [km], `t_s` seconds
@@ -286,14 +316,15 @@ pub fn field_at_dyn(
     // σ_eff = σ·f, field structure mapped to the reference profile via
     // ŝ = s/f with a flux-conservation boost 1/f. f = 1 when both are off —
     // bit-identical v1 path.
-    let f_dist =
-        boundary_factor(params.front_c, rear_c, frame, half_d, psi, qu, w, rho_ip, p, s);
-    let sigma_eff = sigma * f_dist;
+    let dist = boundary_distortion(
+        params.front_c, rear_c, params.pancake_a, frame, half_d, psi, qu, w, rho_ip, p, s,
+    );
+    let sigma_eff = sigma * dist.shape;
     if s >= sigma_eff {
         return FieldSample::default();
     }
-    let s_ref = s / f_dist;
-    let boost = 1.0 / f_dist;
+    let s_ref = s / dist.shape;
+    let boost = dist.boost;
 
     // Local field frame: tangent, radial, poloidal.
     let t_hat = [
@@ -400,9 +431,10 @@ pub fn sheath_at_dyn(
         return false;
     }
     // The sheath shell rides the distorted boundary (spec §15/§16).
-    let f_dist =
-        boundary_factor(params.front_c, rear_c, frame, half_d, psi, qu, w, rho_ip, p, s);
-    let sigma_eff = sigma * f_dist;
+    let dist = boundary_distortion(
+        params.front_c, rear_c, params.pancake_a, frame, half_d, psi, qu, w, rho_ip, p, s,
+    );
+    let sigma_eff = sigma * dist.shape;
     // Shell outer edge: §17 Farris–Russell standoff on the two-curvature
     // nose proxy √(σ_eff·d/2) when η > 0 — Mach-dependent, growing as the
     // decelerating shock weakens. The η = 0 branch keeps the §14 fixed
@@ -1390,6 +1422,95 @@ mod tests {
         let t = 30.0 * 3600.0;
         let edge = shell_edge_sigma(&p, &f, t, &p.dbm(), p.w_kms);
         assert!((edge - 1.8).abs() < 0.01, "legacy shell edge {:.3}σ vs 1.8σ", edge);
+    }
+
+    // ── Pancaking (spec §18) ─────────────────────────────────────────────────
+
+    #[test]
+    fn pancake_one_is_bit_identical() {
+        let a = RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, front_c: 0.3, ..Default::default() };
+        let b = RopeParams { pancake_a: 1.0, ..a };
+        let n = 300;
+        let (mut oa, mut ob) = (vec![0.0f32; 4 * n], vec![0.0f32; 4 * n]);
+        synth_series(&[RopeEntry::new(a, 0.0)], &TrainCfg::default(), 0.0, 1800.0, n, earth(), &mut oa);
+        synth_series(&[RopeEntry::new(b, 0.0)], &TrainCfg::default(), 0.0, 1800.0, n, earth(), &mut ob);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&oa), bits(&ob));
+    }
+
+    #[test]
+    fn pancaking_thins_the_radial_axis_and_widens_the_transverse() {
+        // At the apex of a tilt-90 rope the radial direction is x̂ and the
+        // transverse is ŷ: A = 2 pulls the boundary in to σ/√2 along x̂ and
+        // pushes it out to σ·√2 along ŷ.
+        let round = RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, ..Default::default() };
+        let flat = RopeParams { pancake_a: 2.0, ..round };
+        let fr = Frame::new(0.0, 0.0, 90.0);
+        let t = arrival_time_s(&round, AU_KM);
+        let d = round.dbm().apex_km(t);
+        let sigma = sigma_apex_km(round.sigma_1au_au * AU_KM, d, round.n_sigma);
+        // Radial probe at 0.8σ: inside the circle, OUTSIDE the ellipse
+        // (0.8 > 1/√2 = 0.707).
+        let radial = [d + 0.8 * sigma, 0.0, 0.0];
+        assert!(field_at(&round, &fr, t, radial).inside);
+        assert!(!field_at(&flat, &fr, t, radial).inside);
+        // Transverse probe at 1.2σ: outside the circle, INSIDE the ellipse
+        // (1.2 < √2 = 1.414).
+        let transverse = [d, 1.2 * sigma, 0.0];
+        assert!(!field_at(&round, &fr, t, transverse).inside);
+        assert!(field_at(&flat, &fr, t, transverse).inside);
+    }
+
+    #[test]
+    fn pancaking_is_flux_neutral_on_the_axis() {
+        // Area-preserving deformation carries NO boost: the on-axis field
+        // magnitude must match the circular rope's exactly.
+        let round = RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, ..Default::default() };
+        let flat = RopeParams { pancake_a: 3.0, ..round };
+        let fr = Frame::new(0.0, 0.0, 90.0);
+        let t = arrival_time_s(&round, AU_KM);
+        let d = round.dbm().apex_km(t);
+        let probe = [d - 1.0, 0.0, 0.0]; // 1 km inside the apex axis
+        let br = field_at(&round, &fr, t, probe);
+        let bf = field_at(&flat, &fr, t, probe);
+        assert!(br.inside && bf.inside);
+        let mag = |fs: &FieldSample| dot(fs.b, fs.b).sqrt();
+        assert!(
+            (mag(&br) - mag(&bf)).abs() < 1e-9 * mag(&br).max(1.0),
+            "axis field must be boost-free: {} vs {}",
+            mag(&br),
+            mag(&bf)
+        );
+    }
+
+    #[test]
+    fn pancaking_widens_the_hit_footprint() {
+        // The §18 claim one spacecraft CAN'T measure but geometry pins: a
+        // flank observer beyond the circular footprint gets hit once the
+        // section flattens (transverse half-width σ√A).
+        let round = RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, ..Default::default() };
+        let flat = RopeParams { pancake_a: 2.5, ..round };
+        let flank = observer_pos(1.0, 8.0, 0.0);
+        let n = 400;
+        let mut out = vec![0.0f32; 4 * n];
+        let hits_round =
+            synth_series(&[RopeEntry::new(round, 0.0)], &TrainCfg::default(), 0.0, 1800.0, n, flank, &mut out);
+        let hits_flat =
+            synth_series(&[RopeEntry::new(flat, 0.0)], &TrainCfg::default(), 0.0, 1800.0, n, flank, &mut out);
+        assert_eq!(hits_round, 0, "8° flank must miss the circular rope");
+        assert!(hits_flat > 0, "8° flank must catch the A=2.5 pancaked rope");
+        // And the nose dwell shrinks with the thinned radial axis.
+        let mut o2 = vec![0.0f32; 4 * n];
+        let nose_round =
+            synth_series(&[RopeEntry::new(round, 0.0)], &TrainCfg::default(), 0.0, 1800.0, n, earth(), &mut o2);
+        let nose_flat =
+            synth_series(&[RopeEntry::new(flat, 0.0)], &TrainCfg::default(), 0.0, 1800.0, n, earth(), &mut o2);
+        assert!(
+            nose_flat < nose_round,
+            "nose dwell must shrink: {} vs {} steps",
+            nose_flat,
+            nose_round
+        );
     }
 
     #[test]

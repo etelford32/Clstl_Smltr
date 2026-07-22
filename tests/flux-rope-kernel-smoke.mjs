@@ -574,6 +574,79 @@ check('gannon ensemble: observed min inside member spread',
     k.setInteraction({ enabled: false });
 }
 
+// ── Pancaking (spec §18) — v1.5: geometry capability, honestly scoped ────────
+// A single spacecraft cannot measure the aspect (the nose chord is
+// near-degenerate under σ·√A co-scaling — MEASURED below), so the fitted
+// presets stay circular. What the flattening genuinely changes is the
+// transverse footprint — who gets hit — and therefore ensemble calibration.
+{
+    // Mechanism through the committed WASM: an 8° flank observer misses the
+    // circular rope and catches the A = 2.5 pancaked one; the nose dwell
+    // shrinks with the thinned radial axis.
+    const FLANK = { rAu: 1.0, lonDeg: 8, latDeg: 0 };
+    k.setRope({ tiltDeg: 90, v0Kms: 1100 });
+    const roundFlank = k.series(0, 1800, 400, FLANK);
+    const roundNose = k.series(0, 1800, 400);
+    k.setRope({ tiltDeg: 90, v0Kms: 1100, pancakeA: 2.5 });
+    const flatFlank = k.series(0, 1800, 400, FLANK);
+    const flatNose = k.series(0, 1800, 400);
+    check('pancake: 8° flank miss → hit as the section flattens (A = 2.5)',
+        roundFlank.hits === 0 && flatFlank.hits > 0,
+        `flank hits ${roundFlank.hits} → ${flatFlank.hits}`);
+    check('pancake: nose dwell shrinks with the thinned radial axis',
+        flatNose.hits < roundNose.hits, `${roundNose.hits} → ${flatNose.hits} steps`);
+
+    // The single-spacecraft degeneracy, MEASURED on the real hindcast: the
+    // co-scaled pancaked fit reproduces the v1.4 series metrics almost
+    // unchanged — which is exactly why A is not fittable from L1 alone.
+    const base = ST_PATRICK_FIT.standoffFit.rope;
+    const metrics = (rope) => {
+        k.setRope(rope);
+        const s = k.series(t0S, stepS, n, L1_OBSERVER);
+        let min = Infinity, iMin = -1;
+        let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+        for (let i = 0; i < n; i++) {
+            if (s.bz[i] < min) { min = s.bz[i]; iMin = i; }
+            const y = obsBz[i];
+            if (!Number.isFinite(y)) continue;
+            sx += s.bz[i]; sy += y; sxx += s.bz[i] ** 2; syy += y * y; sxy += s.bz[i] * y;
+        }
+        const r = (sxy - sx * sy / n) / Math.sqrt((sxx - sx * sx / n) * (syy - sy * sy / n) || 1);
+        const first = s.inside.findIndex((v) => v > 0);
+        return { min, iMin, r, first };
+    };
+    const m1 = metrics(base);
+    const m2 = metrics({ ...base, pancakeA: 2, sigma1AuAu: base.sigma1AuAu * Math.SQRT2 });
+    check('pancake: nose chord near-degenerate under σ·√A co-scaling (why L1 alone cannot fit A)',
+        Math.abs(m2.r - m1.r) < 0.02
+            && Math.abs(m2.first - m1.first) * stepS / 3600 < 0.5
+            && Math.abs(m2.min - m1.min) < 2.5,
+        `r ${m1.r.toFixed(3)} vs ${m2.r.toFixed(3)}, onset Δ${(Math.abs(m2.first - m1.first) * stepS / 3600).toFixed(1)} h, min Δ${Math.abs(m2.min - m1.min).toFixed(1)} nT`);
+
+    // The calibration warning, pinned: identical spreads, A = 2 co-scaled →
+    // P(hit) rises sharply. The aspect is unconstrained by single-point
+    // data, so storm-probability calibration inherits this sensitivity.
+    k.setRope(base);
+    k.setSpreads({});
+    const pRound = k.ensembleRun(1805, 500, t0S, stepS, n, L1_OBSERVER).pHit;
+    k.setRope({ ...base, pancakeA: 2, sigma1AuAu: base.sigma1AuAu * Math.SQRT2 });
+    k.setSpreads({});
+    const pFlat = k.ensembleRun(1805, 500, t0S, stepS, n, L1_OBSERVER).pHit;
+    check('pancake: P(hit) strongly aspect-sensitive at identical spreads (the §18 calibration warning)',
+        pFlat > pRound + 0.1, `${pRound.toFixed(2)} → ${pFlat.toFixed(2)}`);
+
+    // Decision pinned: no fitted preset carries an aspect (tested, rejected
+    // per event — the front-compression precedent).
+    const allRopes = [
+        ST_PATRICK_FIT.rope, ST_PATRICK_FIT.sheathFit.rope, ST_PATRICK_FIT.frontFit.rope,
+        ST_PATRICK_FIT.standoffFit.rope,
+        ...GANNON_FIT.ropes, ...GANNON_FIT.sheathRopes,
+        ...GANNON_FIT.interactionRopes, ...GANNON_FIT.standoffRopes,
+    ];
+    check('pancake: fitted presets stay circular (tested; no hindcast improvement)',
+        allRopes.every((r) => (r.pancakeA ?? 1) === 1));
+}
+
 // ── STEREO-A pre-arrival conditioning (spec §13) — the OSSE, end to end ──────
 // Drives the committed WASM through the exact flow the page uses for the
 // OSSE preset: synthesize the truth at both observers, condition the prior

@@ -216,6 +216,7 @@ body {
             <div class="fr-field"><label>sheath δ</label><input type="range" id="p-sheathDeltaNt" min="0" max="6" step="0.5"><output>0 nT</output></div>
             <div class="fr-field"><label>front compr.</label><input type="range" id="p-frontC" min="0" max="0.6" step="0.05"><output>0</output></div>
             <div class="fr-field" title="Farris–Russell standoff η (spec §17): 0 = legacy fixed-k shell; ≈1.1 = quiet-wind blunt body"><label>standoff η</label><input type="range" id="p-sheathEta" min="0" max="3" step="0.1"><output>0</output></div>
+            <div class="fr-field" title="Pancaking aspect A (spec §18): elliptical cross-section, σ/√A radial × σ√A transverse. Area-preserving; 1 = circular"><label>pancake A</label><input type="range" id="p-pancakeA" min="1" max="4" step="0.1"><output>1</output></div>
             <div class="fr-row2">
                 <div class="fr-field" style="grid-template-columns:88px 1fr;"><label>chirality</label>
                     <select id="p-handedness"><option value="1">right (+)</option><option value="-1">left (−)</option></select></div>
@@ -268,7 +269,11 @@ body {
     SSC, rope onset within 1.4 h (was 4.1 h), min Bz −24.6 vs −24.25 nT,
     r 0.69 · Gannon May 2024 (2-rope interacting train, v1.4) min −44.3 vs
     −44.2 nT, internal disturbance +48.8 vs +48.7 h, both southward
-    episodes reproduced. Unmodeled, on record: the X3.9/X5.8 Gannon CMEs,
+    episodes reproduced. Cross-section pancaking (spec §18) is implemented
+    and unit-pinned but the fitted presets stay circular: a single
+    spacecraft cannot measure the aspect (measured degeneracy), while
+    P(hit) is strongly aspect-sensitive — the honest calibration caveat on
+    storm probabilities. Unmodeled, on record: the X3.9/X5.8 Gannon CMEs,
     momentum exchange, sheath-interior deterministic Bz.
 </p>
 
@@ -522,8 +527,8 @@ function renderRopeTabs() {
 }
 
 // ── Parameter panel ──────────────────────────────────────────────────────────
-const SLIDERS = ['lonDeg', 'latDeg', 'tiltDeg', 'twistTurns', 'b1AuNt', 'sigma1AuAu', 'v0Kms', 'wKms', 'sheathDeltaNt', 'frontC', 'sheathEta'];
-const UNITS = { lonDeg: '°', latDeg: '°', tiltDeg: '°', twistTurns: '', b1AuNt: ' nT', sigma1AuAu: ' AU', v0Kms: ' km/s', wKms: ' km/s', sheathDeltaNt: ' nT', frontC: '', sheathEta: '' };
+const SLIDERS = ['lonDeg', 'latDeg', 'tiltDeg', 'twistTurns', 'b1AuNt', 'sigma1AuAu', 'v0Kms', 'wKms', 'sheathDeltaNt', 'frontC', 'sheathEta', 'pancakeA'];
+const UNITS = { lonDeg: '°', latDeg: '°', tiltDeg: '°', twistTurns: '', b1AuNt: ' nT', sigma1AuAu: ' AU', v0Kms: ' km/s', wKms: ' km/s', sheathDeltaNt: ' nT', frontC: '', sheathEta: '', pancakeA: '' };
 
 function syncSliders() {
     const rope = activeRope();

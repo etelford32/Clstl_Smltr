@@ -166,8 +166,22 @@ the same crate.
   retires the k = 2.0 stand-in. New limiting residual, on record: the
   observed St. Patrick's minimum sits AT the leading edge; the model's
   at 22% of dwell — the §15 front-compression clamp is now the
-  bottleneck. Remaining Phase 5: momentum exchange, deformation/
-  pancaking, EEGGL/SWMF comparison runs, server-side API build.
+  bottleneck.
+  ✅ cross-section pancaking (2026-07-22, spec §18): elliptical
+  deformation σ/√A radial × σ·√A transverse, area-preserving (no field
+  boost — only the compressive §15/§16 lobes boost), composed cleanly
+  with the odd lobes as the even factor of one boundary distortion.
+  Honest outcome, pinned: the nose chord is near-degenerate under
+  (σ·√A, A) co-scaling — MEASURED on St. Patrick's (r 0.676 vs 0.686,
+  onset Δ0.3 h) — so no fitted preset carries an aspect (the §15
+  rejection precedent; Gannon trades min 0.3% → 10.1% for r +0.006).
+  What the flattening genuinely changes is pinned instead: an 8° flank
+  observer misses circular and catches A = 2.5, and ensemble P(hit)
+  jumps 0.54 → 0.83 at identical spreads — the documented calibration
+  sensitivity of storm probabilities to an aspect single-point data
+  cannot constrain (multi-point/§13 or a population prior resolves it;
+  future work). Remaining Phase 5: momentum exchange, EEGGL/SWMF
+  comparison runs, server-side API build.
 
 ## 5. Data inputs
 

@@ -43,6 +43,10 @@ export const ROPE_DEFAULTS = Object.freeze({
     // η·FR(M)·√(σ_eff·d/2) and sheathK is ignored. 0 = legacy fixed-k
     // shell; literature anchor ≈ 1.1 for a quiet-wind blunt body.
     sheathEta: 0,
+    // Pancaking aspect A (spec §18): elliptical cross-section with
+    // semi-axes σ/√A (radial) and σ·√A (transverse). Area-preserving —
+    // no field boost. 1 = circular; literature 1 AU aspects ~2–6.
+    pancakeA: 1,
 });
 
 export const SPREAD_DEFAULTS = Object.freeze({
@@ -97,7 +101,7 @@ export async function loadFluxRopeKernel(source) {
                 r.b1AuNt, r.sigma1AuAu, r.nB, r.nSigma, r.d0Rsun,
                 r.v0Kms, r.gammaPerKm, r.wKms,
                 r.profile === 'lundquist' ? 1 : 0,
-                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC, r.sheathEta,
+                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC, r.sheathEta, r.pancakeA,
             );
             return r;
         },
@@ -113,7 +117,7 @@ export async function loadFluxRopeKernel(source) {
                 r.b1AuNt, r.sigma1AuAu, r.nB, r.nSigma, r.d0Rsun,
                 r.v0Kms, r.gammaPerKm, r.wKms,
                 r.profile === 'lundquist' ? 1 : 0,
-                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC, r.sheathEta,
+                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC, r.sheathEta, r.pancakeA,
                 r.launchOffsetS,
             );
             return n;
