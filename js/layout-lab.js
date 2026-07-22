@@ -57,6 +57,22 @@ export function migrateLayout(raw) {
     return raw;
 }
 
+/** The order a zone actually applies: the mobile priority under the
+ *  mobile breakpoint when one exists, else the desktop order. */
+export function effectiveOrder(spec, mobile) {
+    return mobile && spec?.orderMobile?.length ? spec.orderMobile : (spec?.order ?? []);
+}
+
+/** "Arrange on the device you're on": which side of the doc a capture
+ *  updates. On mobile, the current arrangement becomes orderMobile and
+ *  the desktop order is preserved from the prior doc; on desktop the
+ *  reverse. Pure — captureLayout uses it. */
+export function mergeCapturedOrder(currentIds, mobile, prior) {
+    return mobile
+        ? { order: prior?.order?.length ? prior.order : currentIds, orderMobile: currentIds }
+        : { order: currentIds, orderMobile: prior?.orderMobile ?? [] };
+}
+
 /**
  * Merge a saved panel order with the panels actually present in the DOM.
  * - saved ids that no longer exist are dropped
@@ -116,6 +132,9 @@ export function normalizeLayout(raw, page) {
         if (!z || typeof z !== 'object') continue;
         zones[zid] = {
             order: strList(z.order),
+            // D2 mobile order: an OPTIONAL single-column priority used
+            // under the mobile breakpoint; empty = fall back to `order`.
+            orderMobile: strList(z.orderMobile),
             hidden: strList(z.hidden),
             wide: strList(z.wide),
             size: sizeMap(z.size),
@@ -137,6 +156,14 @@ const zoneEls = (root) => [...root.querySelectorAll('[data-lab-zone]')];
 const panelsOf = (zoneEl) =>
     [...zoneEl.children].filter(c => c.hasAttribute?.('data-lab-panel'));
 const pid = (el) => el.getAttribute('data-lab-panel');
+
+/* Multi-instance panels (D2): instance ids are 'base#n' (e.g.
+   'aurora-spot#2'). The base id is the registry entry; instances are
+   created at runtime by the page's `instantiate` factory — on gallery
+   ＋Add, and during applyLayout for instance ids a saved layout carries
+   that are not in the DOM yet. */
+export const instanceBase = (id) => String(id).split('#')[0];
+export const isInstanceId = (id) => String(id).includes('#');
 
 // The element whose height a resize actually changes: the panel itself for
 // data-lab-resize="1", else the first match of the selector inside it (a
@@ -161,7 +188,17 @@ function setSize(panel, h) {
     t.style.height = h === null ? '' : clampSize(h) + 'px';
 }
 
-export function captureLayout(root, page, preset = null) {
+const isMobileViewport = () =>
+    typeof matchMedia !== 'undefined' && matchMedia('(max-width: 768px)').matches;
+
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.mobile]  viewport override (defaults to matchMedia)
+ * @param {object}  [opts.prior]   the doc being edited — its OTHER order
+ *                                 side is preserved (mergeCapturedOrder)
+ */
+export function captureLayout(root, page, preset = null, opts = {}) {
+    const mobile = opts.mobile ?? isMobileViewport();
     const zones = {};
     for (const z of zoneEls(root)) {
         const size = {};
@@ -169,8 +206,10 @@ export function captureLayout(root, page, preset = null) {
             const h = currentSize(p);
             if (h !== null) size[pid(p)] = h;
         }
-        zones[z.getAttribute('data-lab-zone')] = {
-            order: panelsOf(z).map(pid),
+        const zid = z.getAttribute('data-lab-zone');
+        zones[zid] = {
+            ...mergeCapturedOrder(panelsOf(z).map(pid), mobile,
+                normalizeLayout(opts.prior, page)?.zones?.[zid]),
             hidden: panelsOf(z).filter(p => p.classList.contains('lab-hidden')).map(pid),
             wide: panelsOf(z).filter(p => p.classList.contains('lab-wide')).map(pid),
             size,
@@ -179,16 +218,29 @@ export function captureLayout(root, page, preset = null) {
     return { v: LAYOUT_VERSION, page, preset, zones };
 }
 
-export function applyLayout(root, layout) {
+export function applyLayout(root, layout, instantiate = null) {
     const doc = normalizeLayout(layout);
     if (!doc) return false;
     for (const z of zoneEls(root)) {
         const spec = doc.zones[z.getAttribute('data-lab-zone')];
         if (!spec) continue;
+        // Recreate saved multi-instance panels that aren't in the DOM yet
+        // (they only exist when a factory builds them) BEFORE merging, so
+        // mergeOrder doesn't drop their ids as stale.
+        if (instantiate) {
+            const live = new Set(panelsOf(z).map(pid));
+            for (const id of spec.order) {
+                if (!isInstanceId(id) || live.has(id)) continue;
+                try {
+                    const el = instantiate(id);
+                    if (el) { el.setAttribute('data-lab-panel', id); z.appendChild(el); }
+                } catch { /* a broken factory must not break apply */ }
+            }
+        }
         const panels = panelsOf(z);
         if (!panels.length) continue;
         const byId = new Map(panels.map(p => [pid(p), p]));
-        const order = mergeOrder(panels.map(pid), spec.order);
+        const order = mergeOrder(panels.map(pid), effectiveOrder(spec, isMobileViewport()));
         // Reinsert the ordered block where the first panel currently sits,
         // so non-panel siblings (header, alert bars) keep their positions.
         const marker = z.ownerDocument.createComment('lab');
@@ -304,6 +356,22 @@ function savePanelConfigStore(page, all) {
     } catch {}
 }
 
+/** Merge values into one panel's config, persist, publish. Exported so
+ *  self-configuring panels (e.g. the aurora-spot card's location picker)
+ *  write through the SAME store + event the ⚙ sheets use. */
+export function setPanelConfigValue(page, panelId, values) {
+    const all = loadPanelConfig(page);
+    all[panelId] = { ...(all[panelId] || {}), ...values };
+    const clean = sanitizeConfig(all);
+    savePanelConfigStore(page, clean);
+    try {
+        window.__swPanelConfig = clean;
+        window.dispatchEvent(new CustomEvent('sw-panel-config',
+            { detail: { panel: panelId, config: clean[panelId] || {} } }));
+    } catch {}
+    return clean;
+}
+
 /* ── Entry point ───────────────────────────────────────────────────── */
 
 /**
@@ -319,9 +387,13 @@ function savePanelConfigStore(page, all) {
  *                 (e.g. js/space-weather-registry.js PANELS) — enables the
  *                 gallery drawer in design mode; pages without a registry
  *                 keep the pre-D1 designer unchanged
+ * @param {Function} [opts.instantiate]  (instanceId) => Element|null —
+ *                 factory for multi-instance panels ('base#n'); called on
+ *                 gallery ＋Add and for saved instance ids applyLayout
+ *                 finds missing from the DOM
  */
 export async function initLayoutLab({ page, experimentKey, variantsUrl,
-                                      presetsUrl, registry } = {}) {
+                                      presetsUrl, registry, instantiate } = {}) {
     if (typeof document === 'undefined' || !page) return null;
     const root = document;
     injectStyles();
@@ -358,12 +430,12 @@ export async function initLayoutLab({ page, experimentKey, variantsUrl,
     // Resolve what to show: personal beats variant beats authored.
     const personal = loadPersonal(page);
     let mode = 'authored';
-    if (personal && applyLayout(root, personal)) {
+    if (personal && applyLayout(root, personal, instantiate)) {
         mode = 'personal';
     } else if (exp) {
         variant = exp.assign(experimentKey);   // exposure fires (deduped)
         const v = variantsDoc?.variants?.[variant];
-        if (v && applyLayout(root, normalizeLayout(v, page))) mode = `variant:${variant}`;
+        if (v && applyLayout(root, normalizeLayout(v, page), instantiate)) mode = `variant:${variant}`;
     }
 
     // User size overrides land last so they win over whatever layout applied.
@@ -377,14 +449,8 @@ export async function initLayoutLab({ page, experimentKey, variantsUrl,
     // the setter to the designer's ⚙ sheets.
     const panelConfig = loadPanelConfig(page);
     const setPanelConfig = (panelId, values) => {
-        panelConfig[panelId] = { ...(panelConfig[panelId] || {}), ...values };
-        const clean = sanitizeConfig(panelConfig);
-        savePanelConfigStore(page, clean);
-        try {
-            window.__swPanelConfig = clean;
-            window.dispatchEvent(new CustomEvent('sw-panel-config',
-                { detail: { panel: panelId, config: clean[panelId] || {} } }));
-        } catch {}
+        const clean = setPanelConfigValue(page, panelId, values);
+        Object.assign(panelConfig, clean);
         trackFeature('panel_config', { page, panel: panelId });
     };
     try {
@@ -403,10 +469,10 @@ export async function initLayoutLab({ page, experimentKey, variantsUrl,
         // layouts from scratch-built ones.
         preset: personal?.preset ?? null,
         panelConfig,
-        applyLayout: (l) => applyLayout(root, l),
+        applyLayout: (l) => applyLayout(root, l, instantiate),
     };
     if (labEnabled()) mountDesigner(root, page, authored, variantsDoc, api, exp,
-                                    presetsDoc, registry, setPanelConfig);
+                                    presetsDoc, registry, setPanelConfig, instantiate);
     return api;
 }
 
@@ -551,6 +617,7 @@ body.lab-design .lab-chip { display: flex; }
 .lab-gallery-del { border: 1px solid rgba(255,120,120,.45); color: #f2a6a6; }
 .lab-gallery-missing { opacity: .45; }
 .lab-gallery-missing span:last-child { font-size: 10px; color: #f2a6a6; }
+.lab-gallery-instance { padding-left: 16px; opacity: .9; }
 .lab-config-sheet { margin: 2px 4px 8px; padding: 7px 9px; border-radius: 8px;
   background: rgba(0,30,55,.55); border: 1px solid rgba(0,198,255,.3); }
 .lab-config-sheet label { display: flex; justify-content: space-between; align-items: center;
@@ -566,7 +633,7 @@ body.lab-design .lab-chip { display: flex; }
 }
 
 function mountDesigner(root, page, authored, variantsDoc, api, exp,
-                       presetsDoc, registry, setPanelConfig) {
+                       presetsDoc, registry, setPanelConfig, instantiate) {
     const open = document.createElement('button');
     open.id = 'lab-open';
     open.textContent = '🎛 Customize';
@@ -714,8 +781,8 @@ function mountDesigner(root, page, authored, variantsDoc, api, exp,
             btn('🗂 Gallery', 'Browse every panel — show, hide, and jump to panels', toggleGallery);
         }
 
-        btn('💾 Save mine', 'Save current arrangement as YOUR layout (this browser)', () => {
-            savePersonal(page, captureLayout(root, page, api.preset));
+        btn('💾 Save mine', 'Save current arrangement as YOUR layout (this browser; on a phone this saves your MOBILE order)', () => {
+            savePersonal(page, captureLayout(root, page, api.preset, { prior: loadPersonal(page) }));
             api.mode = 'personal'; status();
             trackFeature('layout_save', { page, preset: api.preset });
             // Cloud sync (D2) listens for this and pushes the bundle.
@@ -729,7 +796,7 @@ function mountDesigner(root, page, authored, variantsDoc, api, exp,
             api.mode = 'authored'; api.preset = null; status(); refreshGallery();
         });
         btn('📋 Export', 'Copy current arrangement as JSON — paste into data/layout-variants to publish as an A/B variant', async () => {
-            const json = JSON.stringify(captureLayout(root, page, api.preset), null, 2);
+            const json = JSON.stringify(captureLayout(root, page, api.preset, { prior: loadPersonal(page) }), null, 2);
             try { await navigator.clipboard.writeText(json); alert('Layout JSON copied to clipboard.'); }
             catch { prompt('Copy the layout JSON:', json); }
             console.log('[layout-lab] export\n' + json);
@@ -800,6 +867,55 @@ function mountDesigner(root, page, authored, variantsDoc, api, exp,
             h.textContent = entries[0]?.familyLabel || family;
             wrap.appendChild(h);
             for (const entry of entries) {
+                // Multi-instance entries: a ＋Add row plus one sub-row per
+                // live instance (⚙ config keyed by the INSTANCE id, ✕
+                // removes it — capture/save then reflects the change).
+                if (entry.multiInstance) {
+                    const row = document.createElement('div');
+                    row.className = 'lab-gallery-row';
+                    row.title = entry.blurb || '';
+                    row.innerHTML = `<span class="lab-gallery-title">${entry.title}</span>`;
+                    const add = document.createElement('button');
+                    add.textContent = '＋ Add';
+                    add.className = 'lab-gallery-add';
+                    add.title = 'Add another instance of this panel';
+                    add.addEventListener('click', () => {
+                        if (!instantiate) return;
+                        const live = [...root.querySelectorAll(`[data-lab-panel^="${entry.id}#"]`)];
+                        const next = 1 + live.reduce((m, p) =>
+                            Math.max(m, +pid(p).split('#')[1] || 0), 0);
+                        const id = `${entry.id}#${next}`;
+                        const el2 = instantiate(id);
+                        if (!el2) return;
+                        el2.setAttribute('data-lab-panel', id);
+                        const zone = zoneEls(root).find((z) =>
+                            z.getAttribute('data-lab-zone') === entry.zone) || zoneEls(root)[0];
+                        zone.insertBefore(el2, panelsOf(zone)[0] || null);
+                        el2.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        trackFeature('panel_add', { page, panel: id });
+                        refreshGallery();
+                    });
+                    row.appendChild(add);
+                    wrap.appendChild(row);
+                    for (const inst of root.querySelectorAll(`[data-lab-panel^="${entry.id}#"]`)) {
+                        const iid = pid(inst);
+                        const sub = document.createElement('div');
+                        sub.className = 'lab-gallery-row lab-gallery-instance';
+                        sub.innerHTML = `<span class="lab-gallery-title">· ${iid}</span>`;
+                        const del = document.createElement('button');
+                        del.textContent = '✕';
+                        del.className = 'lab-gallery-del';
+                        del.title = 'Remove this instance';
+                        del.addEventListener('click', () => {
+                            inst.remove();
+                            trackFeature('panel_remove', { page, panel: iid });
+                            refreshGallery();
+                        });
+                        sub.appendChild(del);
+                        wrap.appendChild(sub);
+                    }
+                    continue;
+                }
                 const el = panelEl(entry.id);
                 const row = document.createElement('div');
                 row.className = 'lab-gallery-row';

@@ -85,7 +85,14 @@ test('config schemas (D2 sheets) are well-formed with in-range defaults', () => 
 test('every data-lab-panel in the page has a registry entry, and vice versa', () => {
     const inPage = [...html.matchAll(/data-lab-panel="([^"]+)"/g)].map(m => m[1]);
     assert.equal(new Set(inPage).size, inPage.length, 'duplicate data-lab-panel in page');
-    assert.deepEqual(new Set(inPage), new Set(PANELS.map(p => p.id)));
+    // Static panels = every non-multiInstance registry entry, exactly.
+    const staticIds = PANELS.filter(p => !p.multiInstance).map(p => p.id);
+    assert.deepEqual(new Set(inPage), new Set(staticIds));
+    // Multi-instance entries have no static markup — they must ship a
+    // <template id="<id>-template"> the factory clones instead.
+    for (const p of PANELS.filter(p => p.multiInstance)) {
+        assert.ok(html.includes(`id="${p.id}-template"`), `${p.id}: template required`);
+    }
 });
 
 test('registry zone assignment matches the page nesting', () => {
@@ -98,6 +105,7 @@ test('registry zone assignment matches the page nesting', () => {
     assert.ok(gridStart > 0 && gridEnd > gridStart, 'page structure moved — update this test');
     for (const p of PANELS) {
         if (p.id === 'data-grid') continue;   // the container itself is a main panel
+        if (p.multiInstance) continue;        // no static position to check
         const pos = html.indexOf(`data-lab-panel="${p.id}"`);
         const inGridSpan = pos > gridStart && pos < gridEnd;
         assert.equal(inGridSpan, p.zone === 'grid', `${p.id}: zone ${p.zone} vs page position`);
@@ -123,9 +131,12 @@ test('every preset normalizes as v2 with its own name stamped', () => {
 });
 
 test('presets are total and closed over the registry (deterministic apply)', () => {
+    // Multi-instance panels are user-created — presets neither list nor
+    // require them (mergeOrder keeps saved instances near their zone
+    // predecessors on apply).
     const zoneIds = {
-        main: panelsForZone('main').map(p => p.id),
-        grid: panelsForZone('grid').map(p => p.id),
+        main: panelsForZone('main').filter(p => !p.multiInstance).map(p => p.id),
+        grid: panelsForZone('grid').filter(p => !p.multiInstance).map(p => p.id),
     };
     for (const [k, p] of Object.entries(presetsDoc.presets)) {
         for (const [zone, ids] of Object.entries(zoneIds)) {
@@ -137,6 +148,11 @@ test('presets are total and closed over the registry (deterministic apply)', () 
                 `${k}/${zone}: duplicate id in order`);
             for (const id of [...spec.hidden, ...spec.wide]) {
                 assert.ok(spec.order.includes(id), `${k}/${zone}: ${id} not in order`);
+            }
+            // A curated mobile order (optional) must be total too.
+            if (spec.orderMobile?.length) {
+                assert.deepEqual(new Set(spec.orderMobile), new Set(ids),
+                    `${k}/${zone}: orderMobile must list every registry panel`);
             }
             // applyLayout only honours wide in zones marked data-lab-wide="1"
             // — on this page that is the grid alone.

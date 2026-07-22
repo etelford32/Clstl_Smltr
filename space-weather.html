@@ -3129,6 +3129,19 @@ try {
     </div>
 
     <!-- ── LIVE DATA SOURCES PANEL ─────────────────────────────────────────── -->
+    <!-- Template for the multi-instance aurora-spot cards (D2) — inert
+         until js/aurora-spot-card.js clones it; deliberately NOT a
+         data-lab-panel (instances get 'aurora-spot#n' ids at runtime). -->
+    <template id="aurora-spot-template">
+        <div class="data-card aurora-spot-card">
+            <h3>Aurora tonight · <span class="as-city">pick a spot</span></h3>
+            <select class="as-loc" aria-label="Pick a saved location"
+                style="width:100%;margin:4px 0 8px;padding:5px 8px;border-radius:6px;border:1px solid var(--sw-border,rgba(255,255,255,.09));background:rgba(0,10,26,.8);color:var(--sw-text-bright,#e8f4ff);font:inherit"></select>
+            <div class="as-verdict" style="font-size:1.6rem;font-weight:800;margin:2px 0">—</div>
+            <div class="as-detail" style="font-size:.72rem;color:var(--sw-text-muted,#8b94ad)"></div>
+        </div>
+    </template>
+
     <div class="data-sources-panel" data-lab-panel="sources">
         <h4>⚡ Live Data Sources</h4>
         <div class="ds-grid">
@@ -6088,6 +6101,7 @@ window.openImg = function(thumb) {
 try {
     const { initLayoutLab } = await import('./js/layout-lab.js');
     const { PANELS, FAMILIES } = await import('./js/space-weather-registry.js');
+    const { createAuroraSpotCard } = await import('./js/aurora-spot-card.js');
     initLayoutLab({
         page: 'space-weather',
         experimentKey: 'sw_layout_v1',
@@ -6096,6 +6110,10 @@ try {
         // Decorate with display labels here so layout-lab stays generic
         // (it renders entry.familyLabel, never imports the registry).
         registry: PANELS.map((p) => ({ ...p, familyLabel: FAMILIES[p.family] })),
+        // Multi-instance factory (D2): saved 'aurora-spot#n' ids and the
+        // gallery's ＋Add both come through here.
+        instantiate: (id) =>
+            id.startsWith('aurora-spot#') ? createAuroraSpotCard(id) : null,
     });
 } catch (e) { console.warn('[layout-lab] disabled:', e); }
 </script>
@@ -6125,6 +6143,13 @@ mountStage('sw-stage-host');
 <script type="module">
 import { initDashboardSync } from './js/dashboard-sync.js';
 initDashboardSync({ page: 'space-weather' });
+</script>
+
+<!-- First-run flow (D2; once, post-signin, skipped for existing users
+     and previews — see js/sw-first-run.js) -->
+<script type="module">
+import { mountFirstRun } from './js/sw-first-run.js';
+mountFirstRun('space-weather');
 </script>
 
 </body>

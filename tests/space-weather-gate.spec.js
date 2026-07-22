@@ -21,6 +21,7 @@ const SEED_AUTH = () => {
         signedIn: true, id: 'e2e-gate', email: 'e2e@playwright.test',
         plan: 'free', role: 'user', provider: 'password',
     }));
+    localStorage.setItem('sw-first-run-done', '1');
 };
 
 test.describe('space-weather sign-in gate', () => {

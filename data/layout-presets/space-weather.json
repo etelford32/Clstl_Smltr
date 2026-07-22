@@ -34,7 +34,23 @@
               "tables"
             ],
             "wide": [],
-            "size": {}
+            "size": {},
+            "orderMobile": [
+              "stage",
+              "metrics-hero",
+              "earth-forecast",
+              "forecast-timeline",
+              "globe",
+              "flux-rope-forecast",
+              "cme-forecast",
+              "data-grid",
+              "imagery",
+              "transit",
+              "helio-hero",
+              "solar-system-info",
+              "tables",
+              "sources"
+            ]
           },
           "grid": {
             "order": [
@@ -93,7 +109,23 @@
               "solar-system-info"
             ],
             "wide": [],
-            "size": {}
+            "size": {},
+            "orderMobile": [
+              "stage",
+              "metrics-hero",
+              "cme-forecast",
+              "flux-rope-forecast",
+              "forecast-timeline",
+              "data-grid",
+              "transit",
+              "earth-forecast",
+              "globe",
+              "imagery",
+              "tables",
+              "sources",
+              "helio-hero",
+              "solar-system-info"
+            ]
           },
           "grid": {
             "order": [

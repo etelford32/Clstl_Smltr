@@ -151,6 +151,17 @@ export const PANELS = Object.freeze([
       title: 'Earth orbital state',
       blurb: 'VSOP87D on-device ephemeris for Earth.',
       personas: ['educator'] },
+
+    // ── Multi-instance panels (D2) ──────────────────────────────────────
+    // No static markup — instances ('aurora-spot#n') are built at runtime
+    // from <template id="aurora-spot-template"> by js/aurora-spot-card.js
+    // via layout-lab's instantiate hook. The drift test checks the
+    // template instead of a data-lab-panel, and presets do not list
+    // multi-instance ids (instances are user-created).
+    { id: 'aurora-spot', zone: 'grid', family: 'forecast', multiInstance: true,
+      title: 'Aurora tonight — saved spot',
+      blurb: 'GO / Maybe / No for one of your saved locations — add one card per spot.',
+      personas: ['chaser'] },
 ]);
 
 /* ── Pure helpers ─────────────────────────────────────────────────────── */

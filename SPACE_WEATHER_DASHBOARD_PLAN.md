@@ -426,10 +426,28 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
   (stage/scale.js BODY), so surface features, shells, and the
   magnetopause share ONE local scale. The forecast-band magnetopause
   breathing (vs observed-now) remains an S3-era upgrade.
-- **D2 — Personalization depth. ✅ CORE SHIPPED 2026-07-22** (config
-  sheets + threshold unification + cloud sync — the arc the author
-  commissioned; still open within D2: multi-instance panels, the mobile
-  dock order, and the first-run persona flow). Landed as:
+- **D2 — Personalization depth. ✅ FULLY SHIPPED 2026-07-22** (core arc
+  + the remainder in a second round). The remainder landed as:
+  · **Multi-instance panels**: registry entries may set `multiInstance`
+    (no static markup; a `<template id>` + a page `instantiate` factory
+    instead — drift test amended); instance ids are 'base#n'; applyLayout
+    recreates saved instances through the factory before merging; the
+    gallery gets ＋Add / per-instance ✕. First tenant: the aurora-spot
+    card (js/aurora-spot-card.js — 'Aurora tonight — <spot>' via the
+    SAME verdict-engine GO oracle, location per instance from the
+    ppx_user_locations list + pin, persisted in the panel-config store).
+    Presets deliberately exclude multi-instance ids (user-created).
+  · **Mobile order**: v2 zones gain optional `orderMobile`; applyLayout
+    picks it under 768 px; capture follows "arrange on the device you're
+    on" (mergeCapturedOrder preserves the other side from the prior
+    doc); chaser + operator presets carry curated single-column orders.
+  · **First-run flow (§11)**: js/sw-first-run.js — once, post-signin,
+    skipped for existing users and previews: persona → location →
+    Kp line in ≤3 taps, writing through the REAL stores (preset layout,
+    saveUserLocation, saveProfile with the alert handoff), then a
+    staged reveal — one reload and the Stage flies to your persona's
+    home staging. Funnel: first_run_view→…→done.
+  The earlier core landed as:
   · **Threshold profile (§8)**: `js/threshold-profile.js` — ONE line
     {kp, minBzNt, dstNt, leoAltKm} (gScale DERIVED from kp, never
     stored), localStorage + 'threshold-profile-changed', ⚙ editor on

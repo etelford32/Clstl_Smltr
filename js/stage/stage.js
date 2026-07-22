@@ -415,6 +415,18 @@ function mount(host) {
     canvas.addEventListener('dblclick', () => flyTo(state.station));
     flyTo('corridor', true);
 
+    // First-run staged reveal (D2, §11): the onboarding flow stamps the
+    // chosen persona; land on that persona's home staging with a flight.
+    try {
+        const reveal = sessionStorage.getItem('sw-first-run-reveal');
+        if (reveal) {
+            sessionStorage.removeItem('sw-first-run-reveal');
+            const home = reveal === 'chaser' ? 'my-sky'
+                : reveal === 'operator' ? 'orbit-ops' : 'corridor';
+            setTimeout(() => flyTo(home), 900);
+        }
+    } catch {}
+
     /* ── True-scale toggle ────────────────────────────────────────── */
     const scaleBtn = wrap.querySelector('.swst-truescale');
     scaleBtn.addEventListener('click', () => {

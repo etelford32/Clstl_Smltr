@@ -24,6 +24,7 @@ test.beforeEach(async ({ page }) => {
             signedIn: true, id: 'e2e-ua', email: 'e2e@playwright.test',
             plan: 'free', role: 'user', provider: 'password',
         }));
+        localStorage.setItem('sw-first-run-done', '1');
     });
 });
 

@@ -16,6 +16,7 @@ function seed(page, { plan = 'basic', sbToken = true } = {}) {
             signedIn: true, id: 'e2e-d2-user', email: 'e2e@playwright.test',
             plan, role: 'user', provider: 'password',
         }));
+        localStorage.setItem('sw-first-run-done', '1');
         if (sbToken) {
             localStorage.setItem('sb-e2e-auth-token',
                 JSON.stringify({ access_token: 'e2e-'.padEnd(48, 'x') }));
@@ -88,6 +89,47 @@ test.describe('D2 personalization', () => {
             { timeout: 20_000 }).toBe('orbit-ops');
     });
 
+    test('multi-instance: add an aurora spot, pick a place, reload recreates it', async ({ page }) => {
+        test.slow();
+        await seed(page);
+        await page.addInitScript(() => {
+            localStorage.setItem('ppx_user_location', JSON.stringify(
+                { lat: 64.84, lon: -147.72, city: 'Fairbanks' }));
+        });
+        await page.route(SB_REST, (r) => r.fulfill({ json: [] }));
+        await page.goto('/space-weather.html', { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('#lab-open', { timeout: 30_000 });
+        await page.click('#lab-open');
+        await page.getByRole('button', { name: /Gallery/ }).click();
+
+        // ＋Add builds an instance from the template via the factory.
+        const addRow = page.locator('#lab-gallery .lab-gallery-row',
+            { hasText: 'Aurora tonight — saved spot' });
+        await addRow.locator('button', { hasText: 'Add' }).click();
+        const inst = page.locator('[data-lab-panel="aurora-spot#1"]');
+        await expect(inst).toBeVisible();
+
+        // Pick the pin → the card calls the verdict oracle for that spot
+        // and persists the choice in the per-instance config store.
+        await inst.locator('.as-loc').selectOption({ index: 1 });
+        await expect(inst.locator('.as-city')).toContainText('Fairbanks');
+        await expect(inst.locator('.as-verdict')).not.toHaveText('—');
+
+        // Save → the layout doc carries the instance id.
+        await page.getByRole('button', { name: /Save mine/ }).click();
+        const saved = await page.evaluate(() =>
+            JSON.parse(localStorage.getItem('pp-layout.space-weather')));
+        expect(saved.zones.grid.order).toContain('aurora-spot#1');
+
+        // Cold boot: applyLayout's instantiate hook recreates the card,
+        // and the config store restores its location.
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('#lab-open', { timeout: 30_000 });
+        const inst2 = page.locator('[data-lab-panel="aurora-spot#1"]');
+        await expect(inst2).toBeVisible({ timeout: 15_000 });
+        await expect(inst2.locator('.as-city')).toContainText('Fairbanks');
+    });
+
     test('cloud sync: pull → synced, Save mine pushes the {layout,config,sizes} bundle', async ({ page }) => {
         test.slow();
         const pushes = [];
@@ -117,6 +159,43 @@ test.describe('D2 personalization', () => {
         expect(await page.evaluate(() =>
             JSON.parse(localStorage.getItem('pp-layout.space-weather.meta')).updatedAt))
             .toBeTruthy();
+    });
+
+    test('first-run: persona → location(skip) → threshold, staged reveal lands on your staging', async ({ page }) => {
+        test.slow();
+        // Fresh signed-in user: NO first-run-done flag, NO personal layout.
+        await page.addInitScript(() => {
+            localStorage.setItem('pp_auth', JSON.stringify({
+                signedIn: true, id: 'e2e-fresh', email: 'e2e@playwright.test',
+                plan: 'free', role: 'user', provider: 'password',
+            }));
+            try {
+                localStorage.setItem('pp_consent_v1', JSON.stringify(
+                    { strict: true, functional: true, analytics: false, ts: Date.now(), version: 1 }));
+            } catch {}
+        });
+        await page.route(SB_REST, (r) => r.fulfill({ json: [] }));
+        await page.goto('/space-weather.html', { waitUntil: 'domcontentloaded' });
+
+        const fr = page.locator('#sw-first-run');
+        await expect(fr).toBeVisible({ timeout: 30_000 });
+        await fr.locator('.fr-options button', { hasText: 'Aurora Chaser' }).click();
+        await fr.locator('.fr-skip').click();                       // skip location
+        await fr.locator('.fr-kp button', { hasText: 'Kp 5' }).click();
+
+        // The flow wrote through the REAL stores and reloads for the reveal.
+        await page.waitForLoadState('domcontentloaded');
+        await expect.poll(() => page.evaluate(() => ({
+            done: localStorage.getItem('sw-first-run-done'),
+            preset: JSON.parse(localStorage.getItem('pp-layout.space-weather') || 'null')?.preset,
+            kp: JSON.parse(localStorage.getItem('pp-threshold-profile') || 'null')?.kp,
+        })), { timeout: 20_000 }).toEqual({ done: '1', preset: 'chaser', kp: 5 });
+        // No overlay on the second boot…
+        await page.waitForSelector('#lab-open', { timeout: 30_000 });
+        await expect(page.locator('#sw-first-run')).toHaveCount(0);
+        // …and the staged reveal flies the Stage to the chaser home.
+        await expect.poll(() => page.evaluate(() => window.__swStage?.station),
+            { timeout: 30_000 }).toBe('my-sky');
     });
 
     test('cloud sync honesty: free tier stays off; missing table self-disables', async ({ page }) => {
