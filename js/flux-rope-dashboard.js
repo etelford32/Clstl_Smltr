@@ -17,8 +17,7 @@
  * injected here — zero footprint on the page's own CSS.
  */
 
-import { loadFluxRopeKernel } from './flux-rope-kernel.js';
-import { fetchDonkiCmes, donkiToPreset, fetchRtswDriver } from './flux-rope-live.js';
+import { computeFluxRopeForecast } from './flux-rope-forecast.js';
 import { drawBzChart } from './flux-rope/charts.js';
 
 const CSS = `
@@ -69,58 +68,27 @@ export async function mountFluxRopeDashboard(containerId) {
             </div>`;
         const panel = host.firstElementChild;
 
-        const cmes = await fetchDonkiCmes({ days: 7 });
-        const target = cmes.find((c) => c.earthDirected) ?? null;
-        if (!target) {
+        // The SHARED provider (js/flux-rope-forecast.js) owns the pipeline:
+        // DONKI → seeded ensemble → particle-filter conditioning on live L1.
+        const fc = await computeFluxRopeForecast({
+            days: 7, members: MEMBERS, seed: SEED, gridDtS: GRID_DT_S, gridHours: GRID_HOURS,
+        });
+        if (fc.idle) {
             panel.querySelector('.frd-quiet').innerHTML =
                 '☀ No Earth-directed CME analyses in the DONKI catalog (last 7 days). ' +
                 'The ensemble engine is idle — explore hindcasts in the ' +
                 '<a href="flux-rope.html" style="color:#4fc3f7">Flux Rope Simulator</a>.';
             return;
         }
+        const { cme: target, launchMs, fan, assimNote, rtsw, summary } = fc;
+        const n = fc.grid.n;
 
-        // Live L1 for ambient wind + assimilation (best-effort).
-        let rtsw = null;
-        try { rtsw = await fetchRtswDriver(); } catch { /* offline is fine */ }
-        let wSum = 0, wN = 0;
-        for (const s of rtsw?.samples ?? []) if (Number.isFinite(s.v)) { wSum += s.v; wN++; }
-        const preset = donkiToPreset(target, { ambientWKms: wN ? Math.round(wSum / wN) : 400 });
-
-        const kernel = await loadFluxRopeKernel('./js/flux-rope-wasm/flux_rope_core.wasm');
-        kernel.setRope(preset.rope);
-        kernel.setSpreads(preset.spreads);
-        const n = Math.round(GRID_HOURS * 3600 / GRID_DT_S);
-        const launchMs = Date.parse(preset.launchIso);
-        const ens = kernel.ensembleRun(SEED, MEMBERS, 0, GRID_DT_S, n);
-
-        // Condition on live observed Bz where coverage overlaps the grid.
-        let fan = ens, assimNote = 'prior (no L1 overlap yet)';
-        if (rtsw?.length) {
-            const obs = new Float32Array(n).fill(NaN);
-            let nObs = 0;
-            const nowIdx = Math.min(n, Math.max(0, Math.floor((Date.now() - launchMs) / 1000 / GRID_DT_S)));
-            for (let i = 0; i < nowIdx; i++) {
-                const t = launchMs + i * GRID_DT_S * 1000;
-                if (t < rtsw.tStart || t > rtsw.tEnd) continue;
-                const s = rtsw.at(t);
-                if (s && Number.isFinite(s.bz)) { obs[i] = s.bz; nObs++; }
-            }
-            if (nObs >= 4) {
-                const a = kernel.assimilate({ obsBz: obs, i0: 0, i1: nowIdx, sigmaNt: 4 });
-                fan = a;
-                assimNote = `particle filter · ${nObs} obs · ESS ${a.ess.toFixed(0)}/${MEMBERS}`
-                    + (a.temperature < 1 ? ` · λ ${a.temperature.toFixed(2)}` : '');
-            }
-        }
-
-        // Arrival window from the (prior) member arrival distribution.
-        const arr = Array.from(ens.arrivalH).filter(Number.isFinite).sort((a, b) => a - b);
-        const fmtUtc = (h) => new Date(launchMs + h * 3600_000).toISOString().slice(5, 16).replace('T', ' ');
-        const arrTxt = arr.length
-            ? `${fmtUtc(arr[Math.floor(arr.length * 0.1)])} – ${fmtUtc(arr[Math.floor(arr.length * 0.9)])}`
+        const fmtUtc = (msVal) => new Date(msVal).toISOString().slice(5, 16).replace('T', ' ');
+        const arrTxt = summary.arrivalP10Ms != null
+            ? `${fmtUtc(summary.arrivalP10Ms)} – ${fmtUtc(summary.arrivalP90Ms)}`
             : 'likely miss';
         const pct = (v) => `${Math.round(v * 100)}%`;
-        const p10 = fan.pMinBzBelow(-10), p20 = fan.pMinBzBelow(-20);
+        const p10 = summary.p10, p20 = summary.p20;
 
         panel.innerHTML = `
             <div class="frd-title"><span class="frd-pip"></span>
@@ -144,7 +112,7 @@ export async function mountFluxRopeDashboard(containerId) {
                 <a href="flux-rope.html">Open in the Flux Rope Simulator →</a>
             </div>`;
 
-        const tH = Array.from({ length: n }, (_, i) => i * GRID_DT_S / 3600);
+        const tH = Array.from({ length: n }, (_, i) => i * fc.grid.dtS / 3600);
         const obsPlot = rtsw?.length
             ? { tH: rtsw.samples.map((s) => (s.t - launchMs) / 3600_000), bz: rtsw.samples.map((s) => s.bz) }
             : null;

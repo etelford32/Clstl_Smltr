@@ -114,6 +114,35 @@ the same crate.
   alerts (Watch → Warning → Nowcast; alert-sender fix rides along), EarthView
   3-day outlook, Gannon three-way validation page (observed vs rope ensemble
   vs BATS-R-US through the same Dst pipeline).
+  ✅ first consumer wave (2026-07-22): the SHARED forecast provider
+  `js/flux-rope-forecast.js` (one pipeline — DONKI → seeded ensemble →
+  particle-filter conditioning on live L1 — returning the fan, a
+  SolarWindDriver with source 'forecast', and a scalar summary; fixture
+  gate tests/flux-rope-forecast.mjs; the space-weather dashboard panel now
+  consumes it instead of its private copy). Consumers wired:
+  · RING CURRENT — js/ring-current-outlook.js: the forecast driver's
+    samples feed the SAME integrateDst as the live pipeline (the Phase 0
+    driver-contract bet paying out literally) → days-ahead min-Dst /
+    storm-class / arrival panel, fail-quiet on ring-current.html.
+  · EARTHVIEW — pure `stormOutlook()` in js/verdict-engine.js (fixture-
+    tested; watch / warning / arriving tiers) renders a third verdict-card
+    sky row from the provider summary; earth.html fills it off the boot
+    path, fail-quiet.
+  · AURORACLE — THE ALERT-SENDER FIX: api/cron/aurora-alerts.js (Node
+    runtime, */15) finally READS the per-subscriber kp_threshold/lat/lon
+    columns (write-only since the prefs migration) and implements the
+    documented Sender v1 contract, extended to tiers (pure logic in
+    api/_lib/aurora-tiers.js + tests/aurora-tiers.mjs): WATCH (1–3 d,
+    NOAA 3-day + flux-rope ensemble window) → WARNING (< 24 h) → NOWCAST
+    (observed Kp), per-subscriber escalation/cooldown debounce, per-
+    recipient Resend sends with token unsubscribe. The flux-rope layer
+    runs the committed WASM SERVER-SIDE through the shared provider with
+    injected sources — the engine's first server-side consumer (the SBIR
+    "API build" seed). Ledger migration
+    supabase-aurora-tiered-alerts-migration.sql is committed but PENDING
+    apply; the cron self-detects and refuses to send until it lands.
+  Remaining Phase 4: space-weather customizable dashboard, Gannon
+  three-way validation page.
 - **Phase 5 — Depth.** Empirical sheath model, cross-section deformation,
   CME–CME interaction, EEGGL/SWMF comparison runs, server-side API build.
   ✅ sheath model (2026-07-21, spec §14): R–H-compressed front-side shell,

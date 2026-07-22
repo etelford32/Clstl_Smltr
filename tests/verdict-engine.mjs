@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import {
     computeVerdict, auroraVerdict, magneticLatitude, boundaryForKp,
     aqiCategory, aqiState, uvState, moonPhase, weatherGlyph,
-    sunAltitudeDeg, issMagEstimate,
+    sunAltitudeDeg, issMagEstimate, stormOutlook,
 } from '../js/verdict-engine.js';
 
 let n = 0;
@@ -320,6 +320,51 @@ function mkInputs(over = {}) {
     const midnightUtc = Date.UTC(2026, 6, 12, 8, 5);
     assert.ok(sunAltitudeDeg(38.76, -121.16, midnightUtc) < -20);
     ok('weather glyphs + sun-altitude sanity');
+}
+
+// ── 13. Flux-rope 3-day storm outlook (Phase 4) ──────────────────────────────
+{
+    const t0 = NOW.getTime();
+    const fr = (o = {}) => ({
+        pHit: 0.72, p10: 0.55, p20: 0.2,
+        arrivalP10Ms: t0 + 30 * HOUR, arrivalP50Ms: t0 + 38 * HOUR,
+        arrivalP90Ms: t0 + 46 * HOUR, minBzP50: -14, ...o,
+    });
+
+    // Watch tier: arrival beyond a day, decent probabilities → 'maybe' row.
+    const watch = stormOutlook(fr(), t0);
+    assert.equal(watch.tier, 'watch');
+    assert.equal(watch.state, 'maybe');
+    assert.match(watch.title, /CME watch/);
+    assert.match(watch.desc, /moderate .*P\(hit\) 72%/);
+    assert.match(watch.when, /^\+38 h$/);
+    ok('outlook: watch tier with window + probabilities');
+
+    // Warning tier inside 24 h; arriving tier when the median is past.
+    assert.equal(stormOutlook(fr({ arrivalP50Ms: t0 + 20 * HOUR }), t0).tier, 'warning');
+    const arriving = stormOutlook(fr({ arrivalP50Ms: t0 - 2 * HOUR }), t0);
+    assert.equal(arriving.tier, 'arriving');
+    assert.equal(arriving.state, 'go');
+    assert.equal(arriving.when, 'now');
+    ok('outlook: warning inside 24 h, arriving after the median');
+
+    // Severity ladder + null paths.
+    assert.match(stormOutlook(fr({ p20: 0.5 }), t0).desc, /strong/);
+    assert.match(stormOutlook(fr({ p10: 0.2, p20: 0.05 }), t0).desc, /minor/);
+    assert.equal(stormOutlook(null, t0), null);
+    assert.equal(stormOutlook(fr({ pHit: 0.1 }), t0), null, 'deep miss → no row');
+    assert.equal(stormOutlook(fr({ arrivalP90Ms: t0 - 20 * HOUR }), t0), null, 'window long past → no row');
+    ok('outlook: severity ladder + null paths');
+
+    // computeVerdict appends the row WITHOUT moving aurora/ISS indices.
+    const base = computeVerdict(mkInputs(), NOW);
+    const withFr = computeVerdict(mkInputs({ fluxRope: fr() }), NOW);
+    assert.equal(base.skyEvents.length, 2);
+    assert.equal(withFr.skyEvents.length, 3);
+    assert.equal(withFr.skyEvents[0].id ?? 'aurora', base.skyEvents[0].id ?? 'aurora');
+    assert.equal(withFr.skyEvents[2].id, 'storm-outlook');
+    assert.equal(withFr.outlook.tier, 'watch');
+    ok('computeVerdict: outlook row appended, aurora/ISS indices stable');
 }
 
 console.log(`\nverdict-engine: ${n} checks passed`);
