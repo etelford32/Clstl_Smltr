@@ -25,8 +25,10 @@
 
 import { stormOutlook, magneticLatitude, auroraVerdict, sunAltitudeDeg }
     from './verdict-engine.js';
+import { loadProfile, saveProfile, CHANGE_EVENT } from './threshold-profile.js';
 
 export const STATUS_RANK = ['quiet', 'elevated', 'watch', 'warning', 'severe'];
+const rankOf = (cls) => STATUS_RANK.indexOf(cls);
 
 const HOUR = 3.6e6;
 const isNum = (v) => Number.isFinite(v);
@@ -62,10 +64,13 @@ const fmtWin = (v) => (isNum(v)
  *        undefined = still computing, null = provider idle (no CME)
  * @param {number|null} opts.kp     current Kp
  * @param {object|null} opts.loc    { lat, lon, city } or null
+ * @param {object|null} [opts.profile]  threshold profile (§8) — when set,
+ *        the Kp cell escalates to at least 'warning' the moment kp
+ *        crosses YOUR line, and says so in words
  * @param {number} opts.nowMs
  * @returns {{cells: Array<{id,label,value,detail,cls}>}}
  */
-export function statusBandModel({ summary, kp, loc, nowMs }) {
+export function statusBandModel({ summary, kp, loc, profile = null, nowMs }) {
     const cells = [];
 
     // 1 ── Storm outlook (tier via the ONE stormOutlook oracle)
@@ -102,10 +107,19 @@ export function statusBandModel({ summary, kp, loc, nowMs }) {
             cls: cells[0].cls });                 // urgency follows the outlook tier
     }
 
-    // 3 ── Kp now
+    // 3 ── Kp now (escalates at YOUR threshold line)
     const ks = kpStatus(kp);
+    let kpCls = ks.cls, kpDetail = ks.word;
+    if (profile && isNum(profile.kp) && isNum(kp)) {
+        if (kp >= profile.kp) {
+            if (rankOf(kpCls) < rankOf('warning')) kpCls = 'warning';
+            kpDetail = `${ks.word} · ≥ your line (Kp ${profile.kp})`;
+        } else {
+            kpDetail = `${ks.word} · your line Kp ${profile.kp}`;
+        }
+    }
     cells.push({ id: 'kp', label: 'Kp now', value: isNum(kp) ? String(kp) : '—',
-        detail: ks.word, cls: ks.cls });
+        detail: kpDetail, cls: kpCls });
 
     // 4 ── Tonight at your pin
     if (!loc || !isNum(loc.lat) || !isNum(loc.lon)) {
@@ -130,8 +144,36 @@ export function statusBandModel({ summary, kp, loc, nowMs }) {
 /* ── Mount (fail-quiet, DOM only below this line) ─────────────────────── */
 
 const CSS = `
-#sw-status-band { display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: var(--sw-gap, 12px); margin: 0 0 14px; }
+#sw-status-band { position: relative; margin: 0 0 14px; }
+#sw-status-band .swb-cells { display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: var(--sw-gap, 12px); }
+.swb-gear { position: absolute; top: 4px; right: 6px; z-index: 5;
+    font: 700 12px/1 system-ui; padding: 3px 6px; border-radius: 6px; cursor: pointer;
+    background: transparent; border: 1px solid transparent;
+    color: var(--sw-text-dim, #68718a); transition: all var(--sw-t-snap, .15s ease); }
+.swb-gear:hover { color: var(--sw-text-bright, #e8f4ff);
+    border-color: var(--sw-border-focus, rgba(0,198,255,.45)); }
+.swb-editor { position: absolute; top: 30px; right: 6px; z-index: 620; width: 240px;
+    background: var(--sw-surface-raised, rgba(16,24,48,.96));
+    border: 1px solid var(--sw-border-focus, rgba(0,198,255,.45));
+    border-radius: 10px; padding: 10px 12px; font: 500 11px/1.5 system-ui;
+    color: var(--sw-text, #cdd); box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+.swb-editor h4 { font-size: .68rem; font-weight: 800; letter-spacing: .07em;
+    text-transform: uppercase; margin: 0 0 8px; color: var(--sw-text-bright, #e8f4ff); }
+.swb-editor label { display: flex; justify-content: space-between; align-items: center;
+    gap: 8px; margin-bottom: 6px; }
+.swb-editor input { width: 82px; font: inherit; padding: 3px 6px; border-radius: 6px;
+    border: 1px solid var(--sw-border, rgba(255,255,255,.09));
+    background: rgba(0,10,26,.8); color: var(--sw-text-bright, #e8f4ff); }
+.swb-editor .swb-editor-row { display: flex; justify-content: space-between;
+    margin-top: 8px; }
+.swb-editor button { font: 700 11px/1 system-ui; padding: 5px 12px; border-radius: 6px;
+    cursor: pointer; border: 1px solid var(--sw-border-focus, rgba(0,198,255,.45));
+    background: rgba(0,30,55,.8); color: var(--sw-text, #cdd); }
+.swb-editor .swb-save { background: var(--sw-accent, #4fc3f7); color: #04101c;
+    border-color: var(--sw-accent, #4fc3f7); }
+.swb-editor .swb-note { color: var(--sw-text-dim, #68718a); font-size: .58rem;
+    margin-top: 6px; }
 .swb-cell { background: var(--sw-surface-card, rgba(10,16,34,.66));
     border: 1px solid var(--sw-border, rgba(255,255,255,.09));
     border-left: 3px solid var(--swb-c, var(--sw-status-quiet, #4fc97f));
@@ -149,8 +191,8 @@ const CSS = `
 .swb-cell.warning  { --swb-c: var(--sw-status-warning, #ff7847); }
 .swb-cell.severe   { --swb-c: var(--sw-status-severe, #ff4466); }
 @media (max-width: 768px) {
-    #sw-status-band { grid-template-columns: repeat(2, 1fr);
-        position: sticky; top: 0; z-index: 500; }
+    #sw-status-band { position: sticky; top: 0; z-index: 500; }
+    #sw-status-band .swb-cells { grid-template-columns: repeat(2, 1fr); }
     .swb-cell { background: var(--sw-surface-raised, rgba(16,24,48,.9)); }
 }
 `;
@@ -164,20 +206,66 @@ export function mountStatusBand(hostId = 'sw-status-band') {
         style.textContent = CSS;
         document.head.appendChild(style);
 
+        // Stable shell: the cells container re-renders; the ⚙ editor is a
+        // sibling so a data refresh can never blow it away mid-edit (the
+        // verdict-card stable-header lesson).
+        host.innerHTML = `
+            <div class="swb-cells"></div>
+            <button type="button" class="swb-gear" title="Your thresholds (§8 — one line for the whole console)" aria-haspopup="dialog">⚙</button>
+            <div class="swb-editor" role="dialog" aria-label="Threshold profile" hidden></div>`;
+        const cellsEl = host.querySelector('.swb-cells');
+
         // State — each source updates independently, every update re-renders.
         let summary;                       // undefined = pending
         let kp = null;
         let loc = null;
+        let profile = loadProfile();
 
         const render = () => {
-            const { cells } = statusBandModel({ summary, kp, loc, nowMs: Date.now() });
-            host.innerHTML = cells.map((c) => `
+            const { cells } = statusBandModel({ summary, kp, loc, profile, nowMs: Date.now() });
+            cellsEl.innerHTML = cells.map((c) => `
                 <div class="swb-cell ${c.cls}" data-cell="${c.id}">
                     <div class="swb-label">${c.label}</div>
                     <div class="swb-value">${c.value}</div>
                     <div class="swb-detail" title="${c.detail.replace(/"/g, '&quot;')}">${c.detail}</div>
                 </div>`).join('');
         };
+
+        // ── The ⚙ threshold editor (the §8 single editor) ─────────────
+        const editor = host.querySelector('.swb-editor');
+        const FIELDS = [
+            ['kp', 'Kp line', '0.5'], ['minBzNt', 'min Bz (nT)', '1'],
+            ['dstNt', 'Dst line (nT)', '10'], ['leoAltKm', 'LEO altitude (km)', '10'],
+        ];
+        const openEditor = () => {
+            editor.innerHTML = `<h4>Your thresholds</h4>` + FIELDS.map(([k, label, step]) => `
+                <label>${label}<input type="number" step="${step}" data-k="${k}"
+                    value="${profile[k]}"></label>`).join('') + `
+                <div class="swb-editor-row">
+                    <button type="button" class="swb-cancel">Close</button>
+                    <button type="button" class="swb-save">Save</button>
+                </div>
+                <div class="swb-note">The Kp line also updates your account's aurora
+                alert threshold — one line everywhere.</div>`;
+            editor.hidden = false;
+            editor.querySelector('.swb-cancel').addEventListener('click', () => { editor.hidden = true; });
+            editor.querySelector('.swb-save').addEventListener('click', () => {
+                const raw = { ...profile };
+                for (const inp of editor.querySelectorAll('input[data-k]')) {
+                    raw[inp.dataset.k] = parseFloat(inp.value);
+                }
+                profile = saveProfile(raw);   // broadcasts CHANGE_EVENT
+                editor.hidden = true;
+                render();
+            });
+        };
+        host.querySelector('.swb-gear').addEventListener('click', () => {
+            if (editor.hidden) openEditor(); else editor.hidden = true;
+        });
+        window.addEventListener(CHANGE_EVENT, (e) => {
+            profile = e.detail || loadProfile();
+            render();
+        });
 
         // Kp from the page's #kp-val (UA-card MutationObserver pattern).
         const kpEl = document.getElementById('kp-val');

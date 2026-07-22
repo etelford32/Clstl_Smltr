@@ -6120,5 +6120,12 @@ import { mountStage } from './js/stage/stage.js';
 mountStage('sw-stage-host');
 </script>
 
+<!-- Cloud sync (D2; Basic+; fail-quiet, migration-guarded — stays off
+     until supabase-dashboards-migration.sql is applied) -->
+<script type="module">
+import { initDashboardSync } from './js/dashboard-sync.js';
+initDashboardSync({ page: 'space-weather' });
+</script>
+
 </body>
 </html>

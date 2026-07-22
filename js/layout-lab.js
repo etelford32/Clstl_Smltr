@@ -262,6 +262,48 @@ function applySizeOverrides(root, page) {
     }
 }
 
+/* ── Per-panel config store (D2 config sheets) ─────────────────────── */
+// Lives OUTSIDE the layout doc for the same reason panel sizes do: a
+// config tweak (default station, a dressing toggle) is an ergonomic
+// setting, not an arrangement choice — it must survive layout switches
+// and must never silently convert an A/B-variant view into a personal
+// layout. Schemas live on the page's registry entries (see
+// space-weather-registry.js header); consumers receive values via
+// window.__swPanelConfig + the 'sw-panel-config' event and own the
+// semantic validation of what they read.
+
+/** Strip an untrusted config map down to scalar values (pure, node-tested). */
+export function sanitizeConfig(raw) {
+    const out = {};
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        for (const [panelId, vals] of Object.entries(raw)) {
+            if (!vals || typeof vals !== 'object' || Array.isArray(vals)) continue;
+            const clean = {};
+            for (const [k, v] of Object.entries(vals)) {
+                if (typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))) clean[k] = v;
+                else if (typeof v === 'string' && v.length <= 60) clean[k] = v;
+            }
+            if (Object.keys(clean).length) out[panelId] = clean;
+        }
+    }
+    return out;
+}
+
+const configStoreKey = (page) => `pp-panel-config.${page}`;
+
+export function loadPanelConfig(page) {
+    try { return sanitizeConfig(JSON.parse(localStorage.getItem(configStoreKey(page)) || 'null')); }
+    catch { return {}; }
+}
+
+function savePanelConfigStore(page, all) {
+    try {
+        const clean = sanitizeConfig(all);
+        if (Object.keys(clean).length) localStorage.setItem(configStoreKey(page), JSON.stringify(clean));
+        else localStorage.removeItem(configStoreKey(page));
+    } catch {}
+}
+
 /* ── Entry point ───────────────────────────────────────────────────── */
 
 /**
@@ -330,6 +372,29 @@ export async function initLayoutLab({ page, experimentKey, variantsUrl,
 
     if (exp) wireGoals(root, exp);
 
+    // D2 panel config: load, publish for consumers (global for late
+    // mounts + one event per configured panel for early ones), and hand
+    // the setter to the designer's ⚙ sheets.
+    const panelConfig = loadPanelConfig(page);
+    const setPanelConfig = (panelId, values) => {
+        panelConfig[panelId] = { ...(panelConfig[panelId] || {}), ...values };
+        const clean = sanitizeConfig(panelConfig);
+        savePanelConfigStore(page, clean);
+        try {
+            window.__swPanelConfig = clean;
+            window.dispatchEvent(new CustomEvent('sw-panel-config',
+                { detail: { panel: panelId, config: clean[panelId] || {} } }));
+        } catch {}
+        trackFeature('panel_config', { page, panel: panelId });
+    };
+    try {
+        window.__swPanelConfig = panelConfig;
+        for (const [panelId, config] of Object.entries(panelConfig)) {
+            window.dispatchEvent(new CustomEvent('sw-panel-config',
+                { detail: { panel: panelId, config } }));
+        }
+    } catch {}
+
     const api = {
         page, mode, authored,
         // Preset attribution for the layout the user is looking at right
@@ -337,10 +402,11 @@ export async function initLayoutLab({ page, experimentKey, variantsUrl,
         // into the persisted v2 doc so analytics can tell preset-derived
         // layouts from scratch-built ones.
         preset: personal?.preset ?? null,
+        panelConfig,
         applyLayout: (l) => applyLayout(root, l),
     };
     if (labEnabled()) mountDesigner(root, page, authored, variantsDoc, api, exp,
-                                    presetsDoc, registry);
+                                    presetsDoc, registry, setPanelConfig);
     return api;
 }
 
@@ -485,12 +551,22 @@ body.lab-design .lab-chip { display: flex; }
 .lab-gallery-del { border: 1px solid rgba(255,120,120,.45); color: #f2a6a6; }
 .lab-gallery-missing { opacity: .45; }
 .lab-gallery-missing span:last-child { font-size: 10px; color: #f2a6a6; }
+.lab-config-sheet { margin: 2px 4px 8px; padding: 7px 9px; border-radius: 8px;
+  background: rgba(0,30,55,.55); border: 1px solid rgba(0,198,255,.3); }
+.lab-config-sheet label { display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; margin-bottom: 5px; font-size: 11px; }
+.lab-config-sheet input[type=number], .lab-config-sheet select { width: 110px;
+  font: inherit; padding: 3px 6px; border-radius: 6px;
+  border: 1px solid rgba(0,198,255,.35); background: rgba(0,10,26,.85); color: #e8f4ff; }
+.lab-config-sheet button { font: 600 11px/1 system-ui; padding: 4px 10px; border-radius: 6px;
+  cursor: pointer; border: 1px solid rgba(0,198,255,.5); background: rgba(0,198,255,.2);
+  color: #cfeaff; }
 `;
     document.head.appendChild(s);
 }
 
 function mountDesigner(root, page, authored, variantsDoc, api, exp,
-                       presetsDoc, registry) {
+                       presetsDoc, registry, setPanelConfig) {
     const open = document.createElement('button');
     open.id = 'lab-open';
     open.textContent = '🎛 Customize';
@@ -642,6 +718,10 @@ function mountDesigner(root, page, authored, variantsDoc, api, exp,
             savePersonal(page, captureLayout(root, page, api.preset));
             api.mode = 'personal'; status();
             trackFeature('layout_save', { page, preset: api.preset });
+            // Cloud sync (D2) listens for this and pushes the bundle.
+            try {
+                window.dispatchEvent(new CustomEvent('sw-layout-saved', { detail: { page } }));
+            } catch {}
         });
         btn('🧹 Clear mine', 'Delete your saved layout and go back to the authored page', () => {
             clearPersonal(page);
@@ -738,6 +818,20 @@ function mountDesigner(root, page, authored, variantsDoc, api, exp,
                     wrap.appendChild(row);
                     continue;
                 }
+                row.dataset.panel = entry.id;
+                // ⚙ config sheet (D2) — only for entries with a schema.
+                if (entry.config?.length && setPanelConfig) {
+                    const gear = document.createElement('button');
+                    gear.textContent = '⚙';
+                    gear.title = 'Configure this panel';
+                    gear.addEventListener('click', () => {
+                        const open = row.nextElementSibling?.classList?.contains('lab-config-sheet');
+                        if (open) { row.nextElementSibling.remove(); return; }
+                        wrap.querySelector('.lab-config-sheet')?.remove();
+                        row.after(buildConfigSheet(entry));
+                    });
+                    row.appendChild(gear);
+                }
                 const tgl = document.createElement('button');
                 const hidden = el.classList.contains('lab-hidden');
                 tgl.textContent = hidden ? '＋ Show' : '－ Hide';
@@ -754,5 +848,57 @@ function mountDesigner(root, page, authored, variantsDoc, api, exp,
             }
         }
         return wrap;
+    }
+
+    /** Schema-driven ⚙ sheet for one panel (registry `config` field). */
+    function buildConfigSheet(entry) {
+        const sheet = document.createElement('div');
+        sheet.className = 'lab-config-sheet';
+        const current = api.panelConfig?.[entry.id] || {};
+        for (const f of entry.config) {
+            const label = document.createElement('label');
+            label.textContent = f.label;
+            let input;
+            if (f.type === 'select') {
+                input = document.createElement('select');
+                input.innerHTML = f.options.map((o) =>
+                    `<option value="${o}">${o}</option>`).join('');
+                input.value = current[f.key] ?? f.default;
+            } else if (f.type === 'toggle') {
+                input = document.createElement('input');
+                input.type = 'checkbox';
+                input.checked = current[f.key] ?? f.default;
+            } else {
+                input = document.createElement('input');
+                input.type = 'number';
+                if (f.min != null) input.min = f.min;
+                if (f.max != null) input.max = f.max;
+                if (f.step != null) input.step = f.step;
+                input.value = current[f.key] ?? f.default;
+            }
+            input.dataset.key = f.key;
+            label.appendChild(input);
+            sheet.appendChild(label);
+        }
+        const save = document.createElement('button');
+        save.textContent = '✓ Apply';
+        save.addEventListener('click', () => {
+            const values = {};
+            for (const f of entry.config) {
+                const input = sheet.querySelector(`[data-key="${f.key}"]`);
+                if (!input) continue;
+                if (f.type === 'toggle') values[f.key] = input.checked;
+                else if (f.type === 'number') {
+                    const v = parseFloat(input.value);
+                    values[f.key] = Number.isFinite(v)
+                        ? Math.min(f.max ?? Infinity, Math.max(f.min ?? -Infinity, v))
+                        : f.default;
+                } else values[f.key] = input.value;
+            }
+            setPanelConfig(entry.id, values);
+            sheet.remove();
+        });
+        sheet.appendChild(save);
+        return sheet;
     }
 }

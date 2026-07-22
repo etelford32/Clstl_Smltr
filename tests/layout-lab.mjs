@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict';
 import { mergeOrder, normalizeLayout, layoutsEqual, LAYOUT_VERSION,
-         clampSize, SIZE_MIN, SIZE_MAX }
+         clampSize, SIZE_MIN, SIZE_MAX, sanitizeConfig }
     from '../js/layout-lab.js';
 
 let n = 0;
@@ -126,6 +126,21 @@ test('v1 docs are accepted forever via migration (preset = null)', () => {
     assert.equal(l.v, LAYOUT_VERSION);
     assert.equal(l.preset, null);
     assert.deepEqual(l.zones.m.order, ['a', 'b']);
+});
+
+/* ── D2 per-panel config sanitizer ──────────────────────────────────── */
+
+test('sanitizeConfig keeps scalars, strips structures and junk', () => {
+    const clean = sanitizeConfig({
+        stage: { station: 'my-sky', spirals: false, ghosts: 6,
+                 evil: { nested: true }, fn: () => {}, long: 'x'.repeat(61) },
+        ghostPanel: { only: [1, 2] },
+        bad: 'not-an-object',
+    });
+    assert.deepEqual(clean, { stage: { station: 'my-sky', spirals: false, ghosts: 6 } });
+    assert.deepEqual(sanitizeConfig(null), {});
+    assert.deepEqual(sanitizeConfig([1, 2]), {});
+    assert.deepEqual(sanitizeConfig({ p: { v: NaN } }), {}, 'non-finite numbers dropped');
 });
 
 /* ── layoutsEqual ───────────────────────────────────────────────────── */

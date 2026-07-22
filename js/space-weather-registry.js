@@ -20,6 +20,18 @@
  * `family` groups the gallery drawer; `personas` feed preset authoring
  * and (later) the first-run flow. Both vocabularies are closed — the
  * node test enforces membership.
+ *
+ * D2 config sheets: entries MAY carry a `config` schema — an array of
+ * typed fields the gallery drawer renders as a ⚙ sheet. Field shapes:
+ *   { key, label, type: 'select', options: [...], default }
+ *   { key, label, type: 'number', min, max, step?, default }
+ *   { key, label, type: 'toggle', default }
+ * Values persist in the per-page panel-config store (layout-lab.js —
+ * OUTSIDE the layout doc, the same rationale as panel sizes: a config
+ * tweak must survive layout switches and must never silently convert an
+ * A/B-variant view into a personal layout). Consumers receive values
+ * via window.__swPanelConfig + the 'sw-panel-config' event and OWN the
+ * semantic validation of what they read.
  */
 
 export const FAMILIES = Object.freeze({
@@ -38,7 +50,13 @@ export const PANELS = Object.freeze([
     { id: 'stage', zone: 'main', family: 'sim',
       title: 'The Stage — Sun→Earth corridor',
       blurb: 'The one-context 3D scene: kernel-driven CME ropes, ensemble ghosts and wavefronts, L1, and the breathing magnetopause, on the τ-timeline.',
-      personas: ['chaser', 'operator', 'forecaster', 'educator', 'casual'] },
+      personas: ['chaser', 'operator', 'forecaster', 'educator', 'casual'],
+      config: [
+          { key: 'station', label: 'Default station', type: 'select', default: 'corridor',
+            options: ['solar-watch', 'corridor', 'l1-approach', 'magnetosphere', 'my-sky', 'orbit-ops'] },
+          { key: 'spirals', label: 'Parker-spiral dressing', type: 'toggle', default: true },
+          { key: 'ghosts', label: 'Ensemble ghost ropes', type: 'number', min: 0, max: 14, step: 1, default: 14 },
+      ] },
     { id: 'metrics-hero', zone: 'main', family: 'live',
       title: 'Live metrics strip',
       blurb: 'Solar wind speed, IMF Bz, Kp, and X-ray flux at a glance.',

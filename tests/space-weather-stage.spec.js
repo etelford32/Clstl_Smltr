@@ -167,6 +167,10 @@ test.describe('the Stage (S1) on space-weather.html', () => {
     });
 
     test('true-scale toggle animates the compression away and back', async ({ page }) => {
+        // The tween advances per animation frame — on a cold software-GL
+        // boot the main thread can starve RAF for many seconds, so the
+        // polls get generous headroom (frame-rate-independence lesson).
+        test.slow();
         const host = page.locator('#sw-stage-host');
         const btn = host.locator('.swst-truescale');
         await expect(btn).toBeVisible({ timeout: 30_000 });
@@ -174,10 +178,10 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         await btn.click();
         await expect(btn).toHaveAttribute('aria-pressed', 'true');
         await expect.poll(() => page.evaluate(() => window.__swStage.mix),
-            { timeout: 10_000 }).toBeGreaterThan(0.9);
+            { timeout: 30_000 }).toBeGreaterThan(0.9);
         await btn.click();
         await expect.poll(() => page.evaluate(() => window.__swStage.mix),
-            { timeout: 10_000 }).toBeLessThan(0.1);
+            { timeout: 30_000 }).toBeLessThan(0.1);
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 });

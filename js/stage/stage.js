@@ -51,6 +51,7 @@ import { ropeFrame } from '../flux-rope/view.js';
 import { magneticLatitude, boundaryForKp } from '../verdict-engine.js';
 import { density, kpToAp } from '../upper-atmosphere-engine.js';
 import { propagate } from '../satellite-tracker.js';
+import { loadProfile, CHANGE_EVENT as THRESHOLD_EVENT } from '../threshold-profile.js';
 
 const HOUR = 3.6e6;
 const PAST_MS = 24 * HOUR, FUTURE_MS = 72 * HOUR;
@@ -204,6 +205,9 @@ function mount(host) {
         pin: null,                                 // ppx_user_location
         assets: [],                                // CelesTrak picks (≤8)
         ovalKey: '', heatKey: '',
+        // D2: the §8 threshold profile — heat-shell altitude fallback +
+        // oval-median emphasis at YOUR Kp line.
+        profile: loadProfile(),
     };
     const p3 = [0, 0, 0];   // shared remap scratch (used from setTau onward)
 
@@ -524,6 +528,34 @@ function mount(host) {
         const t = e?.detail?.forecast_timeline;
         if (t) { state.timeline = t; updateScene(); }
     });
+    window.addEventListener(THRESHOLD_EVENT, (e) => {
+        state.profile = e.detail || loadProfile();
+        state.heatKey = '';               // altitude may have moved — recolor
+        updateScene(true);
+    });
+
+    // D2 panel config (registry schema; values via layout-lab's store —
+    // window global for late mounts, event for live edits). The Stage
+    // owns the semantic validation of what it reads.
+    state.ghostMax = N_GHOSTS;
+    function applyStageConfig(cfg) {
+        if (!cfg) return;
+        if (typeof cfg.spirals === 'boolean') {
+            for (const l of spirals) l.visible = cfg.spirals;
+        }
+        if (Number.isFinite(cfg.ghosts)) {
+            state.ghostMax = Math.max(0, Math.min(N_GHOSTS, Math.round(cfg.ghosts)));
+        }
+        if (typeof cfg.station === 'string' && cfg.station !== state.station
+            && stationDefs().some((s) => s.id === cfg.station)) {
+            flyTo(cfg.station, true);
+        }
+        updateScene(true);
+    }
+    applyStageConfig(window.__swPanelConfig?.stage);
+    window.addEventListener('sw-panel-config', (e) => {
+        if (e.detail?.panel === 'stage') applyStageConfig(e.detail.config);
+    });
     import('../user-location.js').then((m) => {
         state.pin = m.loadUserLocation();
         window.addEventListener('user-location-changed', (ev) => {
@@ -770,7 +802,7 @@ function mount(host) {
         const showGhosts = live && state.ghosts.length;
         for (let i = 0; i < ghostLines.length; i++) {
             const line = ghostLines[i], m = state.ghosts[i];
-            line.visible = !!(showGhosts && m);
+            line.visible = !!(showGhosts && m && i < (state.ghostMax ?? N_GHOSTS));
             if (!line.visible) continue;
             const spec = ropeSpecAt(m, state.rope.wKms ?? 400, tS);
             const pts = ropeAxisPoints(spec, GHOST_PTS);
@@ -847,9 +879,20 @@ function mount(host) {
             pinLabel.style.display = 'none';
         }
 
-        // Drag heat-shell at the fleet's mean altitude (UA-engine oracle).
+        // Oval-median emphasis at YOUR Kp line (threshold profile, §8):
+        // the median ring goes warning-orange when the forecast median
+        // crosses the user's threshold. Material-only — no rebuild.
+        const overLine = !!(band && state.profile && band.p50 >= state.profile.kp);
+        for (const h of ovalHemis) {
+            h.median.material.color.setHex(overLine ? 0xff7847 : 0x8fe9ae);
+            h.median.material.opacity = overLine ? 1 : 0.75;
+        }
+
+        // Drag heat-shell at the fleet's mean altitude — or, with no
+        // assets, at the PROFILE's configured LEO altitude (§8).
         const heatAlt = assetObjs.length
-            ? assetObjs.reduce((s, o) => s + o.altKm, 0) / assetObjs.length : 550;
+            ? assetObjs.reduce((s, o) => s + o.altKm, 0) / assetObjs.length
+            : (state.profile?.leoAltKm ?? 550);
         const heatKey = `${Math.round(heatAlt)}|${(state.kpNow ?? -1).toFixed(1)}|${Math.round(state.f107)}`;
         if (heatKey !== state.heatKey) {
             state.heatKey = heatKey;

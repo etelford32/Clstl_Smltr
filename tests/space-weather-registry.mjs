@@ -51,6 +51,35 @@ test('registry ids unique; zones/families/personas from closed vocabularies', ()
     assert.equal(new Set(grouped).size, ids.length, 'galleryGroups must cover every panel');
 });
 
+test('config schemas (D2 sheets) are well-formed with in-range defaults', () => {
+    let seen = 0;
+    for (const p of PANELS) {
+        if (!p.config) continue;
+        seen++;
+        const keys = p.config.map(f => f.key);
+        assert.equal(new Set(keys).size, keys.length, `${p.id}: duplicate config key`);
+        for (const f of p.config) {
+            assert.ok(f.key && f.label, `${p.id}/${f.key}: key+label required`);
+            assert.ok(['select', 'number', 'toggle'].includes(f.type), `${p.id}/${f.key}: type`);
+            if (f.type === 'select') {
+                assert.ok(Array.isArray(f.options) && f.options.includes(f.default),
+                    `${p.id}/${f.key}: default must be an option`);
+            } else if (f.type === 'number') {
+                assert.ok(Number.isFinite(f.min) && Number.isFinite(f.max) && f.min < f.max,
+                    `${p.id}/${f.key}: min/max`);
+                assert.ok(f.default >= f.min && f.default <= f.max,
+                    `${p.id}/${f.key}: default in range`);
+            } else {
+                assert.equal(typeof f.default, 'boolean', `${p.id}/${f.key}: toggle default`);
+            }
+        }
+    }
+    assert.ok(seen >= 1, 'the stage schema exists');
+    // The stage station list must track the model's stationDefs ids.
+    const stationField = byId().get('stage').config.find(f => f.key === 'station');
+    assert.ok(stationField.options.length === 6, 'six stations in the picker');
+});
+
 /* ── 1. Registry ↔ page markup ──────────────────────────────────────── */
 
 test('every data-lab-panel in the page has a registry entry, and vice versa', () => {

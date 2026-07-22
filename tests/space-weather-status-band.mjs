@@ -127,6 +127,32 @@ test('midnight sun beats any Kp: Fairbanks in June, Kp 9 → No', () => {
     assert.equal(cell(m, 'tonight').value, 'No');
 });
 
+/* ── D2: the §8 threshold line escalates the Kp cell ────────────────── */
+
+test('Kp at/above YOUR line escalates to warning and says so', () => {
+    const profile = { kp: 5, minBzNt: -10, dstNt: -50, leoAltKm: 550 };
+    const m = statusBandModel({ summary: null, kp: 5, loc: null, profile, nowMs: T0 });
+    assert.equal(cell(m, 'kp').cls, 'warning', 'watch (G1) escalates at the line');
+    assert.match(cell(m, 'kp').detail, /your line \(Kp 5\)/);
+});
+
+test('Kp below the line stays calm but shows where the line is', () => {
+    const profile = { kp: 5, minBzNt: -10, dstNt: -50, leoAltKm: 550 };
+    const m = statusBandModel({ summary: null, kp: 3, loc: null, profile, nowMs: T0 });
+    assert.equal(cell(m, 'kp').cls, 'quiet');
+    assert.match(cell(m, 'kp').detail, /your line Kp 5/);
+});
+
+test('escalation never DOWNGRADES an already-severe cell', () => {
+    const profile = { kp: 5, minBzNt: -10, dstNt: -50, leoAltKm: 550 };
+    const m = statusBandModel({ summary: null, kp: 8, loc: null, profile, nowMs: T0 });
+    assert.equal(cell(m, 'kp').cls, 'severe');
+    assert.match(cell(m, 'kp').detail, /≥ your line/);
+    // And without a profile the D1 behavior is bit-identical.
+    const bare = statusBandModel({ summary: null, kp: 8, loc: null, nowMs: T0 });
+    assert.equal(bare.cells[2].detail, 'G3+ storm');
+});
+
 test('deepestSunAltitude is pure and deterministic', () => {
     assert.equal(
         deepestSunAltitude(FAIRBANKS.lat, FAIRBANKS.lon, T0),

@@ -426,10 +426,35 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
   (stage/scale.js BODY), so surface features, shells, and the
   magnetopause share ONE local scale. The forecast-band magnetopause
   breathing (vs observed-now) remains an S3-era upgrade.
-- **D2 — Personalization depth.** Config sheets, threshold profile
-  unification (alert-sender handoff), multi-instance, mobile order,
-  cloud sync via the `dashboards` table (migration on author's go),
-  first-run flow.
+- **D2 — Personalization depth. ✅ CORE SHIPPED 2026-07-22** (config
+  sheets + threshold unification + cloud sync — the arc the author
+  commissioned; still open within D2: multi-instance panels, the mobile
+  dock order, and the first-run persona flow). Landed as:
+  · **Threshold profile (§8)**: `js/threshold-profile.js` — ONE line
+    {kp, minBzNt, dstNt, leoAltKm} (gScale DERIVED from kp, never
+    stored), localStorage + 'threshold-profile-changed', ⚙ editor on
+    the status band (stable-shell markup so refreshes can't eat it).
+    Consumers: the band's Kp cell escalates at YOUR line; the Stage's
+    heat-shell altitude defaults to leoAltKm and the oval median goes
+    warning-orange when forecast p50 crosses your Kp. THE HANDOFF:
+    saving writes user_profiles.aurora_kp_threshold via
+    auth.updateProfile — the same column alert-engine, account.html,
+    and the alert products already read. tests/threshold-profile.mjs.
+  · **Config sheets (§6)**: registry entries may carry typed `config`
+    schemas (stage: default station / spirals / ghost count); values
+    live in the per-page panel-config store (OUTSIDE the layout doc —
+    the sizes-store rationale: never silently re-bucket an A/B view),
+    surfaced via window.__swPanelConfig + 'sw-panel-config'; gallery
+    rows get ⚙ sheets; the Stage consumes live + at boot.
+  · **Cloud sync (§6, decisions #2/#3)**: `supabase-dashboards-
+    migration.sql` committed **PENDING — apply only on the author's
+    go**; ownership-only RLS (tier gating client-side, rationale in the
+    header); doc = {layout, config, sizes} per (user, page, name).
+    `js/dashboard-sync.js`: local-first, Basic+/tester/admin gate,
+    JWT from the sb-* session entry, pull-newer-wins with ONE guarded
+    reload, debounced push on save/config events, self-disables on
+    the missing table (PGRST205 → 'migration-pending').
+    tests/dashboard-sync.mjs + tests/space-weather-d2.spec.js (4).
 - **D3 — Analytics & trust.** User-facing analytics family, product
   instrumentation + first tuning pass, density/ops mode, a11y + perf
   gates, print/light theme for operator shift briefings (DECIDED: in
