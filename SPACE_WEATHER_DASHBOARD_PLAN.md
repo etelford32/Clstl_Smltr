@@ -1,18 +1,23 @@
 # Space Weather Dashboard v2 — the signed-in mission console (plan)
 
 > **Plan only — no implementation in this document's commits.** Product
-> target: `space-weather.html` becomes the platform's SIGNED-IN
-> mission-control surface for two primary personas — **Aurora Chasers**
-> and **Satellite Operators** — built around a true-3D **Stage** (one
-> continuous Sun→Earth scene) with a fully customizable instrument dock.
+> target: a RE-DO of `space-weather.html` as the platform's signed-in,
+> per-user **space weather dashboard** for two primary personas —
+> **Aurora Chasers** and **Satellite Operators** — built around a
+> true-3D **Stage** (one continuous Sun→Earth scene) with a fully
+> customizable instrument dock. It is its own surface: the account
+> dashboard (`dashboard.html`) remains the account dashboard —
+> especially for superuser/admin — and is NOT absorbed or renamed.
 > Decisions marked ⚠ need the author's call (§13) before their phase.
 >
 > Decisions already made by the author (2026-07-22): the dashboard is
 > **sign-in gated** (authenticated users only); primary personas are
 > **Aurora Chaser + Satellite Operator**; the 3D presentation is a
 > first-class design object, not a widget. The six §13 questions were
-> answered 2026-07-22 — §13 is now the decisions-on-record table; no
-> open blockers remain.
+> answered 2026-07-22, and #1 was REVISED same day: no account-home
+> absorption — this is a redesign of the space-weather page itself, with
+> additional features for signed-in users. §13 is the decisions-on-record
+> table; no open blockers remain.
 
 ---
 
@@ -33,8 +38,10 @@ v2 inverts both axes at once:
   2D pseudo-views. Panels stop being the page; they become the
   **instrument dock** around the Stage.
 - **Ownership**: the page is composed per user — panels, thresholds,
-  locations, assets, camera home — and lives behind sign-in, making it
-  the account's home surface and the platform's retention core.
+  locations, assets, camera home — and lives behind sign-in. It is the
+  platform's retention core as the SPACE WEATHER surface; account
+  administration stays on the account dashboard, which it does not
+  replace.
 
 One sentence: **your sky and your fleet, on one stage, with honest
 uncertainty — arranged by you.**
@@ -79,15 +86,26 @@ discipline for anything the GPU draws.
 - **Funnel instrumentation**: `gate_view → signin_start → signin_done →
   first_layout_touch` through the existing auth-funnel channel; the gate
   is an experiment surface (copy/att­ract variants) via experiments.js.
-- **DECIDED — this page absorbs the account-home role.** The console
-  becomes THE signed-in dashboard: the post-signin default destination,
-  the nav's single "Dashboard" entry, and the account's home surface;
-  `dashboard.html` is repositioned as Account/Settings. Implementation
-  care (D1+G scope): the post-auth redirect target moves here, every
-  `dashboard.html` reference in nav/auth flows is re-pointed (nav-lint +
-  the auth-tier-redirect spec are the safety nets), and a redirect
-  preserves old deep links. This RAISES the console's bar: it must be a
-  worthy daily home (status band + fast boot are not optional polish).
+- **DECIDED (revised 2026-07-22) — separate surfaces, no absorption.**
+  `dashboard.html` REMAINS the account dashboard — the admin/superuser
+  home (view-as tier debugging, admin analytics, account management stay
+  there, untouched). The redesigned space-weather page keeps its own
+  identity ("Space Weather" in nav — no naming collision to resolve) and
+  is reached from nav and from a prominent "Open your space weather
+  dashboard" tile on the account dashboard (a bridge, not a merge). The
+  post-signin default destination is UNCHANGED. Deep links into
+  space-weather still round-trip through `?next=`. QA note: the
+  superadmin `pp-view-as` override applies here like any tier-gated
+  surface — the tool for testing Basic+/Institution gating of cloud sync
+  and org features.
+- **What signing in unlocks (vs the old public page)**: the entire v2
+  feature set is signed-in — composition (registry/gallery/presets),
+  per-panel config, the threshold profile, saved locations + fleet
+  assets on the Stage, cloud sync (Basic+), the alert ledger and
+  personal analytics. The old page's PUBLIC marketing/SEO role transfers
+  to the attract loop on the landing/pricing heroes and `?preview=1`
+  embeds (decision #6) — a stated consequence of the gate, mitigated,
+  not ignored.
 
 ## 4. Personas (locked) → stagings + presets
 
@@ -305,14 +323,13 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
 
 ## 12. Phasing (D = dock, S = stage; interleaved)
 
-- **D1+G — Foundation + gate + home swap.** Sign-in gate + funnel +
-  attract stub (current page in `?preview=1`); the account-home
-  absorption (post-auth redirect → here, nav re-point, dashboard.html →
-  Account/Settings, legacy redirects); registry with legacy adapters;
-  grid + v2 layout schema (+ v1 migrator); gallery; five presets; status
-  band; token port. Exit: signed-in users land here by default and can
-  compose/save/restore; signed-out see gate + teaser; nav-lint +
-  auth-redirect + all existing gates green.
+- **D1+G — Foundation + gate.** Sign-in gate + funnel + attract stub
+  (current page in `?preview=1`); the account-dashboard bridge tile
+  (dashboard.html itself otherwise untouched); registry with legacy
+  adapters; grid + v2 layout schema (+ v1 migrator); gallery; five
+  presets; status band; token port. Exit: signed-in users can
+  compose/save/restore their space-weather dashboard; signed-out see
+  gate + teaser; nav-lint + auth-redirect + all existing gates green.
 - **S1 — Stage core.** One-context corridor scene: Sun, ropes (kernel-
   oracle), L1, Earth, compressed-scale ruler; stations 1–4 + flights;
   τ-timeline driving Stage + chart cursors; replaces the three 2D
@@ -340,7 +357,7 @@ timeline sync, a11y), per house workflow.
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | Naming / relation to `dashboard.html` | **Absorb the account home** — this console becomes THE signed-in dashboard and post-signin destination; dashboard.html repositioned as Account/Settings with redirects (D1+G scope) |
+| 1 | Relation to `dashboard.html` | **REVISED 2026-07-22: separate surfaces.** dashboard.html stays the account dashboard (admin/superuser home, untouched); this is a re-do of the space-weather page as the signed-in customized dashboard, keeping its own nav identity, linked by a bridge tile — no absorption, no renames, post-signin destination unchanged |
 | 2 | Gate scope | **Authentication-only** — free signed-in accounts get full customization; Basic+ gates cloud sync/multi-dashboards; Institution gates org sharing/kiosk |
 | 3 | Cloud-sync shape | **Named/versioned `dashboards` table** (several per user, org-ready); migration SQL committed, applied only on the author's go |
 | 4 | Operator asset ingestion | **CelesTrak picker** (name / NORAD ID search over ingested catalogs); no uploads in v1 |
@@ -352,7 +369,9 @@ No open blockers remain — every phase can start.
 ## 14. Success metrics
 
 Gate funnel: gate_view→signin conversion ≥ baseline signup ×1.5 (the
-attract loop earns its keep or gets iterated). ≥40% of returning
+attract loop earns its keep or gets iterated); account-dashboard bridge
+tile CTR tracked (does the surface pull daily returns without being the
+forced home?). ≥40% of returning
 signed-in users run a non-default layout within 30 days. Preset adoption
 ≥60% of first-runs; median time-to-first-custom-panel < 2 min.
 Stage engagement: ≥50% of sessions change station or scrub the future
