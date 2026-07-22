@@ -1,0 +1,335 @@
+{
+  "page": "space-weather",
+  "_howto": "Named starting-point layouts for the space-weather dashboard (SPACE_WEATHER_DASHBOARD_PLAN.md §4/§6, phase D1). Users apply one from the Layout Lab picker and then edit — applying never overwrites a saved personal layout until the user hits Save. Distinct from data/layout-variants/space-weather.json: variants are assigned silently by the A/B experiment; presets are chosen deliberately. Every panel id must exist in js/space-weather-registry.js — tests/space-weather-registry.mjs enforces it, and requires each preset to list EVERY registry panel in its zone orders so application is fully deterministic.",
+  "presets": {
+    "chaser": {
+      "label": "Aurora Chaser",
+      "blurb": "Will I see it tonight? Kp, the oval, and the next 72 hours first.",
+      "layout": {
+        "v": 2,
+        "page": "space-weather",
+        "preset": "chaser",
+        "zones": {
+          "main": {
+            "order": [
+              "stage",
+              "metrics-hero",
+              "forecast-timeline",
+              "earth-forecast",
+              "globe",
+              "flux-rope-forecast",
+              "cme-forecast",
+              "data-grid",
+              "imagery",
+              "transit",
+              "helio-hero",
+              "solar-system-info",
+              "tables",
+              "scorecard",
+              "sources"
+            ],
+            "hidden": [
+              "transit",
+              "helio-hero",
+              "solar-system-info",
+              "tables"
+            ],
+            "wide": [],
+            "size": {},
+            "orderMobile": [
+              "stage",
+              "metrics-hero",
+              "earth-forecast",
+              "forecast-timeline",
+              "globe",
+              "flux-rope-forecast",
+              "cme-forecast",
+              "data-grid",
+              "imagery",
+              "transit",
+              "helio-hero",
+              "solar-system-info",
+              "tables",
+              "sources",
+              "scorecard"
+            ]
+          },
+          "grid": {
+            "order": [
+              "card-storm-scale",
+              "card-polar-mag",
+              "card-wind",
+              "card-cme-donki",
+              "card-upper-atmosphere",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-gravity-wave",
+              "card-earth-orbit",
+              "storm-log"
+            ],
+            "hidden": [
+              "card-upper-atmosphere",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-gravity-wave",
+              "card-earth-orbit"
+            ],
+            "wide": [],
+            "size": {}
+          }
+        }
+      }
+    },
+    "operator": {
+      "label": "Satellite Operator",
+      "blurb": "The next 72 h on the fleet: CME arrivals, Bz, and thermosphere drag.",
+      "layout": {
+        "v": 2,
+        "page": "space-weather",
+        "preset": "operator",
+        "zones": {
+          "main": {
+            "order": [
+              "stage",
+              "metrics-hero",
+              "cme-forecast",
+              "flux-rope-forecast",
+              "forecast-timeline",
+              "transit",
+              "data-grid",
+              "earth-forecast",
+              "globe",
+              "imagery",
+              "tables",
+              "scorecard",
+              "sources",
+              "helio-hero",
+              "solar-system-info"
+            ],
+            "hidden": [
+              "helio-hero",
+              "solar-system-info"
+            ],
+            "wide": [],
+            "size": {},
+            "orderMobile": [
+              "stage",
+              "metrics-hero",
+              "cme-forecast",
+              "flux-rope-forecast",
+              "forecast-timeline",
+              "data-grid",
+              "transit",
+              "earth-forecast",
+              "globe",
+              "imagery",
+              "tables",
+              "sources",
+              "helio-hero",
+              "solar-system-info",
+              "scorecard"
+            ]
+          },
+          "grid": {
+            "order": [
+              "card-upper-atmosphere",
+              "card-wind",
+              "card-storm-scale",
+              "card-cme-donki",
+              "card-polar-mag",
+              "card-earth-orbit",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-gravity-wave",
+              "storm-log"
+            ],
+            "hidden": [
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-gravity-wave"
+            ],
+            "wide": [
+              "card-upper-atmosphere"
+            ],
+            "size": {}
+          }
+        }
+      }
+    },
+    "forecaster": {
+      "label": "Forecaster / Researcher",
+      "blurb": "Everything, forecast-first — nothing hidden.",
+      "layout": {
+        "v": 2,
+        "page": "space-weather",
+        "preset": "forecaster",
+        "zones": {
+          "main": {
+            "order": [
+              "stage",
+              "metrics-hero",
+              "cme-forecast",
+              "flux-rope-forecast",
+              "earth-forecast",
+              "forecast-timeline",
+              "transit",
+              "globe",
+              "data-grid",
+              "imagery",
+              "tables",
+              "helio-hero",
+              "solar-system-info",
+              "scorecard",
+              "sources"
+            ],
+            "hidden": [],
+            "wide": [],
+            "size": {}
+          },
+          "grid": {
+            "order": [
+              "card-wind",
+              "card-storm-scale",
+              "card-cme-donki",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-polar-mag",
+              "card-gravity-wave",
+              "card-upper-atmosphere",
+              "card-earth-orbit",
+              "storm-log"
+            ],
+            "hidden": [],
+            "wide": [],
+            "size": {}
+          }
+        }
+      }
+    },
+    "educator": {
+      "label": "Educator",
+      "blurb": "The system view first: the simulations and the Sun→Earth story.",
+      "layout": {
+        "v": 2,
+        "page": "space-weather",
+        "preset": "educator",
+        "zones": {
+          "main": {
+            "order": [
+              "stage",
+              "helio-hero",
+              "solar-system-info",
+              "globe",
+              "transit",
+              "metrics-hero",
+              "earth-forecast",
+              "forecast-timeline",
+              "cme-forecast",
+              "flux-rope-forecast",
+              "imagery",
+              "data-grid",
+              "tables",
+              "scorecard",
+              "sources"
+            ],
+            "hidden": [],
+            "wide": [],
+            "size": {}
+          },
+          "grid": {
+            "order": [
+              "card-wind",
+              "card-storm-scale",
+              "card-cme-donki",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-polar-mag",
+              "card-gravity-wave",
+              "card-upper-atmosphere",
+              "card-earth-orbit",
+              "storm-log"
+            ],
+            "hidden": [],
+            "wide": [],
+            "size": {}
+          }
+        }
+      }
+    },
+    "casual": {
+      "label": "Casual glance",
+      "blurb": "Just the picture: conditions now, aurora tonight, imagery.",
+      "layout": {
+        "v": 2,
+        "page": "space-weather",
+        "preset": "casual",
+        "zones": {
+          "main": {
+            "order": [
+              "stage",
+              "metrics-hero",
+              "earth-forecast",
+              "globe",
+              "imagery",
+              "forecast-timeline",
+              "data-grid",
+              "flux-rope-forecast",
+              "cme-forecast",
+              "transit",
+              "helio-hero",
+              "solar-system-info",
+              "tables",
+              "scorecard",
+              "sources"
+            ],
+            "hidden": [
+              "flux-rope-forecast",
+              "cme-forecast",
+              "transit",
+              "helio-hero",
+              "solar-system-info",
+              "tables",
+              "sources",
+              "scorecard"
+            ],
+            "wide": [],
+            "size": {}
+          },
+          "grid": {
+            "order": [
+              "card-storm-scale",
+              "card-wind",
+              "card-cme-donki",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-polar-mag",
+              "card-gravity-wave",
+              "card-upper-atmosphere",
+              "card-earth-orbit",
+              "storm-log"
+            ],
+            "hidden": [
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-polar-mag",
+              "card-gravity-wave",
+              "card-upper-atmosphere",
+              "card-earth-orbit",
+              "storm-log"
+            ],
+            "wide": [],
+            "size": {}
+          }
+        }
+      }
+    }
+  }
+}

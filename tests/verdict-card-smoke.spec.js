@@ -81,6 +81,11 @@ async function bootWithCard(page, url = '/earth.html') {
     });
     await page.route('**/api.open-meteo.com/**', r => r.fulfill({ json: wxFixture(now) }));
     await page.route('**/air-quality-api.open-meteo.com/**', r => r.fulfill({ json: aqFixture(now) }));
+    // Flux-rope 3-day outlook (Phase 4): the page fills a third sky row when
+    // the DONKI catalog carries an Earth-directed CME. Abort the route by
+    // default so the baseline contract (exactly 2 sky rows) is hermetic —
+    // the outlook path has its own fixture-driven test below.
+    await page.route('**/api/donki/**', r => r.abort());
     await page.goto(url, { waitUntil: 'load' });
 }
 
@@ -237,5 +242,40 @@ test.describe('EarthView verdict card', () => {
         await expect(page.locator('#loc-panel')).toBeAttached();
         await expect(page.locator('#loc-panel')).toBeVisible();
         await expect(page.locator('#hud')).toBeVisible();
+    });
+
+    test('flux-rope outlook adds a third sky row for an inbound CME', async ({ page }) => {
+        // Phase 4: fixture an Earth-directed DONKI cone launched 6 h ago —
+        // the shared provider runs the REAL ensemble WASM in-page and the
+        // card appends the storm-outlook sky row (aurora/ISS stay [0]/[1]).
+        const launch = new Date(Date.now() - 6 * HOUR).toISOString().slice(0, 19) + 'Z';
+        const donki = {
+            data: {
+                cmes: [{
+                    time: launch, speed_km_s: 1400, latitude_deg: -2, longitude_deg: 3,
+                    half_angle_deg: 45, earth_directed: true, most_accurate: true,
+                }],
+            },
+        };
+        const now = Date.now();
+        await page.addInitScript(() => {
+            localStorage.setItem('ppx_user_location', JSON.stringify({
+                lat: 38.76, lon: -121.16, city: 'Granite Bay', displayName: 'Granite Bay, CA',
+            }));
+        });
+        await page.route('**/api.open-meteo.com/**', r => r.fulfill({ json: wxFixture(now) }));
+        await page.route('**/air-quality-api.open-meteo.com/**', r => r.fulfill({ json: aqFixture(now) }));
+        await page.route('**/api/donki/**', r => r.fulfill({ json: donki }));
+        // No live L1 for the filter — prior-only is the deterministic path.
+        await page.route('**/services.swpc.noaa.gov/json/rtsw/**', r => r.abort());
+        await page.goto('/earth.html', { waitUntil: 'load' });
+
+        const card = page.locator('#ev-verdict-card');
+        await expect(card).toBeVisible({ timeout: 30_000 });
+        // The fill runs ~4 s after mount + a ~1 s in-page ensemble.
+        await expect(card.locator('.ev-verdict-skyrow')).toHaveCount(3, { timeout: 60_000 });
+        const outlook = card.locator('.ev-verdict-skyrow').nth(2);
+        await expect(outlook).toContainText(/CME (watch|warning|arriving)/i);
+        await expect(outlook).toContainText(/P\(hit\)|storm potential/);
     });
 });

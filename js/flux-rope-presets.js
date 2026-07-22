@@ -25,7 +25,69 @@ export const ST_PATRICK_FIT = Object.freeze({
     // Validation numbers this fit holds (pinned by the smoke test):
     // min Bz −24.1 vs obs −24.25 nT (0.4%), min-Bz timing Δ2.1 h,
     // Bz shape r = 0.66, southward dwell 16.3 vs 17.8 h. Sheath NOT modeled
-    // (Phase 5) — the observed sheath interval is an honest, known miss.
+    // in THIS baseline fit — kept as the diffable v1 generation; the page
+    // defaults to sheathFit below.
+    //
+    // sheathFit — the v1.1 generation with the spec §14 sheath forward
+    // model. What the sheath buys, measured (pinned): DISTURBANCE (shock)
+    // arrival lands on the observed SSC (+51.6 vs +51.55 h post-launch —
+    // the baseline's first disturbance was 2.3 h early), rope-onset error
+    // drops 10.5 h → 3.4 h (the baseline had to slide the rope INTO the
+    // sheath window to cover it), min Bz −20.6 (15%), shape r = 0.62.
+    // Honest residual, on record: the model's Bz minimum sits mid-passage
+    // while the observed minimum hugs the rope's LEADING EDGE — front
+    // compression/erosion asymmetry is the next unmodeled miss.
+    sheathFit: Object.freeze({
+        rope: Object.freeze({
+            lonDeg: 0, latDeg: -6, tiltDeg: 45, handedness: 1,
+            twistTurns: 6, b1AuNt: 40, sigma1AuAu: 0.13,
+            v0Kms: 760, gammaPerKm: 0.3e-7, wKms: 400,
+            sheathDeltaNt: 2.5, sheathK: 0.55, bAmb1AuNt: 5,
+        }),
+    }),
+    // frontFit — the v1.2-generation fit with FRONT COMPRESSION (spec §15)
+    // on top of the sheath: the snowplowed leading edge is thinner and
+    // flux-conservation-boosted, which is what puts the observed Bz minimum
+    // at the rope's front. Pinned: shock +51.7 vs SSC +51.55 h, min Bz
+    // −23.8 vs −24.25 nT (1.9%!) at Δ0.5 h timing (v1.1: 8–12 h), rope
+    // onset 4.1 h early, shape r = 0.635. The geoeffective peak — value AND
+    // time — is now the model's strongest point instead of its weakest.
+    frontFit: Object.freeze({
+        rope: Object.freeze({
+            lonDeg: 0, latDeg: -2, tiltDeg: 50, handedness: 1,
+            twistTurns: 5, b1AuNt: 24, sigma1AuAu: 0.15,
+            v0Kms: 800, gammaPerKm: 0.25e-7, wKms: 400,
+            sheathDeltaNt: 2.5, sheathK: 0.95, bAmb1AuNt: 5, frontC: 0.55,
+        }),
+    }),
+    // Pancaking (spec §18) was TESTED and produced NO fit improvement here:
+    // the nose chord is near-degenerate under (σ·√A, A) co-scaling — A = 2
+    // gives r 0.676 vs 0.686 and leaves the minimum at 22% of the dwell —
+    // so the fitted generation stays circular. What A = 2 DOES change is
+    // ensemble geometry: P(hit) 0.54 → 0.83 at identical spreads (the
+    // §18 calibration warning, pinned by the smoke test).
+    //
+    // standoffFit — the v1.4 generation with the spec §17 Mach-dependent
+    // (Farris–Russell) shock standoff replacing the fixed-fraction shell.
+    // η = 1.1 is THE LITERATURE blunt-body coefficient, applied to the
+    // two-curvature nose proxy √(σ_eff·d/2) with no retuning — and it lands
+    // the shock ON the SSC (error 0.0 h) while finally decoupling the rope
+    // onset from the shock: onset error 1.4 h (v1.2: 4.1 h — the residual
+    // that motivated §17). Pinned: min Bz −24.6 vs −24.25 nT (1.4%) at
+    // Δ1.8 h, shape r = 0.686 (the best of any generation), southward
+    // dwell 13.4 vs 12.5 h (v1.2: 16.4). Honest residual, on record: the
+    // observed minimum sits 10 min after onset (AT the leading edge); the
+    // model's sits at 22% of the dwell — the §15 front-compression clamp
+    // (c ≤ 0.6) is the limiting mechanism now, not the sheath.
+    standoffFit: Object.freeze({
+        rope: Object.freeze({
+            lonDeg: 0, latDeg: -2, tiltDeg: 50, handedness: 1,
+            twistTurns: 5, b1AuNt: 24, sigma1AuAu: 0.12,
+            v0Kms: 765, gammaPerKm: 0.25e-7, wKms: 400,
+            sheathDeltaNt: 2.5, sheathK: 0, bAmb1AuNt: 5, frontC: 0.6,
+            sheathEta: 1.1,
+        }),
+    }),
 });
 
 /**
@@ -66,6 +128,156 @@ export const GANNON_FIT = Object.freeze({
             launchOffsetS: 72_900,   // +20.25 h → 2024-05-09T17:45Z
         }),
     ]),
+    // v1.1 sheath generation (spec §14): the SAME two ropes with a sheath on
+    // rope A — the SSC progenitor. Kernel-verified: model shock +43.3 h vs
+    // the observed SSC +43.6 h (0.3 h; the sheathless train's first
+    // disturbance was 3.1 h late). Rope B left sheathless: its front runs
+    // inside rope A's wake where the fresh-upstream assumption is wrong —
+    // the honest choice until CME–CME interaction is modeled.
+    //
+    // Front compression (spec §15) was TESTED and REJECTED for this event:
+    // fc = 0 beats fc > 0 on 3 of 4 metrics (shock 0.3 vs 0.8 h, min 0.8 vs
+    // 2.8%, r 0.714 vs 0.701; only min-timing prefers fc, 1.0 → 0.5 h) —
+    // Gannon's min sat 4.5 h into the passage, not at the front. The
+    // parameter is per-event physics, not a universal knob.
+    sheathRopes: Object.freeze([
+        Object.freeze({
+            lonDeg: 0, latDeg: -6, tiltDeg: 60, handedness: 1,
+            twistTurns: 4, b1AuNt: 55, sigma1AuAu: 0.085,
+            v0Kms: 950, gammaPerKm: 0.2e-7, wKms: 450,
+            sheathDeltaNt: 3, sheathK: 0.65, bAmb1AuNt: 5,
+            launchOffsetS: 0,
+        }),
+        Object.freeze({
+            lonDeg: 0, latDeg: 0, tiltDeg: 45, handedness: -1,
+            twistTurns: 5, b1AuNt: 42, sigma1AuAu: 0.12,
+            v0Kms: 1300, gammaPerKm: 0.2e-7, wKms: 450,
+            launchOffsetS: 72_900,
+        }),
+    ]),
+    // v1.3 interaction generation (spec §16): the SAME two-launch story with
+    // CME–CME interaction ON — the train becomes a system, and both v1
+    // absorptions come back out of the fit:
+    //   · rope A relaxes to PLAUSIBLE values (σ 0.12 AU, 38 nT — the v1
+    //     0.085 AU / 55 nT compactness was rope B's compression absorbed
+    //     into a hand fit); the kernel's dynamic rear compression now
+    //     supplies that depth where and WHEN rope B closes in.
+    //   · rope B gains its sheath honestly: its shock Mach is computed
+    //     against rope A's WAKE (not fresh wind), and the observed INTERNAL
+    //     disturbance — the V 684→748 jump at +48.7 h, mid-storm, 2.5 h
+    //     before the global minimum — is a feature v1/v1.1 could not
+    //     represent at all.
+    // Kernel-verified (pinned): shock +43.2 vs SSC +43.6 h; internal
+    // disturbance +48.9 vs +48.7 h observed; min Bz −44.3 vs −44.17 nT
+    // (0.3%) at Δ1.5 h; southward dwell 16.8 vs 15.9 h (v1.1: 18.5); rope
+    // overlap 0 steps. Honest trades, on record: full-window r 0.66 vs the
+    // v1.1 generation's 0.71 — the deterministic series now carries ZEROS
+    // through the 54–56 h sheath handover (spec §14 keeps sheath Bz
+    // stochastic, ensemble-only) where v1.1's overlong 18.5 h rope-A dwell
+    // happened to cover the observations; and rope B's sheath_k = 2.0 is a
+    // stand-in for the missing Mach-dependent shock standoff (§15
+    // residual). v0_B = 900 is a FIT parameter under the frozen-at-launch
+    // wake (w_eff 739 km/s carries the transit), not the coronagraph speed.
+    interaction: Object.freeze({ wakeGammaFrac: 0.8, compC: 1.0, compReach: 1.2 }),
+    interactionRopes: Object.freeze([
+        Object.freeze({
+            lonDeg: 0, latDeg: -6, tiltDeg: 60, handedness: 1,
+            twistTurns: 4, b1AuNt: 38, sigma1AuAu: 0.12,
+            v0Kms: 950, gammaPerKm: 0.2e-7, wKms: 450,
+            sheathDeltaNt: 3, sheathK: 0.2, bAmb1AuNt: 5,
+            launchOffsetS: 0,
+        }),
+        Object.freeze({
+            lonDeg: 0, latDeg: 0, tiltDeg: 45, handedness: -1,
+            twistTurns: 5, b1AuNt: 42, sigma1AuAu: 0.14,
+            v0Kms: 900, gammaPerKm: 0.2e-7, wKms: 450,
+            sheathDeltaNt: 2.5, sheathK: 2.0, bAmb1AuNt: 5,
+            launchOffsetS: 72_900,
+        }),
+    ]),
+    // Pancaking (spec §18) tested here too and REJECTED: A = 2 co-scaled
+    // trades the minimum (0.3% → 10.1% error) for marginal shape gain
+    // (r +0.006) — the flattening also perturbs the §16 squeeze geometry
+    // through σ̂. The fitted train stays circular.
+    //
+    // v1.4 standoff generation (spec §17): the SAME interacting ropes with
+    // the Farris–Russell shell replacing both fixed fractions — the ONLY
+    // change is k → η, and rope B's admitted k = 2.0 stand-in becomes a
+    // physical statement. Kernel-verified (pinned): shock −0.8 h vs SSC,
+    // internal disturbance +0.2 h vs the observed +48.7 h jump (k-mode:
+    // +0.3), all rope-field metrics bit-identical to interactionRopes
+    // (min 0.3%, Δ1.5 h, r 0.663, dwell 16.8 h, zero overlap — the shell
+    // carries flags, not deterministic field). Honest η report:
+    //   · rope B η = 3.0 ≈ 2.7× blunt-body — wake PILEUP the flank flow
+    //     cannot evacuate, exactly the §17 honesty note's prediction for a
+    //     follower ramming its leader's wake.
+    //   · rope A η = 0.3 — SUB-blunt-body: its observed SSC→onset gap is
+    //     thinner than the quiet-wind relation predicts (the storm-period
+    //     wind ahead of the train was itself disturbed; documented, not
+    //     hidden).
+    standoffRopes: Object.freeze([
+        Object.freeze({
+            lonDeg: 0, latDeg: -6, tiltDeg: 60, handedness: 1,
+            twistTurns: 4, b1AuNt: 38, sigma1AuAu: 0.12,
+            v0Kms: 950, gammaPerKm: 0.2e-7, wKms: 450,
+            sheathDeltaNt: 3, sheathK: 0, bAmb1AuNt: 5, sheathEta: 0.3,
+            launchOffsetS: 0,
+        }),
+        Object.freeze({
+            lonDeg: 0, latDeg: 0, tiltDeg: 45, handedness: -1,
+            twistTurns: 5, b1AuNt: 42, sigma1AuAu: 0.14,
+            v0Kms: 900, gammaPerKm: 0.2e-7, wKms: 450,
+            sheathDeltaNt: 2.5, sheathK: 0, bAmb1AuNt: 5, sheathEta: 3.0,
+            launchOffsetS: 72_900,
+        }),
+    ]),
+});
+
+/**
+ * OSSE_STA — an Observing System Simulation Experiment (spec §13): a
+ * SYNTHETIC event demonstrating STEREO-A pre-arrival conditioning. `truth`
+ * is the rope that "really" happened; the page synthesizes its in situ
+ * signatures at BOTH observers, hands them to the particle filter as
+ * "observations", and starts you from the deliberately-off `rope` prior.
+ * Kernel-verified geometry: the truth grazes STEREO-A at +38.5 h (−18 nT
+ * flank signal, 20 h dwell) while L1 stays silent until +41.2 h — scrub
+ * into that gap and the posterior collapses on data Earth hasn't seen:
+ * ESS drops to the floor with mild tempering (λ ≈ 0.6 — real information,
+ * not overconfidence) and P(Earth hit) rises before L1 measures anything.
+ * Depth (P(min Bz < −10)) firms only as the flank crossing deepens — the
+ * honest information ordering of a graze: arrival first, amplitude later.
+ *
+ * Pinned to the May-2024-era geometry (STA ≈ +15° ahead, from
+ * staPositionApprox at the synthetic epoch) because that is when the
+ * flank-graze configuration was real; today's STA sits much farther from
+ * the Sun–Earth line. Everything here is labeled synthetic — no validation
+ * claims attached.
+ */
+export const OSSE_STA = Object.freeze({
+    id: 'osse-sta',
+    label: 'OSSE · STEREO-A flank graze (synthetic)',
+    launchIso: '2024-05-01T00:00:00Z',
+    bundleUrl: null,
+    osse: true,
+    // The forecaster's PRIOR: DONKI-class direction/speed knowledge, wide
+    // magnetic uncertainty (what you'd have from a cone fit alone).
+    rope: Object.freeze({
+        lonDeg: 6, latDeg: 0, tiltDeg: 90, handedness: 1,
+        twistTurns: 4, b1AuNt: 20, sigma1AuAu: 0.115,
+        v0Kms: 1000, gammaPerKm: 0.2e-7, wKms: 400,
+    }),
+    // What "really" happened — offset in direction, tilt, size and speed.
+    // (Low tilt keeps the croissant legs near the ecliptic so the +15° STA
+    // flank graze is real — kernel-verified, see header.)
+    truth: Object.freeze({
+        lonDeg: 7, latDeg: -2, tiltDeg: 20, handedness: 1,
+        twistTurns: 4.5, b1AuNt: 30, sigma1AuAu: 0.15,
+        v0Kms: 1150, gammaPerKm: 0.2e-7, wKms: 400,
+    }),
+    spreads: Object.freeze({
+        sigLonDeg: 8, sigLatDeg: 5, sigTiltDeg: 30, sigV0Kms: 120,
+        lnsigB: 0.3, lnsigSigma: 0.2, lnsigGamma: 0.4, sigTwist: 1.2, pFlip: 0.3,
+    }),
 });
 
 /** Illustrative synthetic scenarios — no validation claims attached. */

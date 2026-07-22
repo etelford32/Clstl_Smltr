@@ -17,7 +17,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { loadFluxRopeKernel, L1_OBSERVER } from '../js/flux-rope-kernel.js';
-import { GANNON_FIT, ST_PATRICK_FIT } from '../js/flux-rope-presets.js';
+import { GANNON_FIT, OSSE_STA, ST_PATRICK_FIT } from '../js/flux-rope-presets.js';
 
 const wasmPath = fileURLToPath(new URL('../js/flux-rope-wasm/flux_rope_core.wasm', import.meta.url));
 const bundlePath = fileURLToPath(new URL('../data/hindcast/st_patrick_mar_2015_replay.json', import.meta.url));
@@ -292,6 +292,412 @@ const gMins = Array.from(gEns.minBz).filter(Number.isFinite).sort((a, b) => a - 
 check('gannon ensemble: observed min inside member spread',
     gMins[0] < gMinObs && gMinObs < gMins[gMins.length - 1],
     `obs ${gMinObs} in [${gMins[0].toFixed(1)}, ${gMins[gMins.length - 1].toFixed(1)}]`);
+
+// ── Sheath generation (spec §14) — v1.1 fits vs the same ground truth ────────
+// The sheath's measured value is STRUCTURAL TIMING: the model now has a
+// shock/sheath phase distinct from the rope, so it no longer has to slide
+// the rope into the sheath window to cover it.
+{
+    // St. Patrick's: shock on the SSC, rope on the rope onset.
+    const SSC_H = t0S / 3600 + 16.8;
+    const ROPE_ONSET_H = (Date.parse('2015-03-17T13:00:00Z') - Date.parse(ST_PATRICK_FIT.launchIso)) / 3600e3;
+    k.setRope(ST_PATRICK_FIT.sheathFit.rope);
+    const sf = k.series(t0S, stepS, n, L1_OBSERVER);
+    const tHof = (i) => t0S / 3600 + i * stepS / 3600;
+    const firstSheath = sf.sheath.findIndex((v) => v > 0);
+    const firstRope = sf.inside.findIndex((v) => v > 0);
+    check('sheath-fit: model shock lands on the observed SSC (±1.5 h)',
+        firstSheath >= 0 && Math.abs(tHof(firstSheath) - SSC_H) < 1.5,
+        `+${tHof(firstSheath).toFixed(1)} h vs SSC +${SSC_H.toFixed(1)} h`);
+    // Baseline first-disturbance error (its rope onset — it has no sheath).
+    k.setRope(ST_PATRICK_FIT.rope);
+    const bl = k.series(t0S, stepS, n, L1_OBSERVER);
+    const blOnsetErr = Math.abs(tHof(bl.inside.findIndex((v) => v > 0)) - ROPE_ONSET_H);
+    const sfOnsetErr = Math.abs(tHof(firstRope) - ROPE_ONSET_H);
+    check('sheath-fit: rope-onset error at least halved vs the baseline',
+        sfOnsetErr < 5 && sfOnsetErr < 0.5 * blOnsetErr,
+        `${sfOnsetErr.toFixed(1)} h vs baseline ${blOnsetErr.toFixed(1)} h`);
+    k.setRope(ST_PATRICK_FIT.sheathFit.rope);
+    const sf2 = k.series(t0S, stepS, n, L1_OBSERVER);
+    let sMin = Infinity;
+    let sx2 = 0, sy2 = 0, sxx2 = 0, syy2 = 0, sxy2 = 0;
+    for (let i = 0; i < n; i++) {
+        if (sf2.bz[i] < sMin) sMin = sf2.bz[i];
+        const y = obsBz[i];
+        if (!Number.isFinite(y)) continue;
+        sx2 += sf2.bz[i]; sy2 += y; sxx2 += sf2.bz[i] ** 2; syy2 += y * y; sxy2 += sf2.bz[i] * y;
+    }
+    const rSheath = (sxy2 - sx2 * sy2 / n) / Math.sqrt((sxx2 - sx2 * sx2 / n) * (syy2 - sy2 * sy2 / n) || 1);
+    check('sheath-fit: min Bz within ±35%', Math.abs((sMin - minObs) / minObs) < 0.35,
+        `${sMin.toFixed(1)} vs obs ${minObs.toFixed(1)} nT`);
+    check('sheath-fit: shape correlation holds (> 0.55)', rSheath > 0.55, `r = ${rSheath.toFixed(3)}`);
+
+    // Ensemble with the sheath: deterministic under the seed, and the storm
+    // probability never drops vs the sheathless baseline.
+    k.setRope(ST_PATRICK_FIT.rope);
+    k.setSpreads({});
+    const pBase = k.ensembleRun(1503, 500, t0S, stepS, n, L1_OBSERVER).pMinBzBelow(-10);
+    k.setRope(ST_PATRICK_FIT.sheathFit.rope);
+    k.setSpreads({});
+    const e1 = k.ensembleRun(1503, 500, t0S, stepS, n, L1_OBSERVER);
+    const e2 = k.ensembleRun(1503, 500, t0S, stepS, n, L1_OBSERVER);
+    check('sheath ensemble: seeded-reproducible (OU streams included)',
+        e1.bzPct.p50.every((v, i) => v === e2.bzPct.p50[i]));
+    check('sheath ensemble: storm probability never drops vs baseline',
+        e1.pMinBzBelow(-10) >= pBase - 1e-9,
+        `${e1.pMinBzBelow(-10).toFixed(2)} vs baseline ${pBase.toFixed(2)}`);
+
+    // Gannon v1.1: sheath on rope A only — shock on the observed SSC with
+    // the rope train untouched.
+    const SSC_G_H = (Date.parse('2024-05-10T17:05:00Z') - Date.parse(GANNON_FIT.launchIso)) / 3600e3;
+    k.setRopes(GANNON_FIT.sheathRopes);
+    const gs = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+    const gFirstSheath = gs.sheath.findIndex((v) => v > 0);
+    check('gannon sheath: model shock lands on the observed SSC (±1.5 h)',
+        gFirstSheath >= 0 && Math.abs(gT0S / 3600 + gFirstSheath * gStepS / 3600 - SSC_G_H) < 1.5,
+        `+${(gT0S / 3600 + gFirstSheath * gStepS / 3600).toFixed(1)} h vs SSC +${SSC_G_H.toFixed(1)} h`);
+    check('gannon sheath: rope structure untouched (min Bz gate still holds)', (() => {
+        let m = Infinity;
+        for (let i = 0; i < gN; i++) m = Math.min(m, gs.bz[i]);
+        return Math.abs((m - gMinObs) / gMinObs) < 0.25;
+    })());
+}
+
+// ── Front compression (spec §15) — v1.2: the geoeffective peak lands ─────────
+// The v1.1 residual was structural: the observed Bz minimum hugs the rope's
+// leading edge while the symmetric model put it mid-passage. The snowplowed
+// front (thinner boundary + flux-conservation boost) closes it.
+{
+    const SSC_H = t0S / 3600 + 16.8;
+    k.setRope(ST_PATRICK_FIT.frontFit.rope);
+    const ff = k.series(t0S, stepS, n, L1_OBSERVER);
+    const tHof = (i) => t0S / 3600 + i * stepS / 3600;
+    const firstSheath = ff.sheath.findIndex((v) => v > 0);
+    let fMin = Infinity, iFMin = -1;
+    let fx = 0, fy = 0, fxx = 0, fyy = 0, fxy = 0;
+    for (let i = 0; i < n; i++) {
+        if (ff.bz[i] < fMin) { fMin = ff.bz[i]; iFMin = i; }
+        const y = obsBz[i];
+        if (!Number.isFinite(y)) continue;
+        fx += ff.bz[i]; fy += y; fxx += ff.bz[i] ** 2; fyy += y * y; fxy += ff.bz[i] * y;
+    }
+    const rFront = (fxy - fx * fy / n) / Math.sqrt((fxx - fx * fx / n) * (fyy - fy * fy / n) || 1);
+    check('front-fit: shock still on the observed SSC (±1.5 h)',
+        firstSheath >= 0 && Math.abs(tHof(firstSheath) - SSC_H) < 1.5,
+        `+${tHof(firstSheath).toFixed(1)} h vs +${SSC_H.toFixed(1)} h`);
+    check('front-fit: min Bz value within ±15% (was ±35%)',
+        Math.abs((fMin - minObs) / minObs) < 0.15,
+        `${fMin.toFixed(1)} vs obs ${minObs.toFixed(1)} nT (Δ ${(100 * Math.abs((fMin - minObs) / minObs)).toFixed(1)}%)`);
+    check('front-fit: min-Bz TIMING within ±2 h (v1.1: 8–12 h)',
+        Math.abs(iFMin - iMinObs) * stepS / 3600 < 2,
+        `Δ ${(Math.abs(iFMin - iMinObs) * stepS / 3600).toFixed(1)} h`);
+    check('front-fit: shape correlation holds (> 0.55)', rFront > 0.55, `r = ${rFront.toFixed(3)}`);
+    // The min must sit in the FRONT third of the rope passage — the whole
+    // point of the mechanism.
+    const fRope = ff.inside.findIndex((v) => v > 0);
+    const lRope = (() => { let l = -1; for (let i = 0; i < n; i++) if (ff.inside[i] > 0) l = i; return l; })();
+    check('front-fit: minimum sits in the front third of the passage',
+        (iFMin - fRope) / Math.max(1, lRope - fRope) < 0.34,
+        `${(100 * (iFMin - fRope) / Math.max(1, lRope - fRope)).toFixed(0)}% of dwell`);
+    // Gannon decision pinned: front compression tested and rejected there —
+    // the preset must NOT carry it (per-event physics, not a global knob).
+    check('gannon: front compression deliberately absent (fc=0 wins 3 of 4 metrics)',
+        !GANNON_FIT.sheathRopes.some((r) => (r.frontC ?? 0) > 0));
+}
+
+// ── CME–CME interaction (spec §16) — v1.3: the train becomes a system ────────
+// The two v1 absorptions come back out of the Gannon fit: rope A relaxes to
+// plausible values (the kernel's dynamic rear compression supplies what the
+// 0.085 AU / 55 nT hand fit absorbed), and rope B gains a WAKE-conditioned
+// sheath whose shock reproduces the observed mid-storm internal disturbance.
+{
+    const SSC_G_H = (Date.parse('2024-05-10T17:05:00Z') - Date.parse(GANNON_FIT.launchIso)) / 3600e3;
+    const INT_G_H = (Date.parse('2024-05-10T22:10:00Z') - Date.parse(GANNON_FIT.launchIso)) / 3600e3;
+    const tHofG = (i) => gT0S / 3600 + i * gStepS / 3600;
+    const ir = GANNON_FIT.interactionRopes;
+
+    check('interaction: preset carries the v1.3 generation + engine config',
+        ir?.length === 2 && GANNON_FIT.interaction != null);
+    check('interaction: rope A relaxed to plausible values (σ ≥ 0.1 AU, B₁AU ≤ 45 nT)',
+        ir[0].sigma1AuAu >= 0.1 && ir[0].b1AuNt <= 45,
+        `σ ${ir[0].sigma1AuAu} AU, ${ir[0].b1AuNt} nT (v1 absorbed fit: 0.085 AU, 55 nT)`);
+
+    k.setRopes(ir);
+    k.setInteraction({ enabled: true, ...GANNON_FIT.interaction });
+    check('interaction: follower reads wake kinematics (elevated w_eff, reduced Γ)',
+        k.ropeWEffKms(1) > 600 && k.ropeGammaEff(1) < ir[1].gammaPerKm
+            && k.ropeWEffKms(0) === ir[0].wKms,
+        `w_eff ${k.ropeWEffKms(1).toFixed(0)} km/s (fresh ${ir[1].wKms}), Γ_eff ${k.ropeGammaEff(1).toExponential(2)}`);
+
+    const is = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+    let iMinV = Infinity, iIMin = -1, iSouthH = 0, iOverlap = 0;
+    let ix = 0, iy = 0, ixx = 0, iyy = 0, ixy = 0, ic = 0;
+    let iFirstSheath = -1, iFirstInternal = -1;
+    for (let i = 0; i < gN; i++) {
+        if (is.bz[i] < iMinV) { iMinV = is.bz[i]; iIMin = i; }
+        if (is.bz[i] < -10) iSouthH += gStepS / 3600;
+        if (is.inside[i] > 1) iOverlap++;
+        if (iFirstSheath < 0 && is.sheath[i] > 0) iFirstSheath = i;
+        if (iFirstInternal < 0 && is.sheath[i] > 0 && is.inside[i] > 0) iFirstInternal = i;
+        if (!Number.isFinite(gObs[i])) continue;
+        ix += is.bz[i]; iy += gObs[i]; ixx += is.bz[i] ** 2; iyy += gObs[i] ** 2; ixy += is.bz[i] * gObs[i]; ic++;
+    }
+    const rInt = (ixy - ix * iy / ic) / Math.sqrt((ixx - ix * ix / ic) * (iyy - iy * iy / ic) || 1);
+    check('interaction: shock on the observed SSC (±1.5 h)',
+        iFirstSheath >= 0 && Math.abs(tHofG(iFirstSheath) - SSC_G_H) < 1.5,
+        `+${tHofG(iFirstSheath).toFixed(1)} h vs SSC +${SSC_G_H.toFixed(1)} h`);
+    check('interaction: the INTERNAL disturbance lands — rope B\'s wake shock inside rope A (±1.5 h)',
+        iFirstInternal >= 0 && Math.abs(tHofG(iFirstInternal) - INT_G_H) < 1.5,
+        `+${tHofG(iFirstInternal).toFixed(1)} h vs observed +${INT_G_H.toFixed(1)} h (V 684→748, Bz −38)`);
+    check('interaction: global min Bz within ±10% (rear compression, not a 55 nT rope)',
+        Math.abs((iMinV - gMinObs) / gMinObs) < 0.10,
+        `${iMinV.toFixed(1)} vs obs ${gMinObs.toFixed(1)} nT (Δ ${(100 * Math.abs((iMinV - gMinObs) / gMinObs)).toFixed(1)}%)`);
+    check('interaction: min-Bz timing within ±2.5 h', Math.abs(iIMin - gIMinObs) * gStepS / 3600 < 2.5,
+        `Δ ${(Math.abs(iIMin - gIMinObs) * gStepS / 3600).toFixed(1)} h`);
+    check('interaction: shape correlation > 0.6 (v1.1: 0.71 — trade documented in the preset)',
+        rInt > 0.6, `r = ${rInt.toFixed(3)} over ${ic} obs samples`);
+    check('interaction: southward dwell within factor 1.3 (v1.1: 18.5 h vs obs 15.9 h)',
+        iSouthH > gSouthObsH / 1.3 && iSouthH < gSouthObsH * 1.3,
+        `model ${iSouthH.toFixed(1)} h vs obs ${gSouthObsH.toFixed(1)} h`);
+    check('interaction: no unphysical overlap superposition', iOverlap === 0,
+        `${iOverlap} overlap steps`);
+
+    // Mechanism attribution: the SAME ropes with interaction disabled lose
+    // both new features — the minimum shallows by the squeeze's share and
+    // the internal disturbance slips hours late (fresh-wind sheath timing).
+    k.setInteraction({ enabled: false });
+    const ds = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+    let dMin = Infinity, dFirstInternal = -1;
+    for (let i = 0; i < gN; i++) {
+        if (ds.bz[i] < dMin) dMin = ds.bz[i];
+        if (dFirstInternal < 0 && ds.sheath[i] > 0 && ds.inside[i] > 0) dFirstInternal = i;
+    }
+    check('interaction: attribution — disabling it shallows the min > 3 nT',
+        dMin > iMinV + 3, `${dMin.toFixed(1)} vs ${iMinV.toFixed(1)} nT`);
+    check('interaction: attribution — disabling it mistimes the internal disturbance > 3 h',
+        dFirstInternal < 0 || Math.abs(tHofG(dFirstInternal) - INT_G_H) > 3,
+        dFirstInternal >= 0 ? `+${tHofG(dFirstInternal).toFixed(1)} h vs observed +${INT_G_H.toFixed(1)} h` : 'absent');
+
+    // Joint ensemble under interaction: deterministic, and the storm call
+    // survives the plausible-rope-A generation.
+    k.setInteraction({ enabled: true, ...GANNON_FIT.interaction });
+    k.setSpreads({});
+    const iEns = k.ensembleRun(2024, 500, gT0S, gStepS, gN, L1_OBSERVER);
+    check('interaction ensemble: joint train sampling runs under the config',
+        iEns.ropesPerMember === 2 && iEns.pHit > 0.6, `pHit ${iEns.pHit.toFixed(2)}`);
+    check('interaction ensemble: P(min Bz < −20 nT) still calls a severe storm',
+        iEns.pMinBzBelow(-20) > 0.5, `${iEns.pMinBzBelow(-20).toFixed(2)}`);
+    const iEns2 = k.ensembleRun(2024, 500, gT0S, gStepS, gN, L1_OBSERVER);
+    check('interaction ensemble: seeded-reproducible',
+        iEns.bzPct.p50.every((v, i) => v === iEns2.bzPct.p50[i]));
+
+    // Hygiene: later sections assume the non-interacting engine.
+    k.setInteraction({ enabled: false });
+}
+
+// ── Mach-dependent standoff (spec §17) — v1.4: the shell earns its thickness ─
+// The fixed-fraction sheath welded shock arrival and rope onset to one
+// number; both hindcasts exposed it. The Farris–Russell shell decouples
+// them through measurable physics — and the LITERATURE coefficient lands it.
+{
+    const SSC_H = t0S / 3600 + 16.8;
+    const ROPE_ONSET_H = (Date.parse('2015-03-17T13:00:00Z') - Date.parse(ST_PATRICK_FIT.launchIso)) / 3600e3;
+    const tHof = (i) => t0S / 3600 + i * stepS / 3600;
+    const sr = ST_PATRICK_FIT.standoffFit.rope;
+    check('standoff: η is THE literature blunt-body coefficient (1.1), not a retuned knob',
+        sr.sheathEta === 1.1 && sr.sheathK === 0);
+
+    k.setRope(sr);
+    const so = k.series(t0S, stepS, n, L1_OBSERVER);
+    const soFirstSheath = so.sheath.findIndex((v) => v > 0);
+    const soFirstRope = so.inside.findIndex((v) => v > 0);
+    check('standoff-fit: shock ON the observed SSC (±1 h)',
+        soFirstSheath >= 0 && Math.abs(tHof(soFirstSheath) - SSC_H) < 1.0,
+        `+${tHof(soFirstSheath).toFixed(1)} h vs SSC +${SSC_H.toFixed(1)} h`);
+    const soOnsetErr = Math.abs(tHof(soFirstRope) - ROPE_ONSET_H);
+    check('standoff-fit: rope-onset error < 2 h (v1.2: 4.1 h — the §17 motivation)',
+        soOnsetErr < 2.0, `${soOnsetErr.toFixed(1)} h`);
+    let soMin = Infinity, soIMin = -1, soSouthH = 0;
+    let ox = 0, oy = 0, oxx = 0, oyy = 0, oxy = 0;
+    for (let i = 0; i < n; i++) {
+        if (so.bz[i] < soMin) { soMin = so.bz[i]; soIMin = i; }
+        if (so.bz[i] < -5) soSouthH += stepS / 3600; // < −5: this file's SP convention
+        const y = obsBz[i];
+        if (!Number.isFinite(y)) continue;
+        ox += so.bz[i]; oy += y; oxx += so.bz[i] ** 2; oyy += y * y; oxy += so.bz[i] * y;
+    }
+    const rSo = (oxy - ox * oy / n) / Math.sqrt((oxx - ox * ox / n) * (oyy - oy * oy / n) || 1);
+    check('standoff-fit: min Bz within ±10%', Math.abs((soMin - minObs) / minObs) < 0.10,
+        `${soMin.toFixed(1)} vs obs ${minObs.toFixed(1)} nT (Δ ${(100 * Math.abs((soMin - minObs) / minObs)).toFixed(1)}%)`);
+    check('standoff-fit: min-Bz timing within ±2.5 h',
+        Math.abs(soIMin - iMinObs) * stepS / 3600 < 2.5,
+        `Δ ${(Math.abs(soIMin - iMinObs) * stepS / 3600).toFixed(1)} h`);
+    check('standoff-fit: shape correlation > 0.65 (best of any generation)',
+        rSo > 0.65, `r = ${rSo.toFixed(3)}`);
+    check('standoff-fit: southward dwell (< −5 nT) within factor 1.3',
+        soSouthH > southObsH / 1.3 && soSouthH < southObsH * 1.3,
+        `model ${soSouthH.toFixed(1)} h vs obs ${southObsH.toFixed(1)} h`);
+    // Ensemble under the η shell: still seeded-reproducible.
+    k.setSpreads({});
+    const soE1 = k.ensembleRun(1704, 400, t0S, stepS, n, L1_OBSERVER);
+    const soE2 = k.ensembleRun(1704, 400, t0S, stepS, n, L1_OBSERVER);
+    check('standoff ensemble: seeded-reproducible',
+        soE1.bzPct.p50.every((v, i) => v === soE2.bzPct.p50[i]));
+
+    // Gannon v1.4: η replaces BOTH fixed fractions on the interacting train.
+    // The shell carries flags, never deterministic field — the rope-field
+    // series must be bit-identical to the v1.3 generation.
+    const SSC_G_H = (Date.parse('2024-05-10T17:05:00Z') - Date.parse(GANNON_FIT.launchIso)) / 3600e3;
+    const INT_G_H = (Date.parse('2024-05-10T22:10:00Z') - Date.parse(GANNON_FIT.launchIso)) / 3600e3;
+    const tHofG = (i) => gT0S / 3600 + i * gStepS / 3600;
+    check('gannon standoff: η generation carries no fixed-k stand-ins',
+        GANNON_FIT.standoffRopes.every((r) => (r.sheathK ?? 0) === 0 && r.sheathEta > 0),
+        `η_A ${GANNON_FIT.standoffRopes[0].sheathEta}, η_B ${GANNON_FIT.standoffRopes[1].sheathEta} (was k 0.2 / 2.0)`);
+    k.setRopes(GANNON_FIT.standoffRopes);
+    k.setInteraction({ enabled: true, ...GANNON_FIT.interaction });
+    const gso = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+    k.setRopes(GANNON_FIT.interactionRopes);
+    const gio = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+    check('gannon standoff: rope field bit-identical to v1.3 (shell is flags only)',
+        gso.bz.every((v, i) => v === gio.bz[i]));
+    const gsoFirstSheath = gso.sheath.findIndex((v) => v > 0);
+    let gsoFirstInternal = -1;
+    for (let i = 0; i < gN; i++) {
+        if (gso.sheath[i] > 0 && gso.inside[i] > 0) { gsoFirstInternal = i; break; }
+    }
+    check('gannon standoff: shock on the SSC (±1.5 h)',
+        gsoFirstSheath >= 0 && Math.abs(tHofG(gsoFirstSheath) - SSC_G_H) < 1.5,
+        `+${tHofG(gsoFirstSheath).toFixed(1)} h vs SSC +${SSC_G_H.toFixed(1)} h`);
+    check('gannon standoff: internal disturbance ±1.5 h (η_B = 3 ≈ 2.7× blunt-body — wake pileup, reported honestly)',
+        gsoFirstInternal >= 0 && Math.abs(tHofG(gsoFirstInternal) - INT_G_H) < 1.5,
+        `+${tHofG(gsoFirstInternal).toFixed(1)} h vs observed +${INT_G_H.toFixed(1)} h`);
+    k.setInteraction({ enabled: false });
+}
+
+// ── Pancaking (spec §18) — v1.5: geometry capability, honestly scoped ────────
+// A single spacecraft cannot measure the aspect (the nose chord is
+// near-degenerate under σ·√A co-scaling — MEASURED below), so the fitted
+// presets stay circular. What the flattening genuinely changes is the
+// transverse footprint — who gets hit — and therefore ensemble calibration.
+{
+    // Mechanism through the committed WASM: an 8° flank observer misses the
+    // circular rope and catches the A = 2.5 pancaked one; the nose dwell
+    // shrinks with the thinned radial axis.
+    const FLANK = { rAu: 1.0, lonDeg: 8, latDeg: 0 };
+    k.setRope({ tiltDeg: 90, v0Kms: 1100 });
+    const roundFlank = k.series(0, 1800, 400, FLANK);
+    const roundNose = k.series(0, 1800, 400);
+    k.setRope({ tiltDeg: 90, v0Kms: 1100, pancakeA: 2.5 });
+    const flatFlank = k.series(0, 1800, 400, FLANK);
+    const flatNose = k.series(0, 1800, 400);
+    check('pancake: 8° flank miss → hit as the section flattens (A = 2.5)',
+        roundFlank.hits === 0 && flatFlank.hits > 0,
+        `flank hits ${roundFlank.hits} → ${flatFlank.hits}`);
+    check('pancake: nose dwell shrinks with the thinned radial axis',
+        flatNose.hits < roundNose.hits, `${roundNose.hits} → ${flatNose.hits} steps`);
+
+    // The single-spacecraft degeneracy, MEASURED on the real hindcast: the
+    // co-scaled pancaked fit reproduces the v1.4 series metrics almost
+    // unchanged — which is exactly why A is not fittable from L1 alone.
+    const base = ST_PATRICK_FIT.standoffFit.rope;
+    const metrics = (rope) => {
+        k.setRope(rope);
+        const s = k.series(t0S, stepS, n, L1_OBSERVER);
+        let min = Infinity, iMin = -1;
+        let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+        for (let i = 0; i < n; i++) {
+            if (s.bz[i] < min) { min = s.bz[i]; iMin = i; }
+            const y = obsBz[i];
+            if (!Number.isFinite(y)) continue;
+            sx += s.bz[i]; sy += y; sxx += s.bz[i] ** 2; syy += y * y; sxy += s.bz[i] * y;
+        }
+        const r = (sxy - sx * sy / n) / Math.sqrt((sxx - sx * sx / n) * (syy - sy * sy / n) || 1);
+        const first = s.inside.findIndex((v) => v > 0);
+        return { min, iMin, r, first };
+    };
+    const m1 = metrics(base);
+    const m2 = metrics({ ...base, pancakeA: 2, sigma1AuAu: base.sigma1AuAu * Math.SQRT2 });
+    check('pancake: nose chord near-degenerate under σ·√A co-scaling (why L1 alone cannot fit A)',
+        Math.abs(m2.r - m1.r) < 0.02
+            && Math.abs(m2.first - m1.first) * stepS / 3600 < 0.5
+            && Math.abs(m2.min - m1.min) < 2.5,
+        `r ${m1.r.toFixed(3)} vs ${m2.r.toFixed(3)}, onset Δ${(Math.abs(m2.first - m1.first) * stepS / 3600).toFixed(1)} h, min Δ${Math.abs(m2.min - m1.min).toFixed(1)} nT`);
+
+    // The calibration warning, pinned: identical spreads, A = 2 co-scaled →
+    // P(hit) rises sharply. The aspect is unconstrained by single-point
+    // data, so storm-probability calibration inherits this sensitivity.
+    k.setRope(base);
+    k.setSpreads({});
+    const pRound = k.ensembleRun(1805, 500, t0S, stepS, n, L1_OBSERVER).pHit;
+    k.setRope({ ...base, pancakeA: 2, sigma1AuAu: base.sigma1AuAu * Math.SQRT2 });
+    k.setSpreads({});
+    const pFlat = k.ensembleRun(1805, 500, t0S, stepS, n, L1_OBSERVER).pHit;
+    check('pancake: P(hit) strongly aspect-sensitive at identical spreads (the §18 calibration warning)',
+        pFlat > pRound + 0.1, `${pRound.toFixed(2)} → ${pFlat.toFixed(2)}`);
+
+    // Decision pinned: no fitted preset carries an aspect (tested, rejected
+    // per event — the front-compression precedent).
+    const allRopes = [
+        ST_PATRICK_FIT.rope, ST_PATRICK_FIT.sheathFit.rope, ST_PATRICK_FIT.frontFit.rope,
+        ST_PATRICK_FIT.standoffFit.rope,
+        ...GANNON_FIT.ropes, ...GANNON_FIT.sheathRopes,
+        ...GANNON_FIT.interactionRopes, ...GANNON_FIT.standoffRopes,
+    ];
+    check('pancake: fitted presets stay circular (tested; no hindcast improvement)',
+        allRopes.every((r) => (r.pancakeA ?? 1) === 1));
+}
+
+// ── STEREO-A pre-arrival conditioning (spec §13) — the OSSE, end to end ──────
+// Drives the committed WASM through the exact flow the page uses for the
+// OSSE preset: synthesize the truth at both observers, condition the prior
+// ensemble on a window that ends BEFORE the truth reaches L1, and require
+// the off-Sun–Earth-line data to do real forecasting work.
+{
+    const STA = { rAu: 0.96, lonDeg: 14.9, latDeg: 0 };
+    const nG = 792, dtG = 600;
+    k.setRope(OSSE_STA.truth);
+    const staTruth = k.series(0, dtG, nG, STA);
+    const l1Truth = k.series(0, dtG, nG);
+    const staArrH = staTruth.inside.findIndex((v) => v > 0) * dtG / 3600;
+    const l1ArrH = l1Truth.inside.findIndex((v) => v > 0) * dtG / 3600;
+    check('osse: truth grazes STEREO-A before L1', staArrH > 0 && staArrH + 2 < l1ArrH,
+        `STA +${staArrH.toFixed(1)} h, L1 +${l1ArrH.toFixed(1)} h`);
+
+    k.setRope(OSSE_STA.rope);
+    k.setSpreads(OSSE_STA.spreads);
+    k.setAuxObserver(STA);
+    const priorO = k.ensembleRun(20260721, 500, 0, dtG, nG);
+    check('osse: aux member series recorded', k.ensHasAux());
+    const priorHit = priorO.pHit;
+
+    // The now-line sits in the gap: STA has data, L1 has only silence.
+    const i1 = Math.floor((l1ArrH - 0.5) * 3600 / dtG);
+    const post = k.assimilateJoint({
+        obsBz: l1Truth.bz, i0: 0, i1, sigmaNt: 4,
+        auxObsBz: staTruth.bz, auxI0: 0, auxI1: i1, auxSigmaNt: 4,
+    });
+    check('osse: pre-arrival STA data collapses the posterior',
+        post.ess < priorO.members / 3, `ESS ${post.ess.toFixed(0)}/${priorO.members}, λ ${post.temperature.toFixed(2)}`);
+    check('osse: P(Earth hit) rises before L1 sees anything',
+        post.pHit > priorHit, `${post.pHit.toFixed(2)} vs prior ${priorHit.toFixed(2)}`);
+    // The L1 storm is entirely in the future — the forecast median for it
+    // must move TOWARD the truth. (Raw fan width is not a sound metric here:
+    // percentiles are inside-member-conditional, and the posterior has MORE
+    // members present in the storm window than the phase-scattered prior.)
+    const iStorm = [Math.floor(l1ArrH * 3600 / dtG), Math.floor((l1ArrH + 12) * 3600 / dtG)];
+    const err = (r) => {
+        let s = 0;
+        for (let i = iStorm[0]; i < Math.min(nG, iStorm[1]); i++) {
+            s += Math.abs(r.bzPct.p50[i] - l1Truth.bz[i]);
+        }
+        return s;
+    };
+    check('osse: the future L1 forecast sharpens on off-line data alone',
+        err(post) < err(priorO),
+        `Σ|median−truth| ${err(post).toFixed(0)} vs prior ${err(priorO).toFixed(0)} nT`);
+    k.assimReset();
+    k.clearAuxObserver();
+}
 
 console.log(failures ? `\n${failures} failure(s)` : '\nall flux-rope kernel checks passed');
 process.exit(failures ? 1 : 0);

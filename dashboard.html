@@ -480,6 +480,23 @@ footer a:hover{color:var(--text)}
     </div>
   </div>
 
+  <!-- ── SPACE WEATHER DASHBOARD BRIDGE ──
+       The account dashboard stays the account dashboard (admin/superuser
+       home); the customizable space-weather console is its own surface.
+       This tile is the bridge between the two — see
+       SPACE_WEATHER_DASHBOARD_PLAN.md §3 (separate surfaces, no merge). -->
+  <div class="card" id="sw-bridge-card" style="margin-bottom:16px">
+    <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 18px">
+      <div>
+        <div style="font-size:.82rem;font-weight:700;color:#e8f4ff">Your space weather dashboard</div>
+        <div style="font-size:.68rem;color:var(--muted)">Live solar wind, storm indices, CME forecasts, and the auroral oval — fully customizable, arranged your way.</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a href="space-weather.html" class="btn-sm" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;padding:6px 16px;text-decoration:none;font-size:.75rem">Open dashboard →</a>
+      </div>
+    </div>
+  </div>
+
   <!-- ── CLASS ROSTER (educator/institution/enterprise) ── -->
   <!-- Mounted by js/class-roster.js when the user holds a seated plan. -->
   <div class="card" id="class-roster-card" style="margin-bottom:16px;display:none"></div>

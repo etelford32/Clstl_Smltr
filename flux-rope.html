@@ -192,6 +192,12 @@ body {
                 <select id="fr-preset" aria-label="event preset"></select>
             </div>
             <p style="font-size:.72rem;color:#68718a;line-height:1.45;" id="fr-preset-note"></p>
+            <div class="fr-field"><label>STEREO-A lon</label><input type="range" id="p-staLon" min="-90" max="90" step="1" value="15"><output>+15°</output></div>
+            <p style="font-size:.66rem;color:#68718a;line-height:1.4;">
+                r 0.96 AU · approximate drift ephemeris (anchored to the Aug 2023
+                conjunction, ±3°) — edit to explore the flank-graze geometry.
+                Member Bz at this position feeds the joint particle filter.
+            </p>
         </div>
 
         <div class="fr-panel">
@@ -207,6 +213,10 @@ body {
             <div class="fr-field"><label>launch v₀</label><input type="range" id="p-v0Kms" min="300" max="2500" step="10"><output>800 km/s</output></div>
             <div class="fr-field"><label>drag Γ</label><input type="range" id="p-gammaE7" min="0.05" max="2" step="0.05"><output>0.20</output></div>
             <div class="fr-field"><label>wind w</label><input type="range" id="p-wKms" min="250" max="700" step="10"><output>400 km/s</output></div>
+            <div class="fr-field"><label>sheath δ</label><input type="range" id="p-sheathDeltaNt" min="0" max="6" step="0.5"><output>0 nT</output></div>
+            <div class="fr-field"><label>front compr.</label><input type="range" id="p-frontC" min="0" max="0.6" step="0.05"><output>0</output></div>
+            <div class="fr-field" title="Farris–Russell standoff η (spec §17): 0 = legacy fixed-k shell; ≈1.1 = quiet-wind blunt body"><label>standoff η</label><input type="range" id="p-sheathEta" min="0" max="3" step="0.1"><output>0</output></div>
+            <div class="fr-field" title="Pancaking aspect A (spec §18): elliptical cross-section, σ/√A radial × σ√A transverse. Area-preserving; 1 = circular"><label>pancake A</label><input type="range" id="p-pancakeA" min="1" max="4" step="0.1"><output>1</output></div>
             <div class="fr-row2">
                 <div class="fr-field" style="grid-template-columns:88px 1fr;"><label>chirality</label>
                     <select id="p-handedness"><option value="1">right (+)</option><option value="-1">left (−)</option></select></div>
@@ -248,14 +258,23 @@ body {
 <p class="fr-note">
     <b>Reading the chart:</b> shaded bands are the ensemble 5–95% and 25–75%
     Bz envelopes at L1; the white trace is the deterministic reference fit and
-    the amber trace is the observed OMNI Bz for hindcast events. The v1 engine
-    models magnetic ropes only — <b>no sheath, no rope–rope interaction</b> —
-    so the observed sheath interval and train compression are expected,
-    honestly-reported misses (the Phase 5 roadmap). Validated fits:
-    St. Patrick's 2015 (single rope) min Bz −24.1 vs −24.25 nT observed,
-    timing Δ2.1 h, shape r 0.66 · Gannon May 2024 (2-rope train) min Bz
-    −43.8 vs −44.2 nT, timing Δ1.0 h, full-window r 0.71, both southward
-    episodes reproduced.
+    the amber trace is the observed OMNI Bz for hindcast events. The forward
+    model now carries the shocked <b>sheath</b> (phase-flagged; its Bz rides
+    the ensemble band, deliberately not the deterministic trace),
+    <b>front compression</b> where an event demands it, <b>CME–CME
+    interaction</b> (wake kinematics + follower squeeze), and sheath
+    thickness from the <b>Mach-dependent Farris–Russell standoff</b> —
+    growing as the decelerating shock weakens. Validated fits: St.
+    Patrick's 2015 (single rope, v1.4, literature η = 1.1) shock ON the
+    SSC, rope onset within 1.4 h (was 4.1 h), min Bz −24.6 vs −24.25 nT,
+    r 0.69 · Gannon May 2024 (2-rope interacting train, v1.4) min −44.3 vs
+    −44.2 nT, internal disturbance +48.8 vs +48.7 h, both southward
+    episodes reproduced. Cross-section pancaking (spec §18) is implemented
+    and unit-pinned but the fitted presets stay circular: a single
+    spacecraft cannot measure the aspect (measured degeneracy), while
+    P(hit) is strongly aspect-sensitive — the honest calibration caveat on
+    storm probabilities. Unmodeled, on record: the X3.9/X5.8 Gannon CMEs,
+    momentum exchange, sheath-interior deterministic Bz.
 </p>
 
 <section class="fr-info">
@@ -292,11 +311,11 @@ body {
 
 <script type="module">
 import { loadFluxRopeKernel, ROPE_DEFAULTS, SPREAD_DEFAULTS } from './js/flux-rope-kernel.js';
-import { GANNON_FIT, ST_PATRICK_FIT, SCENARIOS } from './js/flux-rope-presets.js';
+import { GANNON_FIT, OSSE_STA, ST_PATRICK_FIT, SCENARIOS } from './js/flux-rope-presets.js';
 import { HeliosphereView } from './js/flux-rope/view.js';
 import { drawBzChart, drawArrivalHist } from './js/flux-rope/charts.js';
-import { fromReplayBundle } from './js/solar-wind-driver.js';
-import { fetchDonkiCmes, donkiToPreset, fetchRtswDriver } from './js/flux-rope-live.js';
+import { fromArrays, fromReplayBundle } from './js/solar-wind-driver.js';
+import { fetchDonkiCmes, donkiToPreset, fetchRtswDriver, fetchStereoBeaconDriver, staPositionApprox } from './js/flux-rope-live.js';
 
 const AU_KM = 1.495978707e8;
 const $ = (id) => document.getElementById(id);
@@ -305,7 +324,10 @@ const kernel = await loadFluxRopeKernel('./js/flux-rope-wasm/flux_rope_core.wasm
 const view = new HeliosphereView($('fr-gl'), $('fr-overlay'));
 
 // Normalize a preset (single `rope` or train `ropes`) into a full train.
-const toRopes = (p) => (p.ropes ?? [p.rope]).map((r) => ({ ...ROPE_DEFAULTS, launchOffsetS: 0, ...r }));
+// Generation preference: interaction (spec §16) > sheath (§14) > baseline.
+const toRopes = (p) => (p.standoffRopes ?? p.interactionRopes ?? p.sheathRopes ?? p.ropes
+    ?? [p.standoffFit?.rope ?? p.frontFit?.rope ?? p.sheathFit?.rope ?? p.rope])
+    .map((r) => ({ ...ROPE_DEFAULTS, launchOffsetS: 0, ...r }));
 
 /**
  * TauClock — the ring-simulator clock discipline (js/sim-clock.js semantics,
@@ -341,19 +363,34 @@ const state = {
     tH: Array.from({ length: GRID.n }, (_, i) => (GRID.t0S + i * GRID.dtS) / 3600),
     cursorH: 0,
     rtsw: null,            // live L1 driver, fetched once at boot
+    staBeacon: null,       // live STEREO-A beacon driver, fetched at boot
+    // STEREO-A (spec 13): assumed position + observed/synthetic driver.
+    sta: { pos: { rAu: 0.96, lonDeg: 15, latDeg: 0 }, obsDriver: null, aligned: null },
+    detSta: null,          // deterministic predicted Bz at STEREO-A
+    // CME–CME interaction config (spec §16) — per preset; custom inherits.
+    interaction: { enabled: false },
 };
 const clock = new TauClock(parseFloat($('fr-speed').value));
 const activeRope = () => state.ropes[state.active];
 
 // ── Presets ──────────────────────────────────────────────────────────────────
-const PRESETS = [ST_PATRICK_FIT, GANNON_FIT, ...SCENARIOS, { id: 'custom', label: 'Custom', rope: null }];
+const PRESETS = [ST_PATRICK_FIT, GANNON_FIT, OSSE_STA, ...SCENARIOS, { id: 'custom', label: 'Custom', rope: null }];
 const PRESET_NOTES = {
-    'st-patrick-2015': 'Hand fit to the 17 Mar 2015 G4 storm (DONKI-informed launch). ' +
-        'The amber observed trace is OMNI 5-min Bz; drag the timeline and the ' +
+    'st-patrick-2015': 'Hand fit to the 17 Mar 2015 G4 storm — v1.4 forward model with the ' +
+        'Mach-dependent (Farris–Russell) shock standoff at the LITERATURE η = 1.1: shock ' +
+        'ON the observed SSC, rope onset within 1.4 h (was 4.1 h), min Bz −24.6 vs ' +
+        '−24.25 nT, shape r 0.69 — the best generation yet. Drag the timeline and the ' +
         'particle filter conditions the fan on everything left of the now-line.',
     'gannon-2024': 'The May 2024 G5 CME train as TWO sequential ropes (X1.0 and X2.2 flare ' +
-        'launches from AR 13664, +20.25 h apart). The X3.9/X5.8 CMEs and rope–rope ' +
-        'compression are honestly unmodeled — that is the v2 roadmap.',
+        'launches from AR 13664, +20.25 h apart) — v1.4 forward model: CME–CME interaction ' +
+        'ON (rope B rides rope A’s wake and squeezes its rear to the −44 nT minimum with a ' +
+        'plausible 38 nT rope A) and the Farris–Russell standoff replacing fixed sheath ' +
+        'fractions — rope B’s η = 3 (≈2.7× blunt-body, wake pileup) puts its internal ' +
+        'shock at +48.8 vs +48.7 h observed. The X3.9/X5.8 CMEs remain honestly unmodeled.',
+    'osse-sta': 'SYNTHETIC observing-system experiment at the 2024 flank-graze geometry: the ' +
+        'dotted green trace is what a spacecraft at STEREO-A "really" measured; the truth ' +
+        'grazes it at +38.5 h while L1 stays silent until +41 h. Scrub into that gap and the ' +
+        'fan collapses on off-Sun–Earth-line data alone — the pre-arrival lead-time claim.',
     'fast-halo': 'Synthetic: a 1600 km/s halo eruption aimed at Earth — note the shorter transit and harder Bz.',
     'slow-glancing': 'Synthetic: a slow flank launch — most ensemble members miss; the fan is wide and shallow.',
     'custom': 'Free play: every slider redraws the active rope; add ropes to build a train.',
@@ -388,10 +425,20 @@ async function applyPreset(id) {
         state.active = 0;
         state.launchMs = p.launchIso ? Date.parse(p.launchIso) : null;
         state.spreadsBase = p.spreads ?? SPREAD_DEFAULTS;
+        // §16: the interaction config travels with the generation it fit.
+        state.interaction = ((p.standoffRopes || p.interactionRopes) && p.interaction)
+            ? { enabled: true, ...p.interaction }
+            : { enabled: false };
         renderRopeTabs();
         syncSliders();
     }
     state.obsDriver = null;
+    state.sta.obsDriver = null;
+    // Assumed STEREO-A position from the drift ephemeris at the event epoch
+    // (editable afterwards — the slider discloses the assumption).
+    const staRef = staPositionApprox(state.launchMs ?? Date.now());
+    state.sta.pos = { rAu: staRef.rAu, lonDeg: staRef.lonDeg, latDeg: staRef.latDeg };
+    syncStaSlider();
     if (p && p.bundleUrl) {
         try {
             const bundle = await (await fetch(p.bundleUrl)).json();
@@ -399,11 +446,43 @@ async function applyPreset(id) {
         } catch (e) {
             console.warn('flux-rope: observed overlay unavailable', e);
         }
-    } else if (p?.live && state.rtsw?.length) {
-        state.obsDriver = state.rtsw;   // live DSCOVR/ACE overlay + assimilation
+    } else if (p?.osse) {
+        synthesizeOsse(p);
+    } else if (p?.live) {
+        if (state.rtsw?.length) state.obsDriver = state.rtsw;
+        if (state.staBeacon?.length) state.sta.obsDriver = state.staBeacon;
     }
     clock.scrub(0);
     recompute();
+}
+
+function syncStaSlider() {
+    $('p-staLon').value = state.sta.pos.lonDeg;
+    $('p-staLon').nextElementSibling.textContent =
+        `${state.sta.pos.lonDeg >= 0 ? '+' : ''}${Math.round(state.sta.pos.lonDeg)}°`;
+}
+$('p-staLon').addEventListener('input', () => {
+    state.sta.pos.lonDeg = parseFloat($('p-staLon').value);
+    syncStaSlider();
+    clearTimeout(debounceId);
+    debounceId = setTimeout(recompute, 120);   // geometry change only — keep the preset
+});
+
+/**
+ * OSSE synthesis (spec 13): fly the preset's hidden TRUTH rope past both
+ * observers with the kernel, and hand those series to the filter as
+ * "observations". Everything is deterministic and labeled synthetic.
+ */
+function synthesizeOsse(p) {
+    kernel.setRope({ ...ROPE_DEFAULTS, ...p.truth });
+    const tMs = Array.from({ length: GRID.n }, (_, i) => state.launchMs + (GRID.t0S + i * GRID.dtS) * 1000);
+    const l1 = kernel.series(GRID.t0S, GRID.dtS, GRID.n);
+    state.obsDriver = fromArrays({ t: tMs, bz: Array.from(l1.bz) },
+        { source: 'synthetic', label: 'synthetic truth at L1 (OSSE)' });
+    const sta = kernel.series(GRID.t0S, GRID.dtS, GRID.n,
+        { rAu: state.sta.pos.rAu, lonDeg: state.sta.pos.lonDeg, latDeg: state.sta.pos.latDeg });
+    state.sta.obsDriver = fromArrays({ t: tMs, bz: Array.from(sta.bz) },
+        { source: 'synthetic', label: 'synthetic truth at STEREO-A (OSSE)' });
 }
 
 // ── Rope tabs (train editing, spec §10) ──────────────────────────────────────
@@ -448,8 +527,8 @@ function renderRopeTabs() {
 }
 
 // ── Parameter panel ──────────────────────────────────────────────────────────
-const SLIDERS = ['lonDeg', 'latDeg', 'tiltDeg', 'twistTurns', 'b1AuNt', 'sigma1AuAu', 'v0Kms', 'wKms'];
-const UNITS = { lonDeg: '°', latDeg: '°', tiltDeg: '°', twistTurns: '', b1AuNt: ' nT', sigma1AuAu: ' AU', v0Kms: ' km/s', wKms: ' km/s' };
+const SLIDERS = ['lonDeg', 'latDeg', 'tiltDeg', 'twistTurns', 'b1AuNt', 'sigma1AuAu', 'v0Kms', 'wKms', 'sheathDeltaNt', 'frontC', 'sheathEta', 'pancakeA'];
+const UNITS = { lonDeg: '°', latDeg: '°', tiltDeg: '°', twistTurns: '', b1AuNt: ' nT', sigma1AuAu: ' AU', v0Kms: ' km/s', wKms: ' km/s', sheathDeltaNt: ' nT', frontC: '', sheathEta: '', pancakeA: '' };
 
 function syncSliders() {
     const rope = activeRope();
@@ -505,8 +584,28 @@ $('a-toggle').addEventListener('change', () => { lastAssimI1 = -1; maybeAssimila
 // ── Compute ──────────────────────────────────────────────────────────────────
 function recompute() {
     kernel.setRopes(state.ropes);
-    view.setRopes(state.ropes);
+    kernel.setInteraction(state.interaction ?? { enabled: false });
+    // The view mirrors the kernel's EFFECTIVE kinematics (§16 wake for
+    // followers) via the kernel getters — identical to the raw params while
+    // interaction is off. The rear-compression field distortion is NOT
+    // mirrored in the shader (same documented display-only omission as the
+    // sheath); the kernel probe fr_field_at remains the oracle.
+    view.setRopes(state.ropes.map((r, i) => ({
+        ...r, wKms: kernel.ropeWEffKms(i), gammaPerKm: kernel.ropeGammaEff(i),
+    })));
     state.det = kernel.series(GRID.t0S, GRID.dtS, GRID.n);
+
+    // STEREO-A (spec 13): predicted flank signature + aux recording for the
+    // joint filter. Aux recording is RNG-free - the L1 prior is unchanged.
+    const staObs = { rAu: state.sta.pos.rAu, lonDeg: state.sta.pos.lonDeg, latDeg: state.sta.pos.latDeg };
+    state.detSta = kernel.series(GRID.t0S, GRID.dtS, GRID.n, staObs).bz;
+    kernel.setAuxObserver(staObs);
+    const staRad = state.sta.pos.lonDeg * Math.PI / 180;
+    view.setStaMarker([
+        state.sta.pos.rAu * Math.cos(staRad),
+        state.sta.pos.rAu * Math.sin(staRad),
+        0,
+    ]);
 
     const sc = parseFloat($('e-scale').value);
     kernel.setSpreads(Object.fromEntries(
@@ -521,17 +620,19 @@ function recompute() {
     // Observed series aligned to the ensemble grid (assimilation input +
     // chart overlay). Built from the SolarWindDriver so hindcast bundles
     // and live RTSW behave identically.
-    state.obsAligned = null;
-    if (state.obsDriver && state.launchMs) {
+    const alignToGrid = (driver) => {
+        if (!driver || !state.launchMs) return null;
         const a = new Float32Array(GRID.n).fill(NaN);
         for (let i = 0; i < GRID.n; i++) {
             const t = state.launchMs + (GRID.t0S + i * GRID.dtS) * 1000;
-            if (t < state.obsDriver.tStart || t > state.obsDriver.tEnd) continue;
-            const s = state.obsDriver.at(t);
+            if (t < driver.tStart || t > driver.tEnd) continue;
+            const s = driver.at(t);
             if (s && Number.isFinite(s.bz)) a[i] = s.bz;
         }
-        state.obsAligned = a;
-    }
+        return a;
+    };
+    state.obsAligned = alignToGrid(state.obsDriver);
+    state.sta.aligned = alignToGrid(state.sta.obsDriver);
     state.assim = null;
     view.setWeights(null);
     lastAssimI1 = -1;
@@ -558,18 +659,31 @@ function maybeAssimilate(force = false) {
     if (!force && (i1 === lastAssimI1 || now < assimBusyUntil)) return;
     lastAssimI1 = i1;
     assimBusyUntil = now + 250;   // throttle: ≥250 ms between filter updates
-    // Count real observations left of the now-line.
-    let nObs = 0;
-    for (let i = 0; i < i1; i++) if (Number.isFinite(state.obsAligned[i])) nObs++;
-    if (nObs < 3) {
+    // Count real observations left of the now-line, per observer.
+    const countObs = (a) => {
+        if (!a) return 0;
+        let c = 0;
+        for (let i = 0; i < i1; i++) if (Number.isFinite(a[i])) c++;
+        return c;
+    };
+    const nL1 = countObs(state.obsAligned);
+    const nSta = countObs(state.sta.aligned);
+    if (nL1 + nSta < 3) {
         if (state.assim) { kernel.assimReset(); state.assim = null; view.setWeights(null); }
         $('fr-assim-status').textContent = 'particle filter armed — advance the now-line into observed data';
     } else {
-        state.assim = kernel.assimilate({ obsBz: state.obsAligned, i0: 0, i1, sigmaNt: 4 });
+        // JOINT update (spec §13): L1 + STEREO-A log-likelihoods, one temper.
+        state.assim = kernel.assimilateJoint({
+            obsBz: state.obsAligned, i0: 0, i1, sigmaNt: 4,
+            auxObsBz: state.sta.aligned, auxI0: 0, auxI1: i1, auxSigmaNt: 4,
+        });
         view.setWeights(state.assim.weights);
         const a = state.assim;
+        const parts = [];
+        if (nL1) parts.push(`L1 ${nL1}`);
+        if (nSta) parts.push(`STA ${nSta}`);
         $('fr-assim-status').textContent =
-            `particle filter · ${nObs} obs · ESS ${a.ess.toFixed(0)}/${a.members}`
+            `particle filter · ${parts.join(' + ')} obs · ESS ${a.ess.toFixed(0)}/${a.members}`
             + (a.temperature < 1 ? ` · λ ${a.temperature.toFixed(3)} (tempered)` : '');
     }
     updateStats();
@@ -606,11 +720,24 @@ function drawCharts() {
             bz: state.obsDriver.samples.map((s) => s.bz),
         }
         : null;
+    const auxObs = (state.sta.obsDriver && state.launchMs)
+        ? {
+            tH: state.sta.obsDriver.samples.map((s) => (s.t - state.launchMs) / 3600_000),
+            bz: state.sta.obsDriver.samples.map((s) => s.bz),
+        }
+        : null;
+    const synthetic = state.obsDriver?.meta.source === 'synthetic';
     drawBzChart($('fr-bz-chart'), {
         tH: state.tH,
         det: state.det ? state.det.bz : null,
         fan: fanSrc ? { ...fanSrc.bzPct, hitFrac: fanSrc.hitFrac } : null,
         obs,
+        obsLabel: synthetic ? 'observed L1 (synthetic)' : undefined,
+        // Hide the predicted-STA trace when the rope never brushes STA — a
+        // flat zero line would only add legend noise.
+        aux: state.detSta && state.detSta.some((v) => v !== 0) ? state.detSta : null,
+        auxObs,
+        auxObsLabel: synthetic ? 'STEREO-A (synthetic)' : undefined,
         launchMs: state.launchMs,
         cursorH: state.cursorH,
     });
@@ -651,10 +778,12 @@ function tick() {
     $('fr-hud-sig').textContent = `${(probes[a].sigmaApexKm / AU_KM).toFixed(3)} AU`;
     const i = Math.min(GRID.n - 1, Math.max(0, Math.round(tS / GRID.dtS)));
     const count = state.det ? state.det.inside[i] : 0;
+    const inSheath = state.det ? state.det.sheath[i] > 0 : false;
     const allPassed = state.ropes.every((rope, r) =>
         tS > (rope.launchOffsetS || 0) && probes[r].apexKm / AU_KM > 1.05);
     $('fr-hud-status').textContent = count > 1 ? '⚡ rope overlap at L1'
         : count > 0 ? '⚡ crossing L1'
+        : inSheath ? '⚡ in sheath — shock passed'
         : allPassed ? 'passed L1' : 'in transit';
     if (!clock.paused || state._chartDirty) {
         maybeAssimilate();

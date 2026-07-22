@@ -11,7 +11,8 @@
 
 import assert from 'node:assert/strict';
 import { mergeOrder, normalizeLayout, layoutsEqual, LAYOUT_VERSION,
-         clampSize, SIZE_MIN, SIZE_MAX }
+         clampSize, SIZE_MIN, SIZE_MAX, sanitizeConfig,
+         instanceBase, isInstanceId, effectiveOrder, mergeCapturedOrder }
     from '../js/layout-lab.js';
 
 let n = 0;
@@ -108,6 +109,80 @@ test('normalizeLayout clamps size map and drops invalid entries', () => {
 test('missing size map defaults to empty object', () => {
     const l = normalizeLayout({ v: 1, zones: { m: { order: ['a'] } } }, 'p');
     assert.deepEqual(l.zones.m.size, {});
+});
+
+/* ── v2 preset field + v1 migration ─────────────────────────────────── */
+
+test('v2 preset field survives normalization; junk presets drop to null', () => {
+    const base = { v: 2, page: 'p', zones: { m: { order: ['a'] } } };
+    assert.equal(normalizeLayout({ ...base, preset: 'chaser' }, 'p').preset, 'chaser');
+    assert.equal(normalizeLayout(base, 'p').preset, null);
+    assert.equal(normalizeLayout({ ...base, preset: 42 }, 'p').preset, null);
+    assert.equal(normalizeLayout({ ...base, preset: 'x'.repeat(41) }, 'p').preset, null);
+});
+
+test('v1 docs are accepted forever via migration (preset = null)', () => {
+    const v1 = { v: 1, page: 'p', zones: { m: { order: ['a', 'b'], hidden: ['b'] } } };
+    const l = normalizeLayout(v1, 'p');
+    assert.equal(l.v, LAYOUT_VERSION);
+    assert.equal(l.preset, null);
+    assert.deepEqual(l.zones.m.order, ['a', 'b']);
+});
+
+/* ── D2 mobile order ────────────────────────────────────────────────── */
+
+test('orderMobile normalizes; effectiveOrder falls back when absent', () => {
+    const l = normalizeLayout({ v: 2, zones: { m: {
+        order: ['a', 'b'], orderMobile: ['b', 'a', 42] } } }, 'p');
+    assert.deepEqual(l.zones.m.orderMobile, ['b', 'a']);
+    assert.deepEqual(effectiveOrder(l.zones.m, true), ['b', 'a']);
+    assert.deepEqual(effectiveOrder(l.zones.m, false), ['a', 'b']);
+    const bare = normalizeLayout({ v: 2, zones: { m: { order: ['a'] } } }, 'p');
+    assert.deepEqual(bare.zones.m.orderMobile, []);
+    assert.deepEqual(effectiveOrder(bare.zones.m, true), ['a'], 'no mobile order → desktop');
+});
+
+test('mergeCapturedOrder: arrange on the device you are on', () => {
+    const prior = { order: ['a', 'b'], orderMobile: ['b', 'a'] };
+    assert.deepEqual(mergeCapturedOrder(['b', 'a'], true, prior),
+        { order: ['a', 'b'], orderMobile: ['b', 'a'] }, 'mobile capture keeps desktop order');
+    assert.deepEqual(mergeCapturedOrder(['a', 'b'], false, prior),
+        { order: ['a', 'b'], orderMobile: ['b', 'a'] }, 'desktop capture keeps mobile order');
+    assert.deepEqual(mergeCapturedOrder(['x'], true, null),
+        { order: ['x'], orderMobile: ['x'] }, 'first-ever save on mobile seeds both');
+    assert.deepEqual(mergeCapturedOrder(['x'], false, null),
+        { order: ['x'], orderMobile: [] });
+});
+
+/* ── D2 multi-instance ids ──────────────────────────────────────────── */
+
+test('instance-id helpers + mergeOrder treats instances as plain ids', () => {
+    assert.equal(instanceBase('aurora-spot#3'), 'aurora-spot');
+    assert.equal(instanceBase('plain'), 'plain');
+    assert.ok(isInstanceId('aurora-spot#1') && !isInstanceId('aurora-spot'));
+    // A saved order carrying instances merges like any other id set —
+    // present instances keep their slots, missing ones drop out.
+    assert.deepEqual(
+        mergeOrder(['a', 'aurora-spot#1', 'b'], ['b', 'aurora-spot#1', 'a']),
+        ['b', 'aurora-spot#1', 'a']);
+    assert.deepEqual(
+        mergeOrder(['a', 'b'], ['b', 'aurora-spot#9', 'a']),
+        ['b', 'a'], 'un-instantiated instance ids drop (factory failed / removed)');
+});
+
+/* ── D2 per-panel config sanitizer ──────────────────────────────────── */
+
+test('sanitizeConfig keeps scalars, strips structures and junk', () => {
+    const clean = sanitizeConfig({
+        stage: { station: 'my-sky', spirals: false, ghosts: 6,
+                 evil: { nested: true }, fn: () => {}, long: 'x'.repeat(61) },
+        ghostPanel: { only: [1, 2] },
+        bad: 'not-an-object',
+    });
+    assert.deepEqual(clean, { stage: { station: 'my-sky', spirals: false, ghosts: 6 } });
+    assert.deepEqual(sanitizeConfig(null), {});
+    assert.deepEqual(sanitizeConfig([1, 2]), {});
+    assert.deepEqual(sanitizeConfig({ p: { v: NaN } }), {}, 'non-finite numbers dropped');
 });
 
 /* ── layoutsEqual ───────────────────────────────────────────────────── */

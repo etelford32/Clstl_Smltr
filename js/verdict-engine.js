@@ -26,6 +26,9 @@
  *     astro:    { sunset, sunrise, moonIllumPct }      // Dates; moon optional
  *     air:      { aqi, uvNow, uvPeak, uvPeakHour }
  *     loc:      { lat, lon, name, tz }
+ *     fluxRope: { pHit, p10, p20, arrivalP10Ms, arrivalP50Ms, arrivalP90Ms,
+ *                 minBzP50 }        // flux-rope ensemble summary (Phase 4) —
+ *                                   // js/flux-rope-forecast.js `summary`
  *   }
  */
 
@@ -650,6 +653,47 @@ function buildFactors(inputs, now, moonNow) {
  * Fuse all feed snapshots into the card model. Pure: same inputs + now →
  * same output. See the module header for the input contract.
  */
+/**
+ * 3-day storm outlook row from the flux-rope ensemble summary (Phase 4:
+ * the EarthView consumer of js/flux-rope-forecast.js). Location-independent
+ * — it describes the inbound CME, not local visibility (the aurora row owns
+ * that). Returns a skyEvents-shaped row plus a `tier`
+ * ('watch' | 'warning' | 'arriving'), or null when there is nothing worth a
+ * row: no data, a deep miss (P(hit) < 15%), or a window already >12 h past.
+ */
+export function stormOutlook(fluxRope, now = Date.now()) {
+    const f = fluxRope;
+    const t0 = ms(now);
+    if (!f || !isNum(f.pHit) || !isNum(f.arrivalP50Ms)) return null;
+    if (f.pHit < 0.15) return null;
+    if (isNum(f.arrivalP90Ms) && f.arrivalP90Ms < t0 - 12 * HOUR_MS) return null;
+
+    const hours = (f.arrivalP50Ms - t0) / HOUR_MS;
+    const sev = (f.p20 ?? 0) >= 0.4 ? 'strong (G2–G3) storm potential'
+        : (f.p10 ?? 0) >= 0.4 ? 'moderate (G1–G2) storm potential'
+        : 'minor storm potential';
+    const pct = Math.round(f.pHit * 100);
+    const win = (v) => (isNum(v) ? new Date(v).toISOString().slice(5, 16).replace('T', ' ') + 'Z' : '—');
+
+    if (hours <= 0) {
+        return {
+            id: 'storm-outlook', tier: 'arriving',
+            state: (f.p10 ?? 0) >= 0.3 ? 'go' : 'maybe',
+            title: 'CME arriving',
+            desc: `Flux-rope ensemble: ${sev} · P(hit) ${pct}%`,
+            when: 'now',
+        };
+    }
+    const tier = hours <= 24 ? 'warning' : 'watch';
+    return {
+        id: 'storm-outlook', tier,
+        state: f.pHit >= 0.5 && (f.p10 ?? 0) >= 0.3 ? 'maybe' : 'no',
+        title: tier === 'warning' ? 'CME warning — arrival within a day' : 'CME watch',
+        desc: `Flux-rope ensemble: ${sev} · P(hit) ${pct}% · window ${win(f.arrivalP10Ms)}–${win(f.arrivalP90Ms)}`,
+        when: `+${Math.round(hours)} h`,
+    };
+}
+
 export function computeVerdict(inputs = {}, now = new Date()) {
     const t0 = ms(now);
     const tz = inputs.loc?.tz;
@@ -717,12 +761,17 @@ export function computeVerdict(inputs = {}, now = new Date()) {
         }
     }
 
+    // 3-day storm outlook (Phase 4): APPENDED so the aurora/ISS indices the
+    // card's CTA logic relies on ([0]/[1]) never move.
+    const outlook = stormOutlook(inputs.fluxRope, t0);
     const skyEvents = [
         { id: 'aurora', state: aurora.state, title: aurora.title, desc: aurora.desc, when: auroraWhen },
         buildIssRow(inputs, t0),
+        ...(outlook ? [outlook] : []),
     ];
 
     return {
+        outlook,
         word: head.word,
         sub: head.sub,
         lamp: head.lamp,

@@ -274,7 +274,29 @@
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("");</script>
 
 <!-- ═══════════════════════════════════════════════════════ MAIN ═══ -->
-<main class="auth-page">
+
+<!-- ── ATTRACT LOOP BACKDROP (S3/D4, plan decision #6) ─────────────────
+     The gate sells what it protects: the live Sun→Earth Stage cycles
+     behind the sign-in card (space-weather.html?preview=1 — the page's
+     own gate exempts previews; preview-mode.js promotes the Stage and
+     kills interactivity). Lazy + faded in only when the preview posts
+     'preview-ready', so the form never waits on it. -->
+<div id="sw-attract-backdrop" aria-hidden="true"
+     style="position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden">
+    <iframe src="/space-weather.html?preview=1" title="" loading="lazy" tabindex="-1"
+        style="position:absolute;inset:0;width:100%;height:100%;border:0;opacity:0;transition:opacity 1.4s ease"></iframe>
+    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 50% 45%,rgba(3,1,14,.55) 0%,rgba(3,1,14,.92) 78%)"></div>
+</div>
+<script>
+window.addEventListener('message', (e) => {
+    if (e.data?.type === 'preview-ready') {
+        const f = document.querySelector('#sw-attract-backdrop iframe');
+        if (f) f.style.opacity = '0.85';
+    }
+});
+</script>
+
+<main class="auth-page" style="position:relative;z-index:1">
     <div class="auth-container">
 
         <!-- Left panel -->

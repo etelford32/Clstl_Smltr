@@ -656,6 +656,12 @@ body {
             </div>
         </section>
 
+        <!-- Flux-rope FORECAST mode (Phase 4): days-ahead Dst outlook from the
+             ensemble engine via the SolarWindDriver contract. Self-mounting,
+             fail-quiet (js/ring-current-outlook.js) — absent when the DONKI
+             catalog has no Earth-directed CME. -->
+        <div id="rc-flux-outlook"></div>
+
         <section class="rc-panel">
             <h2>Sun &rarr; Earth twin bridge</h2>
             <div class="rc-kv"><span class="rc-k">parcels in transit</span><span class="rc-v" id="rc-parcels">&mdash;</span></div>
@@ -2059,5 +2065,11 @@ feed.start();
 window.addEventListener('resize', () => drawChart(replayState ?? lastState));
 </script>
 
+<script type="module">
+// Flux-rope forecast outlook — isolated module; must never break the page.
+import('./js/ring-current-outlook.js')
+    .then((m) => m.mountRingCurrentOutlook('rc-flux-outlook'))
+    .catch(() => { const h = document.getElementById('rc-flux-outlook'); if (h) h.style.display = 'none'; });
+</script>
 </body>
 </html>

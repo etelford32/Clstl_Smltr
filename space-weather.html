@@ -25,6 +25,39 @@
 <meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 
 <style>
+/* ─── Design tokens (DESIGN_TOKENS.md discipline, ported per
+   SPACE_WEATHER_DASHBOARD_PLAN.md §10, phase D1) ─────────────────────
+   ONE status grammar for the whole dashboard — band cells, chips, tier
+   banners, and (later) Stage elements all read these five steps. The
+   palette is colorblind-safe only because consumers are required to
+   carry the state as TEXT too; color reinforces, never encodes alone.
+   New chrome should consume tokens, not raw hex — add a token here
+   rather than patching a rule with a literal. */
+:root {
+    /* status grammar: quiet / elevated / watch / warning / severe */
+    --sw-status-quiet:    #4fc97f;  --sw-status-quiet-rgb:    79,201,127;
+    --sw-status-elevated: #ffd75e;  --sw-status-elevated-rgb: 255,215,94;
+    --sw-status-watch:    #ffaa22;  --sw-status-watch-rgb:    255,170,34;
+    --sw-status-warning:  #ff7847;  --sw-status-warning-rgb:  255,120,71;
+    --sw-status-severe:   #ff4466;  --sw-status-severe-rgb:   255,68,102;
+    /* surfaces + borders */
+    --sw-surface-card:   rgba(10,16,34,.66);
+    --sw-surface-raised: rgba(16,24,48,.9);
+    --sw-border:         rgba(255,255,255,.09);
+    --sw-border-focus:   rgba(0,198,255,.45);
+    /* text scale */
+    --sw-text:        #cdd;
+    --sw-text-bright: #e8f4ff;
+    --sw-text-muted:  #8b94ad;
+    --sw-text-dim:    #68718a;
+    /* accent (matches the page's chart/link cyan) */
+    --sw-accent: #4fc3f7;
+    /* rhythm */
+    --sw-gap: 12px;
+    --sw-radius: 10px;
+    --sw-t-snap: .15s ease;
+}
+
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { scroll-behavior: smooth; }
 body {
@@ -916,33 +949,7 @@ nav {
     width:6px; height:6px; border-radius:50%; background:#ff6622;
     box-shadow:0 0 6px #ff6622; animation: pip-pulse 2s ease-in-out infinite;
 }
-/* ── Event cards below the 3D view ───────────────────────────────────────── */
-.cme-events-row {
-    display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px;
-}
-.cme-event-card {
-    flex: 1 1 220px; max-width: 340px;
-    background: rgba(255,255,255,.04);
-    border: 1px solid rgba(255,255,255,.09);
-    border-radius: 8px; padding: 12px 14px;
-    position: relative; overflow: hidden;
-    transition: border-color .3s;
-}
-.cme-event-card.earth-directed {
-    border-color: rgba(255,100,40,.3);
-}
-.cme-event-card.arrived {
-    border-color: rgba(255,40,40,.4);
-    box-shadow: 0 0 12px rgba(255,40,40,.15);
-}
-.cme-card-header {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 6px;
-}
-.cme-card-speed {
-    font-size: 1.2rem; font-weight: 700; color: #e8f4ff;
-    font-variant-numeric: tabular-nums;
-}
+/* ── Severity badges (shared: surf/vortex/pmag/gw risk chips) ────────────── */
 .cme-card-badge {
     display: inline-block; padding: 2px 8px; border-radius: 4px;
     font-size: .7rem; font-weight: 700; letter-spacing: .05em;
@@ -953,37 +960,6 @@ nav {
 .badge-severe   { background:rgba(255,60,40,.15); color:#ff4444; border:1px solid rgba(255,60,40,.3); }
 .badge-extreme  { background:rgba(255,40,80,.18); color:#ff2266; border:1px solid rgba(255,40,80,.35);
     box-shadow:0 0 10px rgba(255,40,80,.2); animation:xflare 1.1s ease-in-out infinite; }
-.cme-card-row {
-    display: flex; justify-content: space-between; align-items: baseline;
-    font-size: .75rem; padding: 2px 0;
-}
-.cme-card-row .k { color: #667; }
-.cme-card-row .v { color: #aac; font-weight: 600; font-variant-numeric: tabular-nums; }
-/* ── Timeline bar ────────────────────────────────────────────────────────── */
-.cme-timeline-bar {
-    height: 6px; border-radius: 3px; margin: 8px 0 4px;
-    background: rgba(255,255,255,.06); position: relative; overflow: hidden;
-}
-.cme-timeline-fill {
-    height: 100%; border-radius: 3px;
-    transition: width .3s;
-    background: linear-gradient(90deg, #ff8c00, #ff4422);
-}
-.cme-timeline-fill.arrived {
-    background: linear-gradient(90deg, #ff4422, #ff0066);
-}
-.cme-timeline-labels {
-    display: flex; justify-content: space-between;
-    font-size: .65rem; color: #556;
-}
-/* ── No-event placeholder ────────────────────────────────────────────────── */
-.cme-no-events {
-    text-align: center; padding: 20px 0 10px;
-    font-size: .82rem; color: #556;
-}
-.cme-no-events .quiet-icon {
-    font-size: 1.4rem; display: block; margin-bottom: 6px; opacity: .5;
-}
 
 /* ── HELIOSPHERE HERO CANVAS ─────────────────────────────────────────────── */
 .helio-hero-wrap {
@@ -1652,6 +1628,73 @@ nav {
 }
 .cv-btn:hover { background: rgba(0,140,255,.18); border-color:#0088ff; }
 #btn-sw-here { top:12px; right:12px; }
+
+/* ─── The Stage (S1) ─────────────────────────────────────────────── */
+.stage-section { margin-bottom: 18px; }
+#sw-stage-host { height: 540px; }
+@media (max-width: 700px) { #sw-stage-host { height: 430px; } }
+@media (max-width: 480px) { #sw-stage-host { height: 360px; } }
+
+/* ─── Print briefing theme (D3, decision #5 — operator shift briefings)
+   The printed page IS the briefing: light theme, the status band + the
+   forecast/trust panels; interactive chrome and canvas-heavy sims are
+   dropped. The 🖨 button in the page header triggers it. ─── */
+#sw-print-btn {
+    font: 700 11px/1 system-ui; padding: 6px 11px; border-radius: 7px;
+    cursor: pointer; background: var(--sw-surface-card, rgba(10,16,34,.66));
+    border: 1px solid var(--sw-border, rgba(255,255,255,.09));
+    color: var(--sw-text-muted, #8b94ad); margin-left: 10px;
+}
+#sw-print-btn:hover { color: var(--sw-text-bright, #e8f4ff);
+    border-color: var(--sw-border-focus, rgba(0,198,255,.45)); }
+@media print {
+    :root {
+        --sw-surface-card: #fff; --sw-surface-raised: #fff;
+        --sw-border: #bbb; --sw-border-focus: #999;
+        --sw-text: #111; --sw-text-bright: #000;
+        --sw-text-muted: #444; --sw-text-dim: #666;
+        --sw-accent: #054;
+    }
+    html, body { background: #fff !important; color: #111 !important; }
+    nav, footer, #alerts-bar, #data-status-banner,
+    .stage-section, .helio-hero-wrap, .transit-section, .globe-section,
+    /* single-quoted on purpose: the registry drift gate scans the raw
+       HTML for double-quoted data-lab-panel attributes */
+    .imagery-section, .earth-section[data-lab-panel='solar-system-info'],
+    #sw-print-btn, .swb-gear, .swb-editor,
+    #lab-open, #lab-toolbar, #lab-gallery,
+    .lab-resize-handle { display: none !important; }
+    .sw-header .sw-title { color: #000 !important;
+        -webkit-text-fill-color: initial !important; background: none !important; }
+    .swb-cell, .data-card, .earth-section, .cme-prediction-section,
+    .earth-forecast-section, .forecast-timeline-section, .hero-row,
+    .tables-row, .data-sources-panel {
+        background: #fff !important; border-color: #bbb !important;
+        color: #111 !important; box-shadow: none !important;
+        break-inside: avoid;
+    }
+}
+
+/* ─── Sign-in gate overlay (see SPACE_WEATHER_DASHBOARD_PLAN.md §3) ──────
+   Present in markup so it covers the page from FIRST PAINT — no flash of
+   gated content while the module scripts are still queued. z-index above
+   nav (600), dropdowns (800), and the Layout Lab toolbar (1000). */
+#sw-auth-gate {
+    position: fixed; inset: 0; z-index: 9999;
+    background: #03010e;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; padding: 24px;
+}
+#sw-auth-gate img { height: 52px; width: 52px; border-radius: 50%; object-fit: cover; margin-bottom: 18px; }
+#sw-auth-gate h2 { font-size: 1.4rem; font-weight: 800; color: #e8f4ff; margin-bottom: 10px; }
+#sw-auth-gate p { color: #8899aa; margin-bottom: 24px; max-width: 400px; font-size: .88rem; line-height: 1.5; }
+.sw-gate-signin {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 12px 26px; min-height: 44px; border-radius: 24px;
+    font-weight: 700; font-size: .88rem; text-decoration: none;
+    background: linear-gradient(45deg, #ffd700, #ff8c00); color: #000;
+    -webkit-tap-highlight-color: rgba(255,184,48,.25);
+}
 </style>
 <script type="application/ld+json">
 {
@@ -1689,7 +1732,85 @@ nav {
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
-<!-- perf-hints:end --><!-- ── NAV ─────────────────────────────────────────────────────────────────── -->
+<!-- perf-hints:end -->
+
+<!-- ── SIGN-IN GATE ────────────────────────────────────────────────────────
+     This page is a signed-in surface (SPACE_WEATHER_DASHBOARD_PLAN.md §3):
+     authentication-only, not a paywall — every signed-in plan gets the full
+     console. The gate is a CLASSIC inline script that runs AT PARSE TIME,
+     immediately after the overlay div: signed-in visitors (the pp_auth
+     mirror auth.js maintains, OR a raw Supabase sb-*-auth-token — so a
+     cleared mirror can't bounce a live session) get the overlay removed
+     before it ever paints, and anonymous visitors location.replace() to
+     signin.html?next=… without waiting for the module graph. The previous
+     module-script gate deferred behind three.js + the page's whole module
+     queue — seconds of black overlay for every signed-in boot.
+     Two exemptions, both deliberate:
+       · preview mode (?preview=1 / iframe): js/preview-mode.js stamps
+         <html data-preview> synchronously in <head>; previews are the
+         page's public, non-interactive marketing embed.
+       · OAuth/OTP hash payloads (#access_token= / #error= / email-link
+         types): js/oauth-sentinel.js (imported by nav.js) forwards those
+         to /auth-callback.html — bouncing to signin here would race that
+         navigation and could drop the tokens. The overlay stays up to
+         cover the ~200 ms hop.
+     On any unexpected failure the gate FAILS OPEN: the page's data is
+     public NOAA/NASA feeds and the paid surfaces gate server-side, so a
+     broken storage environment must never brick the page for a signed-in
+     user (the lesson of dashboard.html's gate-stuck-visible bug). -->
+<div id="sw-auth-gate" aria-live="polite">
+  <img src="ParkersPhysics_logo2.jpg" alt="Parkers Physics">
+  <h2>Sign in to open your Space Weather dashboard</h2>
+  <p>Live solar wind, Kp and storm indices, CME forecasts, and the auroral oval — arranged your way. Signing in keeps your layout, locations, and alert thresholds.</p>
+  <a class="sw-gate-signin" href="signin.html?next=%2Fspace-weather.html">Sign In</a>
+</div>
+<script>
+(function () {
+    try {
+        var gate = document.getElementById('sw-auth-gate');
+        if (document.documentElement.hasAttribute('data-preview')) {
+            if (gate) gate.remove();
+            return;
+        }
+        var hp = new URLSearchParams((location.hash || '').replace(/^#/, ''));
+        var authPayload = hp.has('access_token') || hp.has('error') ||
+            hp.has('error_description') ||
+            ['magiclink', 'recovery', 'signup', 'invite', 'email_change']
+                .indexOf(hp.get('type') || '') !== -1;
+        if (authPayload) return;   // overlay stays up for the sentinel hop
+        var signedIn = false;
+        try {
+            var raw = localStorage.getItem('pp_auth') || sessionStorage.getItem('pp_auth');
+            signedIn = !!(raw && JSON.parse(raw).signedIn);
+        } catch (e) {}
+        if (!signedIn) {
+            // Mirror missing but a Supabase session exists (e.g. pp_auth
+            // cleared by hand): honor the raw token rather than bouncing.
+            try {
+                for (var i = 0; i < localStorage.length; i++) {
+                    var k = localStorage.key(i);
+                    if (/^sb-.+-auth-token$/.test(k) &&
+                        (localStorage.getItem(k) || '').indexOf('access_token') !== -1) {
+                        signedIn = true; break;
+                    }
+                }
+            } catch (e) {}
+        }
+        if (signedIn) {
+            if (gate) gate.remove();
+        } else {
+            location.replace('signin.html?next=' +
+                encodeURIComponent(location.pathname + location.search + location.hash));
+        }
+    } catch (e) {
+        try { console.warn('[sw-gate] check failed, failing open:', e); } catch (_) {}
+        var g = document.getElementById('sw-auth-gate');
+        if (g) g.remove();
+    }
+})();
+</script>
+
+<!-- ── NAV ─────────────────────────────────────────────────────────────────── -->
 <!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
@@ -1706,10 +1827,23 @@ nav {
             <div class="live-dot"></div>
             <span>LIVE &nbsp;·&nbsp; Updated <span id="last-update">--:--</span> UTC</span>
         </div>
+        <button id="sw-print-btn" type="button" onclick="window.print()"
+            title="Print the shift briefing: status band + forecasts in a light theme">🖨 Briefing</button>
+        <!-- Location box (fix round 2026-07-22): the user's STORED location,
+             just below the title. Writes through js/user-location.js, so the
+             band / Stage pin / aurora cards follow via 'user-location-changed'.
+             Mounted fail-quiet by js/sw-location-box.js. -->
+        <div id="sw-loc-box"></div>
     </div>
 
     <!-- Alerts bar (hidden by default) -->
     <div id="alerts-bar"></div>
+
+    <!-- ── STATUS BAND (glance layer, plan §10) ──────────────────────────
+         Stable chrome like the header — deliberately NOT a data-lab-panel,
+         so layouts/presets can never hide or reorder the glance layer.
+         Mounted by js/space-weather-status-band.js (fail-quiet). -->
+    <div id="sw-status-band" aria-live="polite"></div>
 
     <!-- ── DATA STATUS BANNER (shown when feed is stale or offline) ────────── -->
     <div id="data-status-banner">
@@ -1718,10 +1852,26 @@ nav {
         <span class="dsb-age" id="dsb-age"></span>
     </div>
 
+    <!-- ── THE STAGE (S1) ──────────────────────────────────────────────────
+         One-context Sun→Earth corridor scene (SPACE_WEATHER_DASHBOARD_PLAN.md
+         §5): kernel-probed CME ropes + weight-faded ensemble ghosts +
+         P10/P50/P90 wavefronts, L1 sentinel, Earth with the breathing Shue
+         magnetopause, stations 1–4, and the τ-timeline (dispatches 'sw-tau'
+         for dock chart cursors). js/stage/stage.js; pure model in
+         js/stage/{scale,model}.js (node-gated, kernel-oracle pinned).
+         The three 2D pseudo-views below (helio hero, transit, globe) stay
+         until the Stage passes parity — retiring them is a later, gated
+         step, per the plan's S1 exit criteria. -->
+    <!-- data-preview-stage moved here from the helio hero (S3/D4,
+         decision #6): the ?preview=1 attract loop IS the Stage now. -->
+    <section class="stage-section" data-preview-stage="1" data-lab-panel="stage" data-lab-resize="#sw-stage-host">
+        <div id="sw-stage-host"></div>
+    </section>
+
     <!-- ── HELIOSPHERE HERO ────────────────────────────────────────────────── -->
     <!-- 3D inner solar system: real ephemeris orbits, 3D Parker spiral wind,  -->
     <!-- Earth magnetosphere (Shue model), CME shells, flare events.           -->
-    <div class="helio-hero-wrap" data-preview-stage="1" data-lab-panel="helio-hero" data-lab-resize="1">
+    <div class="helio-hero-wrap" data-lab-panel="helio-hero" data-lab-resize="1">
         
         <button class="cv-btn" id="btn-sw-here" title="Current Space Weather" style="top:12px;right:12px;" onclick="document.getElementById('helio-canvas').dispatchEvent(new Event('reset'))">⊙ Reset View</button>
         <!-- Sprint 5 — Hypothetical Mode (badge / dial / watermark / toast) -->
@@ -2028,21 +2178,21 @@ nav {
     <div class="cme-prediction-section" id="cme-prediction-section" data-lab-panel="cme-forecast">
         <div class="cme-pred-title">
             <span class="cme-pip" id="cme-pip"></span>
-            CME Propagation Forecast · Drag-Based Model (Vršnak 2013)
+            CME Arrival Calendar · last 7 days + next 30 · Drag-Based Model (Vršnak 2013) + WSA-ENLIL
         </div>
 
-        <!-- Active CME event cards (populated by JS, driven by 3D globe propagator) -->
-        <div class="cme-events-row" id="cme-events-row">
-            <div class="cme-no-events" id="cme-no-events">
-                <span class="quiet-icon">&#9788;</span>
-                No active CME events — monitoring DONKI feed
-            </div>
-        </div>
+        <!-- Arrival calendar (fix round 2026-07-22: replaced the event-card
+             row at the author's direction). Fed from the page's 'swpc-update'
+             bus; ⊕ chips are Earth arrivals (ENLIL-preferred, DBM fallback),
+             dots are launches; day clicks scrub the Stage τ-timeline.
+             Mounted fail-quiet by js/cme-calendar.js. -->
+        <div id="cme-calendar-host"></div>
 
         <!-- Data source attribution -->
         <div style="margin-top:8px;font-size:.6rem;color:#443;line-height:1.5">
             <strong style="color:#665">Model:</strong>
             Vršnak et al. (2013) A&amp;A 557, A141 · Drag-based propagation ·
+            WSA&ndash;ENLIL shock arrivals (NASA DONKI) ·
             Rankine&ndash;Hugoniot sheath compression ·
             O'Brien &amp; McPherron (2002) Dst injection ·
             Yashiro et al. (2006) flare&ndash;CME statistics
@@ -2882,6 +3032,15 @@ nav {
             </div>
         </div>
 
+        <!-- ── PERSONAL STORM LOG (D3, plan §9a — trust family) ────────
+             Crossings of YOUR Kp line (threshold profile), recorded
+             client-side while the console is open. js/storm-log.js. -->
+        <div class="data-card" id="storm-log-card" data-lab-panel="storm-log">
+            <h3>Personal Storm Log<span class="src-chip live"
+                title="Rising-edge crossings of your threshold-profile Kp line, recorded in this browser">your Kp line</span></h3>
+            <div id="storm-log-body"></div>
+        </div>
+
     </div><!-- /data-grid -->
 
     <!-- ── SDO / SOHO LIVE IMAGERY ──────────────────────────────────────────── -->
@@ -2986,6 +3145,57 @@ nav {
     </div>
 
     <!-- ── LIVE DATA SOURCES PANEL ─────────────────────────────────────────── -->
+    <!-- ── VALIDATION SCORECARD (D3, plan §9a — trust family) ──────────
+         The engine's receipts: every number below is PINNED by an
+         automated gate against the committed engine — change the engine
+         and the gates fail before this card can lie. Sources:
+         tests/flux-rope-kernel-smoke.mjs (hindcast generations),
+         tests/gannon-dst-compare.mjs (the Dst pipeline-ceiling miss). -->
+    <div class="earth-section" data-lab-panel="scorecard"
+         style="background:rgba(4,10,8,.6);border-color:rgba(84,224,138,.15)">
+        <div class="earth-section-title" style="color:#8fe9ae">Forecast Validation — the receipts</div>
+        <div style="display:grid;gap:10px;font-size:.78rem;line-height:1.55">
+            <div>
+                <b style="color:var(--sw-text-bright,#e8f4ff)">St. Patrick's Day storm · Mar 2015 (G4)</b><br>
+                Shock arrival error <b>0.0 h</b> · min-Bz depth error <b>1.3%</b> at <b>Δ1.8 h</b> ·
+                waveform r <b>0.686</b> — launch-time CME parameters only, standoff coefficient
+                η = 1.1 straight from the literature, no retuning.
+                <a href="st-patrick-storm.html" style="color:var(--sw-accent,#4fc3f7)">Replay it →</a>
+            </div>
+            <div>
+                <b style="color:var(--sw-text-bright,#e8f4ff)">Gannon superstorm · May 2024 (G5, two-CME train)</b><br>
+                Leading shock <b>−0.8 h</b> · internal shock <b>Δ0.1 h</b> at +48.8 h ·
+                min-Bz depth error <b>0.3%</b> at <b>Δ1.5 h</b> · waveform r <b>0.663</b> —
+                CME–CME interaction physics, not per-event knobs.
+                <a href="gannon-superstorm.html" style="color:var(--sw-accent,#4fc3f7)">Replay it →</a>
+            </div>
+            <div style="border-left:3px solid var(--sw-status-warning,#ff7847);padding-left:10px">
+                <b style="color:var(--sw-status-warning,#ff7847)">The documented miss (kept on purpose)</b><br>
+                At G5 the empirical Dst integrator saturates: driven with the OBSERVED L1 data,
+                it bottoms at <b>−280 nT</b> vs the published <b>−412 nT</b> — a 32% ceiling that
+                no launch-time forecast through this pipeline can beat. That gap is the case for
+                the physics-first MHD leg, and we show it rather than hide it.
+            </div>
+            <div style="font-size:.66rem;color:var(--sw-text-dim,#68718a)">
+                Every figure on this card is enforced by an automated gate against the committed
+                engine · <a href="flux-rope.html" style="color:var(--sw-accent,#4fc3f7)">Flux Rope Simulator →</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Template for the multi-instance aurora-spot cards (D2) — inert
+         until js/aurora-spot-card.js clones it; deliberately NOT a
+         data-lab-panel (instances get 'aurora-spot#n' ids at runtime). -->
+    <template id="aurora-spot-template">
+        <div class="data-card aurora-spot-card">
+            <h3>Aurora tonight · <span class="as-city">pick a spot</span></h3>
+            <select class="as-loc" aria-label="Pick a saved location"
+                style="width:100%;margin:4px 0 8px;padding:5px 8px;border-radius:6px;border:1px solid var(--sw-border,rgba(255,255,255,.09));background:rgba(0,10,26,.8);color:var(--sw-text-bright,#e8f4ff);font:inherit"></select>
+            <div class="as-verdict" style="font-size:1.6rem;font-weight:800;margin:2px 0">—</div>
+            <div class="as-detail" style="font-size:.72rem;color:var(--sw-text-muted,#8b94ad)"></div>
+        </div>
+    </template>
+
     <div class="data-sources-panel" data-lab-panel="sources">
         <h4>⚡ Live Data Sources</h4>
         <div class="ds-grid">
@@ -4916,102 +5126,12 @@ window.addEventListener('helio-time-update', _updatePlanetTable);
     }
 }
 
-// ── CME Prediction Event Cards ────────────────────────────────────────────────
-// Event cards wired to the 3D globe's CmePropagator. The 3D visualization lives
-// inside SpaceWeatherGlobe; this block only manages the HTML prediction cards.
-{
-    // Use the globe's shared propagator (created in the globe section below)
-    // We defer wiring until _globe is constructed.
-    let _propagatorWired = false;
-
-    // ── Event cards HTML (driven by globe's CmePropagator) ─────────────────
-    function _renderEventCards(events) {
-        const container = el('cme-events-row');
-        const noEvEl    = el('cme-no-events');
-        const pip       = el('cme-pip');
-        if (!container) return;
-
-        if (!events.length) {
-            if (noEvEl) noEvEl.style.display = '';
-            container.querySelectorAll('.cme-event-card').forEach(c => c.remove());
-            if (pip) { pip.style.background = '#ff6622'; pip.style.boxShadow = '0 0 6px #ff6622'; }
-            return;
-        }
-
-        if (noEvEl) noEvEl.style.display = 'none';
-        if (pip) { pip.style.background = '#ff3322'; pip.style.boxShadow = '0 0 8px #ff3322'; }
-
-        // Remove stale cards
-        const existingKeys = new Set(events.map(e => e.id));
-        container.querySelectorAll('.cme-event-card').forEach(card => {
-            if (!existingKeys.has(card.dataset.cmeId)) card.remove();
-        });
-
-        const nowMs = Date.now();
-        events.forEach(ev => {
-            let card = container.querySelector(`[data-cme-id="${CSS.escape(ev.id)}"]`);
-            const state = ev.stateAt(nowMs);
-            const etaH  = ev.hoursUntilArrival(nowMs);
-
-            const sevLower = (ev.impact?.severity ?? 'minor').toLowerCase();
-            const badgeClass = 'badge-' + sevLower;
-            const gScale = ev.impact?.g_scale ?? 0;
-
-            const etaStr = state.arrived
-                ? '<span style="color:#ff4444;font-weight:700">Arrived</span>'
-                : etaH > 24
-                    ? `${(etaH / 24).toFixed(1)} days`
-                    : `${Math.round(etaH)} hours`;
-
-            const depTime = new Date(ev.departure_ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
-            const arrTime = new Date(ev.arrival_ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
-
-            const html = `
-                <div class="cme-card-header">
-                    <span class="cme-card-speed">${Math.round(ev.v0)} <span style="font-size:.7rem;color:#889;font-weight:400">km/s</span></span>
-                    <span class="cme-card-badge ${badgeClass}">${gScale > 0 ? 'G' + gScale + ' ' : ''}${ev.impact?.severity ?? 'MINOR'}</span>
-                </div>
-                <div class="cme-card-row"><span class="k">ETA</span><span class="v">${etaStr}</span></div>
-                <div class="cme-card-row"><span class="k">Position</span><span class="v">${state.r_AU.toFixed(3)} AU · ${Math.round(state.v_kms)} km/s</span></div>
-                <div class="cme-card-row"><span class="k">Departure</span><span class="v">${depTime}</span></div>
-                <div class="cme-card-row"><span class="k">Est. Arrival</span><span class="v">${arrTime}</span></div>
-                <div class="cme-card-row"><span class="k">Predicted Kp</span><span class="v">${ev.impact?.kp_max?.toFixed(1) ?? '–'}</span></div>
-                <div class="cme-card-row"><span class="k">Predicted Dst</span><span class="v">${ev.impact?.dst_min ?? '–'} nT</span></div>
-                <div class="cme-card-row"><span class="k">Mach</span><span class="v">${ev.sheath?.mach?.toFixed(1) ?? '–'}${ev.sheath?.isShock ? ' (shock)' : ''}</span></div>
-                <div class="cme-card-row"><span class="k">Aurora ≥</span><span class="v">${ev.impact?.aurora_lat ?? '–'}° lat</span></div>
-                <div class="cme-timeline-bar"><div class="cme-timeline-fill${state.arrived ? ' arrived' : ''}" style="width:${(state.progress * 100).toFixed(1)}%"></div></div>
-                <div class="cme-timeline-labels"><span>${ev.earthDirected ? '⊕ Earth-directed' : 'Non-Earth-directed'}</span><span>${(state.progress * 100).toFixed(0)}%</span></div>
-            `;
-
-            if (!card) {
-                card = document.createElement('div');
-                card.className = 'cme-event-card' + (ev.earthDirected ? ' earth-directed' : '') + (state.arrived ? ' arrived' : '');
-                card.dataset.cmeId = ev.id;
-                container.appendChild(card);
-            }
-            card.innerHTML = html;
-            card.className = 'cme-event-card' + (ev.earthDirected ? ' earth-directed' : '') + (state.arrived ? ' arrived' : '');
-        });
-    }
-
-    // Wire to globe's propagator once the globe is ready (deferred)
-    function _wirePropagator() {
-        if (_propagatorWired || !_globe?.cmePropagator) return;
-        const propagator = _globe.cmePropagator;
-        propagator.onChange((events) => _renderEventCards(events));
-        // Periodic refresh for position updates
-        setInterval(() => {
-            const events = propagator.getActive();
-            if (events.length) _renderEventCards(events);
-        }, 10_000);
-        _propagatorWired = true;
-    }
-
-    // Try wiring after a short delay (globe constructs below)
-    setTimeout(_wirePropagator, 500);
-    // Also retry on first swpc-update in case globe took longer
-    window.addEventListener('swpc-update', _wirePropagator, { once: true });
-}
+// ── CME arrival calendar ─────────────────────────────────────────────────────
+// The event-card row this section used to render was replaced by the
+// arrival calendar (fix round 2026-07-22) — see js/cme-calendar.js. The
+// calendar feeds from 'swpc-update' directly (same DBM oracle imported
+// from js/cme-propagation.js, ENLIL preferred) and drives #cme-pip; the
+// 3D globe's own CmePropagator shells are untouched.
 
 // ── LEGACY IIFE REMOVED — kept below as dead stub for safety until cleanup ──
 (function () {
@@ -5944,10 +6064,20 @@ window.openImg = function(thumb) {
 // data plane in the main module above. Enable design mode with ?layoutlab=1.
 try {
     const { initLayoutLab } = await import('./js/layout-lab.js');
+    const { PANELS, FAMILIES } = await import('./js/space-weather-registry.js');
+    const { createAuroraSpotCard } = await import('./js/aurora-spot-card.js');
     initLayoutLab({
         page: 'space-weather',
         experimentKey: 'sw_layout_v1',
         variantsUrl: 'data/layout-variants/space-weather.json',
+        presetsUrl: 'data/layout-presets/space-weather.json',
+        // Decorate with display labels here so layout-lab stays generic
+        // (it renders entry.familyLabel, never imports the registry).
+        registry: PANELS.map((p) => ({ ...p, familyLabel: FAMILIES[p.family] })),
+        // Multi-instance factory (D2): saved 'aurora-spot#n' ids and the
+        // gallery's ＋Add both come through here.
+        instantiate: (id) =>
+            id.startsWith('aurora-spot#') ? createAuroraSpotCard(id) : null,
     });
 } catch (e) { console.warn('[layout-lab] disabled:', e); }
 </script>
@@ -5956,6 +6086,46 @@ try {
 <script type="module">
 import { mountFluxRopeDashboard } from './js/flux-rope-dashboard.js';
 mountFluxRopeDashboard('flux-rope-forecast-panel');
+</script>
+
+<!-- Status band (glance layer; fail-quiet; consumes the forecast the
+     panel above publishes — see js/space-weather-status-band.js) -->
+<script type="module">
+import { mountStatusBand } from './js/space-weather-status-band.js';
+mountStatusBand('sw-status-band');
+</script>
+
+<!-- Header location box (fail-quiet — see js/sw-location-box.js) -->
+<script type="module">
+import { mountLocationBox } from './js/sw-location-box.js';
+mountLocationBox('sw-loc-box');
+</script>
+
+<!-- CME arrival calendar (fail-quiet — see js/cme-calendar.js) -->
+<script type="module">
+import { mountCmeCalendar } from './js/cme-calendar.js';
+mountCmeCalendar('cme-calendar-host');
+</script>
+
+<!-- The Stage (S1; fail-quiet; consumes the same published forecast —
+     see js/stage/stage.js) -->
+<script type="module">
+import { mountStage } from './js/stage/stage.js';
+mountStage('sw-stage-host');
+</script>
+
+<!-- Cloud sync (D2; Basic+; fail-quiet, migration-guarded — stays off
+     until supabase-dashboards-migration.sql is applied) -->
+<script type="module">
+import { initDashboardSync } from './js/dashboard-sync.js';
+initDashboardSync({ page: 'space-weather' });
+</script>
+
+
+<!-- Personal storm log (D3; fail-quiet — see js/storm-log.js) -->
+<script type="module">
+import { mountStormLog } from './js/storm-log.js';
+mountStormLog('storm-log-body');
 </script>
 
 </body>

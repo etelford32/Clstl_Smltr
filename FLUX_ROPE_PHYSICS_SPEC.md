@@ -353,3 +353,358 @@ climatological defaults with deliberately WIDE priors (tilt σ 40°,
 chirality flip probability 0.5 = "unknown"): that honest prior is the
 starting posterior the §11 filter narrows as STEREO-A / L1 data arrives.
 Ambient wind `w` is seeded from the live RTSW plasma mean when available.
+
+## 13. STEREO-A pre-arrival conditioning (Phase 3 close-out)
+
+The off-Sun–Earth-line constraint: a spacecraft the CME's flank brushes
+hours before L1 turns the §11 filter into a genuine EARLY-WARNING update.
+
+**Auxiliary observer.** The ensemble run optionally records each member's
+Bz at ONE auxiliary position (STEREO-A) alongside the primary L1 series.
+Recording draws nothing from the PRNG and never touches the primary
+statistics — the L1 prior is bit-identical with or without it (pinned).
+The §2 GSE z-mapping is reused at the aux position; at STA offsets of
+±20° the frame error is small against the 4 nT observation sigma.
+
+**Joint update.** L1 and STA observations are independent, so their
+log-likelihoods ADD, and the §11 degeneracy guard tempers the JOINT
+likelihood once — a Bayesian combination, not two chained filters. An
+empty aux window (or a run without aux recording) reduces bit-exactly to
+the primary-only update. ABI: `fr_aux_set/clear`, `fr_obs_aux_ptr`,
+`fr_assimilate_joint(i0, i1, σ, aux_i0, aux_i1, σ_aux, floor)`.
+
+**Ephemeris.** STA's assumed position comes from a disclosed drift
+approximation (`staPositionApprox`): anchored at the 2023-08-12 Earth
+conjunction, +0.0549°/day ahead, r 0.96 AU, good to ≈ ±3° over 2023–2028
+(Gannon epoch: +14.9° vs ≈ +13° in the event literature). The page
+DISPLAYS the assumption and lets the user edit it; live beacon data rides
+the same fixture-gated parser as RTSW with a fail-quiet candidate-URL
+fetcher (SWPC unreachable from the dev sandbox — see js/flux-rope-live.js).
+
+**Validation — the OSSE.** With no committed STA fixture for the hindcast
+events, the claim is validated as an Observing System Simulation
+Experiment (standard practice, labeled synthetic everywhere): a truth rope
+(OSSE_STA.truth, kernel-verified to graze STA at +38.5 h with −18 nT and
+reach L1 only at +41.2 h) generates "observations" at both spacecraft;
+conditioning the deliberately-off prior on the pre-arrival window pins,
+in cargo AND against the committed WASM:
+- the posterior collapses (ESS → floor, λ ≈ 0.2–0.6 — information, not
+  noise) with the truth member carrying the top weight;
+- P(Earth hit) RISES before L1 measures anything (0.51 → 0.60);
+- the forecast median for the entirely-in-the-future L1 storm moves
+  toward the truth (Σ|median − truth| 774 → 342 nT);
+- depth probabilities firm only as the flank crossing deepens — the
+  honest information ordering of a graze: arrival first, amplitude later.
+Real-storm STA validation (Gannon-era beacon archive → a committed
+fixture bundle) is the natural follow-on once archived beacon data is
+baked, and slots into this exact machinery unchanged.
+
+## 14. Sheath model (v1.1 — the first Phase 5 increment)
+
+The single biggest documented v1 miss: both hindcasts showed a shocked
+SHEATH between the SSC and the rope onset that the pure rope model could
+not represent, forcing fits to slide the rope into the sheath window.
+
+**Existence + geometry.** A sheath exists only while the apex outruns the
+ambient wind faster than the fast-magnetosonic speed (`V_MS = 70 km/s`
+fixed, §1-class ambient): `M = (v_apex − w)/V_MS > 1`. The sheath is the
+FRONT-SIDE shell around the rope surface,
+
+```
+σ(ψ) ≤ s < σ(ψ)·(1 + k)        (k = sheath_k, default 0.8)
+```
+
+restricted to points farther from the Sun than the local axis (sheaths
+pile up ahead of the obstacle, never in its wake). Thickness rides the
+rope's own taper — thickest at the nose, vanishing at the legs.
+
+**Compression.** Perpendicular fast-shock Rankine–Hugoniot ratio, γ = 5/3:
+
+```
+X(M) = (γ+1)M² / ((γ−1)M² + 2)      → 1 at M = 1, capped at 4
+```
+
+**Sheath field — the honesty decision.** Sheath Bz is compressed upstream
+turbulence: its AMPLITUDE is predictable, its sign/phase is not. So:
+
+- The DETERMINISTIC series carries no sheath Bz — only phase flags
+  (series count code = rope_count + 100·sheath_count).
+- Each ENSEMBLE member gets its own zero-mean Ornstein–Uhlenbeck Bz
+  realization (correlation time 1 h, std X(M)·δ with δ = `sheath_delta_nt`,
+  the ambient variability; compressed |B| envelope X·B_amb for |B|), from
+  SEPARATE per-member seeded streams — parameter draws stay bit-identical
+  with the sheath on or off, and δ = 0 disables everything (every v1 pin
+  holds untouched).
+- Fans, hit fractions, and min-Bz statistics use the FULL series (the fan
+  shows the sheath band; P(min Bz < thr) includes sheath-driven storms);
+  ASSIMILATION scores the rope-only clean series (§11/§13) — the filter
+  matches structure, never each member's private noise.
+
+**Measured value (pinned).** St. Patrick's v1.1 `sheathFit`: the model
+shock lands ON the observed SSC (+51.6 vs +51.55 h; the baseline's first
+disturbance was 2.3 h early) and the rope-onset error drops 10.5 → 3.3 h,
+with min Bz −20.6 (15%) and shape r = 0.62. Gannon `sheathRopes`: sheath
+on rope A only (rope B runs in A's wake, where the fresh-upstream
+assumption fails — honest until CME–CME interaction lands); model shock
++43.3 vs observed SSC +43.6 h with the validated rope train untouched.
+Storm probabilities never drop vs the sheathless baseline (pinned ≥).
+
+**Next miss, on record.** The observed Bz minimum hugs the rope's LEADING
+EDGE (front compression/erosion); the model's minimum sits mid-passage —
+that asymmetry is now the largest remaining structural error, and it is
+the natural next Phase 5 increment (deformation/erosion).
+
+## 15. Front compression (v1.2 — leading-edge asymmetry)
+
+The §14 re-fit measured the next structural miss: the OBSERVED Bz minimum
+hugs the rope's leading edge (St. Patrick's: 10 min before the rope-onset
+boundary) while the symmetric §3–§4 model puts its extremum mid-passage.
+Physics: a decelerating rope snowplows — its front is compressed against
+the ambient wind while its wake is not.
+
+**Model.** One parameter, `front_c = c ∈ [0, 0.6]` (0 = off, bit-identical
+v1 path). The cross-section boundary is distorted by the angle θ between
+the local cross-section radial r̂ and the anti-Sunward direction ô
+(the Sun→axis-point direction projected ⊥ t̂):
+
+```
+f(θ) = 1 − c·(1 + cosθ)/2          σ_eff(θ) = σ(ψ)·f
+```
+
+— thinnest at the nose (θ = 0 → f = 1−c), untouched in the wake (θ = π).
+The field structure maps onto the compressed geometry via the reference
+radius `ŝ = s/f` (boundary → boundary), with a flux-conservation boost
+`B → B/f` (one squeezed dimension, p = 1). The §14 sheath shell rides the
+compressed boundary (σ_eff ≤ s < σ_eff·(1+k)). Degenerate geometries
+(on-axis, footpoints) fall back to f = 1.
+
+**Effect, unit-pinned:** the crossing's Bz extremum moves from mid-passage
+into the front third of the dwell; the front boundary thins (a probe at
+s = 0.8σ ahead of the apex exits the c = 0.4 rope); the front interior
+field is boosted ≥ 1.2×; c = 0 is bit-identical.
+
+**Measured value (pinned) — St. Patrick's `frontFit` (v1.2):** shock still
+on the observed SSC (+51.7 vs +51.55 h), **min Bz −23.8 vs −24.25 nT
+(1.9%) at Δ0.5 h timing** (v1.1: 8–12 h), minimum at 23% of the dwell,
+shape r = 0.635, rope onset 4.1 h early. The geoeffective peak — value AND
+time — moved from the model's weakest point to its strongest.
+
+**Per-event honesty — Gannon:** front compression was tested and REJECTED
+there (fc = 0 wins 3 of 4 metrics; Gannon's minimum sat 4.5 h into the
+passage, not at the front). `front_c` is per-event physics recovered by
+fitting, not a universal knob — and the pinned Gannon preset carries none.
+
+**Remaining structural residual:** rope-onset timing (~4 h early on
+St. Patrick's with shock + minimum both pinned) — the sheath-thickness /
+standoff relation is the next candidate (Mach-dependent standoff), then
+CME–CME interaction for the Gannon train.
+
+## 16. CME–CME interaction (v1.3 — the train becomes a system)
+
+The §10 train is a superposition of NON-interacting ropes, and both its
+documented misses are interaction physics: rope A's Gannon fit is
+suspiciously compact/strong (σ 0.085 AU, 55 nT — it absorbs real
+compression by the train behind it), and rope B was left sheathless
+because its front runs inside rope A's wake where the §14 fresh-upstream
+assumption fails. The observed L1 series carries the signature directly:
+an internal shock-like jump at +48.7 h (V 684→748 km/s, N 20→24 /cc)
+while Bz already sat at −38 nT, 2.5 h before the −44.17 nT global
+minimum — a follower-driven disturbance compressing the leader's rear.
+
+**Partner selection.** Ropes interact PAIRWISE, follower→leader. Rope j's
+LEADER is the most recently launched earlier rope i whose launch
+direction aligns with j's: `ê_dir,i · ê_dir,j > 0.5`. Chains (A←B←C)
+resolve leader-first in launch order. Misaligned ropes never interact.
+
+**Wake kinematics (the follower).** A follower flies through wind
+preconditioned by its leader, not the quiet ambient:
+
+```
+w_eff,j = max(w_j, v_i(t_launch,j − t_launch,i))     (frozen at launch)
+Γ_eff,j = Γ_j · wake_gamma_frac                       (default 0.5)
+```
+
+— the leader's (already wake-modified, if chained) apex speed when the
+follower launches, so the §5 closed form survives. Freezing w at launch
+is the v1.3 approximation, stated: the leader keeps decelerating and the
+follower may eventually outrun the wake; neither is modeled.
+
+**Rear compression (the leader).** The follower's approach squeezes the
+leader's rear — the counterpart of §15's front lobe, but DYNAMIC. At
+train time t, with apex distances d, apex minor radii σ̂, and apex speeds
+v from the effective kinematics:
+
+```
+gap(t)  = (d_i − σ̂_i) − (d_j + σ̂_j)                 (nose-to-tail line)
+q(t)    = clamp(1 − gap / (comp_reach·σ̂_i), 0, 1)    (reach default 1.5)
+M_rel   = max(0, (v_j − v_i) / V_MS)
+rear_c(t) = clamp(comp_c · (1 − 1/X(M_rel)) · q, 0, 0.75)
+```
+
+X is the §14 Rankine–Hugoniot ratio (X ≤ 4 → rear_c ≤ 0.75 → boost ≤ 4,
+the same cap), so a follower that is not closing super-magnetosonically
+compresses nothing (X(M≤1) = 1). `comp_c ∈ [0,1]` (default 1) is the one
+honest scale knob. The §15 boundary distortion generalizes to two lobes:
+
+```
+f(θ) = 1 − front_c·(1 + cosθ)/2 − rear_c·(1 − cosθ)/2
+```
+
+with the same σ_eff = σ·f boundary, ŝ = s/f reference mapping, and 1/f
+flux-conservation boost — the leader's rear thins and its field
+strengthens as the follower closes. A leader with several aligned
+followers takes the strongest rear_c. Mutual compression of the
+FOLLOWER's front by the pile-up is NOT auto-derived — it remains the
+per-rope static `front_c` (§15) if a fit wants it.
+
+**Wake-conditioned sheath (the follower).** The §14 existence test uses
+the wake flow, not fresh wind: `M_j = (v_j − v_up)/V_MS` with
+`v_up = max(w_j, v_i(t))` evaluated LIVE. A follower slower than its
+leader's wake drives no shock (the honest kill that justified leaving
+Gannon rope B sheathless in v1.1); one that genuinely outruns the wake
+gains a sheath whose X(M_j) compression uses the same wake Mach. The
+leader's own sheath is untouched (fresh upstream ahead of it).
+
+**Determinism + scope.** The interaction config
+`{enabled, wake_gamma_frac, comp_c, comp_reach}` is engine-level, shared
+across ensemble members (not sampled); each member's partner selection,
+wake speeds and gaps derive from that member's OWN sampled parameters, so
+interaction uncertainty enters the fan through the §7 draws with no new
+RNG stream. `enabled = false` (default) is bit-identical to §10 —
+every pre-v1.3 pin holds. NOT modeled, on record: momentum exchange (the
+leader is compressed but not pushed; the follower loses no momentum at
+contact beyond its wake drag), merging/reconnection, erosion, deflection.
+The §10 containment count stays the honesty diagnostic where structures
+overlap.
+
+**Measured value (pinned) — Gannon `interactionRopes` (v1.3):** rope A
+relaxes to plausible values (σ 0.12 AU, 38 nT vs the v1 absorbed
+0.085 AU / 55 nT) with the follower squeeze supplying the minimum:
+**−44.3 vs −44.17 nT (0.3%) at Δ1.5 h**; rope B's wake shock reproduces
+the observed mid-storm internal disturbance **+48.9 vs +48.7 h**; shock
+stays on the SSC (+43.2 vs +43.6 h); dwell 16.8 vs 15.9 h observed
+(v1.1: 18.5); zero overlap superposition. Attribution pinned: disabling
+interaction on the same ropes shallows the min by ~5 nT and mistimes the
+internal disturbance by ~5 h. Honest trades: full-window r 0.66 vs
+v1.1's 0.71 (deterministic zeros through the 54–56 h sheath handover —
+§14 keeps sheath Bz ensemble-only — where v1.1's overlong rope-A dwell
+happened to cover the data), and rope B's `sheath_k = 2.0` standing in
+for the missing Mach-dependent shock standoff (§15 residual).
+
+## 17. Mach-dependent sheath standoff (v1.4)
+
+The §14 shell has a FIXED fractional thickness `k·σ(ψ)` — one number
+welded to the rope surface, setting shock arrival and rope onset
+together. Both hindcasts exposed it: St. Patrick's v1.2 pins the shock
+ON the SSC and the minimum at Δ0.5 h yet the rope onset runs ~4 h early
+(the observed sheath is ~8 h thick; a fixed k cannot thicken the shell
+without dragging the shock earlier), and Gannon rope B needed
+`sheath_k = 2.0` as an undisguised stand-in.
+
+**Model.** The shell thickness becomes the blunt-body shock standoff
+(Farris & Russell 1994), evaluated per point and per time:
+
+```
+Δ(ψ, t) = η · FR(M) · R_c(ψ, t)
+FR(M)   = ((γ−1)M² + 2) / ((γ+1)(M² − 1))     γ = 5/3, clamped ≤ 3
+R_c     = sqrt(σ_eff(ψ) · d/2)
+shell:    σ_eff ≤ s < σ_eff + Δ                (front side, as before)
+```
+
+- `FR` is the classic standoff ratio: → 1/4 for a strong shock,
+  diverging as M → 1⁺ where the shock detaches and dies — clamped at 3
+  (η·3·R_c) so the dissolving shock fades instead of exploding.
+- `R_c` is the obstacle's nose curvature proxy: the geometric mean of
+  the cross-section minor radius σ_eff (distorted per §15/§16) and the
+  torus major radius d/2 — a croissant nose is much blunter than its
+  cross-section alone. Δ ∝ √σ(ψ) still tapers to zero at the legs.
+- `M` is the §14 shock Mach, WAKE-conditioned for §16 followers.
+- `η = sheath_eta` is the one calibration knob (literature anchor
+  η ≈ 1.1 for a smooth blunt body). **η = 0 (default) keeps the legacy
+  fixed-k shell bit-identical** — every pre-v1.4 pin holds; η > 0
+  replaces k entirely for that rope.
+
+**The physics this buys.** M falls as the rope decelerates, so FR — and
+the sheath — GROWS toward 1 AU, exactly the observed behavior a fixed k
+cannot represent: the shock pulls ahead of the rope late in transit.
+The rope onset decouples from the shock arrival through measurable
+physics rather than a hand-tuned fraction.
+
+**Honesty note.** The blunt-body relation describes a QUIET-WIND
+sheath. A §16 follower ramming its leader's wake accumulates pileup the
+flank flow cannot evacuate; its fitted η is expected ABOVE the
+literature ~1 and is reported as such, not hidden inside the geometry.
+
+**Measured value (pinned).** St. Patrick's `standoffFit` (v1.4), at the
+LITERATURE η = 1.1 with no retuning of the coefficient: shock ON the
+observed SSC (error 0.0 h), **rope-onset error 1.4 h (v1.2: 4.1 h — the
+residual that motivated this section)**, min Bz −24.6 vs −24.25 nT
+(1.3%) at Δ1.8 h, shape r = 0.686 (the best of any generation),
+southward dwell 14.0 vs 17.8 h (< −5 nT). Remaining residual: the
+observed minimum sits AT the leading edge (10 min after onset); the
+model's sits at 22% of the dwell — the §15 clamp (c ≤ 0.6) is now the
+limiting mechanism. Gannon `standoffRopes` (v1.4): η replaces both fixed
+fractions on the interacting train with the rope fields BIT-IDENTICAL
+(the shell carries flags, not deterministic field); shock −0.8 h,
+internal disturbance **+48.8 vs +48.7 h observed**; η_B = 3.0 ≈ 2.7×
+blunt-body (wake pileup, as predicted above), η_A = 0.3 sub-blunt-body
+(the pre-train wind was itself disturbed; documented, not hidden).
+
+## 18. Cross-section pancaking (v1.5 — elliptical deformation)
+
+Real magnetic clouds at 1 AU are not circular: lateral expansion in the
+diverging wind flattens the cross-section perpendicular to the radial
+direction — literature aspect ratios run ~2–6 (Riley & Crooker 2004;
+Savani et al. 2011). The circular §3 section conflates two things a
+flattened one separates: the RADIAL thickness (what one spacecraft's
+dwell measures) and the TRANSVERSE footprint (what decides who gets
+hit). The v1 σ fits carry both jobs in one number.
+
+**Model.** One parameter per rope, `pancake_a = A ≥ 1` (1 = circular,
+bit-identical). The boundary becomes an ellipse in the cross-section
+plane with principal axes along ô (the §15 anti-Sunward projection —
+radial) and ⊥ ô (transverse):
+
+```
+g(θ) = 1 / sqrt(A·cos²θ + sin²θ/A)        (even in cosθ)
+σ_eff(θ) = σ(ψ) · g(θ) · f(θ)              (f = the §15/§16 odd lobes)
+ŝ = s / (g·f)                              boost = 1/f  (NOT 1/(g·f))
+```
+
+— semi-axes σ/√A (radial, thinned) and σ·√A (transverse, widened).
+Deformation factorizes cleanly: `g` is EVEN (pure flattening), `f` is
+ODD (front/rear asymmetry). Pancaking is AREA-PRESERVING (π·σ²/√A·√A =
+π·σ²): flux per unit length is conserved, so it carries NO field boost —
+only the genuinely compressive f lobes do. The §14/§17 sheath shell
+rides the same distorted boundary.
+
+**What it buys, honestly scoped.** For a nose crossing, A is largely
+DEGENERATE with σ in a single time series (both set the radial dwell) —
+one spacecraft cannot measure it alone. Its testable content is
+geometric: at FIXED nose dwell, a pancaked rope has a √A-wider
+transverse footprint (flank observers that a circular rope misses get
+hit — pinned in the kernel tests), flatter duration-vs-impact-parameter,
+and correspondingly different ensemble hit statistics. Hindcast fits may
+therefore accept or reject A per event exactly like §15's front_c; a
+rejection is a result, not a failure.
+
+**Approximations, stated.** A is constant with distance (real pancaking
+GROWS in transit; a distance-dependent A(d) is future work). A is NOT
+ensemble-sampled — the §7 draw order is a determinism contract, and the
+parameter is structural. The GLSL view renders the circular section
+(display-only omission, like the sheath and the lobes — the kernel
+remains the oracle). DONKI live seeds keep A = 1 until a validated
+half-angle → (σ, A) mapping exists.
+
+**Measured value (pinned).** Mechanism: an 8° flank observer misses the
+circular rope and catches A = 2.5 (kernel + WASM pinned); the nose dwell
+shrinks by the thinned radial axis; the on-axis field is boost-free
+(area preservation). Hindcast outcome — REJECTED per event, the §15
+precedent: St. Patrick's co-scaled A = 2 gives r 0.676 vs 0.686 with
+the minimum still at 22% of dwell; Gannon co-scaled A = 2 trades the
+minimum (0.3% → 10.1%) for r +0.006. The fitted presets stay circular.
+The pinned calibration warning: at IDENTICAL spreads, co-scaled A = 2
+lifts ensemble P(hit) 0.54 → 0.83 — the aspect is unconstrained by
+single-point data, and storm-probability calibration inherits that
+sensitivity. Resolving it needs multi-point data (the §13 machinery) or
+a population prior; both are future work, stated.

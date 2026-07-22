@@ -49,6 +49,53 @@ pub fn sigma_apex_km(sigma_1au_km: f64, d_km: f64, n_sigma: f64) -> f64 {
     sigma_1au_km * (d_km / AU_KM).powf(n_sigma)
 }
 
+// ── Sheath (spec §14) ────────────────────────────────────────────────────────
+
+/// Fixed ambient fast-magnetosonic speed near 1 AU [km/s] (√(v_A²+c_s²) for
+/// typical B≈5 nT, n≈5 cm⁻³, T≈1e5 K). A shock — and therefore a sheath —
+/// exists only while the apex outruns the ambient wind by more than this.
+pub const V_MS_KMS: f64 = 70.0;
+
+/// Fast-shock magnetosonic Mach number of the apex (0 when sub-magnetosonic).
+pub fn shock_mach(v_apex_kms: f64, w_kms: f64) -> f64 {
+    ((v_apex_kms - w_kms) / V_MS_KMS).max(0.0)
+}
+
+/// Rankine–Hugoniot density/field compression ratio for a perpendicular fast
+/// shock, γ = 5/3: X = (γ+1)M² / ((γ−1)M² + 2), → 1 at M = 1, capped at 4.
+pub fn compression_ratio(mach: f64) -> f64 {
+    if mach <= 1.0 {
+        return 1.0;
+    }
+    let m2 = mach * mach;
+    ((8.0 / 3.0) * m2 / ((2.0 / 3.0) * m2 + 2.0)).min(4.0)
+}
+
+/// Ambient (Parker-spiral) field magnitude at heliocentric distance d [nT].
+pub fn b_ambient_nt(b_amb_1au_nt: f64, d_km: f64) -> f64 {
+    b_amb_1au_nt * (d_km / AU_KM).powf(-1.6)
+}
+
+// ── Shock standoff (spec §17) ────────────────────────────────────────────────
+
+/// Cap on the Farris–Russell ratio: as M → 1⁺ the relation diverges (the
+/// shock detaches and dies); the dying shock FADES at this ceiling instead
+/// of exploding the shell.
+pub const STANDOFF_MAX: f64 = 3.0;
+
+/// Farris–Russell (1994) blunt-body shock standoff ratio Δ/R_c, γ = 5/3:
+/// ((γ−1)M² + 2) / ((γ+1)(M² − 1)) — 1/4 for a strong shock, growing as
+/// the shock weakens, clamped at STANDOFF_MAX toward the M → 1⁺
+/// detachment. Callers gate on M > 1 (no shock, no sheath); the M ≤ 1
+/// guard here just returns the cap.
+pub fn standoff_ratio(mach: f64) -> f64 {
+    if mach <= 1.0 {
+        return STANDOFF_MAX;
+    }
+    let m2 = mach * mach;
+    (((2.0 / 3.0) * m2 + 2.0) / ((8.0 / 3.0) * (m2 - 1.0))).min(STANDOFF_MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,6 +151,19 @@ mod tests {
         let b = Dbm { gamma_per_km: 0.0, ..DBM };
         assert!((b.apex_km(1000.0) - (b.d0_km + 1100.0 * 1000.0)).abs() < 1e-6);
         assert_eq!(b.speed_kms(99_999.0), 1100.0);
+    }
+
+    #[test]
+    fn standoff_ratio_matches_farris_russell() {
+        // Strong-shock limit 1/4; M = 2 → ((2/3)·4 + 2)/((8/3)·3) = 0.5833….
+        assert!((standoff_ratio(100.0) - 0.25).abs() < 1e-3);
+        assert!((standoff_ratio(2.0) - 0.583_333).abs() < 1e-4);
+        // Monotone: a weaker shock stands farther off.
+        assert!(standoff_ratio(1.5) > standoff_ratio(2.0));
+        assert!(standoff_ratio(2.0) > standoff_ratio(4.0));
+        // Detachment clamp near and below M = 1.
+        assert_eq!(standoff_ratio(1.01), STANDOFF_MAX);
+        assert_eq!(standoff_ratio(0.5), STANDOFF_MAX);
     }
 
     #[test]

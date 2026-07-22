@@ -99,15 +99,133 @@ the same crate.
   time discipline (sim time = τ × wall clock, ×1/×100/×1000/×10000),
   true-3D raymarched WebGL2 heliosphere with orbit camera, and the first
   space-weather.html insertion (`js/flux-rope-dashboard.js` — the fail-quiet
-  "next" panel under the arrival-only DBM section). STEREO-A pre-arrival
-  conditioning and resample-move remain open Phase 3+ items.
+  "next" panel under the arrival-only DBM section).
+  ✅ STEREO-A pre-arrival conditioning (2026-07-21, spec §13): auxiliary
+  observer in the ensemble run (RNG-free — L1 prior bit-identical), JOINT
+  L1+STA likelihood with a single temper, drift ephemeris (disclosed ±3°,
+  editable on the page), fail-quiet beacon fetcher, and the OSSE
+  validation: pre-arrival STA flank data collapses ESS to the floor,
+  raises P(hit) 0.51→0.60 before L1 sees anything, and cuts the future-L1
+  forecast error 774→342 nT. Remaining Phase 3+ items: resample-move for
+  iterated filtering; archived-beacon STA fixture for a real-storm
+  (Gannon-era) STA validation.
 - **Phase 4 — Consumers.** ring-current forecast mode via SolarWindDriver,
   space-weather.html customizable dashboard + rope fan, AurOracle tiered
   alerts (Watch → Warning → Nowcast; alert-sender fix rides along), EarthView
   3-day outlook, Gannon three-way validation page (observed vs rope ensemble
   vs BATS-R-US through the same Dst pipeline).
+  ✅ first consumer wave (2026-07-22): the SHARED forecast provider
+  `js/flux-rope-forecast.js` (one pipeline — DONKI → seeded ensemble →
+  particle-filter conditioning on live L1 — returning the fan, a
+  SolarWindDriver with source 'forecast', and a scalar summary; fixture
+  gate tests/flux-rope-forecast.mjs; the space-weather dashboard panel now
+  consumes it instead of its private copy). Consumers wired:
+  · RING CURRENT — js/ring-current-outlook.js: the forecast driver's
+    samples feed the SAME integrateDst as the live pipeline (the Phase 0
+    driver-contract bet paying out literally) → days-ahead min-Dst /
+    storm-class / arrival panel, fail-quiet on ring-current.html.
+  · EARTHVIEW — pure `stormOutlook()` in js/verdict-engine.js (fixture-
+    tested; watch / warning / arriving tiers) renders a third verdict-card
+    sky row from the provider summary; earth.html fills it off the boot
+    path, fail-quiet.
+  · AURORACLE — THE ALERT-SENDER FIX: api/cron/aurora-alerts.js (Node
+    runtime, */15) finally READS the per-subscriber kp_threshold/lat/lon
+    columns (write-only since the prefs migration) and implements the
+    documented Sender v1 contract, extended to tiers (pure logic in
+    api/_lib/aurora-tiers.js + tests/aurora-tiers.mjs): WATCH (1–3 d,
+    NOAA 3-day + flux-rope ensemble window) → WARNING (< 24 h) → NOWCAST
+    (observed Kp), per-subscriber escalation/cooldown debounce, per-
+    recipient Resend sends with token unsubscribe. The flux-rope layer
+    runs the committed WASM SERVER-SIDE through the shared provider with
+    injected sources — the engine's first server-side consumer (the SBIR
+    "API build" seed). Ledger migration
+    supabase-aurora-tiered-alerts-migration.sql is committed but PENDING
+    apply; the cron self-detects and refuses to send until it lands.
+  ✅ Gannon three-way Dst validation (2026-07-22,
+  gannon-superstorm.html + js/gannon-dst-compare.js): ONE pipeline
+  (integrateDst) driven three ways over the identical window — observed
+  SYM-H truth, observed L1 drivers (the pipeline CEILING), and the v1.4
+  flux-rope train at launch-time knowledge — with the BATS-R-US GM/IE
+  Dst trace wired as an auto-lighting bundle slot (dst_nt in
+  gannon_may_2024_hindcast.gm_ie.json; pending the workstation re-run,
+  reported honestly on-page). Pinned offline
+  (tests/gannon-dst-compare.mjs) + browser gate
+  (tests/gannon-dst-smoke.spec.js). THE finding, pinned: even with
+  PERFECT L1 knowledge the empirical integrator bottoms at −280 vs the
+  published −412 nT (~32% G5 saturation miss) — the page's own argument
+  for MHD ground truth, now quantified; the rope leg adds only 35 nT
+  RMSE / Δ1.3 h min-timing of DRIVER error on top (its closer −377
+  minimum vs truth is labeled as error cancellation, not skill; the fit
+  is reproduction, not blind forecast). Remaining Phase 4:
+  space-weather customizable dashboard.
 - **Phase 5 — Depth.** Empirical sheath model, cross-section deformation,
   CME–CME interaction, EEGGL/SWMF comparison runs, server-side API build.
+  ✅ sheath model (2026-07-21, spec §14): R–H-compressed front-side shell,
+  phase-flagged deterministic series, per-member zero-mean OU sheath Bz in
+  the ensemble (fan carries the sheath band; the filter scores rope-only
+  structure). v1.1 fits pinned: St. Patrick's model shock ON the observed
+  SSC (baseline 2.3 h early) with rope-onset error 10.5 → 3.3 h; Gannon
+  shock +43.3 vs +43.6 h observed with the rope train untouched. New
+  largest documented miss: leading-edge Bz compression asymmetry
+  (deformation/erosion is next).
+  ✅ front-compression asymmetry (2026-07-21, spec §15): pileup-flattened
+  front — thinner cross-section, flux-conservation-boosted field, angle-
+  weighted by cos of the anti-Sunward angle. v1.2 St. Patrick fit pinned:
+  min Bz −23.8 vs −24.25 nT (1.9%) at Δ0.5 h timing (v1.1 had the minimum
+  mid-passage, 8–12 h late), shock still on the SSC, minimum lands in the
+  front third of the dwell. Per-event physics, not a universal knob:
+  tested and REJECTED for Gannon (fc = 0 wins 3 of 4 metrics — its min
+  sat 4.5 h into the passage), and the rejection is itself smoke-pinned.
+  Honest residual: rope onset ~4 h early with shock and min both pinned —
+  a Mach-dependent sheath standoff is the candidate fix.
+  ✅ CME–CME interaction (2026-07-22, spec §16): the train becomes a
+  system — pairwise nearest-aligned-predecessor partners, wake kinematics
+  for followers (frozen-at-launch w_eff + reduced Γ, closed form kept),
+  DYNAMIC rear compression of leaders (R–H-capped follower squeeze
+  through the generalized two-lobe §15 boundary distortion), and
+  wake-conditioned follower sheaths (shock Mach vs the leader's live wake,
+  not fresh wind). Gannon v1.3 fit pinned: both v1 absorptions come back
+  out — rope A relaxes to plausible values (σ 0.12 AU, 38 nT vs the
+  absorbed 0.085 AU / 55 nT) with the squeeze supplying the −44.3 vs
+  −44.17 nT minimum (0.3%, Δ1.5 h), and rope B's wake shock reproduces
+  the observed MID-STORM internal disturbance (+48.9 vs +48.7 h — a
+  feature no earlier generation could represent). Shock stays on the SSC
+  (+43.2 vs +43.6 h), dwell 16.8 vs 15.9 h observed (v1.1: 18.5), zero
+  overlap superposition; attribution pinned (disabling interaction
+  shallows the min 5 nT and mistimes the internal disturbance ~5 h).
+  Honest trades on record: full-window r 0.66 vs v1.1's 0.71 (the
+  deterministic series now carries zeros through the sheath handover that
+  v1.1's overlong rope-A dwell papered over) and rope B's sheath_k = 2.0
+  standing in for the missing Mach-dependent standoff.
+  ✅ Mach-dependent sheath standoff (2026-07-22, spec §17): the shell
+  thickness becomes the Farris–Russell blunt-body standoff
+  η·FR(M)·√(σ_eff·d/2) — Mach-dependent, GROWING as the decelerating
+  shock weakens, wake-conditioned for §16 followers; η = 0 keeps the
+  legacy fixed-k shell bit-identical. v1.4 fits pinned: St. Patrick's at
+  the LITERATURE η = 1.1 lands the shock ON the SSC with the rope-onset
+  error down 4.1 → 1.4 h and r = 0.686 (best of any generation, dwell
+  14.0 vs obs 17.8 h at < −5 nT); Gannon keeps every v1.3 rope-field
+  metric bit-identical while η_B = 3.0 (≈2.7× blunt-body — wake pileup,
+  honestly reported) puts the internal shock at +48.8 vs +48.7 h and
+  retires the k = 2.0 stand-in. New limiting residual, on record: the
+  observed St. Patrick's minimum sits AT the leading edge; the model's
+  at 22% of dwell — the §15 front-compression clamp is now the
+  bottleneck.
+  ✅ cross-section pancaking (2026-07-22, spec §18): elliptical
+  deformation σ/√A radial × σ·√A transverse, area-preserving (no field
+  boost — only the compressive §15/§16 lobes boost), composed cleanly
+  with the odd lobes as the even factor of one boundary distortion.
+  Honest outcome, pinned: the nose chord is near-degenerate under
+  (σ·√A, A) co-scaling — MEASURED on St. Patrick's (r 0.676 vs 0.686,
+  onset Δ0.3 h) — so no fitted preset carries an aspect (the §15
+  rejection precedent; Gannon trades min 0.3% → 10.1% for r +0.006).
+  What the flattening genuinely changes is pinned instead: an 8° flank
+  observer misses circular and catches A = 2.5, and ensemble P(hit)
+  jumps 0.54 → 0.83 at identical spreads — the documented calibration
+  sensitivity of storm probabilities to an aspect single-point data
+  cannot constrain (multi-point/§13 or a population prior resolves it;
+  future work). Remaining Phase 5: momentum exchange, EEGGL/SWMF
+  comparison runs, server-side API build.
 
 ## 5. Data inputs
 

@@ -21,6 +21,8 @@ const COL = {
     median: '#4fc3f7',
     det: '#e8eefc',
     obs: '#ffb454',
+    aux: '#7fe6c3',
+    auxObs: 'rgba(127, 230, 195, 0.8)',
     thresh: 'rgba(255, 110, 90, 0.55)',
     cursor: 'rgba(255, 255, 255, 0.65)',
     text: '#aab6cf',
@@ -166,6 +168,36 @@ export function drawBzChart(canvas, o) {
         ctx.stroke();
     }
 
+    // Predicted-at-auxiliary-observer trace (STEREO-A) — dashed teal on the
+    // shared timeline: the flank signature the filter conditions on.
+    if (o.aux) {
+        ctx.strokeStyle = COL.aux;
+        ctx.lineWidth = 1.2 * dpr;
+        ctx.setLineDash([6 * dpr, 4 * dpr]);
+        ctx.beginPath();
+        for (let i = 0; i < o.tH.length; i++) {
+            const y = Y(o.aux[i]);
+            if (i === 0) ctx.moveTo(X(o.tH[i]), y); else ctx.lineTo(X(o.tH[i]), y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+    if (o.auxObs) {
+        ctx.strokeStyle = COL.auxObs;
+        ctx.lineWidth = 1.1 * dpr;
+        ctx.setLineDash([2 * dpr, 3 * dpr]);
+        ctx.beginPath();
+        let pen = false;
+        for (let i = 0; i < o.auxObs.tH.length; i++) {
+            const v = o.auxObs.bz[i];
+            if (!Number.isFinite(v) || o.auxObs.tH[i] < t0 || o.auxObs.tH[i] > t1) { pen = false; continue; }
+            const x = X(o.auxObs.tH[i]), y = Y(v);
+            if (!pen) { ctx.moveTo(x, y); pen = true; } else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
     // Observed overlay.
     if (o.obs) {
         ctx.strokeStyle = COL.obs;
@@ -194,7 +226,9 @@ export function drawBzChart(canvas, o) {
     const legend = [];
     if (o.fan) legend.push([COL.median, 'ensemble median ± 50/90%']);
     if (o.det) legend.push([COL.det, 'deterministic fit']);
-    if (o.obs) legend.push([COL.obs, 'observed (OMNI)']);
+    if (o.obs) legend.push([COL.obs, o.obsLabel || 'observed (OMNI)']);
+    if (o.aux) legend.push([COL.aux, 'predicted at STEREO-A']);
+    if (o.auxObs) legend.push([COL.auxObs, o.auxObsLabel || 'STEREO-A observed']);
     let lx = padL + 8 * dpr;
     ctx.font = `${10 * dpr}px system-ui, sans-serif`;
     for (const [col, label] of legend) {

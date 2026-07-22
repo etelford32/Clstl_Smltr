@@ -66,9 +66,13 @@ test.describe('flux-rope simulator', () => {
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
-    test('scrubber drives the HUD through transit and L1 crossing', async ({ page }) => {
+    test('scrubber drives the HUD through transit, sheath and L1 crossing', async ({ page }) => {
         await expect(page.locator('#fr-s-phit')).not.toHaveText('—', { timeout: 20_000 });
         await page.locator('#fr-play').click();
+        // v1.1 sheath fit: shock +51.6 h, rope onset +59.5 h — the HUD walks
+        // transit → sheath → rope.
+        await page.locator('#fr-time').fill('55');
+        await expect(page.locator('#fr-hud-status')).toHaveText(/in sheath/);
         await page.locator('#fr-time').fill('62');
         await expect(page.locator('#fr-hud-status')).toHaveText(/crossing L1/);
         await expect(page.locator('#fr-hud-r')).toHaveText(/AU/);
@@ -86,10 +90,30 @@ test.describe('flux-rope simulator', () => {
         const p20 = parseInt(await page.locator('#fr-s-p20').textContent(), 10);
         expect(p20).toBeGreaterThan(40);
         await page.locator('#fr-ropetabs button', { hasText: 'Rope 2' }).click();
-        await expect(page.locator('#p-v0Kms')).toHaveValue('1300');
+        // v1.3 interaction generation: rope B's launch speed is a fit under
+        // the frozen-at-launch wake (spec §16), not the fresh-wind 1300.
+        await expect(page.locator('#p-v0Kms')).toHaveValue('900');
         await page.locator('#fr-ropetabs button.fr-add').click();
         await expect(page.locator('#fr-ropetabs button.active')).toHaveText(/Rope 3/);
         await expect(page.locator('#fr-preset')).toHaveValue('custom');
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
+    test('OSSE preset: STEREO-A data conditions the fan before L1 arrival', async ({ page }) => {
+        await expect(page.locator('#fr-s-phit')).not.toHaveText('—', { timeout: 20_000 });
+        await page.locator('#fr-preset').selectOption('osse-sta');
+        // Ephemeris-derived STA longitude for the 2024-era synthetic epoch.
+        await expect(page.locator('#p-staLon')).toHaveValue(/^1[3-6]$/);
+        const priorHit = parseInt(await page.locator('#fr-s-phit').textContent(), 10);
+        // Freeze and scrub into the graze gap: STA sees the flank, L1 silent.
+        await page.locator('#fr-play').click();
+        await page.locator('#fr-time').fill('40');
+        await expect(page.locator('#fr-assim-status')).toHaveText(/STA \d+ obs/, { timeout: 10_000 });
+        await expect(page.locator('#fr-assim-status')).toHaveText(/ESS \d+\/\d+/);
+        await expect(page.locator('#fr-hud-status')).toHaveText(/in transit/);
+        // Pre-arrival: the Earth-hit call strengthens on off-line data alone.
+        const postHit = parseInt(await page.locator('#fr-s-phit').textContent(), 10);
+        expect(postHit).toBeGreaterThanOrEqual(priorHit);
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
