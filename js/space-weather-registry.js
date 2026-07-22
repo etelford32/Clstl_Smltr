@@ -35,6 +35,10 @@ export const PERSONAS = Object.freeze(
 
 export const PANELS = Object.freeze([
     // ── zone: main (#sw-app) ────────────────────────────────────────────
+    { id: 'stage', zone: 'main', family: 'sim',
+      title: 'The Stage — Sun→Earth corridor',
+      blurb: 'The one-context 3D scene: kernel-driven CME ropes, ensemble ghosts and wavefronts, L1, and the breathing magnetopause, on the τ-timeline.',
+      personas: ['chaser', 'operator', 'forecaster', 'educator', 'casual'] },
     { id: 'metrics-hero', zone: 'main', family: 'live',
       title: 'Live metrics strip',
       blurb: 'Solar wind speed, IMF Bz, Kp, and X-ray flux at a glance.',

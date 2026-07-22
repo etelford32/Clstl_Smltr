@@ -124,16 +124,22 @@ export async function mountFluxRopeDashboard(containerId) {
         const obsPlot = rtsw?.length
             ? { tH: rtsw.samples.map((s) => (s.t - launchMs) / 3600_000), bz: rtsw.samples.map((s) => s.bz) }
             : null;
-        const draw = () => drawBzChart(document.getElementById(`${containerId}-chart`), {
+        const draw = (cursorMs = Date.now()) => drawBzChart(document.getElementById(`${containerId}-chart`), {
             tH,
             det: null,
             fan: { ...fan.bzPct, hitFrac: fan.hitFrac },
             obs: obsPlot,
             launchMs,
-            cursorH: (Date.now() - launchMs) / 3600_000,
+            cursorH: (cursorMs - launchMs) / 3600_000,
         });
         draw();
-        window.addEventListener('resize', draw);
+        window.addEventListener('resize', () => draw());
+        // τ-timeline sync (plan §5.5): the Stage scrubber dispatches
+        // 'sw-tau' — the chart cursor follows it. One-way, fail-quiet.
+        window.addEventListener('sw-tau', (e) => {
+            const t = e.detail?.tauMs;
+            if (Number.isFinite(t)) draw(t);
+        });
     } catch (e) {
         console.info('flux-rope dashboard panel unavailable:', e?.message ?? e);
         host.style.display = 'none';

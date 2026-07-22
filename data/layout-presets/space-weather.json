@@ -11,14 +11,52 @@
         "preset": "chaser",
         "zones": {
           "main": {
-            "order": ["metrics-hero", "forecast-timeline", "earth-forecast", "globe", "flux-rope-forecast", "cme-forecast", "data-grid", "imagery", "transit", "helio-hero", "solar-system-info", "tables", "sources"],
-            "hidden": ["transit", "helio-hero", "solar-system-info", "tables"],
+            "order": [
+              "stage",
+              "metrics-hero",
+              "forecast-timeline",
+              "earth-forecast",
+              "globe",
+              "flux-rope-forecast",
+              "cme-forecast",
+              "data-grid",
+              "imagery",
+              "transit",
+              "helio-hero",
+              "solar-system-info",
+              "tables",
+              "sources"
+            ],
+            "hidden": [
+              "transit",
+              "helio-hero",
+              "solar-system-info",
+              "tables"
+            ],
             "wide": [],
             "size": {}
           },
           "grid": {
-            "order": ["card-storm-scale", "card-polar-mag", "card-wind", "card-cme-donki", "card-upper-atmosphere", "card-ssw", "card-surface", "card-vortex", "card-gravity-wave", "card-earth-orbit"],
-            "hidden": ["card-upper-atmosphere", "card-ssw", "card-surface", "card-vortex", "card-gravity-wave", "card-earth-orbit"],
+            "order": [
+              "card-storm-scale",
+              "card-polar-mag",
+              "card-wind",
+              "card-cme-donki",
+              "card-upper-atmosphere",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-gravity-wave",
+              "card-earth-orbit"
+            ],
+            "hidden": [
+              "card-upper-atmosphere",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-gravity-wave",
+              "card-earth-orbit"
+            ],
             "wide": [],
             "size": {}
           }
@@ -34,15 +72,51 @@
         "preset": "operator",
         "zones": {
           "main": {
-            "order": ["metrics-hero", "cme-forecast", "flux-rope-forecast", "forecast-timeline", "transit", "data-grid", "earth-forecast", "globe", "imagery", "tables", "sources", "helio-hero", "solar-system-info"],
-            "hidden": ["helio-hero", "solar-system-info"],
+            "order": [
+              "stage",
+              "metrics-hero",
+              "cme-forecast",
+              "flux-rope-forecast",
+              "forecast-timeline",
+              "transit",
+              "data-grid",
+              "earth-forecast",
+              "globe",
+              "imagery",
+              "tables",
+              "sources",
+              "helio-hero",
+              "solar-system-info"
+            ],
+            "hidden": [
+              "helio-hero",
+              "solar-system-info"
+            ],
             "wide": [],
             "size": {}
           },
           "grid": {
-            "order": ["card-upper-atmosphere", "card-wind", "card-storm-scale", "card-cme-donki", "card-polar-mag", "card-earth-orbit", "card-ssw", "card-surface", "card-vortex", "card-gravity-wave"],
-            "hidden": ["card-ssw", "card-surface", "card-vortex", "card-gravity-wave"],
-            "wide": ["card-upper-atmosphere"],
+            "order": [
+              "card-upper-atmosphere",
+              "card-wind",
+              "card-storm-scale",
+              "card-cme-donki",
+              "card-polar-mag",
+              "card-earth-orbit",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-gravity-wave"
+            ],
+            "hidden": [
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-gravity-wave"
+            ],
+            "wide": [
+              "card-upper-atmosphere"
+            ],
             "size": {}
           }
         }
@@ -57,13 +131,39 @@
         "preset": "forecaster",
         "zones": {
           "main": {
-            "order": ["metrics-hero", "cme-forecast", "flux-rope-forecast", "earth-forecast", "forecast-timeline", "transit", "globe", "data-grid", "imagery", "tables", "helio-hero", "solar-system-info", "sources"],
+            "order": [
+              "stage",
+              "metrics-hero",
+              "cme-forecast",
+              "flux-rope-forecast",
+              "earth-forecast",
+              "forecast-timeline",
+              "transit",
+              "globe",
+              "data-grid",
+              "imagery",
+              "tables",
+              "helio-hero",
+              "solar-system-info",
+              "sources"
+            ],
             "hidden": [],
             "wide": [],
             "size": {}
           },
           "grid": {
-            "order": ["card-wind", "card-storm-scale", "card-cme-donki", "card-ssw", "card-surface", "card-vortex", "card-polar-mag", "card-gravity-wave", "card-upper-atmosphere", "card-earth-orbit"],
+            "order": [
+              "card-wind",
+              "card-storm-scale",
+              "card-cme-donki",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-polar-mag",
+              "card-gravity-wave",
+              "card-upper-atmosphere",
+              "card-earth-orbit"
+            ],
             "hidden": [],
             "wide": [],
             "size": {}
@@ -80,13 +180,39 @@
         "preset": "educator",
         "zones": {
           "main": {
-            "order": ["helio-hero", "solar-system-info", "globe", "transit", "metrics-hero", "earth-forecast", "forecast-timeline", "cme-forecast", "flux-rope-forecast", "imagery", "data-grid", "tables", "sources"],
+            "order": [
+              "stage",
+              "helio-hero",
+              "solar-system-info",
+              "globe",
+              "transit",
+              "metrics-hero",
+              "earth-forecast",
+              "forecast-timeline",
+              "cme-forecast",
+              "flux-rope-forecast",
+              "imagery",
+              "data-grid",
+              "tables",
+              "sources"
+            ],
             "hidden": [],
             "wide": [],
             "size": {}
           },
           "grid": {
-            "order": ["card-wind", "card-storm-scale", "card-cme-donki", "card-ssw", "card-surface", "card-vortex", "card-polar-mag", "card-gravity-wave", "card-upper-atmosphere", "card-earth-orbit"],
+            "order": [
+              "card-wind",
+              "card-storm-scale",
+              "card-cme-donki",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-polar-mag",
+              "card-gravity-wave",
+              "card-upper-atmosphere",
+              "card-earth-orbit"
+            ],
             "hidden": [],
             "wide": [],
             "size": {}
@@ -103,14 +229,56 @@
         "preset": "casual",
         "zones": {
           "main": {
-            "order": ["metrics-hero", "earth-forecast", "globe", "imagery", "forecast-timeline", "data-grid", "flux-rope-forecast", "cme-forecast", "transit", "helio-hero", "solar-system-info", "tables", "sources"],
-            "hidden": ["flux-rope-forecast", "cme-forecast", "transit", "helio-hero", "solar-system-info", "tables", "sources"],
+            "order": [
+              "stage",
+              "metrics-hero",
+              "earth-forecast",
+              "globe",
+              "imagery",
+              "forecast-timeline",
+              "data-grid",
+              "flux-rope-forecast",
+              "cme-forecast",
+              "transit",
+              "helio-hero",
+              "solar-system-info",
+              "tables",
+              "sources"
+            ],
+            "hidden": [
+              "flux-rope-forecast",
+              "cme-forecast",
+              "transit",
+              "helio-hero",
+              "solar-system-info",
+              "tables",
+              "sources"
+            ],
             "wide": [],
             "size": {}
           },
           "grid": {
-            "order": ["card-storm-scale", "card-wind", "card-cme-donki", "card-ssw", "card-surface", "card-vortex", "card-polar-mag", "card-gravity-wave", "card-upper-atmosphere", "card-earth-orbit"],
-            "hidden": ["card-ssw", "card-surface", "card-vortex", "card-polar-mag", "card-gravity-wave", "card-upper-atmosphere", "card-earth-orbit"],
+            "order": [
+              "card-storm-scale",
+              "card-wind",
+              "card-cme-donki",
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-polar-mag",
+              "card-gravity-wave",
+              "card-upper-atmosphere",
+              "card-earth-orbit"
+            ],
+            "hidden": [
+              "card-ssw",
+              "card-surface",
+              "card-vortex",
+              "card-polar-mag",
+              "card-gravity-wave",
+              "card-upper-atmosphere",
+              "card-earth-orbit"
+            ],
             "wide": [],
             "size": {}
           }

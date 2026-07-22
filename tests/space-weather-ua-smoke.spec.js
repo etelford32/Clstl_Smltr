@@ -66,21 +66,31 @@ test.describe('space-weather upper-atmosphere card', () => {
         expect(rect?.height, 'mini-plot has height').toBeGreaterThan(50);
     });
 
-    test('recomputes when Kp changes (MutationObserver path)', async ({ page }) => {
+    test('recomputes when Kp changes (bus + fallback paths)', async ({ page }) => {
         await page.goto(URL);
         await waitForCard(page);
         const before = await page.textContent('#ua-rho-iss');
 
         // Simulate a geomagnetic storm — Kp 7 → Ap 140 (SWPC table).
-        // The card's MutationObserver should fire on the textContent change.
+        // Drive BOTH channels the card listens on: the swpc-update bus
+        // (which, once it has fired, takes precedence over the DOM
+        // fallback — injecting only #kp-val was this test's long-standing
+        // flake) and the #kp-val MutationObserver fallback for the
+        // pre-bus boot state. Timers are stopped first so a queued
+        // refresh can't rewrite the fallback Kp over the injection, and
+        // we poll rather than fixed-wait (software-GL loops starve the
+        // main thread).
         await page.evaluate(() => {
+            let hi = setTimeout(() => {}, 0);
+            for (let i = 1; i <= hi; i++) { clearTimeout(i); clearInterval(i); }
             const el = document.getElementById('kp-val');
             if (el) el.textContent = '7';
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 7 } }));
         });
-        await page.waitForTimeout(400);
+        await expect.poll(() => page.textContent('#ua-rho-iss'),
+            { timeout: 10_000, message: 'rho value changed after Kp update' })
+            .not.toBe(before);
         const after = await page.textContent('#ua-rho-iss');
-
-        expect(after, 'rho value changed after Kp update').not.toBe(before);
 
         // ρ @ ISS should increase during a storm — compare exponents.
         const expOf = (s) => {

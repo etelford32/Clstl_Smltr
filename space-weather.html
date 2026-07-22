@@ -1686,6 +1686,12 @@ nav {
 .cv-btn:hover { background: rgba(0,140,255,.18); border-color:#0088ff; }
 #btn-sw-here { top:12px; right:12px; }
 
+/* ─── The Stage (S1) ─────────────────────────────────────────────── */
+.stage-section { margin-bottom: 18px; }
+#sw-stage-host { height: 540px; }
+@media (max-width: 700px) { #sw-stage-host { height: 430px; } }
+@media (max-width: 480px) { #sw-stage-host { height: 360px; } }
+
 /* ─── Sign-in gate overlay (see SPACE_WEATHER_DASHBOARD_PLAN.md §3) ──────
    Present in markup so it covers the page from FIRST PAINT — no flash of
    gated content while the module scripts are still queued. z-index above
@@ -1840,6 +1846,20 @@ try {
         <span class="dsb-text" id="dsb-text">Space weather data is temporarily unavailable. Showing cached values.</span>
         <span class="dsb-age" id="dsb-age"></span>
     </div>
+
+    <!-- ── THE STAGE (S1) ──────────────────────────────────────────────────
+         One-context Sun→Earth corridor scene (SPACE_WEATHER_DASHBOARD_PLAN.md
+         §5): kernel-probed CME ropes + weight-faded ensemble ghosts +
+         P10/P50/P90 wavefronts, L1 sentinel, Earth with the breathing Shue
+         magnetopause, stations 1–4, and the τ-timeline (dispatches 'sw-tau'
+         for dock chart cursors). js/stage/stage.js; pure model in
+         js/stage/{scale,model}.js (node-gated, kernel-oracle pinned).
+         The three 2D pseudo-views below (helio hero, transit, globe) stay
+         until the Stage passes parity — retiring them is a later, gated
+         step, per the plan's S1 exit criteria. -->
+    <section class="stage-section" data-lab-panel="stage" data-lab-resize="#sw-stage-host">
+        <div id="sw-stage-host"></div>
+    </section>
 
     <!-- ── HELIOSPHERE HERO ────────────────────────────────────────────────── -->
     <!-- 3D inner solar system: real ephemeris orbits, 3D Parker spiral wind,  -->
@@ -6091,6 +6111,13 @@ mountFluxRopeDashboard('flux-rope-forecast-panel');
 <script type="module">
 import { mountStatusBand } from './js/space-weather-status-band.js';
 mountStatusBand('sw-status-band');
+</script>
+
+<!-- The Stage (S1; fail-quiet; consumes the same published forecast —
+     see js/stage/stage.js) -->
+<script type="module">
+import { mountStage } from './js/stage/stage.js';
+mountStage('sw-stage-host');
 </script>
 
 </body>

@@ -374,10 +374,32 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
   via the 'flux-rope-forecast' event); the `--sw-*` token block in the
   page `:root`. Deferred within D1 scope, deliberately: gallery live
   previews, density modes, and per-panel config sheets (D2).
-- **S1 — Stage core.** One-context corridor scene: Sun, ropes (kernel-
-  oracle), L1, Earth, compressed-scale ruler; stations 1–4 + flights;
-  τ-timeline driving Stage + chart cursors; replaces the three 2D
-  pseudo-views (which retire only when parity gates pass).
+- **S1 — Stage core. ✅ SHIPPED 2026-07-22.** One-context corridor scene:
+  Sun, ropes (kernel-oracle), L1, Earth, compressed-scale ruler;
+  stations 1–4 + flights; τ-timeline driving Stage + chart cursors.
+  Landed as: `js/stage/scale.js` (piecewise-compressed radial map +
+  true-scale mix + disclosed body/local-frame exaggerations;
+  tests/stage-scale.mjs) and `js/stage/model.js` (rope surface = the
+  view.js SDF zero level built ONLY through the already-exported
+  view.js mirrors; ghost members + weighted wavefront quantiles; Shue
+  surface via the ring-current oracle; stations/flights;
+  tests/stage-model.mjs pins the mirrors against the committed WASM's
+  fr_apex_km_at / fr_sigma_apex_km_at) + `js/stage/stage.js` (three.js
+  renderer: median rope probed straight off the provider's LIVE kernel
+  instance, vertex Bz sampled oracle-DIRECT via kernel.fieldAt, ghosts
+  weight-faded by the assimilated fan, P10/P50/P90 wavefront shells,
+  breathing Shue magnetopause at disclosed Earth-local R_E scale, HTML
+  overlay annotations, DPR clamp + visibility pause + context-loss
+  fallback + reduced-motion cuts). τ contract: the Stage scrubber
+  ([now−24 h, now+72 h], Now, ×1000 play) dispatches `sw-tau`
+  {tauMs, regime}; the flux-rope panel chart cursor follows. The Stage
+  registers as panel `stage`, first in all five presets. Browser gate:
+  tests/space-weather-stage.spec.js (boot, stations, τ contract,
+  true-scale toggle — offline, quiet-corridor). **The three 2D
+  pseudo-views are NOT yet retired** — that stays behind explicit
+  parity review, as planned. S2 upgrades on record: live active
+  regions on the Sun, forecast-band magnetopause breathing, aurora
+  oval band + persona stagings, picking→dock sync.
 - **S2 — Persona stagings.** My Sky + Orbit Ops (oval band, drive ring,
   shells, heat-shell, CelesTrak asset picker), uncertainty grammar complete
   (ghosts, wavefronts, magnetopause breathing), picking→dock sync.

@@ -32,6 +32,9 @@ test.describe('space-weather dashboard composition (Layout Lab v2)', () => {
     });
 
     test('apply preset → gallery tweak → save → reload restores the layout', async ({ page }) => {
+        // Two full page boots (three canvases + the Stage) under software
+        // GL — triple the budget rather than racing the renderer.
+        test.slow();
         await page.click('#lab-open');
         await expect(page.locator('#lab-toolbar')).toBeVisible();
 
@@ -40,11 +43,12 @@ test.describe('space-weather dashboard composition (Layout Lab v2)', () => {
         const presetOptions = page.locator('#lab-toolbar optgroup[label="Presets"] option');
         await expect(presetOptions).toHaveCount(5);
 
-        // Apply the Satellite Operator preset: metrics strip leads, the
-        // sim canvas and solar-system notes hide, drag card goes wide.
+        // Apply the Satellite Operator preset: the Stage leads (always-first
+        // panel), metrics strip next, the legacy sim canvas and solar-system
+        // notes hide, drag card goes wide.
         await page.selectOption('#lab-toolbar select', 'preset:operator');
         const firstPanel = page.locator('#sw-app > [data-lab-panel]').first();
-        await expect(firstPanel).toHaveAttribute('data-lab-panel', 'metrics-hero');
+        await expect(firstPanel).toHaveAttribute('data-lab-panel', 'stage');
         await expect(page.locator('[data-lab-panel="helio-hero"]')).toHaveClass(/lab-hidden/);
         await expect(page.locator('[data-lab-panel="card-upper-atmosphere"]')).toHaveClass(/lab-wide/);
 
@@ -52,7 +56,7 @@ test.describe('space-weather dashboard composition (Layout Lab v2)', () => {
         // panel un-hides it (D1 semantics).
         await page.getByRole('button', { name: /Gallery/ }).click();
         await expect(page.locator('#lab-gallery')).toBeVisible();
-        await expect(page.locator('#lab-gallery .lab-gallery-row')).toHaveCount(23);
+        await expect(page.locator('#lab-gallery .lab-gallery-row')).toHaveCount(24);
         await expect(page.locator('#lab-gallery .lab-gallery-missing')).toHaveCount(0);
         const helioRow = page.locator('#lab-gallery .lab-gallery-row',
             { hasText: 'Heliosphere simulation' });
@@ -65,7 +69,7 @@ test.describe('space-weather dashboard composition (Layout Lab v2)', () => {
             JSON.parse(localStorage.getItem('pp-layout.space-weather')));
         expect(saved.v).toBe(2);
         expect(saved.preset).toBe('operator');
-        expect(saved.zones.main.order[0]).toBe('metrics-hero');
+        expect(saved.zones.main.order[0]).toBe('stage');
         expect(saved.zones.main.hidden).toContain('solar-system-info');
         expect(saved.zones.main.hidden).not.toContain('helio-hero');
 
@@ -73,7 +77,7 @@ test.describe('space-weather dashboard composition (Layout Lab v2)', () => {
         await page.reload({ waitUntil: 'domcontentloaded' });
         await page.waitForSelector('#lab-open', { timeout: 20_000 });
         await expect(page.locator('#sw-app > [data-lab-panel]').first())
-            .toHaveAttribute('data-lab-panel', 'metrics-hero');
+            .toHaveAttribute('data-lab-panel', 'stage');
         await expect(page.locator('[data-lab-panel="solar-system-info"]')).toHaveClass(/lab-hidden/);
         await expect(page.locator('[data-lab-panel="helio-hero"]')).not.toHaveClass(/lab-hidden/);
     });
@@ -87,14 +91,22 @@ test.describe('space-weather dashboard composition (Layout Lab v2)', () => {
             await expect(page.locator(`#sw-status-band [data-cell="${id}"]`)).toBeVisible();
         }
         // Storm-Kp injection via the page's #kp-val (the band's only Kp
-        // source — the UA-card MutationObserver pattern).
+        // source — the UA-card MutationObserver pattern). Quiesce first:
+        // wait out in-flight boot fetches, then stop the page's timers so
+        // no refresh can rewrite the fallback Kp over the injection.
+        // Observers and event listeners (the paths under test) still run.
+        await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {});
         await page.evaluate(() => {
+            let hi = setTimeout(() => {}, 0);
+            for (let i = 1; i <= hi; i++) { clearTimeout(i); clearInterval(i); }
             const el = document.getElementById('kp-val');
             if (el) el.textContent = '7';
         });
+        // Generous timeouts: the MutationObserver→render hop competes with
+        // the page's render loops under software GL.
         const kpCell = page.locator('#sw-status-band [data-cell="kp"]');
-        await expect(kpCell.locator('.swb-value')).toHaveText('7');
-        await expect(kpCell).toHaveClass(/severe/);
+        await expect(kpCell.locator('.swb-value')).toHaveText('7', { timeout: 15_000 });
+        await expect(kpCell).toHaveClass(/severe/, { timeout: 15_000 });
         await expect(kpCell.locator('.swb-detail')).toContainText('G3');
     });
 });
