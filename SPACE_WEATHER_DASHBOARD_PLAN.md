@@ -10,7 +10,9 @@
 > Decisions already made by the author (2026-07-22): the dashboard is
 > **sign-in gated** (authenticated users only); primary personas are
 > **Aurora Chaser + Satellite Operator**; the 3D presentation is a
-> first-class design object, not a widget.
+> first-class design object, not a widget. The six §13 questions were
+> answered 2026-07-22 — §13 is now the decisions-on-record table; no
+> open blockers remain.
 
 ---
 
@@ -62,10 +64,10 @@ discipline for anything the GPU draws.
 - **Hard gate, authentication not paywall**: `space-weather.html` checks
   the session at boot (before heavy init); signed-out visitors are
   redirected to `signin.html?next=/space-weather.html` (house pattern —
-  the tier-redirect spec already pins this flow family). Free signed-in
-  accounts get the full customizable dashboard (⚠ §13-Q2 confirms tier
-  split; recommendation unchanged: customize free, cloud sync Basic+,
-  org features Institution).
+  the tier-redirect spec already pins this flow family). **DECIDED**: the
+  gate is authentication-only — free signed-in accounts get the full
+  customizable console (the growth loop); Basic+ gates cloud sync /
+  multi-dashboards; Institution gates org sharing / kiosk.
 - **The signed-out moment is a marketing asset, not a wall**: the signin
   page (and pricing/landing embeds) get the Stage's **attract loop** — a
   non-interactive cinematic auto-flight at *current live conditions* via
@@ -77,11 +79,15 @@ discipline for anything the GPU draws.
 - **Funnel instrumentation**: `gate_view → signin_start → signin_done →
   first_layout_touch` through the existing auth-funnel channel; the gate
   is an experiment surface (copy/att­ract variants) via experiments.js.
-- ⚠ §13-Q1 naming: the platform already has `dashboard.html` (account
-  dashboard). Two "dashboards" will confuse nav and telemetry. Options:
-  (a) this page absorbs the account-home role and dashboard.html becomes
-  settings; (b) rename this surface "Mission Console" / "Console" in nav.
-  Recommend (b) short-term, revisit (a) after adoption data.
+- **DECIDED — this page absorbs the account-home role.** The console
+  becomes THE signed-in dashboard: the post-signin default destination,
+  the nav's single "Dashboard" entry, and the account's home surface;
+  `dashboard.html` is repositioned as Account/Settings. Implementation
+  care (D1+G scope): the post-auth redirect target moves here, every
+  `dashboard.html` reference in nav/auth flows is re-pointed (nav-lint +
+  the auth-tier-redirect spec are the safety nets), and a redirect
+  preserves old deep links. This RAISES the console's bar: it must be a
+  worthy daily home (status band + fast boot are not optional polish).
 
 ## 4. Personas (locked) → stagings + presets
 
@@ -183,8 +189,10 @@ the operator product.
   forecast Kp distribution; drive-ring annotation ("oval edge ≈ 220 km
   north at 23:10 local"); cloud overlay; moon phase lighting; one-tap
   "show me why" flight to the Corridor and back.
-- **Operator staging**: Orbit Ops home; per-asset config (altitude,
-  TLE ⚠ §13-Q4 ingestion path); drag heat-shell at asset altitudes with
+- **Operator staging**: Orbit Ops home; per-asset config (altitude;
+  **DECIDED**: assets come from a CelesTrak picker — search by name /
+  NORAD ID over the already-ingested catalogs, no uploads in v1); drag
+  heat-shell at asset altitudes with
   the Starlink-2022 reference band; timeline pins at P10/P50/P90 arrival;
   tier banner wired to *fleet* thresholds (Dst/density), not just Kp.
 
@@ -224,8 +232,10 @@ Layout Lab v1 → v2 as previously planned: **registry** (self-describing
 panels with config schemas, multi-instance), **gallery drawer** with live
 previews, **grid** with density modes (comfortable/compact/ops), **per-
 panel config sheets**, **presets** as named layout-variants, **persist**
-localStorage-first + cloud sync signed-in (⚠ §13-Q3 storage shape),
-**share** via layout links/export. The Stage registers as a special
+localStorage-first + cloud sync signed-in (**DECIDED**: the named/
+versioned `dashboards` table — several per user, org-ready; migration
+ships as SQL and is applied only on the author's go), **share** via
+layout links/export. The Stage registers as a special
 always-first panel whose "config" is station + dressing + solo mode.
 
 ## 7. Panel catalog v2 (dock instruments)
@@ -295,47 +305,49 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
 
 ## 12. Phasing (D = dock, S = stage; interleaved)
 
-- **D1+G — Foundation + gate.** Sign-in gate + funnel + attract stub
-  (current page in `?preview=1`); registry with legacy adapters; grid +
-  v2 layout schema (+ v1 migrator); gallery; five presets; status band;
-  token port. Exit: signed-in users compose/save/restore; signed-out see
-  gate + teaser; all existing gates green.
+- **D1+G — Foundation + gate + home swap.** Sign-in gate + funnel +
+  attract stub (current page in `?preview=1`); the account-home
+  absorption (post-auth redirect → here, nav re-point, dashboard.html →
+  Account/Settings, legacy redirects); registry with legacy adapters;
+  grid + v2 layout schema (+ v1 migrator); gallery; five presets; status
+  band; token port. Exit: signed-in users land here by default and can
+  compose/save/restore; signed-out see gate + teaser; nav-lint +
+  auth-redirect + all existing gates green.
 - **S1 — Stage core.** One-context corridor scene: Sun, ropes (kernel-
   oracle), L1, Earth, compressed-scale ruler; stations 1–4 + flights;
   τ-timeline driving Stage + chart cursors; replaces the three 2D
   pseudo-views (which retire only when parity gates pass).
 - **S2 — Persona stagings.** My Sky + Orbit Ops (oval band, drive ring,
-  shells, heat-shell, assets ⚠ Q4), uncertainty grammar complete
+  shells, heat-shell, CelesTrak asset picker), uncertainty grammar complete
   (ghosts, wavefronts, magnetopause breathing), picking→dock sync.
 - **D2 — Personalization depth.** Config sheets, threshold profile
   unification (alert-sender handoff), multi-instance, mobile order,
-  cloud sync (⚠ Q3), first-run flow.
+  cloud sync via the `dashboards` table (migration on author's go),
+  first-run flow.
 - **D3 — Analytics & trust.** User-facing analytics family, product
   instrumentation + first tuning pass, density/ops mode, a11y + perf
-  gates, (⚠ Q5) print/light theme.
-- **S3/D4 — Polish & reach.** Attract loop as the marketing asset,
-  layout links, org dashboards, kiosk mode, mobile fallback frames.
+  gates, print/light theme for operator shift briefings (DECIDED: in
+  scope).
+- **S3/D4 — Polish & reach.** Attract loop shipped to BOTH the signin
+  gate and the public landing/pricing heroes (DECIDED), layout links,
+  org dashboards, kiosk mode, mobile fallback frames.
 
 Each phase is a PR-sized arc with its own gates (pure-model node
 fixtures; Playwright: gate flow, compose/persist, station flights,
 timeline sync, a11y), per house workflow.
 
-## 13. Open questions for the author
+## 13. Decisions on record (author, 2026-07-22)
 
-1. **Naming collision**: this signed-in console vs the existing
-   `dashboard.html` (account home). Recommend calling this surface
-   **Mission Console** in nav for now; revisit merging after adoption.
-2. **Gate = authN only?** Free signed-in users get full customization
-   (recommended — it's the growth loop); paid gates apply to cloud sync
-   / org features. Confirm.
-3. **Cloud-sync shape**: named/versioned `dashboards` table (recommended,
-   institution-ready) vs `user_profiles` JSONB column. Migration ships
-   as SQL, applied only on your go (aurora-ledger precedent).
-4. **Operator asset ingestion**: CelesTrak picker (search by name/NORAD,
-   zero-friction, recommended for v1) vs TLE upload vs both.
-5. **Print/light theme** for operator briefings — D3 scope?
-6. **Attract loop placement**: signin page only, or also the public
-   landing/pricing pages as the hero?
+| # | Question | Decision |
+|---|---|---|
+| 1 | Naming / relation to `dashboard.html` | **Absorb the account home** — this console becomes THE signed-in dashboard and post-signin destination; dashboard.html repositioned as Account/Settings with redirects (D1+G scope) |
+| 2 | Gate scope | **Authentication-only** — free signed-in accounts get full customization; Basic+ gates cloud sync/multi-dashboards; Institution gates org sharing/kiosk |
+| 3 | Cloud-sync shape | **Named/versioned `dashboards` table** (several per user, org-ready); migration SQL committed, applied only on the author's go |
+| 4 | Operator asset ingestion | **CelesTrak picker** (name / NORAD ID search over ingested catalogs); no uploads in v1 |
+| 5 | Print/light theme | **Yes — D3 scope** (operator shift briefings) |
+| 6 | Attract-loop placement | **Signin gate + public landing/pricing heroes** |
+
+No open blockers remain — every phase can start.
 
 ## 14. Success metrics
 
