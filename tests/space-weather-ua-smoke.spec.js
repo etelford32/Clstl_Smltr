@@ -13,6 +13,20 @@ import { test, expect } from '@playwright/test';
 const URL = '/space-weather.html';
 const BOOT_TIMEOUT_MS = 20_000;
 
+// space-weather.html is sign-in gated (SPACE_WEATHER_DASHBOARD_PLAN.md §3).
+// Seed the legacy pp_auth mirror — the gate's belt-and-suspenders fallback —
+// so these specs exercise the signed-in page without a live Supabase session.
+// The gate's own behavior (redirect, preview bypass) is pinned separately in
+// tests/space-weather-gate.spec.js.
+test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+        localStorage.setItem('pp_auth', JSON.stringify({
+            signedIn: true, id: 'e2e-ua', email: 'e2e@playwright.test',
+            plan: 'free', role: 'user', provider: 'password',
+        }));
+    });
+});
+
 function attachConsoleRecorder(page) {
     const errors = [];
     page.on('console', (msg) => {

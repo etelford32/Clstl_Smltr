@@ -110,6 +110,24 @@ test('missing size map defaults to empty object', () => {
     assert.deepEqual(l.zones.m.size, {});
 });
 
+/* ── v2 preset field + v1 migration ─────────────────────────────────── */
+
+test('v2 preset field survives normalization; junk presets drop to null', () => {
+    const base = { v: 2, page: 'p', zones: { m: { order: ['a'] } } };
+    assert.equal(normalizeLayout({ ...base, preset: 'chaser' }, 'p').preset, 'chaser');
+    assert.equal(normalizeLayout(base, 'p').preset, null);
+    assert.equal(normalizeLayout({ ...base, preset: 42 }, 'p').preset, null);
+    assert.equal(normalizeLayout({ ...base, preset: 'x'.repeat(41) }, 'p').preset, null);
+});
+
+test('v1 docs are accepted forever via migration (preset = null)', () => {
+    const v1 = { v: 1, page: 'p', zones: { m: { order: ['a', 'b'], hidden: ['b'] } } };
+    const l = normalizeLayout(v1, 'p');
+    assert.equal(l.v, LAYOUT_VERSION);
+    assert.equal(l.preset, null);
+    assert.deepEqual(l.zones.m.order, ['a', 'b']);
+});
+
 /* ── layoutsEqual ───────────────────────────────────────────────────── */
 
 test('layoutsEqual ignores field-order noise via normalization', () => {

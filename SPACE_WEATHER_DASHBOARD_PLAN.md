@@ -354,13 +354,26 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
 
 ## 12. Phasing (D = dock, S = stage; interleaved)
 
-- **D1+G — Foundation + gate.** Sign-in gate + funnel + attract stub
-  (current page in `?preview=1`); the account-dashboard bridge tile
-  (dashboard.html itself otherwise untouched); registry with legacy
-  adapters; grid + v2 layout schema (+ v1 migrator); gallery; five
-  presets; status band; token port. Exit: signed-in users can
-  compose/save/restore their space-weather dashboard; signed-out see
-  gate + teaser; nav-lint + auth-redirect + all existing gates green.
+- **D1+G — Foundation + gate. ✅ SHIPPED 2026-07-22.** Sign-in gate +
+  funnel + attract stub (current page in `?preview=1`); the
+  account-dashboard bridge tile (dashboard.html itself otherwise
+  untouched); registry with legacy adapters; grid + v2 layout schema
+  (+ v1 migrator); gallery; five presets; status band; token port.
+  Exit criteria met: signed-in users compose/save/restore
+  (tests/space-weather-compose.spec.js); signed-out see gate + teaser
+  (tests/space-weather-gate.spec.js); nav-lint + existing gates green.
+  Landed as: gate module in space-weather.html (preview + OAuth-hash
+  exemptions, fail-open posture documented inline);
+  `js/space-weather-registry.js` (+ registry↔page↔presets drift gate
+  tests/space-weather-registry.mjs); layout-lab v2 `{v:2, preset}` with
+  a permanent v1 migrator; `data/layout-presets/space-weather.json`
+  (five persona presets, total orders); gallery drawer + preset picker
+  in the Layout Lab designer; `js/space-weather-status-band.js` (pure
+  model over the verdict-engine oracles + tests/space-weather-status-band.mjs;
+  consumes the ONE provider run `js/flux-rope-dashboard.js` publishes
+  via the 'flux-rope-forecast' event); the `--sw-*` token block in the
+  page `:root`. Deferred within D1 scope, deliberately: gallery live
+  previews, density modes, and per-panel config sheets (D2).
 - **S1 — Stage core.** One-context corridor scene: Sun, ropes (kernel-
   oracle), L1, Earth, compressed-scale ruler; stations 1–4 + flights;
   τ-timeline driving Stage + chart cursors; replaces the three 2D
@@ -413,7 +426,8 @@ through every phase.
 
 ---
 
-*Updated 2026-07-22: sign-in gate committed; personas locked (Aurora
+*Updated 2026-07-22 (later the same day): phase D1+G shipped — see §12.
+Earlier: sign-in gate committed; personas locked (Aurora
 Chaser + Satellite Operator); the Stage (§5) added as the presentation
 centerpiece — supersedes the earlier grid-only framing. Companions:
 FLUX_ROPE_SIMULATOR_PLAN.md, DESIGN_TOKENS.md, js/layout-lab.js header,

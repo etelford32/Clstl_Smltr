@@ -25,6 +25,39 @@
 <meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 
 <style>
+/* ─── Design tokens (DESIGN_TOKENS.md discipline, ported per
+   SPACE_WEATHER_DASHBOARD_PLAN.md §10, phase D1) ─────────────────────
+   ONE status grammar for the whole dashboard — band cells, chips, tier
+   banners, and (later) Stage elements all read these five steps. The
+   palette is colorblind-safe only because consumers are required to
+   carry the state as TEXT too; color reinforces, never encodes alone.
+   New chrome should consume tokens, not raw hex — add a token here
+   rather than patching a rule with a literal. */
+:root {
+    /* status grammar: quiet / elevated / watch / warning / severe */
+    --sw-status-quiet:    #4fc97f;  --sw-status-quiet-rgb:    79,201,127;
+    --sw-status-elevated: #ffd75e;  --sw-status-elevated-rgb: 255,215,94;
+    --sw-status-watch:    #ffaa22;  --sw-status-watch-rgb:    255,170,34;
+    --sw-status-warning:  #ff7847;  --sw-status-warning-rgb:  255,120,71;
+    --sw-status-severe:   #ff4466;  --sw-status-severe-rgb:   255,68,102;
+    /* surfaces + borders */
+    --sw-surface-card:   rgba(10,16,34,.66);
+    --sw-surface-raised: rgba(16,24,48,.9);
+    --sw-border:         rgba(255,255,255,.09);
+    --sw-border-focus:   rgba(0,198,255,.45);
+    /* text scale */
+    --sw-text:        #cdd;
+    --sw-text-bright: #e8f4ff;
+    --sw-text-muted:  #8b94ad;
+    --sw-text-dim:    #68718a;
+    /* accent (matches the page's chart/link cyan) */
+    --sw-accent: #4fc3f7;
+    /* rhythm */
+    --sw-gap: 12px;
+    --sw-radius: 10px;
+    --sw-t-snap: .15s ease;
+}
+
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { scroll-behavior: smooth; }
 body {
@@ -1652,6 +1685,27 @@ nav {
 }
 .cv-btn:hover { background: rgba(0,140,255,.18); border-color:#0088ff; }
 #btn-sw-here { top:12px; right:12px; }
+
+/* ─── Sign-in gate overlay (see SPACE_WEATHER_DASHBOARD_PLAN.md §3) ──────
+   Present in markup so it covers the page from FIRST PAINT — no flash of
+   gated content while the module scripts are still queued. z-index above
+   nav (600), dropdowns (800), and the Layout Lab toolbar (1000). */
+#sw-auth-gate {
+    position: fixed; inset: 0; z-index: 9999;
+    background: #03010e;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; padding: 24px;
+}
+#sw-auth-gate img { height: 52px; width: 52px; border-radius: 50%; object-fit: cover; margin-bottom: 18px; }
+#sw-auth-gate h2 { font-size: 1.4rem; font-weight: 800; color: #e8f4ff; margin-bottom: 10px; }
+#sw-auth-gate p { color: #8899aa; margin-bottom: 24px; max-width: 400px; font-size: .88rem; line-height: 1.5; }
+.sw-gate-signin {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 12px 26px; min-height: 44px; border-radius: 24px;
+    font-weight: 700; font-size: .88rem; text-decoration: none;
+    background: linear-gradient(45deg, #ffd700, #ff8c00); color: #000;
+    -webkit-tap-highlight-color: rgba(255,184,48,.25);
+}
 </style>
 <script type="application/ld+json">
 {
@@ -1689,7 +1743,70 @@ nav {
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
-<!-- perf-hints:end --><!-- ── NAV ─────────────────────────────────────────────────────────────────── -->
+<!-- perf-hints:end -->
+
+<!-- ── SIGN-IN GATE ────────────────────────────────────────────────────────
+     This page is a signed-in surface (SPACE_WEATHER_DASHBOARD_PLAN.md §3):
+     authentication-only, not a paywall — every signed-in plan gets the full
+     console. The overlay covers the page from first paint; the module below
+     removes it for signed-in visitors (auth module OR the legacy pp_auth
+     localStorage mirror — the same belt-and-suspenders precheck
+     dashboard.html uses, so a cold Supabase init can't bounce a signed-in
+     superuser) and sends anonymous visitors to
+     signin.html?next=/space-weather.html via auth.requireAuth().
+     Two exemptions, both deliberate:
+       · preview mode (?preview=1 / iframe): js/preview-mode.js stamps
+         <html data-preview> synchronously in <head>; previews are the
+         page's public, non-interactive marketing embed.
+       · OAuth/OTP hash payloads (#access_token= / #error= / email-link
+         types): js/oauth-sentinel.js (imported by nav.js) forwards those
+         to /auth-callback.html — bouncing to signin here would race that
+         navigation and could drop the tokens. The overlay stays up to
+         cover the ~200 ms hop.
+     On any unexpected failure the gate FAILS OPEN: the page's data is
+     public NOAA/NASA feeds and the paid surfaces gate server-side, so a
+     broken storage environment must never brick the page for a signed-in
+     user (the lesson of dashboard.html's gate-stuck-visible bug). -->
+<div id="sw-auth-gate" aria-live="polite">
+  <img src="ParkersPhysics_logo2.jpg" alt="Parkers Physics">
+  <h2>Sign in to open your Space Weather dashboard</h2>
+  <p>Live solar wind, Kp and storm indices, CME forecasts, and the auroral oval — arranged your way. Signing in keeps your layout, locations, and alert thresholds.</p>
+  <a class="sw-gate-signin" href="signin.html?next=%2Fspace-weather.html">Sign In</a>
+</div>
+<script type="module">
+try {
+    const gate = document.getElementById('sw-auth-gate');
+    const hp = new URLSearchParams((location.hash || '').replace(/^#/, ''));
+    const authPayload = hp.has('access_token') || hp.has('error') || hp.has('error_description') ||
+        ['magiclink', 'recovery', 'signup', 'invite', 'email_change'].includes(hp.get('type') || '');
+    if (document.documentElement.hasAttribute('data-preview')) {
+        gate?.remove();
+    } else if (!authPayload) {
+        const { auth } = await import('./js/auth.js');
+        let signedIn = auth.isSignedIn();
+        if (!signedIn) {
+            try {
+                const raw = localStorage.getItem('pp_auth') || sessionStorage.getItem('pp_auth');
+                signedIn = !!(raw && JSON.parse(raw)?.signedIn);
+            } catch {}
+        }
+        if (signedIn) {
+            gate?.remove();
+        } else {
+            try {
+                const { funnel } = await import('./js/auth-funnel.js');
+                funnel.step('gate_view', { page: 'space-weather' });
+            } catch {}
+            auth.requireAuth('signin.html');
+        }
+    }
+} catch (e) {
+    console.warn('[sw-gate] check failed, failing open:', e);
+    document.getElementById('sw-auth-gate')?.remove();
+}
+</script>
+
+<!-- ── NAV ─────────────────────────────────────────────────────────────────── -->
 <!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
@@ -1710,6 +1827,12 @@ nav {
 
     <!-- Alerts bar (hidden by default) -->
     <div id="alerts-bar"></div>
+
+    <!-- ── STATUS BAND (glance layer, plan §10) ──────────────────────────
+         Stable chrome like the header — deliberately NOT a data-lab-panel,
+         so layouts/presets can never hide or reorder the glance layer.
+         Mounted by js/space-weather-status-band.js (fail-quiet). -->
+    <div id="sw-status-band" aria-live="polite"></div>
 
     <!-- ── DATA STATUS BANNER (shown when feed is stale or offline) ────────── -->
     <div id="data-status-banner">
@@ -5944,10 +6067,15 @@ window.openImg = function(thumb) {
 // data plane in the main module above. Enable design mode with ?layoutlab=1.
 try {
     const { initLayoutLab } = await import('./js/layout-lab.js');
+    const { PANELS, FAMILIES } = await import('./js/space-weather-registry.js');
     initLayoutLab({
         page: 'space-weather',
         experimentKey: 'sw_layout_v1',
         variantsUrl: 'data/layout-variants/space-weather.json',
+        presetsUrl: 'data/layout-presets/space-weather.json',
+        // Decorate with display labels here so layout-lab stays generic
+        // (it renders entry.familyLabel, never imports the registry).
+        registry: PANELS.map((p) => ({ ...p, familyLabel: FAMILIES[p.family] })),
     });
 } catch (e) { console.warn('[layout-lab] disabled:', e); }
 </script>
@@ -5956,6 +6084,13 @@ try {
 <script type="module">
 import { mountFluxRopeDashboard } from './js/flux-rope-dashboard.js';
 mountFluxRopeDashboard('flux-rope-forecast-panel');
+</script>
+
+<!-- Status band (glance layer; fail-quiet; consumes the forecast the
+     panel above publishes — see js/space-weather-status-band.js) -->
+<script type="module">
+import { mountStatusBand } from './js/space-weather-status-band.js';
+mountStatusBand('sw-status-band');
 </script>
 
 </body>

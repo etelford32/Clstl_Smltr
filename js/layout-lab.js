@@ -38,9 +38,24 @@
  * inside functions that are only called from initLayoutLab().
  */
 
-export const LAYOUT_VERSION = 1;
+// v2 (2026-07, dashboard redesign D1): adds a top-level `preset` field —
+// the named preset a layout derives from (data/layout-presets/<page>.json)
+// or null for hand-arranged layouts. Zone shape is UNCHANGED from v1.
+// v1 docs (committed A/B variants, users' saved personal layouts) are
+// accepted forever via migrateLayout — bumping the version must never
+// strand a saved layout.
+export const LAYOUT_VERSION = 2;
 
 /* ── Pure layout algebra (node-tested) ─────────────────────────────── */
+
+/** Lossless v1 → v2 migration. Returns the input untouched for any doc
+ *  that is not a plain v1 object (normalizeLayout rejects those later). */
+export function migrateLayout(raw) {
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && raw.v === 1) {
+        return { ...raw, v: 2, preset: null };
+    }
+    return raw;
+}
 
 /**
  * Merge a saved panel order with the panels actually present in the DOM.
@@ -87,8 +102,10 @@ const sizeMap = (v) => {
     return out;
 };
 
-/** Validate/clamp an untrusted layout doc (import paste, fetched variant). */
+/** Validate/clamp an untrusted layout doc (import paste, fetched variant).
+ *  Accepts v1 docs via migrateLayout — see the LAYOUT_VERSION note. */
 export function normalizeLayout(raw, page) {
+    raw = migrateLayout(raw);
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     if (raw.v !== LAYOUT_VERSION) return null;
     if (page && raw.page && raw.page !== page) return null;
@@ -104,7 +121,9 @@ export function normalizeLayout(raw, page) {
             size: sizeMap(z.size),
         };
     }
-    return { v: LAYOUT_VERSION, page: raw.page || page || '', zones };
+    const preset = (typeof raw.preset === 'string' && raw.preset.length <= 40)
+        ? raw.preset : null;
+    return { v: LAYOUT_VERSION, page: raw.page || page || '', preset, zones };
 }
 
 export function layoutsEqual(a, b) {
@@ -142,7 +161,7 @@ function setSize(panel, h) {
     t.style.height = h === null ? '' : clampSize(h) + 'px';
 }
 
-export function captureLayout(root, page) {
+export function captureLayout(root, page, preset = null) {
     const zones = {};
     for (const z of zoneEls(root)) {
         const size = {};
@@ -157,7 +176,7 @@ export function captureLayout(root, page) {
             size,
         };
     }
-    return { v: LAYOUT_VERSION, page, zones };
+    return { v: LAYOUT_VERSION, page, preset, zones };
 }
 
 export function applyLayout(root, layout) {
@@ -250,8 +269,17 @@ function applySizeOverrides(root, page) {
  * @param {string}  opts.page          layout/storage key, e.g. 'space-weather'
  * @param {string} [opts.experimentKey]  key in EXPERIMENTS registry
  * @param {string} [opts.variantsUrl]    committed variants JSON
+ * @param {string} [opts.presetsUrl]     committed named-preset JSON
+ *                 (data/layout-presets/<page>.json — presets are starting
+ *                 points the user applies and then edits; distinct from
+ *                 A/B variants, which assign silently)
+ * @param {Array}  [opts.registry]       self-describing panel metadata
+ *                 (e.g. js/space-weather-registry.js PANELS) — enables the
+ *                 gallery drawer in design mode; pages without a registry
+ *                 keep the pre-D1 designer unchanged
  */
-export async function initLayoutLab({ page, experimentKey, variantsUrl } = {}) {
+export async function initLayoutLab({ page, experimentKey, variantsUrl,
+                                      presetsUrl, registry } = {}) {
     if (typeof document === 'undefined' || !page) return null;
     const root = document;
     injectStyles();
@@ -271,11 +299,18 @@ export async function initLayoutLab({ page, experimentKey, variantsUrl } = {}) {
         }
     } catch (e) { console.warn('[layout-lab] telemetry unavailable', e); }
 
+    let presetsDoc = null;
     if (variantsUrl) {
         try {
             const res = await fetch(variantsUrl, { cache: 'no-cache' });
             if (res.ok) variantsDoc = await res.json();
         } catch { /* variants file is optional */ }
+    }
+    if (presetsUrl) {
+        try {
+            const res = await fetch(presetsUrl, { cache: 'no-cache' });
+            if (res.ok) presetsDoc = await res.json();
+        } catch { /* presets file is optional */ }
     }
 
     // Resolve what to show: personal beats variant beats authored.
@@ -295,9 +330,26 @@ export async function initLayoutLab({ page, experimentKey, variantsUrl } = {}) {
 
     if (exp) wireGoals(root, exp);
 
-    const api = { page, mode, authored, applyLayout: (l) => applyLayout(root, l) };
-    if (labEnabled()) mountDesigner(root, page, authored, variantsDoc, api, exp);
+    const api = {
+        page, mode, authored,
+        // Preset attribution for the layout the user is looking at right
+        // now (null = hand-arranged / authored). "Save mine" stamps this
+        // into the persisted v2 doc so analytics can tell preset-derived
+        // layouts from scratch-built ones.
+        preset: personal?.preset ?? null,
+        applyLayout: (l) => applyLayout(root, l),
+    };
+    if (labEnabled()) mountDesigner(root, page, authored, variantsDoc, api, exp,
+                                    presetsDoc, registry);
     return api;
+}
+
+/* ── Customization telemetry (plan §9b) — always fail-quiet ────────── */
+
+function trackFeature(action, meta) {
+    import('./telemetry.js')
+        .then((m) => m.telemetry.recordFeature('sw_dashboard', action, meta))
+        .catch(() => {});
 }
 
 /* ── Always-on resize handles (data-lab-resize panels) ─────────────── */
@@ -413,11 +465,32 @@ body.lab-design .lab-chip { display: flex; }
   transition: background .15s, width .15s; }
 .lab-resize-handle:hover .lab-resize-pill,
 .lab-resize-handle.lab-resizing .lab-resize-pill { background: rgba(0,198,255,.8); width: 96px; }
+#lab-gallery { position: fixed; top: 60px; right: 14px; bottom: 74px; width: 300px; max-width: 92vw;
+  z-index: 1000; overflow-y: auto; background: rgba(4,10,20,.96); border: 1px solid rgba(0,198,255,.5);
+  border-radius: 12px; padding: 10px 12px; font: 500 12px/1.35 system-ui; color: #cfeaff;
+  box-shadow: 0 6px 30px rgba(0,0,0,.55); }
+.lab-gallery-head { display: flex; justify-content: space-between; align-items: center;
+  font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+.lab-gallery-head button { font: inherit; border: 1px solid rgba(0,198,255,.4); border-radius: 6px;
+  background: rgba(0,30,55,.8); color: #cfeaff; cursor: pointer; padding: 2px 8px; }
+.lab-gallery-family { margin: 10px 0 4px; font-weight: 700; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .08em; color: #7fb8d8; }
+.lab-gallery-row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 5px 6px; border-radius: 7px; }
+.lab-gallery-row:hover { background: rgba(0,198,255,.10); }
+.lab-gallery-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-gallery-row button { flex-shrink: 0; font: 600 11px/1 system-ui; padding: 4px 8px; border-radius: 6px;
+  cursor: pointer; background: rgba(4,10,20,.92); }
+.lab-gallery-add { border: 1px solid rgba(90,255,150,.5); color: #8fe9ae; }
+.lab-gallery-del { border: 1px solid rgba(255,120,120,.45); color: #f2a6a6; }
+.lab-gallery-missing { opacity: .45; }
+.lab-gallery-missing span:last-child { font-size: 10px; color: #f2a6a6; }
 `;
     document.head.appendChild(s);
 }
 
-function mountDesigner(root, page, authored, variantsDoc, api, exp) {
+function mountDesigner(root, page, authored, variantsDoc, api, exp,
+                       presetsDoc, registry) {
     const open = document.createElement('button');
     open.id = 'lab-open';
     open.textContent = '🎛 Customize';
@@ -426,6 +499,7 @@ function mountDesigner(root, page, authored, variantsDoc, api, exp) {
 
     let bar = null;
     let dragging = null;
+    let gallery = null;
 
     const status = () => {
         const el = bar?.querySelector('.lab-status');
@@ -444,6 +518,7 @@ function mountDesigner(root, page, authored, variantsDoc, api, exp) {
         document.body.classList.remove('lab-design');
         open.style.display = '';
         bar?.remove(); bar = null;
+        gallery?.remove(); gallery = null;
         for (const p of root.querySelectorAll('[data-lab-panel]')) {
             p.removeAttribute('draggable');
         }
@@ -521,35 +596,60 @@ function mountDesigner(root, page, authored, variantsDoc, api, exp) {
             return b;
         };
 
-        // Variant preview picker — authored / committed variants / personal
+        // Layout picker — authored / personal / named presets / A/B variants.
+        // Presets are the user-facing starting points (plan §6); variants
+        // stay listed for QA of the experiment surface.
         const sel = document.createElement('select');
-        sel.title = 'Preview a layout';
-        const opts = [['authored', 'As authored'], ['personal', 'My saved layout']];
-        for (const vid of Object.keys(variantsDoc?.variants || {})) {
-            opts.push([`variant:${vid}`, `Variant ${vid}`]);
+        sel.title = 'Apply a layout';
+        const opt = ([v, l]) => `<option value="${v}">${l}</option>`;
+        const presetIds = Object.keys(presetsDoc?.presets || {});
+        let html = [['authored', 'As authored'], ['personal', 'My saved layout']].map(opt).join('');
+        if (presetIds.length) {
+            html += '<optgroup label="Presets">' + presetIds.map((pid2) =>
+                opt([`preset:${pid2}`, presetsDoc.presets[pid2]?.label || pid2])).join('') + '</optgroup>';
         }
-        sel.innerHTML = opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+        const variantIds = Object.keys(variantsDoc?.variants || {});
+        if (variantIds.length) {
+            html += '<optgroup label="A/B variants (QA)">' + variantIds.map((vid) =>
+                opt([`variant:${vid}`, `Variant ${vid}`])).join('') + '</optgroup>';
+        }
+        sel.innerHTML = html;
         sel.addEventListener('change', () => {
-            let l = null;
+            let l = null, preset = null;
             if (sel.value === 'authored') l = authored;
             else if (sel.value === 'personal') l = loadPersonal(page);
+            else if (sel.value.startsWith('preset:')) {
+                preset = sel.value.slice(7);
+                l = normalizeLayout(presetsDoc?.presets?.[preset]?.layout, page);
+            }
             else l = normalizeLayout(variantsDoc?.variants?.[sel.value.slice(8)], page);
-            if (l) { applyLayout(root, l); api.mode = sel.value; status(); }
+            if (l) {
+                applyLayout(root, l);
+                api.mode = sel.value;
+                api.preset = preset ?? l.preset ?? null;
+                status(); refreshGallery();
+                if (preset) trackFeature('preset_apply', { page, preset });
+            }
             else alert('No layout stored for: ' + sel.value);
         });
         el.appendChild(sel);
 
+        if (registry?.length) {
+            btn('🗂 Gallery', 'Browse every panel — show, hide, and jump to panels', toggleGallery);
+        }
+
         btn('💾 Save mine', 'Save current arrangement as YOUR layout (this browser)', () => {
-            savePersonal(page, captureLayout(root, page));
+            savePersonal(page, captureLayout(root, page, api.preset));
             api.mode = 'personal'; status();
+            trackFeature('layout_save', { page, preset: api.preset });
         });
         btn('🧹 Clear mine', 'Delete your saved layout and go back to the authored page', () => {
             clearPersonal(page);
             applyLayout(root, authored);
-            api.mode = 'authored'; status();
+            api.mode = 'authored'; api.preset = null; status(); refreshGallery();
         });
         btn('📋 Export', 'Copy current arrangement as JSON — paste into data/layout-variants to publish as an A/B variant', async () => {
-            const json = JSON.stringify(captureLayout(root, page), null, 2);
+            const json = JSON.stringify(captureLayout(root, page, api.preset), null, 2);
             try { await navigator.clipboard.writeText(json); alert('Layout JSON copied to clipboard.'); }
             catch { prompt('Copy the layout JSON:', json); }
             console.log('[layout-lab] export\n' + json);
@@ -560,14 +660,99 @@ function mountDesigner(root, page, authored, variantsDoc, api, exp) {
             try {
                 const l = normalizeLayout(JSON.parse(raw), page);
                 if (!l) throw new Error('not a v' + LAYOUT_VERSION + ' layout for ' + page);
-                applyLayout(root, l); api.mode = 'imported'; status();
+                applyLayout(root, l); api.mode = 'imported'; api.preset = l.preset; status(); refreshGallery();
             } catch (err) { alert('Import failed: ' + err.message); }
         });
         btn('↩ Reset view', 'Re-apply the as-authored layout (does not touch saved layouts)', () => {
             applyLayout(root, authored);
-            api.mode = 'authored'; status();
+            api.mode = 'authored'; api.preset = null; status(); refreshGallery();
         });
         btn('✖ Exit', 'Leave design mode', exit);
         return el;
+    }
+
+    /* ── Gallery drawer (registry pages only) ──────────────────────────
+       D1 semantics: every panel already exists in the page DOM, so
+       "adding" a panel = un-hiding it (and jumping to it); "removing" =
+       hiding. Live thumbnails and multi-instance land with D2 — the
+       drawer's contract (registry-driven rows, show/hide, jump) is
+       stable across that upgrade. */
+
+    function toggleGallery() {
+        if (gallery) { gallery.remove(); gallery = null; return; }
+        gallery = buildGallery();
+        document.body.appendChild(gallery);
+    }
+
+    function refreshGallery() {
+        if (!gallery) return;
+        gallery.remove();
+        gallery = buildGallery();
+        document.body.appendChild(gallery);
+    }
+
+    function panelEl(id) {
+        return root.querySelector(`[data-lab-panel="${id}"]`);
+    }
+
+    function buildGallery() {
+        const wrap = document.createElement('div');
+        wrap.id = 'lab-gallery';
+        const head = document.createElement('div');
+        head.className = 'lab-gallery-head';
+        head.innerHTML = '<span>Panel gallery</span>';
+        const close = document.createElement('button');
+        close.textContent = '✕';
+        close.title = 'Close the gallery';
+        close.addEventListener('click', toggleGallery);
+        head.appendChild(close);
+        wrap.appendChild(head);
+
+        // Group registry entries by family, preserving registry order.
+        const groups = new Map();
+        for (const entry of registry) {
+            if (!groups.has(entry.family)) groups.set(entry.family, []);
+            groups.get(entry.family).push(entry);
+        }
+        for (const [family, entries] of groups) {
+            const h = document.createElement('div');
+            h.className = 'lab-gallery-family';
+            h.textContent = entries[0]?.familyLabel || family;
+            wrap.appendChild(h);
+            for (const entry of entries) {
+                const el = panelEl(entry.id);
+                const row = document.createElement('div');
+                row.className = 'lab-gallery-row';
+                row.title = entry.blurb || '';
+                const label = document.createElement('span');
+                label.className = 'lab-gallery-title';
+                label.textContent = entry.title;
+                row.appendChild(label);
+                if (!el) {
+                    // Registry drift guard: the node test should make this
+                    // unreachable, but the drawer must not lie if it isn't.
+                    row.classList.add('lab-gallery-missing');
+                    const chip = document.createElement('span');
+                    chip.textContent = 'not on page';
+                    row.appendChild(chip);
+                    wrap.appendChild(row);
+                    continue;
+                }
+                const tgl = document.createElement('button');
+                const hidden = el.classList.contains('lab-hidden');
+                tgl.textContent = hidden ? '＋ Show' : '－ Hide';
+                tgl.className = hidden ? 'lab-gallery-add' : 'lab-gallery-del';
+                tgl.addEventListener('click', () => {
+                    const on = !el.classList.toggle('lab-hidden');
+                    tgl.textContent = on ? '－ Hide' : '＋ Show';
+                    tgl.className = on ? 'lab-gallery-del' : 'lab-gallery-add';
+                    if (on) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    trackFeature(on ? 'panel_add' : 'panel_remove', { page, panel: entry.id });
+                });
+                row.appendChild(tgl);
+                wrap.appendChild(row);
+            }
+        }
+        return wrap;
     }
 }

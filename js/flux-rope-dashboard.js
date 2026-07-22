@@ -73,6 +73,14 @@ export async function mountFluxRopeDashboard(containerId) {
         const fc = await computeFluxRopeForecast({
             days: 7, members: MEMBERS, seed: SEED, gridDtS: GRID_DT_S, gridHours: GRID_HOURS,
         });
+        // Publish for sibling consumers on this page (the status band reads
+        // this): ONE provider run per page, shared — never a second
+        // ensemble compute. Published for idle results too, so consumers
+        // can show a definitive "quiet" instead of loading forever.
+        try {
+            window.__fluxRopeForecast = fc;
+            window.dispatchEvent(new CustomEvent('flux-rope-forecast', { detail: fc }));
+        } catch {}
         if (fc.idle) {
             panel.querySelector('.frd-quiet').innerHTML =
                 '☀ No Earth-directed CME analyses in the DONKI catalog (last 7 days). ' +

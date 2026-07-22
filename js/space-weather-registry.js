@@ -1,0 +1,154 @@
+/**
+ * space-weather-registry.js — self-describing panel registry for the
+ * space-weather dashboard (SPACE_WEATHER_DASHBOARD_PLAN.md §6, phase D1).
+ *
+ * PURE DATA + pure helpers — no DOM, no fetch. Node-tested by
+ * tests/space-weather-registry.mjs, which cross-checks every entry here
+ * against the actual `data-lab-panel` markup in space-weather.html (both
+ * directions), so this file cannot silently drift from the page.
+ *
+ * D1 scope: the registry ADAPTS the legacy panels that already exist in
+ * the page markup — it does not create panels. Layout Lab's gallery
+ * drawer renders from this metadata, and the committed preset layouts
+ * (data/layout-presets/space-weather.json) may only reference ids listed
+ * here. Multi-instance panels and per-panel config schemas are D2 —
+ * when they land, entries gain a `config` schema field; do not bolt
+ * config onto D1 entries ad hoc.
+ *
+ * `zone` matches the page's `data-lab-zone` containers: 'main' (#sw-app)
+ * or 'grid' (the data-card grid — itself a movable panel of 'main').
+ * `family` groups the gallery drawer; `personas` feed preset authoring
+ * and (later) the first-run flow. Both vocabularies are closed — the
+ * node test enforces membership.
+ */
+
+export const FAMILIES = Object.freeze({
+    forecast:  'Forecast',
+    live:      'Live now',
+    sim:       'Simulation',
+    trust:     'Trust & validation',
+    reference: 'Reference',
+});
+
+export const PERSONAS = Object.freeze(
+    ['chaser', 'operator', 'forecaster', 'educator', 'casual']);
+
+export const PANELS = Object.freeze([
+    // ── zone: main (#sw-app) ────────────────────────────────────────────
+    { id: 'metrics-hero', zone: 'main', family: 'live',
+      title: 'Live metrics strip',
+      blurb: 'Solar wind speed, IMF Bz, Kp, and X-ray flux at a glance.',
+      personas: ['chaser', 'operator', 'forecaster', 'casual'] },
+    { id: 'helio-hero', zone: 'main', family: 'sim',
+      title: 'Heliosphere simulation',
+      blurb: 'The Sun→Earth 3D view with live + hypothetical scenario modes.',
+      personas: ['educator', 'forecaster'] },
+    { id: 'solar-system-info', zone: 'main', family: 'reference',
+      title: 'Solar system simulation notes',
+      blurb: 'What the heliosphere view shows and how to read it.',
+      personas: ['educator'] },
+    { id: 'transit', zone: 'main', family: 'live',
+      title: 'Solar wind transit · Sun → L1 → Earth',
+      blurb: 'Where the plasma passing L1 right now is on its way to Earth.',
+      personas: ['operator', 'forecaster', 'educator'] },
+    { id: 'cme-forecast', zone: 'main', family: 'forecast',
+      title: 'CME propagation forecast',
+      blurb: 'Drag-based arrival forecasts for active DONKI CMEs.',
+      personas: ['operator', 'forecaster'] },
+    { id: 'flux-rope-forecast', zone: 'main', family: 'forecast',
+      title: 'CME flux-rope Bz forecast',
+      blurb: 'Ensemble Bz fan from the flux-rope engine, assimilated on live L1 data.',
+      personas: ['chaser', 'operator', 'forecaster'] },
+    { id: 'earth-forecast', zone: 'main', family: 'forecast',
+      title: 'Earth-side forecast',
+      blurb: 'Consequences of today’s solar activity: aurora, radio, GPS, power.',
+      personas: ['chaser', 'operator', 'forecaster', 'casual'] },
+    { id: 'forecast-timeline', zone: 'main', family: 'forecast',
+      title: '72-hour forecast timeline',
+      blurb: 'Probabilistic Kp and impact windows for the next three days.',
+      personas: ['chaser', 'operator', 'forecaster', 'casual'] },
+    { id: 'globe', zone: 'main', family: 'sim',
+      title: 'Sun · Earth · Moon · magnetosphere globe',
+      blurb: '3D globe with the auroral oval, magnetopause, and CME propagation.',
+      personas: ['chaser', 'educator', 'casual', 'forecaster'] },
+    { id: 'data-grid', zone: 'main', family: 'live',
+      title: 'Data card grid',
+      blurb: 'The card grid below — hiding this hides every card in it.',
+      personas: ['chaser', 'operator', 'forecaster', 'educator'] },
+    { id: 'imagery', zone: 'main', family: 'live',
+      title: 'Live solar imagery · SDO / LASCO',
+      blurb: 'Latest disk and coronagraph frames.',
+      personas: ['forecaster', 'educator', 'casual'] },
+    { id: 'tables', zone: 'main', family: 'reference',
+      title: 'Active regions & recent flares',
+      blurb: 'NOAA active-region table and the 7-day GOES flare list.',
+      personas: ['forecaster'] },
+    { id: 'sources', zone: 'main', family: 'reference',
+      title: 'Data sources',
+      blurb: 'Every feed on this page, with cadence and provenance.',
+      personas: ['forecaster', 'educator'] },
+
+    // ── zone: grid (the data-card grid) ─────────────────────────────────
+    { id: 'card-wind', zone: 'grid', family: 'live',
+      title: 'Solar wind parameters',
+      blurb: 'DSCOVR/ACE L1 plasma and field, 1-minute cadence.',
+      personas: ['chaser', 'operator', 'forecaster'] },
+    { id: 'card-storm-scale', zone: 'grid', family: 'live',
+      title: 'Geomagnetic storm scale',
+      blurb: 'NOAA Kp / G-scale plus radiation (SEP) events.',
+      personas: ['chaser', 'operator', 'forecaster', 'casual'] },
+    { id: 'card-cme-donki', zone: 'grid', family: 'live',
+      title: 'Latest CME · NASA DONKI',
+      blurb: 'Most recent CME analyses as they are catalogued.',
+      personas: ['operator', 'forecaster'] },
+    { id: 'card-ssw', zone: 'grid', family: 'trust',
+      title: 'SSW forecast track record',
+      blurb: 'Sudden-stratospheric-warming calls, scored against what happened.',
+      personas: ['forecaster'] },
+    { id: 'card-surface', zone: 'grid', family: 'forecast',
+      title: 'Surface outlook',
+      blurb: 'Stratosphere-to-troposphere coupling outlook.',
+      personas: ['forecaster'] },
+    { id: 'card-vortex', zone: 'grid', family: 'live',
+      title: 'Stratospheric polar vortex',
+      blurb: '60°N vortex state — the SSW precursor.',
+      personas: ['forecaster'] },
+    { id: 'card-polar-mag', zone: 'grid', family: 'live',
+      title: 'Polar magnetic state',
+      blurb: 'High-latitude ground magnetometer activity.',
+      personas: ['chaser', 'forecaster'] },
+    { id: 'card-gravity-wave', zone: 'grid', family: 'live',
+      title: 'Gravity-wave activity',
+      blurb: 'DSMC residual gravity-wave diagnostic.',
+      personas: ['forecaster'] },
+    { id: 'card-upper-atmosphere', zone: 'grid', family: 'live',
+      title: 'Upper atmosphere · thermosphere',
+      blurb: 'LEO-altitude density and temperature — the satellite-drag card.',
+      personas: ['operator', 'forecaster'] },
+    { id: 'card-earth-orbit', zone: 'grid', family: 'reference',
+      title: 'Earth orbital state',
+      blurb: 'VSOP87D on-device ephemeris for Earth.',
+      personas: ['educator'] },
+]);
+
+/* ── Pure helpers ─────────────────────────────────────────────────────── */
+
+/** Map id → registry entry. */
+export function byId() {
+    return new Map(PANELS.map(p => [p.id, p]));
+}
+
+/** Registry entries for one zone, in registry (≈ authored) order. */
+export function panelsForZone(zone) {
+    return PANELS.filter(p => p.zone === zone);
+}
+
+/** Gallery model: entries grouped by family, in FAMILIES key order. */
+export function galleryGroups() {
+    const groups = [];
+    for (const [key, label] of Object.entries(FAMILIES)) {
+        const panels = PANELS.filter(p => p.family === key);
+        if (panels.length) groups.push({ key, label, panels });
+    }
+    return groups;
+}
