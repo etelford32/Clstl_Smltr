@@ -47,6 +47,14 @@ export const SPREAD_DEFAULTS = Object.freeze({
     sigTwist: 1.0, pFlip: 0.08,
 });
 
+/** CME–CME interaction config (spec §16) — engine-level, off by default. */
+export const INTERACTION_DEFAULTS = Object.freeze({
+    enabled: false,
+    wakeGammaFrac: 0.5,   // follower drag reduction inside the leader's wake
+    compC: 1.0,           // scale on the R–H-derived rear-compression amplitude
+    compReach: 1.5,       // rear-compression gap ramp reach [units of leader σ̂]
+});
+
 export const L1_OBSERVER = Object.freeze({ rAu: 0.99, lonDeg: 0, latDeg: 0 });
 
 export async function loadFluxRopeKernel(source) {
@@ -114,6 +122,24 @@ export async function loadFluxRopeKernel(source) {
         },
         ropeCount() { return x.fr_rope_count(); },
         ropeLaunchS(i) { return x.fr_rope_t_launch_s(i); },
+
+        // ── CME–CME interaction (spec §16) ──────────────────────────────────
+        /**
+         * Configure interaction for ALL subsequent series/probe/ensemble
+         * calls: wake kinematics for followers, dynamic rear compression of
+         * leaders, wake-conditioned follower sheaths. Independent of the
+         * rope list — set it per event; disabled is bit-identical to the
+         * non-interacting train.
+         */
+        setInteraction(cfg = {}) {
+            const c = { ...INTERACTION_DEFAULTS, ...cfg };
+            x.fr_set_interaction(c.enabled ? 1 : 0, c.wakeGammaFrac, c.compC, c.compReach);
+            return c;
+        },
+        /** EFFECTIVE ambient wind [km/s] of rope i (wake speed for a follower). */
+        ropeWEffKms(i) { return x.fr_rope_w_eff_kms(i); },
+        /** EFFECTIVE drag Γ [km⁻¹] of rope i (wake-reduced for a follower). */
+        ropeGammaEff(i) { return x.fr_rope_gamma_eff(i); },
 
         // Kinematics probes (page HUD + GLSL uniforms). t = seconds after the
         // reference epoch; index-free forms probe rope 0.

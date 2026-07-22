@@ -169,14 +169,17 @@ pub struct FieldSample {
     pub inside: bool,
 }
 
-/// Front-compression distortion factor f ∈ [1−c, 1] (spec §15): the local
-/// boundary is σ_eff = σ·f, thinnest where the cross-section radial points
-/// anti-Sunward (θ = 0, the snowplowed leading edge) and undistorted at the
-/// wake (θ = π). Returns 1 when the mechanism is off, on-axis, or in the
-/// (unphysical) degenerate geometries near the footpoints.
+/// Boundary distortion factor f (spec §15 front lobe + §16 rear lobe):
+/// the local boundary is σ_eff = σ·f with
+/// f(θ) = 1 − c_front·(1+cosθ)/2 − c_rear·(1−cosθ)/2 — thinnest at the
+/// snowplowed leading edge (θ = 0) for the front lobe, at the
+/// follower-squeezed rear (θ = π) for the rear lobe. Returns 1 when both
+/// mechanisms are off, on-axis, or in the (unphysical) degenerate
+/// geometries near the footpoints.
 #[allow(clippy::too_many_arguments)]
-fn front_factor(
+fn boundary_factor(
     front_c: f64,
+    rear_c: f64,
     frame: &Frame,
     half_d: f64,
     psi: f64,
@@ -186,7 +189,7 @@ fn front_factor(
     p: V3,
     s: f64,
 ) -> f64 {
-    if front_c <= 0.0 || s < 1e-6 {
+    if (front_c <= 0.0 && rear_c <= 0.0) || s < 1e-6 {
         return 1.0;
     }
     let t_hat = [
@@ -216,14 +219,31 @@ fn front_factor(
     }
     o = scale(o, 1.0 / on);
     let cos_th = dot(r_hat, o);
-    1.0 - front_c.min(0.6) * (1.0 + cos_th) * 0.5
+    1.0 - front_c.clamp(0.0, 0.6) * (1.0 + cos_th) * 0.5
+        - rear_c.clamp(0.0, 0.75) * (1.0 - cos_th) * 0.5
 }
 
 /// Evaluate the rope field at heliocentric point `p` [km], `t_s` seconds
 /// after launch. Returns B in the HELIOCENTRIC frame (§2); callers map to
-/// GSE with `to_gse`.
+/// GSE with `to_gse`. The v1 single-rope form: raw kinematics, no §16
+/// rear compression.
 pub fn field_at(params: &RopeParams, frame: &Frame, t_s: f64, p: V3) -> FieldSample {
-    let d = params.dbm().apex_km(t_s);
+    field_at_dyn(params, frame, t_s, p, &params.dbm(), 0.0)
+}
+
+/// §16-aware rope field: same physics as `field_at` but with EFFECTIVE
+/// kinematics (wake-modified for a follower) and a dynamic rear-compression
+/// amplitude supplied by the train layer. `rear_c = 0` + the rope's own
+/// DBM reproduces `field_at` bit-for-bit.
+pub fn field_at_dyn(
+    params: &RopeParams,
+    frame: &Frame,
+    t_s: f64,
+    p: V3,
+    dbm: &Dbm,
+    rear_c: f64,
+) -> FieldSample {
+    let d = dbm.apex_km(t_s);
     if d <= 0.0 {
         return FieldSample::default();
     }
@@ -253,10 +273,12 @@ pub fn field_at(params: &RopeParams, frame: &Frame, t_s: f64, p: V3) -> FieldSam
     if sigma <= 0.0 {
         return FieldSample::default();
     }
-    // Front compression (spec §15): compressed boundary σ_eff = σ·f, field
-    // structure mapped to the reference profile via ŝ = s/f with a
-    // flux-conservation boost 1/f. f = 1 when off — bit-identical v1 path.
-    let f_dist = front_factor(params.front_c, frame, half_d, psi, qu, w, rho_ip, p, s);
+    // Boundary distortion (spec §15 front / §16 rear): compressed boundary
+    // σ_eff = σ·f, field structure mapped to the reference profile via
+    // ŝ = s/f with a flux-conservation boost 1/f. f = 1 when both are off —
+    // bit-identical v1 path.
+    let f_dist =
+        boundary_factor(params.front_c, rear_c, frame, half_d, psi, qu, w, rho_ip, p, s);
     let sigma_eff = sigma * f_dist;
     if s >= sigma_eff {
         return FieldSample::default();
@@ -319,13 +341,29 @@ pub fn to_gse(b: V3) -> V3 {
 /// σ(ψ) ≤ s < σ(ψ)·(1 + k), present only while the apex is
 /// super-magnetosonic (a shock exists) and only SUNWARD-OUTWARD of the
 /// rope surface (|P| > |nearest axis point| — sheaths pile up ahead of the
-/// obstacle, not in its wake).
+/// obstacle, not in its wake). The v1 form: raw kinematics, fresh-wind
+/// upstream, no §16 rear compression.
 pub fn sheath_at(params: &RopeParams, frame: &Frame, t_s: f64, p: V3) -> bool {
+    sheath_at_dyn(params, frame, t_s, p, &params.dbm(), params.w_kms, 0.0)
+}
+
+/// §16-aware sheath test: EFFECTIVE kinematics and an explicit upstream
+/// flow speed — a follower's shock exists only while it outruns its
+/// leader's WAKE magnetosonically, not the fresh wind. The shell rides the
+/// same distorted boundary as the field.
+pub fn sheath_at_dyn(
+    params: &RopeParams,
+    frame: &Frame,
+    t_s: f64,
+    p: V3,
+    dbm: &Dbm,
+    upstream_kms: f64,
+    rear_c: f64,
+) -> bool {
     if params.sheath_delta_nt <= 0.0 || params.sheath_k <= 0.0 {
         return false;
     }
-    let dbm = params.dbm();
-    if crate::kinematics::shock_mach(dbm.speed_kms(t_s), params.w_kms) <= 1.0 {
+    if crate::kinematics::shock_mach(dbm.speed_kms(t_s), upstream_kms) <= 1.0 {
         return false;
     }
     let d = dbm.apex_km(t_s);
@@ -351,8 +389,9 @@ pub fn sheath_at(params: &RopeParams, frame: &Frame, t_s: f64, p: V3) -> bool {
     if sigma <= 0.0 {
         return false;
     }
-    // The sheath shell rides the front-compressed boundary (spec §15).
-    let f_dist = front_factor(params.front_c, frame, half_d, psi, qu, w, rho_ip, p, s);
+    // The sheath shell rides the distorted boundary (spec §15/§16).
+    let f_dist =
+        boundary_factor(params.front_c, rear_c, frame, half_d, psi, qu, w, rho_ip, p, s);
     let sigma_eff = sigma * f_dist;
     if s < sigma_eff || s >= sigma_eff * (1.0 + params.sheath_k) {
         return false;
@@ -395,6 +434,203 @@ impl RopeEntry {
     }
 }
 
+// ── CME–CME interaction (spec §16) ───────────────────────────────────────────
+
+/// Engine-level interaction configuration (spec §16), shared across
+/// ensemble members (never sampled). Disabled by default — every §10
+/// non-interacting pin is bit-identical with it off.
+#[derive(Clone, Copy, Debug)]
+pub struct TrainCfg {
+    pub enabled: bool,
+    /// Drag reduction inside a leader's wake: Γ_eff = Γ · this.
+    pub wake_gamma_frac: f64,
+    /// Scale ∈ [0, 1] on the R–H-derived rear-compression amplitude.
+    pub comp_c: f64,
+    /// Rear-compression gap ramp reach, in units of the leader's σ̂_apex.
+    pub comp_reach: f64,
+}
+
+impl Default for TrainCfg {
+    fn default() -> Self {
+        TrainCfg { enabled: false, wake_gamma_frac: 0.5, comp_c: 1.0, comp_reach: 1.5 }
+    }
+}
+
+/// Launch-direction alignment threshold for partner selection (spec §16).
+pub const ALIGN_MIN_COS: f64 = 0.5;
+
+/// Per-rope effective dynamics under interaction: wake-modified kinematics
+/// plus the leader index (−1 = none). With interaction disabled every rope
+/// keeps its raw DBM and no partners exist.
+#[derive(Clone, Copy, Debug)]
+pub struct RopeDyn {
+    pub dbm: Dbm,
+    pub lead: i32,
+}
+
+/// Resolve the train's interaction structure (spec §16): nearest-predecessor
+/// aligned partner selection + frozen-at-launch wake kinematics, processed
+/// leader-first in launch order so chains (A←B←C) see their leader's
+/// already-modified apex speed. Fills `out` (cleared) with one entry per
+/// rope, in rope order.
+pub fn train_dyn(ropes: &[RopeEntry], cfg: &TrainCfg, out: &mut Vec<RopeDyn>) {
+    out.clear();
+    for r in ropes {
+        out.push(RopeDyn { dbm: r.params.dbm(), lead: -1 });
+    }
+    if !cfg.enabled || ropes.len() < 2 {
+        return;
+    }
+    // Launch order, stable on ties by index (n ≤ MAX_ROPES → O(n²) is fine).
+    let mut order: Vec<usize> = (0..ropes.len()).collect();
+    order.sort_by(|&a, &b| {
+        ropes[a]
+            .t_launch_s
+            .partial_cmp(&ropes[b].t_launch_s)
+            .unwrap()
+            .then(a.cmp(&b))
+    });
+    for oi in 1..order.len() {
+        let j = order[oi];
+        let lead = order[..oi]
+            .iter()
+            .rev()
+            .copied()
+            .find(|&i| dot(ropes[i].frame.e_dir, ropes[j].frame.e_dir) > ALIGN_MIN_COS);
+        if let Some(i) = lead {
+            let dt = (ropes[j].t_launch_s - ropes[i].t_launch_s).max(0.0);
+            let w_eff = out[i].dbm.speed_kms(dt).max(ropes[j].params.w_kms);
+            out[j] = RopeDyn {
+                dbm: Dbm {
+                    w_kms: w_eff,
+                    gamma_per_km: ropes[j].params.gamma_per_km * cfg.wake_gamma_frac.max(0.0),
+                    ..out[j].dbm
+                },
+                lead: i as i32,
+            };
+        }
+    }
+}
+
+/// Rear-compression amplitude on rope k at train time t (spec §16): the
+/// strongest follower-driven squeeze; 0 unless a follower is closing
+/// super-magnetosonically within `comp_reach·σ̂` of the leader's tail line.
+pub fn rear_c_at(
+    ropes: &[RopeEntry],
+    dyns: &[RopeDyn],
+    cfg: &TrainCfg,
+    k: usize,
+    t_s: f64,
+) -> f64 {
+    if !cfg.enabled || cfg.comp_c <= 0.0 {
+        return 0.0;
+    }
+    let age_k = t_s - ropes[k].t_launch_s;
+    if age_k <= 0.0 {
+        return 0.0;
+    }
+    let d_i = dyns[k].dbm.apex_km(age_k);
+    let sig_i = sigma_apex_km(ropes[k].params.sigma_1au_au * AU_KM, d_i, ropes[k].params.n_sigma);
+    if sig_i <= 0.0 {
+        return 0.0;
+    }
+    let v_i = dyns[k].dbm.speed_kms(age_k);
+    let mut c = 0.0f64;
+    for (j, dj) in dyns.iter().enumerate() {
+        if dj.lead != k as i32 {
+            continue;
+        }
+        let age_j = t_s - ropes[j].t_launch_s;
+        if age_j <= 0.0 {
+            continue;
+        }
+        let d_j = dj.dbm.apex_km(age_j);
+        let sig_j =
+            sigma_apex_km(ropes[j].params.sigma_1au_au * AU_KM, d_j, ropes[j].params.n_sigma);
+        let gap = (d_i - sig_i) - (d_j + sig_j);
+        let q = (1.0 - gap / (cfg.comp_reach.max(1e-6) * sig_i)).clamp(0.0, 1.0);
+        if q <= 0.0 {
+            continue;
+        }
+        let m_rel =
+            ((dj.dbm.speed_kms(age_j) - v_i) / crate::kinematics::V_MS_KMS).max(0.0);
+        let x = crate::kinematics::compression_ratio(m_rel);
+        c = c.max((cfg.comp_c.clamp(0.0, 1.0) * (1.0 - 1.0 / x) * q).clamp(0.0, 0.75));
+    }
+    c
+}
+
+/// Upstream flow speed for rope k's sheath Mach (spec §16): a follower rams
+/// its leader's LIVE wake flow (proxied by the leader's apex speed), never
+/// slower than the rope's own ambient; a leader sees the fresh wind.
+pub fn upstream_kms(ropes: &[RopeEntry], dyns: &[RopeDyn], k: usize, t_s: f64) -> f64 {
+    let w = ropes[k].params.w_kms;
+    if dyns[k].lead < 0 {
+        return w;
+    }
+    let li = dyns[k].lead as usize;
+    let age_l = t_s - ropes[li].t_launch_s;
+    if age_l <= 0.0 {
+        return w;
+    }
+    dyns[li].dbm.speed_kms(age_l).max(w)
+}
+
+/// §16-aware train field: superposition with wake kinematics + dynamic rear
+/// compression. With interaction disabled this is exactly `field_at_set`.
+pub fn field_at_train(
+    ropes: &[RopeEntry],
+    dyns: &[RopeDyn],
+    cfg: &TrainCfg,
+    t_s: f64,
+    p: V3,
+) -> (V3, u32) {
+    let mut b = [0.0, 0.0, 0.0];
+    let mut count = 0u32;
+    for (k, r) in ropes.iter().enumerate() {
+        let dt = t_s - r.t_launch_s;
+        if dt <= 0.0 {
+            continue; // not launched yet — DBM is undefined for dt < 0
+        }
+        let rc = rear_c_at(ropes, dyns, cfg, k, t_s);
+        let fs = field_at_dyn(&r.params, &r.frame, dt, p, &dyns[k].dbm, rc);
+        if fs.inside {
+            count += 1;
+            b[0] += fs.b[0];
+            b[1] += fs.b[1];
+            b[2] += fs.b[2];
+        }
+    }
+    (b, count)
+}
+
+/// §16-aware sheath containment count over the train.
+pub fn sheath_count_at_train(
+    ropes: &[RopeEntry],
+    dyns: &[RopeDyn],
+    cfg: &TrainCfg,
+    t_s: f64,
+    p: V3,
+) -> u32 {
+    ropes
+        .iter()
+        .enumerate()
+        .filter(|(k, r)| {
+            let dt = t_s - r.t_launch_s;
+            dt > 0.0
+                && sheath_at_dyn(
+                    &r.params,
+                    &r.frame,
+                    dt,
+                    p,
+                    &dyns[*k].dbm,
+                    upstream_kms(ropes, dyns, *k, t_s),
+                    rear_c_at(ropes, dyns, cfg, *k, t_s),
+                )
+        })
+        .count() as u32
+}
+
 /// Evaluate a rope TRAIN at heliocentric point `p` [km], `t_s` seconds after
 /// the reference epoch: field SUPERPOSITION over all launched ropes, plus
 /// the containment count. count ≥ 2 marks exactly where the v1
@@ -431,28 +667,32 @@ pub fn observer_pos(r_au: f64, lon_deg: f64, lat_deg: f64) -> V3 {
     )
 }
 
-/// Synthesize the virtual-spacecraft series (spec §6, §10, §14): n GSE
+/// Synthesize the virtual-spacecraft series (spec §6, §10, §14, §16): n GSE
 /// samples starting `t0_s` after the reference epoch at `dt_s` spacing,
-/// over a rope TRAIN. Writes (bx, by, bz, count_code) per step into `out`
-/// (len ≥ 4·n), where `count_code = rope_count + 100·sheath_count` —
-/// decode with % 100 (rope containment) and / 100 (sheath containment).
+/// over a rope TRAIN under the given interaction config. Writes
+/// (bx, by, bz, count_code) per step into `out` (len ≥ 4·n), where
+/// `count_code = rope_count + 100·sheath_count` — decode with % 100 (rope
+/// containment) and / 100 (sheath containment).
 /// The DETERMINISTIC series carries no sheath field (its Bz is zero-mean
 /// stochastic and lives in the ensemble, spec §14) — only the flags.
 /// Returns the number of steps with rope containment ≥ 1. A single
 /// sheathless rope reproduces the v1 behavior exactly (code is 0/1).
 pub fn synth_series(
     ropes: &[RopeEntry],
+    cfg: &TrainCfg,
     t0_s: f64,
     dt_s: f64,
     n: usize,
     obs: V3,
     out: &mut [f32],
 ) -> usize {
+    let mut dyns: Vec<RopeDyn> = Vec::with_capacity(ropes.len());
+    train_dyn(ropes, cfg, &mut dyns);
     let mut hits = 0;
     for i in 0..n {
         let t = t0_s + dt_s * i as f64;
-        let (b, count) = field_at_set(ropes, t, obs);
-        let sheath = sheath_count_at_set(ropes, t, obs);
+        let (b, count) = field_at_train(ropes, &dyns, cfg, t, obs);
+        let sheath = sheath_count_at_train(ropes, &dyns, cfg, t, obs);
         let g = to_gse(b);
         out[4 * i] = g[0] as f32;
         out[4 * i + 1] = g[1] as f32;
@@ -605,7 +845,7 @@ mod tests {
         let n = 400;
         let dt = 1800.0;
         let mut out = vec![0.0f32; 4 * n];
-        let hits = synth_series(&[RopeEntry::new(p, 0.0)], 0.0, dt, n, earth(), &mut out);
+        let hits = synth_series(&[RopeEntry::new(p, 0.0)], &TrainCfg::default(), 0.0, dt, n, earth(), &mut out);
         let dwell_h = hits as f64 * dt / 3600.0;
         assert!(
             (10.0..=30.0).contains(&dwell_h),
@@ -623,7 +863,7 @@ mod tests {
         let p = RopeParams { lon_deg: 90.0, ..Default::default() };
         let n = 400;
         let mut out = vec![0.0f32; 4 * n];
-        let hits = synth_series(&[RopeEntry::new(p, 0.0)], 0.0, 1800.0, n, earth(), &mut out);
+        let hits = synth_series(&[RopeEntry::new(p, 0.0)], &TrainCfg::default(), 0.0, 1800.0, n, earth(), &mut out);
         assert_eq!(hits, 0);
     }
 
@@ -637,7 +877,7 @@ mod tests {
         let n = 600;
         let dt = 1800.0;
         let mut out = vec![0.0f32; 4 * n];
-        synth_series(&train, 0.0, dt, n, earth(), &mut out);
+        synth_series(&train, &TrainCfg::default(), 0.0, dt, n, earth(), &mut out);
         let counts: Vec<u32> = (0..n).map(|i| out[4 * i + 3] as u32).collect();
         let first_a = counts.iter().position(|&c| c > 0).expect("rope 1 must arrive");
         let last = counts.iter().rposition(|&c| c > 0).unwrap();
@@ -700,7 +940,7 @@ mod tests {
         };
         let n = 400;
         let mut out = vec![0.0f32; 4 * n];
-        synth_series(&[RopeEntry::new(fast, 0.0)], 0.0, 1800.0, n, earth(), &mut out);
+        synth_series(&[RopeEntry::new(fast, 0.0)], &TrainCfg::default(), 0.0, 1800.0, n, earth(), &mut out);
         let codes: Vec<u32> = (0..n).map(|i| out[4 * i + 3] as u32).collect();
         let first_rope = codes.iter().position(|c| c % 100 > 0).expect("rope must arrive");
         let first_sheath = codes.iter().position(|c| c / 100 > 0).expect("sheath must exist");
@@ -722,7 +962,7 @@ mod tests {
             ..Default::default()
         };
         let mut out2 = vec![0.0f32; 4 * n];
-        synth_series(&[RopeEntry::new(slow, 0.0)], 0.0, 3600.0, n, earth(), &mut out2);
+        synth_series(&[RopeEntry::new(slow, 0.0)], &TrainCfg::default(), 0.0, 3600.0, n, earth(), &mut out2);
         assert!(
             (0..n).all(|i| (out2[4 * i + 3] as u32) / 100 == 0),
             "sub-magnetosonic rope must have no sheath"
@@ -773,7 +1013,7 @@ mod tests {
         let dt = 900.0;
         let frac_of_dwell_at_min = |p: RopeParams| {
             let mut out = vec![0.0f32; 4 * n];
-            synth_series(&[RopeEntry::new(p, 0.0)], 0.0, dt, n, earth(), &mut out);
+            synth_series(&[RopeEntry::new(p, 0.0)], &TrainCfg::default(), 0.0, dt, n, earth(), &mut out);
             let codes: Vec<u32> = (0..n).map(|i| out[4 * i + 3] as u32 % 100).collect();
             let first = codes.iter().position(|&c| c > 0).unwrap();
             let last = codes.iter().rposition(|&c| c > 0).unwrap();
@@ -802,8 +1042,8 @@ mod tests {
         let b = RopeParams { front_c: 0.0, ..a };
         let n = 300;
         let (mut oa, mut ob) = (vec![0.0f32; 4 * n], vec![0.0f32; 4 * n]);
-        synth_series(&[RopeEntry::new(a, 0.0)], 0.0, 1800.0, n, earth(), &mut oa);
-        synth_series(&[RopeEntry::new(b, 0.0)], 0.0, 1800.0, n, earth(), &mut ob);
+        synth_series(&[RopeEntry::new(a, 0.0)], &TrainCfg::default(), 0.0, 1800.0, n, earth(), &mut oa);
+        synth_series(&[RopeEntry::new(b, 0.0)], &TrainCfg::default(), 0.0, 1800.0, n, earth(), &mut ob);
         let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&oa), bits(&ob));
     }
@@ -817,6 +1057,219 @@ mod tests {
         let (b, count) = field_at_set(&train, 24.0 * 3600.0, earth());
         assert_eq!(count, 0);
         assert_eq!(b, [0.0, 0.0, 0.0]);
+    }
+
+    // ── CME–CME interaction (spec §16) ───────────────────────────────────────
+
+    fn icfg() -> TrainCfg {
+        TrainCfg { enabled: true, ..TrainCfg::default() }
+    }
+
+    /// Arrival time of an effective Dbm at radius r (bisection).
+    fn dbm_arrival_s(dbm: &Dbm, r_km: f64) -> f64 {
+        let (mut lo, mut hi) = (0.0, 20.0 * 86_400.0);
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if dbm.apex_km(mid) < r_km {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 * (lo + hi)
+    }
+
+    #[test]
+    fn interaction_disabled_train_matches_the_v1_superposition_bitwise() {
+        // synth_series with the default (disabled) cfg must reproduce the
+        // §10 field_at_set / sheath_count_at_set path bit-for-bit.
+        let a = RopeParams {
+            v0_kms: 1000.0,
+            tilt_deg: 90.0,
+            sheath_delta_nt: 2.0,
+            ..Default::default()
+        };
+        let b = RopeParams { v0_kms: 1400.0, tilt_deg: 45.0, ..a };
+        let train = [RopeEntry::new(a, 0.0), RopeEntry::new(b, 20.0 * 3600.0)];
+        let n = 500;
+        let dt = 1800.0;
+        let mut out = vec![0.0f32; 4 * n];
+        synth_series(&train, &TrainCfg::default(), 0.0, dt, n, earth(), &mut out);
+        for i in 0..n {
+            let t = dt * i as f64;
+            let (bv, count) = field_at_set(&train, t, earth());
+            let sheath = sheath_count_at_set(&train, t, earth());
+            let g = to_gse(bv);
+            assert_eq!(out[4 * i].to_bits(), (g[0] as f32).to_bits(), "step {}", i);
+            assert_eq!(out[4 * i + 2].to_bits(), (g[2] as f32).to_bits(), "step {}", i);
+            assert_eq!(out[4 * i + 3] as u32, count + 100 * sheath, "step {}", i);
+        }
+    }
+
+    #[test]
+    fn single_rope_with_interaction_enabled_is_bit_identical() {
+        // No partner → no wake, no rear compression: cfg on must change
+        // nothing for a lone rope.
+        let p = RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, sheath_delta_nt: 3.0, ..Default::default() };
+        let n = 400;
+        let (mut oa, mut ob) = (vec![0.0f32; 4 * n], vec![0.0f32; 4 * n]);
+        synth_series(&[RopeEntry::new(p, 0.0)], &TrainCfg::default(), 0.0, 1800.0, n, earth(), &mut oa);
+        synth_series(&[RopeEntry::new(p, 0.0)], &icfg(), 0.0, 1800.0, n, earth(), &mut ob);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&oa), bits(&ob));
+    }
+
+    #[test]
+    fn wake_kinematics_entrain_the_follower() {
+        // Aligned follower: elevated frozen-at-launch ambient, reduced drag,
+        // and an EARLIER 1 AU arrival than the fresh-wind DBM predicts.
+        let lead = RopeParams { v0_kms: 1000.0, ..Default::default() };
+        let foll = RopeParams { v0_kms: 1400.0, ..Default::default() };
+        let train = [
+            RopeEntry::new(lead, 0.0),
+            RopeEntry::new(foll, 20.0 * 3600.0),
+        ];
+        let mut dyns = Vec::new();
+        train_dyn(&train, &icfg(), &mut dyns);
+        assert_eq!(dyns[0].lead, -1);
+        assert_eq!(dyns[1].lead, 0);
+        let w_expect = lead.dbm().speed_kms(20.0 * 3600.0);
+        assert!(
+            (dyns[1].dbm.w_kms - w_expect).abs() < 1e-9 && w_expect > 600.0,
+            "wake ambient {} must be the leader's launch-time speed {}",
+            dyns[1].dbm.w_kms,
+            w_expect
+        );
+        assert!((dyns[1].dbm.gamma_per_km - 0.5 * foll.gamma_per_km).abs() < 1e-20);
+        assert!((dyns[0].dbm.w_kms - lead.w_kms).abs() < 1e-12, "leader untouched");
+        let t_wake = dbm_arrival_s(&dyns[1].dbm, AU_KM);
+        let t_fresh = dbm_arrival_s(&foll.dbm(), AU_KM);
+        assert!(
+            t_wake < t_fresh - 3600.0,
+            "wake must speed the follower up: {} vs {} h",
+            t_wake / 3600.0,
+            t_fresh / 3600.0
+        );
+    }
+
+    #[test]
+    fn misaligned_ropes_never_partner() {
+        let lead = RopeParams { v0_kms: 1000.0, ..Default::default() };
+        let flank = RopeParams { lon_deg: 90.0, v0_kms: 1400.0, ..Default::default() };
+        let train = [
+            RopeEntry::new(lead, 0.0),
+            RopeEntry::new(flank, 20.0 * 3600.0),
+        ];
+        let mut dyns = Vec::new();
+        train_dyn(&train, &icfg(), &mut dyns);
+        assert_eq!(dyns[1].lead, -1, "90°-apart launches must not interact");
+        assert!((dyns[1].dbm.w_kms - flank.w_kms).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rear_compression_ramps_with_approach_and_boosts_the_rear_field() {
+        // Slow leader, fast follower 12 h behind: early on the follower is
+        // far (rear_c = 0); as it closes, rear_c grows (≤ 0.75) and the
+        // leader's REAR interior field is flux-conservation-boosted while
+        // its FRONT stays bit-identical.
+        let lead = RopeParams { v0_kms: 800.0, tilt_deg: 90.0, sigma_1au_au: 0.10, ..Default::default() };
+        let foll = RopeParams { v0_kms: 1900.0, tilt_deg: 90.0, sigma_1au_au: 0.08, ..lead };
+        let train = [
+            RopeEntry::new(lead, 0.0),
+            RopeEntry::new(foll, 12.0 * 3600.0),
+        ];
+        let cfg = icfg();
+        let mut dyns = Vec::new();
+        train_dyn(&train, &cfg, &mut dyns);
+        // Just after the follower launches: no squeeze yet.
+        assert_eq!(rear_c_at(&train, &dyns, &cfg, 0, 13.0 * 3600.0), 0.0);
+        // Sweep for the squeeze window.
+        let mut t_sq = None;
+        for k in 0..400 {
+            let t = 13.0 * 3600.0 + k as f64 * 900.0;
+            let c = rear_c_at(&train, &dyns, &cfg, 0, t);
+            assert!((0.0..=0.75).contains(&c), "rear_c {} out of range", c);
+            if c > 0.2 {
+                t_sq = Some(t);
+                break;
+            }
+        }
+        let t = t_sq.expect("a 1900 km/s follower must catch a 800 km/s leader");
+        let d = dyns[0].dbm.apex_km(t);
+        let sigma = sigma_apex_km(lead.sigma_1au_au * AU_KM, d, lead.n_sigma);
+        let mag = |fs: FieldSample| dot(fs.b, fs.b).sqrt();
+        // Rear interior point (Sunward of the apex axis).
+        let rear_p = [d - 0.5 * sigma, 0.0, 0.0];
+        let rc = rear_c_at(&train, &dyns, &cfg, 0, t);
+        let plain = field_at(&lead, &train[0].frame, t, rear_p);
+        let squeezed = field_at_dyn(&lead, &train[0].frame, t, rear_p, &dyns[0].dbm, rc);
+        assert!(plain.inside && squeezed.inside);
+        assert!(
+            mag(squeezed) > 1.15 * mag(plain),
+            "rear field must be boosted: {} vs {}",
+            mag(squeezed),
+            mag(plain)
+        );
+        // Front interior point: the rear lobe vanishes at θ = 0, so the
+        // squeezed field matches the plain one to rounding.
+        let front_p = [d + 0.5 * sigma, 0.0, 0.0];
+        let pf = field_at(&lead, &train[0].frame, t, front_p);
+        let sf = field_at_dyn(&lead, &train[0].frame, t, front_p, &dyns[0].dbm, rc);
+        assert!(pf.inside && sf.inside);
+        for i in 0..3 {
+            assert!(
+                (pf.b[i] - sf.b[i]).abs() <= 1e-9 * mag(pf).max(1.0),
+                "front must be untouched: {:?} vs {:?}",
+                pf.b,
+                sf.b
+            );
+        }
+    }
+
+    #[test]
+    fn wake_conditioned_sheath_follows_the_relative_mach() {
+        // KILL: a follower that outruns the FRESH wind but not its leader's
+        // wake must lose the sheath the §14 fresh-upstream test would grant.
+        // (Ballistic leader so its live wake speed never sags below the
+        // entrained follower's — the kill is then exact at every step.)
+        let lead = RopeParams { v0_kms: 1500.0, gamma_per_km: 0.0, ..Default::default() };
+        let slow_foll = RopeParams { v0_kms: 800.0, sheath_delta_nt: 3.0, ..Default::default() };
+        let train = [
+            RopeEntry::new(lead, 0.0),
+            RopeEntry::new(slow_foll, 10.0 * 3600.0),
+        ];
+        let cfg = icfg();
+        let mut dyns = Vec::new();
+        train_dyn(&train, &cfg, &mut dyns);
+        let n = 500;
+        let dt = 1800.0;
+        let mut fresh_sheath = 0u32;
+        let mut wake_sheath = 0u32;
+        for i in 0..n {
+            let t = dt * i as f64;
+            fresh_sheath += sheath_count_at_set(&train, t, earth());
+            wake_sheath += sheath_count_at_train(&train, &dyns, &cfg, t, earth());
+        }
+        assert!(
+            fresh_sheath > 0,
+            "fresh-wind test would grant the 800 km/s follower a sheath"
+        );
+        assert_eq!(
+            wake_sheath, 0,
+            "a follower slower than its leader's wake drives no shock"
+        );
+        // GAIN: a follower that genuinely outruns the wake keeps its sheath.
+        let fast_foll = RopeParams { v0_kms: 1900.0, sheath_delta_nt: 3.0, ..Default::default() };
+        let train2 = [
+            RopeEntry::new(RopeParams { v0_kms: 700.0, ..Default::default() }, 0.0),
+            RopeEntry::new(fast_foll, 10.0 * 3600.0),
+        ];
+        let mut dyns2 = Vec::new();
+        train_dyn(&train2, &cfg, &mut dyns2);
+        let got: u32 = (0..n)
+            .map(|i| sheath_count_at_train(&train2, &dyns2, &cfg, dt * i as f64, earth()))
+            .sum();
+        assert!(got > 0, "a wake-outrunning follower must keep its sheath");
     }
 
     #[test]

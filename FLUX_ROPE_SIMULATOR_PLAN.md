@@ -133,10 +133,28 @@ the same crate.
   tested and REJECTED for Gannon (fc = 0 wins 3 of 4 metrics — its min
   sat 4.5 h into the passage), and the rejection is itself smoke-pinned.
   Honest residual: rope onset ~4 h early with shock and min both pinned —
-  a Mach-dependent sheath standoff is the candidate fix. Remaining
-  Phase 5: CME–CME interaction (unlocks Gannon rope B's sheath and the
-  compression absorbed into rope A's compact fit), deformation/pancaking,
-  EEGGL/SWMF comparison runs, server-side API build.
+  a Mach-dependent sheath standoff is the candidate fix.
+  ✅ CME–CME interaction (2026-07-22, spec §16): the train becomes a
+  system — pairwise nearest-aligned-predecessor partners, wake kinematics
+  for followers (frozen-at-launch w_eff + reduced Γ, closed form kept),
+  DYNAMIC rear compression of leaders (R–H-capped follower squeeze
+  through the generalized two-lobe §15 boundary distortion), and
+  wake-conditioned follower sheaths (shock Mach vs the leader's live wake,
+  not fresh wind). Gannon v1.3 fit pinned: both v1 absorptions come back
+  out — rope A relaxes to plausible values (σ 0.12 AU, 38 nT vs the
+  absorbed 0.085 AU / 55 nT) with the squeeze supplying the −44.3 vs
+  −44.17 nT minimum (0.3%, Δ1.5 h), and rope B's wake shock reproduces
+  the observed MID-STORM internal disturbance (+48.9 vs +48.7 h — a
+  feature no earlier generation could represent). Shock stays on the SSC
+  (+43.2 vs +43.6 h), dwell 16.8 vs 15.9 h observed (v1.1: 18.5), zero
+  overlap superposition; attribution pinned (disabling interaction
+  shallows the min 5 nT and mistimes the internal disturbance ~5 h).
+  Honest trades on record: full-window r 0.66 vs v1.1's 0.71 (the
+  deterministic series now carries zeros through the sheath handover that
+  v1.1's overlong rope-A dwell papered over) and rope B's sheath_k = 2.0
+  standing in for the missing Mach-dependent standoff. Remaining Phase 5:
+  Mach-dependent sheath standoff, momentum exchange, deformation/
+  pancaking, EEGGL/SWMF comparison runs, server-side API build.
 
 ## 5. Data inputs
 

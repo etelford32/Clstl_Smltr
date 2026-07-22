@@ -127,6 +127,46 @@ export const GANNON_FIT = Object.freeze({
             launchOffsetS: 72_900,
         }),
     ]),
+    // v1.3 interaction generation (spec §16): the SAME two-launch story with
+    // CME–CME interaction ON — the train becomes a system, and both v1
+    // absorptions come back out of the fit:
+    //   · rope A relaxes to PLAUSIBLE values (σ 0.12 AU, 38 nT — the v1
+    //     0.085 AU / 55 nT compactness was rope B's compression absorbed
+    //     into a hand fit); the kernel's dynamic rear compression now
+    //     supplies that depth where and WHEN rope B closes in.
+    //   · rope B gains its sheath honestly: its shock Mach is computed
+    //     against rope A's WAKE (not fresh wind), and the observed INTERNAL
+    //     disturbance — the V 684→748 jump at +48.7 h, mid-storm, 2.5 h
+    //     before the global minimum — is a feature v1/v1.1 could not
+    //     represent at all.
+    // Kernel-verified (pinned): shock +43.2 vs SSC +43.6 h; internal
+    // disturbance +48.9 vs +48.7 h observed; min Bz −44.3 vs −44.17 nT
+    // (0.3%) at Δ1.5 h; southward dwell 16.8 vs 15.9 h (v1.1: 18.5); rope
+    // overlap 0 steps. Honest trades, on record: full-window r 0.66 vs the
+    // v1.1 generation's 0.71 — the deterministic series now carries ZEROS
+    // through the 54–56 h sheath handover (spec §14 keeps sheath Bz
+    // stochastic, ensemble-only) where v1.1's overlong 18.5 h rope-A dwell
+    // happened to cover the observations; and rope B's sheath_k = 2.0 is a
+    // stand-in for the missing Mach-dependent shock standoff (§15
+    // residual). v0_B = 900 is a FIT parameter under the frozen-at-launch
+    // wake (w_eff 739 km/s carries the transit), not the coronagraph speed.
+    interaction: Object.freeze({ wakeGammaFrac: 0.8, compC: 1.0, compReach: 1.2 }),
+    interactionRopes: Object.freeze([
+        Object.freeze({
+            lonDeg: 0, latDeg: -6, tiltDeg: 60, handedness: 1,
+            twistTurns: 4, b1AuNt: 38, sigma1AuAu: 0.12,
+            v0Kms: 950, gammaPerKm: 0.2e-7, wKms: 450,
+            sheathDeltaNt: 3, sheathK: 0.2, bAmb1AuNt: 5,
+            launchOffsetS: 0,
+        }),
+        Object.freeze({
+            lonDeg: 0, latDeg: 0, tiltDeg: 45, handedness: -1,
+            twistTurns: 5, b1AuNt: 42, sigma1AuAu: 0.14,
+            v0Kms: 900, gammaPerKm: 0.2e-7, wKms: 450,
+            sheathDeltaNt: 2.5, sheathK: 2.0, bAmb1AuNt: 5,
+            launchOffsetS: 72_900,
+        }),
+    ]),
 });
 
 /**

@@ -405,6 +405,96 @@ check('gannon ensemble: observed min inside member spread',
         !GANNON_FIT.sheathRopes.some((r) => (r.frontC ?? 0) > 0));
 }
 
+// ── CME–CME interaction (spec §16) — v1.3: the train becomes a system ────────
+// The two v1 absorptions come back out of the Gannon fit: rope A relaxes to
+// plausible values (the kernel's dynamic rear compression supplies what the
+// 0.085 AU / 55 nT hand fit absorbed), and rope B gains a WAKE-conditioned
+// sheath whose shock reproduces the observed mid-storm internal disturbance.
+{
+    const SSC_G_H = (Date.parse('2024-05-10T17:05:00Z') - Date.parse(GANNON_FIT.launchIso)) / 3600e3;
+    const INT_G_H = (Date.parse('2024-05-10T22:10:00Z') - Date.parse(GANNON_FIT.launchIso)) / 3600e3;
+    const tHofG = (i) => gT0S / 3600 + i * gStepS / 3600;
+    const ir = GANNON_FIT.interactionRopes;
+
+    check('interaction: preset carries the v1.3 generation + engine config',
+        ir?.length === 2 && GANNON_FIT.interaction != null);
+    check('interaction: rope A relaxed to plausible values (σ ≥ 0.1 AU, B₁AU ≤ 45 nT)',
+        ir[0].sigma1AuAu >= 0.1 && ir[0].b1AuNt <= 45,
+        `σ ${ir[0].sigma1AuAu} AU, ${ir[0].b1AuNt} nT (v1 absorbed fit: 0.085 AU, 55 nT)`);
+
+    k.setRopes(ir);
+    k.setInteraction({ enabled: true, ...GANNON_FIT.interaction });
+    check('interaction: follower reads wake kinematics (elevated w_eff, reduced Γ)',
+        k.ropeWEffKms(1) > 600 && k.ropeGammaEff(1) < ir[1].gammaPerKm
+            && k.ropeWEffKms(0) === ir[0].wKms,
+        `w_eff ${k.ropeWEffKms(1).toFixed(0)} km/s (fresh ${ir[1].wKms}), Γ_eff ${k.ropeGammaEff(1).toExponential(2)}`);
+
+    const is = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+    let iMinV = Infinity, iIMin = -1, iSouthH = 0, iOverlap = 0;
+    let ix = 0, iy = 0, ixx = 0, iyy = 0, ixy = 0, ic = 0;
+    let iFirstSheath = -1, iFirstInternal = -1;
+    for (let i = 0; i < gN; i++) {
+        if (is.bz[i] < iMinV) { iMinV = is.bz[i]; iIMin = i; }
+        if (is.bz[i] < -10) iSouthH += gStepS / 3600;
+        if (is.inside[i] > 1) iOverlap++;
+        if (iFirstSheath < 0 && is.sheath[i] > 0) iFirstSheath = i;
+        if (iFirstInternal < 0 && is.sheath[i] > 0 && is.inside[i] > 0) iFirstInternal = i;
+        if (!Number.isFinite(gObs[i])) continue;
+        ix += is.bz[i]; iy += gObs[i]; ixx += is.bz[i] ** 2; iyy += gObs[i] ** 2; ixy += is.bz[i] * gObs[i]; ic++;
+    }
+    const rInt = (ixy - ix * iy / ic) / Math.sqrt((ixx - ix * ix / ic) * (iyy - iy * iy / ic) || 1);
+    check('interaction: shock on the observed SSC (±1.5 h)',
+        iFirstSheath >= 0 && Math.abs(tHofG(iFirstSheath) - SSC_G_H) < 1.5,
+        `+${tHofG(iFirstSheath).toFixed(1)} h vs SSC +${SSC_G_H.toFixed(1)} h`);
+    check('interaction: the INTERNAL disturbance lands — rope B\'s wake shock inside rope A (±1.5 h)',
+        iFirstInternal >= 0 && Math.abs(tHofG(iFirstInternal) - INT_G_H) < 1.5,
+        `+${tHofG(iFirstInternal).toFixed(1)} h vs observed +${INT_G_H.toFixed(1)} h (V 684→748, Bz −38)`);
+    check('interaction: global min Bz within ±10% (rear compression, not a 55 nT rope)',
+        Math.abs((iMinV - gMinObs) / gMinObs) < 0.10,
+        `${iMinV.toFixed(1)} vs obs ${gMinObs.toFixed(1)} nT (Δ ${(100 * Math.abs((iMinV - gMinObs) / gMinObs)).toFixed(1)}%)`);
+    check('interaction: min-Bz timing within ±2.5 h', Math.abs(iIMin - gIMinObs) * gStepS / 3600 < 2.5,
+        `Δ ${(Math.abs(iIMin - gIMinObs) * gStepS / 3600).toFixed(1)} h`);
+    check('interaction: shape correlation > 0.6 (v1.1: 0.71 — trade documented in the preset)',
+        rInt > 0.6, `r = ${rInt.toFixed(3)} over ${ic} obs samples`);
+    check('interaction: southward dwell within factor 1.3 (v1.1: 18.5 h vs obs 15.9 h)',
+        iSouthH > gSouthObsH / 1.3 && iSouthH < gSouthObsH * 1.3,
+        `model ${iSouthH.toFixed(1)} h vs obs ${gSouthObsH.toFixed(1)} h`);
+    check('interaction: no unphysical overlap superposition', iOverlap === 0,
+        `${iOverlap} overlap steps`);
+
+    // Mechanism attribution: the SAME ropes with interaction disabled lose
+    // both new features — the minimum shallows by the squeeze's share and
+    // the internal disturbance slips hours late (fresh-wind sheath timing).
+    k.setInteraction({ enabled: false });
+    const ds = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+    let dMin = Infinity, dFirstInternal = -1;
+    for (let i = 0; i < gN; i++) {
+        if (ds.bz[i] < dMin) dMin = ds.bz[i];
+        if (dFirstInternal < 0 && ds.sheath[i] > 0 && ds.inside[i] > 0) dFirstInternal = i;
+    }
+    check('interaction: attribution — disabling it shallows the min > 3 nT',
+        dMin > iMinV + 3, `${dMin.toFixed(1)} vs ${iMinV.toFixed(1)} nT`);
+    check('interaction: attribution — disabling it mistimes the internal disturbance > 3 h',
+        dFirstInternal < 0 || Math.abs(tHofG(dFirstInternal) - INT_G_H) > 3,
+        dFirstInternal >= 0 ? `+${tHofG(dFirstInternal).toFixed(1)} h vs observed +${INT_G_H.toFixed(1)} h` : 'absent');
+
+    // Joint ensemble under interaction: deterministic, and the storm call
+    // survives the plausible-rope-A generation.
+    k.setInteraction({ enabled: true, ...GANNON_FIT.interaction });
+    k.setSpreads({});
+    const iEns = k.ensembleRun(2024, 500, gT0S, gStepS, gN, L1_OBSERVER);
+    check('interaction ensemble: joint train sampling runs under the config',
+        iEns.ropesPerMember === 2 && iEns.pHit > 0.6, `pHit ${iEns.pHit.toFixed(2)}`);
+    check('interaction ensemble: P(min Bz < −20 nT) still calls a severe storm',
+        iEns.pMinBzBelow(-20) > 0.5, `${iEns.pMinBzBelow(-20).toFixed(2)}`);
+    const iEns2 = k.ensembleRun(2024, 500, gT0S, gStepS, gN, L1_OBSERVER);
+    check('interaction ensemble: seeded-reproducible',
+        iEns.bzPct.p50.every((v, i) => v === iEns2.bzPct.p50[i]));
+
+    // Hygiene: later sections assume the non-interacting engine.
+    k.setInteraction({ enabled: false });
+}
+
 // ── STEREO-A pre-arrival conditioning (spec §13) — the OSSE, end to end ──────
 // Drives the committed WASM through the exact flow the page uses for the
 // OSSE preset: synthesize the truth at both observers, condition the prior

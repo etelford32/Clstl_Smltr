@@ -33,7 +33,10 @@ pub mod kinematics;
 pub mod rope;
 
 use ensemble::{EnsembleResult, Spreads, PCTS};
-use rope::{field_at_set, observer_pos, synth_series, Profile, RopeEntry, RopeParams};
+use rope::{
+    field_at_train, observer_pos, synth_series, train_dyn, Profile, RopeDyn, RopeEntry,
+    RopeParams, TrainCfg,
+};
 
 /// Series buffer cap: 4 channels × MAX_STEPS samples.
 pub const MAX_STEPS: usize = 4096;
@@ -44,6 +47,10 @@ pub const MAX_ROPES: usize = 4;
 
 struct Engine {
     ropes: Vec<RopeEntry>,
+    /// §16 CME–CME interaction config — engine-level, disabled by default.
+    cfg: TrainCfg,
+    /// Scratch for the ropes' effective dynamics (refreshed per probe call).
+    dyns: Vec<RopeDyn>,
     spreads: Spreads,
     series: Box<[f32; 4 * MAX_STEPS]>,
     /// Observation INPUT buffer for assimilation: JS writes observed Bz
@@ -63,6 +70,8 @@ impl Engine {
     fn new() -> Engine {
         Engine {
             ropes: vec![RopeEntry::new(RopeParams::default(), 0.0)],
+            cfg: TrainCfg::default(),
+            dyns: Vec::new(),
             spreads: Spreads::default(),
             series: Box::new([0.0; 4 * MAX_STEPS]),
             obs: Box::new([f32::NAN; MAX_STEPS]),
@@ -237,20 +246,77 @@ pub extern "C" fn fr_max_ropes() -> u32 {
     MAX_ROPES as u32
 }
 
+// ── CME–CME interaction (spec §16) ───────────────────────────────────────────
+
+/// Configure §16 interaction for ALL subsequent series / probe / ensemble
+/// calls: wake kinematics for followers, dynamic rear compression of
+/// leaders, wake-conditioned follower sheaths. `enabled = 0` (the default)
+/// is bit-identical to the §10 non-interacting train. Independent of the
+/// rope list — fr_set_rope / fr_clear_ropes leave it untouched, so set it
+/// per event. Invalidates any stored ensemble.
+#[no_mangle]
+pub extern "C" fn fr_set_interaction(
+    enabled: f64,
+    wake_gamma_frac: f64,
+    comp_c: f64,
+    comp_reach: f64,
+) {
+    let e = engine();
+    e.cfg = TrainCfg {
+        enabled: enabled >= 0.5,
+        wake_gamma_frac: wake_gamma_frac.clamp(0.0, 1.0),
+        comp_c: comp_c.clamp(0.0, 1.0),
+        comp_reach: comp_reach.max(0.1),
+    };
+    e.ens = None;
+}
+
+/// Refresh the engine's effective-dynamics scratch from the current ropes
+/// + interaction config (cheap: n ≤ MAX_ROPES).
+fn refresh_dyns(e: &mut Engine) {
+    let Engine { ropes, cfg, dyns, .. } = e;
+    train_dyn(ropes, cfg, dyns);
+}
+
+/// EFFECTIVE ambient wind [km/s] of rope `idx` under the current
+/// interaction config — the frozen wake speed for a follower, the rope's
+/// own w otherwise. NaN when out of range.
+#[no_mangle]
+pub extern "C" fn fr_rope_w_eff_kms(idx: u32) -> f64 {
+    let e = engine();
+    refresh_dyns(e);
+    match e.dyns.get(idx as usize) {
+        Some(d) => d.dbm.w_kms,
+        None => f64::NAN,
+    }
+}
+
+/// EFFECTIVE drag parameter Γ [km⁻¹] of rope `idx` (wake-reduced for a
+/// follower). NaN when out of range.
+#[no_mangle]
+pub extern "C" fn fr_rope_gamma_eff(idx: u32) -> f64 {
+    let e = engine();
+    refresh_dyns(e);
+    match e.dyns.get(idx as usize) {
+        Some(d) => d.dbm.gamma_per_km,
+        None => f64::NAN,
+    }
+}
+
 // ── Kinematics probes (page HUD + GLSL uniforms) ─────────────────────────────
 // The _at variants take a rope index into the train; the index-free forms
 // probe rope 0 (v1 back-compat). A rope not yet launched (t < t_launch)
-// reports its launch state: apex at d0, launch speed, σ(d0).
-
-fn rope_at(idx: u32) -> Option<&'static RopeEntry> {
-    engine().ropes.get(idx as usize)
-}
+// reports its launch state: apex at d0, launch speed, σ(d0). All probes use
+// the EFFECTIVE (§16 wake-modified) kinematics — identical to the raw DBM
+// while interaction is disabled.
 
 /// Apex heliocentric distance [km] of rope `idx` at t seconds after epoch.
 #[no_mangle]
 pub extern "C" fn fr_apex_km_at(idx: u32, t_s: f64) -> f64 {
-    match rope_at(idx) {
-        Some(r) => r.params.dbm().apex_km((t_s - r.t_launch_s).max(0.0)),
+    let e = engine();
+    refresh_dyns(e);
+    match e.ropes.get(idx as usize) {
+        Some(r) => e.dyns[idx as usize].dbm.apex_km((t_s - r.t_launch_s).max(0.0)),
         None => f64::NAN,
     }
 }
@@ -258,8 +324,10 @@ pub extern "C" fn fr_apex_km_at(idx: u32, t_s: f64) -> f64 {
 /// Apex speed [km/s] of rope `idx` at t seconds after epoch.
 #[no_mangle]
 pub extern "C" fn fr_apex_v_kms_at(idx: u32, t_s: f64) -> f64 {
-    match rope_at(idx) {
-        Some(r) => r.params.dbm().speed_kms((t_s - r.t_launch_s).max(0.0)),
+    let e = engine();
+    refresh_dyns(e);
+    match e.ropes.get(idx as usize) {
+        Some(r) => e.dyns[idx as usize].dbm.speed_kms((t_s - r.t_launch_s).max(0.0)),
         None => f64::NAN,
     }
 }
@@ -267,9 +335,11 @@ pub extern "C" fn fr_apex_v_kms_at(idx: u32, t_s: f64) -> f64 {
 /// Apex minor radius σ_apex [km] of rope `idx` at t seconds after epoch.
 #[no_mangle]
 pub extern "C" fn fr_sigma_apex_km_at(idx: u32, t_s: f64) -> f64 {
-    match rope_at(idx) {
+    let e = engine();
+    refresh_dyns(e);
+    match e.ropes.get(idx as usize) {
         Some(r) => {
-            let d = r.params.dbm().apex_km((t_s - r.t_launch_s).max(0.0));
+            let d = e.dyns[idx as usize].dbm.apex_km((t_s - r.t_launch_s).max(0.0));
             kinematics::sigma_apex_km(
                 r.params.sigma_1au_au * kinematics::AU_KM,
                 d,
@@ -298,7 +368,7 @@ pub extern "C" fn fr_sigma_apex_km(t_s: f64) -> f64 {
 /// Launch offset [s] of rope `idx` (NaN when out of range).
 #[no_mangle]
 pub extern "C" fn fr_rope_t_launch_s(idx: u32) -> f64 {
-    match rope_at(idx) {
+    match engine().ropes.get(idx as usize) {
         Some(r) => r.t_launch_s,
         None => f64::NAN,
     }
@@ -314,7 +384,11 @@ pub extern "C" fn fr_rope_t_launch_s(idx: u32) -> f64 {
 #[no_mangle]
 pub extern "C" fn fr_field_at(t_s: f64, x_km: f64, y_km: f64, z_km: f64) -> *const f32 {
     let e = engine();
-    let (b, count) = field_at_set(&e.ropes, t_s, [x_km, y_km, z_km]);
+    let (b, count) = {
+        let Engine { ropes, cfg, dyns, .. } = &mut *e;
+        train_dyn(ropes, cfg, dyns);
+        field_at_train(ropes, dyns, cfg, t_s, [x_km, y_km, z_km])
+    };
     e.field_probe = [b[0] as f32, b[1] as f32, b[2] as f32, count as f32];
     e.field_probe.as_ptr()
 }
@@ -340,7 +414,8 @@ pub extern "C" fn fr_series(
     let e = engine();
     let n = (n_steps as usize).min(MAX_STEPS);
     let obs = observer_pos(obs_r_au, obs_lon_deg, obs_lat_deg);
-    synth_series(&e.ropes, t0_s, dt_s, n, obs, &mut e.series[..4 * n]) as u32
+    let Engine { ropes, cfg, series, .. } = &mut *e;
+    synth_series(ropes, cfg, t0_s, dt_s, n, obs, &mut series[..4 * n]) as u32
 }
 
 #[no_mangle]
@@ -416,6 +491,7 @@ pub extern "C" fn fr_ens_run(
         n_s,
         obs,
         aux,
+        &e.cfg,
     );
     let n = res.n_members as u32;
     e.ens = Some(res);
@@ -781,6 +857,67 @@ mod abi_tests {
         );
         assert_eq!(fr_rope_count(), 1);
         assert_eq!(fr_rope_t_launch_s(0), 0.0);
+    }
+
+    /// Drive the §16 interaction surface the way the page does.
+    #[test]
+    fn abi_interaction_end_to_end() {
+        let _guard = ABI_LOCK.lock().unwrap();
+        fr_init();
+        fr_clear_ropes();
+        let push = |v0: f64, delta: f64, t_launch_h: f64| {
+            fr_push_rope(
+                0.0, 0.0, 90.0, 1.0, 5.0, 24.0, 0.10, 1.64, 1.14, 21.5, v0, 0.2e-7, 400.0,
+                0.0, delta, 0.8, 5.0, 0.0, t_launch_h * 3600.0,
+            )
+        };
+        push(900.0, 0.0, 0.0);
+        push(1600.0, 3.0, 18.0);
+        // Disabled (default): effective kinematics are the raw ones.
+        assert_eq!(fr_rope_w_eff_kms(1), 400.0);
+        assert_eq!(fr_rope_gamma_eff(1), 0.2e-7);
+        let base: Vec<f32> = {
+            fr_series(0.0, 1800.0, 500, 0.99, 0.0, 0.0);
+            let p = fr_series_ptr();
+            (0..4 * 500).map(|i| unsafe { *p.add(i) }).collect()
+        };
+        // Enabled: the follower reads wake kinematics, the series moves.
+        fr_set_interaction(1.0, 0.5, 1.0, 1.5);
+        assert!(
+            fr_rope_w_eff_kms(1) > 500.0,
+            "wake ambient {} must exceed the fresh wind",
+            fr_rope_w_eff_kms(1)
+        );
+        assert_eq!(fr_rope_gamma_eff(1), 0.1e-7);
+        assert_eq!(fr_rope_w_eff_kms(0), 400.0, "leader keeps the fresh wind");
+        let on: Vec<f32> = {
+            fr_series(0.0, 1800.0, 500, 0.99, 0.0, 0.0);
+            let p = fr_series_ptr();
+            (0..4 * 500).map(|i| unsafe { *p.add(i) }).collect()
+        };
+        assert!(base.iter().zip(&on).any(|(a, b)| a.to_bits() != b.to_bits()));
+        // Ensemble under interaction: runs, deterministic, sane.
+        fr_set_spreads(6.0, 4.0, 15.0, 100.0, 0.2, 0.15, 0.3, 0.8, 0.05);
+        let n = fr_ens_run(16.0, 100, 0.0, 1800.0, 500, 0.99, 0.0, 0.0);
+        assert_eq!(n, 100);
+        assert!(fr_ens_p_hit() > 0.5, "p_hit {}", fr_ens_p_hit());
+        let med1: Vec<f32> =
+            (0..500).map(|i| unsafe { *fr_ens_bz_pct_ptr(2).add(i) }).collect();
+        fr_ens_run(16.0, 100, 0.0, 1800.0, 500, 0.99, 0.0, 0.0);
+        let med2: Vec<f32> =
+            (0..500).map(|i| unsafe { *fr_ens_bz_pct_ptr(2).add(i) }).collect();
+        assert_eq!(med1, med2);
+        // Back off: bit-identical to the pre-interaction series.
+        fr_set_interaction(0.0, 0.5, 1.0, 1.5);
+        assert_eq!(fr_rope_w_eff_kms(1), 400.0);
+        let off: Vec<f32> = {
+            fr_series(0.0, 1800.0, 500, 0.99, 0.0, 0.0);
+            let p = fr_series_ptr();
+            (0..4 * 500).map(|i| unsafe { *p.add(i) }).collect()
+        };
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&base), bits(&off));
+        fr_init(); // leave the global engine clean for the next ABI test
     }
 
     /// Drive the aux-observer (STEREO-A) surface the way the page does.

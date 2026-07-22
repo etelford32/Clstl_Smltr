@@ -256,14 +256,16 @@ body {
 <p class="fr-note">
     <b>Reading the chart:</b> shaded bands are the ensemble 5–95% and 25–75%
     Bz envelopes at L1; the white trace is the deterministic reference fit and
-    the amber trace is the observed OMNI Bz for hindcast events. The v1 engine
-    models magnetic ropes only — <b>no sheath, no rope–rope interaction</b> —
-    so the observed sheath interval and train compression are expected,
-    honestly-reported misses (the Phase 5 roadmap). Validated fits:
-    St. Patrick's 2015 (single rope) min Bz −24.1 vs −24.25 nT observed,
-    timing Δ2.1 h, shape r 0.66 · Gannon May 2024 (2-rope train) min Bz
-    −43.8 vs −44.2 nT, timing Δ1.0 h, full-window r 0.71, both southward
-    episodes reproduced.
+    the amber trace is the observed OMNI Bz for hindcast events. The forward
+    model now carries the shocked <b>sheath</b> (phase-flagged; its Bz rides
+    the ensemble band, deliberately not the deterministic trace),
+    <b>front compression</b> where an event demands it, and <b>CME–CME
+    interaction</b> (wake kinematics + follower squeeze). Validated fits:
+    St. Patrick's 2015 (single rope, v1.2) min Bz −23.8 vs −24.25 nT at
+    Δ0.5 h, shock on the SSC · Gannon May 2024 (2-rope interacting train,
+    v1.3) min −44.3 vs −44.2 nT, internal disturbance +48.9 vs +48.7 h,
+    both southward episodes reproduced. Unmodeled, on record: the X3.9/X5.8
+    Gannon CMEs, momentum exchange, Mach-dependent shock standoff.
 </p>
 
 <section class="fr-info">
@@ -313,7 +315,8 @@ const kernel = await loadFluxRopeKernel('./js/flux-rope-wasm/flux_rope_core.wasm
 const view = new HeliosphereView($('fr-gl'), $('fr-overlay'));
 
 // Normalize a preset (single `rope` or train `ropes`) into a full train.
-const toRopes = (p) => (p.sheathRopes ?? p.ropes ?? [p.frontFit?.rope ?? p.sheathFit?.rope ?? p.rope])
+// Generation preference: interaction (spec §16) > sheath (§14) > baseline.
+const toRopes = (p) => (p.interactionRopes ?? p.sheathRopes ?? p.ropes ?? [p.frontFit?.rope ?? p.sheathFit?.rope ?? p.rope])
     .map((r) => ({ ...ROPE_DEFAULTS, launchOffsetS: 0, ...r }));
 
 /**
@@ -354,6 +357,8 @@ const state = {
     // STEREO-A (spec 13): assumed position + observed/synthetic driver.
     sta: { pos: { rAu: 0.96, lonDeg: 15, latDeg: 0 }, obsDriver: null, aligned: null },
     detSta: null,          // deterministic predicted Bz at STEREO-A
+    // CME–CME interaction config (spec §16) — per preset; custom inherits.
+    interaction: { enabled: false },
 };
 const clock = new TauClock(parseFloat($('fr-speed').value));
 const activeRope = () => state.ropes[state.active];
@@ -366,8 +371,11 @@ const PRESET_NOTES = {
         'the rope leading edge (−23.8 vs −24.25 nT at Δ0.5 h). Drag the timeline and the ' +
         'particle filter conditions the fan on everything left of the now-line.',
     'gannon-2024': 'The May 2024 G5 CME train as TWO sequential ropes (X1.0 and X2.2 flare ' +
-        'launches from AR 13664, +20.25 h apart). The X3.9/X5.8 CMEs and rope–rope ' +
-        'compression are honestly unmodeled — that is the v2 roadmap.',
+        'launches from AR 13664, +20.25 h apart) — v1.3 forward model with CME–CME ' +
+        'interaction ON: rope B rides rope A’s wake, its shock reproduces the observed ' +
+        'mid-storm internal disturbance (+48.9 vs +48.7 h), and its approach squeezes rope ' +
+        'A’s rear to the −44 nT minimum with a physically plausible rope A (38 nT, not a ' +
+        'hand-compressed 55). The X3.9/X5.8 CMEs remain honestly unmodeled.',
     'osse-sta': 'SYNTHETIC observing-system experiment at the 2024 flank-graze geometry: the ' +
         'dotted green trace is what a spacecraft at STEREO-A "really" measured; the truth ' +
         'grazes it at +38.5 h while L1 stays silent until +41 h. Scrub into that gap and the ' +
@@ -406,6 +414,10 @@ async function applyPreset(id) {
         state.active = 0;
         state.launchMs = p.launchIso ? Date.parse(p.launchIso) : null;
         state.spreadsBase = p.spreads ?? SPREAD_DEFAULTS;
+        // §16: the interaction config travels with the generation it fit.
+        state.interaction = (p.interactionRopes && p.interaction)
+            ? { enabled: true, ...p.interaction }
+            : { enabled: false };
         renderRopeTabs();
         syncSliders();
     }
@@ -561,7 +573,15 @@ $('a-toggle').addEventListener('change', () => { lastAssimI1 = -1; maybeAssimila
 // ── Compute ──────────────────────────────────────────────────────────────────
 function recompute() {
     kernel.setRopes(state.ropes);
-    view.setRopes(state.ropes);
+    kernel.setInteraction(state.interaction ?? { enabled: false });
+    // The view mirrors the kernel's EFFECTIVE kinematics (§16 wake for
+    // followers) via the kernel getters — identical to the raw params while
+    // interaction is off. The rear-compression field distortion is NOT
+    // mirrored in the shader (same documented display-only omission as the
+    // sheath); the kernel probe fr_field_at remains the oracle.
+    view.setRopes(state.ropes.map((r, i) => ({
+        ...r, wKms: kernel.ropeWEffKms(i), gammaPerKm: kernel.ropeGammaEff(i),
+    })));
     state.det = kernel.series(GRID.t0S, GRID.dtS, GRID.n);
 
     // STEREO-A (spec 13): predicted flank signature + aux recording for the

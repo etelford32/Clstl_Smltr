@@ -498,3 +498,95 @@ fitting, not a universal knob — and the pinned Gannon preset carries none.
 St. Patrick's with shock + minimum both pinned) — the sheath-thickness /
 standoff relation is the next candidate (Mach-dependent standoff), then
 CME–CME interaction for the Gannon train.
+
+## 16. CME–CME interaction (v1.3 — the train becomes a system)
+
+The §10 train is a superposition of NON-interacting ropes, and both its
+documented misses are interaction physics: rope A's Gannon fit is
+suspiciously compact/strong (σ 0.085 AU, 55 nT — it absorbs real
+compression by the train behind it), and rope B was left sheathless
+because its front runs inside rope A's wake where the §14 fresh-upstream
+assumption fails. The observed L1 series carries the signature directly:
+an internal shock-like jump at +48.7 h (V 684→748 km/s, N 20→24 /cc)
+while Bz already sat at −38 nT, 2.5 h before the −44.17 nT global
+minimum — a follower-driven disturbance compressing the leader's rear.
+
+**Partner selection.** Ropes interact PAIRWISE, follower→leader. Rope j's
+LEADER is the most recently launched earlier rope i whose launch
+direction aligns with j's: `ê_dir,i · ê_dir,j > 0.5`. Chains (A←B←C)
+resolve leader-first in launch order. Misaligned ropes never interact.
+
+**Wake kinematics (the follower).** A follower flies through wind
+preconditioned by its leader, not the quiet ambient:
+
+```
+w_eff,j = max(w_j, v_i(t_launch,j − t_launch,i))     (frozen at launch)
+Γ_eff,j = Γ_j · wake_gamma_frac                       (default 0.5)
+```
+
+— the leader's (already wake-modified, if chained) apex speed when the
+follower launches, so the §5 closed form survives. Freezing w at launch
+is the v1.3 approximation, stated: the leader keeps decelerating and the
+follower may eventually outrun the wake; neither is modeled.
+
+**Rear compression (the leader).** The follower's approach squeezes the
+leader's rear — the counterpart of §15's front lobe, but DYNAMIC. At
+train time t, with apex distances d, apex minor radii σ̂, and apex speeds
+v from the effective kinematics:
+
+```
+gap(t)  = (d_i − σ̂_i) − (d_j + σ̂_j)                 (nose-to-tail line)
+q(t)    = clamp(1 − gap / (comp_reach·σ̂_i), 0, 1)    (reach default 1.5)
+M_rel   = max(0, (v_j − v_i) / V_MS)
+rear_c(t) = clamp(comp_c · (1 − 1/X(M_rel)) · q, 0, 0.75)
+```
+
+X is the §14 Rankine–Hugoniot ratio (X ≤ 4 → rear_c ≤ 0.75 → boost ≤ 4,
+the same cap), so a follower that is not closing super-magnetosonically
+compresses nothing (X(M≤1) = 1). `comp_c ∈ [0,1]` (default 1) is the one
+honest scale knob. The §15 boundary distortion generalizes to two lobes:
+
+```
+f(θ) = 1 − front_c·(1 + cosθ)/2 − rear_c·(1 − cosθ)/2
+```
+
+with the same σ_eff = σ·f boundary, ŝ = s/f reference mapping, and 1/f
+flux-conservation boost — the leader's rear thins and its field
+strengthens as the follower closes. A leader with several aligned
+followers takes the strongest rear_c. Mutual compression of the
+FOLLOWER's front by the pile-up is NOT auto-derived — it remains the
+per-rope static `front_c` (§15) if a fit wants it.
+
+**Wake-conditioned sheath (the follower).** The §14 existence test uses
+the wake flow, not fresh wind: `M_j = (v_j − v_up)/V_MS` with
+`v_up = max(w_j, v_i(t))` evaluated LIVE. A follower slower than its
+leader's wake drives no shock (the honest kill that justified leaving
+Gannon rope B sheathless in v1.1); one that genuinely outruns the wake
+gains a sheath whose X(M_j) compression uses the same wake Mach. The
+leader's own sheath is untouched (fresh upstream ahead of it).
+
+**Determinism + scope.** The interaction config
+`{enabled, wake_gamma_frac, comp_c, comp_reach}` is engine-level, shared
+across ensemble members (not sampled); each member's partner selection,
+wake speeds and gaps derive from that member's OWN sampled parameters, so
+interaction uncertainty enters the fan through the §7 draws with no new
+RNG stream. `enabled = false` (default) is bit-identical to §10 —
+every pre-v1.3 pin holds. NOT modeled, on record: momentum exchange (the
+leader is compressed but not pushed; the follower loses no momentum at
+contact beyond its wake drag), merging/reconnection, erosion, deflection.
+The §10 containment count stays the honesty diagnostic where structures
+overlap.
+
+**Measured value (pinned) — Gannon `interactionRopes` (v1.3):** rope A
+relaxes to plausible values (σ 0.12 AU, 38 nT vs the v1 absorbed
+0.085 AU / 55 nT) with the follower squeeze supplying the minimum:
+**−44.3 vs −44.17 nT (0.3%) at Δ1.5 h**; rope B's wake shock reproduces
+the observed mid-storm internal disturbance **+48.9 vs +48.7 h**; shock
+stays on the SSC (+43.2 vs +43.6 h); dwell 16.8 vs 15.9 h observed
+(v1.1: 18.5); zero overlap superposition. Attribution pinned: disabling
+interaction on the same ropes shallows the min by ~5 nT and mistimes the
+internal disturbance by ~5 h. Honest trades: full-window r 0.66 vs
+v1.1's 0.71 (deterministic zeros through the 54–56 h sheath handover —
+§14 keeps sheath Bz ensemble-only — where v1.1's overlong rope-A dwell
+happened to cover the data), and rope B's `sheath_k = 2.0` standing in
+for the missing Mach-dependent shock standoff (§15 residual).

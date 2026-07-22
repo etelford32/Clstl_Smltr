@@ -90,7 +90,9 @@ test.describe('flux-rope simulator', () => {
         const p20 = parseInt(await page.locator('#fr-s-p20').textContent(), 10);
         expect(p20).toBeGreaterThan(40);
         await page.locator('#fr-ropetabs button', { hasText: 'Rope 2' }).click();
-        await expect(page.locator('#p-v0Kms')).toHaveValue('1300');
+        // v1.3 interaction generation: rope B's launch speed is a fit under
+        // the frozen-at-launch wake (spec §16), not the fresh-wind 1300.
+        await expect(page.locator('#p-v0Kms')).toHaveValue('900');
         await page.locator('#fr-ropetabs button.fr-add').click();
         await expect(page.locator('#fr-ropetabs button.active')).toHaveText(/Rope 3/);
         await expect(page.locator('#fr-preset')).toHaveValue('custom');

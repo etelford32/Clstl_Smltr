@@ -4,7 +4,10 @@
 //! and WASM — splitmix64 → xoshiro256**, Box–Muller normals, no ambient
 //! entropy anywhere.
 
-use crate::rope::{field_at_set, to_gse, RopeEntry, RopeParams, V3};
+use crate::rope::{
+    field_at_train, rear_c_at, sheath_at_dyn, to_gse, train_dyn, upstream_kms, RopeDyn,
+    RopeEntry, RopeParams, TrainCfg, V3,
+};
 
 // ── PRNG ─────────────────────────────────────────────────────────────────────
 
@@ -198,6 +201,9 @@ fn percentile_sorted(a: &[f32], q: f64) -> f32 {
 /// `aux`: optional second observer position (STEREO-A). Recording it draws
 /// NOTHING from the RNG and never touches the primary statistics — the same
 /// seed yields a bit-identical L1 prior with or without it (pinned by test).
+/// `cfg`: the §16 interaction config, shared across members; each member's
+/// partner structure and wake speeds derive from its OWN sampled parameters
+/// (no new RNG stream — disabled cfg is bit-identical to pre-§16).
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     fits: &[RopeEntry],
@@ -209,6 +215,7 @@ pub fn run(
     n_steps: usize,
     obs: V3,
     aux: Option<V3>,
+    cfg: &TrainCfg,
 ) -> EnsembleResult {
     let mut rng = Rng::new(seed);
     let n_ropes = fits.len().max(1);
@@ -223,6 +230,7 @@ pub fn run(
     let mut member_params = vec![0.0f32; n_members * n_ropes * MEMBER_STRIDE];
     let mut hit_members = 0usize;
     let mut train: Vec<RopeEntry> = Vec::with_capacity(fits.len());
+    let mut dyns: Vec<RopeDyn> = Vec::with_capacity(fits.len());
 
     for m in 0..n_members {
         train.clear();
@@ -240,6 +248,8 @@ pub fn run(
             ]);
             train.push(RopeEntry::new(member, fit.t_launch_s));
         }
+        // §16: this member's interaction structure from its OWN draws.
+        train_dyn(&train, cfg, &mut dyns);
         // Per-rope sheath OU streams (spec §14): SEPARATE seeded generators,
         // so sheath randomness never perturbs the parameter-draw stream —
         // sheath on/off leaves every sampled member bit-identical. Unit-std
@@ -257,8 +267,9 @@ pub fn run(
         let mut member_arr = f32::NAN;
         for i in 0..n_steps {
             let t = t0_s + dt_s * i as f64;
-            let (b, count) = field_at_set(&train, t, obs);
-            // Sheath contribution at the primary observer (spec §14).
+            let (b, count) = field_at_train(&train, &dyns, cfg, t, obs);
+            // Sheath contribution at the primary observer (spec §14; §16
+            // wake-conditioned Mach for followers).
             let mut bz_sh = 0.0f64;
             let mut bt_sh_env = 0.0f64;
             let mut sheath_hits = 0u32;
@@ -269,18 +280,21 @@ pub fn run(
                     }
                     ou_state[r] = ou_state[r] * ou_decay + ou_kick * ou_rngs[r].normal();
                     let dt_r = t - entry.t_launch_s;
-                    if dt_r > 0.0
-                        && crate::rope::sheath_at(&entry.params, &entry.frame, dt_r, obs)
+                    if dt_r <= 0.0 {
+                        continue;
+                    }
+                    let up = upstream_kms(&train, &dyns, r, t);
+                    let rc = rear_c_at(&train, &dyns, cfg, r, t);
+                    if sheath_at_dyn(&entry.params, &entry.frame, dt_r, obs, &dyns[r].dbm, up, rc)
                     {
-                        let dbm = entry.params.dbm();
                         let x = crate::kinematics::compression_ratio(
-                            crate::kinematics::shock_mach(dbm.speed_kms(dt_r), entry.params.w_kms),
+                            crate::kinematics::shock_mach(dyns[r].dbm.speed_kms(dt_r), up),
                         );
                         bz_sh += ou_state[r] * x * entry.params.sheath_delta_nt;
                         bt_sh_env = bt_sh_env.max(
                             x * crate::kinematics::b_ambient_nt(
                                 entry.params.b_amb_1au_nt,
-                                dbm.apex_km(dt_r),
+                                dyns[r].dbm.apex_km(dt_r),
                             ),
                         );
                         sheath_hits += 1;
@@ -311,7 +325,7 @@ pub fn run(
             if let Some(aux_pos) = aux {
                 // Aux series stays CLEAN rope-only: it exists for the §13
                 // likelihood, which never scores sheath noise (spec §14).
-                let (ba, ca) = field_at_set(&train, t, aux_pos);
+                let (ba, ca) = field_at_train(&train, &dyns, cfg, t, aux_pos);
                 if ca > 0 {
                     // Same GSE z-component convention as the primary (§2 —
                     // valid for observers near the Earth longitude; STA at
@@ -669,8 +683,8 @@ mod tests {
     #[test]
     fn same_seed_bitwise_reproducible() {
         let obs = observer_pos(1.0, 0.0, 0.0);
-        let a = run(&fit(), &spreads(), 42, 64, 0.0, 3600.0, 120, obs, None);
-        let b = run(&fit(), &spreads(), 42, 64, 0.0, 3600.0, 120, obs, None);
+        let a = run(&fit(), &spreads(), 42, 64, 0.0, 3600.0, 120, obs, None, &TrainCfg::default());
+        let b = run(&fit(), &spreads(), 42, 64, 0.0, 3600.0, 120, obs, None, &TrainCfg::default());
         // Bit-pattern compare: arrival/min arrays legitimately contain NaN
         // (miss members), and NaN != NaN under assert_eq.
         let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
@@ -678,14 +692,14 @@ mod tests {
         assert_eq!(bits(&a.arrival_h), bits(&b.arrival_h));
         assert_eq!(a.p_hit, b.p_hit);
         // A different seed must actually change the draw.
-        let c = run(&fit(), &spreads(), 43, 64, 0.0, 3600.0, 120, obs, None);
+        let c = run(&fit(), &spreads(), 43, 64, 0.0, 3600.0, 120, obs, None, &TrainCfg::default());
         assert_ne!(bits(&a.arrival_h), bits(&c.arrival_h));
     }
 
     #[test]
     fn zero_spread_collapses_to_deterministic_run() {
         let obs = observer_pos(1.0, 0.0, 0.0);
-        let r = run(&fit(), &Spreads::default(), 7, 32, 0.0, 1800.0, 300, obs, None);
+        let r = run(&fit(), &Spreads::default(), 7, 32, 0.0, 1800.0, 300, obs, None, &TrainCfg::default());
         assert!((r.p_hit - 1.0).abs() < 1e-12, "head-on zero-spread must always hit");
         // All members identical → the 5th and 95th percentile fans coincide.
         for i in 0..r.n_steps {
@@ -701,7 +715,7 @@ mod tests {
     #[test]
     fn spread_widens_the_fan_and_loses_some_members() {
         let obs = observer_pos(1.0, 0.0, 0.0);
-        let r = run(&fit(), &spreads(), 1234, 300, 0.0, 1800.0, 300, obs, None);
+        let r = run(&fit(), &spreads(), 1234, 300, 0.0, 1800.0, 300, obs, None, &TrainCfg::default());
         assert!(r.p_hit > 0.5 && r.p_hit <= 1.0, "p_hit {}", r.p_hit);
         // Somewhere mid-storm the 5–95 fan must be genuinely open.
         let mut max_width = 0.0f32;
@@ -723,7 +737,7 @@ mod tests {
         let obs = observer_pos(1.0, 0.0, 0.0);
         let p = RopeParams { v0_kms: 1400.0, tilt_deg: 90.0, ..Default::default() };
         let train = vec![RopeEntry::new(p, 0.0), RopeEntry::new(p, 24.0 * 3600.0)];
-        let r = run(&train, &spreads(), 99, 100, 0.0, 1800.0, 500, obs, None);
+        let r = run(&train, &spreads(), 99, 100, 0.0, 1800.0, 500, obs, None, &TrainCfg::default());
         assert_eq!(r.ropes_per_member, 2);
         assert_eq!(r.member_params.len(), 100 * 2 * MEMBER_STRIDE);
         // The two ropes of one member are DIFFERENT draws (independent).
@@ -731,13 +745,13 @@ mod tests {
         let b = &r.member_params[MEMBER_STRIDE..2 * MEMBER_STRIDE];
         assert!(a != b, "per-rope draws must be independent");
         // Deterministic under the same seed.
-        let r2 = run(&train, &spreads(), 99, 100, 0.0, 1800.0, 500, obs, None);
+        let r2 = run(&train, &spreads(), 99, 100, 0.0, 1800.0, 500, obs, None, &TrainCfg::default());
         let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&r.bz_pct), bits(&r2.bz_pct));
         assert_eq!(bits(&r.member_params), bits(&r2.member_params));
         // Two chances to hit can only help: the joint train p_hit must beat
         // a single-rope ensemble of either rope under the same priors.
-        let solo = run(&train[..1], &spreads(), 99, 100, 0.0, 1800.0, 500, obs, None);
+        let solo = run(&train[..1], &spreads(), 99, 100, 0.0, 1800.0, 500, obs, None, &TrainCfg::default());
         assert!(r.p_hit >= solo.p_hit, "train {} < solo {}", r.p_hit, solo.p_hit);
         assert!(r.p_hit > 0.6, "p_hit {}", r.p_hit);
     }
@@ -745,7 +759,7 @@ mod tests {
     #[test]
     fn assimilation_collapses_onto_truth() {
         let obs_pos = observer_pos(1.0, 0.0, 0.0);
-        let mut r = run(&fit(), &spreads(), 4242, 200, 0.0, 1800.0, 300, obs_pos, None);
+        let mut r = run(&fit(), &spreads(), 4242, 200, 0.0, 1800.0, 300, obs_pos, None, &TrainCfg::default());
         let n = r.n_members;
         // Synthetic truth: a member that genuinely HITS with signal inside
         // the observed window (a missing member predicts 0 everywhere and
@@ -793,7 +807,7 @@ mod tests {
     #[test]
     fn assimilation_with_no_observations_is_the_prior() {
         let obs_pos = observer_pos(1.0, 0.0, 0.0);
-        let mut r = run(&fit(), &spreads(), 99, 100, 0.0, 1800.0, 200, obs_pos, None);
+        let mut r = run(&fit(), &spreads(), 99, 100, 0.0, 1800.0, 200, obs_pos, None, &TrainCfg::default());
         let prior_pct = r.bz_pct.clone();
         let prior_phit = r.p_hit;
         let ess = assimilate(&mut r, &vec![f32::NAN; 200], 0, 200, 4.0, 0.1);
@@ -807,7 +821,7 @@ mod tests {
     #[test]
     fn assimilation_deterministic_and_resettable() {
         let obs_pos = observer_pos(1.0, 0.0, 0.0);
-        let mut r = run(&fit(), &spreads(), 7, 100, 0.0, 1800.0, 200, obs_pos, None);
+        let mut r = run(&fit(), &spreads(), 7, 100, 0.0, 1800.0, 200, obs_pos, None, &TrainCfg::default());
         let prior_pct = r.bz_pct.clone();
         let obs: Vec<f32> = (0..200)
             .map(|i| if (80..120).contains(&i) { -12.0 } else { f32::NAN })
@@ -828,8 +842,8 @@ mod tests {
     fn aux_observer_recording_never_touches_the_primary_prior() {
         let l1 = observer_pos(1.0, 0.0, 0.0);
         let sta = observer_pos(0.96, 14.0, 0.0);
-        let plain = run(&fit(), &spreads(), 77, 100, 0.0, 1800.0, 300, l1, None);
-        let with_aux = run(&fit(), &spreads(), 77, 100, 0.0, 1800.0, 300, l1, Some(sta));
+        let plain = run(&fit(), &spreads(), 77, 100, 0.0, 1800.0, 300, l1, None, &TrainCfg::default());
+        let with_aux = run(&fit(), &spreads(), 77, 100, 0.0, 1800.0, 300, l1, Some(sta), &TrainCfg::default());
         let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&plain.bz_pct), bits(&with_aux.bz_pct), "L1 prior must be bit-identical");
         assert_eq!(bits(&plain.arrival_h), bits(&with_aux.arrival_h));
@@ -852,7 +866,7 @@ mod tests {
             RopeParams { v0_kms: 1100.0, tilt_deg: 90.0, lon_deg: 6.0, ..Default::default() },
             0.0,
         )];
-        let mut r = run(&fits, &spreads(), 2468, 300, 0.0, 1800.0, 300, l1, Some(sta));
+        let mut r = run(&fits, &spreads(), 2468, 300, 0.0, 1800.0, 300, l1, Some(sta), &TrainCfg::default());
         let n = r.n_members;
         // Truth: a member that hits BOTH observers, STA first.
         let first_aux = |m: usize| {
@@ -919,8 +933,8 @@ mod tests {
     fn joint_with_empty_aux_window_equals_primary_only() {
         let l1 = observer_pos(1.0, 0.0, 0.0);
         let sta = observer_pos(0.96, 14.0, 0.0);
-        let mut r1 = run(&fit(), &spreads(), 7, 100, 0.0, 1800.0, 200, l1, Some(sta));
-        let mut r2 = run(&fit(), &spreads(), 7, 100, 0.0, 1800.0, 200, l1, Some(sta));
+        let mut r1 = run(&fit(), &spreads(), 7, 100, 0.0, 1800.0, 200, l1, Some(sta), &TrainCfg::default());
+        let mut r2 = run(&fit(), &spreads(), 7, 100, 0.0, 1800.0, 200, l1, Some(sta), &TrainCfg::default());
         let obs: Vec<f32> = (0..200)
             .map(|i| if (80..120).contains(&i) { -12.0 } else { f32::NAN })
             .collect();
@@ -937,7 +951,7 @@ mod tests {
         // to one member when a floor is requested — and the applied
         // temperature must be surfaced.
         let obs_pos = observer_pos(1.0, 0.0, 0.0);
-        let mut r = run(&fit(), &spreads(), 4242, 200, 0.0, 1800.0, 300, obs_pos, None);
+        let mut r = run(&fit(), &spreads(), 4242, 200, 0.0, 1800.0, 300, obs_pos, None, &TrainCfg::default());
         let n = r.n_members;
         let tm = (0..n)
             .find(|m| r.arrival_h[*m].is_finite() && r.min_bz[*m] < -8.0)
@@ -999,8 +1013,8 @@ mod tests {
         // The sheath RNG streams are separate AND unused when δ = 0: the
         // whole run must be bit-identical to a default (sheathless) run.
         let obs = observer_pos(1.0, 0.0, 0.0);
-        let a = run(&fit(), &spreads(), 42, 100, 0.0, 1800.0, 200, obs, None);
-        let b = run(&fit(), &spreads(), 42, 100, 0.0, 1800.0, 200, obs, None);
+        let a = run(&fit(), &spreads(), 42, 100, 0.0, 1800.0, 200, obs, None, &TrainCfg::default());
+        let b = run(&fit(), &spreads(), 42, 100, 0.0, 1800.0, 200, obs, None, &TrainCfg::default());
         let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&a.member_bz), bits(&b.member_bz));
         assert!(a.member_bz_clean.is_empty(), "no clean matrix without a sheath");
@@ -1011,7 +1025,7 @@ mod tests {
         // Zero-spread ensemble: the sheath must put finite Bz samples BEFORE
         // the rope arrival, and the clean matrix must stay rope-only.
         let obs = observer_pos(1.0, 0.0, 0.0);
-        let r = run(&sheath_fit(), &Spreads::default(), 7, 8, 0.0, 1800.0, 300, obs, None);
+        let r = run(&sheath_fit(), &Spreads::default(), 7, 8, 0.0, 1800.0, 300, obs, None, &TrainCfg::default());
         let n = r.n_members;
         let arr_step = (r.arrival_h[0] as f64 * 2.0).round() as usize; // 1800 s steps
         let mut pre_arrival_finite = 0;
@@ -1041,7 +1055,7 @@ mod tests {
         // Statistical check on the OU realizations across members: mean ≈ 0,
         // std within a factor of the X·δ envelope.
         let obs = observer_pos(1.0, 0.0, 0.0);
-        let r = run(&sheath_fit(), &Spreads::default(), 99, 400, 0.0, 1800.0, 300, obs, None);
+        let r = run(&sheath_fit(), &Spreads::default(), 99, 400, 0.0, 1800.0, 300, obs, None, &TrainCfg::default());
         let n = r.n_members;
         let mut vals: Vec<f64> = Vec::new();
         for m in 0..n {
@@ -1067,10 +1081,10 @@ mod tests {
         // Same seed, sheath on vs off: southward sheath excursions can only
         // add storm chances — P(min Bz < −10) must not decrease.
         let obs = observer_pos(1.0, 0.0, 0.0);
-        let off = run(&fit(), &spreads(), 4242, 300, 0.0, 1800.0, 300, obs, None);
+        let off = run(&fit(), &spreads(), 4242, 300, 0.0, 1800.0, 300, obs, None, &TrainCfg::default());
         let mut fits_on = fit();
         fits_on[0].params.sheath_delta_nt = 3.0;
-        let on = run(&fits_on, &spreads(), 4242, 300, 0.0, 1800.0, 300, obs, None);
+        let on = run(&fits_on, &spreads(), 4242, 300, 0.0, 1800.0, 300, obs, None, &TrainCfg::default());
         assert!(
             on.p_min_bz_below(-10.0) >= off.p_min_bz_below(-10.0),
             "sheath must not reduce storm probability: {} vs {}",
@@ -1087,7 +1101,7 @@ mod tests {
         // Conditioning on a member's ROPE-ONLY series must recover it even
         // though every member's full series carries private sheath noise.
         let obs = observer_pos(1.0, 0.0, 0.0);
-        let mut r = run(&sheath_fit(), &spreads(), 2468, 200, 0.0, 1800.0, 300, obs, None);
+        let mut r = run(&sheath_fit(), &spreads(), 2468, 200, 0.0, 1800.0, 300, obs, None, &TrainCfg::default());
         let n = r.n_members;
         let tm = (0..n)
             .find(|m| r.arrival_h[*m].is_finite() && r.min_bz[*m] < -8.0)
@@ -1103,6 +1117,31 @@ mod tests {
         let w = r.weights.as_ref().unwrap();
         let best = (0..n).max_by(|a, b| w[*a].partial_cmp(&w[*b]).unwrap()).unwrap();
         assert_eq!(best, tm, "the generating member must dominate despite sheath noise");
+    }
+
+    // ── CME–CME interaction (spec §16) ───────────────────────────────────────
+
+    #[test]
+    fn interaction_never_touches_the_draws_and_stays_deterministic() {
+        // Same seed, cfg on vs off over a closing 2-rope train: the sampled
+        // parameters are bit-identical (interaction adds NO RNG stream), the
+        // Bz series genuinely move, and cfg-on is seed-reproducible.
+        let obs = observer_pos(1.0, 0.0, 0.0);
+        let lead = RopeParams { v0_kms: 900.0, tilt_deg: 90.0, ..Default::default() };
+        let foll = RopeParams { v0_kms: 1600.0, tilt_deg: 45.0, ..Default::default() };
+        let train = vec![
+            RopeEntry::new(lead, 0.0),
+            RopeEntry::new(foll, 18.0 * 3600.0),
+        ];
+        let icfg = TrainCfg { enabled: true, ..TrainCfg::default() };
+        let off = run(&train, &spreads(), 555, 150, 0.0, 1800.0, 400, obs, None, &TrainCfg::default());
+        let on = run(&train, &spreads(), 555, 150, 0.0, 1800.0, 400, obs, None, &icfg);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&off.member_params), bits(&on.member_params));
+        assert_ne!(bits(&off.member_bz), bits(&on.member_bz), "interaction must act");
+        let on2 = run(&train, &spreads(), 555, 150, 0.0, 1800.0, 400, obs, None, &icfg);
+        assert_eq!(bits(&on.member_bz), bits(&on2.member_bz));
+        assert_eq!(bits(&on.bz_pct), bits(&on2.bz_pct));
     }
 
     #[test]
