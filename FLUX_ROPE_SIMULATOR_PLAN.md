@@ -141,8 +141,23 @@ the same crate.
     "API build" seed). Ledger migration
     supabase-aurora-tiered-alerts-migration.sql is committed but PENDING
     apply; the cron self-detects and refuses to send until it lands.
-  Remaining Phase 4: space-weather customizable dashboard, Gannon
-  three-way validation page.
+  ✅ Gannon three-way Dst validation (2026-07-22,
+  gannon-superstorm.html + js/gannon-dst-compare.js): ONE pipeline
+  (integrateDst) driven three ways over the identical window — observed
+  SYM-H truth, observed L1 drivers (the pipeline CEILING), and the v1.4
+  flux-rope train at launch-time knowledge — with the BATS-R-US GM/IE
+  Dst trace wired as an auto-lighting bundle slot (dst_nt in
+  gannon_may_2024_hindcast.gm_ie.json; pending the workstation re-run,
+  reported honestly on-page). Pinned offline
+  (tests/gannon-dst-compare.mjs) + browser gate
+  (tests/gannon-dst-smoke.spec.js). THE finding, pinned: even with
+  PERFECT L1 knowledge the empirical integrator bottoms at −280 vs the
+  published −412 nT (~32% G5 saturation miss) — the page's own argument
+  for MHD ground truth, now quantified; the rope leg adds only 35 nT
+  RMSE / Δ1.3 h min-timing of DRIVER error on top (its closer −377
+  minimum vs truth is labeled as error cancellation, not skill; the fit
+  is reproduction, not blind forecast). Remaining Phase 4:
+  space-weather customizable dashboard.
 - **Phase 5 — Depth.** Empirical sheath model, cross-section deformation,
   CME–CME interaction, EEGGL/SWMF comparison runs, server-side API build.
   ✅ sheath model (2026-07-21, spec §14): R–H-compressed front-side shell,
