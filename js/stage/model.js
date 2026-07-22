@@ -31,11 +31,13 @@
 
 import { ropeFrame, dbmApexKm, sigmaApexKm } from '../flux-rope/view.js';
 import { shueStandoffRe, shueAlpha, dynamicPressure } from '../ring-current-model.js';
-import { AU_KM, EARTH_S, stageRadius } from './scale.js';
+import { magneticLatitude, boundaryForKp } from '../verdict-engine.js';
+import { AU_KM, EARTH_S, RE_KM, stageRadius } from './scale.js';
 
 export { dynamicPressure };
 
 const TAU = Math.PI * 2;
+const DEG = Math.PI / 180;
 
 /* ── Rope geometry (SDF zero level, physical AU) ─────────────────────── */
 
@@ -241,7 +243,168 @@ export function parkerSpiralPoints(vKms = 400, phi0Deg = 0, nPts = 80, rMaxAu = 
     return out;
 }
 
-/* ── Stations & flights (§5.4, stations 1–4) ─────────────────────────── */
+/* ── Aurora oval band (§5.2 Earth, phase S2) ─────────────────────────
+   The oval is drawn as the band between the p10 and p90 equatorward
+   boundaries of the FORECAST Kp distribution — uncertainty as geometry.
+   Oracles: verdict-engine boundaryForKp (the NOAA table) and
+   magneticLatitude (the dipole) — this module only INVERTS the dipole
+   numerically; the node gate pins the inversion against the oracle. */
+
+/**
+ * Geographic latitude where |magneticLatitude| equals `boundaryMlat` on
+ * the given meridian. Bisection over [0°, 82°] (monotone there for every
+ * longitude; the NOAA table never exceeds 66.5°). hemisphere: +1 N, −1 S.
+ */
+export function ovalLatAtLon(boundaryMlat, lonDeg, hemisphere = 1) {
+    let lo = 0, hi = 82;
+    for (let i = 0; i < 40; i++) {
+        const mid = 0.5 * (lo + hi);
+        if (Math.abs(magneticLatitude(hemisphere * mid, lonDeg)) < boundaryMlat) lo = mid;
+        else hi = mid;
+    }
+    return hemisphere * 0.5 * (lo + hi);
+}
+
+/**
+ * Boundary polylines for a Kp distribution {p10, p50, p90} (Kp p10 low →
+ * POLEWARD edge; Kp p90 high → EQUATORWARD edge). Latitudes per sampled
+ * longitude, one hemisphere.
+ */
+export function ovalBandGrid(kpBand, nLon = 90, hemisphere = 1) {
+    const lons = new Float32Array(nLon + 1);
+    const poleward = new Float32Array(nLon + 1);
+    const median = new Float32Array(nLon + 1);
+    const equatorward = new Float32Array(nLon + 1);
+    const bPole = boundaryForKp(kpBand.p10);
+    const bMed = boundaryForKp(kpBand.p50);
+    const bEq = boundaryForKp(kpBand.p90);
+    for (let i = 0; i <= nLon; i++) {
+        const lon = -180 + 360 * (i / nLon);
+        lons[i] = lon;
+        poleward[i] = ovalLatAtLon(bPole, lon, hemisphere);
+        median[i] = ovalLatAtLon(bMed, lon, hemisphere);
+        equatorward[i] = ovalLatAtLon(bEq, lon, hemisphere);
+    }
+    return { lons, poleward, median, equatorward };
+}
+
+/**
+ * Kp distribution at τ from the page's forecast_timeline payload (the
+ * 'earth-forecast-update' event — the EXISTING probabilistic-Kp oracle:
+ * AR(p) + persistence + SWPC consensus; we consume its arp mean/lo80/hi80,
+ * never re-derive). Past or missing trajectory → degenerate band at kpNow.
+ */
+export function kpBandAt(tauMs, timeline, kpNow) {
+    const traj = timeline?.trajectory;
+    const clampKp = (v) => Math.min(9, Math.max(0, v));
+    const start = traj?.start_ms ?? timeline?.updated_at;
+    if (traj?.arp?.mean?.length && Number.isFinite(start) && tauMs > start) {
+        const idx = Math.min(traj.arp.mean.length - 1,
+            Math.max(0, Math.round((tauMs - start) / 3.6e6) - 1));
+        const p50 = traj.arp.mean[idx], lo = traj.arp.lo80[idx], hi = traj.arp.hi80[idx];
+        if ([p50, lo, hi].every(Number.isFinite)) {
+            return { p10: clampKp(lo), p50: clampKp(p50), p90: clampKp(hi) };
+        }
+    }
+    if (!Number.isFinite(kpNow)) return null;
+    const k = clampKp(kpNow);
+    return { p10: k, p50: k, p90: k };
+}
+
+/* ── Earth-local geographic frame (S2) ───────────────────────────────
+   Stage Earth-local axes: z = north, the SUN sits in the −x direction
+   from Earth. Geography is placed by MEAN SOLAR TIME: the subsolar
+   meridian faces −x. Documented display tolerances: the equation of
+   time (±4 min ≈ ±1° of longitude) and Earth's obliquity (subsolar
+   latitude pinned to 0°) are ignored — context display only; real pass
+   timing stays with js/pass-predictor.js. */
+
+/** Mean-sun subsolar longitude (°E) at τ. */
+export function subsolarLonDeg(tauMs) {
+    const utcH = (tauMs / 3.6e6) % 24;
+    let lon = (12 - utcH) * 15;
+    while (lon > 180) lon -= 360;
+    while (lon < -180) lon += 360;
+    return lon;
+}
+
+/** Geographic (lat°, lon°, radius) → Earth-local xyz, same radial units
+ *  in as out. The subsolar point maps to the −x axis. */
+export function earthLocal(latDeg, lonDeg, r, tauMs, out = [0, 0, 0]) {
+    const d = (lonDeg - subsolarLonDeg(tauMs)) * DEG;
+    const phi = latDeg * DEG;
+    out[0] = -r * Math.cos(phi) * Math.cos(d);
+    out[1] = -r * Math.cos(phi) * Math.sin(d);
+    out[2] = r * Math.sin(phi);
+    return out;
+}
+
+/* ── Orbital assets (S2, Orbit Ops) ──────────────────────────────────
+   Elements come from /api/celestrak/tle (parsed name/inclination/
+   period/apogee/perigee + raw lines). Live positions use the house SGP4
+   (js/satellite-tracker.js propagate → TEME km); the display frame is
+   TEME rotated so the mean Sun sits at −x, consistent (to the same
+   documented mean-sun tolerance) with the geographic frame above. */
+
+/** Mean solar ecliptic longitude (°) — the standard mean-sun series. */
+export function sunEclipticLonDeg(tauMs) {
+    const d = (tauMs - Date.UTC(2000, 0, 1, 12)) / 86400e3;   // days since J2000
+    let L = 280.460 + 0.9856474 * d;
+    L %= 360;
+    return L < 0 ? L + 360 : L;
+}
+
+/** TEME km → Earth-local display frame, in R_E. Rotation about z chosen
+ *  so the mean-sun direction lands on −x. */
+export function temeToStageRe(temeKm, tauMs, out = [0, 0, 0]) {
+    const a = (180 - sunEclipticLonDeg(tauMs)) * DEG;
+    const c = Math.cos(a), s = Math.sin(a);
+    out[0] = (c * temeKm.x - s * temeKm.y) / RE_KM;
+    out[1] = (s * temeKm.x + c * temeKm.y) / RE_KM;
+    out[2] = temeKm.z / RE_KM;
+    return out;
+}
+
+/** RAAN (°) from TLE line 2, columns 18–25. */
+export function parseTleRaan(line2) {
+    const v = parseFloat(String(line2 ?? '').slice(17, 25));
+    return Number.isFinite(v) ? v : 0;
+}
+
+/**
+ * Orbit context ring for an asset: a CIRCLE at the mean altitude in the
+ * asset's orbital plane (inclination + RAAN), in TEME axes, R_E units.
+ * Display context only — the live dot uses the real SGP4 propagation;
+ * the ring shows plane + altitude, not eccentricity.
+ */
+export function assetOrbitRing({ inclDeg = 0, raanDeg = 0, altKm = 550 }, n = 96) {
+    const r = (RE_KM + altKm) / RE_KM;
+    const i = inclDeg * DEG, o = raanDeg * DEG;
+    // P = node direction, Q = in-plane normal to P (rotated by inclination).
+    const P = [Math.cos(o), Math.sin(o), 0];
+    const Q = [-Math.sin(o) * Math.cos(i), Math.cos(o) * Math.cos(i), Math.sin(i)];
+    const out = new Float32Array((n + 1) * 3);
+    for (let k = 0; k <= n; k++) {
+        const u = TAU * (k / n);
+        const cu = Math.cos(u), su = Math.sin(u);
+        out[k * 3] = r * (cu * P[0] + su * Q[0]);
+        out[k * 3 + 1] = r * (cu * P[1] + su * Q[1]);
+        out[k * 3 + 2] = r * (cu * P[2] + su * Q[2]);
+    }
+    return out;
+}
+
+/* ── My Sky pose (S2, Aurora Chaser staging) ─────────────────────────
+   Ground-level look-north from the user's pin, in Earth-local R_E:
+   camera floats just above the pin, target on the northward horizon. */
+export function mySkyPose(latDeg, lonDeg, tauMs) {
+    const pos = earthLocal(latDeg, lonDeg, 1.10, tauMs);
+    const northLat = Math.min(88, latDeg + 24);
+    const target = earthLocal(northLat, lonDeg, 1.02, tauMs);
+    return { pos, target };
+}
+
+/* ── Stations & flights (§5.4 — stations 1–4 in S1, 5–6 in S2) ───────── */
 
 /** Camera stations in STAGE units (+x Sun→Earth, z north; Earth at
  *  [EARTH_S,0,0]). Poses framed for the compressed map (mix=0) — the
@@ -258,6 +421,12 @@ export function stationDefs(mix = 0) {
           pos: [sL1 + 0.34, -0.42, 0.16], target: [sL1 - 0.8, 0, 0], minD: 0.15, maxD: 2.2 },
         { id: 'magnetosphere', title: 'Magnetosphere',
           pos: [e - 0.62, -0.5, 0.24], target: [e, 0, 0], minD: 0.18, maxD: 2.2 },
+        // S2 persona stagings. My Sky's nominal pose is the no-pin
+        // fallback — with a pin the renderer overrides it via mySkyPose.
+        { id: 'my-sky', title: 'My Sky',
+          pos: [e - 0.09, 0, 0.05], target: [e, 0, 0.02], minD: 0.004, maxD: 0.5 },
+        { id: 'orbit-ops', title: 'Orbit Ops',
+          pos: [e - 0.28, -0.22, 0.38], target: [e, 0, 0], minD: 0.05, maxD: 1.6 },
     ];
 }
 

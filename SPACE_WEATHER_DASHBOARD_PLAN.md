@@ -400,9 +400,32 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
   parity review, as planned. S2 upgrades on record: live active
   regions on the Sun, forecast-band magnetopause breathing, aurora
   oval band + persona stagings, picking→dock sync.
-- **S2 — Persona stagings.** My Sky + Orbit Ops (oval band, drive ring,
-  shells, heat-shell, CelesTrak asset picker), uncertainty grammar complete
-  (ghosts, wavefronts, magnetopause breathing), picking→dock sync.
+- **S2 — Persona stagings. ✅ SHIPPED 2026-07-22.** My Sky + Orbit Ops
+  (oval band, drive ring, shells, heat-shell, CelesTrak asset picker),
+  uncertainty grammar complete (ghosts, wavefronts, magnetopause
+  breathing), picking→dock sync. Landed as: stations 5–6 in
+  `js/stage/model.js` stationDefs; the aurora oval as a p10–p90 BAND
+  between forecast-Kp boundary quantiles — `ovalLatAtLon` numerically
+  inverts the verdict-engine dipole (node-pinned against the oracle) and
+  `kpBandAt` consumes the page's EXISTING probabilistic-Kp trajectory
+  (the 'earth-forecast-update' arp mean/lo80/hi80 — never re-derived);
+  mean-sun geographic + TEME display frames (equation-of-time and
+  obliquity omissions documented in the module header; real pass timing
+  stays with js/pass-predictor.js); My Sky = ground-level look-north
+  from the ppx_user_location pin with the drive-ring annotation ("oval
+  edge ≈ N km poleward", via the same verdict-engine oracles the alert
+  products use); Orbit Ops = LEO/GEO shells + drag heat-shell colored
+  by the UA-engine density ratio at the fleet's mean altitude +
+  CelesTrak picker (/api/celestrak/tle by NORAD id or name over the
+  edge-cached active group; ≤8 assets, localStorage-persisted; live
+  dots via the house SGP4 js/satellite-tracker.js propagate, orbit
+  rings from mean elements); picking (rope → forecast-panel focus,
+  pin → My Sky, asset → label highlight) dispatching `sw-pick` —
+  one-way Stage→dock like sw-tau. Scale-honesty consolidation rode
+  along: the drawn Earth is now EXACTLY 1 R_E in the Earth-local frame
+  (stage/scale.js BODY), so surface features, shells, and the
+  magnetopause share ONE local scale. The forecast-band magnetopause
+  breathing (vs observed-now) remains an S3-era upgrade.
 - **D2 — Personalization depth.** Config sheets, threshold profile
   unification (alert-sender handoff), multi-instance, mobile order,
   cloud sync via the `dashboards` table (migration on author's go),

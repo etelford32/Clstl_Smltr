@@ -82,18 +82,21 @@ export function rulerTicks(mix = 0) {
 
 /* ── Disclosed body / local-frame exaggerations ───────────────────────── */
 
+// Earth-local frame: 1 stage unit = EARTH_LOCAL_RE R_E around Earth's
+// stage position. Chosen so the quiet magnetopause nose (~10 R_E) sits
+// well clear of the drawn Earth and a storm-compressed nose (~5.4 R_E)
+// visibly bites inside GEO (6.6 R_E).
+export const EARTH_LOCAL_RE = 55;   // R_E per stage unit
+export const reToUnits = (re) => re / EARTH_LOCAL_RE;
+
 export const BODY = Object.freeze({
     // Stage-unit draw radii. Real: Sun 0.00465 AU → 0.014 stage units at
     // A=4; Earth 4.26e-5 AU → invisible. Factors stated for the HUD line.
+    // The drawn Earth is EXACTLY 1 R_E in the Earth-local frame (S2):
+    // surface features (pin, oval band), orbital shells, and the Shue
+    // magnetopause all share ONE local scale — no second Earth size.
     sunRadiusUnits: 0.12,
-    earthRadiusUnits: 0.055,
-    sunExaggeration: 0.12 / (A * (RSUN_KM / AU_KM)),          // ≈ ×6.5
-    earthExaggeration: 0.055 / (A * (RE_KM / AU_KM)),         // ≈ ×320
+    earthRadiusUnits: 1 / EARTH_LOCAL_RE,
+    sunExaggeration: 0.12 / (A * (RSUN_KM / AU_KM)),                    // ≈ ×6.5
+    earthExaggeration: (1 / EARTH_LOCAL_RE) / (A * (RE_KM / AU_KM)),    // ≈ ×107
 });
-
-// Earth-local frame: 1 stage unit = EARTH_LOCAL_RE R_E around Earth's
-// stage position. Chosen so the quiet magnetopause nose (~10 R_E) sits
-// just outside the drawn Earth sphere and a storm-compressed nose
-// (~5.4 R_E) visibly bites inside GEO (6.6 R_E).
-export const EARTH_LOCAL_RE = 55;   // R_E per stage unit
-export const reToUnits = (re) => re / EARTH_LOCAL_RE;

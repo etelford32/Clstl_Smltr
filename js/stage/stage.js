@@ -40,12 +40,17 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { stagePoint, stageRadius, rulerTicks, BODY, EARTH_S, AU_KM, reToUnits }
+import { stagePoint, stageRadius, rulerTicks, BODY, EARTH_S, AU_KM, RE_KM, reToUnits }
     from './scale.js';
 import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          wavefrontRadiiAu, shueSurfaceGrid, parkerSpiralPoints,
-         stationDefs, flightPose, dynamicPressure } from './model.js';
+         stationDefs, flightPose, dynamicPressure,
+         ovalBandGrid, kpBandAt, earthLocal, temeToStageRe,
+         assetOrbitRing, parseTleRaan, mySkyPose } from './model.js';
 import { ropeFrame } from '../flux-rope/view.js';
+import { magneticLatitude, boundaryForKp } from '../verdict-engine.js';
+import { density, kpToAp } from '../upper-atmosphere-engine.js';
+import { propagate } from '../satellite-tracker.js';
 
 const HOUR = 3.6e6;
 const PAST_MS = 24 * HOUR, FUTURE_MS = 72 * HOUR;
@@ -105,6 +110,29 @@ const CSS = `
 .swst-lost { position: absolute; inset: 0; display: none; align-items: center;
     justify-content: center; color: var(--sw-text-muted, #8b94ad); font-size: .8rem;
     background: #05030f; text-align: center; padding: 20px; }
+.swst-assets { position: absolute; left: 10px; top: 46px; width: 230px; max-width: 60vw;
+    display: none; pointer-events: auto; background: var(--sw-surface-raised, rgba(16,24,48,.92));
+    border: 1px solid var(--sw-border, rgba(255,255,255,.09)); border-radius: 9px;
+    padding: 8px; font: 500 11px/1.4 system-ui; color: var(--sw-text, #cdd); }
+.swst-assets.open { display: block; }
+.swst-assets .swst-asset-search { display: flex; gap: 5px; margin-bottom: 6px; }
+.swst-assets input { flex: 1; min-width: 0; font: inherit; padding: 4px 7px; border-radius: 6px;
+    border: 1px solid var(--sw-border, rgba(255,255,255,.09)); background: rgba(0,10,26,.8);
+    color: var(--sw-text-bright, #e8f4ff); }
+.swst-assets button { font: 600 10px/1 system-ui; padding: 4px 8px; border-radius: 6px;
+    cursor: pointer; background: rgba(0,30,55,.8); color: var(--sw-text, #cdd);
+    border: 1px solid var(--sw-border-focus, rgba(0,198,255,.45)); }
+.swst-asset-row { display: flex; justify-content: space-between; align-items: center;
+    gap: 6px; padding: 3px 4px; border-radius: 5px; }
+.swst-asset-row:hover { background: rgba(0,198,255,.10); }
+.swst-asset-row .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swst-asset-note { color: var(--sw-text-dim, #68718a); font-size: .58rem; margin-top: 4px; }
+.swst-pin-label { position: absolute; transform: translate(-50%, -145%);
+    font-size: .6rem; color: var(--sw-status-quiet, #4fc97f); white-space: nowrap;
+    text-shadow: 0 1px 3px #000; }
+.swst-asset-label { position: absolute; transform: translate(8px, -50%);
+    font-size: .56rem; color: #ffd27a; white-space: nowrap; text-shadow: 0 1px 3px #000; }
+.swst-asset-label.picked { color: #fff; font-weight: 700; }
 `;
 
 export function mountStage(hostId = 'sw-stage-host') {
@@ -125,6 +153,15 @@ function mount(host) {
         <canvas></canvas>
         <div class="swst-overlay"></div>
         <div class="swst-stations" role="tablist" aria-label="Camera stations"></div>
+        <div class="swst-assets" aria-label="Fleet assets">
+          <div class="swst-asset-search">
+            <input type="search" placeholder="Name or NORAD ID…" aria-label="Search satellites">
+            <button type="button" class="swst-asset-go">Search</button>
+          </div>
+          <div class="swst-asset-results"></div>
+          <div class="swst-asset-list"></div>
+          <div class="swst-asset-note">CelesTrak catalog · max 8 assets · saved in this browser</div>
+        </div>
         <div class="swst-scale">
           <button type="button" class="swst-truescale" aria-pressed="false">⇲ True scale</button>
           <div class="swst-disclose">Mid-corridor distance log-compressed · bodies enlarged ·
@@ -146,7 +183,9 @@ function mount(host) {
     /* ── Three basics ─────────────────────────────────────────────── */
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setClearColor(0x05030f, 1);
-    const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 60);
+    // Near plane small enough for the My Sky station (camera ~0.008 units
+    // from its target); the scene is sparse so the depth range is safe.
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.002, 60);
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
@@ -160,6 +199,11 @@ function mount(host) {
         playing: false, station: 'corridor', flying: false,
         lost: false, visible: true, onScreen: true,
         lastSceneUpdate: 0, lastTauDispatch: 0,
+        // S2 persona-staging state
+        kpNow: null, f107: 150, timeline: null,    // swpc bus + forecast payload
+        pin: null,                                 // ppx_user_location
+        assets: [],                                // CelesTrak picks (≤8)
+        ovalKey: '', heatKey: '',
     };
     const p3 = [0, 0, 0];   // shared remap scratch (used from setTau onward)
 
@@ -207,6 +251,55 @@ function mount(host) {
     const geoRing = new THREE.LineLoop(circleGeometry(reToUnits(6.6), 72),
         new THREE.LineBasicMaterial({ color: 0x3b4f6e, transparent: true, opacity: 0.55 }));
     earthGroup.add(geoRing);
+    // LEO context ring (550 km — the Starlink shell neighbourhood).
+    earthGroup.add(new THREE.LineLoop(
+        circleGeometry(reToUnits((RE_KM + 550) / RE_KM), 72),
+        new THREE.LineBasicMaterial({ color: 0x3b4f6e, transparent: true, opacity: 0.35 })));
+
+    /* ── S2: aurora oval band, user pin, drag heat-shell, assets ────
+       All in the Earth-local frame (1 drawn Earth radius = 1 R_E — see
+       stage/scale.js BODY). Geography rotates with τ through the
+       mean-sun mapping in model.js earthLocal(); the oval (geomagnetic-
+       pole-fixed) and the pin therefore turn together — consistent by
+       construction. */
+    const OVAL_NLON = 72;
+    const ovalHemis = [1, -1].map(() => {
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position',
+            new THREE.BufferAttribute(new Float32Array((OVAL_NLON + 1) * 2 * 3), 3));
+        const idx = [];
+        for (let i = 0; i < OVAL_NLON; i++) {
+            const a = i * 2, b = a + 2;
+            idx.push(a, a + 1, b, a + 1, b + 1, b);
+        }
+        geom.setIndex(idx);
+        const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({
+            color: 0x54e08a, transparent: true, opacity: 0.22,
+            side: THREE.DoubleSide, depthWrite: false }));
+        const medGeom = new THREE.BufferGeometry();
+        medGeom.setAttribute('position',
+            new THREE.BufferAttribute(new Float32Array((OVAL_NLON + 1) * 3), 3));
+        const median = new THREE.Line(medGeom, new THREE.LineBasicMaterial({
+            color: 0x8fe9ae, transparent: true, opacity: 0.75 }));
+        mesh.visible = median.visible = false;
+        earthGroup.add(mesh); earthGroup.add(median);
+        return { mesh, median };
+    });
+
+    const pinMarker = new THREE.Mesh(
+        new THREE.SphereGeometry(reToUnits(0.22), 12, 8),
+        new THREE.MeshBasicMaterial({ color: 0x4fc97f }));
+    pinMarker.visible = false;
+    earthGroup.add(pinMarker);
+
+    const heatShell = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 40, 24),
+        new THREE.MeshBasicMaterial({ color: 0x4fc97f, transparent: true,
+            opacity: 0.08, side: THREE.DoubleSide, depthWrite: false }));
+    heatShell.visible = false;
+    earthGroup.add(heatShell);
+
+    const assetObjs = [];   // { asset, ring: Line, dot: Mesh, label }
 
     /* ── Rope + ghosts + wavefronts (dynamic) ─────────────────────── */
     const ropeGrid = { nPsi: N_PSI, nTheta: N_THETA };
@@ -264,9 +357,18 @@ function mount(host) {
         const tick = addLabel('swst-tick', `${t.rAu} AU`, () => [stageRadius(t.rAu, state.mix), 0, -0.05]);
         tick.dataset.rau = t.rAu;
     }
+    // S2 overlay: pin label (with the drive-ring annotation) + drag chip.
+    const pinLocal = [0, 0, 0];
+    const pinLabel = addLabel('swst-pin-label', '',
+        () => [EARTH_S + pinLocal[0], pinLocal[1], pinLocal[2]]);
+    pinLabel.style.display = 'none';
+    const heatChip = addLabel('swst-chip dim', '',
+        () => [EARTH_S, 0, heatShell.visible ? heatShell.scale.z : 0.1]);
+    heatChip.style.display = 'none';
 
     /* ── Stations ─────────────────────────────────────────────────── */
     const tabs = wrap.querySelector('.swst-stations');
+    const assetPanel = wrap.querySelector('.swst-assets');
     let flight = null;
     for (const st of stationDefs()) {
         const b = document.createElement('button');
@@ -280,10 +382,19 @@ function mount(host) {
         return stationDefs(state.mix).find((s) => s.id === state.station);
     }
     function flyTo(id, cut = false) {
-        const to = stationDefs(state.mix).find((s) => s.id === id);
+        let to = stationDefs(state.mix).find((s) => s.id === id);
         if (!to) return;
+        // My Sky with a pin: ground-level look-north from the user's
+        // location (model.js mySkyPose, Earth-local R_E → stage units).
+        if (id === 'my-sky' && state.pin) {
+            const p = mySkyPose(state.pin.lat, state.pin.lon, state.tauMs);
+            const toStage = (v) =>
+                [EARTH_S + reToUnits(v[0]), reToUnits(v[1]), reToUnits(v[2])];
+            to = { ...to, pos: toStage(p.pos), target: toStage(p.target) };
+        }
         state.station = id;
         for (const b of tabs.children) b.classList.toggle('active', b.dataset.station === id);
+        assetPanel.classList.toggle('open', id === 'orbit-ops');
         controls.minDistance = to.minD;
         controls.maxDistance = to.maxD;
         if (reduced || cut) {
@@ -383,6 +494,225 @@ function mount(host) {
     window.addEventListener('flux-rope-forecast', (e) => takeForecast(e.detail));
     if (window.__fluxRopeForecast) takeForecast(window.__fluxRopeForecast);
 
+    /* ── S2 data intake: Kp/F10.7 bus, forecast timeline, user pin ──
+       All existing page oracles — the Stage consumes, never re-derives:
+       'swpc-update' (the live bus every card uses), the #kp-val fallback
+       for the pre-bus boot state, 'earth-forecast-update' (the AR(p) +
+       persistence + SWPC probabilistic Kp — feeds kpBandAt), and the
+       shared ppx_user_location store. */
+    window.addEventListener('swpc-update', (e) => {
+        const d = e?.detail;
+        const k = d?.geomagnetic?.kp ?? d?.kp;
+        const f = d?.solar_activity?.f107_sfu;
+        if (Number.isFinite(k)) state.kpNow = k;
+        if (Number.isFinite(f)) state.f107 = f;
+        updateScene();
+    });
+    {
+        const kpEl = document.getElementById('kp-val');
+        const readKp = () => {
+            const v = parseFloat(kpEl?.textContent);
+            if (Number.isFinite(v)) { state.kpNow = v; updateScene(); }
+        };
+        if (kpEl) {
+            new MutationObserver(readKp)
+                .observe(kpEl, { childList: true, characterData: true, subtree: true });
+            readKp();
+        }
+    }
+    window.addEventListener('earth-forecast-update', (e) => {
+        const t = e?.detail?.forecast_timeline;
+        if (t) { state.timeline = t; updateScene(); }
+    });
+    import('../user-location.js').then((m) => {
+        state.pin = m.loadUserLocation();
+        window.addEventListener('user-location-changed', (ev) => {
+            state.pin = ev.detail || m.loadUserLocation();
+            updateScene(true);
+        });
+        updateScene(true);
+    }).catch(() => {});
+
+    /* ── S2 assets: CelesTrak picker + persistence ──────────────────
+       Search by name (over the edge-cached 'active' group) or NORAD ID
+       (?norad=). Assets carry the raw TLE lines; live positions use the
+       house SGP4 (js/satellite-tracker.js — WASM when loaded, J2 Kepler
+       fallback otherwise), rings show plane + mean altitude. */
+    const ASSET_KEY = 'sw-stage-assets';
+    const MAX_ASSETS = 8;
+    try { state.assets = JSON.parse(localStorage.getItem(ASSET_KEY) || '[]').slice(0, MAX_ASSETS); }
+    catch { state.assets = []; }
+
+    function saveAssets() {
+        try { localStorage.setItem(ASSET_KEY, JSON.stringify(state.assets)); } catch {}
+    }
+
+    // Mean elements for the propagate() fallback, straight from line 2.
+    function tleFields(row) {
+        const l2 = row.line2 || '';
+        return {
+            line1: row.line1, line2: row.line2,
+            inclination: parseFloat(l2.slice(8, 16)) || row.inclination || 0,
+            raan: parseTleRaan(l2),
+            eccentricity: parseFloat('0.' + l2.slice(26, 33).trim()) || 0,
+            arg_perigee: parseFloat(l2.slice(34, 42)) || 0,
+            mean_anomaly: parseFloat(l2.slice(43, 51)) || 0,
+            mean_motion: parseFloat(l2.slice(52, 63)) || (1440 / (row.period_min || 92.5)),
+        };
+    }
+
+    function rebuildAssetObjs() {
+        for (const o of assetObjs) {
+            o.ring.geometry.dispose(); earthGroup.remove(o.ring);
+            o.dot.geometry.dispose(); earthGroup.remove(o.dot);
+            o.label.remove();
+            const li = labels.findIndex((l) => l.el === o.label);
+            if (li >= 0) labels.splice(li, 1);
+        }
+        assetObjs.length = 0;
+        for (const a of state.assets) {
+            const altKm = ((a.apogee_km ?? 550) + (a.perigee_km ?? 550)) / 2;
+            const ringRe = assetOrbitRing(
+                { inclDeg: a.inclination ?? 0, raanDeg: parseTleRaan(a.line2), altKm }, 96);
+            const pos = new Float32Array(ringRe.length);
+            const t = { x: 0, y: 0, z: 0 };
+            for (let i = 0; i < ringRe.length / 3; i++) {
+                t.x = ringRe[i * 3] * RE_KM; t.y = ringRe[i * 3 + 1] * RE_KM; t.z = ringRe[i * 3 + 2] * RE_KM;
+                const v = temeToStageRe(t, state.tauMs);
+                pos[i * 3] = reToUnits(v[0]); pos[i * 3 + 1] = reToUnits(v[1]); pos[i * 3 + 2] = reToUnits(v[2]);
+            }
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            const ring = new THREE.Line(g, new THREE.LineBasicMaterial({
+                color: 0xffd27a, transparent: true, opacity: 0.4 }));
+            earthGroup.add(ring);
+            const dot = new THREE.Mesh(
+                new THREE.SphereGeometry(reToUnits(0.35), 10, 6),
+                new THREE.MeshBasicMaterial({ color: 0xffd27a }));
+            dot.userData.norad = a.norad_id;
+            earthGroup.add(dot);
+            const world = [EARTH_S, 0, 0];
+            const label = addLabel('swst-asset-label', a.name || a.norad_id, () => world);
+            assetObjs.push({ asset: a, tle: tleFields(a), ring, dot, label, world, altKm });
+        }
+        renderAssetList();
+        updateScene(true);
+    }
+
+    function renderAssetList() {
+        const list = assetPanel.querySelector('.swst-asset-list');
+        list.innerHTML = '';
+        for (const a of state.assets) {
+            const row = document.createElement('div');
+            row.className = 'swst-asset-row';
+            row.innerHTML = `<span class="n">${a.name || a.norad_id}</span>`;
+            const del = document.createElement('button');
+            del.textContent = '✕';
+            del.title = 'Remove asset';
+            del.addEventListener('click', () => {
+                state.assets = state.assets.filter((x) => x.norad_id !== a.norad_id);
+                saveAssets(); rebuildAssetObjs();
+            });
+            row.appendChild(del);
+            list.appendChild(row);
+        }
+    }
+
+    let catalogCache = null;
+    async function searchAssets(q) {
+        const results = assetPanel.querySelector('.swst-asset-results');
+        results.innerHTML = '<div class="swst-asset-note">searching…</div>';
+        try {
+            let rows;
+            if (/^\d+$/.test(q)) {
+                const res = await fetch(`/api/celestrak/tle?norad=${q}`);
+                rows = res.ok ? await res.json() : [];
+            } else {
+                if (!catalogCache) {
+                    const res = await fetch('/api/celestrak/tle?group=active');
+                    catalogCache = res.ok ? await res.json() : [];
+                }
+                const needle = q.toLowerCase();
+                rows = catalogCache.filter((r) => r.name?.toLowerCase().includes(needle));
+            }
+            rows = (Array.isArray(rows) ? rows : []).slice(0, 8);
+            results.innerHTML = rows.length ? '' :
+                '<div class="swst-asset-note">no match in the catalog</div>';
+            for (const r of rows) {
+                const row = document.createElement('div');
+                row.className = 'swst-asset-row';
+                row.innerHTML = `<span class="n">${r.name} · ${r.norad_id}</span>`;
+                const add = document.createElement('button');
+                add.textContent = '＋';
+                add.title = 'Add to fleet';
+                add.addEventListener('click', () => {
+                    if (state.assets.length >= MAX_ASSETS ||
+                        state.assets.some((x) => x.norad_id === r.norad_id)) return;
+                    state.assets.push(r);
+                    saveAssets(); rebuildAssetObjs();
+                    results.innerHTML = '';
+                });
+                row.appendChild(add);
+                results.appendChild(row);
+            }
+        } catch {
+            results.innerHTML = '<div class="swst-asset-note">catalog unreachable</div>';
+        }
+    }
+    assetPanel.querySelector('.swst-asset-go').addEventListener('click', () => {
+        const q = assetPanel.querySelector('input').value.trim();
+        if (q) searchAssets(q);
+    });
+    assetPanel.querySelector('input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const q = e.target.value.trim();
+            if (q) searchAssets(q);
+        }
+    });
+    rebuildAssetObjs();
+
+    /* ── S2 picking → dock sync (§5.7 "picking = navigation") ───────
+       Click (not drag): rope → the forecast panel focuses; pin → My
+       Sky; asset → its label highlights. Every pick also dispatches
+       'sw-pick' for dock instruments; one-way, fail-quiet. */
+    const raycaster = new THREE.Raycaster();
+    let downXY = null;
+    canvas.addEventListener('pointerdown', (e) => { downXY = [e.clientX, e.clientY]; });
+    canvas.addEventListener('pointerup', (e) => {
+        if (!downXY || Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) > 5) return;
+        downXY = null;
+        const r = canvas.getBoundingClientRect();
+        raycaster.setFromCamera(new THREE.Vector2(
+            ((e.clientX - r.left) / r.width) * 2 - 1,
+            -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+        const targets = [];
+        if (ropeMesh.visible) targets.push(ropeMesh);
+        if (pinMarker.visible) targets.push(pinMarker);
+        for (const o of assetObjs) targets.push(o.dot);
+        const hit = raycaster.intersectObjects(targets, false)[0];
+        if (!hit) return;
+        try {
+            if (hit.object === ropeMesh) {
+                window.dispatchEvent(new CustomEvent('sw-pick', { detail: { type: 'rope' } }));
+                const panel = document.querySelector('[data-lab-panel="flux-rope-forecast"]');
+                if (panel) {
+                    panel.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'center' });
+                    panel.style.outline = '2px solid var(--sw-accent, #4fc3f7)';
+                    setTimeout(() => { panel.style.outline = ''; }, 1600);
+                }
+            } else if (hit.object === pinMarker) {
+                window.dispatchEvent(new CustomEvent('sw-pick', { detail: { type: 'pin' } }));
+                flyTo('my-sky');
+            } else {
+                const norad = hit.object.userData.norad;
+                window.dispatchEvent(new CustomEvent('sw-pick', { detail: { type: 'asset', norad } }));
+                for (const o of assetObjs) {
+                    o.label.classList.toggle('picked', o.asset.norad_id === norad);
+                }
+            }
+        } catch {}
+    });
+
     function updateMagnetopause(s) {
         const pdyn = s ? dynamicPressure(s.n, s.v) : null;
         const key = `${(pdyn ?? 2).toFixed(2)}|${(s?.bz ?? 0).toFixed(1)}`;
@@ -467,6 +797,95 @@ function mount(host) {
                 waves[i].scale.setScalar(s);
             }
         }
+
+        /* ── S2: oval band, pin, heat-shell, live assets ──────────── */
+        const band = kpBandAt(state.tauMs, state.timeline, state.kpNow);
+        const ovalKey = band
+            ? `${band.p10.toFixed(1)}|${band.p50.toFixed(1)}|${band.p90.toFixed(1)}|${Math.round(state.tauMs / 600e3)}`
+            : '';
+        if (ovalKey !== state.ovalKey) {
+            state.ovalKey = ovalKey;
+            for (let h = 0; h < 2; h++) {
+                const { mesh, median } = ovalHemis[h];
+                mesh.visible = median.visible = !!band;
+                if (!band) continue;
+                const g = ovalBandGrid(band, OVAL_NLON, h === 0 ? 1 : -1);
+                const mp = mesh.geometry.getAttribute('position');
+                const lp = median.geometry.getAttribute('position');
+                const rBand = reToUnits(1.03);
+                for (let i = 0; i <= OVAL_NLON; i++) {
+                    earthLocal(g.poleward[i], g.lons[i], rBand, state.tauMs, p3);
+                    mp.array[i * 6] = p3[0]; mp.array[i * 6 + 1] = p3[1]; mp.array[i * 6 + 2] = p3[2];
+                    earthLocal(g.equatorward[i], g.lons[i], rBand, state.tauMs, p3);
+                    mp.array[i * 6 + 3] = p3[0]; mp.array[i * 6 + 4] = p3[1]; mp.array[i * 6 + 5] = p3[2];
+                    earthLocal(g.median[i], g.lons[i], rBand * 1.002, state.tauMs, p3);
+                    lp.array[i * 3] = p3[0]; lp.array[i * 3 + 1] = p3[1]; lp.array[i * 3 + 2] = p3[2];
+                }
+                mp.needsUpdate = lp.needsUpdate = true;
+                mesh.geometry.computeBoundingSphere();
+                median.geometry.computeBoundingSphere();
+            }
+        }
+
+        // User pin + the drive-ring annotation (margin via the SAME
+        // verdict-engine oracles the alert products use).
+        if (state.pin && Number.isFinite(state.pin.lat)) {
+            earthLocal(state.pin.lat, state.pin.lon, reToUnits(1.005), state.tauMs, pinLocal);
+            pinMarker.position.set(pinLocal[0], pinLocal[1], pinLocal[2]);
+            pinMarker.visible = true;
+            pinLabel.style.display = '';
+            let drive = state.pin.city || 'your pin';
+            if (band) {
+                const margin = boundaryForKp(band.p50)
+                    - Math.abs(magneticLatitude(state.pin.lat, state.pin.lon));
+                drive += margin <= 0 ? ' · oval overhead'
+                    : ` · oval edge ≈ ${Math.round(margin * 111 / 10) * 10} km poleward`;
+            }
+            pinLabel.textContent = drive;
+        } else {
+            pinMarker.visible = false;
+            pinLabel.style.display = 'none';
+        }
+
+        // Drag heat-shell at the fleet's mean altitude (UA-engine oracle).
+        const heatAlt = assetObjs.length
+            ? assetObjs.reduce((s, o) => s + o.altKm, 0) / assetObjs.length : 550;
+        const heatKey = `${Math.round(heatAlt)}|${(state.kpNow ?? -1).toFixed(1)}|${Math.round(state.f107)}`;
+        if (heatKey !== state.heatKey) {
+            state.heatKey = heatKey;
+            const ok = Number.isFinite(state.kpNow);
+            heatShell.visible = ok;
+            heatChip.style.display = ok ? '' : 'none';
+            if (ok) {
+                const rhoNow = density({ altitudeKm: heatAlt, f107Sfu: state.f107, ap: kpToAp(state.kpNow) }).rho;
+                const rhoQuiet = density({ altitudeKm: heatAlt, f107Sfu: state.f107, ap: kpToAp(2) }).rho;
+                const ratio = rhoNow / rhoQuiet;
+                heatShell.scale.setScalar(reToUnits((RE_KM + heatAlt) / RE_KM));
+                heatShell.material.color.setHex(
+                    ratio < 1.2 ? 0x4fc97f : ratio < 1.6 ? 0xffd75e :
+                    ratio < 2.5 ? 0xffaa22 : ratio < 4 ? 0xff7847 : 0xff4466);
+                heatChip.textContent =
+                    `drag shell ${Math.round(heatAlt)} km · ρ ×${ratio.toFixed(2)} vs quiet`;
+                heatChip.className = 'swst-chip';
+            }
+        }
+
+        // Live asset dots at τ (house SGP4; catalog epoch as the anchor).
+        for (const o of assetObjs) {
+            const epochMs = Date.parse(o.asset.epoch);
+            let teme = null;
+            if (Number.isFinite(epochMs)) {
+                try { teme = propagate(o.tle, (state.tauMs - epochMs) / 60_000); } catch {}
+            }
+            if (!teme || !Number.isFinite(teme.x)) { o.dot.visible = false; continue; }
+            const v = temeToStageRe(teme, state.tauMs);
+            o.dot.position.set(reToUnits(v[0]), reToUnits(v[1]), reToUnits(v[2]));
+            o.dot.visible = true;
+            o.world[0] = EARTH_S + o.dot.position.x;
+            o.world[1] = o.dot.position.y;
+            o.world[2] = o.dot.position.z;
+        }
+
         chip.classList.toggle('dim', regime() !== 'live');
     }
 
@@ -573,6 +992,9 @@ function mount(host) {
         get station() { return state.station; },
         get tauMs() { return state.tauMs; },
         get mix() { return state.mix; },
+        get assets() { return state.assets.map((a) => a.norad_id); },
+        get ovalVisible() { return ovalHemis[0].mesh.visible; },
+        get pinVisible() { return pinMarker.visible; },
         flyTo, setTau,
     };
     window.__swStage = api;

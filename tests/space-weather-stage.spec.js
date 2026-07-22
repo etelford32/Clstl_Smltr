@@ -42,10 +42,10 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         await page.goto('/space-weather.html', { waitUntil: 'domcontentloaded' });
     });
 
-    test('boots: canvas, four stations, overlay annotations, quiet corridor', async ({ page }) => {
+    test('boots: canvas, six stations, overlay annotations, quiet corridor', async ({ page }) => {
         const host = page.locator('#sw-stage-host');
         await expect(host.locator('canvas')).toBeVisible({ timeout: 30_000 });
-        await expect(host.locator('.swst-stations button')).toHaveCount(4);
+        await expect(host.locator('.swst-stations button')).toHaveCount(6);
         // HTML overlay layer (never rasterized): body labels + AU ruler.
         await expect(host.locator('.swst-overlay')).toContainText('SUN');
         await expect(host.locator('.swst-overlay')).toContainText('EARTH');
@@ -57,7 +57,7 @@ test.describe('the Stage (S1) on space-weather.html', () => {
 
     test('stations switch with bounded orbit; flights land', async ({ page }) => {
         const host = page.locator('#sw-stage-host');
-        await expect(host.locator('.swst-stations button')).toHaveCount(4, { timeout: 30_000 });
+        await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
         await host.locator('.swst-stations button', { hasText: 'L1 Approach' }).click();
         await expect(host.locator('.swst-stations button.active')).toHaveText('L1 Approach');
         await expect.poll(() => page.evaluate(() => window.__swStage?.station))
@@ -90,6 +90,79 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         expect(events.length).toBeGreaterThan(0);
         expect(events.every((e) => Number.isFinite(e.tauMs) &&
             ['replay', 'live', 'forecast'].includes(e.regime))).toBe(true);
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
+    test('S2: pin + My Sky staging + oval band from injected Kp', async ({ page }) => {
+        // Seed a Fairbanks pin through the shared store the Stage reads.
+        await page.addInitScript(() => {
+            localStorage.setItem('ppx_user_location', JSON.stringify(
+                { lat: 64.84, lon: -147.72, city: 'Fairbanks' }));
+        });
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
+
+        // Inject Kp through the page bus → the oval band appears and the
+        // pin label carries the drive-ring annotation.
+        await page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 6 } }));
+        });
+        await expect.poll(() => page.evaluate(() => window.__swStage?.ovalVisible),
+            { timeout: 15_000 }).toBe(true);
+        await expect.poll(() => page.evaluate(() => window.__swStage?.pinVisible)).toBe(true);
+        await expect(host.locator('.swst-pin-label')).toContainText('Fairbanks');
+        await expect(host.locator('.swst-pin-label')).toContainText(/oval/);
+
+        // My Sky flight lands at the pin (ground-level: camera well inside
+        // the Earth-local neighbourhood).
+        await host.locator('.swst-stations button', { hasText: 'My Sky' }).click();
+        await expect.poll(() => page.evaluate(() => window.__swStage?.station))
+            .toBe('my-sky');
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
+    test('S2: Orbit Ops — asset picker (mocked catalog), heat-shell chip, sw-pick', async ({ page }) => {
+        const ISS = {
+            name: 'ISS (ZARYA)', norad_id: 25544,
+            line1: '1 25544U 98067A   26203.50000000  .00016717  00000-0  10270-3 0  9000',
+            line2: '2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537',
+            epoch: '2026-07-22T12:00:00.000Z',
+            inclination: 51.6416, period_min: 91.6, apogee_km: 424, perigee_km: 415,
+        };
+        await page.route('**/api/celestrak/tle*', (r) => r.fulfill({ json: [ISS] }));
+        await page.addInitScript(() => {
+            window.__picks = [];
+            window.addEventListener('sw-pick', (e) => window.__picks.push(e.detail));
+        });
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
+
+        // The picker opens with the Orbit Ops staging.
+        await expect(host.locator('.swst-assets')).not.toBeVisible();
+        await host.locator('.swst-stations button', { hasText: 'Orbit Ops' }).click();
+        await expect(host.locator('.swst-assets')).toBeVisible();
+
+        // NORAD search against the mocked catalog → add → persisted.
+        await host.locator('.swst-assets input').fill('25544');
+        await host.locator('.swst-asset-go').click();
+        await expect(host.locator('.swst-asset-results .swst-asset-row')).toHaveCount(1);
+        await host.locator('.swst-asset-results button').click();
+        await expect(host.locator('.swst-asset-list .swst-asset-row')).toContainText('ISS');
+        expect(await page.evaluate(() => window.__swStage.assets)).toEqual([25544]);
+        expect(await page.evaluate(() =>
+            JSON.parse(localStorage.getItem('sw-stage-assets')).length)).toBe(1);
+
+        // The live dot + label exist and the drag heat-shell chip appears
+        // once Kp is known (UA-engine oracle drives the color/ratio).
+        await page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 5 } }));
+        });
+        await expect(host.locator('.swst-asset-label')).toContainText('ISS');
+        await expect.poll(async () =>
+            (await host.locator('.swst-chip', { hasText: 'drag shell' }).count()))
+            .toBeGreaterThan(0);
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 

@@ -22,9 +22,13 @@ import {
     ghostMembers, quantileWeighted, wavefrontRadiiAu,
     shueSurfaceGrid, parkerSpiralPoints, stationDefs, easeInOutCubic,
     flightPose, D0_KM_DEFAULT, dynamicPressure,
+    ovalLatAtLon, ovalBandGrid, kpBandAt, subsolarLonDeg, earthLocal,
+    sunEclipticLonDeg, temeToStageRe, parseTleRaan, assetOrbitRing, mySkyPose,
 } from '../js/stage/model.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
-import { AU_KM } from '../js/stage/scale.js';
+import { magneticLatitude, boundaryForKp } from '../js/verdict-engine.js';
+import { density, kpToAp } from '../js/upper-atmosphere-engine.js';
+import { AU_KM, RE_KM, EARTH_S } from '../js/stage/scale.js';
 
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log(`  ✓ ${name}`); };
@@ -167,16 +171,20 @@ test('Parker spiral curls with distance (context only)', () => {
 
 /* ── Stations & flights ─────────────────────────────────────────────── */
 
-test('four stations in narrative order with sane frames', () => {
+test('six stations in narrative order with sane frames', () => {
     const s = stationDefs();
     assert.deepEqual(s.map((x) => x.id),
-        ['solar-watch', 'corridor', 'l1-approach', 'magnetosphere']);
+        ['solar-watch', 'corridor', 'l1-approach', 'magnetosphere', 'my-sky', 'orbit-ops']);
     for (const st of s) {
         assert.ok([...st.pos, ...st.target].every(Number.isFinite));
         assert.ok(st.minD > 0 && st.maxD > st.minD);
     }
     const l1 = s[2];
     assert.ok(l1.target[0] < l1.pos[0], 'L1 Approach looks sunward');
+    // The persona stagings live in the Earth neighbourhood.
+    for (const st of [s[4], s[5]]) {
+        assert.ok(Math.hypot(st.pos[0] - EARTH_S, st.pos[1], st.pos[2]) < 0.6, st.id);
+    }
 });
 
 test('flight easing: endpoints exact, midpoint eased', () => {
@@ -186,6 +194,114 @@ test('flight easing: endpoints exact, midpoint eased', () => {
     const [a, b] = stationDefs();
     assert.deepEqual(flightPose(a, b, 0).pos, a.pos);
     assert.deepEqual(flightPose(a, b, 1).target, b.target);
+});
+
+/* ── S2: aurora oval band (oracle = verdict-engine dipole + table) ──── */
+
+test('ovalLatAtLon inverts the magneticLatitude oracle on both hemispheres', () => {
+    for (const kp of [2, 5, 9]) {
+        const b = boundaryForKp(kp);
+        for (const lon of [-180, -72.7, 0, 95]) {
+            for (const hemi of [1, -1]) {
+                const lat = ovalLatAtLon(b, lon, hemi);
+                assert.ok(hemi * lat > 0, `hemisphere sign kp=${kp} lon=${lon}`);
+                const m = Math.abs(magneticLatitude(lat, lon));
+                assert.ok(Math.abs(m - b) < 0.02,
+                    `kp=${kp} lon=${lon} hemi=${hemi}: |mlat| ${m.toFixed(3)} vs boundary ${b.toFixed(3)}`);
+            }
+        }
+    }
+});
+
+test('oval band: poleward > median > equatorward at every longitude', () => {
+    const g = ovalBandGrid({ p10: 3, p50: 5, p90: 7 }, 36);
+    assert.equal(g.lons.length, 37);
+    for (let i = 0; i < g.lons.length; i++) {
+        assert.ok(g.poleward[i] > g.median[i] && g.median[i] > g.equatorward[i],
+            `ordering at lon ${g.lons[i]}`);
+    }
+    // Storm band sits equatorward of a quiet band.
+    const quiet = ovalBandGrid({ p10: 1, p50: 2, p90: 3 }, 36);
+    assert.ok(g.median[0] < quiet.median[0]);
+});
+
+test('kpBandAt: τ-indexed arp band, degenerate past/missing, clamped', () => {
+    const T0 = Date.parse('2026-07-22T00:00:00Z');
+    const timeline = { updated_at: T0, trajectory: {
+        h_steps: 3, start_ms: T0,
+        arp: { mean: [4, 5, 6], lo80: [3, 4, 5], hi80: [5, 7, 12] },
+    } };
+    const b2 = kpBandAt(T0 + 2 * 3.6e6, timeline, 2);
+    assert.deepEqual(b2, { p10: 4, p50: 5, p90: 7 });
+    assert.equal(kpBandAt(T0 + 3 * 3.6e6, timeline, 2).p90, 9, 'hi80 clamps to Kp 9');
+    assert.deepEqual(kpBandAt(T0 - 3.6e6, timeline, 2), { p10: 2, p50: 2, p90: 2 });
+    assert.deepEqual(kpBandAt(T0 + 3.6e6, null, 3.5), { p10: 3.5, p50: 3.5, p90: 3.5 });
+    assert.equal(kpBandAt(T0, null, null), null);
+});
+
+/* ── S2: geographic + orbital display frames ────────────────────────── */
+
+test('mean-sun geography: subsolar meridian faces the Sun (−x), poles on ±z', () => {
+    const noon = Date.parse('2026-07-22T12:00:00Z');
+    assert.ok(Math.abs(subsolarLonDeg(noon)) < 1e-9, '12:00 UTC → subsolar 0°E');
+    const p = earthLocal(0, subsolarLonDeg(noon), 1, noon);
+    assert.ok(Math.hypot(p[0] + 1, p[1], p[2]) < 1e-12, 'subsolar point at −x');
+    assert.ok(Math.hypot(...earthLocal(90, 0, 1, noon).map((v, i) => v - [0, 0, 1][i])) < 1e-9);
+    const q = earthLocal(30, 40, 2.5, noon);
+    assert.ok(Math.abs(Math.hypot(...q) - 2.5) < 1e-12, 'radius preserved');
+});
+
+test('mean solar longitude: J2000 anchor + daily rate', () => {
+    const j2000 = Date.UTC(2000, 0, 1, 12);
+    assert.ok(Math.abs(sunEclipticLonDeg(j2000) - 280.46) < 0.01);
+    const d10 = sunEclipticLonDeg(j2000 + 10 * 86400e3) - sunEclipticLonDeg(j2000);
+    const wrapped = ((d10 % 360) + 360) % 360;
+    assert.ok(Math.abs(wrapped - 9.856474) < 1e-6);
+});
+
+test('temeToStageRe: rigid rotation about z, km → R_E', () => {
+    const t = Date.parse('2026-07-22T05:00:00Z');
+    const v = temeToStageRe({ x: 5000, y: -3000, z: 4000 }, t);
+    assert.ok(Math.abs(Math.hypot(...v) - Math.hypot(5000, -3000, 4000) / RE_KM) < 1e-9);
+    assert.ok(Math.abs(v[2] - 4000 / RE_KM) < 1e-12, 'z untouched');
+});
+
+test('TLE line-2 RAAN parse (ISS sample)', () => {
+    assert.equal(parseTleRaan(
+        '2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537'), 247.4627);
+    assert.equal(parseTleRaan(null), 0);
+});
+
+test('asset orbit ring: constant mean-altitude radius, inclination sets max |z|', () => {
+    const ring = assetOrbitRing({ inclDeg: 51.6, raanDeg: 247.5, altKm: 420 }, 64);
+    const r = (RE_KM + 420) / RE_KM;
+    let zMax = 0;
+    for (let k = 0; k <= 64; k++) {
+        const x = ring[k * 3], y = ring[k * 3 + 1], z = ring[k * 3 + 2];
+        assert.ok(Math.abs(Math.hypot(x, y, z) - r) < 1e-6, `radius at ${k}`);
+        zMax = Math.max(zMax, Math.abs(z));
+    }
+    assert.ok(Math.abs(zMax - r * Math.sin(51.6 * Math.PI / 180)) < 1e-3);
+    // The ascending node sits along the RAAN direction in the equator plane.
+    // f32 storage: tolerances at the Float32Array quantum, not f64.
+    const eq = assetOrbitRing({ inclDeg: 0, raanDeg: 90, altKm: 420 }, 4);
+    assert.ok(Math.abs(eq[0]) < 1e-6 && Math.abs(eq[1] - r) < 1e-6, 'u=0 at the node');
+});
+
+test('mySkyPose: camera just above the pin, target on the northward horizon', () => {
+    const t = Date.parse('2026-07-22T06:00:00Z');
+    const { pos, target } = mySkyPose(45, -105, t);
+    assert.ok(Math.abs(Math.hypot(...pos) - 1.10) < 1e-9);
+    assert.ok(Math.abs(Math.hypot(...target) - 1.02) < 1e-9);
+    assert.ok(target[2] > pos[2], 'looking poleward');
+});
+
+/* ── S2: the drag oracle the heat-shell colors encode ───────────────── */
+
+test('thermosphere density rises with activity (UA-engine oracle)', () => {
+    const at = (kp) => density({ altitudeKm: 550, f107Sfu: 150, ap: kpToAp(kp) }).rho;
+    assert.ok(at(5) > at(2) && at(8) > at(5), 'monotone in Kp');
+    assert.ok(at(8) / at(2) > 1.5, 'a G4 storm is a visible drag event at 550 km');
 });
 
 console.log(`stage-model: ALL PASS (${n} tests)`);
