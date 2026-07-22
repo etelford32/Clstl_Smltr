@@ -1,318 +1,358 @@
-# Space Weather Dashboard v2 — full-customization redesign plan
+# Space Weather Dashboard v2 — the signed-in mission console (plan)
 
-> **Plan only — no implementation in this document's commit.** Product
-> target: `space-weather.html` becomes a per-user mission-control surface —
-> "make it YOURS" — composed from the platform's now-validated forecast
-> engine (flux-rope Phases 0–5), the Phase 4 consumer modules, and the
-> existing live-feed spine. Decisions marked ⚠ need the author's call
-> (§12) before their phase starts.
+> **Plan only — no implementation in this document's commits.** Product
+> target: `space-weather.html` becomes the platform's SIGNED-IN
+> mission-control surface for two primary personas — **Aurora Chasers**
+> and **Satellite Operators** — built around a true-3D **Stage** (one
+> continuous Sun→Earth scene) with a fully customizable instrument dock.
+> Decisions marked ⚠ need the author's call (§13) before their phase.
+>
+> Decisions already made by the author (2026-07-22): the dashboard is
+> **sign-in gated** (authenticated users only); primary personas are
+> **Aurora Chaser + Satellite Operator**; the 3D presentation is a
+> first-class design object, not a widget.
 
 ---
 
 ## 1. Vision
 
-Today the dashboard is a *general* page: ~20 author-arranged panels that
-are the same for a satellite operator at 2 a.m. during a G4 watch and a
-first-visit aurora hopeful in Ohio. The redesign inverts it: **the page is
-an empty grid + a panel catalog + your data**. Users compose the dashboard
-from panels that each accept *their* location, *their* thresholds, *their*
-assets (satellites, ground sites), and *their* horizon — and the platform's
-differentiator (physics-first, validated, honest uncertainty) is visible in
-every panel: fans not lines, probabilities not verdicts, skill numbers not
-vibes.
+Today the page is a *general* feed viewer: ~20 author-arranged panels and
+three separate pseudo-3D views that are actually 2D-canvas projections
+(`getContext('2d')` — the helio hero, the transit view, the globe). The
+platform's REAL 3D and its validated physics live elsewhere: the
+raymarched flux-rope heliosphere (kernel-oracle GLSL), the EarthView
+globe, the ring-current layers, the Shue magnetopause form, the aurora
+boundary tables, TLE pass prediction.
 
-One sentence: **from "our page about space weather" to "your console for
-your exposure to space weather."**
+v2 inverts both axes at once:
+
+- **Presentation**: one cinematic, data-true 3D **Stage** — a continuous
+  Sun→Earth corridor the camera inhabits — replaces the disconnected
+  2D pseudo-views. Panels stop being the page; they become the
+  **instrument dock** around the Stage.
+- **Ownership**: the page is composed per user — panels, thresholds,
+  locations, assets, camera home — and lives behind sign-in, making it
+  the account's home surface and the platform's retention core.
+
+One sentence: **your sky and your fleet, on one stage, with honest
+uncertainty — arranged by you.**
 
 ## 2. What exists (build on it, don't rediscover it)
 
-| Asset | State | Redesign role |
+| Asset | State | v2 role |
 |---|---|---|
-| **Layout Lab** (`js/layout-lab.js`, 573 lines, node-tested) | SHIPPED: drag-reorder, hide/show, full-width spans, per-panel resize, personal layout in localStorage, A/B variants (`data/layout-variants/space-weather.json`), export/import JSON, experiment goals `sw_panel_interact` / `sw_dwell_60s` | The v2 foundation. v1 rearranges *author-authored* panels; v2 adds a **registry** (panels as self-describing modules), **add-from-gallery**, **per-panel config**, **presets**, **cloud sync**. Do NOT fork it — extend it. |
-| ~20 tagged panels (`data-lab-panel=`) | SHIPPED | Become registry entries with declared config schemas |
-| Flux-rope forecast panel (`js/flux-rope-dashboard.js`) | SHIPPED (Phase 3/4) | First fully-configurable v2 panel (thresholds, horizon, event picker) |
-| Shared forecast provider (`js/flux-rope-forecast.js`) | SHIPPED (Phase 4) | THE data spine for every forecast panel — one pipeline, many views |
-| `js/ring-current-outlook.js`, `stormOutlook()` verdict tier, `api/_lib/aurora-tiers.js` | SHIPPED (Phase 4) | Dst-outlook panel; storm-tier banner; per-user threshold unification (§6) |
-| `SolarWindDriver` contract + hindcast bundles + pinned validation numbers | SHIPPED | The trust assets behind the Skill/Scorecard panels (§7a) |
-| `telemetry.recordFeature` (kind `'feature'`, migrated 2026-07-13) + `js/experiments.js` | SHIPPED | Product-analytics channel (§7b) — no new DB kinds needed for most events |
-| Verdict-card patterns (`draggable-panel.js`, stable-header/re-rendered-body, fail-quiet mounts) | SHIPPED | House interaction + resilience patterns to reuse verbatim |
-| `DESIGN_TOKENS.md` (earth.html token system) | SHIPPED for earth.html only | Port the token discipline to space-weather (§8) — the page currently carries its own inline paint-shop |
-| `js/tier-config.js` + `user_profiles` one-column-per-flag | SHIPPED | Gating + persistence conventions (§9) |
+| **Layout Lab** (`js/layout-lab.js`, node-tested) | SHIPPED: drag-reorder, hide, span, resize, personal layouts (localStorage), A/B variants, export/import, `sw_panel_interact` / `sw_dwell_60s` goals | Foundation of the instrument dock; v2 adds registry, gallery, per-panel config, presets, cloud sync — extend, don't fork |
+| Flux-rope engine + shared provider (`js/flux-rope-forecast.js`) | SHIPPED, 5 validated generations | The Stage's CME actors + every forecast instrument's data spine |
+| Raymarched heliosphere view (`js/flux-rope/view.js`, WebGL2) | SHIPPED on flux-rope.html | Seed of the Stage's corridor renderer (kernel-oracle discipline proven) |
+| EarthView globe stack (earth.html: THREE, aurora, city markers, sat tracker, `nextPasses`) | SHIPPED | Seed of the Stage's Earth station + My Sky staging |
+| Ring-current globe/ionosphere layers, `shueStandoffRe`/`shueAlpha` | SHIPPED | Magnetosphere station geometry (Shue surface IS the validated form) |
+| `boundaryForKp` (verdict engine), `stormOutlook`, aurora tiers | SHIPPED | Aurora oval banding + tier banner, one threshold grammar |
+| τ-clock discipline (flux-rope page), hindcast replay bundles | SHIPPED | The Stage's global timeline (past-replay / now / forecast) |
+| `js/preview-mode.js` (`?preview=1` fullscreen-stage, zero interactivity) | SHIPPED | The attract loop / marketing embed of the Stage, and the signed-out teaser |
+| Auth stack (`js/auth.js`, signin redirects, `tests/auth-tier-redirect.spec.js`, funnel telemetry) | SHIPPED | The sign-in gate mechanics (§4) |
+| `telemetry.recordFeature` + `js/experiments.js` | SHIPPED | Product analytics channel (§9b) |
+| `DESIGN_TOKENS.md`, tier-config, verdict-card interaction patterns | SHIPPED | Visual system port + gating + house UX patterns |
 
-Hard constraints carried forward: **no frameworks, no bundler**, flat
-`*.html`, ES modules, browser-direct NOAA / edge-proxied NASA, fail-quiet
-panel mounts, additive Layout Lab (applying a layout never creates/destroys
-panel internals).
+Constraints carried forward: no frameworks/bundlers, flat `*.html`, ES
+modules, fail-quiet mounts, additive Layout Lab semantics, kernel-oracle
+discipline for anything the GPU draws.
 
-## 3. Personas → presets (the usability spine)
+## 3. The sign-in gate (new commitment)
 
-Each persona is a JOB, and each maps to a **named preset layout** shipped
-as data (same JSON shape Layout Lab already exports), selectable at
-first-run and re-applicable anytime. Presets are starting points, not
-modes — everything stays editable after.
+- **Hard gate, authentication not paywall**: `space-weather.html` checks
+  the session at boot (before heavy init); signed-out visitors are
+  redirected to `signin.html?next=/space-weather.html` (house pattern —
+  the tier-redirect spec already pins this flow family). Free signed-in
+  accounts get the full customizable dashboard (⚠ §13-Q2 confirms tier
+  split; recommendation unchanged: customize free, cloud sync Basic+,
+  org features Institution).
+- **The signed-out moment is a marketing asset, not a wall**: the signin
+  page (and pricing/landing embeds) get the Stage's **attract loop** — a
+  non-interactive cinematic auto-flight at *current live conditions* via
+  `?preview=1` (the mechanism exists) — so the gate sells what it
+  protects. CTA pair: "Sign in" / "Request access" (B2G path,
+  request-access.html per the strategic frame).
+- **Deep links survive** the round-trip (`?next=` preserved, layout and
+  station params included).
+- **Funnel instrumentation**: `gate_view → signin_start → signin_done →
+  first_layout_touch` through the existing auth-funnel channel; the gate
+  is an experiment surface (copy/att­ract variants) via experiments.js.
+- ⚠ §13-Q1 naming: the platform already has `dashboard.html` (account
+  dashboard). Two "dashboards" will confuse nav and telemetry. Options:
+  (a) this page absorbs the account-home role and dashboard.html becomes
+  settings; (b) rename this surface "Mission Console" / "Console" in nav.
+  Recommend (b) short-term, revisit (a) after adoption data.
 
-1. **Aurora Chaser** — "Will I see it from HERE, and when should I drive?"
-   Location-anchored: aurora odds tonight + 3-night strip, tiered alert
-   status at *my* Kp threshold, cloud cover, flux-rope arrival countdown,
-   dark-window clock.
-2. **Satellite Operator (B2G wedge)** — "What does the next 72 h do to MY
-   assets?" Dst outlook, LEO density/drag index + Starlink-2022 context,
-   arrival window with uncertainty, GEO charging scale, per-asset altitude
-   config, alert ledger for shift handoff.
-3. **Forecaster / Researcher** — "Show me the model guts." Bz fan with
-   ensemble controls, ESS/λ assimilation chip, STEREO-A conditioning
-   status, three-way validation chips, raw feed strips, event replay links
-   into the Flux Rope Simulator / Hindcast Lab.
-4. **Educator** — curated storytelling order: Sun → transit → Earth →
-   effects; annotations on; jargon-light labels; classroom share link.
-5. **Casual / first visit** — the current page's job: a good general
-   default (this preset ≈ today's layout, so nothing regresses).
+## 4. Personas (locked) → stagings + presets
 
-⚠ §12-Q1: which TWO personas get design-polish priority in D1? (Strategy
-doc says B2G + operators; traffic says aurora chasers. Recommend: Operator
-+ Aurora Chaser first.)
+Primary (design-polish priority, D1/S1):
 
-## 4. The customization model (Layout Lab v1 → Dashboard v2)
+1. **Aurora Chaser** — *"Will I see it from here, and when do I drive?"*
+2. **Satellite Operator** — *"What does the next 72 h do to my fleet?"*
 
-Four layers, each strictly additive:
+Secondary presets (ship as layouts, polish later): Forecaster/Researcher,
+Educator, Casual. Each persona = a **Stage staging** (camera home +
+scene dressing, §5.6) + an **instrument dock preset** + default
+thresholds. Everything remains editable — presets are starting points.
 
-1. **Registry.** Every panel becomes a self-describing entry:
-   `{ id, title, blurb, category, tier, sizes: [1x1|2x1|2x2|wide],
-   configSchema, dataNeeds: [feed keys], mount(el, config), preview() }`.
-   Existing DOM panels register with a thin adapter (no rewrite);
-   new panels (§7) are registry-native modules under `js/dashboard/panels/`.
-   The registry is what turns "reorder what the author wrote" into
-   "compose from a catalog", including MULTIPLE INSTANCES of one panel
-   with different configs (two aurora panels: home + cabin).
-2. **Grid.** CSS grid with explicit spans replaces the current
-   section-flow; Layout Lab's zone/order/span/hide model extends with
-   `{cols, size}` per placement. Mobile: single-column reflow by a
-   user-orderable priority list (the mobile order ≠ desktop order — small
-   screens get their own drag list). Density modes: comfortable / compact /
-   **ops** (max data per pixel, for wall screens; pairs with an auto-cycle
-   "kiosk" toggle).
-3. **Per-panel config.** Each panel's ⚙ opens a config sheet generated
-   from its `configSchema`: location (defaults to the account/saved
-   location system), thresholds (§6), horizon (24 h / 72 h / 27-day),
-   units, data source variants, asset altitude, chart style. Config edits
-   re-render only that panel body (verdict-card stable-header pattern).
-4. **Presets + persistence + sharing.**
-   - Presets: the five §3 layouts shipped in `data/layout-variants/` (the
-     mechanism already exists — presets are just named variants surfaced
-     in UI instead of assigned by experiment).
-   - Personal layouts: localStorage first (works signed-out, keeps the
-     anonymous surface), **cloud sync when signed in** so the dashboard
-     follows the user across devices. ⚠ §12-Q2 storage shape: a
-     `dashboards` table (named, versioned, several per user — enables the
-     institution "shared org dashboard" later) vs a single
-     `user_profiles.dashboard_layout` JSONB column. Recommend the table.
-   - Sharing: "copy layout link" (URL-fragment-encoded layout, no server),
-     plus export/import JSON (exists). Org-shared dashboards = later phase,
-     institution tier.
+## 5. THE STAGE — the 3D presentation architecture
 
-## 5. Panel catalog v2 (what "specific to their needs" means concretely)
+This is the centerpiece. Not "a 3D widget in a card": **one continuous,
+data-true Sun→Earth scene** that the whole dashboard is arranged around.
 
-**Forecast family (the flux-rope payoff — all via the ONE shared provider):**
-- **Bz forecast fan** — configurable thresholds drawn on the fan, horizon,
-  members, "show assimilation detail" toggle (ESS/λ), event picker when
-  multiple CMEs are in flight.
-- **Arrival countdown** — big-type P10–P90 window + P(hit), counts down;
-  the panel most people will screenshot.
-- **Dst / storm-depth outlook** — ring-current pipeline over the forecast
-  driver; G-scale banding at the user's threshold.
-- **My alert tier** — the aurora-alerts Watch/Warning/Nowcast state
-  evaluated at *my* threshold + *my* location, with inline threshold
-  editor and email-subscribe handoff (closes the loop with the fixed
-  sender).
-- **Aurora tonight (per location)** — verdict-engine `auroraVerdict` +
-  cloud + dark window; multi-instance for multiple sites.
-- **LEO drag index (operator)** — density outlook at a configurable
-  altitude, Starlink-2022 reference band, link to the Gannon density page.
+### 5.1 Why one scene
 
-**Live-now family (exists, gains config):** solar wind strip, Kp/G-R-S
-scales, X-ray flares, DONKI CME list, globe, transit view, heliosphere
-hero — each gets thresholds/units/source options instead of one-size copy.
+Three separate canvases with three implicit cameras (today) means no
+narrative continuity, competing focal points, and physics drawn three
+different ways. One scene gives: cause→effect as camera motion (the Sun
+*launches*, the corridor *carries*, the magnetosphere *receives*, your
+sky *responds*); one lighting/scale/color grammar; one render budget;
+and picking/synchronization between 3D objects and dock instruments.
 
-**Trust family (new, differentiating, §7a):** validation scorecard,
-personal storm log, forecast-vs-actual replay.
+### 5.2 Scene graph (every element has a data oracle — nothing decorative)
 
-**Utility:** notes/ops-log (shift handoff), clock strip (UTC + local +
-Bartels rotation), links/bookmarks.
+- **Sun** — live active regions (SRS/HEK feeds already ingested), flare
+  glints on X-ray events; rotation at true Carrington rate under the
+  τ-clock.
+- **Inner heliosphere corridor** — Parker-spiral context geometry
+  (ambient field lines, faint); **CME flux ropes as the raymarched
+  croissants** (the existing kernel-oracle GLSL — geometry from the SAME
+  member params the forecast uses), with ensemble ghost ropes
+  weight-faded exactly as the flux-rope page already does.
+- **L1 sentinel** — a marked station with a live instrument chip
+  (current Bz/V/N, assimilation ESS/λ when the filter is armed); the
+  "now-line in space".
+- **Magnetosphere** — Shue-form magnetopause surface (`shueStandoffRe`,
+  `shueAlpha` — validated, already in the codebase), bow shock, tail;
+  the surface BREATHES with Pdyn (observed now; forecast band later on
+  the timeline).
+- **Earth** — night lights, live cloud layer (existing mosaic tech),
+  terminator; **aurora oval as a BAND** (p10/p50/p90 equatorward
+  boundaries from `boundaryForKp` over the Kp forecast distribution —
+  uncertainty as geometry, not error bars); the user's location pin(s)
+  with a sightline to the oval edge.
+- **Orbital shells** — LEO/MEO/GEO context rings; live asset orbits from
+  TLEs (satTracker/pass-predictor tech); **drag heat-shell**: a
+  translucent altitude shell colored by the density outlook at the
+  operator's configured altitude.
+- **Arrival wavefronts** — translucent shells at the ensemble's P10 /
+  P50 / P90 arrival distances: the storm's *where-is-it-now* made
+  visible, honest about spread.
 
-Every panel declares empty/loading/degraded states up front — the
-fail-quiet culture becomes a *visible design element* ("NOAA feed stale
-14 min" chip), not silent absence.
+### 5.3 Scale honesty
 
-## 6. One threshold system (the coherence move)
+True Sun–Earth scale is unusable (Earth would be sub-pixel). The
+corridor uses **piecewise-compressed distance** (near-Sun and near-Earth
+zones near-true, mid-corridor log-compressed) with a persistent scale
+ruler and a "true scale" toggle that animates the compression away —
+honesty about the compression is part of the design, stated on-stage.
 
-Today thresholds are scattered: AurOracle slider (`kp_threshold`),
-alert-engine prefs (`aurora_kp_threshold`, `storm_g_threshold`), verdict
-GO margins, hard-coded panel copy. v2 introduces a single per-user
-**threshold profile** `{ kp, gScale, minBzNt, dstNt, leoAltKm }` with one
-editor, consumed by every panel, the verdict tier, and the alert sender.
-Set "Kp ≥ 5" once → the fan draws your line, the countdown colors at your
-line, the alert tier fires at your line, the email matches the page.
-(Mapping helpers already exist: `kpFromMinBz`, G-scale tables,
-`stormClass` — this is unification, not new science.)
+### 5.4 Camera stations & flights (the narrative grammar)
 
-## 7. Analytics — both meanings, explicitly
+Authored stations, smooth flights between them; user orbit within bounds
+per station; double-click reset (house pattern). Every flight is a
+cause→effect edge:
 
-**a) Analytics FOR the user (product value):**
-- **Validation scorecard panel** — the pinned hindcast numbers (St.
-  Patrick's min-Bz 1.3% / shock 0.0 h; Gannon min 0.3% / internal shock
-  0.2 h; the −280-vs−412 pipeline-ceiling finding) rendered as the trust
-  badge with links to the receipts. No competitor shows their misses;
-  we pin ours to the dashboard.
-- **Personal storm log** — every crossing of *your* threshold since you
-  set it (from stored Kp/Dst history), with "what the engine said N hours
-  before" replay links.
-- **Alert ledger** — the tier emails/in-app alerts you actually received,
-  vs what happened (per-user hit/false-alarm record — honesty as a
-  feature).
-- **Forecast-vs-actual strip** — rolling 27-day overlay of issued fans vs
-  observed Bz/Kp (extends `forecast_log`/`archive-forecasts` plumbing).
+1. **Solar Watch** — Sun close-up; ARs, flare pips, launch history.
+2. **Corridor** — side-on Sun→Earth; ropes in flight, wavefronts, L1.
+3. **L1 Approach** — ride at the sentinel; the fan chart docks beside
+   live in-situ; assimilation visually "grabs" ghost ropes (weight fade)
+   as data arrives.
+4. **Magnetosphere** — the receiving end; magnetopause vs GEO ring,
+   ring-current glow tie-in.
+5. **My Sky** (Aurora Chaser home) — ground-level look-north from the
+   user's pin: horizon, cloud layer, the oval band overhead/poleward,
+   dark-window shading; "the forecast as you'd see it".
+6. **Orbit Ops** (Operator home) — Earth with shells + assets; drag
+   heat-shell; magnetopause proximity to GEO; conjunction/decay chips.
 
-**b) Product analytics (learn what users need):**
-- Instrument the customization loop itself via existing channels
-  (`recordFeature` kind `'feature'`; experiment goals): `panel_add`,
-  `panel_remove`, `panel_config` (which field), `panel_move`,
-  `preset_apply`, `layout_save`, `layout_share`, `density_change`,
-  `threshold_set` (value bucket, not raw location), mobile-order edits,
-  dwell per panel (extend `sw_panel_interact` to per-panel dwell buckets).
-- Decision uses: default preset per traffic source, which panels earn
-  D-phase polish, threshold distributions → alert-tier default tuning,
-  kill-list for never-added panels.
-- Privacy posture unchanged: anonymous-write telemetry surface, no
-  locations in analytics (bucketed mlat at most), thresholds bucketed.
+### 5.5 Time — the global τ-timeline
 
-## 8. Visual refinement (the design system pass)
+ONE scrubber governs the Stage and every dock instrument (chart cursors
+included): **past** (observed replay from bundles/feeds) | **now-line**
+| **future** (forecast regime — the scene renders the ensemble: ghost
+ropes, oval band, wavefront spread). τ-presets ×1/×100/×1000 (the
+flux-rope τ-clock discipline generalizes). Scrubbing into tomorrow night
+and WATCHING the oval band cross your pin is the aurora product;
+scrubbing arrival and watching the magnetopause compress past GEO is
+the operator product.
 
-- **Port the token discipline** from `DESIGN_TOKENS.md` to
-  space-weather.html: one `:root` block (surfaces, text scale, borders,
-  radii, spacing rhythm, transitions) + a **status grammar** shared by
-  every panel: quiet / elevated / watch / warning / severe map to one
-  color family (colorblind-safe, shape+text redundant) — the SAME grammar
-  the G/R/S chips, tier banner, fan thresholds, and alert emails use.
-- **One card chrome**: uniform header (title · source chip · freshness ·
-  ⚙ · drag affordance), uniform body padding, uniform skeleton/degraded
-  states. Kill the per-panel bespoke borders/glows; accent via a thin
-  category keyline only.
-- **Glance hierarchy**: a persistent top **status band** (the "answer
-  row"): tier state at your threshold · arrival countdown · Kp now ·
-  your location's tonight verdict. Everything below is depth-on-demand.
-- **Type discipline**: numeric KPIs in the mono stack at 3 fixed sizes;
-  prose only in notes/blurbs. Charts follow the flux-rope chart language
-  (fan bands, dashed observed, threshold rules) so every plot on the site
-  reads identically.
-- **Motion restraint**: state changes tween ≤200 ms; live tickers pulse
-  only on threshold crossings; `prefers-reduced-motion` honored
-  everywhere; heavy sims (globe, heliosphere) pause when off-viewport
-  (perf + battery).
-- Light theme + print/PDF stylesheet for the operator briefing use-case
-  (⚠ §12-Q3 — worth D3 scope?).
+### 5.6 Persona stagings
 
-## 9. Usability program
+- **Aurora Chaser staging**: My Sky home; oval band breathing with the
+  forecast Kp distribution; drive-ring annotation ("oval edge ≈ 220 km
+  north at 23:10 local"); cloud overlay; moon phase lighting; one-tap
+  "show me why" flight to the Corridor and back.
+- **Operator staging**: Orbit Ops home; per-asset config (altitude,
+  TLE ⚠ §13-Q4 ingestion path); drag heat-shell at asset altitudes with
+  the Starlink-2022 reference band; timeline pins at P10/P50/P90 arrival;
+  tier banner wired to *fleet* thresholds (Dst/density), not just Kp.
 
-- **First-run**: one screen — "What brings you here?" → persona preset +
-  location + threshold in ≤3 taps; skippable to the Casual preset.
-  (Repo has onboarding-nudge/funnel precedents to hang this on.)
-- **Edit mode**: explicit Customize toggle (exists) opens the gallery
-  drawer — panels shown as LIVE mini-previews with one-line "why you'd
-  want this"; drag from drawer to grid; in-grid drag/resize/span; undo
-  stack + "reset to preset"; everything keyboard-operable (roving focus,
-  arrow-key move, announced via aria-live).
-- **Empty states sell**: an empty grid cell offers the 3 most-added
-  panels for your persona (analytics loop feeding UX).
-- **Mobile**: bottom-sheet config, priority-order editor, swipe between
-  "boards" (pages of the grid); the status band becomes the sticky
-  header.
-- **Performance budget**: lazy-mount panels on first visibility; ONE
-  feed bus (existing `SpaceWeatherFeed` + INTERVALS) fans data to all
-  panels — a panel never fetches what the bus already has; WASM loads
-  once and is shared (provider already does this); target < 2.5 s LCP
-  with the default preset on mid mobile.
-- **Accessibility gate**: axe pass + keyboard-only walkthrough added to
-  the Playwright suite.
+### 5.7 Presentation & staging principles
 
-## 10. Technical architecture (named, but not built here)
+- **One WebGL context** for the Stage; dock instruments are 2D
+  (charts/HTML). Hero band layout: Stage persistent at top (resizable —
+  the `data-lab-resize` machinery exists), dock grid below/beside;
+  "Stage solo" mode for wall screens.
+- **Picking = navigation**: click a rope → its forecast panel focuses +
+  chart cursors sync; click the pin → My Sky; click an asset → its risk
+  chip. The Stage is the index into the dock.
+- **Annotation grammar**: billboarded labels with leader lines, chips
+  anchored to 3D objects, max N annotations per station (declutter
+  rule), all text in the HTML overlay layer (crisp, accessible,
+  screen-reader reachable) — never rasterized into the canvas.
+- **Uncertainty grammar (the differentiator, visualized)**: bands and
+  ghosts, never single lines, in the future regime; sharpening as
+  assimilation narrows (ESS visibly prunes ghosts). Motto on record:
+  **no single-line futures in 3D.**
+- **Degraded-state visibility**: a stale feed DIMS its element and chips
+  "NOAA mag stale 14 min" — fail-quiet must be visible, never silent.
+- **Performance budget**: adaptive DPR, off-viewport/backgrounded pause,
+  context-loss recovery, LOD per station; mobile gets the same scene at
+  reduced dressing + a static-frame fallback for WebGL-less clients;
+  `prefers-reduced-motion` swaps flights for cuts. (Software-GL CI
+  lesson applies: interaction tests must not depend on frame rate.)
+- **Oracle discipline extended**: every Stage element that encodes data
+  has a pinned source of truth (kernel probes for ropes, Shue form for
+  the magnetopause, boundary tables for the oval, TLE propagator for
+  assets) and a node/browser gate, exactly like the flux-rope view's
+  kernel-mirror contract. Display-only omissions get documented headers.
 
-- `js/dashboard/registry.js` — panel registry + adapter for legacy
-  `data-lab-panel` sections; pure core (node-testable like
-  `mergeOrder`).
-- `js/dashboard/grid.js` — grid model (placement algebra pure; DOM apply
-  thin) extending layout-lab; layout schema `LAYOUT_VERSION: 2` with a
-  v1→v2 migrator (v1 saved layouts must keep working — merge semantics
-  already exist).
-- `js/dashboard/config-sheet.js` — schema-driven per-panel config UI.
-- `js/dashboard/panels/*.js` — new panels; each fail-quiet, each with a
-  node fixture test for its pure compute (house pattern).
-- `js/threshold-profile.js` — the §6 unified thresholds (pure +
-  storage).
-- Persistence: localStorage keys extend layout-lab's store; cloud sync
-  via a new migration (⚠ §12-Q2) following the repo's SECURITY DEFINER +
-  RLS conventions; sync is last-write-wins with updated_at, layouts are
-  small JSON.
-- Tests: pure-model node fixtures (registry merge, grid algebra,
-  threshold mapping, v1→v2 layout migration) + one Playwright suite
-  (boot default, apply preset, add/configure/move/persist a panel,
-  mobile reflow, a11y pass) + the existing per-panel gates keep running.
-- Telemetry: no schema change expected (kind `'feature'` + experiments
-  goals); IF a new event kind becomes necessary, CHECK constraint + RPC
-  whitelist move together (documented invariant).
+## 6. The instrument dock (customization model — unchanged core, now around the Stage)
 
-## 11. Phasing
+Layout Lab v1 → v2 as previously planned: **registry** (self-describing
+panels with config schemas, multi-instance), **gallery drawer** with live
+previews, **grid** with density modes (comfortable/compact/ops), **per-
+panel config sheets**, **presets** as named layout-variants, **persist**
+localStorage-first + cloud sync signed-in (⚠ §13-Q3 storage shape),
+**share** via layout links/export. The Stage registers as a special
+always-first panel whose "config" is station + dressing + solo mode.
 
-- **D1 — Foundation (registry + grid + presets).** Registry with legacy
-  adapters, grid model + v2 layout schema (+migrator), gallery drawer,
-  the five presets, status band, token port for the card chrome. Two
-  polished personas (⚠ Q1). Exit: compose/save/restore a personal
-  dashboard signed-out; all existing panels still work; gates green.
-- **D2 — Personalization depth.** Per-panel config sheets on the
-  forecast family, threshold profile unification (incl. alert-sender
-  handoff), multi-instance panels, mobile priority order, cloud sync
-  migration (⚠ Q2), first-run flow.
-- **D3 — Analytics & trust.** User-facing family (scorecard, storm log,
-  alert ledger, forecast-vs-actual), product-analytics instrumentation +
-  first default-tuning pass, density/ops mode, a11y gate, perf budget
-  enforcement, (⚠ Q3) print/light theme.
-- **D4 — Sharing & org.** Layout links, institution shared dashboards,
-  kiosk mode, marketing screenshots pipeline.
+## 7. Panel catalog v2 (dock instruments)
 
-Each phase lands as one PR-sized arc with its own gates, per house
-workflow (implement → measure → pin → docs → gates → push).
+Forecast family (all via the ONE shared provider): Bz fan (thresholds
+drawn on-fan, horizon, ESS detail), arrival countdown (big-type P10–P90 +
+P(hit)), Dst/storm-depth outlook, **my alert tier** (Watch/Warning/
+Nowcast at MY threshold + inline subscribe — closes the loop with the
+fixed sender), per-location aurora tonight (multi-instance), LEO drag
+index (per-asset altitude).
+Live-now family (existing, gain config): solar wind strip, Kp/G-R-S,
+X-ray, DONKI list.
+Trust family (§9a): validation scorecard, personal storm log, alert
+ledger, forecast-vs-actual.
+Utility: notes/ops-log, clock strip, links.
 
-## 12. Open questions for the author (blocking their phases only)
+## 8. One threshold system
 
-1. **Persona priority** for D1 polish — recommend Satellite Operator +
-   Aurora Chaser (B2G strategy + traffic reality). Confirm?
-2. **Cloud-sync shape** — new `dashboards` table (named, versioned,
-   multiple per user; institution-ready) vs a `user_profiles` JSONB
-   column (simpler, fits one-column-per-flag culture). Recommend the
-   table; needs your DB sign-off either way (migration will be committed
-   as SQL and applied only on your go, per the aurora-ledger precedent).
-3. **Print/light theme** for operator briefings — in scope for D3?
-4. **Tier gating** — recommend: composing/customizing FREE (it's the
-   growth loop), cloud sync + multi-dashboards Basic+, org sharing +
-   kiosk Institution. Confirm against pricing strategy.
-5. **Kiosk/ops wall mode** — worth pulling forward for SBIR demo optics?
+Unified per-user profile `{ kp, gScale, minBzNt, dstNt, leoAltKm }` with
+a single editor; consumed by every instrument, the Stage (oval band
+emphasis, heat-shell coloring, tier banner), the verdict tier, and the
+aurora alert sender. Set your line once; the whole console honors it.
 
-## 13. Success metrics
+## 9. Analytics — both meanings
 
-- ≥40% of returning visitors have a non-default layout within 30 days
-  (product analytics: `layout_save` reach).
-- Preset adoption ≥60% of first-runs; median time-to-first-custom-panel
-  < 2 min.
-- Panel dwell concentration DOWN (users see *their* panels, not scroll
-  past ours); `sw_dwell_60s` up on customized layouts vs default (A/B
-  via the existing experiments channel).
-- Alert-threshold setters (the §6 profile) ≥25% of signed-in users —
-  the bridge metric into the tiered alert product.
-- Zero regression: existing per-panel gates + nav-lint + boot probes
-  stay green through every phase.
+**a) FOR the user (trust + retention):** validation scorecard wearing the
+pinned hindcast numbers AND misses (St. Patrick's shock 0.0 h / min
+1.3%; Gannon internal shock 0.2 h / min 0.3%; the −280-vs−412 pipeline-
+ceiling finding); personal storm log (crossings of YOUR threshold, with
+"what the engine said N h before" replay links); alert ledger
+(hit/false-alarm record per user — honesty as a feature); rolling
+forecast-vs-actual strips.
+
+**b) ABOUT usage (tune the product):** instrument the customization loop
+and the STAGE (station changes, flight usage, scrub depth into the
+future, picking) through `recordFeature` + experiment goals:
+`panel_add/remove/config/move`, `preset_apply`, `layout_save/share`,
+`station_change`, `timeline_scrub_future`, `stage_pick`,
+`threshold_set` (bucketed), per-panel dwell. Decisions it feeds: default
+station per persona, panel kill-list, threshold-default tuning, attract
+loop content. Privacy posture unchanged (anonymous surface, no raw
+locations, bucketed values).
+
+## 10. Visual system
+
+Port the DESIGN_TOKENS discipline to this page (one `:root`, surfaces /
+text scale / borders / spacing / transitions); ONE status grammar
+(quiet / elevated / watch / warning / severe — colorblind-safe,
+shape+text redundant) shared by Stage elements, chips, fan thresholds,
+tier banner, and alert emails; one card chrome (title · source chip ·
+freshness · ⚙ · drag); glance-first **status band** (tier at your
+threshold · arrival countdown · Kp now · tonight at your pin) pinned
+above the Stage; numeric KPIs in the mono stack at 3 sizes; chart
+language identical to the flux-rope charts sitewide; motion restraint
+(≤200 ms tweens, pulses only on threshold crossings).
+
+## 11. Usability program
+
+First-run (post-signin): persona → location → threshold in ≤3 taps →
+staged reveal (attract-style flight lands on your staging). Edit mode:
+explicit toggle, gallery drawer with live previews, drag/resize/undo/
+reset-to-preset, full keyboard operability + aria-live announcements.
+Mobile: status band sticky, Stage as a swipe-station carousel, single-
+column dock with its own priority order, bottom-sheet config. Perf: <2.5 s
+LCP on the default preset (Stage streams in after first paint), lazy
+dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
+
+## 12. Phasing (D = dock, S = stage; interleaved)
+
+- **D1+G — Foundation + gate.** Sign-in gate + funnel + attract stub
+  (current page in `?preview=1`); registry with legacy adapters; grid +
+  v2 layout schema (+ v1 migrator); gallery; five presets; status band;
+  token port. Exit: signed-in users compose/save/restore; signed-out see
+  gate + teaser; all existing gates green.
+- **S1 — Stage core.** One-context corridor scene: Sun, ropes (kernel-
+  oracle), L1, Earth, compressed-scale ruler; stations 1–4 + flights;
+  τ-timeline driving Stage + chart cursors; replaces the three 2D
+  pseudo-views (which retire only when parity gates pass).
+- **S2 — Persona stagings.** My Sky + Orbit Ops (oval band, drive ring,
+  shells, heat-shell, assets ⚠ Q4), uncertainty grammar complete
+  (ghosts, wavefronts, magnetopause breathing), picking→dock sync.
+- **D2 — Personalization depth.** Config sheets, threshold profile
+  unification (alert-sender handoff), multi-instance, mobile order,
+  cloud sync (⚠ Q3), first-run flow.
+- **D3 — Analytics & trust.** User-facing analytics family, product
+  instrumentation + first tuning pass, density/ops mode, a11y + perf
+  gates, (⚠ Q5) print/light theme.
+- **S3/D4 — Polish & reach.** Attract loop as the marketing asset,
+  layout links, org dashboards, kiosk mode, mobile fallback frames.
+
+Each phase is a PR-sized arc with its own gates (pure-model node
+fixtures; Playwright: gate flow, compose/persist, station flights,
+timeline sync, a11y), per house workflow.
+
+## 13. Open questions for the author
+
+1. **Naming collision**: this signed-in console vs the existing
+   `dashboard.html` (account home). Recommend calling this surface
+   **Mission Console** in nav for now; revisit merging after adoption.
+2. **Gate = authN only?** Free signed-in users get full customization
+   (recommended — it's the growth loop); paid gates apply to cloud sync
+   / org features. Confirm.
+3. **Cloud-sync shape**: named/versioned `dashboards` table (recommended,
+   institution-ready) vs `user_profiles` JSONB column. Migration ships
+   as SQL, applied only on your go (aurora-ledger precedent).
+4. **Operator asset ingestion**: CelesTrak picker (search by name/NORAD,
+   zero-friction, recommended for v1) vs TLE upload vs both.
+5. **Print/light theme** for operator briefings — D3 scope?
+6. **Attract loop placement**: signin page only, or also the public
+   landing/pricing pages as the hero?
+
+## 14. Success metrics
+
+Gate funnel: gate_view→signin conversion ≥ baseline signup ×1.5 (the
+attract loop earns its keep or gets iterated). ≥40% of returning
+signed-in users run a non-default layout within 30 days. Preset adoption
+≥60% of first-runs; median time-to-first-custom-panel < 2 min.
+Stage engagement: ≥50% of sessions change station or scrub the future
+(else the Stage is decoration — redesign it). Threshold-profile setters
+≥25% of signed-in users (bridge into the alert product). Zero
+regression: all existing per-panel + nav + boot gates stay green
+through every phase.
 
 ---
 
-*Created 2026-07-22 (flux-rope Phase 4 close-out planning). Companion
-docs: FLUX_ROPE_SIMULATOR_PLAN.md (engine + consumers),
-DESIGN_TOKENS.md (token discipline to port), js/layout-lab.js header
-(the v1 foundation this extends).*
+*Updated 2026-07-22: sign-in gate committed; personas locked (Aurora
+Chaser + Satellite Operator); the Stage (§5) added as the presentation
+centerpiece — supersedes the earlier grid-only framing. Companions:
+FLUX_ROPE_SIMULATOR_PLAN.md, DESIGN_TOKENS.md, js/layout-lab.js header,
+js/preview-mode.js header.*
