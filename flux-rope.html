@@ -215,6 +215,7 @@ body {
             <div class="fr-field"><label>wind w</label><input type="range" id="p-wKms" min="250" max="700" step="10"><output>400 km/s</output></div>
             <div class="fr-field"><label>sheath δ</label><input type="range" id="p-sheathDeltaNt" min="0" max="6" step="0.5"><output>0 nT</output></div>
             <div class="fr-field"><label>front compr.</label><input type="range" id="p-frontC" min="0" max="0.6" step="0.05"><output>0</output></div>
+            <div class="fr-field" title="Farris–Russell standoff η (spec §17): 0 = legacy fixed-k shell; ≈1.1 = quiet-wind blunt body"><label>standoff η</label><input type="range" id="p-sheathEta" min="0" max="3" step="0.1"><output>0</output></div>
             <div class="fr-row2">
                 <div class="fr-field" style="grid-template-columns:88px 1fr;"><label>chirality</label>
                     <select id="p-handedness"><option value="1">right (+)</option><option value="-1">left (−)</option></select></div>
@@ -259,13 +260,16 @@ body {
     the amber trace is the observed OMNI Bz for hindcast events. The forward
     model now carries the shocked <b>sheath</b> (phase-flagged; its Bz rides
     the ensemble band, deliberately not the deterministic trace),
-    <b>front compression</b> where an event demands it, and <b>CME–CME
-    interaction</b> (wake kinematics + follower squeeze). Validated fits:
-    St. Patrick's 2015 (single rope, v1.2) min Bz −23.8 vs −24.25 nT at
-    Δ0.5 h, shock on the SSC · Gannon May 2024 (2-rope interacting train,
-    v1.3) min −44.3 vs −44.2 nT, internal disturbance +48.9 vs +48.7 h,
-    both southward episodes reproduced. Unmodeled, on record: the X3.9/X5.8
-    Gannon CMEs, momentum exchange, Mach-dependent shock standoff.
+    <b>front compression</b> where an event demands it, <b>CME–CME
+    interaction</b> (wake kinematics + follower squeeze), and sheath
+    thickness from the <b>Mach-dependent Farris–Russell standoff</b> —
+    growing as the decelerating shock weakens. Validated fits: St.
+    Patrick's 2015 (single rope, v1.4, literature η = 1.1) shock ON the
+    SSC, rope onset within 1.4 h (was 4.1 h), min Bz −24.6 vs −24.25 nT,
+    r 0.69 · Gannon May 2024 (2-rope interacting train, v1.4) min −44.3 vs
+    −44.2 nT, internal disturbance +48.8 vs +48.7 h, both southward
+    episodes reproduced. Unmodeled, on record: the X3.9/X5.8 Gannon CMEs,
+    momentum exchange, sheath-interior deterministic Bz.
 </p>
 
 <section class="fr-info">
@@ -316,7 +320,8 @@ const view = new HeliosphereView($('fr-gl'), $('fr-overlay'));
 
 // Normalize a preset (single `rope` or train `ropes`) into a full train.
 // Generation preference: interaction (spec §16) > sheath (§14) > baseline.
-const toRopes = (p) => (p.interactionRopes ?? p.sheathRopes ?? p.ropes ?? [p.frontFit?.rope ?? p.sheathFit?.rope ?? p.rope])
+const toRopes = (p) => (p.standoffRopes ?? p.interactionRopes ?? p.sheathRopes ?? p.ropes
+    ?? [p.standoffFit?.rope ?? p.frontFit?.rope ?? p.sheathFit?.rope ?? p.rope])
     .map((r) => ({ ...ROPE_DEFAULTS, launchOffsetS: 0, ...r }));
 
 /**
@@ -366,16 +371,17 @@ const activeRope = () => state.ropes[state.active];
 // ── Presets ──────────────────────────────────────────────────────────────────
 const PRESETS = [ST_PATRICK_FIT, GANNON_FIT, OSSE_STA, ...SCENARIOS, { id: 'custom', label: 'Custom', rope: null }];
 const PRESET_NOTES = {
-    'st-patrick-2015': 'Hand fit to the 17 Mar 2015 G4 storm — v1.2 forward model: sheath + ' +
-        'front compression put the model shock on the observed SSC and the Bz minimum at ' +
-        'the rope leading edge (−23.8 vs −24.25 nT at Δ0.5 h). Drag the timeline and the ' +
+    'st-patrick-2015': 'Hand fit to the 17 Mar 2015 G4 storm — v1.4 forward model with the ' +
+        'Mach-dependent (Farris–Russell) shock standoff at the LITERATURE η = 1.1: shock ' +
+        'ON the observed SSC, rope onset within 1.4 h (was 4.1 h), min Bz −24.6 vs ' +
+        '−24.25 nT, shape r 0.69 — the best generation yet. Drag the timeline and the ' +
         'particle filter conditions the fan on everything left of the now-line.',
     'gannon-2024': 'The May 2024 G5 CME train as TWO sequential ropes (X1.0 and X2.2 flare ' +
-        'launches from AR 13664, +20.25 h apart) — v1.3 forward model with CME–CME ' +
-        'interaction ON: rope B rides rope A’s wake, its shock reproduces the observed ' +
-        'mid-storm internal disturbance (+48.9 vs +48.7 h), and its approach squeezes rope ' +
-        'A’s rear to the −44 nT minimum with a physically plausible rope A (38 nT, not a ' +
-        'hand-compressed 55). The X3.9/X5.8 CMEs remain honestly unmodeled.',
+        'launches from AR 13664, +20.25 h apart) — v1.4 forward model: CME–CME interaction ' +
+        'ON (rope B rides rope A’s wake and squeezes its rear to the −44 nT minimum with a ' +
+        'plausible 38 nT rope A) and the Farris–Russell standoff replacing fixed sheath ' +
+        'fractions — rope B’s η = 3 (≈2.7× blunt-body, wake pileup) puts its internal ' +
+        'shock at +48.8 vs +48.7 h observed. The X3.9/X5.8 CMEs remain honestly unmodeled.',
     'osse-sta': 'SYNTHETIC observing-system experiment at the 2024 flank-graze geometry: the ' +
         'dotted green trace is what a spacecraft at STEREO-A "really" measured; the truth ' +
         'grazes it at +38.5 h while L1 stays silent until +41 h. Scrub into that gap and the ' +
@@ -415,7 +421,7 @@ async function applyPreset(id) {
         state.launchMs = p.launchIso ? Date.parse(p.launchIso) : null;
         state.spreadsBase = p.spreads ?? SPREAD_DEFAULTS;
         // §16: the interaction config travels with the generation it fit.
-        state.interaction = (p.interactionRopes && p.interaction)
+        state.interaction = ((p.standoffRopes || p.interactionRopes) && p.interaction)
             ? { enabled: true, ...p.interaction }
             : { enabled: false };
         renderRopeTabs();
@@ -516,8 +522,8 @@ function renderRopeTabs() {
 }
 
 // ── Parameter panel ──────────────────────────────────────────────────────────
-const SLIDERS = ['lonDeg', 'latDeg', 'tiltDeg', 'twistTurns', 'b1AuNt', 'sigma1AuAu', 'v0Kms', 'wKms', 'sheathDeltaNt', 'frontC'];
-const UNITS = { lonDeg: '°', latDeg: '°', tiltDeg: '°', twistTurns: '', b1AuNt: ' nT', sigma1AuAu: ' AU', v0Kms: ' km/s', wKms: ' km/s', sheathDeltaNt: ' nT', frontC: '' };
+const SLIDERS = ['lonDeg', 'latDeg', 'tiltDeg', 'twistTurns', 'b1AuNt', 'sigma1AuAu', 'v0Kms', 'wKms', 'sheathDeltaNt', 'frontC', 'sheathEta'];
+const UNITS = { lonDeg: '°', latDeg: '°', tiltDeg: '°', twistTurns: '', b1AuNt: ' nT', sigma1AuAu: ' AU', v0Kms: ' km/s', wKms: ' km/s', sheathDeltaNt: ' nT', frontC: '', sheathEta: '' };
 
 function syncSliders() {
     const rope = activeRope();

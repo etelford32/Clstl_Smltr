@@ -80,6 +80,14 @@ pub struct RopeParams {
     /// field boost — the mechanism that puts the observed Bz minimum at the
     /// rope's leading edge.
     pub front_c: f64,
+    // ── Mach-dependent standoff (spec §17, v1.4 — 0 = legacy k mode) ────────
+    /// Farris–Russell standoff calibration η: shell thickness becomes
+    /// η·FR(M)·√(σ_eff·d/2) — Mach-dependent, GROWING as the decelerating
+    /// shock weakens — and `sheath_k` is ignored for this rope. 0 keeps the
+    /// §14 fixed fractional thickness bit-identical. Literature anchor
+    /// η ≈ 1.1 for a quiet-wind blunt body; wake-immersed followers fit
+    /// higher (pileup the flank flow cannot evacuate).
+    pub sheath_eta: f64,
 }
 
 impl RopeParams {
@@ -113,7 +121,8 @@ impl Default for RopeParams {
             sheath_delta_nt: 0.0, // off by default — every pre-sheath pin holds
             sheath_k: 0.8,
             b_amb_1au_nt: 5.0,
-            front_c: 0.0, // off by default — every pre-v1.2 pin holds
+            front_c: 0.0,    // off by default — every pre-v1.2 pin holds
+            sheath_eta: 0.0, // legacy k mode by default — every pre-v1.4 pin holds
         }
     }
 }
@@ -360,10 +369,11 @@ pub fn sheath_at_dyn(
     upstream_kms: f64,
     rear_c: f64,
 ) -> bool {
-    if params.sheath_delta_nt <= 0.0 || params.sheath_k <= 0.0 {
+    if params.sheath_delta_nt <= 0.0 || (params.sheath_k <= 0.0 && params.sheath_eta <= 0.0) {
         return false;
     }
-    if crate::kinematics::shock_mach(dbm.speed_kms(t_s), upstream_kms) <= 1.0 {
+    let mach = crate::kinematics::shock_mach(dbm.speed_kms(t_s), upstream_kms);
+    if mach <= 1.0 {
         return false;
     }
     let d = dbm.apex_km(t_s);
@@ -393,7 +403,19 @@ pub fn sheath_at_dyn(
     let f_dist =
         boundary_factor(params.front_c, rear_c, frame, half_d, psi, qu, w, rho_ip, p, s);
     let sigma_eff = sigma * f_dist;
-    if s < sigma_eff || s >= sigma_eff * (1.0 + params.sheath_k) {
+    // Shell outer edge: §17 Farris–Russell standoff on the two-curvature
+    // nose proxy √(σ_eff·d/2) when η > 0 — Mach-dependent, growing as the
+    // decelerating shock weakens. The η = 0 branch keeps the §14 fixed
+    // fraction in its EXACT legacy expression (bit-identical pins).
+    let outer_km = if params.sheath_eta > 0.0 {
+        sigma_eff
+            + params.sheath_eta
+                * crate::kinematics::standoff_ratio(mach)
+                * (sigma_eff * half_d).sqrt()
+    } else {
+        sigma_eff * (1.0 + params.sheath_k)
+    };
+    if s < sigma_eff || s >= outer_km {
         return false;
     }
     // Front side: farther from the Sun than the local axis point.
@@ -1270,6 +1292,104 @@ mod tests {
             .map(|i| sheath_count_at_train(&train2, &dyns2, &cfg, dt * i as f64, earth()))
             .sum();
         assert!(got > 0, "a wake-outrunning follower must keep its sheath");
+    }
+
+    // ── Mach-dependent standoff (spec §17) ───────────────────────────────────
+
+    /// Shell outer edge along the nose line, in units of σ_apex (bisection).
+    fn shell_edge_sigma(p: &RopeParams, f: &Frame, t: f64, dbm: &Dbm, upstream: f64) -> f64 {
+        let d = dbm.apex_km(t);
+        let sigma = sigma_apex_km(p.sigma_1au_au * AU_KM, d, p.n_sigma);
+        let (mut lo, mut hi) = (1.0, 12.0);
+        for _ in 0..60 {
+            let mid = 0.5 * (lo + hi);
+            if sheath_at_dyn(p, f, t, [d + mid * sigma, 0.0, 0.0], dbm, upstream, 0.0) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 * (lo + hi)
+    }
+
+    #[test]
+    fn standoff_shell_thickens_as_the_decelerating_shock_weakens() {
+        // η mode: FR(M) grows as M falls, so the σ-relative shell must WIDEN
+        // through the transit — the fixed-k shell is constant by construction.
+        let p = RopeParams {
+            v0_kms: 1400.0,
+            tilt_deg: 90.0,
+            sheath_delta_nt: 3.0,
+            sheath_eta: 1.1,
+            sheath_k: 0.0,
+            ..Default::default()
+        };
+        let f = Frame::new(0.0, 0.0, 90.0);
+        let dbm = p.dbm();
+        let t1 = 20.0 * 3600.0;
+        let t2 = 45.0 * 3600.0;
+        let d1 = dbm.apex_km(t1);
+        let s1 = sigma_apex_km(p.sigma_1au_au * AU_KM, d1, p.n_sigma);
+        assert!(
+            sheath_at(&p, &f, t1, [d1 + 1.01 * s1, 0.0, 0.0]),
+            "just outside the rope nose must be sheath"
+        );
+        let early = shell_edge_sigma(&p, &f, t1, &dbm, p.w_kms) - 1.0;
+        let late = shell_edge_sigma(&p, &f, t2, &dbm, p.w_kms) - 1.0;
+        assert!(
+            late > early * 1.1,
+            "shell must widen as M falls: early {:.2}σ, late {:.2}σ",
+            early,
+            late
+        );
+    }
+
+    #[test]
+    fn weaker_shock_stands_farther_off_until_it_dies() {
+        // Same rope, same instant, faster upstream (lower M): the shell must
+        // be THICKER — the detaching shock stands farther out — until M ≤ 1
+        // kills the sheath entirely (the §16 wake-conditioned kill).
+        let p = RopeParams {
+            v0_kms: 1200.0,
+            tilt_deg: 90.0,
+            sheath_delta_nt: 3.0,
+            sheath_eta: 1.1,
+            ..Default::default()
+        };
+        let f = Frame::new(0.0, 0.0, 90.0);
+        let t = 30.0 * 3600.0;
+        let dbm = p.dbm();
+        let v = dbm.speed_kms(t);
+        let fresh = shell_edge_sigma(&p, &f, t, &dbm, p.w_kms);
+        let wakey = shell_edge_sigma(&p, &f, t, &dbm, v - 150.0);
+        assert!(
+            wakey > fresh + 0.05,
+            "weaker shock must stand farther off: {:.2}σ vs {:.2}σ",
+            wakey,
+            fresh
+        );
+        let d = dbm.apex_km(t);
+        let sigma = sigma_apex_km(p.sigma_1au_au * AU_KM, d, p.n_sigma);
+        assert!(
+            !sheath_at_dyn(&p, &f, t, [d + 1.1 * sigma, 0.0, 0.0], &dbm, v - 50.0, 0.0),
+            "sub-magnetosonic upstream must kill the sheath"
+        );
+    }
+
+    #[test]
+    fn eta_zero_keeps_the_legacy_fixed_fraction_shell() {
+        // η = 0 must be the exact §14 geometry: outer edge at σ·(1+k).
+        let p = RopeParams {
+            v0_kms: 1100.0,
+            tilt_deg: 90.0,
+            sheath_delta_nt: 3.0,
+            sheath_k: 0.8,
+            ..Default::default()
+        };
+        let f = Frame::new(0.0, 0.0, 90.0);
+        let t = 30.0 * 3600.0;
+        let edge = shell_edge_sigma(&p, &f, t, &p.dbm(), p.w_kms);
+        assert!((edge - 1.8).abs() < 0.01, "legacy shell edge {:.3}σ vs 1.8σ", edge);
     }
 
     #[test]

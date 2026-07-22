@@ -60,6 +60,27 @@ export const ST_PATRICK_FIT = Object.freeze({
             sheathDeltaNt: 2.5, sheathK: 0.95, bAmb1AuNt: 5, frontC: 0.55,
         }),
     }),
+    // standoffFit — the v1.4 generation with the spec §17 Mach-dependent
+    // (Farris–Russell) shock standoff replacing the fixed-fraction shell.
+    // η = 1.1 is THE LITERATURE blunt-body coefficient, applied to the
+    // two-curvature nose proxy √(σ_eff·d/2) with no retuning — and it lands
+    // the shock ON the SSC (error 0.0 h) while finally decoupling the rope
+    // onset from the shock: onset error 1.4 h (v1.2: 4.1 h — the residual
+    // that motivated §17). Pinned: min Bz −24.6 vs −24.25 nT (1.4%) at
+    // Δ1.8 h, shape r = 0.686 (the best of any generation), southward
+    // dwell 13.4 vs 12.5 h (v1.2: 16.4). Honest residual, on record: the
+    // observed minimum sits 10 min after onset (AT the leading edge); the
+    // model's sits at 22% of the dwell — the §15 front-compression clamp
+    // (c ≤ 0.6) is the limiting mechanism now, not the sheath.
+    standoffFit: Object.freeze({
+        rope: Object.freeze({
+            lonDeg: 0, latDeg: -2, tiltDeg: 50, handedness: 1,
+            twistTurns: 5, b1AuNt: 24, sigma1AuAu: 0.12,
+            v0Kms: 765, gammaPerKm: 0.25e-7, wKms: 400,
+            sheathDeltaNt: 2.5, sheathK: 0, bAmb1AuNt: 5, frontC: 0.6,
+            sheathEta: 1.1,
+        }),
+    }),
 });
 
 /**
@@ -164,6 +185,37 @@ export const GANNON_FIT = Object.freeze({
             twistTurns: 5, b1AuNt: 42, sigma1AuAu: 0.14,
             v0Kms: 900, gammaPerKm: 0.2e-7, wKms: 450,
             sheathDeltaNt: 2.5, sheathK: 2.0, bAmb1AuNt: 5,
+            launchOffsetS: 72_900,
+        }),
+    ]),
+    // v1.4 standoff generation (spec §17): the SAME interacting ropes with
+    // the Farris–Russell shell replacing both fixed fractions — the ONLY
+    // change is k → η, and rope B's admitted k = 2.0 stand-in becomes a
+    // physical statement. Kernel-verified (pinned): shock −0.8 h vs SSC,
+    // internal disturbance +0.2 h vs the observed +48.7 h jump (k-mode:
+    // +0.3), all rope-field metrics bit-identical to interactionRopes
+    // (min 0.3%, Δ1.5 h, r 0.663, dwell 16.8 h, zero overlap — the shell
+    // carries flags, not deterministic field). Honest η report:
+    //   · rope B η = 3.0 ≈ 2.7× blunt-body — wake PILEUP the flank flow
+    //     cannot evacuate, exactly the §17 honesty note's prediction for a
+    //     follower ramming its leader's wake.
+    //   · rope A η = 0.3 — SUB-blunt-body: its observed SSC→onset gap is
+    //     thinner than the quiet-wind relation predicts (the storm-period
+    //     wind ahead of the train was itself disturbed; documented, not
+    //     hidden).
+    standoffRopes: Object.freeze([
+        Object.freeze({
+            lonDeg: 0, latDeg: -6, tiltDeg: 60, handedness: 1,
+            twistTurns: 4, b1AuNt: 38, sigma1AuAu: 0.12,
+            v0Kms: 950, gammaPerKm: 0.2e-7, wKms: 450,
+            sheathDeltaNt: 3, sheathK: 0, bAmb1AuNt: 5, sheathEta: 0.3,
+            launchOffsetS: 0,
+        }),
+        Object.freeze({
+            lonDeg: 0, latDeg: 0, tiltDeg: 45, handedness: -1,
+            twistTurns: 5, b1AuNt: 42, sigma1AuAu: 0.14,
+            v0Kms: 900, gammaPerKm: 0.2e-7, wKms: 450,
+            sheathDeltaNt: 2.5, sheathK: 0, bAmb1AuNt: 5, sheathEta: 3.0,
             launchOffsetS: 72_900,
         }),
     ]),

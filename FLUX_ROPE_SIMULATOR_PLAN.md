@@ -152,8 +152,21 @@ the same crate.
   Honest trades on record: full-window r 0.66 vs v1.1's 0.71 (the
   deterministic series now carries zeros through the sheath handover that
   v1.1's overlong rope-A dwell papered over) and rope B's sheath_k = 2.0
-  standing in for the missing Mach-dependent standoff. Remaining Phase 5:
-  Mach-dependent sheath standoff, momentum exchange, deformation/
+  standing in for the missing Mach-dependent standoff.
+  ✅ Mach-dependent sheath standoff (2026-07-22, spec §17): the shell
+  thickness becomes the Farris–Russell blunt-body standoff
+  η·FR(M)·√(σ_eff·d/2) — Mach-dependent, GROWING as the decelerating
+  shock weakens, wake-conditioned for §16 followers; η = 0 keeps the
+  legacy fixed-k shell bit-identical. v1.4 fits pinned: St. Patrick's at
+  the LITERATURE η = 1.1 lands the shock ON the SSC with the rope-onset
+  error down 4.1 → 1.4 h and r = 0.686 (best of any generation, dwell
+  14.0 vs obs 17.8 h at < −5 nT); Gannon keeps every v1.3 rope-field
+  metric bit-identical while η_B = 3.0 (≈2.7× blunt-body — wake pileup,
+  honestly reported) puts the internal shock at +48.8 vs +48.7 h and
+  retires the k = 2.0 stand-in. New limiting residual, on record: the
+  observed St. Patrick's minimum sits AT the leading edge; the model's
+  at 22% of dwell — the §15 front-compression clamp is now the
+  bottleneck. Remaining Phase 5: momentum exchange, deformation/
   pancaking, EEGGL/SWMF comparison runs, server-side API build.
 
 ## 5. Data inputs

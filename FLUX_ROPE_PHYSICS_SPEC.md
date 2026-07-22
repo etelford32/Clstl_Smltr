@@ -590,3 +590,62 @@ v1.1's 0.71 (deterministic zeros through the 54–56 h sheath handover —
 §14 keeps sheath Bz ensemble-only — where v1.1's overlong rope-A dwell
 happened to cover the data), and rope B's `sheath_k = 2.0` standing in
 for the missing Mach-dependent shock standoff (§15 residual).
+
+## 17. Mach-dependent sheath standoff (v1.4)
+
+The §14 shell has a FIXED fractional thickness `k·σ(ψ)` — one number
+welded to the rope surface, setting shock arrival and rope onset
+together. Both hindcasts exposed it: St. Patrick's v1.2 pins the shock
+ON the SSC and the minimum at Δ0.5 h yet the rope onset runs ~4 h early
+(the observed sheath is ~8 h thick; a fixed k cannot thicken the shell
+without dragging the shock earlier), and Gannon rope B needed
+`sheath_k = 2.0` as an undisguised stand-in.
+
+**Model.** The shell thickness becomes the blunt-body shock standoff
+(Farris & Russell 1994), evaluated per point and per time:
+
+```
+Δ(ψ, t) = η · FR(M) · R_c(ψ, t)
+FR(M)   = ((γ−1)M² + 2) / ((γ+1)(M² − 1))     γ = 5/3, clamped ≤ 3
+R_c     = sqrt(σ_eff(ψ) · d/2)
+shell:    σ_eff ≤ s < σ_eff + Δ                (front side, as before)
+```
+
+- `FR` is the classic standoff ratio: → 1/4 for a strong shock,
+  diverging as M → 1⁺ where the shock detaches and dies — clamped at 3
+  (η·3·R_c) so the dissolving shock fades instead of exploding.
+- `R_c` is the obstacle's nose curvature proxy: the geometric mean of
+  the cross-section minor radius σ_eff (distorted per §15/§16) and the
+  torus major radius d/2 — a croissant nose is much blunter than its
+  cross-section alone. Δ ∝ √σ(ψ) still tapers to zero at the legs.
+- `M` is the §14 shock Mach, WAKE-conditioned for §16 followers.
+- `η = sheath_eta` is the one calibration knob (literature anchor
+  η ≈ 1.1 for a smooth blunt body). **η = 0 (default) keeps the legacy
+  fixed-k shell bit-identical** — every pre-v1.4 pin holds; η > 0
+  replaces k entirely for that rope.
+
+**The physics this buys.** M falls as the rope decelerates, so FR — and
+the sheath — GROWS toward 1 AU, exactly the observed behavior a fixed k
+cannot represent: the shock pulls ahead of the rope late in transit.
+The rope onset decouples from the shock arrival through measurable
+physics rather than a hand-tuned fraction.
+
+**Honesty note.** The blunt-body relation describes a QUIET-WIND
+sheath. A §16 follower ramming its leader's wake accumulates pileup the
+flank flow cannot evacuate; its fitted η is expected ABOVE the
+literature ~1 and is reported as such, not hidden inside the geometry.
+
+**Measured value (pinned).** St. Patrick's `standoffFit` (v1.4), at the
+LITERATURE η = 1.1 with no retuning of the coefficient: shock ON the
+observed SSC (error 0.0 h), **rope-onset error 1.4 h (v1.2: 4.1 h — the
+residual that motivated this section)**, min Bz −24.6 vs −24.25 nT
+(1.3%) at Δ1.8 h, shape r = 0.686 (the best of any generation),
+southward dwell 14.0 vs 17.8 h (< −5 nT). Remaining residual: the
+observed minimum sits AT the leading edge (10 min after onset); the
+model's sits at 22% of the dwell — the §15 clamp (c ≤ 0.6) is now the
+limiting mechanism. Gannon `standoffRopes` (v1.4): η replaces both fixed
+fractions on the interacting train with the rope fields BIT-IDENTICAL
+(the shell carries flags, not deterministic field); shock −0.8 h,
+internal disturbance **+48.8 vs +48.7 h observed**; η_B = 3.0 ≈ 2.7×
+blunt-body (wake pileup, as predicted above), η_A = 0.3 sub-blunt-body
+(the pre-train wind was itself disturbed; documented, not hidden).

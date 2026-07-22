@@ -39,6 +39,10 @@ export const ROPE_DEFAULTS = Object.freeze({
     sheathK: 0.8,           // sheath thickness as a fraction of the rope radius
     bAmb1AuNt: 5,           // ambient Parker |B| at 1 AU [nT]
     frontC: 0,              // leading-edge compression c (spec §15) — 0 = off
+    // Mach-dependent standoff η (spec §17): shell thickness becomes
+    // η·FR(M)·√(σ_eff·d/2) and sheathK is ignored. 0 = legacy fixed-k
+    // shell; literature anchor ≈ 1.1 for a quiet-wind blunt body.
+    sheathEta: 0,
 });
 
 export const SPREAD_DEFAULTS = Object.freeze({
@@ -93,7 +97,7 @@ export async function loadFluxRopeKernel(source) {
                 r.b1AuNt, r.sigma1AuAu, r.nB, r.nSigma, r.d0Rsun,
                 r.v0Kms, r.gammaPerKm, r.wKms,
                 r.profile === 'lundquist' ? 1 : 0,
-                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC,
+                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC, r.sheathEta,
             );
             return r;
         },
@@ -109,7 +113,7 @@ export async function loadFluxRopeKernel(source) {
                 r.b1AuNt, r.sigma1AuAu, r.nB, r.nSigma, r.d0Rsun,
                 r.v0Kms, r.gammaPerKm, r.wKms,
                 r.profile === 'lundquist' ? 1 : 0,
-                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC,
+                r.sheathDeltaNt, r.sheathK, r.bAmb1AuNt, r.frontC, r.sheathEta,
                 r.launchOffsetS,
             );
             return n;

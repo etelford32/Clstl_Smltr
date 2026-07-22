@@ -76,6 +76,26 @@ pub fn b_ambient_nt(b_amb_1au_nt: f64, d_km: f64) -> f64 {
     b_amb_1au_nt * (d_km / AU_KM).powf(-1.6)
 }
 
+// ── Shock standoff (spec §17) ────────────────────────────────────────────────
+
+/// Cap on the Farris–Russell ratio: as M → 1⁺ the relation diverges (the
+/// shock detaches and dies); the dying shock FADES at this ceiling instead
+/// of exploding the shell.
+pub const STANDOFF_MAX: f64 = 3.0;
+
+/// Farris–Russell (1994) blunt-body shock standoff ratio Δ/R_c, γ = 5/3:
+/// ((γ−1)M² + 2) / ((γ+1)(M² − 1)) — 1/4 for a strong shock, growing as
+/// the shock weakens, clamped at STANDOFF_MAX toward the M → 1⁺
+/// detachment. Callers gate on M > 1 (no shock, no sheath); the M ≤ 1
+/// guard here just returns the cap.
+pub fn standoff_ratio(mach: f64) -> f64 {
+    if mach <= 1.0 {
+        return STANDOFF_MAX;
+    }
+    let m2 = mach * mach;
+    (((2.0 / 3.0) * m2 + 2.0) / ((8.0 / 3.0) * (m2 - 1.0))).min(STANDOFF_MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +151,19 @@ mod tests {
         let b = Dbm { gamma_per_km: 0.0, ..DBM };
         assert!((b.apex_km(1000.0) - (b.d0_km + 1100.0 * 1000.0)).abs() < 1e-6);
         assert_eq!(b.speed_kms(99_999.0), 1100.0);
+    }
+
+    #[test]
+    fn standoff_ratio_matches_farris_russell() {
+        // Strong-shock limit 1/4; M = 2 → ((2/3)·4 + 2)/((8/3)·3) = 0.5833….
+        assert!((standoff_ratio(100.0) - 0.25).abs() < 1e-3);
+        assert!((standoff_ratio(2.0) - 0.583_333).abs() < 1e-4);
+        // Monotone: a weaker shock stands farther off.
+        assert!(standoff_ratio(1.5) > standoff_ratio(2.0));
+        assert!(standoff_ratio(2.0) > standoff_ratio(4.0));
+        // Detachment clamp near and below M = 1.
+        assert_eq!(standoff_ratio(1.01), STANDOFF_MAX);
+        assert_eq!(standoff_ratio(0.5), STANDOFF_MAX);
     }
 
     #[test]

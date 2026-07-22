@@ -495,6 +495,85 @@ check('gannon ensemble: observed min inside member spread',
     k.setInteraction({ enabled: false });
 }
 
+// ── Mach-dependent standoff (spec §17) — v1.4: the shell earns its thickness ─
+// The fixed-fraction sheath welded shock arrival and rope onset to one
+// number; both hindcasts exposed it. The Farris–Russell shell decouples
+// them through measurable physics — and the LITERATURE coefficient lands it.
+{
+    const SSC_H = t0S / 3600 + 16.8;
+    const ROPE_ONSET_H = (Date.parse('2015-03-17T13:00:00Z') - Date.parse(ST_PATRICK_FIT.launchIso)) / 3600e3;
+    const tHof = (i) => t0S / 3600 + i * stepS / 3600;
+    const sr = ST_PATRICK_FIT.standoffFit.rope;
+    check('standoff: η is THE literature blunt-body coefficient (1.1), not a retuned knob',
+        sr.sheathEta === 1.1 && sr.sheathK === 0);
+
+    k.setRope(sr);
+    const so = k.series(t0S, stepS, n, L1_OBSERVER);
+    const soFirstSheath = so.sheath.findIndex((v) => v > 0);
+    const soFirstRope = so.inside.findIndex((v) => v > 0);
+    check('standoff-fit: shock ON the observed SSC (±1 h)',
+        soFirstSheath >= 0 && Math.abs(tHof(soFirstSheath) - SSC_H) < 1.0,
+        `+${tHof(soFirstSheath).toFixed(1)} h vs SSC +${SSC_H.toFixed(1)} h`);
+    const soOnsetErr = Math.abs(tHof(soFirstRope) - ROPE_ONSET_H);
+    check('standoff-fit: rope-onset error < 2 h (v1.2: 4.1 h — the §17 motivation)',
+        soOnsetErr < 2.0, `${soOnsetErr.toFixed(1)} h`);
+    let soMin = Infinity, soIMin = -1, soSouthH = 0;
+    let ox = 0, oy = 0, oxx = 0, oyy = 0, oxy = 0;
+    for (let i = 0; i < n; i++) {
+        if (so.bz[i] < soMin) { soMin = so.bz[i]; soIMin = i; }
+        if (so.bz[i] < -5) soSouthH += stepS / 3600; // < −5: this file's SP convention
+        const y = obsBz[i];
+        if (!Number.isFinite(y)) continue;
+        ox += so.bz[i]; oy += y; oxx += so.bz[i] ** 2; oyy += y * y; oxy += so.bz[i] * y;
+    }
+    const rSo = (oxy - ox * oy / n) / Math.sqrt((oxx - ox * ox / n) * (oyy - oy * oy / n) || 1);
+    check('standoff-fit: min Bz within ±10%', Math.abs((soMin - minObs) / minObs) < 0.10,
+        `${soMin.toFixed(1)} vs obs ${minObs.toFixed(1)} nT (Δ ${(100 * Math.abs((soMin - minObs) / minObs)).toFixed(1)}%)`);
+    check('standoff-fit: min-Bz timing within ±2.5 h',
+        Math.abs(soIMin - iMinObs) * stepS / 3600 < 2.5,
+        `Δ ${(Math.abs(soIMin - iMinObs) * stepS / 3600).toFixed(1)} h`);
+    check('standoff-fit: shape correlation > 0.65 (best of any generation)',
+        rSo > 0.65, `r = ${rSo.toFixed(3)}`);
+    check('standoff-fit: southward dwell (< −5 nT) within factor 1.3',
+        soSouthH > southObsH / 1.3 && soSouthH < southObsH * 1.3,
+        `model ${soSouthH.toFixed(1)} h vs obs ${southObsH.toFixed(1)} h`);
+    // Ensemble under the η shell: still seeded-reproducible.
+    k.setSpreads({});
+    const soE1 = k.ensembleRun(1704, 400, t0S, stepS, n, L1_OBSERVER);
+    const soE2 = k.ensembleRun(1704, 400, t0S, stepS, n, L1_OBSERVER);
+    check('standoff ensemble: seeded-reproducible',
+        soE1.bzPct.p50.every((v, i) => v === soE2.bzPct.p50[i]));
+
+    // Gannon v1.4: η replaces BOTH fixed fractions on the interacting train.
+    // The shell carries flags, never deterministic field — the rope-field
+    // series must be bit-identical to the v1.3 generation.
+    const SSC_G_H = (Date.parse('2024-05-10T17:05:00Z') - Date.parse(GANNON_FIT.launchIso)) / 3600e3;
+    const INT_G_H = (Date.parse('2024-05-10T22:10:00Z') - Date.parse(GANNON_FIT.launchIso)) / 3600e3;
+    const tHofG = (i) => gT0S / 3600 + i * gStepS / 3600;
+    check('gannon standoff: η generation carries no fixed-k stand-ins',
+        GANNON_FIT.standoffRopes.every((r) => (r.sheathK ?? 0) === 0 && r.sheathEta > 0),
+        `η_A ${GANNON_FIT.standoffRopes[0].sheathEta}, η_B ${GANNON_FIT.standoffRopes[1].sheathEta} (was k 0.2 / 2.0)`);
+    k.setRopes(GANNON_FIT.standoffRopes);
+    k.setInteraction({ enabled: true, ...GANNON_FIT.interaction });
+    const gso = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+    k.setRopes(GANNON_FIT.interactionRopes);
+    const gio = k.series(gT0S, gStepS, gN, L1_OBSERVER);
+    check('gannon standoff: rope field bit-identical to v1.3 (shell is flags only)',
+        gso.bz.every((v, i) => v === gio.bz[i]));
+    const gsoFirstSheath = gso.sheath.findIndex((v) => v > 0);
+    let gsoFirstInternal = -1;
+    for (let i = 0; i < gN; i++) {
+        if (gso.sheath[i] > 0 && gso.inside[i] > 0) { gsoFirstInternal = i; break; }
+    }
+    check('gannon standoff: shock on the SSC (±1.5 h)',
+        gsoFirstSheath >= 0 && Math.abs(tHofG(gsoFirstSheath) - SSC_G_H) < 1.5,
+        `+${tHofG(gsoFirstSheath).toFixed(1)} h vs SSC +${SSC_G_H.toFixed(1)} h`);
+    check('gannon standoff: internal disturbance ±1.5 h (η_B = 3 ≈ 2.7× blunt-body — wake pileup, reported honestly)',
+        gsoFirstInternal >= 0 && Math.abs(tHofG(gsoFirstInternal) - INT_G_H) < 1.5,
+        `+${tHofG(gsoFirstInternal).toFixed(1)} h vs observed +${INT_G_H.toFixed(1)} h`);
+    k.setInteraction({ enabled: false });
+}
+
 // ── STEREO-A pre-arrival conditioning (spec §13) — the OSSE, end to end ──────
 // Drives the committed WASM through the exact flow the page uses for the
 // OSSE preset: synthesize the truth at both observers, condition the prior
