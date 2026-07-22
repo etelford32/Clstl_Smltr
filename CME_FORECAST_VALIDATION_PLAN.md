@@ -1,6 +1,10 @@
 # CME Forecasting & Validation Pipeline — Design + Phasing
 
-*Status: Phase 0 tooling + Layout Lab shipped on `claude/cme-forecasting-validation-ukleeg`. Schema drafted, not applied. Last updated 2026-07-12.*
+*Status: Phases 0–3 + 6 shipped (schema APPLIED 2026-07-12; the live
+lock/resolve loop + `/api/cme/skill` + the calendar scorecard shipped
+2026-07-23 on `claude/session-c9y6k9`). Phase 4 (hindcast backtest CLI)
+and the Phase 0 human-confirmation runbook remain open. Last updated
+2026-07-23.*
 
 The physics differentiator of this platform is validated, physics-first
 forecasting — skill shown, not claimed. This plan turns the existing daily
@@ -110,7 +114,7 @@ successful Phase 0 pull is reviewed and its inserts applied.
 > policy). A failed pull now reports `NO PRIMARY DATA — NOT verified` and
 > emits no inserts, so it can never masquerade as verification.
 
-### Phase 2 — Issue-time forecast locking (live loop)
+### Phase 2 — Issue-time forecast locking (live loop) ✅ SHIPPED 2026-07-23
 
 Extend `api/cron/validation-rerun.js` (new step before scoring), or a small
 `api/cron/cme-forecast-lock.js` if the function budget allows a cleaner split:
@@ -128,7 +132,22 @@ Extend `api/cron/validation-rerun.js` (new step before scoring), or a small
 - Cron cadence: no new `vercel.json` entry needed if folded into
   validation-rerun; if split out, **must** be added to `crons` (§4.3 CLAUDE.md).
 
-### Phase 3 — Truth resolution + scoring (live loop)
+### Phase 3 — Truth resolution + scoring (live loop) ✅ SHIPPED 2026-07-23
+> **As-built notes (Phases 2+3, both folded into validation-rerun — no new
+> cron entry):** event ids are `PP-RT-<donki-id>` (deterministic from the
+> DONKI activity id — no sequence counter, so concurrent runs can never
+> split an event; deviates from the `<seq>` sketch below on purpose).
+> dbm-v1 locks through the SAME `CmeEvent` model the dashboard displays
+> (adaptiveGamma + sheath + O'Brien/Newell impact), so the forecast on
+> record is the forecast the user saw. Decision logic is pure and
+> node-tested (`validation-scoring.js`: `rtEventId`, `needsNewIssue`,
+> `resolveEventTruth` — the last with a DATA-COVERAGE guard: a Pdyn gap
+> resolves as 'pending', never as a false alarm). Deferred from the
+> sketch: `cme_geomag_observations` fill (impact-magnitude scoring) and
+> the DONKI-IPS cross-check — arrival timing ships first. The dashboard
+> surface is the CME arrival calendar's prediction scorecard
+> (js/cme-calendar.js, browser-gated), which supersedes the Phase 5
+> "CME panel v2" card sketch.
 
 After expected passage (+3 days), the same cron resolves truth per event:
 1. Shock: `detectShockArrivals()` over `validation_pdyn_series` (exists),

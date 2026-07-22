@@ -13,6 +13,17 @@
  *                 arrival day/speed per hole
  *                 (RING_CURRENT_RECURRENCE_VALIDATION.md)
  *
+ * Plus the CME VALIDATION PROGRAM live loop (Phases 2–3 of
+ * CME_FORECAST_VALIDATION_PLAN.md, added 2026-07-23): every Earth-relevant
+ * DONKI CME gets a durable cme_events row and issue-time-LOCKED forecast
+ * rows per model (enlil / ballistic-v1 / dbm-v1 — INSERT-only, re-issued
+ * on kinematic revision); after passage the run resolves L1 truth
+ * (Pdyn-step shock or honest false-alarm — a data gap stays 'pending')
+ * into cme_l1_observations. The cme_model_skill view over these tables
+ * is served by /api/cme/skill and rendered on the space-weather CME
+ * calendar scorecard. Decision logic is pure and node-tested
+ * (validation-scoring.js: rtEventId, needsNewIssue, resolveEventTruth).
+ *
  * The scoring engine is js/validation-scoring.js — the same code the CLI
  * scripts run, so a cron row and a hand run are always comparable. As the
  * archive grows past one Carrington rotation the daily rows become a
@@ -35,8 +46,10 @@ import { fetchWithTimeout } from '../_lib/responses.js';
 import {
     backmapRows, backmapScore, runHindcast, BACKMAP,
     detectShockArrivals, scoreCmeArrivals,
+    rtEventId, needsNewIssue, resolveEventTruth,
 } from '../../js/validation-scoring.js';
 import { cmeTransit } from '../../js/ring-current-model.js';
+import { CmeEvent } from '../../js/cme-propagation.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -130,13 +143,13 @@ async function fetchPdynSeries() {
 }
 
 /**
- * CME arrival predictions with ETAs inside the verification window:
- * DONKI CMEAnalysis (deduped per cme_id, isMostAccurate preferred) +
- * WSA-ENLIL modeled arrivals (preferred basis; ballistic cross-check).
- * Direct NASA calls — the key lives in this runtime's env, same as the
- * /api/donki/cme proxy.
+ * DONKI catalog for the window: CMEAnalysis rows deduped per physical CME
+ * (isMostAccurate preferred) + the newest WSA-ENLIL Earth-arrival sim per
+ * cme id, reduced to the kinematics both the verifier (study 3) and the
+ * forecast-locking loop consume. Direct NASA calls — the key lives in
+ * this runtime's env, same as the /api/donki/cme proxy.
  */
-async function fetchCmePredictions(windowStart, windowEnd) {
+async function fetchDonkiCatalog(windowStart, windowEnd) {
     const NASA_KEY = process.env.NASA_API_KEY || 'DEMO_KEY';
     const fmt = ms => new Date(ms).toISOString().slice(0, 10);
     const start = fmt(windowStart - 5 * DAY), end = fmt(windowEnd + DAY);
@@ -169,28 +182,194 @@ async function fetchCmePredictions(windowStart, windowEnd) {
             byId.set(c.associatedCMEID, c);
         }
     }
-    const preds = [];
+    const rows = [];
     for (const [id, c] of byId) {
-        const launch = Date.parse(c.time21_5);
-        const v = parseFloat(c.speed);
-        const tr = cmeTransit(launch, v, windowEnd);
-        if (!tr) continue;
-        const miss = Math.hypot(parseFloat(c.latitude) || 0, parseFloat(c.longitude) || 0);
+        const launchMs = Date.parse(c.time21_5);
+        const speed = parseFloat(c.speed);
+        if (!Number.isFinite(launchMs) || !Number.isFinite(speed)) continue;
+        const lat = parseFloat(c.latitude) || 0;
+        const lon = parseFloat(c.longitude) || 0;
         const half = parseFloat(c.halfAngle);
         const sim = enlilByCme.get(id);
         const enlilMs = sim ? Date.parse(sim.estimatedShockArrivalTime) : NaN;
-        const relevant = (Number.isFinite(half) && miss <= half + 20) || sim?.isEarthGB === true;
-        if (!relevant) continue;
-        const etaMs = Number.isFinite(enlilMs) ? enlilMs : tr.etaMs;
+        const enlilKp = sim ? Math.max(sim.kp_90 ?? -1, sim.kp_135 ?? -1, sim.kp_180 ?? -1) : -1;
+        const miss = Math.hypot(lat, lon);
+        rows.push({
+            id, launchMs, speed, lat, lon,
+            half: Number.isFinite(half) ? half : null,
+            type: c.type ?? null,
+            enlilMs: Number.isFinite(enlilMs) ? enlilMs : null,
+            enlilKp: enlilKp >= 0 ? enlilKp : null,
+            earthRelevant: (Number.isFinite(half) && miss <= half + 20) || sim?.isEarthGB === true,
+        });
+    }
+    return rows;
+}
+
+/** Study-3 verifiable predictions from the catalog (ETA inside window). */
+function cmePredictionsFrom(catalog, windowStart, windowEnd) {
+    const preds = [];
+    for (const c of catalog) {
+        if (!c.earthRelevant) continue;
+        const tr = cmeTransit(c.launchMs, c.speed, windowEnd);
+        if (!tr) continue;
+        const etaMs = c.enlilMs ?? tr.etaMs;
         if (etaMs < windowStart || etaMs > windowEnd) continue;   // unverifiable here
         preds.push({
-            id, etaMs,
-            basis: Number.isFinite(enlilMs) ? 'enlil' : 'ballistic',
-            enlilEtaMs: Number.isFinite(enlilMs) ? enlilMs : null,
+            id: c.id, etaMs,
+            basis: c.enlilMs != null ? 'enlil' : 'ballistic',
+            enlilEtaMs: c.enlilMs,
             ballisticEtaMs: tr.etaMs,
         });
     }
     return preds;
+}
+
+/* ── CME forecast LOCKING + truth RESOLUTION (validation program §2–3) ──
+   The record-before-predict loop: every Earth-relevant DONKI CME gets a
+   cme_events row at first sight plus ONE issue-time-locked forecast row
+   per model (enlil when modeled / ballistic-v1 / dbm-v1) — re-issued as
+   a NEW row when DONKI revises kinematics, never updated. After passage
+   the same run resolves L1 truth from the detected shocks (arrived /
+   false-alarm, with the data-coverage guard in resolveEventTruth) so the
+   cme_model_skill view — served by /api/cme/skill and rendered on the
+   space-weather calendar scorecard — accretes real per-model skill. */
+
+async function sbGet(path) {
+    const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/${path}`, {
+        timeoutMs: 10_000, headers: sbHeaders,
+    });
+    if (!res.ok) throw new Error(`GET ${path.split('?')[0]} ${res.status}`);
+    return res.json();
+}
+
+async function sbInsert(table, rows, prefer = 'return=minimal') {
+    if (!rows.length) return;
+    const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/${table}`, {
+        method: 'POST', timeoutMs: 10_000,
+        headers: { ...sbHeaders, Prefer: prefer },
+        body: JSON.stringify(rows),
+    });
+    if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`insert ${table} ${res.status}: ${text.slice(0, 160)}`);
+    }
+}
+
+async function lockAndResolveCme(catalog, pdynSeries, nowMs) {
+    const summary = { events: 0, locked: 0, resolved: 0, falseAlarms: 0, pending: 0 };
+    const relevant = catalog.filter(c => c.earthRelevant);
+    const iso = ms => new Date(ms).toISOString();
+
+    // 1 ── Events at first sight (INSERT, never overwrite — the frozen
+    //      per-forecast `inputs` carry any later kinematic revisions).
+    if (relevant.length) {
+        await sbInsert('cme_events?on_conflict=event_id', relevant.map(c => ({
+            event_id: rtEventId(c.id), donki_id: c.id,
+            launch_time_utc: iso(c.launchMs), cme_type: c.type,
+            speed_kms_3d: c.speed, half_width_deg: c.half,
+            direction_lat_deg: c.lat, direction_lon_deg: c.lon,
+            is_earth_directed: true, is_hindcast: false,
+        })), 'return=minimal,resolution=ignore-duplicates');
+        summary.events = relevant.length;
+    }
+
+    // 2 ── Issue-time-locked forecasts (one row per model, re-issue on
+    //      revision > CME_LOCK.REVISION_MIN_H — needsNewIssue decides).
+    const ids = relevant.map(c => rtEventId(c.id));
+    const inList = `in.(${ids.map(encodeURIComponent).join(',')})`;
+    const existing = ids.length ? await sbGet(
+        `cme_arrival_forecasts?event_id=${inList}` +
+        '&select=event_id,model_id,predicted_arrival_utc&order=issued_at.desc') : [];
+    const latest = new Map();   // event|model → latest predicted ms
+    for (const r of existing) {
+        const k = `${r.event_id}|${r.model_id}`;
+        if (!latest.has(k)) latest.set(k, Date.parse(r.predicted_arrival_utc));
+    }
+    const toInsert = [];
+    for (const c of relevant) {
+        const eid = rtEventId(c.id);
+        const frozen = { donki_id: c.id, launch: iso(c.launchMs), speed_kms: c.speed,
+                         half_deg: c.half, lat_deg: c.lat, lon_deg: c.lon };
+        // dbm-v1: the SAME CmeEvent model the dashboard/globe display —
+        // adaptiveGamma drag + sheath compression + O'Brien/Newell impact.
+        const dbm = new CmeEvent({ time: iso(c.launchMs), speed: c.speed,
+            halfAngle: c.half ?? 30, earthDirected: true,
+            latitude: c.lat, longitude: c.lon }, 400);
+        const models = [
+            c.enlilMs != null && { model_id: 'enlil',
+                predicted_arrival_utc: iso(c.enlilMs),
+                predicted_kp_max: c.enlilKp,
+                inputs: { ...frozen, source: 'DONKI WSAEnlilSimulations' } },
+            (() => {
+                const tr = cmeTransit(c.launchMs, c.speed, nowMs);
+                return tr && { model_id: 'ballistic-v1',
+                    predicted_arrival_utc: iso(tr.etaMs),
+                    arrival_window_early: iso(tr.etaEarlyMs),
+                    arrival_window_late: iso(tr.etaLateMs),
+                    inputs: { ...frozen, method: 'constant-speed 21.5Rs→1AU ±15%' } };
+            })(),
+            { model_id: 'dbm-v1',
+                predicted_arrival_utc: iso(dbm.arrival_ms),
+                predicted_speed_at_l1: Math.round(dbm.v_arrival),
+                predicted_kp_max: dbm.impact?.kp_max ?? null,
+                predicted_dst_min_nt: dbm.impact?.dst_min ?? null,
+                inputs: { ...frozen, v_sw: 400, gamma_per_km: dbm.gamma,
+                          method: 'DBM Vrsnak-2013 adaptiveGamma' } },
+        ].filter(Boolean);
+        for (const m of models) {
+            if (needsNewIssue(latest.get(`${eid}|${m.model_id}`) ?? null,
+                              Date.parse(m.predicted_arrival_utc))) {
+                toInsert.push({ event_id: eid, ...m });
+            }
+        }
+    }
+    await sbInsert('cme_arrival_forecasts', toInsert);
+    summary.locked = toInsert.length;
+
+    // 3 ── Truth resolution after passage (arrived / false-alarm /
+    //      still-pending — a Pdyn data gap can never become a false alarm).
+    const sinceIso = iso(nowMs - 20 * DAY);
+    const recent = await sbGet('cme_events?is_hindcast=eq.false' +
+        `&launch_time_utc=gte.${encodeURIComponent(sinceIso)}&select=event_id`);
+    const openIds = recent.map(r => r.event_id);
+    if (openIds.length) {
+        const openIn = `in.(${openIds.map(encodeURIComponent).join(',')})`;
+        const [obs, fcs] = await Promise.all([
+            sbGet(`cme_l1_observations?event_id=${openIn}&select=event_id`),
+            sbGet(`cme_arrival_forecasts?event_id=${openIn}` +
+                  '&select=event_id,predicted_arrival_utc'),
+        ]);
+        const resolved = new Set(obs.map(r => r.event_id));
+        const predsByEvent = new Map();
+        for (const f of fcs) {
+            if (!predsByEvent.has(f.event_id)) predsByEvent.set(f.event_id, []);
+            predsByEvent.get(f.event_id).push(Date.parse(f.predicted_arrival_utc));
+        }
+        const shocks = detectShockArrivals(pdynSeries);
+        const seriesStartMs = pdynSeries[0]?.t, seriesEndMs = pdynSeries.at(-1)?.t;
+        const truthRows = [];
+        for (const [eid, preds] of predsByEvent) {
+            if (resolved.has(eid)) continue;
+            const r = resolveEventTruth({ predictedMsList: preds, shocks, nowMs,
+                                          seriesStartMs, seriesEndMs });
+            if (r.status === 'pending') { summary.pending++; continue; }
+            truthRows.push({
+                event_id: eid,
+                arrived: r.status === 'arrived',
+                shock_arrival_utc: r.status === 'arrived' ? iso(r.shockMs) : null,
+                source: 'RTSW',
+                notes: r.status === 'arrived'
+                    ? 'Pdyn-step shock (detectShockArrivals) matched to locked forecast'
+                    : 'no shock in alarm window; Pdyn series covered it',
+            });
+            if (r.status === 'arrived') summary.resolved++;
+            else summary.falseAlarms++;
+        }
+        await sbInsert('cme_l1_observations?on_conflict=event_id', truthRows,
+            'return=minimal,resolution=ignore-duplicates');
+    }
+    return summary;
 }
 
 async function insertRun(row) {
@@ -266,14 +445,28 @@ async function runValidation(request) {
         },
     });
 
+    // ── CME program: one DONKI catalog + one Pdyn series feed BOTH the
+    //    forecast-locking loop (Phases 2–3) and study 3's verification.
+    let catalog = [], pdynSeries = [];
+    let cmeProgram = { reason: 'not_run' };
+    try {
+        [catalog, pdynSeries] = await Promise.all([
+            fetchDonkiCatalog(windowStart, windowEnd),
+            fetchPdynSeries(),
+        ]);
+        cmeProgram = await lockAndResolveCme(catalog, pdynSeries, Date.now());
+    } catch (e) {
+        cmeProgram = { reason: `lock_resolve_failed: ${String(e?.message || e)}` };
+    }
+
     // ── Study 3: CME arrival verification (predicted vs actual shock) ──
     // Only inserts when there was something to verify — CMEs are episodic
     // and an empty run would poison the sparkline with zeros.
     let cmeSummary = { n: 0, reason: 'no verifiable predictions in window' };
     try {
-        const preds = await fetchCmePredictions(windowStart, windowEnd);
+        const preds = cmePredictionsFrom(catalog, windowStart, windowEnd);
         if (preds.length) {
-            const shocks = detectShockArrivals(await fetchPdynSeries());
+            const shocks = detectShockArrivals(pdynSeries);
             const sc = scoreCmeArrivals(preds, shocks);
             await insertRun({
                 kind: 'cme',
@@ -312,6 +505,7 @@ async function runValidation(request) {
             timingSkill: rc.timingSkill, independentEvents: rc.independentEvents,
         },
         cme: cmeSummary,
+        cmeProgram,
         dur_ms: Date.now() - started,
     });
 }

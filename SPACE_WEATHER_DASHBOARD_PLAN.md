@@ -573,6 +573,22 @@ dock mounts, ONE feed bus. A11y gate in CI (axe + keyboard walkthrough).
   · **Stage visuals**: procedural Sun (fbm granulation + limb
     darkening + corona halo — display dressing, documented) and the
     textured Earth described in the parity row above.
+- **VALIDATION ROUND — ✅ SHIPPED 2026-07-23** (author: "turn the
+  calendar into a tracking scorecard for CME prediction correctness so
+  we can begin improving our models"). The calendar became the LIVE
+  forward ledger of CME_FORECAST_VALIDATION_PLAN.md Phases 2–3:
+  api/cron/validation-rerun.js now locks issue-time forecasts per model
+  (enlil / ballistic-v1 / dbm-v1 — INSERT-only, revisions issue new
+  rows) into the applied cme_* tables and resolves L1 truth after
+  passage (Pdyn-shock or honest false alarm; data gaps stay pending);
+  /api/cme/skill serves the cme_model_skill leaderboard + recent
+  events; js/cme-calendar.js renders the skill strip (per-model MAE /
+  bias / ≤12 h hit rate, "skill shown, not claimed"), rewrites resolved
+  chips as predicted-vs-actual (strike-through + signed error, false
+  alarms marked), adds the next-arrival countdown, an honest
+  quiet-corridor note, and a reduced-motion-gated animation pass
+  (entrance stagger, today pulse, next-arrival glow). Hindcast receipts
+  stay on the separate D3 card — the strip is live-forward only.
 
 Each phase is a PR-sized arc with its own gates (pure-model node
 fixtures; Playwright: gate flow, compose/persist, station flights,
