@@ -28,7 +28,12 @@ import {
     xrayClassOf, sunActivityAt, flareFlashAt,
     normalizeFlares, parcelProbe, liftoffAt,
     sepStateAt, SEP_V_KMS,
+    bearingGamma, apparentAltitudeRad, skyCurtainRibbon, enuBasis, skyDir,
+    CURTAIN_BASE_KM,
+    moonLocalRe, MOON_ORBIT_RE, beltShellGrid, imfSector,
+    detectCoronalHoles, hssArrivalWindow, CARRINGTON_SYNODIC_DAYS,
 } from '../js/stage/model.js';
+import { moonPhase } from '../js/verdict-engine.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
 import { magneticLatitude, boundaryForKp } from '../js/verdict-engine.js';
 import { density, kpToAp } from '../js/upper-atmosphere-engine.js';
@@ -292,12 +297,15 @@ test('asset orbit ring: constant mean-altitude radius, inclination sets max |z|'
     assert.ok(Math.abs(eq[0]) < 1e-6 && Math.abs(eq[1] - r) < 1e-6, 'u=0 at the node');
 });
 
-test('mySkyPose: camera just above the pin, target on the northward horizon', () => {
+test('mySkyPose: camera just above the pin, target on the POLEWARD horizon', () => {
     const t = Date.parse('2026-07-22T06:00:00Z');
     const { pos, target } = mySkyPose(45, -105, t);
     assert.ok(Math.abs(Math.hypot(...pos) - 1.10) < 1e-9);
     assert.ok(Math.abs(Math.hypot(...target) - 1.02) < 1e-9);
-    assert.ok(target[2] > pos[2], 'looking poleward');
+    assert.ok(target[2] > pos[2], 'north: looking poleward (+z)');
+    // Southern observers face SOUTH — the aurora australis side (S6).
+    const s = mySkyPose(-42.9, 147.3, t);
+    assert.ok(s.target[2] < s.pos[2], 'south: looking poleward (−z)');
 });
 
 /* ── S2: the drag oracle the heat-shell colors encode ───────────────── */
@@ -501,6 +509,171 @@ test('S5d liftoff: envelope rises into launch and decays over 90 min', () => {
     assert.ok(Math.abs(liftoffAt(L, L + 45 * 60e3) - 0.5) < 1e-9);   // decaying
     assert.equal(liftoffAt(L, L + 2 * 3.6e6), 0);      // cleared the corona
     assert.equal(liftoffAt(null, L), 0);               // no event, no plume
+});
+
+test('S6 sky geometry: bearings, apparent altitude, the horizon cut', () => {
+    const RE = 6371.2;
+    // Due-north target → azimuth 0; due-east on the equator → azimuth 90°.
+    assert.ok(Math.abs(bearingGamma(40, -100, 50, -100).az) < 1e-9);
+    assert.ok(Math.abs(bearingGamma(0, 0, 0, 30).az - Math.PI / 2) < 1e-9);
+    assert.ok(Math.abs(bearingGamma(0, 0, 0, 90).gamma - Math.PI / 2) < 1e-9);
+    // Overhead point reads +90°; the horizon sits at γ_h = acos(R/(R+h)).
+    assert.ok(Math.abs(apparentAltitudeRad(300, 1e-9) - Math.PI / 2) < 1e-6);
+    const gH = Math.acos(RE / (RE + CURTAIN_BASE_KM));
+    assert.ok(Math.abs(apparentAltitudeRad(CURTAIN_BASE_KM, gH)) < 1e-9);
+    assert.ok(apparentAltitudeRad(CURTAIN_BASE_KM, gH * 1.5) < 0);
+    // Monotone: closer → higher in the sky.
+    assert.ok(apparentAltitudeRad(300, 0.05) > apparentAltitudeRad(300, 0.15));
+});
+
+test('S6 sky ribbon: quiet oval over Fairbanks, storm displacement, Miami glow', () => {
+    // Quiet-to-moderate Kp: the oval sits over Fairbanks — tall sheets.
+    const fbQuiet = skyCurtainRibbon({ p10: 2, p50: 2, p90: 3 }, 64.84, -147.72);
+    assert.ok(fbQuiet.length > 10, `Fairbanks columns ${fbQuiet.length}`);
+    assert.ok(Math.max(...fbQuiet.map((c) => c.altTop)) > 30 * Math.PI / 180);
+    assert.ok(fbQuiet.every((c, i) => i === 0 || c.az >= fbQuiet[i - 1].az), 'az-sorted');
+    assert.ok(fbQuiet.every((c) => c.altTop >= c.altBase), 'top above base');
+    // G3 storm: the oval expands EQUATORWARD past Fairbanks — the median
+    // boundary now hangs low on the SOUTHERN horizon (the real polar-cap
+    // displacement; the verdict card's margin logic encodes the same).
+    const fbStorm = skyCurtainRibbon({ p10: 6, p50: 7, p90: 8 }, 64.84, -147.72);
+    assert.ok(fbStorm.length > 0);
+    assert.ok(fbStorm.every((c) => Math.abs(c.az) > Math.PI / 2), 'displaced south');
+    // Miami, Kp 9: the classic LOW GLOW on the northern horizon — every
+    // visible column within ~15° altitude, azimuths clustered northward.
+    const mi = skyCurtainRibbon({ p10: 9, p50: 9, p90: 9 }, 25.76, -80.19);
+    assert.ok(mi.length > 0, 'Kp 9 reaches Miami');
+    assert.ok(mi.every((c) => c.altTop < 15 * Math.PI / 180), 'low on the horizon');
+    assert.ok(mi.every((c) => Math.abs(c.az) < Math.PI / 2), 'northward');
+    // Miami on a quiet day: EMPTY — never a fabricated glow.
+    assert.equal(skyCurtainRibbon({ p10: 2, p50: 2, p90: 2 }, 25.76, -80.19).length, 0);
+    assert.deepEqual(skyCurtainRibbon(null, 25.76, -80.19), []);
+});
+
+test('S6 ENU basis: orthonormal, geography-consistent, skyDir sane', () => {
+    const T = Date.parse('2026-07-22T06:00Z');
+    const b = enuBasis(64.84, -147.72, T);
+    const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    for (const v of [b.east, b.north, b.up]) {
+        assert.ok(Math.abs(Math.hypot(...v) - 1) < 1e-9, 'unit');
+    }
+    assert.ok(Math.abs(dot(b.east, b.north)) < 1e-6);
+    assert.ok(Math.abs(dot(b.east, b.up)) < 1e-6);
+    assert.ok(Math.abs(dot(b.north, b.up)) < 1e-6);
+    // North tilts poleward (+z) in the northern hemisphere; up is radial.
+    assert.ok(b.north[2] > 0);
+    assert.ok(Math.abs(b.up[2] - Math.sin(64.84 * Math.PI / 180)) < 1e-6);
+    // skyDir: zenith is up; the horizon points are the basis vectors.
+    const d = skyDir(0, Math.PI / 2, b);
+    assert.ok(Math.abs(d[0] - b.up[0]) < 1e-9 && Math.abs(d[2] - b.up[2]) < 1e-9);
+    const n0 = skyDir(0, 0, b);
+    assert.ok(Math.abs(n0[0] - b.north[0]) < 1e-9);
+    const e0 = skyDir(Math.PI / 2, 0, b);
+    assert.ok(Math.abs(e0[1] - b.east[1]) < 1e-9);
+});
+
+test('S7 Moon: phase-locked to the verdict-engine oracle, tail at full moon', () => {
+    // The epoch itself is a new moon: sunward (−x) in the stage frame.
+    const NEW_MOON = Date.UTC(2000, 0, 6, 18, 14);
+    const atNew = moonLocalRe(NEW_MOON);
+    assert.ok(Math.abs(atNew[0] + MOON_ORBIT_RE) < 1e-6, 'new moon sunward');
+    assert.ok(Math.abs(atNew[1]) < 1e-6);
+    // Half a synodic month later: FULL moon, anti-sunward — crossing the
+    // magnetotail. And the verdict-engine oracle agrees it is full.
+    const FULL = NEW_MOON + 29.53058867 / 2 * 86400e3;
+    const atFull = moonLocalRe(FULL);
+    assert.ok(Math.abs(atFull[0] - MOON_ORBIT_RE) < 1e-3, 'full moon tailward');
+    assert.ok(moonPhase(FULL).illumPct > 98, 'moonPhase agrees: full');
+    assert.ok(moonPhase(NEW_MOON).illumPct < 2, 'moonPhase agrees: new');
+    // Constant mean distance, ecliptic-plane (documented tolerances).
+    for (const dt of [3, 11, 21]) {
+        const p = moonLocalRe(NEW_MOON + dt * 86400e3);
+        assert.ok(Math.abs(Math.hypot(...p) - MOON_ORBIT_RE) < 1e-6);
+        assert.equal(p[2], 0);
+    }
+});
+
+test('S8 IMF sector: away/toward from measured Bx,By; honest refusal', () => {
+    // Canonical Parker geometry at Earth: away = (−Bx, +By).
+    assert.equal(imfSector(-3, 4), 'away');
+    assert.equal(imfSector(3, -4), 'toward');
+    // The feed's quiet fallback is Bx≡0, By=5 — degenerate, refuse.
+    assert.equal(imfSector(0, 5), null);
+    // Too weak to call; ambiguous (ortho-sector) refuses too.
+    assert.equal(imfSector(-0.3, 0.4), null);
+    assert.equal(imfSector(3, 4), null);       // Bx+ By+ ≈ orthogonal to spiral
+    assert.equal(imfSector(NaN, 4), null);
+    assert.equal(imfSector(undefined, undefined), null);
+});
+
+test('S7 belts: dipole L-shell geometry, r = L·cos²λ, anchored at rMin', () => {
+    const g = beltShellGrid(5, 20, 32, 1.08);
+    // Equatorial row sits exactly at L.
+    let maxR = 0, minR = Infinity;
+    for (let k = 0; k < g.positions.length / 3; k++) {
+        const r = Math.hypot(g.positions[k * 3], g.positions[k * 3 + 1], g.positions[k * 3 + 2]);
+        maxR = Math.max(maxR, r); minR = Math.min(minR, r);
+    }
+    assert.ok(Math.abs(maxR - 5) < 1e-6, `equator at L (${maxR})`);
+    assert.ok(Math.abs(minR - 1.08) < 0.02, `anchored at rMin (${minR})`);
+    // λc solves L·cos²λ = rMin.
+    assert.ok(Math.abs(5 * Math.cos(g.lamC) ** 2 - 1.08) < 1e-9);
+    // Index buffer is complete triangles inside the vertex range.
+    assert.equal(g.index.length % 3, 0);
+    assert.ok(Math.max(...g.index) < g.positions.length / 3);
+    // lat parameter spans the anchors.
+    assert.ok(Math.abs(g.lat[0] + 1) < 1e-9 && Math.abs(g.lat[g.lat.length - 1] - 1) < 1e-9);
+});
+
+test('S9 coronal holes: darkness found on the disk, background refused', () => {
+    // Synthetic 171 disk: bright everywhere, one dark blob east of
+    // center, one at the north pole; black off-disk corners.
+    const W = 128, img = { width: W, height: W, data: new Uint8ClampedArray(W * W * 4) };
+    const put = (x, y, v) => {
+        const k = (y * W + x) * 4;
+        img.data[k] = img.data[k + 1] = img.data[k + 2] = v; img.data[k + 3] = 255;
+    };
+    for (let y = 0; y < W; y++) {
+        for (let x = 0; x < W; x++) {
+            const r = Math.hypot(x / W - 0.5, y / W - 0.5) / 0.485;
+            put(x, y, r <= 1 ? 200 : 0);
+        }
+    }
+    // East blob (image LEFT = east-positive lon), mid-latitude.
+    for (let y = 52; y < 76; y++) for (let x = 22; x < 44; x++) put(x, y, 18);
+    const holes = detectCoronalHoles(img);
+    assert.equal(holes.length, 1, `found ${holes.length}`);
+    assert.ok(holes[0].lonDeg > 15, `east-positive (${holes[0].lonDeg.toFixed(1)})`);
+    assert.ok(Math.abs(holes[0].latDeg) < 15, 'near-equatorial blob');
+    assert.ok(holes[0].areaFrac > 0.01 && holes[0].areaFrac < 0.2);
+    // A pristine disk finds nothing; null-safety.
+    const clean = { width: W, height: W, data: img.data.slice() };
+    for (let y = 40; y < 90; y++) for (let x = 10; x < 60; x++) {
+        const r = Math.hypot(x / W - 0.5, y / W - 0.5) / 0.485;
+        const k = (y * W + x) * 4;
+        clean.data[k] = clean.data[k + 1] = clean.data[k + 2] = r <= 1 ? 200 : 0;
+    }
+    assert.equal(detectCoronalHoles(clean).length, 0, 'uniform disk → no holes');
+    assert.deepEqual(detectCoronalHoles(null), []);
+    assert.deepEqual(detectCoronalHoles({ width: 0, height: 0, data: [] }), []);
+});
+
+test('S9 HSS arrival: corotation to the meridian + 600 km/s transit', () => {
+    const T = Date.parse('2026-07-22T00:00Z');
+    const rate = 360 / CARRINGTON_SYNODIC_DAYS;
+    // East hole at +30°: crosses the meridian in ~2.27 d, stream lands
+    // ~2.89 d later (1 AU at 600 km/s).
+    const e = hssArrivalWindow(30, T);
+    assert.ok(Math.abs((e.crossMs - T) / 86400e3 - 30 / rate) < 1e-9);
+    assert.ok(Math.abs((e.etaMs - e.crossMs) / 86400e3 - 2.886) < 0.01);
+    assert.ok(e.startMs < e.etaMs && e.etaMs < e.endMs);
+    // West hole (−30°): crossed 2.27 d AGO — its stream is nearly here.
+    const w = hssArrivalWindow(-30, T);
+    assert.ok(w.crossMs < T);
+    assert.ok(w.etaMs > T, 'stream still in transit');
+    // Faster stream, earlier arrival.
+    assert.ok(hssArrivalWindow(0, T, { vKms: 800 }).etaMs
+        < hssArrivalWindow(0, T, { vKms: 500 }).etaMs);
 });
 
 console.log(`stage-model: ALL PASS (${n} tests)`);

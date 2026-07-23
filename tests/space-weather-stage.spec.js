@@ -39,6 +39,9 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         // Offline: the quiet corridor must not need any live feed.
         await page.route('**/services.swpc.noaa.gov/**', (r) => r.abort());
         await page.route('**/api/nasa/**', (r) => r.abort());
+        // S7: block the SDO proxy too — the sun must stay procedural
+        // (sun.live false) and never error when the photo can't load.
+        await page.route('**/api/solar/**', (r) => r.abort());
         await page.goto('/space-weather.html', { waitUntil: 'domcontentloaded' });
     });
 
@@ -146,10 +149,26 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         await expect(host.locator('.swst-pin-label')).toContainText(/oval/);
 
         // My Sky flight lands at the pin (ground-level: camera well inside
-        // the Earth-local neighbourhood).
+        // the Earth-local neighbourhood) and the S6 sky dome comes up:
+        // sky background + the curtain ribbon computed from the SAME oval
+        // oracle in az/alt coordinates (geometry asserted, never the
+        // wall-clock-dependent lighting), while the ×10.6-exaggerated
+        // walls yield to the honest from-below projection.
         await host.locator('.swst-stations button', { hasText: 'My Sky' }).click();
         await expect.poll(() => page.evaluate(() => window.__swStage?.station))
             .toBe('my-sky');
+        await expect.poll(() => page.evaluate(() => window.__swStage.mySky.dome),
+            { timeout: 15_000 }).toBe(true);
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 6 } }));
+            return window.__swStage.mySky.ribbonPts;
+        }), { timeout: 15_000 }).toBeGreaterThan(0);
+        expect(await page.evaluate(() => window.__swStage.curtains.visible))
+            .toBe(false);   // walls hide under the dome
+        expect(await page.evaluate(() => window.__swStage.mySky.sunAltDeg))
+            .not.toBeNull();
+        // Cardinal horizon marks are part of the dome chrome.
+        await expect(host.locator('.swst-overlay')).toContainText('N');
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
@@ -325,14 +344,133 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         // The disclosure line names the curtain exaggeration.
         await expect(host.locator('.swst-disclose')).toContainText('aurora curtain height');
 
-        // My Sky: heliospheric streaks hide, but the curtains are the sky
-        // story — they STAY.
+        // My Sky: heliospheric streaks hide, and the exaggerated curtain
+        // WALLS yield to the S6 dome. With no pin there is no observer,
+        // so the dome (and any sky) honestly stays down too.
         await host.locator('.swst-stations button', { hasText: 'My Sky' }).click();
         await expect.poll(() => page.evaluate(() => window.__swStage?.station))
             .toBe('my-sky');
         await expect.poll(() => page.evaluate(() => window.__swStage.sep.visible))
             .toBe(false);
-        expect(await page.evaluate(() => window.__swStage.curtains.visible)).toBe(true);
+        await expect.poll(() => page.evaluate(() => window.__swStage.curtains.visible))
+            .toBe(false);
+        expect(await page.evaluate(() => window.__swStage.mySky.dome)).toBe(false);
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
+    test('S7: Moon in the tail at full moon, measured belts, live Shue readout', async ({ page }) => {
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
+
+        // Moon: on its mean orbit, phase from the verdict-engine oracle.
+        const m0 = await page.evaluate(() => window.__swStage.moon);
+        expect(Math.hypot(m0.xRe, m0.yRe)).toBeCloseTo(60.27, 1);
+        expect(m0.illumPct).toBeGreaterThanOrEqual(0);
+        expect(m0.illumPct).toBeLessThanOrEqual(100);
+        await expect.poll(() => page.evaluate(() => window.__swStage.moon.visible),
+            { timeout: 15_000 }).toBe(true);
+
+        // Scrub τ to the next full moon: the Moon crosses the magnetotail
+        // (the probe computes from τ synchronously — scan the window).
+        const tail = await page.evaluate(() => {
+            const now = Date.now();
+            for (let d = 0; d <= 30; d += 0.25) {
+                window.__swStage.setTau(now + d * 86400e3);
+                const m = window.__swStage.moon;
+                if (m.inTail) return { d, illum: m.illumPct };
+            }
+            return null;
+        });
+        expect(tail).not.toBeNull();
+        expect(tail.illum).toBeGreaterThan(85);   // tail crossing ≈ full moon
+        await page.evaluate(() => window.__swStage.setTau(Date.now()));
+
+        // Van Allen belts: visible, outer driven by the MEASURED ≥2 MeV
+        // electron flux (re-inject each poll tick — the offline feed's
+        // quiet fallback overwrites between ticks).
+        await expect.poll(() => page.evaluate(() => window.__swStage.belts.visible),
+            { timeout: 15_000 }).toBe(true);
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update',
+                { detail: { electron_flux_2mev: 1e5 } }));
+            return window.__swStage.belts.outer;
+        }), { timeout: 15_000 }).toBe(1);
+
+        // Shue standoff: live readout from the bus wind (fallback 400 km/s
+        // offline), in the honest 6–13 R_E range, stated on the nose chip.
+        await expect.poll(() => page.evaluate(() => window.__swStage.shue.r0Re),
+            { timeout: 15_000 }).toBeGreaterThan(6);
+        expect(await page.evaluate(() => window.__swStage.shue.r0Re)).toBeLessThan(13);
+        await expect(host.locator('.swst-chip', { hasText: 'Shue' }))
+            .toContainText('Rₑ');
+
+        // Offline: the sun stays procedural, honestly labeled not-live —
+        // all three S7/S8 live layers down, zero errors.
+        expect(await page.evaluate(() => window.__swStage.sun.live)).toBe(false);
+        expect(await page.evaluate(() => window.__swStage.sun.corona171)).toBe(false);
+        expect(await page.evaluate(() => window.__swStage.sun.magLive)).toBe(false);
+
+        // S8 IMF sector from measured Bx/By (re-inject per tick — the
+        // offline fallback's degenerate Bx≡0 makes the oracle refuse,
+        // which is itself the honest quiet answer).
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: {
+                solar_wind: { speed: 480, density: 6, bz: -2, bx: -3, by: 4 } } }));
+            return window.__swStage.sun.imfSector;
+        }), { timeout: 15_000 }).toBe('away');
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: {
+                solar_wind: { speed: 480, density: 6, bz: -2, bx: 3, by: -4 } } }));
+            return window.__swStage.sun.imfSector;
+        }), { timeout: 15_000 }).toBe('toward');
+        // Chip narrates the sector (poll re-injects: the offline fallback
+        // wipes it to the honest null between ticks).
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: {
+                solar_wind: { speed: 480, density: 6, bz: -2, bx: 3, by: -4 } } }));
+            return document.querySelector('#sw-stage-host .swst-overlay')?.textContent ?? '';
+        }), { timeout: 15_000 }).toContain('IMF toward');
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
+    test('S9: coronal hole detected on a fixture 171 disk → HSS story chip', async ({ page }) => {
+        // Build a synthetic 171 disk (bright, one dark blob EAST of
+        // center) and serve it on the aia route — later-registered routes
+        // win over the beforeEach abort, exercising the real load→detect
+        // path deterministically.
+        const png = await page.evaluate(() => {
+            const c = document.createElement('canvas');
+            c.width = c.height = 512;
+            const x = c.getContext('2d');
+            x.fillStyle = '#000'; x.fillRect(0, 0, 512, 512);
+            x.fillStyle = '#c9a45e';
+            x.beginPath(); x.arc(256, 256, 248, 0, 7); x.fill();
+            x.fillStyle = '#120e04';
+            x.beginPath(); x.arc(150, 250, 52, 0, 7); x.fill();
+            return c.toDataURL('image/png').split(',')[1];
+        });
+        await page.route('**/api/solar/aia**', (route) => route.fulfill({
+            contentType: 'image/png', body: Buffer.from(png, 'base64') }));
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
+
+        // The detector finds the blob, east-positive, with a plausible area.
+        await expect.poll(() => page.evaluate(() => window.__swStage.sun.holes.length),
+            { timeout: 20_000 }).toBeGreaterThan(0);
+        const h = await page.evaluate(() => window.__swStage.sun.holes[0]);
+        expect(h.lonDeg).toBeGreaterThan(10);        // image-left = east
+        expect(h.areaFrac).toBeGreaterThan(0.005);
+        // The corotation story: a finite HSS ETA in the future window
+        // (east hole → meridian in days, transit ~2.9 d more). Set by the
+        // next scene update after detection — poll.
+        await expect.poll(() => page.evaluate(() => window.__swStage.sun.hssEtaMs),
+            { timeout: 15_000 }).toBeGreaterThan(Date.now());
+        expect(await page.evaluate(() => window.__swStage.sun.hssEtaMs))
+            .toBeLessThan(Date.now() + 12 * 86400e3);
+        // Chip narrates it.
+        await expect(host.locator('.swst-chip', { hasText: 'coronal hole' }))
+            .toContainText('HSS @ Earth');
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 

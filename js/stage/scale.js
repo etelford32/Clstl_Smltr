@@ -134,6 +134,10 @@ export const BODY = Object.freeze({
     earthRadiusUnits: 1 / EARTH_LOCAL_RE,
     sunExaggeration: 0.12 / (A * (RSUN_KM / AU_KM)),                    // ≈ ×6.5
     earthExaggeration: (1 / EARTH_LOCAL_RE) / (A * (RE_KM / AU_KM)),    // ≈ ×107
+    // S7 Moon: real 0.2727 R_E is a speck at Earth-local scale; drawn
+    // 1.1 R_E (×4 — the SMALLEST body exaggeration on stage, disclosed).
+    moonRadiusUnits: 1.1 / EARTH_LOCAL_RE,
+    moonExaggeration: 1.1 / 0.2727,                                     // ≈ ×4
 });
 
 // ── S5c aurora curtains: the disclosed VERTICAL exaggeration ───────────

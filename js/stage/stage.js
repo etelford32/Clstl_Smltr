@@ -51,12 +51,15 @@ import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          assetOrbitRing, parseTleRaan, mySkyPose, windFieldAt,
          memberFieldRows, sunActivityAt, flareFlashAt,
          normalizeFlares, parcelProbe, liftoffAt,
-         sepStateAt, SEP_V_KMS } from './model.js';
+         sepStateAt, SEP_V_KMS,
+         skyCurtainRibbon, enuBasis, skyDir,
+         moonLocalRe, MOON_ORBIT_RE, beltShellGrid, imfSector,
+         detectCoronalHoles, hssArrivalWindow } from './model.js';
 import { sheathCompression } from '../cme-propagation.js';
-import { carringtonL0 } from '../ring-current-model.js';
+import { carringtonL0, shueStandoffRe } from '../ring-current-model.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
 import { ropeFrame } from '../flux-rope/view.js';
-import { magneticLatitude, boundaryForKp } from '../verdict-engine.js';
+import { magneticLatitude, boundaryForKp, sunAltitudeDeg, moonPhase } from '../verdict-engine.js';
 import { density, kpToAp } from '../upper-atmosphere-engine.js';
 import { propagate } from '../satellite-tracker.js';
 import { loadProfile, CHANGE_EVENT as THRESHOLD_EVENT } from '../threshold-profile.js';
@@ -257,7 +260,15 @@ function mount(host) {
     // dressing, like the Parker spirals — no physics claim). Shader math
     // stays clamped (the ionosphere cage-shader overflow lesson) and
     // cheap (3 octaves, no derivatives) for software-GL CI.
-    const sunUniforms = { uTime: { value: 0 }, uAct: { value: 0 } };
+    // S7 LIVE PHOTOSPHERE: the Earth-facing hemisphere samples the actual
+    // SDO/HMI continuum through the house edge proxy (/api/solar/aia —
+    // 12-min cadence, CDN-cached). Orthographic disk→sphere projection on
+    // the near side only; the far side keeps the procedural granulation —
+    // honest: we don't see the far side (that's the far-side program's
+    // job). Texture load is fail-quiet: offline/CI stays procedural.
+    const sunUniforms = { uTime: { value: 0 }, uAct: { value: 0 },
+        uLive: { value: 0 }, uLiveTex: { value: null },
+        uMag: { value: 0 }, uMagTex: { value: null } };
     const sun = new THREE.Mesh(
         new THREE.SphereGeometry(BODY.sunRadiusUnits, 48, 28),
         new THREE.ShaderMaterial({
@@ -290,6 +301,8 @@ function mount(host) {
                     return 0.55 * vnoise(p) + 0.30 * vnoise(p * 2.31)
                          + 0.15 * vnoise(p * 5.17);
                 }
+                uniform float uLive; uniform sampler2D uLiveTex;
+                uniform float uMag; uniform sampler2D uMagTex;
                 void main() {
                     // Granulation drifts slowly; scale chosen so cells read
                     // at the Stage's default camera distance.
@@ -299,6 +312,28 @@ function mount(host) {
                     vec3 bright = vec3(1.00, 0.95, 0.80);
                     vec3 c = mix(deep, mid, clamp(g * 1.6, 0.0, 1.0));
                     c = mix(c, bright, clamp((g - 0.55) * 2.2, 0.0, 1.0));
+                    // S7: live SDO disk on the Earth-facing (+x) hemisphere.
+                    // Orthographic projection: the photo's (u,v) are the
+                    // sphere's (−y, z) as seen from Earth; SDO disks fill
+                    // ~0.97 of the frame. Warm-tint the grayscale HMI.
+                    if (uLive > 0.01 && vObj.x > 0.0) {
+                        vec2 duv = vec2(0.5 - vObj.y * 0.485, 0.5 + vObj.z * 0.485);
+                        vec3 photo = texture2D(uLiveTex, duv).rgb;
+                        vec3 tinted = photo * vec3(1.05, 0.88, 0.62) * 1.25;
+                        float seam = smoothstep(0.0, 0.18, vObj.x);
+                        c = mix(c, tinted, uLive * seam);
+                        // S8: the MEASURED magnetic polarity (HMI LOS
+                        // magnetogram — white = field toward us, black =
+                        // away). Warm/cool tint where |B| is strong; the
+                        // quiet gray disk stays untinted.
+                        if (uMag > 0.01) {
+                            float m = texture2D(uMagTex, duv).r - 0.5;
+                            float pos = clamp(m * 2.4, 0.0, 1.0);
+                            float neg = clamp(-m * 2.4, 0.0, 1.0);
+                            c = mix(c, vec3(1.00, 0.42, 0.30), pos * 0.5 * seam * uMag);
+                            c = mix(c, vec3(0.35, 0.55, 1.00), neg * 0.5 * seam * uMag);
+                        }
+                    }
                     // Limb darkening: μ = cos(view angle), Eddington-ish ramp.
                     float mu = clamp(dot(normalize(vN), normalize(vView)), 0.0, 1.0);
                     c *= 0.45 + 0.55 * pow(mu, 0.55);
@@ -318,6 +353,80 @@ function mount(host) {
     corona.material.opacity = 0.35;
     scene.add(corona);
 
+    // S8 EUV CORONA SHELL: the live AIA 171 Å disk (coronal loops, holes,
+    // limb brightening) as a thin additive shell just above the
+    // photosphere — near side only, opacity breathing with the measured
+    // activity. The halo sprite stays; this is the corona ON the disk.
+    const euvUniforms = { uTex: { value: null }, uAct: sunUniforms.uAct };
+    const euvShell = new THREE.Mesh(
+        new THREE.SphereGeometry(BODY.sunRadiusUnits * 1.012, 48, 28),
+        new THREE.ShaderMaterial({
+            uniforms: euvUniforms,
+            transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            vertexShader: `
+                varying vec3 vObj;
+                void main() {
+                    vObj = normalize(position);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform sampler2D uTex; uniform float uAct;
+                varying vec3 vObj;
+                void main() {
+                    if (vObj.x <= 0.0) discard;   // near side only (honest)
+                    vec2 duv = vec2(0.5 - vObj.y * 0.485, 0.5 + vObj.z * 0.485);
+                    vec3 euv = texture2D(uTex, duv).rgb;
+                    float lum = clamp(dot(euv, vec3(0.35, 0.45, 0.20)), 0.0, 1.0);
+                    float seam = smoothstep(0.0, 0.15, vObj.x);
+                    float a = lum * (0.45 + 0.45 * uAct) * seam;
+                    if (a < 0.01) discard;
+                    gl_FragColor = vec4(euv * vec3(1.1, 0.95, 0.55), a);
+                }`,
+        }));
+    euvShell.visible = false;
+    scene.add(euvShell);
+
+    // S7/S8 live-sun fetch: three channels off the same edge proxy
+    // (photosphere · 171 corona · LOS magnetogram), each fail-quiet,
+    // refreshed at AIA's native 12-min cadence.
+    const loadSunChannel = (channel, onload, onfail) => {
+        new THREE.TextureLoader().load(`/api/solar/aia?channel=${channel}&res=1024`,
+            (tex) => { tex.colorSpace = THREE.SRGBColorSpace; onload(tex); },
+            undefined, onfail);
+    };
+    const loadSunPhoto = () => {
+        loadSunChannel('white', (tex) => {
+            sunUniforms.uLiveTex.value = tex;
+            sunUniforms.uLive.value = 1;
+            state.sunLive = true;
+        }, () => { state.sunLive = false; });
+        loadSunChannel('171', (tex) => {
+            euvUniforms.uTex.value = tex;
+            euvShell.visible = true;
+            state.sunCorona171 = true;
+            // S9: run the pure hole detector on the freshly loaded disk
+            // (downsampled 128² — grid clustering needs no more).
+            try {
+                const c = document.createElement('canvas');
+                c.width = c.height = 128;
+                const x = c.getContext('2d');
+                x.drawImage(tex.image, 0, 0, 128, 128);
+                const holes = detectCoronalHoles(x.getImageData(0, 0, 128, 128));
+                state.holes = holes;
+                state.holesMs = Date.now();
+                state.holesL0 = carringtonL0(state.holesMs).L0;
+            } catch { state.holes = []; }
+        }, () => { euvShell.visible = false; state.sunCorona171 = false; });
+        loadSunChannel('mag', (tex) => {
+            sunUniforms.uMagTex.value = tex;
+            sunUniforms.uMag.value = 1;
+            state.sunMag = true;
+        }, () => { sunUniforms.uMag.value = 0; state.sunMag = false; });
+    };
+    loadSunPhoto();
+    setInterval(loadSunPhoto, 12 * 60e3);
+
     // Live ACTIVE REGIONS on the Sun (the S2 "on record" upgrade; author
     // feedback 2026-07-23 "still not seeing solar activity"): up to 8
     // markers from the page's 'swpc-update' bus (NOAA solar_regions —
@@ -335,6 +444,21 @@ function mount(host) {
         m.visible = false;
         scene.add(m);
         arMarkers.push(m);
+    }
+
+    // S9 coronal-hole rings: dark-teal outlines at the DETECTED holes
+    // (pure detector over the live 171 disk). Detected at Stonyhurst-now;
+    // under τ-scrub they rotate at the true Carrington rate via the same
+    // carringtonL0 oracle the AR markers use.
+    const chMarkers = [];
+    for (let i = 0; i < 4; i++) {
+        const m = new THREE.Mesh(
+            new THREE.RingGeometry(0.72, 1, 26),
+            new THREE.MeshBasicMaterial({ color: 0x2fa8a0, transparent: true,
+                opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+        m.visible = false;
+        scene.add(m);
+        chMarkers.push(m);
     }
 
     const spiralMat = new THREE.LineBasicMaterial({
@@ -613,6 +737,119 @@ function mount(host) {
         return mesh;
     });
 
+    /* ── S6 MY SKY DOME: the sky story from UNDERNEATH ──────────────
+       A background sphere centered on the PIN (twilight gradient +
+       procedural stars, darkness from the ONE solar oracle) plus the
+       curtain ribbon in az/alt coordinates from the SAME oval oracle
+       the band and walls use. From below no height exaggeration is
+       needed — real 100–300 km curtains are tall in ANGLE, so this
+       staging is scale-honest. Camera sits 0.10 R_E above the pin
+       (mySkyPose); at dome radius ~15 R_E that off-center parallax is
+       <1% — documented approximation. Scrubbing τ moves the sun:
+       daylight honestly washes the sky out. */
+    const DOME_R = 0.28;
+    const domeUniforms = {
+        uUp: { value: new THREE.Vector3(0, 0, 1) },
+        uSunAlt: { value: -18 },
+    };
+    const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(DOME_R, 48, 32),
+        new THREE.ShaderMaterial({
+            uniforms: domeUniforms,
+            side: THREE.BackSide, transparent: false,
+            depthWrite: false, depthTest: false,
+            vertexShader: `
+                varying vec3 vDir;
+                void main() {
+                    vDir = normalize(position);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform vec3 uUp; uniform float uSunAlt;
+                varying vec3 vDir;
+                void main() {
+                    vec3 d = normalize(vDir);
+                    float alt = dot(d, normalize(uUp));           // sin(altitude)
+                    float day = clamp((uSunAlt + 6.0) / 12.0, 0.0, 1.0);
+                    float dark = clamp((-uSunAlt - 3.0) / 9.0, 0.0, 1.0);
+                    vec3 night = vec3(0.012, 0.016, 0.035);
+                    vec3 dayC = mix(vec3(0.60, 0.75, 0.92), vec3(0.20, 0.42, 0.78),
+                        clamp(alt * 1.6, 0.0, 1.0));
+                    vec3 c = mix(night, dayC, day);
+                    // Twilight warms the horizon band (bounded args only).
+                    float tw = clamp(1.0 - abs(uSunAlt + 4.0) / 8.0, 0.0, 1.0);
+                    c += vec3(0.55, 0.25, 0.08) * tw * pow(clamp(1.0 - alt, 0.0, 1.0), 6.0);
+                    // Hash stars: dark skies only, above the horizon.
+                    vec3 q = floor(d * 220.0);
+                    float h = fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+                    if (h > 0.9965 && alt > 0.02) {
+                        c += vec3(0.9) * dark * pow((h - 0.9965) / 0.0035, 2.0);
+                    }
+                    // Ground plane below the horizon.
+                    if (alt < 0.0) c = mix(c, vec3(0.015, 0.018, 0.02),
+                        clamp(-alt * 8.0, 0.0, 1.0));
+                    gl_FragColor = vec4(c, 1.0);
+                }`,
+        }));
+    dome.renderOrder = -3;
+    dome.visible = false;
+    earthGroup.add(dome);
+
+    // Curtain ribbon on the dome — columns from skyCurtainRibbon.
+    const RIB_N = 144;
+    const ribbonMat = new THREE.ShaderMaterial({
+        uniforms: { uTime: curtainUniforms.uTime, uInt: curtainUniforms.uInt,
+            uDark: { value: 0 } },
+        transparent: true, depthWrite: false, depthTest: false,
+        side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+        vertexShader: `
+            attribute float aV; attribute float aCol; attribute float aW;
+            varying float vV; varying float vCol; varying float vW;
+            void main() {
+                vV = aV; vCol = aCol; vW = aW;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+        fragmentShader: `
+            uniform float uTime; uniform float uInt; uniform float uDark;
+            varying float vV; varying float vCol; varying float vW;
+            void main() {
+                float ray = 0.55 + 0.45 * sin(vCol * 30.0 - uTime * 1.4);
+                float fade = pow(clamp(1.0 - vV, 0.0, 1.0), 1.4);
+                vec3 c = mix(vec3(0.30, 0.95, 0.55), vec3(0.90, 0.35, 0.45), vV);
+                // From directly beneath, even the quiet oval's arcs are
+                // plainly visible — a base floor with Kp growth, unlike
+                // the distant walls (pure uInt). Darkness still gates.
+                float amp = 0.25 + 0.75 * uInt;
+                float a = amp * uDark * fade * ray * vW * 0.9;
+                if (a < 0.008) discard;
+                gl_FragColor = vec4(c, a);
+            }`,
+    });
+    const ribbonGeom = new THREE.BufferGeometry();
+    ribbonGeom.setAttribute('position',
+        new THREE.BufferAttribute(new Float32Array(RIB_N * 2 * 3), 3));
+    {
+        const aV = new Float32Array(RIB_N * 2);
+        for (let i = 0; i < RIB_N; i++) { aV[i * 2] = 0; aV[i * 2 + 1] = 1; }
+        ribbonGeom.setAttribute('aV', new THREE.BufferAttribute(aV, 1));
+        ribbonGeom.setAttribute('aCol',
+            new THREE.BufferAttribute(new Float32Array(RIB_N * 2), 1));
+        ribbonGeom.setAttribute('aW',
+            new THREE.BufferAttribute(new Float32Array(RIB_N * 2), 1));
+        const idx = [];
+        for (let i = 0; i < RIB_N - 1; i++) {
+            const a = i * 2, b = a + 2;
+            idx.push(a, a + 1, b, a + 1, b + 1, b);
+        }
+        ribbonGeom.setIndex(idx);
+        ribbonGeom.setDrawRange(0, 0);
+    }
+    const ribbon = new THREE.Mesh(ribbonGeom, ribbonMat);
+    ribbon.renderOrder = -2;
+    ribbon.frustumCulled = false;   // dome-relative strip, range-driven
+    ribbon.visible = false;
+    earthGroup.add(ribbon);
+
     const pinMarker = new THREE.Mesh(
         new THREE.SphereGeometry(reToUnits(0.22), 12, 8),
         new THREE.MeshBasicMaterial({ color: 0x4fc97f }));
@@ -625,6 +862,87 @@ function mount(host) {
             opacity: 0.08, side: THREE.DoubleSide, depthWrite: false }));
     heatShell.visible = false;
     earthGroup.add(heatShell);
+
+    // ── S7 THE MOON: mean-orbit position from the SAME new-moon epoch
+    // verdict-engine's moonPhase uses — τ-scrubbing swings it around the
+    // orbit, and every FULL MOON it crosses the magnetotail. Terminator
+    // shading is real: lit from the mean-sun direction (−x).
+    const moon = new THREE.Mesh(
+        new THREE.SphereGeometry(BODY.moonRadiusUnits, 20, 14),
+        new THREE.ShaderMaterial({
+            vertexShader: `
+                varying vec3 vNW;
+                void main() {
+                    // WORLD-frame normal (earthGroup is a pure translation,
+                    // so mat3(modelMatrix) is safe) — the terminator must
+                    // face the mean sun, not the camera.
+                    vNW = normalize(mat3(modelMatrix) * normal);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                varying vec3 vNW;
+                void main() {
+                    // Mean sun sits at world −x.
+                    float lit = clamp(dot(normalize(vNW), vec3(-1.0, 0.0, 0.0)), 0.0, 1.0);
+                    vec3 c = mix(vec3(0.05, 0.05, 0.06), vec3(0.78, 0.77, 0.74),
+                        pow(lit, 0.7));
+                    gl_FragColor = vec4(c, 1.0);
+                }`,
+        }));
+    earthGroup.add(moon);
+    const moonRing = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(
+            Array.from({ length: 97 }, (_, i) => {
+                const a = (i / 96) * Math.PI * 2;
+                const r = reToUnits(MOON_ORBIT_RE);
+                return new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), 0);
+            })),
+        new THREE.LineBasicMaterial({ color: 0x2a3550, transparent: true, opacity: 0.5 }));
+    earthGroup.add(moonRing);
+
+    // ── S7 VAN ALLEN BELTS: dipole L-shell surfaces (model.js
+    // beltShellGrid — same dipole convention as the oval oracle; house
+    // belt L-values from magnetosphere-engine). The OUTER belt breathes
+    // with the MEASURED GOES ≥2 MeV electron flux on the bus — including
+    // the storm-time dropouts, because the data includes them.
+    const beltUniforms = { uInner: { value: 0.5 }, uOuter: { value: 0.5 } };
+    const mkBelt = (L, colorVec, uniName) => {
+        const g = beltShellGrid(L);
+        const geom = new THREE.BufferGeometry();
+        const pos = new Float32Array(g.positions.length);
+        for (let i = 0; i < g.positions.length; i++) {
+            pos[i] = g.positions[i] * reToUnits(1);
+        }
+        geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geom.setAttribute('aLat', new THREE.BufferAttribute(g.lat, 1));
+        geom.setIndex(g.index);
+        const mesh = new THREE.Mesh(geom, new THREE.ShaderMaterial({
+            uniforms: beltUniforms,
+            transparent: true, depthWrite: false, side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            vertexShader: `
+                attribute float aLat; varying float vLat;
+                void main() {
+                    vLat = aLat;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform float ${uniName};
+                varying float vLat;
+                void main() {
+                    // Brightest at the equator, fading toward the anchors.
+                    float eq = pow(clamp(1.0 - abs(vLat), 0.0, 1.0), 1.5);
+                    float a = ${uniName} * eq * 0.16;
+                    if (a < 0.004) discard;
+                    gl_FragColor = vec4(${colorVec}, a);
+                }`,
+        }));
+        mesh.visible = false;
+        earthGroup.add(mesh);
+        return mesh;
+    };
+    const beltInner = mkBelt(1.6, 'vec3(0.35, 0.55, 1.0)', 'uInner');
+    const beltOuter = mkBelt(5.0, 'vec3(1.0, 0.55, 0.25)', 'uOuter');
 
     const assetObjs = [];   // { asset, ring: Line, dot: Mesh, label }
 
@@ -856,6 +1174,40 @@ function mount(host) {
         () => [0, 0, -BODY.sunRadiusUnits * 2.0]);
     addLabel('swst-label', 'EARTH', () => [EARTH_S, 0, BODY.earthRadiusUnits * 2.2]);
     addLabel('swst-label', 'L1', () => [stageRadius(0.99, state.mix), 0, 0.05]);
+    // S7 Moon chip: phase glyph + name from the verdict-engine oracle,
+    // anchored to the live orbit position.
+    const moonChip = addLabel('swst-chip dim', '', () => {
+        const m = state.moonPos;
+        return m ? [EARTH_S + m[0], m[1], m[2] - BODY.moonRadiusUnits * 2.5] : [0, 0, -9];
+    });
+    // S7 Shue nose chip: the LIVE standoff, at the nose it measures.
+    const mpChip = addLabel('swst-chip dim', '', () => {
+        const r = state.shueR0;
+        return r ? [EARTH_S - reToUnits(r), 0, -reToUnits(3)] : [0, 0, -9];
+    });
+    mpChip.style.display = 'none';
+    // S9 coronal-hole chip: largest detected hole + its HSS arrival.
+    const chChip = addLabel('swst-chip dim', '',
+        () => [0, 0, -BODY.sunRadiusUnits * 2.6]);
+    chChip.style.display = 'none';
+    // S6 cardinal horizon marks — only in the My Sky dome (display
+    // toggled with it). World closures read the pin's ENU basis so the
+    // marks turn with the geography under the mean sun.
+    const cardinalEls = ['N', 'E', 'S', 'W'].map((t, i) => {
+        const el = addLabel('swst-label', t, () => {
+            const b = state.skyBasis, dp = state.domePos;
+            if (!b || !dp) return [0, 0, -9];
+            const dir = [b.north, b.east,
+                b.north.map((v) => -v), b.east.map((v) => -v)][i];
+            const R = DOME_R * 0.88;
+            return [EARTH_S + dp[0] + dir[0] * R,
+                dp[1] + dir[1] * R,
+                dp[2] + dir[2] * R + b.up[2] * DOME_R * 0.05];
+        });
+        el.style.display = 'none';
+        return el;
+    });
+
     // S5d probe readout — follows the dropped monitor; hidden until one
     // exists (display toggled by the probe update block, like pinLabel).
     const probeChip = addLabel('swst-chip', '', () => {
@@ -907,6 +1259,14 @@ function mount(host) {
             const toStage = (v) =>
                 [EARTH_S + reToUnits(v[0]), reToUnits(v[1]), reToUnits(v[2])];
             to = { ...to, pos: toStage(p.pos), target: toStage(p.target) };
+            // S6: the observer's LOCAL vertical is camera-up, so the dome's
+            // horizon sits level — world-z up twists the sky at high
+            // latitudes (earthGroup is a pure translation; directions are
+            // world-valid).
+            const b = enuBasis(state.pin.lat, state.pin.lon, state.tauMs);
+            camera.up.set(b.up[0], b.up[1], b.up[2]);
+        } else {
+            camera.up.set(0, 0, 1);
         }
         if (!cut && !state.attract && id !== state.station) track('station_change', { station: id });
         state.station = id;
@@ -1099,6 +1459,23 @@ function mount(host) {
         }
         if (Number.isFinite(d?.proton_flux_10mev)) {
             state.protonLatest = d.proton_flux_10mev;
+        }
+        // S7: measured ≥2 MeV electrons drive the outer Van Allen belt.
+        if (Number.isFinite(d?.electron_flux_2mev) && d.electron_flux_2mev > 0) {
+            state.electronFlux = d.electron_flux_2mev;
+        }
+        // S7: the magnetopause breathes with the MEASURED L1 wind from
+        // the bus — the Shue surface + r₀ chip no longer wait for the
+        // forecast provider (which may be idle on a quiet sun).
+        if (d?.solar_wind && Number.isFinite(d.solar_wind.speed)) {
+            updateMagnetopause({ v: d.solar_wind.speed,
+                n: d.solar_wind.density ?? 5, bz: d.solar_wind.bz ?? 0 });
+        }
+        // S8: measured IMF Bx/By → sector polarity (imfSector refuses
+        // the feed's degenerate quiet fallback on its own).
+        if (d?.solar_wind) {
+            state.imfBx = d.solar_wind.bx;
+            state.imfBy = d.solar_wind.by;
         }
         // BOTH flare catalogs: NOAA retired its 7-day flare JSON, so live
         // flares usually arrive ONLY as donki_flares — reading recent_flares
@@ -1378,6 +1755,13 @@ function mount(host) {
         const key = `${(pdyn ?? 2).toFixed(2)}|${(s?.bz ?? 0).toFixed(1)}`;
         if (key === mpKey) return;
         mpKey = key;
+        // S7: the LIVE Shue-1998 standoff, stated at the nose it measures
+        // (same shueStandoffRe oracle the grid is built from).
+        const r0 = shueStandoffRe(pdyn ?? 2, s?.bz ?? 0);
+        state.shueR0 = r0;
+        mpChip.textContent = `⌓ Shue r₀ ${r0.toFixed(1)} Rₑ · `
+            + `Pdyn ${(pdyn ?? 2).toFixed(1)} nPa · Bz ${(s?.bz ?? 0).toFixed(1)} nT`;
+        mpChip.style.display = '';
         const grid = shueSurfaceGrid(pdyn ?? 2, s?.bz ?? 0, 30, 20);
         const pos = new Float32Array(grid.positions.length);
         for (let i = 0; i < pos.length; i++) pos[i] = reToUnits(grid.positions[i]);
@@ -1423,9 +1807,12 @@ function mount(host) {
             corona.scale.setScalar(2.4 * (1 + 0.3 * act));
             const nAr = (state.regions ?? []).length;
             const nCx = (state.regions ?? []).filter((r) => r.is_complex).length;
+            const sector = imfSector(state.imfBx, state.imfBy);
+            state.imfSectorNow = sector;
             sunChip.textContent = `☀ X-ray ${sa.cls}${flash > 0.05 ? (src ? ` · FLARE @ AR ${src.region}` : ' · FLARE') : ''}`
                 + (nAr ? ` · ${nAr} AR${nAr > 1 ? 's' : ''}${nCx ? ` (${nCx} complex)` : ''}` : '')
-                + (Number.isFinite(state.f107) ? ` · F10.7 ${Math.round(state.f107)}` : '');
+                + (Number.isFinite(state.f107) ? ` · F10.7 ${Math.round(state.f107)}` : '')
+                + (sector ? ` · IMF ${sector}` : '');
         }
 
         // Active-region markers at Stonyhurst positions for τ (Carrington
@@ -1472,6 +1859,47 @@ function mount(host) {
                 liftoffSprite.visible = true;
             } else {
                 liftoffSprite.visible = false;
+            }
+        }
+
+        // S9: coronal-hole rings at Stonyhurst(τ) = detected Stonyhurst +
+        // L0(detect) − L0(τ) — the same Carrington oracle as the ARs —
+        // plus the HSS-story chip for the largest hole.
+        {
+            const holes = state.holes ?? [];
+            const dL0 = holes.length
+                ? (state.holesL0 - carringtonL0(state.tauMs).L0) * Math.PI / 180 : 0;
+            for (let i = 0; i < chMarkers.length; i++) {
+                const hle = holes[i], m = chMarkers[i];
+                if (!hle) { m.visible = false; continue; }
+                const stony = hle.lonDeg * Math.PI / 180 + dL0;
+                const cl = Math.cos(hle.latDeg * Math.PI / 180);
+                m.position.set(
+                    cl * Math.cos(stony), cl * Math.sin(stony),
+                    Math.sin(hle.latDeg * Math.PI / 180))
+                    .multiplyScalar(BODY.sunRadiusUnits * 1.015);
+                m.lookAt(m.position.x * 2, m.position.y * 2, m.position.z * 2);
+                m.scale.setScalar(BODY.sunRadiusUnits
+                    * Math.max(0.1, Math.sqrt(hle.areaFrac) * 1.2));
+                m.visible = true;
+            }
+            if (holes.length) {
+                const h0 = holes[0];
+                const win = hssArrivalWindow(h0.lonDeg, state.holesMs ?? state.tauMs);
+                const ew = h0.lonDeg >= 0 ? 'E' : 'W';
+                const eta = new Date(win.etaMs);
+                const mon = eta.toLocaleString('en', { month: 'short', timeZone: 'UTC' });
+                chChip.textContent = `◐ ${holes.length} coronal hole${holes.length > 1 ? 's' : ''}`
+                    + ` · ${ew}${Math.abs(Math.round(h0.lonDeg))}`
+                    + ` · ${Math.round(h0.areaFrac * 100)}% disk`
+                    + (win.etaMs > Date.now()
+                        ? ` · HSS @ Earth ~${mon} ${eta.getUTCDate()} ±1d`
+                        : ' · HSS window passed');
+                chChip.style.display = '';
+                state.hssEtaMs = win.etaMs;
+            } else {
+                chChip.style.display = 'none';
+                state.hssEtaMs = null;
             }
         }
 
@@ -1673,13 +2101,16 @@ function mount(host) {
         /* ── S2: oval band, pin, heat-shell, live assets ──────────── */
         const band = kpBandAt(state.tauMs, state.timeline, state.kpNow);
         const ovalKey = band
-            ? `${band.p10.toFixed(1)}|${band.p50.toFixed(1)}|${band.p90.toFixed(1)}|${Math.round(state.tauMs / 600e3)}`
+            ? `${band.p10.toFixed(1)}|${band.p50.toFixed(1)}|${band.p90.toFixed(1)}|${Math.round(state.tauMs / 600e3)}|${inMySky ? 1 : 0}`
             : '';
         if (ovalKey !== state.ovalKey) {
             state.ovalKey = ovalKey;
             for (let h = 0; h < 2; h++) {
                 const { mesh, median } = ovalHemis[h];
-                mesh.visible = median.visible = !!band;
+                // The flat band annulus is MAP chrome — seen edge-on from
+                // the ground it reads as a glitch sheet; in My Sky the S6
+                // ribbon is the oval's sky representation.
+                mesh.visible = median.visible = !!band && !inMySky;
                 if (!band) { curtains[h].visible = false; continue; }
                 const g = ovalBandGrid(band, OVAL_NLON, h === 0 ? 1 : -1);
                 const mp = mesh.geometry.getAttribute('position');
@@ -1705,17 +2136,104 @@ function mount(host) {
                 median.geometry.computeBoundingSphere();
                 curtains[h].geometry.computeBoundingSphere();
             }
+
+            // S6 sky ribbon rebuild (same cadence as the band — ovalKey
+            // includes a 10-min τ bucket, which also refreshes the ENU
+            // basis as geography turns under the mean sun).
+            if (state.pin && Number.isFinite(state.pin.lat)) {
+                const basis = enuBasis(state.pin.lat, state.pin.lon, state.tauMs);
+                state.skyBasis = basis;
+                const cols = band
+                    ? skyCurtainRibbon(band, state.pin.lat, state.pin.lon, { n: RIB_N })
+                    : [];
+                const usable = Math.min(cols.length, RIB_N);
+                const rp = ribbonGeom.getAttribute('position');
+                const rc = ribbonGeom.getAttribute('aCol');
+                const rw = ribbonGeom.getAttribute('aW');
+                const R = DOME_R * 0.97;
+                for (let i = 0; i < usable; i++) {
+                    const c = cols[i];
+                    skyDir(c.az, c.altBase, basis, p3);
+                    rp.setXYZ(i * 2, p3[0] * R, p3[1] * R, p3[2] * R);
+                    skyDir(c.az, c.altTop, basis, p3);
+                    rp.setXYZ(i * 2 + 1, p3[0] * R, p3[1] * R, p3[2] * R);
+                    rc.setX(i * 2, c.az); rc.setX(i * 2 + 1, c.az);
+                    rw.setX(i * 2, c.w); rw.setX(i * 2 + 1, c.w);
+                }
+                rp.needsUpdate = rc.needsUpdate = rw.needsUpdate = true;
+                ribbonGeom.setDrawRange(0, Math.max(0, (usable - 1) * 6));
+                state.ribbonPts = usable;
+            } else {
+                state.ribbonPts = 0;
+                ribbonGeom.setDrawRange(0, 0);
+            }
         }
 
         // Curtain intensity tracks the SAME forecast median the band draws
         // (kpBandAt — never a second Kp model): faint by Kp 2, full sheets
-        // at Kp 8+. Visible whenever the oval is (My Sky INCLUDED — the
-        // curtains are the sky story the plan promises that staging).
+        // at Kp 8+. In My Sky the exaggerated WALLS yield to the S6 dome
+        // ribbon — the honest from-below projection of the same oracle.
         {
             const kInt = band ? Math.min(1, Math.max(0, (band.p50 - 1.5) / 6.5)) : 0;
             curtainUniforms.uInt.value = kInt;
             state.curtainInt = kInt;
-            for (const c of curtains) c.visible = !!band && kInt > 0.04;
+            for (const c of curtains) c.visible = !!band && kInt > 0.04 && !inMySky;
+        }
+
+        // S6 dome: only in My Sky, only with a pin (no observer, no sky).
+        {
+            const showDome = inMySky && !!state.pin && Number.isFinite(state.pin.lat);
+            dome.visible = showDome;
+            // Any columns in your sky → drawn (quiet arcs included; the
+            // fragment's base floor + darkness handle the brightness).
+            ribbon.visible = showDome && (state.ribbonPts ?? 0) > 1;
+            if (showDome) {
+                earthLocal(state.pin.lat, state.pin.lon, reToUnits(1.005), state.tauMs, p3);
+                dome.position.set(p3[0], p3[1], p3[2]);
+                ribbon.position.copy(dome.position);
+                state.domePos = [p3[0], p3[1], p3[2]];
+                const b = state.skyBasis
+                    ?? enuBasis(state.pin.lat, state.pin.lon, state.tauMs);
+                domeUniforms.uUp.value.set(b.up[0], b.up[1], b.up[2]);
+                // Sky darkness at the pin AT τ — scrubbing into daylight
+                // honestly washes the curtains out (you can't see aurora
+                // through a blue sky).
+                const sAlt = sunAltitudeDeg(state.pin.lat, state.pin.lon, state.tauMs);
+                state.sunAltDeg = sAlt;
+                domeUniforms.uSunAlt.value = sAlt;
+                ribbonMat.uniforms.uDark.value =
+                    Math.min(1, Math.max(0, (-sAlt - 3) / 9));
+            }
+            for (const el of cardinalEls) {
+                el.style.display = showDome ? '' : 'none';
+            }
+        }
+
+        // S7: the Moon marches with τ (mean orbit, moonPhase-locked) and
+        // the belts breathe with the measured electron environment.
+        {
+            const mRe = moonLocalRe(state.tauMs);
+            moon.position.set(reToUnits(mRe[0]), reToUnits(mRe[1]), reToUnits(mRe[2]));
+            state.moonPos = [moon.position.x, moon.position.y, moon.position.z];
+            const ph = moonPhase(state.tauMs);
+            // Tail crossing: anti-sunward of Earth, inside the ~25 R_E
+            // tail cross-section at lunar distance — every full moon.
+            const inTail = mRe[0] > 20 && Math.abs(mRe[1]) < 25;
+            state.moonInTail = inTail;
+            moonChip.textContent = `${ph.glyph} ${ph.name} · ${ph.illumPct}%`
+                + (inTail ? ' · crossing the magnetotail' : '');
+            moon.visible = moonRing.visible = !inMySky;
+            moonChip.style.display = inMySky ? 'none' : '';
+            // Outer belt: log ramp over the measured GOES ≥2 MeV flux
+            // (quiet ~10² pfu → storm-injected 10⁵; dropouts included).
+            const ef = state.electronFlux;
+            const outer = Number.isFinite(ef) && ef > 0
+                ? Math.min(1, Math.max(0.15, (Math.log10(ef) - 2) / 3)) : 0.5;
+            beltUniforms.uOuter.value = outer;
+            state.beltOuter = outer;
+            beltInner.visible = beltOuter.visible = !inMySky;
+            if (inMySky || !state.shueR0) mpChip.style.display = 'none';
+            else mpChip.style.display = '';
         }
 
         // S5c SEP streaks: gated on the MEASURED ≥10 MeV S-scale at τ.
@@ -1976,7 +2494,32 @@ function mount(host) {
                      act: state.sunAct?.act ?? 0,
                      flash: state.sunAct?.flash ?? 0,
                      flareRegion: state.sunAct?.flareRegion ?? null,
-                     liftoff: liftoffSprite.visible };
+                     liftoff: liftoffSprite.visible,
+                     live: !!state.sunLive,          // S7: SDO photosphere
+                     corona171: !!state.sunCorona171, // S8: AIA 171 shell
+                     magLive: !!state.sunMag,         // S8: HMI magnetogram
+                     imfSector: state.imfSectorNow ?? null,
+                     // S9: detected holes + the largest one's HSS ETA.
+                     holes: (state.holes ?? []).map((h) => ({ ...h })),
+                     hssEtaMs: state.hssEtaMs ?? null };
+        },
+        // S7: system-completeness probes.
+        get moon() {
+            // Pure function of τ (synchronous for tests/deep links — no
+            // updateScene dependency).
+            const m = moonLocalRe(state.tauMs);
+            const ph = moonPhase(state.tauMs);
+            return { xRe: m[0], yRe: m[1], phase: ph.phase,
+                     illumPct: ph.illumPct,
+                     inTail: m[0] > 20 && Math.abs(m[1]) < 25,
+                     visible: moon.visible };
+        },
+        get belts() {
+            return { visible: beltOuter.visible,
+                     outer: state.beltOuter ?? null };
+        },
+        get shue() {
+            return { r0Re: state.shueR0 ?? null };
         },
         // S5d: the virtual monitor (null when none is dropped).
         get probe() {
@@ -2002,6 +2545,15 @@ function mount(host) {
         get curtains() {
             return { visible: curtains[0].visible,
                      intensity: state.curtainInt ?? 0 };
+        },
+        // S6: the My Sky dome (sky-state probes; ribbon alpha scales with
+        // dark — tests assert geometry, never wall-clock-dependent light).
+        get mySky() {
+            return { dome: dome.visible,
+                     ribbonPts: state.ribbonPts ?? 0,
+                     ribbonVisible: ribbon.visible,
+                     sunAltDeg: state.sunAltDeg ?? null,
+                     dark: ribbonMat.uniforms.uDark.value };
         },
         flyTo, setTau,
     };

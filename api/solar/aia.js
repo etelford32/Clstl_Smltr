@@ -21,6 +21,7 @@ export const config = { runtime: 'edge' };
 // channel → SDO "latest_<res>_<code>.jpg" code
 const CODE = {
     white: 'HMIIC',
+    mag:   'HMIB',    // S8: LOS magnetogram — the Stage's polarity layer
     94:  '0094', 131: '0131', 171: '0171',
     193: '0193', 211: '0211', 304: '0304',
 };

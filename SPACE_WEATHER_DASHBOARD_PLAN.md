@@ -758,6 +758,106 @@ those move the CLOCK, and the particles follow the driver at τ.
   S-scale gate, DONKI-free quiet default, disclosure text, and the
   My Sky split. §9b dwell instrumentation rides the existing
   stage_pick/staging telemetry — revisit after the next usage pull.
+- **S9 — CORONAL HOLES → THE HSS STORY. ✅ SHIPPED 2026-07-23**
+  (author: "coronal-hole detection from the 171 darkness feeding the
+  high-speed-stream story"). Pure `detectCoronalHoles` over an
+  ImageData-like object (node-tested with synthetic disks): relative
+  threshold (× mean DISK luminance — exposure-proof; the black
+  off-disk frame is excluded BEFORE the mean), 32² grid clustering
+  with 4-neighbor flood, inverse orthographic → Stonyhurst lon/lat
+  (EAST POSITIVE convention — documented + pinned). Pure
+  `hssArrivalWindow`: corotation at the synodic Carrington rate to
+  the central meridian + 1 AU transit at a representative 600 km/s
+  (500–800 documented range → the ±1 d window). Renderer: detector
+  runs on each 171 load (128² downsample); up to 4 teal ring markers
+  rotate with τ via the SAME carringtonL0 oracle as the ARs; chip
+  `◐ n coronal holes · E22 · 8% disk · HSS @ Earth ~Jul 27 ±1d`.
+  ANNOTATION ONLY: no synthetic HSS speed enters the wind field until
+  the validation program scores HSS arrivals like CMEs (the obvious
+  next validation table). HEK/SPoCA (api/hek) remains the
+  catalog-grade record; this is the live on-disk layer. Spec test
+  serves a fixture disk with a known east blob on the aia route —
+  the full load→detect→story path runs deterministically offline.
+  Probes: sun.{holes, hssEtaMs}.
+- **S8 — THE MAGNETIC SUN. ✅ SHIPPED 2026-07-23** (author: "AIA 171
+  corona as a second live channel… the sun and its magnetic
+  qualities"). Three additions: (1) EUV CORONA SHELL — the live AIA
+  171 Å disk (loops, coronal holes, limb brightening) as a thin
+  additive shell just above the photosphere, same near-side
+  orthographic projection, opacity breathing with the measured
+  activity; the halo sprite stays (this is the corona ON the disk).
+  (2) MAGNETOGRAM POLARITY — /api/solar/aia gains the `mag` (HMIB LOS
+  magnetogram) channel; the surface shader tints strong measured
+  polarity warm(+)/cool(−) over the live photo — the Sun's actual
+  magnetic field on the disk, quiet gray stays untinted. (3) IMF
+  SECTOR — pure `imfSector(bx,by)`: the Parker-spiral polarity
+  ("away"/"toward") from the measured L1 Bx/By, with honest refusal
+  (weak, ambiguous, or the feed's degenerate Bx≡0 fallback → null,
+  never a guess — node-pinned); the sun vitals chip appends
+  `· IMF away|toward`. All three channels fail-quiet (offline stays
+  procedural — spec-pinned); probes sun.{corona171, magLive,
+  imfSector}. Verified with synthetic fixture disks served on the
+  aia route (known bipole → visible red/blue tint; the sandbox can't
+  reach SDO). Grab lesson addendum: the toDataURL-in-rAF capture can
+  still catch a cleared buffer — retry until non-blank.
+- **S7 — SYSTEM COMPLETENESS. ✅ SHIPPED 2026-07-23** (author: "Sun ·
+  Earth · Moon · Magnetosphere — live photosphere + corona, Shue-1998
+  magnetopause, Van Allen belts, Kp/Bz simulation… tied
+  deterministically to real-time"). Four additions, each on an
+  existing oracle: (1) LIVE PHOTOSPHERE — the Earth-facing hemisphere
+  of the Stage sun samples the actual SDO/HMI continuum through the
+  house /api/solar/aia proxy (12-min cadence), orthographic disk→
+  sphere projection on the near side only; far side stays procedural
+  (we don't see it — that's the far-side program's job); fail-quiet:
+  offline stays procedural, probe sun.live says which. (2) THE MOON —
+  pure moonLocalRe on the SAME new-moon epoch + synodic month as
+  verdict-engine moonPhase (the two can never disagree); in the
+  Earth-local frame −x is the mean sun, so the synodic angle IS the
+  geometry: every full moon the Moon crosses the magnetotail (probe
+  moon.inTail; chip says so; node-pinned). World-frame terminator
+  shading; drawn 1.1 R_E (×4, the smallest disclosed body
+  exaggeration — scale.js BODY.moonExaggeration). (3) VAN ALLEN
+  BELTS — pure beltShellGrid dipole L-shells r = L·cos²λ (same dipole
+  convention as the oval oracle; house L-values from
+  magnetosphere-engine: inner 1.6, outer 5); the OUTER belt breathes
+  with the MEASURED GOES ≥2 MeV electron flux on the bus (log ramp
+  10²→10⁵ pfu — storm dropouts included, because the data includes
+  them). (4) LIVE SHUE READOUT — updateMagnetopause now also fires
+  from the bus's measured L1 wind (no longer waits for the forecast
+  provider), and a nose chip states `⌓ Shue r₀ · Pdyn · Bz` from the
+  same shueStandoffRe oracle the surface is built from. Plus
+  DIAGONALIZED DETERMINISM in the provider: eventSeed(id) = FNV-1a
+  over the event identity ⊕ base — every catalogued CME gets its OWN
+  bit-reproducible ensemble on every load and replay (node-pinned in
+  the forecast gate). Probes: __swStage.{moon, belts, shue, sun.live}.
+- **S6 — MY SKY DOME. ✅ SHIPPED 2026-07-23** (the sky-dome follow-up
+  the S5c walls were "the input" for). The staging now renders the sky
+  story FROM UNDERNEATH at the pin, and it is the Stage's only
+  scale-HONEST staging: real 100–300 km curtains are tall in ANGLE, so
+  no height exaggeration is needed from below. Pure oracles in
+  stage/model.js — `bearingGamma` + `apparentAltitudeRad` (exact
+  spherical-Earth altitude: why mid-latitudes only ever see storm
+  aurora low on the poleward horizon), `skyCurtainRibbon` (the oval's
+  median boundary in az/alt from the SAME ovalLatAtLon oracle; node
+  pins: quiet oval overhead at Fairbanks, G3 displacement to
+  Fairbanks's SOUTHERN sky, Kp 9 Miami = low northern glow, quiet
+  Miami = honestly empty), `enuBasis` (numerical from earthLocal —
+  the dome can't disagree with the geography) + `skyDir`. Renderer:
+  background dome at the pin (twilight gradient + hash stars, darkness
+  from the ONE verdict-engine sunAltitudeDeg — scrubbing τ into
+  daylight honestly washes the sky out), curtain ribbon sharing the
+  walls' uInt but with a quiet-arc base floor (from directly beneath
+  even the quiet oval is plainly visible), N/E/S/W horizon marks,
+  camera-up = local vertical (world-z twisted the horizon at high
+  latitudes), mySkyPose now looks POLEWARD in both hemispheres
+  (southern observers face the aurora australis). In My Sky the
+  ×10.6-exaggerated walls AND the flat band annulus yield to the dome
+  (map chrome reads as glitch sheets from the ground; staging change
+  busts the ovalKey cache). No pin → no observer → no sky, honestly.
+  Probes: __swStage.mySky.{dome, ribbonPts, ribbonVisible, sunAltDeg,
+  dark}. House lesson (2026-07-23): headless-CI screenshots of the
+  canvas go stale — capture via canvas.toDataURL inside a rAF
+  callback, not page.screenshot.
 - **S5d — MEASUREMENT: the virtual probe. ✅ SHIPPED 2026-07-23**
   (author: "how can we show particle trajectories? I want some
   measurement ability here"). Click empty corridor → a stationary
