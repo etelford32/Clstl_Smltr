@@ -24,6 +24,10 @@ import {
     flightPose, D0_KM_DEFAULT, dynamicPressure,
     ovalLatAtLon, ovalBandGrid, kpBandAt, subsolarLonDeg, earthLocal,
     sunEclipticLonDeg, temeToStageRe, parseTleRaan, assetOrbitRing, mySkyPose,
+    windFieldAt, AMBIENT_V_KMS, AMBIENT_N_CC, memberFieldRows,
+    xrayClassOf, sunActivityAt, flareFlashAt,
+    normalizeFlares, parcelProbe, liftoffAt,
+    sepStateAt, SEP_V_KMS,
 } from '../js/stage/model.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
 import { magneticLatitude, boundaryForKp } from '../js/verdict-engine.js';
@@ -302,6 +306,201 @@ test('thermosphere density rises with activity (UA-engine oracle)', () => {
     const at = (kp) => density({ altitudeKm: 550, f107Sfu: 150, ap: kpToAp(kp) }).rho;
     assert.ok(at(5) > at(2) && at(8) > at(5), 'monotone in Kp');
     assert.ok(at(8) / at(2) > 1.5, 'a G4 storm is a visible drag event at 550 km');
+});
+
+test('S5a windFieldAt: ambient = the driver sample, clamped density', () => {
+    // The particle field is MEASUREMENT in quiet time: speed passes the
+    // driver sample through untouched, density is relative-to-climatology.
+    const r = windFieldAt(0.5, { vKms: 520, nCc: 10 });
+    assert.equal(r.regime, 'ambient');
+    assert.equal(r.vKms, 520);
+    assert.equal(r.nRel, 2);                       // 10 / AMBIENT_N_CC
+    // Clamps: a gust can neither wash out nor empty the scene.
+    assert.equal(windFieldAt(0.5, { nCc: 500 }).nRel, 4);
+    assert.equal(windFieldAt(0.5, { nCc: 0.01 }).nRel, 0.2);
+    // Honest fallbacks with no driver.
+    const f = windFieldAt(0.5);
+    assert.equal(f.vKms, AMBIENT_V_KMS);
+    assert.equal(f.nRel, 1);
+    assert.equal(AMBIENT_N_CC, 5);                 // matches provider ambientNCc
+});
+
+test('S5a windFieldAt: regime boundaries at the kernel radii (S5b contract)', () => {
+    const amb = { vKms: 420, nCc: 5 };
+    const cme = { shockAu: 0.8, ejectaAu: 0.7, compression: 3, vKms: 750 };
+    // Upstream of the shock: undisturbed ambient.
+    assert.equal(windFieldAt(0.9, amb, cme).regime, 'ambient');
+    assert.equal(windFieldAt(0.9, amb, cme).vKms, 420);
+    // Between ejecta front and shock: sheath — CME speed, piled-up density.
+    const sh = windFieldAt(0.75, amb, cme);
+    assert.equal(sh.regime, 'sheath');
+    assert.equal(sh.vKms, 750);
+    assert.equal(sh.nRel, 3);                      // 1 × compression
+    // Behind the ejecta front: ejecta — CME speed, no pile-up.
+    const ej = windFieldAt(0.5, amb, cme);
+    assert.equal(ej.regime, 'ejecta');
+    assert.equal(ej.vKms, 750);
+    assert.equal(ej.nRel, 1);
+    // Degenerate structure (shock not ahead of ejecta) → ambient.
+    assert.equal(windFieldAt(0.5, amb, { shockAu: 0.6, ejectaAu: 0.7 }).regime,
+        'ambient');
+    // Compression is clamped (RH limit is 4; guard allows headroom to 6).
+    assert.equal(windFieldAt(0.75, amb, { ...cme, compression: 99 }).nRel, 6);
+});
+
+test('S5b memberFieldRows: member-bound rows — apex growth, weights, empty slots', () => {
+    const members = [
+        { v0Kms: 900, gammaPerKm: 2e-7, weight: 1.0, lonDeg: -10, latDeg: 5 },
+        { v0Kms: 500, gammaPerKm: 2e-7, weight: 0.25, lonDeg: 8, latDeg: -3 },
+    ];
+    const H = 3600;
+    const r1 = memberFieldRows(members, 400, 24 * H, { shockOffsetAu: 0.05 });
+    const r2 = memberFieldRows(members, 400, 48 * H, { shockOffsetAu: 0.05 });
+    assert.equal(r1.count, 2);
+    // Apexes advance with τ; the faster member leads — the FAN is real.
+    assert.ok(r2.apexAu[0] > r1.apexAu[0]);
+    assert.ok(r1.apexAu[0] > r1.apexAu[1], 'fast member ahead of slow');
+    // Shock rides a fixed offset ahead of each member front. (Float32
+    // storage: 1e-6 tolerance, the house lesson.)
+    assert.ok(Math.abs(r1.shockAu[0] - r1.apexAu[0] - 0.05) < 1e-6);
+    // Filter weights carried; slots past count stay weight 0 (invisible).
+    assert.equal(r1.weight[0], 1);
+    assert.equal(r1.weight[1], 0.25);
+    assert.equal(r1.weight[2], 0);
+    // Front speed: positive, decayed below v0, above the ambient wind
+    // for a decelerating fast member.
+    assert.ok(r1.vKms[0] > 400 && r1.vKms[0] < 900);
+    // Directions in radians, ropeFrame eDir convention (Float32 tol).
+    assert.ok(Math.abs(r1.lonRad[0] + 10 * Math.PI / 180) < 1e-6);
+    assert.ok(Math.abs(r1.latRad[1] + 3 * Math.PI / 180) < 1e-6);
+    // Degenerate inputs refuse honestly.
+    assert.equal(memberFieldRows([], 400, 3600), null);
+    assert.equal(memberFieldRows(members, 400, 0), null);
+});
+
+test('the sun always has behavior: X-ray grammar, τ-lookup, flare flash', () => {
+    // Class grammar matches the ticker's A/B/C/M/X bands.
+    assert.equal(xrayClassOf(2.3e-6), 'C2.3');
+    assert.equal(xrayClassOf(5.0e-5), 'M5.0');
+    assert.equal(xrayClassOf(2.0e-4), 'X2.0');
+    assert.equal(xrayClassOf(0), 'A0.0');
+    // τ-lookup: nearest sample, edge-clamped; act is the log ramp
+    // A(1e-8)→0 … X(1e-4)→1.
+    const T = Date.parse('2026-07-22T00:00Z');
+    const series = [
+        { t: T, flux: 1e-7 },              // B-class background
+        { t: T + 3.6e6, flux: 5e-5 },      // M5 flare hour
+    ];
+    assert.equal(sunActivityAt(series, T + 3.5e6).cls, 'M5.0');
+    assert.equal(sunActivityAt(series, T - 999e9).cls, 'B1.0');   // edge clamp
+    assert.ok(Math.abs(sunActivityAt(series, T).act - 0.25) < 1e-9);  // B = 0.25
+    // Fallbacks: no series → latest scalar → quiet A-class.
+    assert.equal(sunActivityAt(null, T, 3e-6).cls, 'C3.0');
+    assert.equal(sunActivityAt([], T).cls, 'A1.0');
+    // Flare flash: fast rise, 40-min decay, class-weighted, max-over.
+    const flares = [{ timeMs: T, letter: 'M' }, { timeMs: T + 9e9, letter: 'X' }];
+    assert.equal(flareFlashAt(flares, T), 0.7);                   // M peak
+    assert.ok(Math.abs(flareFlashAt(flares, T + 20 * 60e3) - 0.35) < 1e-9);
+    assert.equal(flareFlashAt(flares, T + 3.6e6), 0);             // decayed
+    assert.equal(flareFlashAt(flares, T - 30 * 60e3), 0);         // not yet
+    assert.equal(flareFlashAt([{ timeMs: T, letter: 'B' }], T), 0);  // sub-C ignored
+    assert.equal(flareFlashAt(null, T), 0);
+});
+
+test('S5d measurement: parcelProbe reads the field, lead time, Parker source', () => {
+    const T = Date.parse('2026-07-22T00:00Z');
+    // Ambient monitor at 0.5 AU, 400 km/s: lead time to Earth is the
+    // remaining half-AU at the local flow speed (~52 h), and the Parker
+    // source longitude sits WEST of (ahead of) the probe longitude.
+    const p = parcelProbe(0.5, 0.3, { vKms: 400, nCc: 5 }, null, T);
+    assert.equal(p.regime, 'ambient');
+    assert.ok(Math.abs(p.leadHours - 0.5 * 1.495978707e8 / 400 / 3600) < 1e-9);
+    assert.ok(Math.abs(p.etaMs - (T + p.leadHours * 3.6e6)) < 1);
+    assert.ok(p.srcLonRad > 0.3, 'source longitude ahead of the probe');
+    // The connectivity curve parkerSpiralPoints draws from spiralPhi0Deg
+    // passes through the probe point (same Ω, same 0.05 AU base).
+    const pts = parkerSpiralPoints(p.vKms, p.spiralPhi0Deg, 901, 1.12);
+    let best = Infinity;
+    for (let i = 0; i < 901; i++) {
+        const r = Math.hypot(pts[i * 3], pts[i * 3 + 1]);
+        const phi = Math.atan2(pts[i * 3 + 1], pts[i * 3]);
+        best = Math.min(best, Math.hypot(r - 0.5, phi - 0.3));
+    }
+    assert.ok(best < 5e-3, `spiral passes through the probe (miss ${best})`);
+    // A faster wind unwinds the spiral: source longitude closer to the probe.
+    const fast = parcelProbe(0.5, 0.3, { vKms: 700, nCc: 5 }, null, T);
+    assert.ok(fast.srcLonRad < p.srcLonRad);
+    // CME structure flips the regime through the SAME windFieldAt oracle.
+    const cme = { shockAu: 0.6, ejectaAu: 0.45, compression: 3, vKms: 800 };
+    assert.equal(parcelProbe(0.5, 0, {}, cme, T).regime, 'sheath');
+    assert.equal(parcelProbe(0.4, 0, {}, cme, T).regime, 'ejecta');
+    assert.equal(parcelProbe(0.7, 0, {}, cme, T).regime, 'ambient');
+    // At/past 1 AU there is nothing left to lead.
+    assert.equal(parcelProbe(1.0, 0, {}, null, T).leadHours, null);
+});
+
+test('S5d flare sourcing: normalizeFlares merges NOAA + DONKI honestly', () => {
+    const T = Date.parse('2026-07-22T00:00Z');
+    const noaa = [{ time: new Date(T), parsed: { letter: 'M' }, region: 14001 }];
+    const donki = [
+        // Same event seen by DONKI 2 min later (dedupe, keep NOAA row)…
+        { peak_time: new Date(T + 2 * 60e3), class_letter: 'M', active_region: 14001 },
+        // …and a DONKI-only X flare (NOAA feed retired — the production path).
+        { peak_time: new Date(T + 7.2e6), class_letter: 'X', active_region: 14002 },
+    ];
+    const merged = normalizeFlares(noaa, donki);
+    assert.equal(merged.length, 2);
+    assert.equal(merged[0].letter, 'X');              // most recent first
+    assert.equal(merged[0].region, 14002);
+    assert.equal(merged[1].timeMs, T);                // NOAA row kept
+    // DONKI-only input works alone (recent_flares empty in production).
+    const only = normalizeFlares([], donki);
+    assert.equal(only.length, 2);
+    assert.ok(only.every((f) => Number.isFinite(f.timeMs) && f.letter));
+    // …and feeds the flash envelope directly.
+    assert.equal(flareFlashAt(only, T + 7.2e6), 1);   // X peak
+    assert.equal(normalizeFlares(null, null).length, 0);
+});
+
+test('S5c SEP: S-scale gate at τ, log intensity, honest speed', () => {
+    const T = Date.parse('2026-07-22T00:00Z');
+    // NOAA S-scale boundaries: S1 at 10 pfu, ×10 per step. Below S1 the
+    // streaks are OFF — quiet corridors stay quiet.
+    assert.equal(sepStateAt(null, T, 9).on, false);
+    assert.equal(sepStateAt(null, T, 9).s, 0);
+    assert.deepEqual(
+        [10, 100, 1e3, 1e4, 1e5].map((f) => sepStateAt(null, T, f).s),
+        [1, 2, 3, 4, 5]);
+    // Intensity is the log ramp S1→0 … S5→1, monotone.
+    assert.equal(sepStateAt(null, T, 10).intensity, 0);
+    assert.equal(sepStateAt(null, T, 1e5).intensity, 1);
+    assert.ok(sepStateAt(null, T, 1e3).intensity > sepStateAt(null, T, 100).intensity);
+    // τ-lookup: nearest series sample wins over the fallback scalar —
+    // replaying yesterday's proton event lights the spirals THEN.
+    const series = [
+        { t: T, flux: 2 },                 // quiet
+        { t: T + 3.6e6, flux: 500 },       // S2 storm hour
+    ];
+    assert.equal(sepStateAt(series, T + 3.5e6, 2).s, 2);
+    assert.equal(sepStateAt(series, T, 500).on, false);      // quiet at THIS τ
+    assert.equal(sepStateAt(series, T + 999e9, 0).s, 2);     // edge clamp
+    assert.equal(sepStateAt([], T).on, false);               // null-safe
+    // Representative streak speed: a 10–100 MeV proton (0.15–0.43 c).
+    const c = 299792;
+    assert.ok(SEP_V_KMS > 0.25 * c && SEP_V_KMS < 0.45 * c);
+    // The visual contrast the plan names: SEP transit is ~200× faster
+    // than a 450 km/s wind parcel.
+    assert.ok(SEP_V_KMS / 450 > 100);
+});
+
+test('S5d liftoff: envelope rises into launch and decays over 90 min', () => {
+    const L = Date.parse('2026-07-22T06:00Z');
+    assert.equal(liftoffAt(L, L - 3.6e6), 0);          // an hour before: nothing
+    assert.ok(Math.abs(liftoffAt(L, L - 7.5 * 60e3) - 0.5) < 1e-9);  // rising
+    assert.equal(liftoffAt(L, L), 1);                  // eruption
+    assert.ok(Math.abs(liftoffAt(L, L + 45 * 60e3) - 0.5) < 1e-9);   // decaying
+    assert.equal(liftoffAt(L, L + 2 * 3.6e6), 0);      // cleared the corona
+    assert.equal(liftoffAt(null, L), 0);               // no event, no plume
 });
 
 console.log(`stage-model: ALL PASS (${n} tests)`);

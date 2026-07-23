@@ -63,6 +63,23 @@ export function stageRadiusInv(s) {
     return R2 + (s - s2) / A;
 }
 
+/** Mix-aware inverse of stageRadius — bisection over the (monotone) blend.
+ *  Closed form covers mix=0; the probe picker needs the inverse at ANY mix
+ *  so a dropped virtual monitor reads the same true AU under the scale
+ *  toggle. ~40 iterations ≪ one raycast; called only on click. */
+export function stageRadiusInvMix(s, mix = 0) {
+    const m = Math.min(1, Math.max(0, mix));
+    if (m === 0) return stageRadiusInv(s);
+    if (s <= 0) return 0;
+    let lo = 0, hi = 2;
+    while (stageRadius(hi, m) < s && hi < 64) hi *= 2;
+    for (let i = 0; i < 48; i++) {
+        const mid = (lo + hi) / 2;
+        if (stageRadius(mid, m) < s) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+}
+
 /** Map a physical heliocentric point [AU]³ through the radial compression
  *  (direction preserved — compression is purely radial). */
 export function stagePoint(pAu, mix = 0, out = [0, 0, 0]) {
@@ -89,6 +106,24 @@ export function rulerTicks(mix = 0) {
 export const EARTH_LOCAL_RE = 55;   // R_E per stage unit
 export const reToUnits = (re) => re / EARTH_LOCAL_RE;
 
+// ── The Stage's one TEMPORAL dishonesty (S5a, plan §15.2) ──────────────
+// At wall clock a 450 km/s parcel takes ~4 days Sun→Earth — imperceptible.
+// The ambient particle flow therefore renders at a TIME-LAPSE: one transit
+// ≈ 100 s on screen at the default. Same doctrine as the spatial map:
+// declared here (never smuggled into the renderer), disclosed on-stage,
+// and REMOVABLE — the true-scale toggle blends it to ×1 via flowLapse(mix),
+// an honestly motionless corridor. τ-playback/scrubbing move the CLOCK
+// instead and are not affected by this constant.
+export const FLOW = Object.freeze({
+    TIME_LAPSE: 3600,            // ambient flow speedup at mix=0
+});
+
+/** Effective flow time-lapse at compression mix (mix=1 ⇒ ×1, honest). */
+export function flowLapse(mix = 0) {
+    const m = Math.min(1, Math.max(0, mix));
+    return (1 - m) * FLOW.TIME_LAPSE + m * 1;
+}
+
 export const BODY = Object.freeze({
     // Stage-unit draw radii. Real: Sun 0.00465 AU → 0.014 stage units at
     // A=4; Earth 4.26e-5 AU → invisible. Factors stated for the HUD line.
@@ -99,4 +134,17 @@ export const BODY = Object.freeze({
     earthRadiusUnits: 1 / EARTH_LOCAL_RE,
     sunExaggeration: 0.12 / (A * (RSUN_KM / AU_KM)),                    // ≈ ×6.5
     earthExaggeration: (1 / EARTH_LOCAL_RE) / (A * (RE_KM / AU_KM)),    // ≈ ×107
+});
+
+// ── S5c aurora curtains: the disclosed VERTICAL exaggeration ───────────
+// Real aurora tops out near ~300 km (the 630 nm red upper border) —
+// 0.047 R_E, invisible at the Earth-local scale. Curtains are drawn
+// DRAWN_RE tall so the precipitation reads as a curtain, an implied
+// ~×10.6 height exaggeration. Declared here (never smuggled into the
+// renderer) and disclosed in the on-stage scale line, per the §15
+// doctrine that every dishonesty lives in scale.js with its factor.
+export const AURORA = Object.freeze({
+    TOP_KM: 300,                       // real upper border
+    DRAWN_RE: 0.5,                     // drawn curtain height in R_E
+    EXAG: (0.5 * RE_KM) / 300,         // ≈ ×10.6, stated for the HUD line
 });

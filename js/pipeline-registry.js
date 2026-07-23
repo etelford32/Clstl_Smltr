@@ -224,7 +224,7 @@ export const PIPELINES = [
 
     { id: 'lightning-strikes',  label: 'Lightning strikes',
       endpoint: '/api/lightning/strikes',
-      category: 'weather', upstream: 'NWS · NLDN',
+      category: 'weather', upstream: 'Blitzortung',
       cadence_s: 300,   prewarm: 'medium',
       warnAgeS:  30 * 60, critAgeS: 120 * 60 },
 

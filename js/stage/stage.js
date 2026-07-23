@@ -41,13 +41,19 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { stagePoint, stageRadius, rulerTicks, BODY, EARTH_S, AU_KM, RE_KM, reToUnits }
+import { stagePoint, stageRadius, stageRadiusInvMix, rulerTicks, BODY, EARTH_S,
+         AU_KM, RE_KM, reToUnits, FLOW, flowLapse, AURORA }
     from './scale.js';
 import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          wavefrontRadiiAu, shueSurfaceGrid, parkerSpiralPoints,
          stationDefs, flightPose, dynamicPressure,
          ovalBandGrid, kpBandAt, earthLocal, subsolarLonDeg, temeToStageRe,
-         assetOrbitRing, parseTleRaan, mySkyPose } from './model.js';
+         assetOrbitRing, parseTleRaan, mySkyPose, windFieldAt,
+         memberFieldRows, sunActivityAt, flareFlashAt,
+         normalizeFlares, parcelProbe, liftoffAt,
+         sepStateAt, SEP_V_KMS } from './model.js';
+import { sheathCompression } from '../cme-propagation.js';
+import { carringtonL0 } from '../ring-current-model.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
 import { ropeFrame } from '../flux-rope/view.js';
 import { magneticLatitude, boundaryForKp } from '../verdict-engine.js';
@@ -198,7 +204,9 @@ function mount(host) {
         <div class="swst-scale">
           <button type="button" class="swst-truescale" aria-pressed="false">⇲ True scale</button>
           <div class="swst-disclose">Mid-corridor distance log-compressed · bodies enlarged ·
-            magnetosphere at local R<sub>E</sub> scale — ruler shows true AU</div>
+            magnetosphere at local R<sub>E</sub> scale — ruler shows true AU ·
+            wind flow at ×${FLOW.TIME_LAPSE} (true scale = real time) ·
+            aurora curtain height ×${Math.round(AURORA.EXAG)}</div>
         </div>
         <div class="swst-tau">
           <span class="swst-regime live" aria-live="polite">LIVE</span>
@@ -227,6 +235,7 @@ function mount(host) {
     const state = {
         fc: null, kernel: null, rope: null, launchMs: 0,
         ghosts: [], kin: [], weights: null,
+        probe: null, probeRead: null, cmeField: null,   // S5d virtual monitor
         mix: 0, mixTarget: 0,
         tauMs: Date.now(), anchorMs: Date.now(),   // scrub window anchor
         playing: false, station: 'corridor', flying: false,
@@ -248,7 +257,7 @@ function mount(host) {
     // dressing, like the Parker spirals — no physics claim). Shader math
     // stays clamped (the ionosphere cage-shader overflow lesson) and
     // cheap (3 octaves, no derivatives) for software-GL CI.
-    const sunUniforms = { uTime: { value: 0 } };
+    const sunUniforms = { uTime: { value: 0 }, uAct: { value: 0 } };
     const sun = new THREE.Mesh(
         new THREE.SphereGeometry(BODY.sunRadiusUnits, 48, 28),
         new THREE.ShaderMaterial({
@@ -263,7 +272,7 @@ function mount(host) {
                     gl_Position = projectionMatrix * mv;
                 }`,
             fragmentShader: `
-                uniform float uTime;
+                uniform float uTime; uniform float uAct;
                 varying vec3 vObj; varying vec3 vN; varying vec3 vView;
                 float hash(vec3 p) {
                     return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
@@ -293,6 +302,11 @@ function mount(host) {
                     // Limb darkening: μ = cos(view angle), Eddington-ish ramp.
                     float mu = clamp(dot(normalize(vN), normalize(vView)), 0.0, 1.0);
                     c *= 0.45 + 0.55 * pow(mu, 0.55);
+                    // MEASURED activity (GOES X-ray at τ, model.js
+                    // sunActivityAt + flare flash): quiet A-class sun is
+                    // calm amber; an X-flare runs white-hot.
+                    c *= 0.85 + 0.5 * uAct;
+                    c = mix(c, vec3(1.0, 0.97, 0.88), 0.4 * uAct);
                     gl_FragColor = vec4(c, 1.0);
                 }`,
         }));
@@ -304,15 +318,75 @@ function mount(host) {
     corona.material.opacity = 0.35;
     scene.add(corona);
 
+    // Live ACTIVE REGIONS on the Sun (the S2 "on record" upgrade; author
+    // feedback 2026-07-23 "still not seeing solar activity"): up to 8
+    // markers from the page's 'swpc-update' bus (NOAA solar_regions —
+    // never a second fetch). NOAA reports CARRINGTON longitude; the
+    // markers convert through the carringtonL0 oracle at τ, so the
+    // Earth-facing side (+x) shows what actually faces Earth and a τ
+    // scrub rotates the regions across the disk at the true rotation
+    // rate. Complex (β-γ-δ) regions run hot orange. Occlusion is real:
+    // far-side markers hide behind the sphere via the depth test.
+    const arMarkers = [];
+    for (let i = 0; i < 8; i++) {
+        const m = new THREE.Mesh(
+            new THREE.SphereGeometry(1, 10, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffe08a }));
+        m.visible = false;
+        scene.add(m);
+        arMarkers.push(m);
+    }
+
     const spiralMat = new THREE.LineBasicMaterial({
         color: 0x2a4a66, transparent: true, opacity: 0.35 });
     const spirals = [];
+    // S5c SEP streaks: THREE.Points SHARING each spiral's geometry (the
+    // polyline IS the field line — no second copy of the spiral math).
+    // The shader lights only vertices near moving phase fronts, so the
+    // pulses RACE along the spirals at ~0.3 c under the same disclosed
+    // flowLapse the wind uses — near-instant arrival vs the days-long
+    // CME transit is the honest contrast. Gated on the measured S-scale.
+    const sepUniforms = { uPhase: { value: 0 }, uInt: { value: 0 } };
+    const sepMat = new THREE.ShaderMaterial({
+        uniforms: sepUniforms,
+        transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        vertexShader: `
+            attribute float aFrac;
+            varying float vFrac;
+            void main() {
+                vFrac = aFrac;
+                vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = 3.0;
+                gl_Position = projectionMatrix * mv;
+            }`,
+        fragmentShader: `
+            uniform float uPhase; uniform float uInt;
+            varying float vFrac;
+            void main() {
+                // Three pulse trains racing outward; cosine window, clamped.
+                float w = 0.5 + 0.5 * cos(6.28318 * (vFrac * 3.0 - uPhase));
+                float a = uInt * pow(clamp(w, 0.0, 1.0), 24.0);
+                if (a < 0.01) discard;
+                gl_FragColor = vec4(0.85, 0.75, 1.0, a);
+            }`,
+    });
+    const sepStreaks = [];
     for (let i = 0; i < 6; i++) {
         const phys = parkerSpiralPoints(420, i * 60, 90, 1.12);
-        const line = new THREE.Line(physLineGeometry(phys), spiralMat);
+        const geom = physLineGeometry(phys);
+        const n = phys.length / 3;
+        const frac = new Float32Array(n);
+        for (let k = 0; k < n; k++) frac[k] = k / (n - 1);
+        geom.setAttribute('aFrac', new THREE.BufferAttribute(frac, 1));
+        const line = new THREE.Line(geom, spiralMat);
         line.userData.phys = phys;
         spirals.push(line);
         scene.add(line);
+        const streak = new THREE.Points(geom, sepMat);
+        streak.visible = false;
+        sepStreaks.push(streak);
+        scene.add(streak);
     }
 
     const rulerLine = new THREE.Line(
@@ -320,6 +394,41 @@ function mount(host) {
             [new THREE.Vector3(0, 0, 0), new THREE.Vector3(EARTH_S, 0, 0)]),
         new THREE.LineBasicMaterial({ color: 0x25344a, transparent: true, opacity: 0.6 }));
     scene.add(rulerLine);
+
+    // S5d VIRTUAL PROBE ("I want some measurement ability here", author
+    // 2026-07-23): click empty corridor → a stationary monitor at that
+    // heliocentric point, like L1 but anywhere. Its readings come from
+    // the SAME parcelProbe/windFieldAt oracle the particle layer renders
+    // — the probe never disagrees with the scene. Two trajectory lines:
+    // the RADIAL one is the parcel path (solar wind moves ~radially);
+    // the SPIRAL one is magnetic connectivity back to the solar source
+    // longitude (the Parker locus — a pattern, not a parcel path; the
+    // chip labels both so the two aren't conflated).
+    const probeMarker = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.045),
+        new THREE.MeshBasicMaterial({ color: 0x6ff2c5 }));
+    probeMarker.visible = false;
+    scene.add(probeMarker);
+    const probeRadial = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(
+            [new THREE.Vector3(), new THREE.Vector3()]),
+        new THREE.LineDashedMaterial({ color: 0x6ff2c5, transparent: true,
+            opacity: 0.55, dashSize: 0.06, gapSize: 0.05 }));
+    probeRadial.visible = false;
+    scene.add(probeRadial);
+    const probeSpiral = new THREE.Line(
+        physLineGeometry(parkerSpiralPoints(400, 0, 90, 1.12)),
+        new THREE.LineBasicMaterial({ color: 0x49b890, transparent: true, opacity: 0.6 }));
+    probeSpiral.visible = false;
+    scene.add(probeSpiral);
+
+    // CME LIFTOFF plume ("active processes of the sun"): a directional
+    // flash at the launch site while τ crosses the catalogued launch
+    // time — geometry from the provider's own event (lon/lat), envelope
+    // from the pure liftoffAt. The transit belongs to the wavefronts.
+    const liftoffSprite = makeGlowSprite('#ffe9bf', 1.0);
+    liftoffSprite.visible = false;
+    scene.add(liftoffSprite);
 
     const l1 = new THREE.Mesh(
         new THREE.OctahedronGeometry(0.02),
@@ -445,6 +554,65 @@ function mount(host) {
         return { mesh, median };
     });
 
+    // S5c aurora precipitation curtains: a wall along the oval's MEDIAN
+    // boundary (the SAME grid the band rebuild computes — never a second
+    // oval model), rising DRAWN_RE per scale.js AURORA (the disclosed
+    // vertical exaggeration). Green at the base → red at the top (the
+    // real 557.7 nm / 630 nm emission ordering); vertical-ray shimmer in
+    // the fragment. This is the sky story — it STAYS visible in My Sky.
+    const curtainUniforms = { uTime: { value: 0 }, uInt: { value: 0 } };
+    const curtainMat = new THREE.ShaderMaterial({
+        uniforms: curtainUniforms,
+        transparent: true, depthWrite: false, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        vertexShader: `
+            attribute float aV;      // 0 base → 1 top
+            attribute float aCol;    // longitude column, radians
+            varying float vV; varying float vCol;
+            void main() {
+                vV = aV; vCol = aCol;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+        fragmentShader: `
+            uniform float uTime; uniform float uInt;
+            varying float vV; varying float vCol;
+            void main() {
+                // Vertical rays drift slowly along the oval; all args bounded
+                // (software-GL lesson: no unclamped exponentials).
+                float ray = 0.55 + 0.45 * sin(vCol * 36.0 - uTime * 1.6);
+                float fade = pow(clamp(1.0 - vV, 0.0, 1.0), 1.6);
+                vec3 c = mix(vec3(0.30, 0.95, 0.55), vec3(0.90, 0.35, 0.45), vV);
+                float a = uInt * fade * ray * 0.55;
+                if (a < 0.008) discard;
+                gl_FragColor = vec4(c, a);
+            }`,
+    });
+    const CURTAIN_SEGS = OVAL_NLON;
+    const curtains = [1, -1].map(() => {
+        const geom = new THREE.BufferGeometry();
+        const cols = CURTAIN_SEGS + 1;
+        geom.setAttribute('position',
+            new THREE.BufferAttribute(new Float32Array(cols * 2 * 3), 3));
+        const aV = new Float32Array(cols * 2);
+        const aCol = new Float32Array(cols * 2);
+        for (let i = 0; i < cols; i++) {
+            aV[i * 2] = 0; aV[i * 2 + 1] = 1;
+            aCol[i * 2] = aCol[i * 2 + 1] = (i / CURTAIN_SEGS) * Math.PI * 2;
+        }
+        geom.setAttribute('aV', new THREE.BufferAttribute(aV, 1));
+        geom.setAttribute('aCol', new THREE.BufferAttribute(aCol, 1));
+        const idx = [];
+        for (let i = 0; i < CURTAIN_SEGS; i++) {
+            const a = i * 2, b = a + 2;
+            idx.push(a, a + 1, b, a + 1, b + 1, b);
+        }
+        geom.setIndex(idx);
+        const mesh = new THREE.Mesh(geom, curtainMat);
+        mesh.visible = false;
+        earthGroup.add(mesh);
+        return mesh;
+    });
+
     const pinMarker = new THREE.Mesh(
         new THREE.SphereGeometry(reToUnits(0.22), 12, 8),
         new THREE.MeshBasicMaterial({ color: 0x4fc97f }));
@@ -497,6 +665,180 @@ function mount(host) {
         return mesh;
     });
 
+    /* ── S5a: ambient particle stream (plan §15) ──────────────────────
+       The solar wind as INSTRUMENT: speed from the ONE provider's
+       driver at τ (fallback: climatology), density-vs-climatology sets
+       brightness, Bz polarity sets the tint (the rope's SOUTH/NORTH
+       palette). Positions are computed IN-SHADER from per-particle
+       seeds + one advected phase uniform — zero per-frame CPU geometry
+       work (software-GL CI constraint). The compressed radial map is
+       SAMPLED from a texture baked off scale.js stageRadius — the
+       shader never re-implements the scale math (no third copy).
+       Motion runs at the DISCLOSED time-lapse (scale.js FLOW; the
+       true-scale toggle blends it to ×1 via flowLapse). Quiet-time
+       honesty: with no CME this shows measurement, not prediction. */
+    const P_COUNT = (typeof window !== 'undefined' && window.innerWidth <= 768)
+        ? 4000 : 16000;
+    const P_MAX_AU = 1.12;               // stream past Earth a little
+    const pMapTex = new THREE.DataTexture(
+        new Float32Array(128 * 4), 128, 1, THREE.RGBAFormat, THREE.FloatType);
+    pMapTex.minFilter = pMapTex.magFilter = THREE.LinearFilter;
+    pMapTex.wrapS = THREE.ClampToEdgeWrapping;
+    let pMapKey = '';
+    function bakeFlowMap() {
+        // stageRadius(f·P_MAX_AU, mix) → red channel; re-baked only when
+        // mix moves (updateScene cadence — 128 samples, trivial).
+        const key = state.mix.toFixed(3);
+        if (key === pMapKey) return;
+        pMapKey = key;
+        const a = pMapTex.image.data;
+        for (let i = 0; i < 128; i++) {
+            a[i * 4] = stageRadius((i / 127) * P_MAX_AU, state.mix);
+        }
+        pMapTex.needsUpdate = true;
+    }
+    // S5b member texture (plan §15.4b): 128 slots × 2 rows —
+    // row 0: [apex stageR, shock stageR, filter weight, front vKms/1000]
+    // row 1: [lon rad, lat rad, 0, 0]  (ropeFrame eDir convention)
+    // Baked from the PURE memberFieldRows + scale.js stageRadius; a slot
+    // past the member count keeps weight 0 → invisible, never wrong.
+    const pMemTex = new THREE.DataTexture(
+        new Float32Array(128 * 2 * 4), 128, 2, THREE.RGBAFormat, THREE.FloatType);
+    pMemTex.minFilter = pMemTex.magFilter = THREE.NearestFilter;
+    const pUniforms = {
+        uPhase: { value: 0 },            // advected radial fraction offset
+        uMap: { value: pMapTex },
+        uSouth: { value: 0 },            // ambient southward-Bz tint (driver)
+        uNRel: { value: 1 },             // density vs climatology (0.2..4)
+        uPx: { value: Math.min(1.5, window.devicePixelRatio || 1) },
+        // S5b — the ensemble enters the cloud:
+        uMemTex: { value: pMemTex },
+        uCmeOn: { value: 0 },            // 0 → kinds collapse to ambient
+        uComp: { value: 1 },             // sheath density compression (oracle)
+        uEjSouth: { value: 0 },          // ejecta tint from ONE fieldAt probe
+        uJit: { value: 0 },              // sheath turbulence clock (dressing)
+    };
+    const pGeom = new THREE.BufferGeometry();
+    {
+        // Deterministic LCG so every boot (and CI run) draws the same dust.
+        let s = 42;
+        const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+        const pos = new Float32Array(P_COUNT * 3);          // required, unused
+        const aSeed = new Float32Array(P_COUNT);
+        const aF0 = new Float32Array(P_COUNT);
+        const aAng = new Float32Array(P_COUNT * 2);
+        const aKind = new Float32Array(P_COUNT);            // 0 ambient · 1 ejecta · 2 sheath
+        const aSlot = new Float32Array(P_COUNT);            // ensemble-member binding
+        for (let i = 0; i < P_COUNT; i++) {
+            aSeed[i] = rnd();
+            aF0[i] = rnd();
+            aAng[i * 2] = (rnd() * 2 - 1) * 0.42;           // ±24° corridor wedge
+            aAng[i * 2 + 1] = (rnd() * 2 - 1);              // ecliptic-z shaping
+            const k = rnd();
+            aKind[i] = k < 0.60 ? 0 : k < 0.85 ? 1 : 2;
+            aSlot[i] = Math.floor(rnd() * 128);
+        }
+        pGeom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        pGeom.setAttribute('aSeed', new THREE.BufferAttribute(aSeed, 1));
+        pGeom.setAttribute('aF0', new THREE.BufferAttribute(aF0, 1));
+        pGeom.setAttribute('aAng', new THREE.BufferAttribute(aAng, 2));
+        pGeom.setAttribute('aKind', new THREE.BufferAttribute(aKind, 1));
+        pGeom.setAttribute('aSlot', new THREE.BufferAttribute(aSlot, 1));
+    }
+    const points = new THREE.Points(pGeom, new THREE.ShaderMaterial({
+        uniforms: pUniforms,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        vertexShader: `
+            uniform float uPhase; uniform sampler2D uMap; uniform float uPx;
+            uniform sampler2D uMemTex; uniform float uCmeOn; uniform float uJit;
+            attribute float aSeed; attribute float aF0; attribute vec2 aAng;
+            attribute float aKind; attribute float aSlot;
+            varying float vFade; varying float vKind; varying float vW;
+            void main() {
+                // With no live forecast every kind collapses to ambient —
+                // the cloud honestly shows only measurement (plan §15.4b).
+                float kind = (uCmeOn > 0.5) ? aKind : 0.0;
+                vec3 pos3; float fade; float w = 1.0;
+                if (kind < 0.5) {
+                    // Ambient: per-particle dispersion around the shared phase.
+                    float f = fract(aF0 + uPhase * (0.85 + 0.30 * aSeed));
+                    float sR = texture2D(uMap, vec2(f, 0.5)).r;
+                    float th = aAng.x;
+                    float z = aAng.y * (0.04 + 0.16 * f);
+                    pos3 = normalize(vec3(cos(th), sin(th), z)) * sR;
+                    fade = smoothstep(0.015, 0.06, f) * (1.0 - smoothstep(0.9, 1.0, f))
+                         * (1.0 - 0.5 * abs(aAng.y));
+                } else {
+                    // Member-bound: THIS particle rides ONE ensemble member.
+                    vec2 u = vec2((aSlot + 0.5) / 128.0, 0.0);
+                    vec4 r0 = texture2D(uMemTex, vec2(u.x, 0.25));
+                    vec4 r1 = texture2D(uMemTex, vec2(u.x, 0.75));
+                    w = r0.b;
+                    float sR;
+                    if (kind < 1.5) {
+                        // Ejecta body: plume behind the member's front.
+                        sR = r0.r * (0.55 + 0.42 * aF0);
+                    } else {
+                        // Sheath: pile-up between front and shock, turbulent
+                        // (the jitter is display dressing, documented).
+                        float jit = sin(uJit * (2.3 + 15.0 * aSeed) + aSeed * 41.0);
+                        sR = mix(r0.r, r0.g, aF0) + jit * 0.006;
+                    }
+                    float th = r1.r + aAng.x * 0.28;
+                    float zl = r1.g + aAng.y * 0.16;
+                    pos3 = vec3(cos(zl) * cos(th), cos(zl) * sin(th), sin(zl)) * sR;
+                    // Weight IS the brightness: the fan you see is the
+                    // assimilated distribution, not a style choice.
+                    fade = 0.12 + 0.88 * w;
+                }
+                vec4 mv = modelViewMatrix * vec4(pos3, 1.0);
+                gl_Position = projectionMatrix * mv;
+                float dist = max(0.4, -mv.z);
+                gl_PointSize = clamp(uPx * (kind > 1.5 ? 3.0 : 2.4) / dist, 1.0, 4.0);
+                vFade = fade; vKind = kind; vW = w;
+            }`,
+        fragmentShader: `
+            uniform float uSouth; uniform float uNRel;
+            uniform float uEjSouth; uniform float uComp;
+            varying float vFade; varying float vKind; varying float vW;
+            void main() {
+                vec2 q = gl_PointCoord - 0.5;
+                float d = dot(q, q);
+                if (d > 0.25) discard;
+                float core = smoothstep(0.25, 0.02, d);
+                vec3 north = vec3(0.45, 0.72, 0.95);   // rope palette family
+                vec3 south = vec3(0.98, 0.55, 0.38);
+                vec3 col; float a;
+                if (vKind < 0.5) {
+                    col = mix(north, south, uSouth);
+                    a = core * vFade * clamp(0.10 + 0.14 * uNRel, 0.0, 0.75);
+                } else if (vKind < 1.5) {
+                    col = mix(north, south, uEjSouth);
+                    a = core * vFade * 0.5;
+                } else {
+                    col = vec3(1.0, 0.9, 0.72);        // shocked sheath, hot
+                    a = core * vFade * clamp(0.12 + 0.10 * uComp, 0.0, 0.8);
+                }
+                gl_FragColor = vec4(col, a);
+            }`,
+    }));
+    points.frustumCulled = false;
+    scene.add(points);
+    bakeFlowMap();
+    // Driver sample at τ: the provider's SolarWindDriver when live,
+    // else its latest RTSW sample, else climatology (honest fallback).
+    function driverAt(tauMs) {
+        const d = state.fc?.driver;
+        if (d?.at) {
+            const s = d.at(tauMs);
+            if (s && Number.isFinite(s.v)) return { vKms: s.v, nCc: s.n, bzNt: s.bz };
+        }
+        const s = state.fc?.rtsw?.samples?.at?.(-1);
+        if (s && Number.isFinite(s.v)) return { vKms: s.v, nCc: s.n, bzNt: s.bz };
+        return { vKms: NaN, nCc: NaN, bzNt: NaN };
+    }
+    let flowPrevTau = state.tauMs;
+
     /* ── HTML overlay annotations ─────────────────────────────────── */
     const labels = [];
     const addLabel = (cls, text, world) => {
@@ -508,8 +850,21 @@ function mount(host) {
         return el;
     };
     addLabel('swst-label', 'SUN', () => [0, 0, BODY.sunRadiusUnits * 1.4]);
+    // The sun's vitals, always on: measured X-ray class at τ, AR count,
+    // F10.7 — "the sun always has behavior" (author, 2026-07-23).
+    const sunChip = addLabel('swst-chip dim', '☀ awaiting GOES X-ray…',
+        () => [0, 0, -BODY.sunRadiusUnits * 2.0]);
     addLabel('swst-label', 'EARTH', () => [EARTH_S, 0, BODY.earthRadiusUnits * 2.2]);
     addLabel('swst-label', 'L1', () => [stageRadius(0.99, state.mix), 0, 0.05]);
+    // S5d probe readout — follows the dropped monitor; hidden until one
+    // exists (display toggled by the probe update block, like pinLabel).
+    const probeChip = addLabel('swst-chip', '', () => {
+        const p = state.probe;
+        if (!p) return [0, 0, -9];
+        const s = stageRadius(p.rAu, state.mix);
+        return [s * Math.cos(p.lonRad), s * Math.sin(p.lonRad), -0.12];
+    });
+    probeChip.style.display = 'none';
     const chip = addLabel('swst-chip dim', 'awaiting L1 feed…',
         () => [stageRadius(0.99, state.mix), 0, 0]);
     for (const t of rulerTicks()) {
@@ -659,6 +1014,11 @@ function mount(host) {
         playBtn.setAttribute('aria-pressed', 'false');
         state.anchorMs = Date.now();
         setTau(Date.now());
+        // Now = back to the LIVE watch: exit any calendar replay (the
+        // provider re-runs and republishes; loose-coupled via the event).
+        if (state.fc?.replay) {
+            try { window.dispatchEvent(new CustomEvent('sw-replay-cme', { detail: null })); } catch {}
+        }
     });
     playBtn.addEventListener('click', () => {
         state.playing = !state.playing;
@@ -671,7 +1031,7 @@ function mount(host) {
         if (!fc) return;
         state.fc = fc;
         if (fc.idle) {
-            state.kernel = null; state.rope = null;
+            state.kernel = null; state.rope = null; state.pMembers = null;
             chip.className = 'swst-chip dim';
             chip.innerHTML = 'corridor quiet — no Earth-directed CME';
             updateScene(true);
@@ -685,9 +1045,15 @@ function mount(host) {
         // Full-member kinematics for the wavefront quantiles.
         state.kin = ghostMembers(fc.prior, null, fc.prior?.members ?? 0)
             .map((m) => ({ v0Kms: m.v0Kms, gammaPerKm: m.gammaPerKm }));
+        // S5b: up to 128 members (evenly subsampled, WITH filter weights)
+        // for the particle cloud's member binding (plan §15.4b).
+        state.pMembers = ghostMembers(fc.prior, state.weights, 128);
         const s = fc.rtsw?.samples?.at?.(-1);
         chip.className = 'swst-chip';
         chip.innerHTML = [
+            // Calendar replay: the corridor is showing a SELECTED event,
+            // not the live watch — say so; Now returns to live.
+            fc.replay ? `⟲ REPLAY ${fc.replay.label}` : null,
             s && Number.isFinite(s.bz) ? `Bz ${s.bz.toFixed(1)} nT` : null,
             s && Number.isFinite(s.v) ? `V ${Math.round(s.v)} km/s` : null,
             s && Number.isFinite(s.n) ? `N ${s.n.toFixed(1)} /cc` : null,
@@ -711,6 +1077,36 @@ function mount(host) {
         const f = d?.solar_activity?.f107_sfu;
         if (Number.isFinite(k)) state.kpNow = k;
         if (Number.isFinite(f)) state.f107 = f;
+        // Adopt non-empty lists only: the feed emits [] both for a
+        // spotless sun AND for a failed solar_regions sub-fetch, and a
+        // transient fetch failure must not blank real markers. (A truly
+        // spotless sun keeps the last markers until reload — display
+        // dressing, acceptable.)
+        if (Array.isArray(d?.active_regions) && d.active_regions.length) {
+            state.regions = d.active_regions;
+        }
+        // The sun ALWAYS has behavior: the measured GOES X-ray record
+        // (series for τ-lookup + latest scalar) and the recent flares.
+        if (Array.isArray(d?.xray_series) && d.xray_series.length) {
+            state.xraySeries = d.xray_series;
+        }
+        if (Number.isFinite(d?.xray_flux) && d.xray_flux > 0) {
+            state.xrayLatest = d.xray_flux;
+        }
+        // S5c: measured ≥10 MeV proton record for the SEP streak gate.
+        if (Array.isArray(d?.proton_series) && d.proton_series.length) {
+            state.protonSeries = d.proton_series;
+        }
+        if (Number.isFinite(d?.proton_flux_10mev)) {
+            state.protonLatest = d.proton_flux_10mev;
+        }
+        // BOTH flare catalogs: NOAA retired its 7-day flare JSON, so live
+        // flares usually arrive ONLY as donki_flares — reading recent_flares
+        // alone meant the flash never fired in production. The pure merge
+        // dedupes the overlap and keeps the AR number for localization.
+        if (d?.recent_flares?.length || d?.donki_flares?.length) {
+            state.flares = normalizeFlares(d.recent_flares, d.donki_flares);
+        }
         updateScene();
     });
     {
@@ -921,9 +1317,36 @@ function mount(host) {
         const targets = [];
         if (ropeMesh.visible) targets.push(ropeMesh);
         if (pinMarker.visible) targets.push(pinMarker);
+        if (probeMarker.visible) targets.push(probeMarker);
         for (const o of assetObjs) targets.push(o.dot);
         const hit = raycaster.intersectObjects(targets, false)[0];
-        if (!hit) return;
+        if (!hit) {
+            // S5d: empty corridor → drop/move the virtual probe on the
+            // ecliptic. The stage→AU inverse is mix-aware, so the monitor
+            // lands on the same TRUE radius under either scale.
+            if (state.station === 'my-sky') return;
+            const pt = new THREE.Vector3();
+            if (!raycaster.ray.intersectPlane(
+                new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), pt)) return;
+            const rAu = stageRadiusInvMix(Math.hypot(pt.x, pt.y), state.mix);
+            if (rAu < 0.07 || rAu > 1.12) return;   // outside the corridor
+            state.probe = { rAu, lonRad: Math.atan2(pt.y, pt.x) };
+            updateScene(true);
+            track('stage_pick', { type: 'probe' });
+            try {
+                window.dispatchEvent(new CustomEvent('sw-pick', {
+                    detail: { type: 'probe', rAu,
+                        lonDeg: state.probe.lonRad * 180 / Math.PI } }));
+            } catch {}
+            return;
+        }
+        if (hit.object === probeMarker) {
+            // Clicking the monitor retrieves it.
+            state.probe = null;
+            updateScene(true);
+            track('stage_pick', { type: 'probe-clear' });
+            return;
+        }
         track('stage_pick', {
             type: hit.object === ropeMesh ? 'rope'
                 : hit.object === pinMarker ? 'pin' : 'asset',
@@ -980,6 +1403,78 @@ function mount(host) {
         // the pin/oval use (model.js subsolarLonDeg).
         earthUniforms.uSubsolarLon.value = subsolarLonDeg(state.tauMs) * Math.PI / 180;
 
+        // The sun's MEASURED state at τ: GOES X-ray activity + flare
+        // flash envelope drive the surface shader, the corona, and the
+        // vitals chip — the star is never a dead ball, CME or no CME.
+        {
+            const sa = sunActivityAt(state.xraySeries, state.tauMs, state.xrayLatest);
+            const flash = flareFlashAt(state.flares, state.tauMs);
+            const act = Math.min(1, Math.max(sa.act, flash));
+            // Localize the flash when the catalog names the source AR:
+            // find the flare currently inside its envelope that carries a
+            // region number (honest attribution only — no region, no site).
+            const src = flash > 0.05
+                ? (state.flares ?? []).find((f) => f.region != null
+                    && flareFlashAt([f], state.tauMs) >= flash - 1e-9)
+                : null;
+            state.sunAct = { cls: sa.cls, act, flash, flareRegion: src?.region ?? null };
+            sunUniforms.uAct.value = act;
+            corona.material.opacity = 0.25 + 0.4 * act + 0.25 * flash;
+            corona.scale.setScalar(2.4 * (1 + 0.3 * act));
+            const nAr = (state.regions ?? []).length;
+            const nCx = (state.regions ?? []).filter((r) => r.is_complex).length;
+            sunChip.textContent = `☀ X-ray ${sa.cls}${flash > 0.05 ? (src ? ` · FLARE @ AR ${src.region}` : ' · FLARE') : ''}`
+                + (nAr ? ` · ${nAr} AR${nAr > 1 ? 's' : ''}${nCx ? ` (${nCx} complex)` : ''}` : '')
+                + (Number.isFinite(state.f107) ? ` · F10.7 ${Math.round(state.f107)}` : '');
+        }
+
+        // Active-region markers at Stonyhurst positions for τ (Carrington
+        // lon − L0(τ), the carringtonL0 oracle): +x faces Earth. The AR the
+        // catalog blames for an in-envelope flare ERUPTS: white-hot and
+        // swollen by the flash — the measured process, placed on record.
+        {
+            const regions = state.regions ?? [];
+            const L0 = carringtonL0(state.tauMs).L0 * Math.PI / 180;
+            const flash = state.sunAct?.flash ?? 0;
+            const flareRegion = state.sunAct?.flareRegion ?? null;
+            for (let i = 0; i < arMarkers.length; i++) {
+                const r = regions[i], m = arMarkers[i];
+                if (!r) { m.visible = false; continue; }
+                const stony = (r.lon_rad ?? 0) - L0;
+                const cl = Math.cos(r.lat_rad ?? 0);
+                m.position.set(
+                    cl * Math.cos(stony), cl * Math.sin(stony),
+                    Math.sin(r.lat_rad ?? 0)).multiplyScalar(BODY.sunRadiusUnits * 1.02);
+                const erupting = flareRegion != null && r.region === flareRegion;
+                m.scale.setScalar(BODY.sunRadiusUnits
+                    * (0.05 + 0.12 * (r.area_norm ?? 0.1))
+                    * (erupting ? 1 + 1.6 * flash : 1));
+                if (erupting) m.material.color.setHex(0xfff6e0);
+                else m.material.color.setHex(r.is_complex ? 0xff6a3d : 0xffe08a);
+                m.visible = true;
+            }
+        }
+
+        // CME liftoff plume: while τ crosses the provider event's launch
+        // time, a directional flash rises at the launch site (lon/lat from
+        // the SAME catalogued event the rope uses — no invented geometry).
+        {
+            const lo = state.rope ? liftoffAt(state.launchMs, state.tauMs) : 0;
+            if (lo > 0.02 && state.station !== 'my-sky') {
+                const lon = (state.rope.lonDeg ?? 0) * Math.PI / 180;
+                const lat = (state.rope.latDeg ?? 0) * Math.PI / 180;
+                const cl = Math.cos(lat);
+                liftoffSprite.position.set(
+                    cl * Math.cos(lon), cl * Math.sin(lon), Math.sin(lat))
+                    .multiplyScalar(BODY.sunRadiusUnits * (1.1 + 0.9 * (1 - lo)));
+                liftoffSprite.scale.setScalar(BODY.sunRadiusUnits * (0.6 + 1.2 * lo));
+                liftoffSprite.material.opacity = 0.85 * lo;
+                liftoffSprite.visible = true;
+            } else {
+                liftoffSprite.visible = false;
+            }
+        }
+
         // Remap statics through the current compression mix. (Ruler-tick
         // labels track automatically — their world() closures read state.mix.)
         for (const line of spirals) remapLine(line, state.mix);
@@ -994,7 +1489,21 @@ function mount(host) {
         // shows the sky story only: oval band, pin, stations chrome.
         const inMySky = state.station === 'my-sky';
         atmo.visible = !inMySky;
+        points.visible = !inMySky;
         ropeMesh.visible = !!live && !inMySky;
+
+        // S5a particle-field refresh at the updateScene cadence: driver
+        // sample at τ → pure windFieldAt → shader uniforms. The frame
+        // loop only advects the phase; it never touches the oracles.
+        bakeFlowMap();
+        {
+            const amb = driverAt(state.tauMs);
+            const wf = windFieldAt(0.5, { vKms: amb.vKms, nCc: amb.nCc });
+            state.flowVKms = wf.vKms;
+            pUniforms.uNRel.value = wf.nRel;
+            pUniforms.uSouth.value = Number.isFinite(amb.bzNt)
+                ? Math.min(1, Math.max(0, -amb.bzNt / 10)) : 0;
+        }
         if (live) {
             // Median rope geometry: apex/σ straight from the KERNEL probes.
             const dAu = state.kernel.apexKmAt(0, tS) / AU_KM;
@@ -1011,6 +1520,122 @@ function mount(host) {
             attr.needsUpdate = true;
             ropeGeom.computeBoundingSphere();
             colorRope(spec, tS);
+
+            // S5b: the ensemble enters the cloud. Rows from the PURE
+            // memberFieldRows helper; STAGE radii applied here via the
+            // scale.js oracle; shock offset = the rope's sheathK × the
+            // kernel's σ_apex probe (same σ the rope surface uses).
+            const rows = state.pMembers?.length
+                ? memberFieldRows(state.pMembers, state.rope.wKms ?? 400, tS,
+                    { shockOffsetAu: (state.rope.sheathK ?? 0.8) * sigAu })
+                : null;
+            if (rows) {
+                const a = pMemTex.image.data;
+                for (let i = 0; i < 128; i++) {
+                    a[i * 4] = stageRadius(rows.apexAu[i], state.mix);
+                    a[i * 4 + 1] = stageRadius(rows.shockAu[i], state.mix);
+                    a[i * 4 + 2] = rows.weight[i];
+                    a[i * 4 + 3] = rows.vKms[i] / 1000;
+                    a[512 + i * 4] = rows.lonRad[i];
+                    a[512 + i * 4 + 1] = rows.latRad[i];
+                }
+                pMemTex.needsUpdate = true;
+                state.pMemberCount = rows.count;
+                pUniforms.uCmeOn.value = 1;
+
+                // Sheath compression from the EXISTING R–H oracle (the
+                // globe and the validation cron use the same function);
+                // front speed = median member front. Swap to a direct
+                // kernel probe when the wrapper exposes one.
+                const amb = driverAt(state.tauMs);
+                const vAmb = Number.isFinite(amb.vKms) && amb.vKms > 50 ? amb.vKms : 400;
+                const nAmb = Number.isFinite(amb.nCc) && amb.nCc > 0 ? amb.nCc : 5;
+                const vs = Array.from(rows.vKms.slice(0, rows.count)).sort((x, y) => x - y);
+                const vFront = vs[vs.length >> 1] || vAmb;
+                const sc = sheathCompression(vFront, vAmb, nAmb);
+                pUniforms.uComp.value = Math.min(6, Math.max(1, (sc.n_sheath ?? nAmb) / nAmb));
+                // The probe reads the SAME nose-line structure the cloud
+                // renders (median apex/shock, R–H compression, front speed).
+                state.cmeField = { shockAu: dAu + (state.rope.sheathK ?? 0.8) * sigAu,
+                    ejectaAu: dAu, compression: pUniforms.uComp.value, vKms: vFront };
+
+                // Ejecta tint: ONE decimated kernel.fieldAt probe just
+                // inside the median nose — the rope MESH carries the
+                // full-fidelity per-vertex colors; the cloud only needs
+                // the headline polarity.
+                const { eDir } = ropeFrame(state.rope.lonDeg, state.rope.latDeg, state.rope.tiltDeg);
+                const rKm = dAu * 0.92 * AU_KM;
+                const nose = state.kernel.fieldAt(tS,
+                    eDir[0] * rKm, eDir[1] * rKm, eDir[2] * rKm);
+                if (nose?.inside) {
+                    const bScale = Math.max(Math.abs(state.rope.b1AuNt ?? 20), 10);
+                    pUniforms.uEjSouth.value =
+                        Math.min(1, Math.max(0, -nose.bz / bScale));
+                }
+            } else {
+                state.pMemberCount = 0;
+                pUniforms.uCmeOn.value = 0;
+                state.cmeField = null;
+            }
+        }
+        if (!live) { state.pMemberCount = 0; pUniforms.uCmeOn.value = 0; state.cmeField = null; }
+
+        // S5d probe refresh: the dropped monitor is FIXED IN SPACE; every
+        // scrub re-reads the field through the SAME oracle the particles
+        // render, so its regime flips exactly when a wavefront sweeps it.
+        {
+            const p = state.probe;
+            const show = !!p && !inMySky;
+            probeMarker.visible = probeRadial.visible = probeSpiral.visible = show;
+            probeChip.style.display = show ? '' : 'none';
+            if (show) {
+                const amb = driverAt(state.tauMs);
+                const read = parcelProbe(p.rAu, p.lonRad,
+                    { vKms: amb.vKms, nCc: amb.nCc }, state.cmeField, state.tauMs);
+                state.probeRead = read;
+                const s = stageRadius(p.rAu, state.mix);
+                const cosL = Math.cos(p.lonRad), sinL = Math.sin(p.lonRad);
+                probeMarker.position.set(s * cosL, s * sinL, 0);
+                // Radial parcel path: launch base → past 1 AU along the ray.
+                const s0 = stageRadius(0.05, state.mix), s1 = stageRadius(1.12, state.mix);
+                const rp = probeRadial.geometry.getAttribute('position');
+                rp.setXYZ(0, s0 * cosL, s0 * sinL, 0);
+                rp.setXYZ(1, s1 * cosL, s1 * sinL, 0);
+                rp.needsUpdate = true;
+                probeRadial.computeLineDistances();
+                // Spiral connectivity: rebuild only when the curve changes
+                // (speed or source longitude moved, or the scale toggled).
+                const key = `${Math.round(read.vKms)}|${read.spiralPhi0Deg.toFixed(1)}|${state.mix.toFixed(3)}`;
+                if (probeSpiral.userData.key !== key) {
+                    probeSpiral.userData.key = key;
+                    const phys = parkerSpiralPoints(read.vKms, read.spiralPhi0Deg, 90, Math.max(1.12, p.rAu));
+                    probeSpiral.userData.phys = phys;
+                    probeSpiral.geometry.dispose();
+                    probeSpiral.geometry = physLineGeometry(phys);
+                    remapLine(probeSpiral, state.mix);
+                }
+                // Source-AR connectivity: an AR whose Stonyhurst longitude
+                // sits within 15° of the spiral footpoint is "connected".
+                const L0 = carringtonL0(state.tauMs).L0 * Math.PI / 180;
+                const TWO_PI = Math.PI * 2;
+                const conn = (state.regions ?? []).find((r) => {
+                    let d = ((r.lon_rad ?? 0) - L0 - read.srcLonRad) % TWO_PI;
+                    if (d > Math.PI) d -= TWO_PI;
+                    if (d < -Math.PI) d += TWO_PI;
+                    return Math.abs(d) < 15 * Math.PI / 180;
+                });
+                state.probeRead.connectedAr = conn?.region ?? null;
+                const lead = read.leadHours == null ? 'at/past Earth'
+                    : `Earth +${read.leadHours < 10 ? read.leadHours.toFixed(1) : Math.round(read.leadHours)} h`;
+                const srcDeg = ((read.srcLonRad * 180 / Math.PI) % 360 + 360) % 360;
+                probeChip.innerHTML =
+                    `⌖ ${p.rAu.toFixed(2)} AU · ${Math.round(read.vKms)} km/s · `
+                    + `${read.nRel.toFixed(1)}×n · ${read.regime} · ${lead}`
+                    + `<br>path ⟶ radial · field ⟿ src ${Math.round(srcDeg)}°`
+                    + (conn ? ` ⇢ AR ${conn.region}` : '');
+            } else {
+                state.probeRead = null;
+            }
         }
 
         // Ghost member axes (weight-faded) + ensemble wavefronts.
@@ -1055,11 +1680,15 @@ function mount(host) {
             for (let h = 0; h < 2; h++) {
                 const { mesh, median } = ovalHemis[h];
                 mesh.visible = median.visible = !!band;
-                if (!band) continue;
+                if (!band) { curtains[h].visible = false; continue; }
                 const g = ovalBandGrid(band, OVAL_NLON, h === 0 ? 1 : -1);
                 const mp = mesh.geometry.getAttribute('position');
                 const lp = median.geometry.getAttribute('position');
                 const rBand = reToUnits(1.03);
+                // S5c curtain wall: base on the median ring, top DRAWN_RE
+                // higher (the AURORA disclosed exaggeration) — SAME grid.
+                const cp = curtains[h].geometry.getAttribute('position');
+                const rTop = reToUnits(1.03 + AURORA.DRAWN_RE);
                 for (let i = 0; i <= OVAL_NLON; i++) {
                     earthLocal(g.poleward[i], g.lons[i], rBand, state.tauMs, p3);
                     mp.array[i * 6] = p3[0]; mp.array[i * 6 + 1] = p3[1]; mp.array[i * 6 + 2] = p3[2];
@@ -1067,10 +1696,40 @@ function mount(host) {
                     mp.array[i * 6 + 3] = p3[0]; mp.array[i * 6 + 4] = p3[1]; mp.array[i * 6 + 5] = p3[2];
                     earthLocal(g.median[i], g.lons[i], rBand * 1.002, state.tauMs, p3);
                     lp.array[i * 3] = p3[0]; lp.array[i * 3 + 1] = p3[1]; lp.array[i * 3 + 2] = p3[2];
+                    cp.array[i * 6] = p3[0]; cp.array[i * 6 + 1] = p3[1]; cp.array[i * 6 + 2] = p3[2];
+                    earthLocal(g.median[i], g.lons[i], rTop, state.tauMs, p3);
+                    cp.array[i * 6 + 3] = p3[0]; cp.array[i * 6 + 4] = p3[1]; cp.array[i * 6 + 5] = p3[2];
                 }
-                mp.needsUpdate = lp.needsUpdate = true;
+                mp.needsUpdate = lp.needsUpdate = cp.needsUpdate = true;
                 mesh.geometry.computeBoundingSphere();
                 median.geometry.computeBoundingSphere();
+                curtains[h].geometry.computeBoundingSphere();
+            }
+        }
+
+        // Curtain intensity tracks the SAME forecast median the band draws
+        // (kpBandAt — never a second Kp model): faint by Kp 2, full sheets
+        // at Kp 8+. Visible whenever the oval is (My Sky INCLUDED — the
+        // curtains are the sky story the plan promises that staging).
+        {
+            const kInt = band ? Math.min(1, Math.max(0, (band.p50 - 1.5) / 6.5)) : 0;
+            curtainUniforms.uInt.value = kInt;
+            state.curtainInt = kInt;
+            for (const c of curtains) c.visible = !!band && kInt > 0.04;
+        }
+
+        // S5c SEP streaks: gated on the MEASURED ≥10 MeV S-scale at τ.
+        // The context spirals run hot while protons are in the corridor.
+        {
+            const sep = sepStateAt(state.protonSeries, state.tauMs, state.protonLatest);
+            state.sep = sep;
+            sepUniforms.uInt.value = sep.on ? 0.35 + 0.65 * sep.intensity : 0;
+            const show = sep.on && !inMySky;
+            for (const s of sepStreaks) s.visible = show;
+            spiralMat.color.setHex(sep.on ? 0x6a5a9e : 0x2a4a66);
+            spiralMat.opacity = sep.on ? 0.5 : 0.35;
+            if (sep.on) {
+                sunChip.textContent += ` · ☢ S${sep.s} SEP`;
             }
         }
 
@@ -1254,6 +1913,30 @@ function mount(host) {
         glow.position.copy(sun.position);
         corona.position.copy(sun.position);
         sunUniforms.uTime.value = now / 1000;   // wall-clock granulation drift
+        pUniforms.uJit.value = now / 1000;      // sheath turbulence (dressing)
+        curtainUniforms.uTime.value = now / 1000;   // aurora ray drift (dressing)
+        // S5c: SEP pulses race the spirals at ~0.3 c under the SAME
+        // disclosed flowLapse as the wind — at true scale they crawl
+        // (1 AU in ~28 real minutes, the honest pace). Reduced motion
+        // freezes them with the rest of the particle field.
+        if (!reduced && sepUniforms.uInt.value > 0) {
+            const sepTransitS = (P_MAX_AU * AU_KM) / SEP_V_KMS;
+            sepUniforms.uPhase.value =
+                (sepUniforms.uPhase.value + (dt / 1000) * flowLapse(state.mix) / sepTransitS) % 1;
+        }
+        // S5a flow advection: τ motion (scrub/playback) moves the field
+        // 1:1; on top, wall-clock adds the DISCLOSED time-lapse — which
+        // flowLapse() blends to ×1 under true scale (honestly still).
+        // Reduced motion: static dust (phase frozen).
+        {
+            const dTauS = (state.tauMs - flowPrevTau) / 1000;
+            flowPrevTau = state.tauMs;
+            if (!reduced) {
+                const simS = dTauS + (dt / 1000) * (flowLapse(state.mix) - 1);
+                const df = simS * (state.flowVKms || 400) / (P_MAX_AU * AU_KM);
+                pUniforms.uPhase.value = ((pUniforms.uPhase.value + df) % 1 + 1) % 1;
+            }
+        }
         projectLabels();
         renderer.render(scene, camera);
     }
@@ -1271,6 +1954,54 @@ function mount(host) {
         get ropeVisible() { return ropeMesh.visible; },
         get forecastState() {
             return !state.fc ? 'none' : state.fc.idle ? 'idle' : 'live';
+        },
+        // S5a probes (state, not pixels — the CI-safe test surface).
+        get particles() {
+            return { count: P_COUNT, timeLapse: flowLapse(state.mix),
+                     phase: pUniforms.uPhase.value,
+                     south: pUniforms.uSouth.value,
+                     vKms: state.flowVKms || null,
+                     visible: points.visible,
+                     // S5b: the ensemble in the cloud.
+                     cmeActive: pUniforms.uCmeOn.value === 1,
+                     members: state.pMemberCount || 0,
+                     comp: pUniforms.uComp.value,
+                     ejSouth: pUniforms.uEjSouth.value };
+        },
+        get sun() {
+            const shown = arMarkers.filter((m) => m.visible).length;
+            return { regions: shown,
+                     complex: (state.regions ?? []).filter((r) => r.is_complex).length,
+                     cls: state.sunAct?.cls ?? null,
+                     act: state.sunAct?.act ?? 0,
+                     flash: state.sunAct?.flash ?? 0,
+                     flareRegion: state.sunAct?.flareRegion ?? null,
+                     liftoff: liftoffSprite.visible };
+        },
+        // S5d: the virtual monitor (null when none is dropped).
+        get probe() {
+            const r = state.probeRead;
+            return !r ? null : { rAu: r.rAu, lonDeg: r.lonRad * 180 / Math.PI,
+                     vKms: r.vKms, nRel: r.nRel, regime: r.regime,
+                     leadHours: r.leadHours, srcLonDeg: r.spiralPhi0Deg,
+                     connectedAr: r.connectedAr ?? null,
+                     visible: probeMarker.visible };
+        },
+        setProbe(rAu, lonDeg) {   // test/deep-link hook — same path as a click
+            state.probe = Number.isFinite(rAu)
+                ? { rAu, lonRad: (lonDeg ?? 0) * Math.PI / 180 } : null;
+            updateScene(true);
+        },
+        // S5c: SEP streak gate + curtain state.
+        get sep() {
+            return { on: !!state.sep?.on, s: state.sep?.s ?? 0,
+                     pfu10: state.sep?.pfu10 ?? 0,
+                     intensity: state.sep?.intensity ?? 0,
+                     visible: sepStreaks[0].visible };
+        },
+        get curtains() {
+            return { visible: curtains[0].visible,
+                     intensity: state.curtainInt ?? 0 };
         },
         flyTo, setTau,
     };

@@ -621,6 +621,198 @@ Stage engagement: ≥50% of sessions change station or scrub the future
 regression: all existing per-panel + nav + boot gates stay green
 through every phase.
 
+## 15. S5 — Particle activity (PLANNED 2026-07-23; author: "as dynamic and representative as possible")
+
+The Stage gets a particle layer whose every behavior traces to a
+measured feed or the kernel — particles as INSTRUMENTS, not decoration.
+"Dynamic" comes from real motion at a disclosed time-lapse; "representative"
+means an auditor can point at any particle behavior and name the feed
+that drives it.
+
+### 15.1 Oracle → motion map (the honesty contract)
+
+| Particle behavior | Driven by | Oracle |
+|---|---|---|
+| Ambient stream speed | measured V at τ | SolarWindDriver samples (replay = archived RTSW, live = now-cast, forecast = ensemble driver) — the ONE provider's driver, never a second fetch |
+| Stream density (points/volume) | measured n | 'swpc-update' `solar_wind.density` (norm already computed by the feed) |
+| Particle color | Bz polarity + \|B\| | driver Bz at τ (SOUTH/NORTH palette shared with the rope) |
+| Sheath pile-up (density spike + jitter) | shock/ejecta radii + compression | kernel wavefront quantiles + the v1.x sheath compression ratio — same probes the wavefront shells use |
+| Ejecta interior character | field rotation | kernel.fieldAt sampling (rope vertex-color pipeline, decimated) |
+| Arrival-spread fan | member kinematics | prior members + assimilated weights (ghost data, re-used) |
+| SEP streaks (radiation storm) | GOES proton flux | `proton_flux_10mev` / `sep_storm_level` (S-scale gate); spiral-aligned, minutes-scale transit — visually DISTINCT from the day-scale wind |
+| Aurora precipitation at Earth | oval + Kp/Bz | existing kpBandAt / boundaryForKp band (Earth-local frame) |
+| Pause/regime | τ scrubber | 'sw-tau' — replay/forecast change the DRIVER SAMPLES, not just playback rate |
+
+### 15.2 The one NEW disclosed dishonesty: flow time-lapse
+
+At wall-clock LIVE, a 450 km/s parcel takes ~4 days Sun→Earth —
+imperceptible. The ambient flow therefore renders at a TIME-LAPSE
+(default ×3600: one transit ≈ 100 s on screen). Per the §5 scale
+doctrine this lives in `js/stage/scale.js` beside the spatial
+compression, joins the on-stage disclosure line ("flow shown at
+×3600"), and the true-scale toggle drops it to ×1 (an honestly
+motionless corridor). τ-playback (×9000) and scrubbing override it —
+those move the CLOCK, and the particles follow the driver at τ.
+
+### 15.3 Architecture (perf-first, CI-safe)
+
+- ONE `THREE.Points` GPU system; positions computed IN-SHADER from a
+  per-particle seed + uniforms — zero per-frame CPU writes (the
+  software-GL CI constraint that killed per-frame geometry updates
+  elsewhere).
+- Pure field model `windFieldAt(rAu, tauMs, ctx)` →
+  `{vKms, nRel, regime: 'ambient'|'sheath'|'ejecta'}` in
+  `js/stage/model.js` — node-tested against the kernel probes; baked to
+  a small 1D texture at the existing 250 ms updateScene throttle; the
+  shader only ever reads the texture.
+- Budgets: ≤16k points desktop, ≤4k mobile; excluded from My Sky (sky
+  staging); pauses with the existing render-loop gates; reduced-motion
+  renders static dust (no advection).
+- Test surface: `__swStage` gains `particles` probes (count, timeLapse,
+  regimeAt) so Playwright asserts state, not pixels.
+
+### 15.4 Phasing (PR-sized arcs, each behind the standing gates)
+
+- **S5a — Ambient stream. ✅ SHIPPED 2026-07-23.** Landed as: FLOW +
+  flowLapse in stage/scale.js (the temporal dishonesty beside the
+  spatial one; true-scale blends to ×1); pure windFieldAt in
+  stage/model.js (ambient passthrough + the S5b regime boundaries,
+  node-pinned); 16k/4k-point in-shader stream in stage.js — one
+  advected phase uniform, stageRadius sampled from a baked texture
+  (no third copy of the scale math), speed/density/Bz-tint from
+  driver.at(τ) with honest climatology fallback, deterministic LCG
+  seeds, My Sky excluded, reduced-motion static, disclosure line
+  updated. Probes on __swStage.particles; stage spec test 7 pins
+  flow/stillness/hiding.
+- **S5b — CME structure. ✅ SHIPPED 2026-07-23.** The §15.4b member
+  binding, literal: 60/25/15 of the cloud is ambient/ejecta/sheath by
+  deterministic seed; each CME particle carries a slot into a 128×2
+  member texture baked per updateScene from the PURE memberFieldRows
+  (apexes via the same dbmApexKm mirror the wavefronts use, per-member
+  lon/lat direction in the ropeFrame eDir convention, filter weight →
+  brightness — the fan IS the assimilated distribution). Sheath band
+  rides each member front out to sheathK × the kernel σ_apex probe;
+  its glow scales with the R–H compression from the EXISTING
+  sheathCompression oracle (swap to a kernel probe when the wrapper
+  exposes one); ejecta tint from ONE decimated kernel.fieldAt probe at
+  the median nose (the rope mesh keeps full-fidelity vertex colors).
+  No live forecast → kinds collapse to ambient (measurement, never
+  prediction — pinned offline in the stage spec). Probes:
+  particles.{cmeActive, members, comp, ejSouth}; live-path spec pins
+  the bound cloud end-to-end. Ghosts stay lines — no double-encoding.
+- **EVENT REPLAY — ✅ SHIPPED 2026-07-23** (author: "we should be able
+  to scrub historically through the most recent events using the
+  calendar… show the actual events as options for the canvas").
+  New contract `sw-replay-cme` {cme: swpc-feed row} | null: clicking an
+  ⊕ arrival chip scrubs τ AND re-runs the page's ONE flux-rope
+  provider seeded with that event (`sources.cmes` override — the same
+  pipeline, never a fork); the republished result time-travels every
+  consumer together: Stage rope + member-bound cloud at the event's
+  own transit, band cells relabeled `Outlook/Arrival · REPLAY` (a past
+  event must never read as the live watch — node-pinned), panel banner
+  with "back to live", Stage Now button exits replay. Assimilation is
+  honest per event age: inside the RTSW archive window the filter
+  conditions on the ACTUAL observed L1 record; outside it the run is
+  the launch-time ensemble and the banner says so. Locked-forecast
+  visibility rode along: chips show 🔒 + per-model locked ETAs in the
+  tooltip and the strip counts locked events before any resolve —
+  the predictor is visibly working while skill accrues. Gate:
+  live-path spec 'calendar replay' (full pipeline, both directions).
+- **SUN BEHAVIOR — ✅ SHIPPED 2026-07-23** (author: "the sun always has
+  behavior… what is the sun doing right now?"). The star expresses its
+  MEASURED state at every τ, CME or no CME. swpc-feed keeps a
+  ~288-point decimated GOES X-ray series on the bus (`xray_series`);
+  pure oracles in stage/model.js — `xrayClassOf` (A/B/C/M/X grammar),
+  `sunActivityAt` (nearest-sample τ-lookup, act = log-scaled 0..1,
+  latest-flux fallback so live τ always reads the header value) and
+  `flareFlashAt` (per-flare envelope: 10-min rise, 40-min decay,
+  C/M/X weighted, max-over) — all node-pinned. stage.js drives the
+  surface shader (uAct brightens + whitens the granulation), the
+  corona sprite (opacity + scale breathe with activity, flash kicks),
+  and the always-on vitals chip `☀ X-ray <cls> · FLARE · N ARs
+  (n complex) · F10.7` under the Sun (AR disc markers landed with the
+  2026-07-23 bug round at Stonyhurst = Carrington − L0(τ)). Scrubbing
+  τ through a flare replays it. Probes: __swStage.sun.{cls, act,
+  flash}; stage-spec S2 test injects an M5 series + fresh flare and
+  pins cls/act/chip.
+- **S5c — SEP + aurora ends. ✅ SHIPPED 2026-07-23.** SEP streaks:
+  swpc-feed keeps a τ-indexed ≥10 MeV `proton_series` on the bus
+  (same decimation as xray_series); pure `sepStateAt` gates on NOAA's
+  S-scale AT τ (S1+ per the plan — replaying an old proton event
+  lights the spirals then) with log intensity S1→0…S5→1, and
+  `SEP_V_KMS` (~0.3 c, documented representative 10–100 MeV speed) —
+  both node-pinned. Rendering: THREE.Points SHARING the context
+  spirals' geometries (the polyline IS the field line — no second
+  spiral math); the shader lights vertices near moving phase fronts,
+  racing at 0.3 c under the SAME disclosed flowLapse (true scale =
+  1 AU in ~28 real minutes, honestly slow); spirals tint violet and
+  the vitals chip appends `☢ S<n> SEP`. Aurora curtains: a wall along
+  the oval's MEDIAN ring built from the SAME ovalBandGrid the band
+  rebuild computes (never a second oval model), rising AURORA.DRAWN_RE
+  per the new scale.js constant — the disclosed ~×10.6 vertical
+  exaggeration, stated in the on-stage scale line; green base → red
+  top (557.7/630 nm ordering), bounded-arg ray shimmer, intensity
+  from the same kpBandAt median. Curtains STAY in My Sky (the sky
+  story); streaks hide there. Probes: __swStage.sep.{on,s,pfu10,
+  intensity,visible}, curtains.{visible,intensity}. Spec pins the
+  S-scale gate, DONKI-free quiet default, disclosure text, and the
+  My Sky split. §9b dwell instrumentation rides the existing
+  stage_pick/staging telemetry — revisit after the next usage pull.
+- **S5d — MEASUREMENT: the virtual probe. ✅ SHIPPED 2026-07-23**
+  (author: "how can we show particle trajectories? I want some
+  measurement ability here"). Click empty corridor → a stationary
+  virtual monitor (like L1, anywhere): pure `parcelProbe` in
+  stage/model.js reads the SAME windFieldAt oracle the particles
+  render (regime flips exactly when a wavefront sweeps the probe),
+  plus lead time to Earth at the local flow speed and the
+  Parker-spiral source longitude (same Ω + 0.05 AU base as
+  parkerSpiralPoints — node-pinned that the drawn connectivity curve
+  passes through the probe). TWO trajectory lines, honestly labeled:
+  the RADIAL dashed line is the parcel path (solar wind moves
+  ~radially); the SPIRAL is magnetic connectivity, a pattern — the
+  chip says `path ⟶ radial · field ⟿ src N°` so they can't be
+  conflated, and appends `⇢ AR n` when the footpoint lands within 15°
+  of a catalogued region. Picking: empty-click drops/moves (mix-aware
+  stageRadiusInvMix inverse in scale.js, node-pinned), clicking the
+  probe retrieves it, `sw-pick {type:'probe'}` dispatched, `?`-hook
+  `__swStage.setProbe(rAu, lonDeg)` for tests/deep links. Probes:
+  __swStage.probe. The transit-panel retire review (§12) remains OPEN.
+- **SOLAR PROCESSES — ✅ SHIPPED 2026-07-23** (author: "maybe we also
+  show active processes of the sun"). Two honest additions: (1) flare
+  LOCALIZATION — state.flares now merges recent_flares + donki_flares
+  via pure `normalizeFlares` (NOAA retired its flare JSON, so live
+  flares arrive DONKI-only; the 07-23 flash feature never fired in
+  production until this landed — spec-pinned on the DONKI-only path),
+  and when the catalog names the source AR the marker ERUPTS
+  (white-hot, swollen by the flash envelope) with the chip reading
+  `FLARE @ AR n` — no region on record, no site invented; (2) CME
+  LIFTOFF — pure `liftoffAt` envelope (15-min rise / 90-min decay)
+  drives a directional plume at the provider event's own lon/lat while
+  τ crosses its launch. Probes: sun.{flareRegion, liftoff}.
+
+### 15.4b Refinement (author framing 2026-07-23: "animate in 4D,
+depicting and predicting what could happen")
+
+The 4th axis is τ, but the future half of τ is a BUNDLE of timelines,
+not one: in S5b each particle is BOUND TO AN ENSEMBLE MEMBER and
+inherits its kinematics and filter weight — heavily-weighted members
+contribute dense bright streams, near-dead members faint stragglers.
+The on-screen spread of the cloud then IS the forecast distribution:
+scrub forward and the futures diverge; scrub to now and they converge
+on what the L1 data allows (the hourglass). No separate "uncertainty
+layer" — the uncertainty is the cloud. Honesty note: the ensemble
+covers the CME corridor only; quiet-time ambient particles represent
+MEASUREMENT (nowcast persistence), not prediction, and the disclosure
+must never imply otherwise.
+
+### 15.5 Open author decisions (none block S5a)
+
+1. Time-lapse default ×3600 (recommended) vs slower.
+2. True-scale toggle zeroing the time-lapse (recommended yes — one
+   button = full honesty).
+3. SEP streak gate at S1 (recommended — rare enough to stay special)
+   vs S2.
+
 ---
 
 *Updated 2026-07-22 (later the same day): phase D1+G shipped — see §12.

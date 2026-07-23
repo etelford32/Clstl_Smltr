@@ -132,6 +132,14 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
   <div id="rt-proxies"><div class="rt-empty">Loading…</div></div>
 </div>
 
+<div class="rt-card">
+  <h3>Credentials &amp; Upstreams · /api/health
+    <button class="rt-refresh" id="rt-refresh-creds">Refresh</button>
+  </h3>
+  <p class="rt-caveat">Presence-only credential report from the edge (never values). The row that matters most: <strong>NASA key</strong> — "demo" means every DONKI feed (CME, flares, SEP, GST) shares api.nasa.gov's 30 req/hr DEMO_KEY quota and will throttle intermittently. Earthdata token is informational: nothing consumes it yet (GIBS imagery is keyless).</p>
+  <div id="rt-creds"><div class="rt-empty">Loading…</div></div>
+</div>
+
 <!-- ── NASA Earth Observations ─────────────────────────────────────────────────
      Probes each GIBS layer the Earth sim renders. CORS-enabled, no key needed.
      Drives whether the SST / AOD / fires / snow / precip overlays on earth.html
@@ -645,10 +653,61 @@ async function loadGibsCard() {
     return { healthy, total: probes.length };
 }
 
+// ── Credentials & edge-authoritative upstreams (/api/health) ────────────────
+// Presence booleans only — the endpoint never returns key material. This is
+// the one card that catches the silent-DEMO_KEY failure mode: DONKI proxies
+// keep "working" on the shared 30 req/hr quota, so nothing else goes red.
+const CRED_LABELS = {
+    nasa_api_key:         'NASA key (DONKI)',
+    nasa_earthdata_token: 'Earthdata token',
+    metno_user_agent:     'MET.no UA',
+    nws_user_agent:       'NWS UA',
+    supabase_service_key: 'Supabase service key',
+    resend_api_key:       'Resend (email)',
+    cron_secret:          'Cron secret',
+    r2_mirror:            'R2 mirror',
+    slack_webhook:        'Slack webhook',
+};
+const CRED_COLORS = { ok: '#4eff91', degraded: '#ffd700', off: '#889' };
+
+async function loadCredentialsCard() {
+    const el = document.getElementById('rt-creds');
+    el.innerHTML = `<div class="rt-empty">Fetching /api/health…</div>`;
+    let payload;
+    try {
+        const res = await fetch('/api/health', { cache: 'no-store' });
+        payload = await res.json();
+    } catch (err) {
+        el.innerHTML = `<div class="rt-error">/api/health unreachable: ${_rtEsc(err.message || err)}</div>`;
+        return;
+    }
+    let html = '<table><thead><tr><th>Credential</th><th>Status</th><th>Detail</th></tr></thead><tbody>';
+    for (const [key, cred] of Object.entries(payload.credentials ?? {})) {
+        const color = CRED_COLORS[cred.status] ?? '#889';
+        html += `<tr><td><strong>${_rtEsc(CRED_LABELS[key] ?? key)}</strong></td>`
+             +  `<td style="color:${color};font-weight:600">● ${_rtEsc(cred.status)}</td>`
+             +  `<td style="color:#aab">${_rtEsc(cred.note)}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    const auth = (payload.upstreams ?? []).filter(u => u.edge_authoritative);
+    if (auth.length) {
+        html += '<table style="margin-top:8px"><thead><tr><th>Edge upstream</th><th>Status</th><th>Latency</th></tr></thead><tbody>';
+        for (const u of auth) {
+            html += `<tr><td>${_rtEsc(u.source)}</td>`
+                 +  `<td style="color:${u.ok ? '#4eff91' : '#ff5555'};font-weight:600">● ${u.ok ? 'up' : _rtEsc(u.error ?? `HTTP ${u.http_status}`)}</td>`
+                 +  `<td style="color:#aab">${u.latency_ms} ms</td></tr>`;
+        }
+        html += '</tbody></table>';
+    }
+    el.innerHTML = html;
+}
+
+document.getElementById('rt-refresh-creds').addEventListener('click', loadCredentialsCard);
 document.getElementById('rt-refresh-heartbeat').addEventListener('click', loadPipelineHeartbeatCard);
 document.getElementById('rt-refresh-proxies').addEventListener('click', loadProxyFreshnessCard);
 document.getElementById('rt-refresh-gibs').addEventListener('click', loadGibsCard);
 loadPipelineHeartbeatCard();
+loadCredentialsCard();
 loadProxyFreshnessCard();
 loadGibsCard();
 

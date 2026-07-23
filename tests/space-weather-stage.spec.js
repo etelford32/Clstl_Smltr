@@ -103,13 +103,44 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         const host = page.locator('#sw-stage-host');
         await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
 
-        // Inject Kp through the page bus → the oval band appears and the
-        // pin label carries the drive-ring annotation.
+        // Inject Kp + active regions + a measured GOES X-ray state through
+        // the page bus → the oval band appears, the Sun grows its AR
+        // markers (one complex), and the star expresses the M-class flux
+        // ("the sun always has behavior" — chip + activity probes).
         await page.evaluate(() => {
-            window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 6 } }));
+            const now = Date.now();
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 6,
+                active_regions: [
+                    { region: 14001, lat_rad: 0.2, lon_rad: 1.1, area_norm: 0.5,
+                      mag_class: 'beta-gamma-delta', is_complex: true },
+                    { region: 14002, lat_rad: -0.15, lon_rad: 2.0, area_norm: 0.2,
+                      mag_class: 'beta', is_complex: false },
+                ],
+                xray_flux: 5e-5,
+                xray_series: [
+                    { t: now - 30 * 60_000, flux: 2e-6 },
+                    { t: now, flux: 5e-5 },
+                ],
+                recent_flares: [
+                    { time: new Date(now - 5 * 60_000).toISOString(),
+                      parsed: { letter: 'M' } },
+                ] } }));
         });
         await expect.poll(() => page.evaluate(() => window.__swStage?.ovalVisible),
             { timeout: 15_000 }).toBe(true);
+        await expect.poll(() => page.evaluate(() => window.__swStage?.sun.regions),
+            { timeout: 15_000 }).toBe(2);
+        await expect.poll(() => page.evaluate(() => window.__swStage.sun.complex),
+            { timeout: 15_000 }).toBe(1);
+        // Measured sun behavior at τ ≈ now: M-class → high activity drive,
+        // the in-flare-window injection lights the flash envelope, and the
+        // vitals chip narrates all of it.
+        await expect.poll(() => page.evaluate(() => window.__swStage?.sun.cls),
+            { timeout: 15_000 }).toMatch(/^M/);
+        await expect.poll(() => page.evaluate(() => window.__swStage.sun.act),
+            { timeout: 15_000 }).toBeGreaterThan(0.5);
+        await expect(host.locator('.swst-chip', { hasText: 'X-ray' }))
+            .toContainText(/X-ray M/);
         await expect.poll(() => page.evaluate(() => window.__swStage?.pinVisible)).toBe(true);
         await expect(host.locator('.swst-pin-label')).toContainText('Fairbanks');
         await expect(host.locator('.swst-pin-label')).toContainText(/oval/);
@@ -163,6 +194,145 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         await expect.poll(async () =>
             (await host.locator('.swst-chip', { hasText: 'drag shell' }).count()))
             .toBeGreaterThan(0);
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
+    test('S5a: particle stream flows at the disclosed lapse; true scale stills it; My Sky hides it', async ({ page }) => {
+        test.slow();
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('canvas')).toBeVisible({ timeout: 30_000 });
+        const probe = () => page.evaluate(() => ({
+            p: window.__swStage.particles,
+            lost: getComputedStyle(
+                document.querySelector('#sw-stage-host .swst-lost')).display !== 'none',
+        }));
+        const s0 = await probe();
+        expect(s0.p.count).toBeGreaterThanOrEqual(4000);
+        expect(s0.p.timeLapse).toBe(3600);
+        expect(s0.p.visible).toBe(true);
+        // Offline quiet corridor: the cloud honestly claims NO ensemble
+        // (S5b kinds collapse to ambient — measurement, not prediction).
+        expect(s0.p.cmeActive).toBe(false);
+        // The dishonesty is disclosed on-stage, in words.
+        await expect(host.locator('.swst-disclose')).toContainText('×3600');
+
+        // The flow advances under the wall-clock time-lapse. (Context
+        // loss under software GL halts rendering honestly — skip, as in
+        // the true-scale test.)
+        const phase0 = s0.p.phase;
+        await expect.poll(async () => {
+            const s = await probe();
+            test.skip(s.lost, 'WebGL context lost — honest fallback shown');
+            return Math.abs(s.p.phase - phase0);
+        }, { timeout: 20_000 }).toBeGreaterThan(1e-4);
+
+        // True scale blends the lapse to ×1 — removability is the honesty.
+        await host.locator('.swst-truescale').click();
+        await expect.poll(async () => (await probe()).p.timeLapse,
+            { timeout: 15_000 }).toBeLessThan(2);
+
+        // My Sky is a ground-level sky view: the heliospheric cloud hides.
+        await host.locator('.swst-stations button', { hasText: 'My Sky' }).click();
+        await expect.poll(async () => (await probe()).p.visible).toBe(false);
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
+    test('S5d: virtual probe measures the corridor; DONKI-only flares localize', async ({ page }) => {
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
+
+        // Drop a monitor at 0.5 AU, 15° via the deep-link hook (the click
+        // path shares it; the mix-aware AU inverse is node-pinned). Offline
+        // spec ⇒ climatological 400 km/s ⇒ ~52 h lead to Earth.
+        await page.evaluate(() => window.__swStage.setProbe(0.5, 15));
+        await expect.poll(() => page.evaluate(() => window.__swStage.probe?.regime),
+            { timeout: 15_000 }).toBe('ambient');
+        const p = await page.evaluate(() => window.__swStage.probe);
+        expect(p.rAu).toBeCloseTo(0.5, 6);
+        expect(p.leadHours).toBeGreaterThan(45);
+        expect(p.leadHours).toBeLessThan(60);
+        expect(p.srcLonDeg).toBeGreaterThan(15);   // Parker source sits west
+        await expect(host.locator('.swst-chip', { hasText: '⌖' }))
+            .toContainText('0.50 AU');
+        await expect(host.locator('.swst-chip', { hasText: '⌖' }))
+            .toContainText('ambient');
+
+        // Retrieve it — readout gone.
+        await page.evaluate(() => window.__swStage.setProbe(null));
+        await expect.poll(() => page.evaluate(() => window.__swStage.probe)).toBe(null);
+
+        // DONKI-only flare sourcing (NOAA's flare JSON is retired — in
+        // production flares arrive ONLY via donki_flares) + honest
+        // localization at the catalogued AR.
+        await page.evaluate(() => {
+            const now = Date.now();
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: {
+                active_regions: [
+                    { region: 14001, lat_rad: 0.2, lon_rad: 1.1, area_norm: 0.5,
+                      mag_class: 'beta-gamma-delta', is_complex: true },
+                ],
+                donki_flares: [
+                    { peak_time: new Date(now - 4 * 60_000).toISOString(),
+                      class_letter: 'M', active_region: 14001 },
+                ] } }));
+        });
+        await expect.poll(() => page.evaluate(() => window.__swStage.sun.flash),
+            { timeout: 15_000 }).toBeGreaterThan(0.3);
+        await expect.poll(() => page.evaluate(() => window.__swStage.sun.flareRegion),
+            { timeout: 15_000 }).toBe(14001);
+        await expect(host.locator('.swst-chip', { hasText: 'X-ray' }))
+            .toContainText('FLARE @ AR 14001');
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
+    test('S5c: SEP streaks gate on the measured S-scale; curtains rise with the oval', async ({ page }) => {
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
+
+        // Quiet corridor first: no protons → no streaks (S0 is honest).
+        await expect.poll(() => page.evaluate(() => window.__swStage.sep.on)).toBe(false);
+
+        // Inject a measured S2 proton storm + Kp 6 through the page bus.
+        await page.evaluate(() => {
+            const now = Date.now();
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: {
+                kp: 6,
+                proton_flux_10mev: 500,
+                proton_series: [
+                    { t: now - 3.6e6, flux: 500 },
+                    { t: now, flux: 500 },
+                ] } }));
+        });
+        await expect.poll(() => page.evaluate(() => window.__swStage.sep.s),
+            { timeout: 15_000 }).toBe(2);
+        await expect.poll(() => page.evaluate(() => window.__swStage.sep.visible),
+            { timeout: 15_000 }).toBe(true);
+        await expect(host.locator('.swst-chip', { hasText: 'SEP' }))
+            .toContainText('S2 SEP');
+
+        // Curtains follow the SAME kpBandAt median the oval band draws.
+        // The offline feed keeps re-dispatching its quiet fallback (Kp 2),
+        // which can overwrite the injected Kp between poll ticks — so the
+        // intensity poll re-injects each tick (same race-hardening as the
+        // AR test).
+        await expect.poll(() => page.evaluate(() => window.__swStage.curtains.visible),
+            { timeout: 15_000 }).toBe(true);
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 6 } }));
+            return window.__swStage.curtains.intensity;
+        }), { timeout: 15_000 }).toBeGreaterThan(0.3);
+
+        // The disclosure line names the curtain exaggeration.
+        await expect(host.locator('.swst-disclose')).toContainText('aurora curtain height');
+
+        // My Sky: heliospheric streaks hide, but the curtains are the sky
+        // story — they STAY.
+        await host.locator('.swst-stations button', { hasText: 'My Sky' }).click();
+        await expect.poll(() => page.evaluate(() => window.__swStage?.station))
+            .toBe('my-sky');
+        await expect.poll(() => page.evaluate(() => window.__swStage.sep.visible))
+            .toBe(false);
+        expect(await page.evaluate(() => window.__swStage.curtains.visible)).toBe(true);
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
