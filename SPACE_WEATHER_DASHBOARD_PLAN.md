@@ -621,6 +621,83 @@ Stage engagement: ≥50% of sessions change station or scrub the future
 regression: all existing per-panel + nav + boot gates stay green
 through every phase.
 
+## 15. S5 — Particle activity (PLANNED 2026-07-23; author: "as dynamic and representative as possible")
+
+The Stage gets a particle layer whose every behavior traces to a
+measured feed or the kernel — particles as INSTRUMENTS, not decoration.
+"Dynamic" comes from real motion at a disclosed time-lapse; "representative"
+means an auditor can point at any particle behavior and name the feed
+that drives it.
+
+### 15.1 Oracle → motion map (the honesty contract)
+
+| Particle behavior | Driven by | Oracle |
+|---|---|---|
+| Ambient stream speed | measured V at τ | SolarWindDriver samples (replay = archived RTSW, live = now-cast, forecast = ensemble driver) — the ONE provider's driver, never a second fetch |
+| Stream density (points/volume) | measured n | 'swpc-update' `solar_wind.density` (norm already computed by the feed) |
+| Particle color | Bz polarity + \|B\| | driver Bz at τ (SOUTH/NORTH palette shared with the rope) |
+| Sheath pile-up (density spike + jitter) | shock/ejecta radii + compression | kernel wavefront quantiles + the v1.x sheath compression ratio — same probes the wavefront shells use |
+| Ejecta interior character | field rotation | kernel.fieldAt sampling (rope vertex-color pipeline, decimated) |
+| Arrival-spread fan | member kinematics | prior members + assimilated weights (ghost data, re-used) |
+| SEP streaks (radiation storm) | GOES proton flux | `proton_flux_10mev` / `sep_storm_level` (S-scale gate); spiral-aligned, minutes-scale transit — visually DISTINCT from the day-scale wind |
+| Aurora precipitation at Earth | oval + Kp/Bz | existing kpBandAt / boundaryForKp band (Earth-local frame) |
+| Pause/regime | τ scrubber | 'sw-tau' — replay/forecast change the DRIVER SAMPLES, not just playback rate |
+
+### 15.2 The one NEW disclosed dishonesty: flow time-lapse
+
+At wall-clock LIVE, a 450 km/s parcel takes ~4 days Sun→Earth —
+imperceptible. The ambient flow therefore renders at a TIME-LAPSE
+(default ×3600: one transit ≈ 100 s on screen). Per the §5 scale
+doctrine this lives in `js/stage/scale.js` beside the spatial
+compression, joins the on-stage disclosure line ("flow shown at
+×3600"), and the true-scale toggle drops it to ×1 (an honestly
+motionless corridor). τ-playback (×9000) and scrubbing override it —
+those move the CLOCK, and the particles follow the driver at τ.
+
+### 15.3 Architecture (perf-first, CI-safe)
+
+- ONE `THREE.Points` GPU system; positions computed IN-SHADER from a
+  per-particle seed + uniforms — zero per-frame CPU writes (the
+  software-GL CI constraint that killed per-frame geometry updates
+  elsewhere).
+- Pure field model `windFieldAt(rAu, tauMs, ctx)` →
+  `{vKms, nRel, regime: 'ambient'|'sheath'|'ejecta'}` in
+  `js/stage/model.js` — node-tested against the kernel probes; baked to
+  a small 1D texture at the existing 250 ms updateScene throttle; the
+  shader only ever reads the texture.
+- Budgets: ≤16k points desktop, ≤4k mobile; excluded from My Sky (sky
+  staging); pauses with the existing render-loop gates; reduced-motion
+  renders static dust (no advection).
+- Test surface: `__swStage` gains `particles` probes (count, timeLapse,
+  regimeAt) so Playwright asserts state, not pixels.
+
+### 15.4 Phasing (PR-sized arcs, each behind the standing gates)
+
+- **S5a — Ambient stream**: point cloud + field model + time-lapse
+  disclosure + τ/driver coupling + reduced-motion. Node: windFieldAt
+  fixtures (ambient speed = driver V; regime boundaries at kernel
+  radii). Stage spec: probes + no-console-error + timing canary.
+- **S5b — CME structure**: sheath pile-up between shock and ejecta
+  front (density × the kernel's compression ratio, turbulent jitter),
+  ejecta interior coloring via decimated fieldAt, arrival-spread fan
+  from member quantiles. Ghosts stay lines — no double-encoding.
+- **S5c — SEP + aurora ends**: proton-event streaks (gate: S1+;
+  spiral-aligned; near-instant arrival is the honest physics and the
+  visual contrast), precipitation curtains into the oval band at
+  Earth-local scale — the input the future My Sky sky-dome renders
+  from below. §9b: instrument whether particle drama moves dwell.
+- **S5d — Parity dividend**: click-a-parcel lead-time annotation in the
+  corridor (the transit view's retirement gate from §12's parity
+  review); run the retire-review for the transit panel.
+
+### 15.5 Open author decisions (none block S5a)
+
+1. Time-lapse default ×3600 (recommended) vs slower.
+2. True-scale toggle zeroing the time-lapse (recommended yes — one
+   button = full honesty).
+3. SEP streak gate at S1 (recommended — rare enough to stay special)
+   vs S2.
+
 ---
 
 *Updated 2026-07-22 (later the same day): phase D1+G shipped — see §12.
