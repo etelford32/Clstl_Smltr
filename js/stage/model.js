@@ -682,6 +682,21 @@ export const SEP_V_KMS = 9.0e4;
  * `intensity` is the log ramp S1→~0 … S5→1 for brightness.
  * @returns {{ pfu10:number, s:number, on:boolean, intensity:number }}
  */
+/* ── S8: IMF sector polarity from the measured L1 field ──────────────
+   The Parker spiral's field points either OUTWARD along the spiral
+   ("away" sector: Bx<0, By>0 at Earth) or inward ("toward": Bx>0,
+   By<0) — the Sun's magnetic polarity sampled in situ. Projection of
+   the measured (Bx,By) onto the nominal away direction (−1,+1)/√2,
+   with honest refusal: too weak, degenerate (the feed's quiet fallback
+   has Bx≡0), or ambiguous → null, never a guess. PURE. */
+export function imfSector(bx, by) {
+    if (!Number.isFinite(bx) || !Number.isFinite(by)) return null;
+    const mag = Math.hypot(bx, by);
+    if (mag < 1 || Math.abs(bx) < 0.3) return null;
+    const s = (by - bx) / (Math.SQRT2 * mag);
+    return s > 0.25 ? 'away' : s < -0.25 ? 'toward' : null;
+}
+
 /* ── S7: the Moon in the Earth-local frame ───────────────────────────
    Mean circular ecliptic-plane orbit phased by the SAME new-moon epoch
    + synodic month verdict-engine's moonPhase uses — the two oracles can

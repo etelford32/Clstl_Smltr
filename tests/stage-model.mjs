@@ -30,7 +30,7 @@ import {
     sepStateAt, SEP_V_KMS,
     bearingGamma, apparentAltitudeRad, skyCurtainRibbon, enuBasis, skyDir,
     CURTAIN_BASE_KM,
-    moonLocalRe, MOON_ORBIT_RE, beltShellGrid,
+    moonLocalRe, MOON_ORBIT_RE, beltShellGrid, imfSector,
 } from '../js/stage/model.js';
 import { moonPhase } from '../js/verdict-engine.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
@@ -590,6 +590,19 @@ test('S7 Moon: phase-locked to the verdict-engine oracle, tail at full moon', ()
         assert.ok(Math.abs(Math.hypot(...p) - MOON_ORBIT_RE) < 1e-6);
         assert.equal(p[2], 0);
     }
+});
+
+test('S8 IMF sector: away/toward from measured Bx,By; honest refusal', () => {
+    // Canonical Parker geometry at Earth: away = (−Bx, +By).
+    assert.equal(imfSector(-3, 4), 'away');
+    assert.equal(imfSector(3, -4), 'toward');
+    // The feed's quiet fallback is Bx≡0, By=5 — degenerate, refuse.
+    assert.equal(imfSector(0, 5), null);
+    // Too weak to call; ambiguous (ortho-sector) refuses too.
+    assert.equal(imfSector(-0.3, 0.4), null);
+    assert.equal(imfSector(3, 4), null);       // Bx+ By+ ≈ orthogonal to spiral
+    assert.equal(imfSector(NaN, 4), null);
+    assert.equal(imfSector(undefined, undefined), null);
 });
 
 test('S7 belts: dipole L-shell geometry, r = L·cos²λ, anchored at rMin', () => {

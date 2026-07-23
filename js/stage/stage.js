@@ -53,7 +53,7 @@ import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          normalizeFlares, parcelProbe, liftoffAt,
          sepStateAt, SEP_V_KMS,
          skyCurtainRibbon, enuBasis, skyDir,
-         moonLocalRe, MOON_ORBIT_RE, beltShellGrid } from './model.js';
+         moonLocalRe, MOON_ORBIT_RE, beltShellGrid, imfSector } from './model.js';
 import { sheathCompression } from '../cme-propagation.js';
 import { carringtonL0, shueStandoffRe } from '../ring-current-model.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
@@ -266,7 +266,8 @@ function mount(host) {
     // honest: we don't see the far side (that's the far-side program's
     // job). Texture load is fail-quiet: offline/CI stays procedural.
     const sunUniforms = { uTime: { value: 0 }, uAct: { value: 0 },
-        uLive: { value: 0 }, uLiveTex: { value: null } };
+        uLive: { value: 0 }, uLiveTex: { value: null },
+        uMag: { value: 0 }, uMagTex: { value: null } };
     const sun = new THREE.Mesh(
         new THREE.SphereGeometry(BODY.sunRadiusUnits, 48, 28),
         new THREE.ShaderMaterial({
@@ -300,6 +301,7 @@ function mount(host) {
                          + 0.15 * vnoise(p * 5.17);
                 }
                 uniform float uLive; uniform sampler2D uLiveTex;
+                uniform float uMag; uniform sampler2D uMagTex;
                 void main() {
                     // Granulation drifts slowly; scale chosen so cells read
                     // at the Stage's default camera distance.
@@ -319,6 +321,17 @@ function mount(host) {
                         vec3 tinted = photo * vec3(1.05, 0.88, 0.62) * 1.25;
                         float seam = smoothstep(0.0, 0.18, vObj.x);
                         c = mix(c, tinted, uLive * seam);
+                        // S8: the MEASURED magnetic polarity (HMI LOS
+                        // magnetogram — white = field toward us, black =
+                        // away). Warm/cool tint where |B| is strong; the
+                        // quiet gray disk stays untinted.
+                        if (uMag > 0.01) {
+                            float m = texture2D(uMagTex, duv).r - 0.5;
+                            float pos = clamp(m * 2.4, 0.0, 1.0);
+                            float neg = clamp(-m * 2.4, 0.0, 1.0);
+                            c = mix(c, vec3(1.00, 0.42, 0.30), pos * 0.5 * seam * uMag);
+                            c = mix(c, vec3(0.35, 0.55, 1.00), neg * 0.5 * seam * uMag);
+                        }
                     }
                     // Limb darkening: μ = cos(view angle), Eddington-ish ramp.
                     float mu = clamp(dot(normalize(vN), normalize(vView)), 0.0, 1.0);
@@ -339,18 +352,64 @@ function mount(host) {
     corona.material.opacity = 0.35;
     scene.add(corona);
 
-    // S7 live-photosphere fetch: same-origin edge proxy, fail-quiet,
-    // refresh at AIA's native 12-min cadence.
+    // S8 EUV CORONA SHELL: the live AIA 171 Å disk (coronal loops, holes,
+    // limb brightening) as a thin additive shell just above the
+    // photosphere — near side only, opacity breathing with the measured
+    // activity. The halo sprite stays; this is the corona ON the disk.
+    const euvUniforms = { uTex: { value: null }, uAct: sunUniforms.uAct };
+    const euvShell = new THREE.Mesh(
+        new THREE.SphereGeometry(BODY.sunRadiusUnits * 1.012, 48, 28),
+        new THREE.ShaderMaterial({
+            uniforms: euvUniforms,
+            transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            vertexShader: `
+                varying vec3 vObj;
+                void main() {
+                    vObj = normalize(position);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform sampler2D uTex; uniform float uAct;
+                varying vec3 vObj;
+                void main() {
+                    if (vObj.x <= 0.0) discard;   // near side only (honest)
+                    vec2 duv = vec2(0.5 - vObj.y * 0.485, 0.5 + vObj.z * 0.485);
+                    vec3 euv = texture2D(uTex, duv).rgb;
+                    float lum = clamp(dot(euv, vec3(0.35, 0.45, 0.20)), 0.0, 1.0);
+                    float seam = smoothstep(0.0, 0.15, vObj.x);
+                    float a = lum * (0.45 + 0.45 * uAct) * seam;
+                    if (a < 0.01) discard;
+                    gl_FragColor = vec4(euv * vec3(1.1, 0.95, 0.55), a);
+                }`,
+        }));
+    euvShell.visible = false;
+    scene.add(euvShell);
+
+    // S7/S8 live-sun fetch: three channels off the same edge proxy
+    // (photosphere · 171 corona · LOS magnetogram), each fail-quiet,
+    // refreshed at AIA's native 12-min cadence.
+    const loadSunChannel = (channel, onload, onfail) => {
+        new THREE.TextureLoader().load(`/api/solar/aia?channel=${channel}&res=1024`,
+            (tex) => { tex.colorSpace = THREE.SRGBColorSpace; onload(tex); },
+            undefined, onfail);
+    };
     const loadSunPhoto = () => {
-        new THREE.TextureLoader().load('/api/solar/aia?channel=white&res=1024',
-            (tex) => {
-                tex.colorSpace = THREE.SRGBColorSpace;
-                sunUniforms.uLiveTex.value = tex;
-                sunUniforms.uLive.value = 1;
-                state.sunLive = true;
-            },
-            undefined,
-            () => { state.sunLive = false; });   // offline → procedural
+        loadSunChannel('white', (tex) => {
+            sunUniforms.uLiveTex.value = tex;
+            sunUniforms.uLive.value = 1;
+            state.sunLive = true;
+        }, () => { state.sunLive = false; });
+        loadSunChannel('171', (tex) => {
+            euvUniforms.uTex.value = tex;
+            euvShell.visible = true;
+            state.sunCorona171 = true;
+        }, () => { euvShell.visible = false; state.sunCorona171 = false; });
+        loadSunChannel('mag', (tex) => {
+            sunUniforms.uMagTex.value = tex;
+            sunUniforms.uMag.value = 1;
+            state.sunMag = true;
+        }, () => { sunUniforms.uMag.value = 0; state.sunMag = false; });
     };
     loadSunPhoto();
     setInterval(loadSunPhoto, 12 * 60e3);
@@ -1380,6 +1439,12 @@ function mount(host) {
             updateMagnetopause({ v: d.solar_wind.speed,
                 n: d.solar_wind.density ?? 5, bz: d.solar_wind.bz ?? 0 });
         }
+        // S8: measured IMF Bx/By → sector polarity (imfSector refuses
+        // the feed's degenerate quiet fallback on its own).
+        if (d?.solar_wind) {
+            state.imfBx = d.solar_wind.bx;
+            state.imfBy = d.solar_wind.by;
+        }
         // BOTH flare catalogs: NOAA retired its 7-day flare JSON, so live
         // flares usually arrive ONLY as donki_flares — reading recent_flares
         // alone meant the flash never fired in production. The pure merge
@@ -1710,9 +1775,12 @@ function mount(host) {
             corona.scale.setScalar(2.4 * (1 + 0.3 * act));
             const nAr = (state.regions ?? []).length;
             const nCx = (state.regions ?? []).filter((r) => r.is_complex).length;
+            const sector = imfSector(state.imfBx, state.imfBy);
+            state.imfSectorNow = sector;
             sunChip.textContent = `☀ X-ray ${sa.cls}${flash > 0.05 ? (src ? ` · FLARE @ AR ${src.region}` : ' · FLARE') : ''}`
                 + (nAr ? ` · ${nAr} AR${nAr > 1 ? 's' : ''}${nCx ? ` (${nCx} complex)` : ''}` : '')
-                + (Number.isFinite(state.f107) ? ` · F10.7 ${Math.round(state.f107)}` : '');
+                + (Number.isFinite(state.f107) ? ` · F10.7 ${Math.round(state.f107)}` : '')
+                + (sector ? ` · IMF ${sector}` : '');
         }
 
         // Active-region markers at Stonyhurst positions for τ (Carrington
@@ -2354,7 +2422,10 @@ function mount(host) {
                      flash: state.sunAct?.flash ?? 0,
                      flareRegion: state.sunAct?.flareRegion ?? null,
                      liftoff: liftoffSprite.visible,
-                     live: !!state.sunLive };   // S7: SDO photosphere loaded
+                     live: !!state.sunLive,          // S7: SDO photosphere
+                     corona171: !!state.sunCorona171, // S8: AIA 171 shell
+                     magLive: !!state.sunMag,         // S8: HMI magnetogram
+                     imfSector: state.imfSectorNow ?? null };
         },
         // S7: system-completeness probes.
         get moon() {

@@ -758,6 +758,27 @@ those move the CLOCK, and the particles follow the driver at τ.
   S-scale gate, DONKI-free quiet default, disclosure text, and the
   My Sky split. §9b dwell instrumentation rides the existing
   stage_pick/staging telemetry — revisit after the next usage pull.
+- **S8 — THE MAGNETIC SUN. ✅ SHIPPED 2026-07-23** (author: "AIA 171
+  corona as a second live channel… the sun and its magnetic
+  qualities"). Three additions: (1) EUV CORONA SHELL — the live AIA
+  171 Å disk (loops, coronal holes, limb brightening) as a thin
+  additive shell just above the photosphere, same near-side
+  orthographic projection, opacity breathing with the measured
+  activity; the halo sprite stays (this is the corona ON the disk).
+  (2) MAGNETOGRAM POLARITY — /api/solar/aia gains the `mag` (HMIB LOS
+  magnetogram) channel; the surface shader tints strong measured
+  polarity warm(+)/cool(−) over the live photo — the Sun's actual
+  magnetic field on the disk, quiet gray stays untinted. (3) IMF
+  SECTOR — pure `imfSector(bx,by)`: the Parker-spiral polarity
+  ("away"/"toward") from the measured L1 Bx/By, with honest refusal
+  (weak, ambiguous, or the feed's degenerate Bx≡0 fallback → null,
+  never a guess — node-pinned); the sun vitals chip appends
+  `· IMF away|toward`. All three channels fail-quiet (offline stays
+  procedural — spec-pinned); probes sun.{corona171, magLive,
+  imfSector}. Verified with synthetic fixture disks served on the
+  aia route (known bipole → visible red/blue tint; the sandbox can't
+  reach SDO). Grab lesson addendum: the toDataURL-in-rAF capture can
+  still catch a cleared buffer — retry until non-blank.
 - **S7 — SYSTEM COMPLETENESS. ✅ SHIPPED 2026-07-23** (author: "Sun ·
   Earth · Moon · Magnetosphere — live photosphere + corona, Shue-1998
   magnetopause, Van Allen belts, Kp/Bz simulation… tied

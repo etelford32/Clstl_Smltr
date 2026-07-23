@@ -404,8 +404,32 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         await expect(host.locator('.swst-chip', { hasText: 'Shue' }))
             .toContainText('Rₑ');
 
-        // Offline: the sun stays procedural, honestly labeled not-live.
+        // Offline: the sun stays procedural, honestly labeled not-live —
+        // all three S7/S8 live layers down, zero errors.
         expect(await page.evaluate(() => window.__swStage.sun.live)).toBe(false);
+        expect(await page.evaluate(() => window.__swStage.sun.corona171)).toBe(false);
+        expect(await page.evaluate(() => window.__swStage.sun.magLive)).toBe(false);
+
+        // S8 IMF sector from measured Bx/By (re-inject per tick — the
+        // offline fallback's degenerate Bx≡0 makes the oracle refuse,
+        // which is itself the honest quiet answer).
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: {
+                solar_wind: { speed: 480, density: 6, bz: -2, bx: -3, by: 4 } } }));
+            return window.__swStage.sun.imfSector;
+        }), { timeout: 15_000 }).toBe('away');
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: {
+                solar_wind: { speed: 480, density: 6, bz: -2, bx: 3, by: -4 } } }));
+            return window.__swStage.sun.imfSector;
+        }), { timeout: 15_000 }).toBe('toward');
+        // Chip narrates the sector (poll re-injects: the offline fallback
+        // wipes it to the honest null between ticks).
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: {
+                solar_wind: { speed: 480, density: 6, bz: -2, bx: 3, by: -4 } } }));
+            return document.querySelector('#sw-stage-host .swst-overlay')?.textContent ?? '';
+        }), { timeout: 15_000 }).toContain('IMF toward');
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
