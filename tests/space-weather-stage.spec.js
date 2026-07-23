@@ -285,6 +285,57 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+    test('S5c: SEP streaks gate on the measured S-scale; curtains rise with the oval', async ({ page }) => {
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
+
+        // Quiet corridor first: no protons → no streaks (S0 is honest).
+        await expect.poll(() => page.evaluate(() => window.__swStage.sep.on)).toBe(false);
+
+        // Inject a measured S2 proton storm + Kp 6 through the page bus.
+        await page.evaluate(() => {
+            const now = Date.now();
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: {
+                kp: 6,
+                proton_flux_10mev: 500,
+                proton_series: [
+                    { t: now - 3.6e6, flux: 500 },
+                    { t: now, flux: 500 },
+                ] } }));
+        });
+        await expect.poll(() => page.evaluate(() => window.__swStage.sep.s),
+            { timeout: 15_000 }).toBe(2);
+        await expect.poll(() => page.evaluate(() => window.__swStage.sep.visible),
+            { timeout: 15_000 }).toBe(true);
+        await expect(host.locator('.swst-chip', { hasText: 'SEP' }))
+            .toContainText('S2 SEP');
+
+        // Curtains follow the SAME kpBandAt median the oval band draws.
+        // The offline feed keeps re-dispatching its quiet fallback (Kp 2),
+        // which can overwrite the injected Kp between poll ticks — so the
+        // intensity poll re-injects each tick (same race-hardening as the
+        // AR test).
+        await expect.poll(() => page.evaluate(() => window.__swStage.curtains.visible),
+            { timeout: 15_000 }).toBe(true);
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 6 } }));
+            return window.__swStage.curtains.intensity;
+        }), { timeout: 15_000 }).toBeGreaterThan(0.3);
+
+        // The disclosure line names the curtain exaggeration.
+        await expect(host.locator('.swst-disclose')).toContainText('aurora curtain height');
+
+        // My Sky: heliospheric streaks hide, but the curtains are the sky
+        // story — they STAY.
+        await host.locator('.swst-stations button', { hasText: 'My Sky' }).click();
+        await expect.poll(() => page.evaluate(() => window.__swStage?.station))
+            .toBe('my-sky');
+        await expect.poll(() => page.evaluate(() => window.__swStage.sep.visible))
+            .toBe(false);
+        expect(await page.evaluate(() => window.__swStage.curtains.visible)).toBe(true);
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
     test('true-scale toggle animates the compression away and back', async ({ page }) => {
         // The tween is wall-clock-anchored (lands in 800 ms at ANY frame
         // rate), but if software-GL CI loses the WebGL context outright,

@@ -735,11 +735,29 @@ those move the CLOCK, and the particles follow the driver at τ.
   τ through a flare replays it. Probes: __swStage.sun.{cls, act,
   flash}; stage-spec S2 test injects an M5 series + fresh flare and
   pins cls/act/chip.
-- **S5c — SEP + aurora ends**: proton-event streaks (gate: S1+;
-  spiral-aligned; near-instant arrival is the honest physics and the
-  visual contrast), precipitation curtains into the oval band at
-  Earth-local scale — the input the future My Sky sky-dome renders
-  from below. §9b: instrument whether particle drama moves dwell.
+- **S5c — SEP + aurora ends. ✅ SHIPPED 2026-07-23.** SEP streaks:
+  swpc-feed keeps a τ-indexed ≥10 MeV `proton_series` on the bus
+  (same decimation as xray_series); pure `sepStateAt` gates on NOAA's
+  S-scale AT τ (S1+ per the plan — replaying an old proton event
+  lights the spirals then) with log intensity S1→0…S5→1, and
+  `SEP_V_KMS` (~0.3 c, documented representative 10–100 MeV speed) —
+  both node-pinned. Rendering: THREE.Points SHARING the context
+  spirals' geometries (the polyline IS the field line — no second
+  spiral math); the shader lights vertices near moving phase fronts,
+  racing at 0.3 c under the SAME disclosed flowLapse (true scale =
+  1 AU in ~28 real minutes, honestly slow); spirals tint violet and
+  the vitals chip appends `☢ S<n> SEP`. Aurora curtains: a wall along
+  the oval's MEDIAN ring built from the SAME ovalBandGrid the band
+  rebuild computes (never a second oval model), rising AURORA.DRAWN_RE
+  per the new scale.js constant — the disclosed ~×10.6 vertical
+  exaggeration, stated in the on-stage scale line; green base → red
+  top (557.7/630 nm ordering), bounded-arg ray shimmer, intensity
+  from the same kpBandAt median. Curtains STAY in My Sky (the sky
+  story); streaks hide there. Probes: __swStage.sep.{on,s,pfu10,
+  intensity,visible}, curtains.{visible,intensity}. Spec pins the
+  S-scale gate, DONKI-free quiet default, disclosure text, and the
+  My Sky split. §9b dwell instrumentation rides the existing
+  stage_pick/staging telemetry — revisit after the next usage pull.
 - **S5d — MEASUREMENT: the virtual probe. ✅ SHIPPED 2026-07-23**
   (author: "how can we show particle trajectories? I want some
   measurement ability here"). Click empty corridor → a stationary

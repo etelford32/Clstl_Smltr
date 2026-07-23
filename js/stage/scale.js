@@ -135,3 +135,16 @@ export const BODY = Object.freeze({
     sunExaggeration: 0.12 / (A * (RSUN_KM / AU_KM)),                    // ≈ ×6.5
     earthExaggeration: (1 / EARTH_LOCAL_RE) / (A * (RE_KM / AU_KM)),    // ≈ ×107
 });
+
+// ── S5c aurora curtains: the disclosed VERTICAL exaggeration ───────────
+// Real aurora tops out near ~300 km (the 630 nm red upper border) —
+// 0.047 R_E, invisible at the Earth-local scale. Curtains are drawn
+// DRAWN_RE tall so the precipitation reads as a curtain, an implied
+// ~×10.6 height exaggeration. Declared here (never smuggled into the
+// renderer) and disclosed in the on-stage scale line, per the §15
+// doctrine that every dishonesty lives in scale.js with its factor.
+export const AURORA = Object.freeze({
+    TOP_KM: 300,                       // real upper border
+    DRAWN_RE: 0.5,                     // drawn curtain height in R_E
+    EXAG: (0.5 * RE_KM) / 300,         // ≈ ×10.6, stated for the HUD line
+});

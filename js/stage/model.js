@@ -659,3 +659,41 @@ export function liftoffAt(launchMs, tauMs) {
     if (d < -15 * 60e3 || d > 90 * 60e3) return 0;
     return d < 0 ? 1 + d / (15 * 60e3) : 1 - d / (90 * 60e3);
 }
+
+/* ── S5c: SEP proton streaks (plan §15.4) ────────────────────────────
+   Solar energetic protons travel ALONG the Parker field lines and
+   cross 1 AU in tens of minutes — the near-instant arrival IS the
+   honest visual contrast against the days-long CME transit. The Stage
+   gates the streaks on the MEASURED GOES ≥10 MeV integral flux at τ
+   (bus proton_series, same τ-lookup pattern as the X-ray record),
+   using NOAA's S-scale boundaries. PURE. */
+
+/** Representative SEP speed: a 10–100 MeV proton runs ~0.15–0.43 c;
+ *  streaks advect at ~0.3 c (documented display choice — the honest
+ *  order of magnitude, not a per-event spectrum). */
+export const SEP_V_KMS = 9.0e4;
+
+/**
+ * Measured SEP state at τ: nearest ≥10 MeV sample (edge-clamped),
+ * falling back to the latest scalar. S-scale per NOAA: S1 at 10 pfu,
+ * ×10 per step. `on` gates the streaks (S1+, per the plan);
+ * `intensity` is the log ramp S1→~0 … S5→1 for brightness.
+ * @returns {{ pfu10:number, s:number, on:boolean, intensity:number }}
+ */
+export function sepStateAt(series, tauMs, fallbackPfu = 0) {
+    let pfu = Number.isFinite(fallbackPfu) && fallbackPfu > 0 ? fallbackPfu : 0;
+    if (Array.isArray(series) && series.length) {
+        let best = null, bestD = Infinity;
+        for (const p of series) {
+            if (!Number.isFinite(p?.t) || !Number.isFinite(p?.flux)) continue;
+            const d = Math.abs(p.t - tauMs);
+            if (d < bestD) { bestD = d; best = p; }
+        }
+        if (best) pfu = best.flux;
+    }
+    const s = pfu >= 1e5 ? 5 : pfu >= 1e4 ? 4 : pfu >= 1e3 ? 3
+        : pfu >= 100 ? 2 : pfu >= 10 ? 1 : 0;
+    const intensity = s >= 1
+        ? Math.min(1, Math.max(0, (Math.log10(pfu) - 1) / 4)) : 0;
+    return { pfu10: pfu, s, on: s >= 1, intensity };
+}

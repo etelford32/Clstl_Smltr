@@ -42,7 +42,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { stagePoint, stageRadius, stageRadiusInvMix, rulerTicks, BODY, EARTH_S,
-         AU_KM, RE_KM, reToUnits, FLOW, flowLapse }
+         AU_KM, RE_KM, reToUnits, FLOW, flowLapse, AURORA }
     from './scale.js';
 import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          wavefrontRadiiAu, shueSurfaceGrid, parkerSpiralPoints,
@@ -50,7 +50,8 @@ import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          ovalBandGrid, kpBandAt, earthLocal, subsolarLonDeg, temeToStageRe,
          assetOrbitRing, parseTleRaan, mySkyPose, windFieldAt,
          memberFieldRows, sunActivityAt, flareFlashAt,
-         normalizeFlares, parcelProbe, liftoffAt } from './model.js';
+         normalizeFlares, parcelProbe, liftoffAt,
+         sepStateAt, SEP_V_KMS } from './model.js';
 import { sheathCompression } from '../cme-propagation.js';
 import { carringtonL0 } from '../ring-current-model.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
@@ -204,7 +205,8 @@ function mount(host) {
           <button type="button" class="swst-truescale" aria-pressed="false">⇲ True scale</button>
           <div class="swst-disclose">Mid-corridor distance log-compressed · bodies enlarged ·
             magnetosphere at local R<sub>E</sub> scale — ruler shows true AU ·
-            wind flow at ×${FLOW.TIME_LAPSE} (true scale = real time)</div>
+            wind flow at ×${FLOW.TIME_LAPSE} (true scale = real time) ·
+            aurora curtain height ×${Math.round(AURORA.EXAG)}</div>
         </div>
         <div class="swst-tau">
           <span class="swst-regime live" aria-live="polite">LIVE</span>
@@ -338,12 +340,53 @@ function mount(host) {
     const spiralMat = new THREE.LineBasicMaterial({
         color: 0x2a4a66, transparent: true, opacity: 0.35 });
     const spirals = [];
+    // S5c SEP streaks: THREE.Points SHARING each spiral's geometry (the
+    // polyline IS the field line — no second copy of the spiral math).
+    // The shader lights only vertices near moving phase fronts, so the
+    // pulses RACE along the spirals at ~0.3 c under the same disclosed
+    // flowLapse the wind uses — near-instant arrival vs the days-long
+    // CME transit is the honest contrast. Gated on the measured S-scale.
+    const sepUniforms = { uPhase: { value: 0 }, uInt: { value: 0 } };
+    const sepMat = new THREE.ShaderMaterial({
+        uniforms: sepUniforms,
+        transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        vertexShader: `
+            attribute float aFrac;
+            varying float vFrac;
+            void main() {
+                vFrac = aFrac;
+                vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = 3.0;
+                gl_Position = projectionMatrix * mv;
+            }`,
+        fragmentShader: `
+            uniform float uPhase; uniform float uInt;
+            varying float vFrac;
+            void main() {
+                // Three pulse trains racing outward; cosine window, clamped.
+                float w = 0.5 + 0.5 * cos(6.28318 * (vFrac * 3.0 - uPhase));
+                float a = uInt * pow(clamp(w, 0.0, 1.0), 24.0);
+                if (a < 0.01) discard;
+                gl_FragColor = vec4(0.85, 0.75, 1.0, a);
+            }`,
+    });
+    const sepStreaks = [];
     for (let i = 0; i < 6; i++) {
         const phys = parkerSpiralPoints(420, i * 60, 90, 1.12);
-        const line = new THREE.Line(physLineGeometry(phys), spiralMat);
+        const geom = physLineGeometry(phys);
+        const n = phys.length / 3;
+        const frac = new Float32Array(n);
+        for (let k = 0; k < n; k++) frac[k] = k / (n - 1);
+        geom.setAttribute('aFrac', new THREE.BufferAttribute(frac, 1));
+        const line = new THREE.Line(geom, spiralMat);
         line.userData.phys = phys;
         spirals.push(line);
         scene.add(line);
+        const streak = new THREE.Points(geom, sepMat);
+        streak.visible = false;
+        sepStreaks.push(streak);
+        scene.add(streak);
     }
 
     const rulerLine = new THREE.Line(
@@ -509,6 +552,65 @@ function mount(host) {
         mesh.visible = median.visible = false;
         earthGroup.add(mesh); earthGroup.add(median);
         return { mesh, median };
+    });
+
+    // S5c aurora precipitation curtains: a wall along the oval's MEDIAN
+    // boundary (the SAME grid the band rebuild computes — never a second
+    // oval model), rising DRAWN_RE per scale.js AURORA (the disclosed
+    // vertical exaggeration). Green at the base → red at the top (the
+    // real 557.7 nm / 630 nm emission ordering); vertical-ray shimmer in
+    // the fragment. This is the sky story — it STAYS visible in My Sky.
+    const curtainUniforms = { uTime: { value: 0 }, uInt: { value: 0 } };
+    const curtainMat = new THREE.ShaderMaterial({
+        uniforms: curtainUniforms,
+        transparent: true, depthWrite: false, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        vertexShader: `
+            attribute float aV;      // 0 base → 1 top
+            attribute float aCol;    // longitude column, radians
+            varying float vV; varying float vCol;
+            void main() {
+                vV = aV; vCol = aCol;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+        fragmentShader: `
+            uniform float uTime; uniform float uInt;
+            varying float vV; varying float vCol;
+            void main() {
+                // Vertical rays drift slowly along the oval; all args bounded
+                // (software-GL lesson: no unclamped exponentials).
+                float ray = 0.55 + 0.45 * sin(vCol * 36.0 - uTime * 1.6);
+                float fade = pow(clamp(1.0 - vV, 0.0, 1.0), 1.6);
+                vec3 c = mix(vec3(0.30, 0.95, 0.55), vec3(0.90, 0.35, 0.45), vV);
+                float a = uInt * fade * ray * 0.55;
+                if (a < 0.008) discard;
+                gl_FragColor = vec4(c, a);
+            }`,
+    });
+    const CURTAIN_SEGS = OVAL_NLON;
+    const curtains = [1, -1].map(() => {
+        const geom = new THREE.BufferGeometry();
+        const cols = CURTAIN_SEGS + 1;
+        geom.setAttribute('position',
+            new THREE.BufferAttribute(new Float32Array(cols * 2 * 3), 3));
+        const aV = new Float32Array(cols * 2);
+        const aCol = new Float32Array(cols * 2);
+        for (let i = 0; i < cols; i++) {
+            aV[i * 2] = 0; aV[i * 2 + 1] = 1;
+            aCol[i * 2] = aCol[i * 2 + 1] = (i / CURTAIN_SEGS) * Math.PI * 2;
+        }
+        geom.setAttribute('aV', new THREE.BufferAttribute(aV, 1));
+        geom.setAttribute('aCol', new THREE.BufferAttribute(aCol, 1));
+        const idx = [];
+        for (let i = 0; i < CURTAIN_SEGS; i++) {
+            const a = i * 2, b = a + 2;
+            idx.push(a, a + 1, b, a + 1, b + 1, b);
+        }
+        geom.setIndex(idx);
+        const mesh = new THREE.Mesh(geom, curtainMat);
+        mesh.visible = false;
+        earthGroup.add(mesh);
+        return mesh;
     });
 
     const pinMarker = new THREE.Mesh(
@@ -990,6 +1092,13 @@ function mount(host) {
         }
         if (Number.isFinite(d?.xray_flux) && d.xray_flux > 0) {
             state.xrayLatest = d.xray_flux;
+        }
+        // S5c: measured ≥10 MeV proton record for the SEP streak gate.
+        if (Array.isArray(d?.proton_series) && d.proton_series.length) {
+            state.protonSeries = d.proton_series;
+        }
+        if (Number.isFinite(d?.proton_flux_10mev)) {
+            state.protonLatest = d.proton_flux_10mev;
         }
         // BOTH flare catalogs: NOAA retired its 7-day flare JSON, so live
         // flares usually arrive ONLY as donki_flares — reading recent_flares
@@ -1571,11 +1680,15 @@ function mount(host) {
             for (let h = 0; h < 2; h++) {
                 const { mesh, median } = ovalHemis[h];
                 mesh.visible = median.visible = !!band;
-                if (!band) continue;
+                if (!band) { curtains[h].visible = false; continue; }
                 const g = ovalBandGrid(band, OVAL_NLON, h === 0 ? 1 : -1);
                 const mp = mesh.geometry.getAttribute('position');
                 const lp = median.geometry.getAttribute('position');
                 const rBand = reToUnits(1.03);
+                // S5c curtain wall: base on the median ring, top DRAWN_RE
+                // higher (the AURORA disclosed exaggeration) — SAME grid.
+                const cp = curtains[h].geometry.getAttribute('position');
+                const rTop = reToUnits(1.03 + AURORA.DRAWN_RE);
                 for (let i = 0; i <= OVAL_NLON; i++) {
                     earthLocal(g.poleward[i], g.lons[i], rBand, state.tauMs, p3);
                     mp.array[i * 6] = p3[0]; mp.array[i * 6 + 1] = p3[1]; mp.array[i * 6 + 2] = p3[2];
@@ -1583,10 +1696,40 @@ function mount(host) {
                     mp.array[i * 6 + 3] = p3[0]; mp.array[i * 6 + 4] = p3[1]; mp.array[i * 6 + 5] = p3[2];
                     earthLocal(g.median[i], g.lons[i], rBand * 1.002, state.tauMs, p3);
                     lp.array[i * 3] = p3[0]; lp.array[i * 3 + 1] = p3[1]; lp.array[i * 3 + 2] = p3[2];
+                    cp.array[i * 6] = p3[0]; cp.array[i * 6 + 1] = p3[1]; cp.array[i * 6 + 2] = p3[2];
+                    earthLocal(g.median[i], g.lons[i], rTop, state.tauMs, p3);
+                    cp.array[i * 6 + 3] = p3[0]; cp.array[i * 6 + 4] = p3[1]; cp.array[i * 6 + 5] = p3[2];
                 }
-                mp.needsUpdate = lp.needsUpdate = true;
+                mp.needsUpdate = lp.needsUpdate = cp.needsUpdate = true;
                 mesh.geometry.computeBoundingSphere();
                 median.geometry.computeBoundingSphere();
+                curtains[h].geometry.computeBoundingSphere();
+            }
+        }
+
+        // Curtain intensity tracks the SAME forecast median the band draws
+        // (kpBandAt — never a second Kp model): faint by Kp 2, full sheets
+        // at Kp 8+. Visible whenever the oval is (My Sky INCLUDED — the
+        // curtains are the sky story the plan promises that staging).
+        {
+            const kInt = band ? Math.min(1, Math.max(0, (band.p50 - 1.5) / 6.5)) : 0;
+            curtainUniforms.uInt.value = kInt;
+            state.curtainInt = kInt;
+            for (const c of curtains) c.visible = !!band && kInt > 0.04;
+        }
+
+        // S5c SEP streaks: gated on the MEASURED ≥10 MeV S-scale at τ.
+        // The context spirals run hot while protons are in the corridor.
+        {
+            const sep = sepStateAt(state.protonSeries, state.tauMs, state.protonLatest);
+            state.sep = sep;
+            sepUniforms.uInt.value = sep.on ? 0.35 + 0.65 * sep.intensity : 0;
+            const show = sep.on && !inMySky;
+            for (const s of sepStreaks) s.visible = show;
+            spiralMat.color.setHex(sep.on ? 0x6a5a9e : 0x2a4a66);
+            spiralMat.opacity = sep.on ? 0.5 : 0.35;
+            if (sep.on) {
+                sunChip.textContent += ` · ☢ S${sep.s} SEP`;
             }
         }
 
@@ -1771,6 +1914,16 @@ function mount(host) {
         corona.position.copy(sun.position);
         sunUniforms.uTime.value = now / 1000;   // wall-clock granulation drift
         pUniforms.uJit.value = now / 1000;      // sheath turbulence (dressing)
+        curtainUniforms.uTime.value = now / 1000;   // aurora ray drift (dressing)
+        // S5c: SEP pulses race the spirals at ~0.3 c under the SAME
+        // disclosed flowLapse as the wind — at true scale they crawl
+        // (1 AU in ~28 real minutes, the honest pace). Reduced motion
+        // freezes them with the rest of the particle field.
+        if (!reduced && sepUniforms.uInt.value > 0) {
+            const sepTransitS = (P_MAX_AU * AU_KM) / SEP_V_KMS;
+            sepUniforms.uPhase.value =
+                (sepUniforms.uPhase.value + (dt / 1000) * flowLapse(state.mix) / sepTransitS) % 1;
+        }
         // S5a flow advection: τ motion (scrub/playback) moves the field
         // 1:1; on top, wall-clock adds the DISCLOSED time-lapse — which
         // flowLapse() blends to ×1 under true scale (honestly still).
@@ -1838,6 +1991,17 @@ function mount(host) {
             state.probe = Number.isFinite(rAu)
                 ? { rAu, lonRad: (lonDeg ?? 0) * Math.PI / 180 } : null;
             updateScene(true);
+        },
+        // S5c: SEP streak gate + curtain state.
+        get sep() {
+            return { on: !!state.sep?.on, s: state.sep?.s ?? 0,
+                     pfu10: state.sep?.pfu10 ?? 0,
+                     intensity: state.sep?.intensity ?? 0,
+                     visible: sepStreaks[0].visible };
+        },
+        get curtains() {
+            return { visible: curtains[0].visible,
+                     intensity: state.curtainInt ?? 0 };
         },
         flyTo, setTau,
     };

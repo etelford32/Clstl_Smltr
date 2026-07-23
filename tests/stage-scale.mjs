@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import { stageRadius, stageRadiusInv, stageRadiusInvMix, stagePoint, rulerTicks,
          R1, R2, A, B, EARTH_S, BODY, EARTH_LOCAL_RE, reToUnits,
-         FLOW, flowLapse }
+         FLOW, flowLapse, AURORA, RE_KM }
     from '../js/stage/scale.js';
 
 let n = 0;
@@ -98,6 +98,18 @@ test('S5a flow time-lapse: declared, useful magnitude, removable', () => {
     assert.ok(flowLapse(0.5) < FLOW.TIME_LAPSE && flowLapse(0.5) > 1);
     assert.equal(flowLapse(2), 1);                    // clamped
     assert.equal(flowLapse(-1), FLOW.TIME_LAPSE);     // clamped
+});
+
+test('S5c curtains: vertical exaggeration declared and self-consistent', () => {
+    // The stated factor must be exactly what the drawn height implies —
+    // a drifted constant would make the disclosure line lie.
+    assert.ok(Math.abs(AURORA.EXAG - (AURORA.DRAWN_RE * RE_KM) / AURORA.TOP_KM) < 1e-9);
+    assert.ok(AURORA.EXAG > 5 && AURORA.EXAG < 20, `EXAG ${AURORA.EXAG}`);
+    // Real ceiling: the 630 nm red border, order 300 km.
+    assert.ok(AURORA.TOP_KM >= 150 && AURORA.TOP_KM <= 500);
+    // Drawn height stays a fraction of the drawn Earth — curtains must
+    // never read as a second magnetosphere shell.
+    assert.ok(AURORA.DRAWN_RE > 0.1 && AURORA.DRAWN_RE <= 1);
 });
 
 test('S5d picking: stageRadiusInvMix inverts the blend at every mix', () => {

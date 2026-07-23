@@ -27,6 +27,7 @@ import {
     windFieldAt, AMBIENT_V_KMS, AMBIENT_N_CC, memberFieldRows,
     xrayClassOf, sunActivityAt, flareFlashAt,
     normalizeFlares, parcelProbe, liftoffAt,
+    sepStateAt, SEP_V_KMS,
 } from '../js/stage/model.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
 import { magneticLatitude, boundaryForKp } from '../js/verdict-engine.js';
@@ -459,6 +460,37 @@ test('S5d flare sourcing: normalizeFlares merges NOAA + DONKI honestly', () => {
     // …and feeds the flash envelope directly.
     assert.equal(flareFlashAt(only, T + 7.2e6), 1);   // X peak
     assert.equal(normalizeFlares(null, null).length, 0);
+});
+
+test('S5c SEP: S-scale gate at τ, log intensity, honest speed', () => {
+    const T = Date.parse('2026-07-22T00:00Z');
+    // NOAA S-scale boundaries: S1 at 10 pfu, ×10 per step. Below S1 the
+    // streaks are OFF — quiet corridors stay quiet.
+    assert.equal(sepStateAt(null, T, 9).on, false);
+    assert.equal(sepStateAt(null, T, 9).s, 0);
+    assert.deepEqual(
+        [10, 100, 1e3, 1e4, 1e5].map((f) => sepStateAt(null, T, f).s),
+        [1, 2, 3, 4, 5]);
+    // Intensity is the log ramp S1→0 … S5→1, monotone.
+    assert.equal(sepStateAt(null, T, 10).intensity, 0);
+    assert.equal(sepStateAt(null, T, 1e5).intensity, 1);
+    assert.ok(sepStateAt(null, T, 1e3).intensity > sepStateAt(null, T, 100).intensity);
+    // τ-lookup: nearest series sample wins over the fallback scalar —
+    // replaying yesterday's proton event lights the spirals THEN.
+    const series = [
+        { t: T, flux: 2 },                 // quiet
+        { t: T + 3.6e6, flux: 500 },       // S2 storm hour
+    ];
+    assert.equal(sepStateAt(series, T + 3.5e6, 2).s, 2);
+    assert.equal(sepStateAt(series, T, 500).on, false);      // quiet at THIS τ
+    assert.equal(sepStateAt(series, T + 999e9, 0).s, 2);     // edge clamp
+    assert.equal(sepStateAt([], T).on, false);               // null-safe
+    // Representative streak speed: a 10–100 MeV proton (0.15–0.43 c).
+    const c = 299792;
+    assert.ok(SEP_V_KMS > 0.25 * c && SEP_V_KMS < 0.45 * c);
+    // The visual contrast the plan names: SEP transit is ~200× faster
+    // than a 450 km/s wind parcel.
+    assert.ok(SEP_V_KMS / 450 > 100);
 });
 
 test('S5d liftoff: envelope rises into launch and decays over 90 min', () => {
