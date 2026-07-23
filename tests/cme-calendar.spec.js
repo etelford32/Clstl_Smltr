@@ -66,9 +66,10 @@ test.describe('CME arrival calendar on space-weather.html', () => {
         await expect(chip).toHaveCount(1);
         await expect(chip).toHaveClass(/g2/);
         await expect(chip).toContainText('⊕');
-        // The non-Earth-directed CME is a launch dot in the observed band.
-        await expect(page.locator('.cal-day.past .cal-dot')).toHaveCount(1);
-        // Earth-directed launch dot is highlighted.
+        // Both launches draw dots (the ED one highlighted). NOT asserted
+        // per-day: a "12 h ago" launch falls on yesterday or today
+        // depending on the wall clock (00:40Z flake, 2026-07-23).
+        await expect(page.locator('.cal-dot')).toHaveCount(2);
         await expect(page.locator('.cal-dot.ed')).toHaveCount(1);
     });
 

@@ -222,17 +222,19 @@ const CSS = `
 .cal-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .cal-swatch.past { background: rgba(255,215,94,.16); border: 1px solid rgba(255,215,94,.35); }
 .cal-swatch.span { background: rgba(79,195,247,.18); border: 1px solid rgba(79,195,247,.4); }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+/* minmax(0,1fr): chip content must never widen a column — on mobile the
+   unequal columns squeezed empty days to slivers (2026-07-23 review). */
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .cal-dow { font-size: .58rem; text-transform: uppercase; letter-spacing: .08em;
     color: #667; text-align: center; padding-bottom: 2px; }
-.cal-day { position: relative; min-height: 52px; border-radius: 6px;
+.cal-day { position: relative; min-height: 52px; min-width: 0; border-radius: 6px;
     padding: 3px 4px; text-align: left; cursor: pointer;
     background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.06);
     transition: border-color .15s ease; font: inherit; color: inherit; }
 .cal-day:hover { border-color: rgba(120,180,240,.45); }
 .cal-day.blank { visibility: hidden; pointer-events: none; }
-.cal-day.past { background: rgba(255,215,94,.055);
-    border-color: rgba(255,215,94,.16); }
+.cal-day.past { background: rgba(255,215,94,.09);
+    border-color: rgba(255,215,94,.24); }
 .cal-day.today { border-color: rgba(79,201,127,.65);
     box-shadow: 0 0 8px rgba(79,201,127,.18); }
 .cal-day.inspan { background: rgba(79,195,247,.08);
@@ -247,6 +249,7 @@ const CSS = `
 .cal-ev { display: block; width: 100%; margin-top: 2px; padding: 1px 4px;
     border-radius: 4px; font-size: .6rem; font-weight: 700; text-align: left;
     font-variant-numeric: tabular-nums; cursor: pointer; border: 1px solid;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     background: rgba(0,200,100,.12); color: #00e874; border-color: rgba(0,200,100,.3); }
 .cal-ev.g1 { background: rgba(255,200,0,.13); color: #ffcc00; border-color: rgba(255,200,0,.35); }
 .cal-ev.g2 { background: rgba(255,140,0,.15); color: #ff9900; border-color: rgba(255,140,0,.4); }
