@@ -150,6 +150,66 @@ export function calendarModel({ events = [], nowMs, span = null,
              startMs, endMs: startMs + n * DAY };
 }
 
+/* ── Prediction scorecard (validation program §2–3 consumers) ─────────
+   Pure models over /api/cme/skill responses: the per-model skill strip
+   and the per-event predicted-vs-actual index the arrival chips render.
+   Sign convention everywhere: predicted − actual, + = predicted LATE
+   (matches cme_model_skill.bias_hours). Node-tested. */
+
+/** Skill-view rows → display rows, best MAE first. Realtime rows are the
+ *  product; hindcast-only is labeled as such, never passed off as live. */
+export function scorecardModel(models) {
+    const scored = (models || []).filter((m) => (m.n_scored | 0) > 0);
+    const rt = scored.filter((m) => m.is_hindcast !== true);
+    const use = rt.length ? rt : scored;
+    const label = (id) => id === 'dbm-v1' ? 'DBM'
+        : id === 'ballistic-v1' ? 'Ballistic' : String(id).toUpperCase();
+    const rows = use.map((m) => ({
+        modelId: m.model_id, label: label(m.model_id),
+        n: m.n_scored | 0,
+        maeH: Number.isFinite(+m.mae_hours) ? +m.mae_hours : null,
+        biasH: Number.isFinite(+m.bias_hours) ? +m.bias_hours : null,
+        hitRate: (m.n_scored | 0) ? (m.hits_12h | 0) / (m.n_scored | 0) : null,
+        falseAlarms: m.false_alarms | 0,
+        misses: m.misses | 0,
+    })).sort((a, b) => (a.maeH ?? 1e9) - (b.maeH ?? 1e9));
+    return { rows, hindcastOnly: !rt.length && scored.length > 0, empty: !use.length };
+}
+
+/** /api/cme/skill events → Map(donki_id → {resolved, arrived, actualMs,
+ *  models:{model_id → predictedMs}}) for chip annotation. */
+export function validationIndex(valEvents) {
+    const map = new Map();
+    for (const ev of valEvents || []) {
+        if (!ev?.donki_id) continue;
+        const models = {};
+        for (const [m, f] of Object.entries(ev.forecasts || {})) {
+            const p = Date.parse(f?.predicted);
+            if (Number.isFinite(p)) models[m] = p;
+        }
+        map.set(ev.donki_id, {
+            resolved: !!ev.truth,
+            arrived: ev.truth?.arrived === true,
+            actualMs: ev.truth?.shock ? Date.parse(ev.truth.shock) : NaN,
+            models,
+        });
+    }
+    return map;
+}
+
+/** Signed timing error, predicted − actual: '+2.9 h' = predicted late. */
+export function fmtErrH(predMs, actualMs) {
+    const d = (predMs - actualMs) / 3.6e6;
+    return `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)} h`;
+}
+
+/** Countdown text for the next-arrival chip. */
+export function fmtCountdown(dtMs) {
+    if (!(dtMs > 0)) return 'now';
+    const h = dtMs / 3.6e6;
+    return h < 48 ? `in ${Math.round(h)} h` : `in ${(h / 24).toFixed(1)} d`;
+}
+
 /* ── Mount (fail-quiet, DOM only below this line) ─────────────────────── */
 
 const CSS = `
@@ -162,17 +222,19 @@ const CSS = `
 .cal-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .cal-swatch.past { background: rgba(255,215,94,.16); border: 1px solid rgba(255,215,94,.35); }
 .cal-swatch.span { background: rgba(79,195,247,.18); border: 1px solid rgba(79,195,247,.4); }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+/* minmax(0,1fr): chip content must never widen a column — on mobile the
+   unequal columns squeezed empty days to slivers (2026-07-23 review). */
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .cal-dow { font-size: .58rem; text-transform: uppercase; letter-spacing: .08em;
     color: #667; text-align: center; padding-bottom: 2px; }
-.cal-day { position: relative; min-height: 52px; border-radius: 6px;
+.cal-day { position: relative; min-height: 52px; min-width: 0; border-radius: 6px;
     padding: 3px 4px; text-align: left; cursor: pointer;
     background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.06);
     transition: border-color .15s ease; font: inherit; color: inherit; }
 .cal-day:hover { border-color: rgba(120,180,240,.45); }
 .cal-day.blank { visibility: hidden; pointer-events: none; }
-.cal-day.past { background: rgba(255,215,94,.055);
-    border-color: rgba(255,215,94,.16); }
+.cal-day.past { background: rgba(255,215,94,.09);
+    border-color: rgba(255,215,94,.24); }
 .cal-day.today { border-color: rgba(79,201,127,.65);
     box-shadow: 0 0 8px rgba(79,201,127,.18); }
 .cal-day.inspan { background: rgba(79,195,247,.08);
@@ -187,6 +249,7 @@ const CSS = `
 .cal-ev { display: block; width: 100%; margin-top: 2px; padding: 1px 4px;
     border-radius: 4px; font-size: .6rem; font-weight: 700; text-align: left;
     font-variant-numeric: tabular-nums; cursor: pointer; border: 1px solid;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     background: rgba(0,200,100,.12); color: #00e874; border-color: rgba(0,200,100,.3); }
 .cal-ev.g1 { background: rgba(255,200,0,.13); color: #ffcc00; border-color: rgba(255,200,0,.35); }
 .cal-ev.g2 { background: rgba(255,140,0,.15); color: #ff9900; border-color: rgba(255,140,0,.4); }
@@ -194,10 +257,56 @@ const CSS = `
 .cal-ev.g4, .cal-ev.g5 { background: rgba(255,40,80,.18); color: #ff2266;
     border-color: rgba(255,40,80,.5); }
 .cal-ev.pastev { opacity: .65; }
+.cal-ev.scored s { opacity: .6; font-weight: 500; }
+.cal-ev.scored .cal-act { font-weight: 800; }
+.cal-ev.scored .cal-err { margin-left: 3px; font-size: .56rem; opacity: .9; }
+.cal-ev.hit { border-style: solid; }
+.cal-ev.falarm { background: rgba(140,140,160,.12); color: #99a;
+    border-color: rgba(140,140,160,.35); text-decoration: none; }
+.cal-count { display: inline-block; margin-left: 4px; padding: 0 4px;
+    border-radius: 3px; background: rgba(79,195,247,.18); color: #7fd4ff;
+    font-size: .56rem; font-weight: 700; }
 .cal-p50 { display: block; margin-top: 2px; font-size: .56rem; color: #4fc3f7; }
+.cal-quiet { grid-column: 1 / -1; text-align: center; padding: 10px 0 2px;
+    font-size: .74rem; color: #667; }
+/* ── Skill strip (the live forward ledger — hindcast receipts live in
+      the separate D3 scorecard panel) ─────────────────────────────── */
+.cal-skill { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    margin: 10px 0 2px; }
+.cal-skill-title { font-size: .62rem; text-transform: uppercase;
+    letter-spacing: .08em; color: #889; }
+.cal-skill-chip { display: inline-flex; gap: 5px; align-items: baseline;
+    padding: 3px 8px; border-radius: 6px; font-size: .68rem;
+    font-variant-numeric: tabular-nums;
+    background: rgba(84,224,138,.07); border: 1px solid rgba(84,224,138,.22);
+    color: #9be9b4; }
+.cal-skill-chip b { color: #d6ffe2; }
+.cal-skill-chip .k { color: #6a8; font-size: .6rem; }
+.cal-skill-arming { font-size: .7rem; color: #778; }
+.cal-skill-note { flex-basis: 100%; font-size: .6rem; color: #556; }
 @media (max-width: 768px) {
     .cal-day { min-height: 42px; }
     .cal-legend { margin-left: 0; }
+}
+/* ── Motion (entrance stagger, today pulse, next-arrival glow) — all
+      behind prefers-reduced-motion; re-renders don't replay the
+      entrance (the .cal-animate class is first-paint only) ────────── */
+@media (prefers-reduced-motion: no-preference) {
+    .cal-animate .cal-day { opacity: 0;
+        animation: calIn .38s ease forwards;
+        animation-delay: calc(var(--i, 0) * 14ms); }
+    @keyframes calIn { from { opacity: 0; transform: translateY(6px); }
+                       to { opacity: 1; transform: none; } }
+    .cal-day { transition: transform .15s ease, border-color .15s ease; }
+    .cal-day:hover { transform: translateY(-1px); }
+    .cal-day.today { animation: calToday 2.6s ease-in-out infinite; }
+    @keyframes calToday {
+        0%, 100% { box-shadow: 0 0 8px rgba(79,201,127,.18); }
+        50%      { box-shadow: 0 0 14px rgba(79,201,127,.38); } }
+    .cal-ev.next { animation: calNext 2s ease-in-out infinite; }
+    @keyframes calNext {
+        0%, 100% { box-shadow: 0 0 0 rgba(255,140,0,0); }
+        50%      { box-shadow: 0 0 9px rgba(255,140,0,.5); } }
 }
 `;
 
@@ -218,6 +327,23 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
         let vSw = 400;
         let span = null;
         let cursorMs = NaN;
+        let firstPaint = true;
+        let nextArrivalMs = NaN;
+        // The prediction-correctness ledger (/api/cme/skill): per-model
+        // skill strip + per-event predicted-vs-actual chip annotations.
+        let validation = { models: [], byId: new Map() };
+        async function fetchSkill() {
+            try {
+                const res = await fetch('/api/cme/skill');
+                if (!res.ok) return;
+                const j = await res.json();
+                validation = {
+                    models: j?.data?.models || [],
+                    byId: validationIndex(j?.data?.events || []),
+                };
+                render();
+            } catch {}
+        }
 
         const takeForecast = (fc) => {
             const s = fc?.summary;
@@ -239,11 +365,18 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
                 pip.style.boxShadow = `0 0 ${hot ? 8 : 6}px ${hot ? '#ff3322' : '#ff6622'}`;
             }
 
+            // The NEXT upcoming Earth arrival gets the countdown chip.
+            nextArrivalMs = events
+                .filter((e) => e.earthDirected && e.arrivalMs > nowMs)
+                .reduce((m, e) => (e.arrivalMs < m ? e.arrivalMs : m), Infinity);
+            if (!Number.isFinite(nextArrivalMs)) nextArrivalMs = NaN;
+
             const cells = [];
             cells.push(...DOW.map((d) => `<div class="cal-dow">${d}</div>`));
             for (let i = 0; i < model.lead; i++) {
                 cells.push('<button class="cal-day blank" tabindex="-1"></button>');
             }
+            let ci = 0;
             for (const day of model.days) {
                 const cls = ['cal-day', day.past && 'past', day.today && 'today',
                     day.inSpan && 'inspan',
@@ -258,24 +391,82 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
                     const eta = a.source === 'enlil' ? 'WSA-ENLIL shock arrival'
                         : 'drag-based (DBM) arrival';
                     const kp = Number.isFinite(a.kpMax) ? ` · Kp≈${(+a.kpMax).toFixed(1)}` : '';
-                    return `<span class="cal-ev g${a.gScale}${a.arrivalMs < nowMs ? ' pastev' : ''}"
+                    const v = validation.byId.get(a.id);
+                    // Resolved truth rewrites the chip: predicted struck
+                    // through, actual bold, signed error (+ = we were late).
+                    if (v?.resolved && v.arrived && Number.isFinite(v.actualMs)) {
+                        const err = fmtErrH(a.arrivalMs, v.actualMs);
+                        const hit = Math.abs(a.arrivalMs - v.actualMs) <= 12 * 3.6e6;
+                        const actual = new Date(v.actualMs).toISOString().slice(11, 16);
+                        return `<span class="cal-ev scored g${a.gScale}${hit ? ' hit' : ''}"
+                            data-tau="${v.actualMs}"
+                            title="Predicted ${new Date(a.arrivalMs).toISOString().slice(0, 16).replace('T', ' ')}Z (${eta}) · observed shock ${new Date(v.actualMs).toISOString().slice(0, 16).replace('T', ' ')}Z · error ${err} (+ = forecast late) · ${hit ? 'HIT ≤12 h' : 'outside the 12 h hit window'} · click to scrub the Stage to the OBSERVED arrival"><s>${a.hhmm}</s> <span class="cal-act">${actual}</span><span class="cal-err">${err}</span></span>`;
+                    }
+                    if (v?.resolved && !v.arrived) {
+                        return `<span class="cal-ev falarm" data-tau="${a.arrivalMs}"
+                            title="Predicted ${new Date(a.arrivalMs).toISOString().slice(0, 16).replace('T', ' ')}Z (${eta}) — NO shock arrived (L1 data covered the window). Logged as a false alarm against the model.">✗ ${a.hhmm} no arrival</span>`;
+                    }
+                    const isNext = a.arrivalMs === nextArrivalMs;
+                    return `<span class="cal-ev g${a.gScale}${a.arrivalMs < nowMs ? ' pastev' : ''}${isNext ? ' next' : ''}"
                         data-tau="${a.arrivalMs}"
-                        title="⊕ Earth arrival ${new Date(a.arrivalMs).toISOString().slice(0, 16).replace('T', ' ')}Z · ${eta} · ${a.speedKms} km/s${kp} · click to scrub the Stage">⊕ ${a.hhmm}${a.gScale ? ` G${a.gScale}` : ''}</span>`;
+                        title="⊕ Earth arrival ${new Date(a.arrivalMs).toISOString().slice(0, 16).replace('T', ' ')}Z · ${eta} · ${a.speedKms} km/s${kp} · click to scrub the Stage">⊕ ${a.hhmm}${a.gScale ? ` G${a.gScale}` : ''}${
+                        isNext ? `<span class="cal-count">${fmtCountdown(a.arrivalMs - nowMs)}</span>` : ''}</span>`;
                 }).join('');
                 const p50 = day.isP50 ? '<span class="cal-p50">◈ ensemble P50</span>' : '';
-                cells.push(`<button type="button" class="${cls}" data-day="${day.dayMs}"
+                cells.push(`<button type="button" class="${cls}" style="--i:${ci++}" data-day="${day.dayMs}"
                     aria-label="${day.iso}${day.arrivals.length ? `, ${day.arrivals.length} CME arrival(s)` : ''}">
                     <span class="cal-dom">${day.dom}</span>${
                         day.monthLabel ? `<span class="cal-mon">${day.monthLabel}</span>` : ''
                     }${dots}${chips}${p50}</button>`);
             }
+            // Quiet-corridor honesty: an empty grid must read as QUIET,
+            // not broken (author feedback 2026-07-22: "it looks empty").
+            const anyEvents = events.length > 0;
+            const quiet = anyEvents ? '' : `<div class="cal-quiet">☀ No CMEs in the
+                DONKI catalog this week — the corridor is quiet. Launches and
+                arrivals appear here the moment NASA logs an analysis; every
+                Earth-directed forecast below is scored after passage.</div>`;
+
+            // Skill strip: the LIVE forward ledger (per-model MAE/bias from
+            // issue-time-locked forecasts). Hindcast receipts stay on the
+            // separate D3 validation card.
+            const sc = scorecardModel(validation.models);
+            const fmtBias = (b) => b == null ? '' :
+                ` <span class="k">bias</span> <b>${b >= 0 ? '+' : '−'}${Math.abs(b).toFixed(1)} h</b>`;
+            const skillChips = sc.empty
+                ? `<span class="cal-skill-arming">ledger arming — every forecast is
+                    locked at issue time; per-model skill appears as events resolve</span>`
+                : sc.rows.map((r) => `<span class="cal-skill-chip"
+                    title="${r.label}: mean |arrival error| over ${r.n} scored event(s)${
+                        r.biasH != null ? ` · mean signed error ${r.biasH >= 0 ? '+' : ''}${r.biasH.toFixed(1)} h (+ = late)` : ''}${
+                        r.hitRate != null ? ` · ${Math.round(r.hitRate * 100)}% within ±12 h` : ''}${
+                        r.falseAlarms ? ` · ${r.falseAlarms} false alarm(s)` : ''}">
+                    <b>${r.label}</b>${r.maeH != null
+                        ? ` <span class="k">MAE</span> <b>${r.maeH.toFixed(1)} h</b>` : ''}${
+                    fmtBias(r.biasH)} <span class="k">·</span> ${r.n} ev</span>`).join('');
+            const strip = `<div class="cal-skill">
+                <span class="cal-skill-title">Prediction scorecard${sc.hindcastOnly ? ' · hindcast' : ''}</span>
+                ${skillChips}
+                <span class="cal-skill-note">skill shown, not claimed — forecasts are
+                    locked before arrival and scored against the observed L1 shock;
+                    struck-through times were our call, bold is what happened</span>
+            </div>`;
+
             host.innerHTML = `
                 <div class="cal-head">
                     <span><span class="cal-swatch past"></span> last 7 days · observed</span>
                     <span><span class="cal-swatch span"></span> ensemble P10–P90 arrival</span>
                     <span class="cal-hint">click a day or an ⊕ arrival to scrub the Stage timeline</span>
                 </div>
-                <div class="cal-grid">${cells.join('')}</div>`;
+                <div class="cal-grid">${cells.join('')}${quiet}</div>
+                ${strip}`;
+            // Entrance stagger runs on the FIRST paint only — re-renders
+            // (feed refreshes) must not replay it.
+            if (firstPaint) {
+                firstPaint = false;
+                host.classList.add('cal-animate');
+                setTimeout(() => host.classList.remove('cal-animate'), 1500);
+            }
         }
 
         // Clicks → the Stage's τ scrubber. The Stage clamps + dispatches
@@ -327,8 +518,19 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
         if (window.__fluxRopeForecast) takeForecast(window.__fluxRopeForecast);
 
         render();
-        // Midnight rollover + past-arrival restyling.
-        setInterval(render, 10 * 60e3);
+        fetchSkill();
+        // Midnight rollover, past-arrival restyling, fresh skill rows.
+        setInterval(() => { render(); fetchSkill(); }, 10 * 60e3);
+        // Countdown ticks WITHOUT rebuilding the grid; crossing zero
+        // triggers a real re-render (the chip becomes a past arrival).
+        setInterval(() => {
+            if (!Number.isFinite(nextArrivalMs)) return;
+            const dt = nextArrivalMs - Date.now();
+            if (dt <= 0) { render(); return; }
+            host.querySelectorAll('.cal-count').forEach((el) => {
+                el.textContent = fmtCountdown(dt);
+            });
+        }, 30e3);
     } catch (e) {
         console.warn('[cme-calendar] mount failed (non-fatal):', e);
     }

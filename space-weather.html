@@ -1868,6 +1868,43 @@ nav {
         <div id="sw-stage-host"></div>
     </section>
 
+    <!-- Moved directly under the Stage (author feedback 2026-07-23:
+         "I don't see a calendar") — the arrival calendar + Bz forecast are
+         the headline forecast surface, ahead of the legacy 2D views. -->
+    <!-- ── CME PREDICTION & PROPAGATION ────────────────────────────────── -->
+    <div class="cme-prediction-section" id="cme-prediction-section" data-lab-panel="cme-forecast">
+        <div class="cme-pred-title">
+            <span class="cme-pip" id="cme-pip"></span>
+            CME Arrival Calendar · last 7 days + next 30 · Drag-Based Model (Vršnak 2013) + WSA-ENLIL
+        </div>
+
+        <!-- Arrival calendar (fix round 2026-07-22: replaced the event-card
+             row at the author's direction). Fed from the page's 'swpc-update'
+             bus; ⊕ chips are Earth arrivals (ENLIL-preferred, DBM fallback),
+             dots are launches; day clicks scrub the Stage τ-timeline.
+             Mounted fail-quiet by js/cme-calendar.js. -->
+        <div id="cme-calendar-host"></div>
+
+        <!-- Data source attribution -->
+        <div style="margin-top:8px;font-size:.6rem;color:#443;line-height:1.5">
+            <strong style="color:#665">Model:</strong>
+            Vršnak et al. (2013) A&amp;A 557, A141 · Drag-based propagation ·
+            WSA&ndash;ENLIL shock arrivals (NASA DONKI) ·
+            Rankine&ndash;Hugoniot sheath compression ·
+            O'Brien &amp; McPherron (2002) Dst injection ·
+            Yashiro et al. (2006) flare&ndash;CME statistics
+        </div>
+
+        <!-- ── FLUX-ROPE Bz FORECAST (the "next" to the ticker's "now") ── -->
+        <!-- Self-mounting, fail-quiet: js/flux-rope-dashboard.js runs the
+             SAME flux-rope-core WASM ensemble as flux-rope.html on the
+             latest Earth-directed DONKI analysis, conditioned on live
+             DSCOVR/ACE Bz (particle filter). The section above forecasts
+             WHEN a CME arrives; this one forecasts WHAT ITS Bz DOES. -->
+        <div id="flux-rope-forecast-panel" data-lab-panel="flux-rope-forecast"></div>
+    </div>
+
+
     <!-- ── HELIOSPHERE HERO ────────────────────────────────────────────────── -->
     <!-- 3D inner solar system: real ephemeris orbits, 3D Parker spiral wind,  -->
     <!-- Earth magnetosphere (Shue model), CME shells, flare events.           -->
@@ -2172,39 +2209,6 @@ nav {
                 <span class="transit-stat-k">nPa</span>
             </div>
         </div>
-    </div>
-
-    <!-- ── CME PREDICTION & PROPAGATION ────────────────────────────────── -->
-    <div class="cme-prediction-section" id="cme-prediction-section" data-lab-panel="cme-forecast">
-        <div class="cme-pred-title">
-            <span class="cme-pip" id="cme-pip"></span>
-            CME Arrival Calendar · last 7 days + next 30 · Drag-Based Model (Vršnak 2013) + WSA-ENLIL
-        </div>
-
-        <!-- Arrival calendar (fix round 2026-07-22: replaced the event-card
-             row at the author's direction). Fed from the page's 'swpc-update'
-             bus; ⊕ chips are Earth arrivals (ENLIL-preferred, DBM fallback),
-             dots are launches; day clicks scrub the Stage τ-timeline.
-             Mounted fail-quiet by js/cme-calendar.js. -->
-        <div id="cme-calendar-host"></div>
-
-        <!-- Data source attribution -->
-        <div style="margin-top:8px;font-size:.6rem;color:#443;line-height:1.5">
-            <strong style="color:#665">Model:</strong>
-            Vršnak et al. (2013) A&amp;A 557, A141 · Drag-based propagation ·
-            WSA&ndash;ENLIL shock arrivals (NASA DONKI) ·
-            Rankine&ndash;Hugoniot sheath compression ·
-            O'Brien &amp; McPherron (2002) Dst injection ·
-            Yashiro et al. (2006) flare&ndash;CME statistics
-        </div>
-
-        <!-- ── FLUX-ROPE Bz FORECAST (the "next" to the ticker's "now") ── -->
-        <!-- Self-mounting, fail-quiet: js/flux-rope-dashboard.js runs the
-             SAME flux-rope-core WASM ensemble as flux-rope.html on the
-             latest Earth-directed DONKI analysis, conditioned on live
-             DSCOVR/ACE Bz (particle filter). The section above forecasts
-             WHEN a CME arrives; this one forecasts WHAT ITS Bz DOES. -->
-        <div id="flux-rope-forecast-panel" data-lab-panel="flux-rope-forecast"></div>
     </div>
 
     <!-- ── EARTH-SIDE SPACE WEATHER FORECAST ────────────────────────────── -->

@@ -76,6 +76,10 @@ const CSS = `
     color: var(--sw-text-muted, #8b94ad); letter-spacing: .06em; white-space: nowrap; }
 .swst-tick { position: absolute; transform: translate(-50%, 0);
     font-size: .58rem; color: var(--sw-text-dim, #68718a); white-space: nowrap; }
+/* .below: screen-space drop for the drag chip — at Earth's on-screen
+   size every Earth-anchored chip lands in the same few pixels, so the
+   L1 sentinel chip and this one collided (2026-07-23 review). */
+.swst-chip.below { transform: translate(-50%, 160%); }
 .swst-chip { position: absolute; transform: translate(12px, -50%);
     background: var(--sw-surface-raised, rgba(16,24,48,.9));
     border: 1px solid var(--sw-border-focus, rgba(0,198,255,.45));
@@ -98,6 +102,13 @@ const CSS = `
     color: var(--sw-text-muted, #8b94ad); }
 .swst-disclose { margin-top: 4px; font-size: .55rem; max-width: 240px;
     color: var(--sw-text-dim, #68718a); }
+/* Mobile: the station tabs wrap into the top-right scale controls and
+   the disclosure paragraph (2026-07-23 visual review) — cap the tab
+   row's width and drop the prose; the ⇲ button keeps scale honesty. */
+@media (max-width: 768px) {
+    .swst-stations { max-width: 68%; }
+    .swst-disclose { display: none; }
+}
 .swst-tau { position: absolute; left: 10px; right: 10px; bottom: 8px;
     display: flex; gap: 8px; align-items: center; pointer-events: auto;
     background: var(--sw-surface-card, rgba(10,16,34,.72));
@@ -510,8 +521,10 @@ function mount(host) {
     const pinLabel = addLabel('swst-pin-label', '',
         () => [EARTH_S + pinLocal[0], pinLocal[1], pinLocal[2]]);
     pinLabel.style.display = 'none';
+    // Anchored BELOW the ecliptic: above it the chip collided with the
+    // L1 sentinel chip and the pin label (2026-07-23 visual review).
     const heatChip = addLabel('swst-chip dim', '',
-        () => [EARTH_S, 0, heatShell.visible ? heatShell.scale.z : 0.1]);
+        () => [EARTH_S, 0, -(heatShell.visible ? heatShell.scale.z : 0.1) * 1.6]);
     heatChip.style.display = 'none';
 
     /* ── Stations ─────────────────────────────────────────────────── */
@@ -546,6 +559,7 @@ function mount(host) {
         assetPanel.classList.toggle('open', id === 'orbit-ops');
         controls.minDistance = to.minD;
         controls.maxDistance = to.maxD;
+        updateScene(true);   // station-conditional visibility (My Sky shells)
         if (reduced || cut) {
             camera.position.set(...to.pos);
             controls.target.set(...to.target);
@@ -973,7 +987,14 @@ function mount(host) {
 
         const tS = state.kernel && state.launchMs ? (state.tauMs - state.launchMs) / 1000 : -1;
         const live = state.kernel && state.rope && tS > 0;
-        ropeMesh.visible = !!live;
+        // My Sky is a GROUND-LEVEL sky view: heliospheric volumes near
+        // 1 AU (rope, ghosts, wavefront shells) and the Earth-hugging
+        // atmosphere sprite ENGULF the camera there and render as
+        // featureless washes (2026-07-23 visual review). That staging
+        // shows the sky story only: oval band, pin, stations chrome.
+        const inMySky = state.station === 'my-sky';
+        atmo.visible = !inMySky;
+        ropeMesh.visible = !!live && !inMySky;
         if (live) {
             // Median rope geometry: apex/σ straight from the KERNEL probes.
             const dAu = state.kernel.apexKmAt(0, tS) / AU_KM;
@@ -993,7 +1014,7 @@ function mount(host) {
         }
 
         // Ghost member axes (weight-faded) + ensemble wavefronts.
-        const showGhosts = live && state.ghosts.length;
+        const showGhosts = live && !inMySky && state.ghosts.length;
         for (let i = 0; i < ghostLines.length; i++) {
             const line = ghostLines[i], m = state.ghosts[i];
             line.visible = !!(showGhosts && m && i < (state.ghostMax ?? N_GHOSTS));
@@ -1016,7 +1037,7 @@ function mount(host) {
         const rs = radii ? [radii.p10, radii.p50, radii.p90] : [];
         for (let i = 0; i < 3; i++) {
             const r = rs[i];
-            const ok = Number.isFinite(r) && r > 0.06 && r < 1.5;
+            const ok = Number.isFinite(r) && r > 0.06 && r < 1.5 && !inMySky;
             waves[i].visible = !!ok;
             if (ok) {
                 const s = stageRadius(r, state.mix);
@@ -1090,10 +1111,8 @@ function mount(host) {
         const heatKey = `${Math.round(heatAlt)}|${(state.kpNow ?? -1).toFixed(1)}|${Math.round(state.f107)}`;
         if (heatKey !== state.heatKey) {
             state.heatKey = heatKey;
-            const ok = Number.isFinite(state.kpNow);
-            heatShell.visible = ok;
-            heatChip.style.display = ok ? '' : 'none';
-            if (ok) {
+            state.heatOk = Number.isFinite(state.kpNow);
+            if (state.heatOk) {
                 const rhoNow = density({ altitudeKm: heatAlt, f107Sfu: state.f107, ap: kpToAp(state.kpNow) }).rho;
                 const rhoQuiet = density({ altitudeKm: heatAlt, f107Sfu: state.f107, ap: kpToAp(2) }).rho;
                 const ratio = rhoNow / rhoQuiet;
@@ -1103,9 +1122,15 @@ function mount(host) {
                     ratio < 2.5 ? 0xffaa22 : ratio < 4 ? 0xff7847 : 0xff4466);
                 heatChip.textContent =
                     `drag shell ${Math.round(heatAlt)} km · ρ ×${ratio.toFixed(2)} vs quiet`;
-                heatChip.className = 'swst-chip';
+                heatChip.className = 'swst-chip below';
             }
         }
+        // (Same My Sky rule for the Earth-enclosing shells; `inMySky`
+        // computed above. Applied every pass, not just on key change,
+        // so leaving the station restores them.)
+        heatShell.visible = !!state.heatOk && !inMySky;
+        heatChip.style.display = heatShell.visible ? '' : 'none';
+        if (mpMesh) mpMesh.visible = !inMySky;
 
         // Live asset dots at τ (house SGP4; catalog epoch as the anchor).
         for (const o of assetObjs) {

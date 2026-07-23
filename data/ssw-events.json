@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "last_updated": "2026-04-25",
+  "_doc": "Historical Sudden Stratospheric Warming events with the regime our combiner *would have* classified them as. The /api/weather/ssw-verify endpoint backtests each one against ERA5 surface-temperature anomalies in the predicted regions to build a verification track record. Append a new event when one fires; the verifier handles the rest.",
+
+  "regions": {
+    "_doc": "Coordinates the verifier samples for each region label. Each region returns the mean post-event temperature anomaly across these points.",
+    "Western Europe":   [{"name": "London",     "lat": 51.51, "lon":  -0.13},
+                         {"name": "Paris",      "lat": 48.86, "lon":   2.35}],
+    "Scandinavia":      [{"name": "Stockholm",  "lat": 59.33, "lon":  18.07},
+                         {"name": "Oslo",       "lat": 59.91, "lon":  10.75}],
+    "US Northeast":     [{"name": "New York",   "lat": 40.71, "lon": -74.01},
+                         {"name": "Boston",     "lat": 42.36, "lon": -71.06}],
+    "US Midwest":       [{"name": "Chicago",    "lat": 41.88, "lon": -87.63},
+                         {"name": "Minneapolis","lat": 44.98, "lon": -93.27}],
+    "US East":          [{"name": "New York",   "lat": 40.71, "lon": -74.01},
+                         {"name": "Washington", "lat": 38.91, "lon": -77.04}],
+    "Northern Europe":  [{"name": "Stockholm",  "lat": 59.33, "lon":  18.07},
+                         {"name": "Helsinki",   "lat": 60.17, "lon":  24.94}],
+    "Central Europe":   [{"name": "Berlin",     "lat": 52.52, "lon":  13.41},
+                         {"name": "Warsaw",     "lat": 52.23, "lon":  21.01}],
+    "Central Asia":     [{"name": "Astana",     "lat": 51.17, "lon":  71.45}]
+  },
+
+  "events": [
+    {
+      "id":   "ssw-2018-02-12",
+      "date": "2018-02-12",
+      "type": "major",
+      "u10_at_event": -7.5,
+      "ao_at_event":  -2.4,
+      "predicted_regime":   "coupled-cold",
+      "predicted_lead_days": 0,
+      "predicted_regions":  ["Western Europe", "US Northeast"],
+      "outcome_label":      "Beast from the East",
+      "notes": "Record-breaking cold across UK + Ireland for ~10 days; -10 °C anomalies. Major SSW with vortex split."
+    },
+    {
+      "id":   "ssw-2019-01-02",
+      "date": "2019-01-02",
+      "type": "major",
+      "u10_at_event": -8.2,
+      "ao_at_event":  -1.1,
+      "predicted_regime":   "emerging-cold",
+      "predicted_lead_days": 14,
+      "predicted_regions":  ["US Northeast", "US Midwest"],
+      "outcome_label":      "Late-January US Polar Vortex",
+      "notes": "Major SSW with vortex split. Late-Jan / early-Feb 2019 brought historic cold to US Midwest (Chicago hit −30 °C)."
+    },
+    {
+      "id":   "ssw-2021-01-05",
+      "date": "2021-01-05",
+      "type": "major",
+      "u10_at_event": -10.1,
+      "ao_at_event":  -0.6,
+      "predicted_regime":   "emerging-cold",
+      "predicted_lead_days": 14,
+      "predicted_regions":  ["US Midwest", "US East", "Western Europe"],
+      "outcome_label":      "February 2021 Texas freeze",
+      "notes": "Major SSW with vortex displacement. ~10 days later, deep cold flooded US Plains; Feb 13–17 Texas freeze killed 700+ and caused a $200B power-grid disaster."
+    },
+    {
+      "id":   "ssw-2024-03-04",
+      "date": "2024-03-04",
+      "type": "minor",
+      "u10_at_event":  4.2,
+      "ao_at_event":   0.1,
+      "predicted_regime":   "decoupled",
+      "predicted_lead_days": 0,
+      "predicted_regions":  [],
+      "outcome_label":      "Late-season minor warming",
+      "notes": "Minor warming with no zonal-wind reversal. Decoupled regime — no significant surface response, consistent with the low confidence the combiner would have assigned."
+    },
+    {
+      "id":   "ssw-2025-01-19",
+      "date": "2025-01-19",
+      "type": "major",
+      "u10_at_event": -3.4,
+      "ao_at_event":  -1.6,
+      "predicted_regime":   "coupled-cold",
+      "predicted_lead_days": 0,
+      "predicted_regions":  ["US Northeast", "Western Europe"],
+      "outcome_label":      "January 2025 cold spell",
+      "notes": "Major SSW; AO already negative at event time. Persistent cold over Eastern US through early February."
+    }
+  ]
+}
