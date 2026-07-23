@@ -512,3 +512,64 @@ export function memberFieldRows(members, wEffKms, tS,
     }
     return { apexAu, shockAu, weight, vKms, lonRad, latRad, count };
 }
+
+/* ── The sun ALWAYS has behavior (author, 2026-07-23) ────────────────
+   τ-indexed solar activity from the MEASURED GOES X-ray record — the
+   Stage sun must express what the star is doing at every τ, CME or no
+   CME. PURE; the series comes off the page's 'swpc-update' bus
+   (js/swpc-feed.js xray_series), never a second fetch. */
+
+/** GOES long-band flux [W/m²] → flare class string (A/B/C/M/X grammar,
+ *  same thresholds as the feed's ticker). */
+export function xrayClassOf(flux) {
+    if (!Number.isFinite(flux) || flux <= 0) return 'A0.0';
+    const bands = [['X', 1e-4], ['M', 1e-5], ['C', 1e-6], ['B', 1e-7], ['A', 1e-8]];
+    for (const [letter, base] of bands) {
+        if (flux >= base) return `${letter}${Math.min(9.9, flux / base).toFixed(1)}`;
+    }
+    return `A${Math.max(0.1, flux / 1e-8).toFixed(1)}`;
+}
+
+/**
+ * Measured X-ray state at τ: nearest series sample (clamped at the
+ * edges), falling back to the latest scalar, then to A-class quiet.
+ * `act` is the display-normalized activity: log-scaled A(1e-8)→0 …
+ * X(1e-4)→1.
+ * @returns {{ flux:number, act:number, cls:string }}
+ */
+export function sunActivityAt(series, tauMs, fallbackFlux = 1e-8) {
+    let flux = Number.isFinite(fallbackFlux) && fallbackFlux > 0 ? fallbackFlux : 1e-8;
+    if (Array.isArray(series) && series.length) {
+        let best = null, bestD = Infinity;
+        for (const s of series) {
+            if (!Number.isFinite(s?.t) || !(s?.flux > 0)) continue;
+            const d = Math.abs(s.t - tauMs);
+            if (d < bestD) { bestD = d; best = s; }
+        }
+        if (best) flux = best.flux;
+    }
+    const act = Math.min(1, Math.max(0, (Math.log10(flux) + 8) / 4));
+    return { flux, act, cls: xrayClassOf(flux) };
+}
+
+/**
+ * Flare flash envelope at τ over the feed's recent-flare list: 0..1,
+ * a fast-rise (10 min) / slow-decay (40 min) pulse per flare, weighted
+ * by class (C 0.35 · M 0.7 · X 1.0), max over flares. Scrubbing τ
+ * across yesterday's M-flare replays its flash.
+ * @param {Array<{timeMs:number, letter:string}>} flares
+ */
+export function flareFlashAt(flares, tauMs) {
+    const W = { C: 0.35, M: 0.7, X: 1.0 };
+    let flash = 0;
+    for (const f of flares || []) {
+        const w = W[f?.letter];
+        if (!w || !Number.isFinite(f.timeMs)) continue;
+        const d = tauMs - f.timeMs;
+        const env = d < -10 * 60e3 || d > 40 * 60e3 ? 0
+            : d < 0 ? 1 + d / (10 * 60e3)
+            : 1 - d / (40 * 60e3);
+        flash = Math.max(flash, w * Math.max(0, env));
+    }
+    return flash;
+}

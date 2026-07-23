@@ -718,6 +718,23 @@ those move the CLOCK, and the particles follow the driver at τ.
   tooltip and the strip counts locked events before any resolve —
   the predictor is visibly working while skill accrues. Gate:
   live-path spec 'calendar replay' (full pipeline, both directions).
+- **SUN BEHAVIOR — ✅ SHIPPED 2026-07-23** (author: "the sun always has
+  behavior… what is the sun doing right now?"). The star expresses its
+  MEASURED state at every τ, CME or no CME. swpc-feed keeps a
+  ~288-point decimated GOES X-ray series on the bus (`xray_series`);
+  pure oracles in stage/model.js — `xrayClassOf` (A/B/C/M/X grammar),
+  `sunActivityAt` (nearest-sample τ-lookup, act = log-scaled 0..1,
+  latest-flux fallback so live τ always reads the header value) and
+  `flareFlashAt` (per-flare envelope: 10-min rise, 40-min decay,
+  C/M/X weighted, max-over) — all node-pinned. stage.js drives the
+  surface shader (uAct brightens + whitens the granulation), the
+  corona sprite (opacity + scale breathe with activity, flash kicks),
+  and the always-on vitals chip `☀ X-ray <cls> · FLARE · N ARs
+  (n complex) · F10.7` under the Sun (AR disc markers landed with the
+  2026-07-23 bug round at Stonyhurst = Carrington − L0(τ)). Scrubbing
+  τ through a flare replays it. Probes: __swStage.sun.{cls, act,
+  flash}; stage-spec S2 test injects an M5 series + fresh flare and
+  pins cls/act/chip.
 - **S5c — SEP + aurora ends**: proton-event streaks (gate: S1+;
   spiral-aligned; near-instant arrival is the honest physics and the
   visual contrast), precipitation curtains into the oval band at

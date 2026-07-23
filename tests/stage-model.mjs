@@ -25,6 +25,7 @@ import {
     ovalLatAtLon, ovalBandGrid, kpBandAt, subsolarLonDeg, earthLocal,
     sunEclipticLonDeg, temeToStageRe, parseTleRaan, assetOrbitRing, mySkyPose,
     windFieldAt, AMBIENT_V_KMS, AMBIENT_N_CC, memberFieldRows,
+    xrayClassOf, sunActivityAt, flareFlashAt,
 } from '../js/stage/model.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
 import { magneticLatitude, boundaryForKp } from '../js/verdict-engine.js';
@@ -373,6 +374,35 @@ test('S5b memberFieldRows: member-bound rows — apex growth, weights, empty slo
     // Degenerate inputs refuse honestly.
     assert.equal(memberFieldRows([], 400, 3600), null);
     assert.equal(memberFieldRows(members, 400, 0), null);
+});
+
+test('the sun always has behavior: X-ray grammar, τ-lookup, flare flash', () => {
+    // Class grammar matches the ticker's A/B/C/M/X bands.
+    assert.equal(xrayClassOf(2.3e-6), 'C2.3');
+    assert.equal(xrayClassOf(5.0e-5), 'M5.0');
+    assert.equal(xrayClassOf(2.0e-4), 'X2.0');
+    assert.equal(xrayClassOf(0), 'A0.0');
+    // τ-lookup: nearest sample, edge-clamped; act is the log ramp
+    // A(1e-8)→0 … X(1e-4)→1.
+    const T = Date.parse('2026-07-22T00:00Z');
+    const series = [
+        { t: T, flux: 1e-7 },              // B-class background
+        { t: T + 3.6e6, flux: 5e-5 },      // M5 flare hour
+    ];
+    assert.equal(sunActivityAt(series, T + 3.5e6).cls, 'M5.0');
+    assert.equal(sunActivityAt(series, T - 999e9).cls, 'B1.0');   // edge clamp
+    assert.ok(Math.abs(sunActivityAt(series, T).act - 0.25) < 1e-9);  // B = 0.25
+    // Fallbacks: no series → latest scalar → quiet A-class.
+    assert.equal(sunActivityAt(null, T, 3e-6).cls, 'C3.0');
+    assert.equal(sunActivityAt([], T).cls, 'A1.0');
+    // Flare flash: fast rise, 40-min decay, class-weighted, max-over.
+    const flares = [{ timeMs: T, letter: 'M' }, { timeMs: T + 9e9, letter: 'X' }];
+    assert.equal(flareFlashAt(flares, T), 0.7);                   // M peak
+    assert.ok(Math.abs(flareFlashAt(flares, T + 20 * 60e3) - 0.35) < 1e-9);
+    assert.equal(flareFlashAt(flares, T + 3.6e6), 0);             // decayed
+    assert.equal(flareFlashAt(flares, T - 30 * 60e3), 0);         // not yet
+    assert.equal(flareFlashAt([{ timeMs: T, letter: 'B' }], T), 0);  // sub-C ignored
+    assert.equal(flareFlashAt(null, T), 0);
 });
 
 console.log(`stage-model: ALL PASS (${n} tests)`);

@@ -49,7 +49,7 @@ import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          stationDefs, flightPose, dynamicPressure,
          ovalBandGrid, kpBandAt, earthLocal, subsolarLonDeg, temeToStageRe,
          assetOrbitRing, parseTleRaan, mySkyPose, windFieldAt,
-         memberFieldRows } from './model.js';
+         memberFieldRows, sunActivityAt, flareFlashAt } from './model.js';
 import { sheathCompression } from '../cme-propagation.js';
 import { carringtonL0 } from '../ring-current-model.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
@@ -253,7 +253,7 @@ function mount(host) {
     // dressing, like the Parker spirals — no physics claim). Shader math
     // stays clamped (the ionosphere cage-shader overflow lesson) and
     // cheap (3 octaves, no derivatives) for software-GL CI.
-    const sunUniforms = { uTime: { value: 0 } };
+    const sunUniforms = { uTime: { value: 0 }, uAct: { value: 0 } };
     const sun = new THREE.Mesh(
         new THREE.SphereGeometry(BODY.sunRadiusUnits, 48, 28),
         new THREE.ShaderMaterial({
@@ -268,7 +268,7 @@ function mount(host) {
                     gl_Position = projectionMatrix * mv;
                 }`,
             fragmentShader: `
-                uniform float uTime;
+                uniform float uTime; uniform float uAct;
                 varying vec3 vObj; varying vec3 vN; varying vec3 vView;
                 float hash(vec3 p) {
                     return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
@@ -298,6 +298,11 @@ function mount(host) {
                     // Limb darkening: μ = cos(view angle), Eddington-ish ramp.
                     float mu = clamp(dot(normalize(vN), normalize(vView)), 0.0, 1.0);
                     c *= 0.45 + 0.55 * pow(mu, 0.55);
+                    // MEASURED activity (GOES X-ray at τ, model.js
+                    // sunActivityAt + flare flash): quiet A-class sun is
+                    // calm amber; an X-flare runs white-hot.
+                    c *= 0.85 + 0.5 * uAct;
+                    c = mix(c, vec3(1.0, 0.97, 0.88), 0.4 * uAct);
                     gl_FragColor = vec4(c, 1.0);
                 }`,
         }));
@@ -706,6 +711,10 @@ function mount(host) {
         return el;
     };
     addLabel('swst-label', 'SUN', () => [0, 0, BODY.sunRadiusUnits * 1.4]);
+    // The sun's vitals, always on: measured X-ray class at τ, AR count,
+    // F10.7 — "the sun always has behavior" (author, 2026-07-23).
+    const sunChip = addLabel('swst-chip dim', '☀ awaiting GOES X-ray…',
+        () => [0, 0, -BODY.sunRadiusUnits * 2.0]);
     addLabel('swst-label', 'EARTH', () => [EARTH_S, 0, BODY.earthRadiusUnits * 2.2]);
     addLabel('swst-label', 'L1', () => [stageRadius(0.99, state.mix), 0, 0.05]);
     const chip = addLabel('swst-chip dim', 'awaiting L1 feed…',
@@ -927,6 +936,20 @@ function mount(host) {
         // dressing, acceptable.)
         if (Array.isArray(d?.active_regions) && d.active_regions.length) {
             state.regions = d.active_regions;
+        }
+        // The sun ALWAYS has behavior: the measured GOES X-ray record
+        // (series for τ-lookup + latest scalar) and the recent flares.
+        if (Array.isArray(d?.xray_series) && d.xray_series.length) {
+            state.xraySeries = d.xray_series;
+        }
+        if (Number.isFinite(d?.xray_flux) && d.xray_flux > 0) {
+            state.xrayLatest = d.xray_flux;
+        }
+        if (Array.isArray(d?.recent_flares) && d.recent_flares.length) {
+            state.flares = d.recent_flares.map((f) => ({
+                timeMs: f?.time instanceof Date ? f.time.getTime() : Date.parse(f?.time ?? ''),
+                letter: f?.parsed?.letter ?? String(f?.cls ?? '')[0],
+            })).filter((f) => Number.isFinite(f.timeMs));
         }
         updateScene();
     });
@@ -1196,6 +1219,24 @@ function mount(host) {
         // Earth geography follows the same τ through the mean-sun oracle
         // the pin/oval use (model.js subsolarLonDeg).
         earthUniforms.uSubsolarLon.value = subsolarLonDeg(state.tauMs) * Math.PI / 180;
+
+        // The sun's MEASURED state at τ: GOES X-ray activity + flare
+        // flash envelope drive the surface shader, the corona, and the
+        // vitals chip — the star is never a dead ball, CME or no CME.
+        {
+            const sa = sunActivityAt(state.xraySeries, state.tauMs, state.xrayLatest);
+            const flash = flareFlashAt(state.flares, state.tauMs);
+            const act = Math.min(1, Math.max(sa.act, flash));
+            state.sunAct = { cls: sa.cls, act, flash };
+            sunUniforms.uAct.value = act;
+            corona.material.opacity = 0.25 + 0.4 * act + 0.25 * flash;
+            corona.scale.setScalar(2.4 * (1 + 0.3 * act));
+            const nAr = (state.regions ?? []).length;
+            const nCx = (state.regions ?? []).filter((r) => r.is_complex).length;
+            sunChip.textContent = `☀ X-ray ${sa.cls}${flash > 0.05 ? ' · FLARE' : ''}`
+                + (nAr ? ` · ${nAr} AR${nAr > 1 ? 's' : ''}${nCx ? ` (${nCx} complex)` : ''}` : '')
+                + (Number.isFinite(state.f107) ? ` · F10.7 ${Math.round(state.f107)}` : '');
+        }
 
         // Active-region markers at Stonyhurst positions for τ (Carrington
         // lon − L0(τ), the carringtonL0 oracle): +x faces Earth.
@@ -1605,7 +1646,10 @@ function mount(host) {
         get sun() {
             const shown = arMarkers.filter((m) => m.visible).length;
             return { regions: shown,
-                     complex: (state.regions ?? []).filter((r) => r.is_complex).length };
+                     complex: (state.regions ?? []).filter((r) => r.is_complex).length,
+                     cls: state.sunAct?.cls ?? null,
+                     act: state.sunAct?.act ?? 0,
+                     flash: state.sunAct?.flash ?? 0 };
         },
         flyTo, setTau,
     };

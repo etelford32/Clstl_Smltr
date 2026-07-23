@@ -63,6 +63,7 @@ export const FALLBACK = {
     kp_forecast:   [],    // array of {time, kp, kind: 'observed'|'estimated'|'predicted'}
     xray_flux:   1e-8,   // W/m²  A-class background
     xray_class:  'A1.0',
+    xray_series: [],     // τ-indexed [{t, flux}] over the last day (~5-min)
     flare_class:  null,
     flare_time:   null,
     flare_letter: 'A',
@@ -466,6 +467,20 @@ async function fetchXray(state) {
         state.flare_letter = state.flare_letter ?? state.xray_class[0];
         break;
     }
+
+    // Keep the τ-indexed SERIES too (decimated ~5-min), not just the
+    // newest point — "the sun always has behavior" (author, 2026-07-23):
+    // the Stage sun breathes with the measured X-ray record when the
+    // timeline scrubs across the last day.
+    const series = [];
+    const step = Math.max(1, Math.floor(candidates.length / 288));
+    for (let i = 0; i < candidates.length; i += step) {
+        const r = candidates[i];
+        const t = Date.parse(r.time_tag ?? r.timestamp ?? '');
+        const flux = noaaFill(r.flux ?? r.observed_flux);
+        if (Number.isFinite(t) && flux != null && flux > 0) series.push({ t, flux });
+    }
+    if (series.length >= 4) state.xray_series = series;
 }
 
 async function fetchProtons(state) {
@@ -1154,6 +1169,7 @@ export class SpaceWeatherFeed {
             kp:             raw.kp,
             xray_flux:      raw.xray_flux,
             xray_class:     raw.xray_class ?? fluxToClass(raw.xray_flux),
+            xray_series:    raw.xray_series ?? [],
             flare_class:    raw.flare_class  ?? null,
             flare_letter:   raw.flare_letter ?? 'A',
             flare_time:     raw.flare_time   ?? null,

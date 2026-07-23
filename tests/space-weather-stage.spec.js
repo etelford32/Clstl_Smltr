@@ -103,15 +103,27 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         const host = page.locator('#sw-stage-host');
         await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
 
-        // Inject Kp + active regions through the page bus → the oval band
-        // appears, and the Sun grows its AR markers (one complex).
+        // Inject Kp + active regions + a measured GOES X-ray state through
+        // the page bus → the oval band appears, the Sun grows its AR
+        // markers (one complex), and the star expresses the M-class flux
+        // ("the sun always has behavior" — chip + activity probes).
         await page.evaluate(() => {
+            const now = Date.now();
             window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 6,
                 active_regions: [
                     { region: 14001, lat_rad: 0.2, lon_rad: 1.1, area_norm: 0.5,
                       mag_class: 'beta-gamma-delta', is_complex: true },
                     { region: 14002, lat_rad: -0.15, lon_rad: 2.0, area_norm: 0.2,
                       mag_class: 'beta', is_complex: false },
+                ],
+                xray_flux: 5e-5,
+                xray_series: [
+                    { t: now - 30 * 60_000, flux: 2e-6 },
+                    { t: now, flux: 5e-5 },
+                ],
+                recent_flares: [
+                    { time: new Date(now - 5 * 60_000).toISOString(),
+                      parsed: { letter: 'M' } },
                 ] } }));
         });
         await expect.poll(() => page.evaluate(() => window.__swStage?.ovalVisible),
@@ -120,6 +132,15 @@ test.describe('the Stage (S1) on space-weather.html', () => {
             { timeout: 15_000 }).toBe(2);
         await expect.poll(() => page.evaluate(() => window.__swStage.sun.complex),
             { timeout: 15_000 }).toBe(1);
+        // Measured sun behavior at τ ≈ now: M-class → high activity drive,
+        // the in-flare-window injection lights the flash envelope, and the
+        // vitals chip narrates all of it.
+        await expect.poll(() => page.evaluate(() => window.__swStage?.sun.cls),
+            { timeout: 15_000 }).toMatch(/^M/);
+        await expect.poll(() => page.evaluate(() => window.__swStage.sun.act),
+            { timeout: 15_000 }).toBeGreaterThan(0.5);
+        await expect(host.locator('.swst-chip', { hasText: 'X-ray' }))
+            .toContainText(/X-ray M/);
         await expect.poll(() => page.evaluate(() => window.__swStage?.pinVisible)).toBe(true);
         await expect(host.locator('.swst-pin-label')).toContainText('Fairbanks');
         await expect(host.locator('.swst-pin-label')).toContainText(/oval/);
