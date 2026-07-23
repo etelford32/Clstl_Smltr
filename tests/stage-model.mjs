@@ -24,7 +24,7 @@ import {
     flightPose, D0_KM_DEFAULT, dynamicPressure,
     ovalLatAtLon, ovalBandGrid, kpBandAt, subsolarLonDeg, earthLocal,
     sunEclipticLonDeg, temeToStageRe, parseTleRaan, assetOrbitRing, mySkyPose,
-    windFieldAt, AMBIENT_V_KMS, AMBIENT_N_CC,
+    windFieldAt, AMBIENT_V_KMS, AMBIENT_N_CC, memberFieldRows,
 } from '../js/stage/model.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
 import { magneticLatitude, boundaryForKp } from '../js/verdict-engine.js';
@@ -343,6 +343,36 @@ test('S5a windFieldAt: regime boundaries at the kernel radii (S5b contract)', ()
         'ambient');
     // Compression is clamped (RH limit is 4; guard allows headroom to 6).
     assert.equal(windFieldAt(0.75, amb, { ...cme, compression: 99 }).nRel, 6);
+});
+
+test('S5b memberFieldRows: member-bound rows — apex growth, weights, empty slots', () => {
+    const members = [
+        { v0Kms: 900, gammaPerKm: 2e-7, weight: 1.0, lonDeg: -10, latDeg: 5 },
+        { v0Kms: 500, gammaPerKm: 2e-7, weight: 0.25, lonDeg: 8, latDeg: -3 },
+    ];
+    const H = 3600;
+    const r1 = memberFieldRows(members, 400, 24 * H, { shockOffsetAu: 0.05 });
+    const r2 = memberFieldRows(members, 400, 48 * H, { shockOffsetAu: 0.05 });
+    assert.equal(r1.count, 2);
+    // Apexes advance with τ; the faster member leads — the FAN is real.
+    assert.ok(r2.apexAu[0] > r1.apexAu[0]);
+    assert.ok(r1.apexAu[0] > r1.apexAu[1], 'fast member ahead of slow');
+    // Shock rides a fixed offset ahead of each member front. (Float32
+    // storage: 1e-6 tolerance, the house lesson.)
+    assert.ok(Math.abs(r1.shockAu[0] - r1.apexAu[0] - 0.05) < 1e-6);
+    // Filter weights carried; slots past count stay weight 0 (invisible).
+    assert.equal(r1.weight[0], 1);
+    assert.equal(r1.weight[1], 0.25);
+    assert.equal(r1.weight[2], 0);
+    // Front speed: positive, decayed below v0, above the ambient wind
+    // for a decelerating fast member.
+    assert.ok(r1.vKms[0] > 400 && r1.vKms[0] < 900);
+    // Directions in radians, ropeFrame eDir convention (Float32 tol).
+    assert.ok(Math.abs(r1.lonRad[0] + 10 * Math.PI / 180) < 1e-6);
+    assert.ok(Math.abs(r1.latRad[1] + 3 * Math.PI / 180) < 1e-6);
+    // Degenerate inputs refuse honestly.
+    assert.equal(memberFieldRows([], 400, 3600), null);
+    assert.equal(memberFieldRows(members, 400, 0), null);
 });
 
 console.log(`stage-model: ALL PASS (${n} tests)`);

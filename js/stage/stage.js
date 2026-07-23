@@ -48,7 +48,9 @@ import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          wavefrontRadiiAu, shueSurfaceGrid, parkerSpiralPoints,
          stationDefs, flightPose, dynamicPressure,
          ovalBandGrid, kpBandAt, earthLocal, subsolarLonDeg, temeToStageRe,
-         assetOrbitRing, parseTleRaan, mySkyPose, windFieldAt } from './model.js';
+         assetOrbitRing, parseTleRaan, mySkyPose, windFieldAt,
+         memberFieldRows } from './model.js';
+import { sheathCompression } from '../cme-propagation.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
 import { ropeFrame } from '../flux-rope/view.js';
 import { magneticLatitude, boundaryForKp } from '../verdict-engine.js';
@@ -531,12 +533,26 @@ function mount(host) {
         }
         pMapTex.needsUpdate = true;
     }
+    // S5b member texture (plan §15.4b): 128 slots × 2 rows —
+    // row 0: [apex stageR, shock stageR, filter weight, front vKms/1000]
+    // row 1: [lon rad, lat rad, 0, 0]  (ropeFrame eDir convention)
+    // Baked from the PURE memberFieldRows + scale.js stageRadius; a slot
+    // past the member count keeps weight 0 → invisible, never wrong.
+    const pMemTex = new THREE.DataTexture(
+        new Float32Array(128 * 2 * 4), 128, 2, THREE.RGBAFormat, THREE.FloatType);
+    pMemTex.minFilter = pMemTex.magFilter = THREE.NearestFilter;
     const pUniforms = {
         uPhase: { value: 0 },            // advected radial fraction offset
         uMap: { value: pMapTex },
-        uSouth: { value: 0 },            // 0..1 southward-Bz tint weight
+        uSouth: { value: 0 },            // ambient southward-Bz tint (driver)
         uNRel: { value: 1 },             // density vs climatology (0.2..4)
         uPx: { value: Math.min(1.5, window.devicePixelRatio || 1) },
+        // S5b — the ensemble enters the cloud:
+        uMemTex: { value: pMemTex },
+        uCmeOn: { value: 0 },            // 0 → kinds collapse to ambient
+        uComp: { value: 1 },             // sheath density compression (oracle)
+        uEjSouth: { value: 0 },          // ejecta tint from ONE fieldAt probe
+        uJit: { value: 0 },              // sheath turbulence clock (dressing)
     };
     const pGeom = new THREE.BufferGeometry();
     {
@@ -547,51 +563,99 @@ function mount(host) {
         const aSeed = new Float32Array(P_COUNT);
         const aF0 = new Float32Array(P_COUNT);
         const aAng = new Float32Array(P_COUNT * 2);
+        const aKind = new Float32Array(P_COUNT);            // 0 ambient · 1 ejecta · 2 sheath
+        const aSlot = new Float32Array(P_COUNT);            // ensemble-member binding
         for (let i = 0; i < P_COUNT; i++) {
             aSeed[i] = rnd();
             aF0[i] = rnd();
             aAng[i * 2] = (rnd() * 2 - 1) * 0.42;           // ±24° corridor wedge
             aAng[i * 2 + 1] = (rnd() * 2 - 1);              // ecliptic-z shaping
+            const k = rnd();
+            aKind[i] = k < 0.60 ? 0 : k < 0.85 ? 1 : 2;
+            aSlot[i] = Math.floor(rnd() * 128);
         }
         pGeom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
         pGeom.setAttribute('aSeed', new THREE.BufferAttribute(aSeed, 1));
         pGeom.setAttribute('aF0', new THREE.BufferAttribute(aF0, 1));
         pGeom.setAttribute('aAng', new THREE.BufferAttribute(aAng, 2));
+        pGeom.setAttribute('aKind', new THREE.BufferAttribute(aKind, 1));
+        pGeom.setAttribute('aSlot', new THREE.BufferAttribute(aSlot, 1));
     }
     const points = new THREE.Points(pGeom, new THREE.ShaderMaterial({
         uniforms: pUniforms,
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
         vertexShader: `
             uniform float uPhase; uniform sampler2D uMap; uniform float uPx;
+            uniform sampler2D uMemTex; uniform float uCmeOn; uniform float uJit;
             attribute float aSeed; attribute float aF0; attribute vec2 aAng;
-            varying float vFade;
+            attribute float aKind; attribute float aSlot;
+            varying float vFade; varying float vKind; varying float vW;
             void main() {
-                // Per-particle dispersion around the shared advection phase.
-                float f = fract(aF0 + uPhase * (0.85 + 0.30 * aSeed));
-                float sR = texture2D(uMap, vec2(f, 0.5)).r;
-                float th = aAng.x;
-                float z = aAng.y * (0.04 + 0.16 * f);
-                vec3 dir = normalize(vec3(cos(th), sin(th), z));
-                vec4 mv = modelViewMatrix * vec4(dir * sR, 1.0);
+                // With no live forecast every kind collapses to ambient —
+                // the cloud honestly shows only measurement (plan §15.4b).
+                float kind = (uCmeOn > 0.5) ? aKind : 0.0;
+                vec3 pos3; float fade; float w = 1.0;
+                if (kind < 0.5) {
+                    // Ambient: per-particle dispersion around the shared phase.
+                    float f = fract(aF0 + uPhase * (0.85 + 0.30 * aSeed));
+                    float sR = texture2D(uMap, vec2(f, 0.5)).r;
+                    float th = aAng.x;
+                    float z = aAng.y * (0.04 + 0.16 * f);
+                    pos3 = normalize(vec3(cos(th), sin(th), z)) * sR;
+                    fade = smoothstep(0.015, 0.06, f) * (1.0 - smoothstep(0.9, 1.0, f))
+                         * (1.0 - 0.5 * abs(aAng.y));
+                } else {
+                    // Member-bound: THIS particle rides ONE ensemble member.
+                    vec2 u = vec2((aSlot + 0.5) / 128.0, 0.0);
+                    vec4 r0 = texture2D(uMemTex, vec2(u.x, 0.25));
+                    vec4 r1 = texture2D(uMemTex, vec2(u.x, 0.75));
+                    w = r0.b;
+                    float sR;
+                    if (kind < 1.5) {
+                        // Ejecta body: plume behind the member's front.
+                        sR = r0.r * (0.55 + 0.42 * aF0);
+                    } else {
+                        // Sheath: pile-up between front and shock, turbulent
+                        // (the jitter is display dressing, documented).
+                        float jit = sin(uJit * (2.3 + 15.0 * aSeed) + aSeed * 41.0);
+                        sR = mix(r0.r, r0.g, aF0) + jit * 0.006;
+                    }
+                    float th = r1.r + aAng.x * 0.28;
+                    float zl = r1.g + aAng.y * 0.16;
+                    pos3 = vec3(cos(zl) * cos(th), cos(zl) * sin(th), sin(zl)) * sR;
+                    // Weight IS the brightness: the fan you see is the
+                    // assimilated distribution, not a style choice.
+                    fade = 0.12 + 0.88 * w;
+                }
+                vec4 mv = modelViewMatrix * vec4(pos3, 1.0);
                 gl_Position = projectionMatrix * mv;
                 float dist = max(0.4, -mv.z);
-                gl_PointSize = clamp(uPx * 2.4 / dist, 1.0, 3.5);
-                // Fade in near the Sun, out past Earth; dim edge-of-wedge.
-                vFade = smoothstep(0.015, 0.06, f) * (1.0 - smoothstep(0.9, 1.0, f))
-                      * (1.0 - 0.5 * abs(aAng.y));
+                gl_PointSize = clamp(uPx * (kind > 1.5 ? 3.0 : 2.4) / dist, 1.0, 4.0);
+                vFade = fade; vKind = kind; vW = w;
             }`,
         fragmentShader: `
             uniform float uSouth; uniform float uNRel;
-            varying float vFade;
+            uniform float uEjSouth; uniform float uComp;
+            varying float vFade; varying float vKind; varying float vW;
             void main() {
                 vec2 q = gl_PointCoord - 0.5;
                 float d = dot(q, q);
                 if (d > 0.25) discard;
-                float a = smoothstep(0.25, 0.02, d) * vFade
-                        * clamp(0.10 + 0.14 * uNRel, 0.0, 0.75);
+                float core = smoothstep(0.25, 0.02, d);
                 vec3 north = vec3(0.45, 0.72, 0.95);   // rope palette family
                 vec3 south = vec3(0.98, 0.55, 0.38);
-                gl_FragColor = vec4(mix(north, south, uSouth), a);
+                vec3 col; float a;
+                if (vKind < 0.5) {
+                    col = mix(north, south, uSouth);
+                    a = core * vFade * clamp(0.10 + 0.14 * uNRel, 0.0, 0.75);
+                } else if (vKind < 1.5) {
+                    col = mix(north, south, uEjSouth);
+                    a = core * vFade * 0.5;
+                } else {
+                    col = vec3(1.0, 0.9, 0.72);        // shocked sheath, hot
+                    a = core * vFade * clamp(0.12 + 0.10 * uComp, 0.0, 0.8);
+                }
+                gl_FragColor = vec4(col, a);
             }`,
     }));
     points.frustumCulled = false;
@@ -785,7 +849,7 @@ function mount(host) {
         if (!fc) return;
         state.fc = fc;
         if (fc.idle) {
-            state.kernel = null; state.rope = null;
+            state.kernel = null; state.rope = null; state.pMembers = null;
             chip.className = 'swst-chip dim';
             chip.innerHTML = 'corridor quiet — no Earth-directed CME';
             updateScene(true);
@@ -799,6 +863,9 @@ function mount(host) {
         // Full-member kinematics for the wavefront quantiles.
         state.kin = ghostMembers(fc.prior, null, fc.prior?.members ?? 0)
             .map((m) => ({ v0Kms: m.v0Kms, gammaPerKm: m.gammaPerKm }));
+        // S5b: up to 128 members (evenly subsampled, WITH filter weights)
+        // for the particle cloud's member binding (plan §15.4b).
+        state.pMembers = ghostMembers(fc.prior, state.weights, 128);
         const s = fc.rtsw?.samples?.at?.(-1);
         chip.className = 'swst-chip';
         chip.innerHTML = [
@@ -1139,7 +1206,60 @@ function mount(host) {
             attr.needsUpdate = true;
             ropeGeom.computeBoundingSphere();
             colorRope(spec, tS);
+
+            // S5b: the ensemble enters the cloud. Rows from the PURE
+            // memberFieldRows helper; STAGE radii applied here via the
+            // scale.js oracle; shock offset = the rope's sheathK × the
+            // kernel's σ_apex probe (same σ the rope surface uses).
+            const rows = state.pMembers?.length
+                ? memberFieldRows(state.pMembers, state.rope.wKms ?? 400, tS,
+                    { shockOffsetAu: (state.rope.sheathK ?? 0.8) * sigAu })
+                : null;
+            if (rows) {
+                const a = pMemTex.image.data;
+                for (let i = 0; i < 128; i++) {
+                    a[i * 4] = stageRadius(rows.apexAu[i], state.mix);
+                    a[i * 4 + 1] = stageRadius(rows.shockAu[i], state.mix);
+                    a[i * 4 + 2] = rows.weight[i];
+                    a[i * 4 + 3] = rows.vKms[i] / 1000;
+                    a[512 + i * 4] = rows.lonRad[i];
+                    a[512 + i * 4 + 1] = rows.latRad[i];
+                }
+                pMemTex.needsUpdate = true;
+                state.pMemberCount = rows.count;
+                pUniforms.uCmeOn.value = 1;
+
+                // Sheath compression from the EXISTING R–H oracle (the
+                // globe and the validation cron use the same function);
+                // front speed = median member front. Swap to a direct
+                // kernel probe when the wrapper exposes one.
+                const amb = driverAt(state.tauMs);
+                const vAmb = Number.isFinite(amb.vKms) && amb.vKms > 50 ? amb.vKms : 400;
+                const nAmb = Number.isFinite(amb.nCc) && amb.nCc > 0 ? amb.nCc : 5;
+                const vs = Array.from(rows.vKms.slice(0, rows.count)).sort((x, y) => x - y);
+                const vFront = vs[vs.length >> 1] || vAmb;
+                const sc = sheathCompression(vFront, vAmb, nAmb);
+                pUniforms.uComp.value = Math.min(6, Math.max(1, (sc.n_sheath ?? nAmb) / nAmb));
+
+                // Ejecta tint: ONE decimated kernel.fieldAt probe just
+                // inside the median nose — the rope MESH carries the
+                // full-fidelity per-vertex colors; the cloud only needs
+                // the headline polarity.
+                const { eDir } = ropeFrame(state.rope.lonDeg, state.rope.latDeg, state.rope.tiltDeg);
+                const rKm = dAu * 0.92 * AU_KM;
+                const nose = state.kernel.fieldAt(tS,
+                    eDir[0] * rKm, eDir[1] * rKm, eDir[2] * rKm);
+                if (nose?.inside) {
+                    const bScale = Math.max(Math.abs(state.rope.b1AuNt ?? 20), 10);
+                    pUniforms.uEjSouth.value =
+                        Math.min(1, Math.max(0, -nose.bz / bScale));
+                }
+            } else {
+                state.pMemberCount = 0;
+                pUniforms.uCmeOn.value = 0;
+            }
         }
+        if (!live) { state.pMemberCount = 0; pUniforms.uCmeOn.value = 0; }
 
         // Ghost member axes (weight-faded) + ensemble wavefronts.
         const showGhosts = live && !inMySky && state.ghosts.length;
@@ -1382,6 +1502,7 @@ function mount(host) {
         glow.position.copy(sun.position);
         corona.position.copy(sun.position);
         sunUniforms.uTime.value = now / 1000;   // wall-clock granulation drift
+        pUniforms.uJit.value = now / 1000;      // sheath turbulence (dressing)
         // S5a flow advection: τ motion (scrub/playback) moves the field
         // 1:1; on top, wall-clock adds the DISCLOSED time-lapse — which
         // flowLapse() blends to ×1 under true scale (honestly still).
@@ -1419,7 +1540,12 @@ function mount(host) {
                      phase: pUniforms.uPhase.value,
                      south: pUniforms.uSouth.value,
                      vKms: state.flowVKms || null,
-                     visible: points.visible };
+                     visible: points.visible,
+                     // S5b: the ensemble in the cloud.
+                     cmeActive: pUniforms.uCmeOn.value === 1,
+                     members: state.pMemberCount || 0,
+                     comp: pUniforms.uComp.value,
+                     ejSouth: pUniforms.uEjSouth.value };
         },
         flyTo, setTau,
     };

@@ -75,6 +75,13 @@ test.describe('live forecast path (faithful fixtures, real pipeline)', () => {
             { timeout: 30_000 }).toBe('live');
         await expect.poll(() => page.evaluate(() => window.__swStage?.ropeVisible),
             { timeout: 30_000 }).toBe(true);
+        // …the particle cloud binds to the ensemble (S5b): members baked,
+        // sheath compression ≥ 1 from the R–H oracle.
+        await expect.poll(() => page.evaluate(() => window.__swStage?.particles?.cmeActive),
+            { timeout: 30_000 }).toBe(true);
+        const cloud = await page.evaluate(() => window.__swStage.particles);
+        expect(cloud.members).toBeGreaterThan(0);
+        expect(cloud.comp).toBeGreaterThanOrEqual(1);
         // …and the status band's outlook cell leaves 'Quiet'.
         await expect(page.locator('#sw-status-band [data-cell="outlook"] .swb-value'))
             .not.toHaveText('Quiet', { timeout: 30_000 });

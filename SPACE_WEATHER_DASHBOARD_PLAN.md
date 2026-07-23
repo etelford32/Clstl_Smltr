@@ -684,10 +684,22 @@ those move the CLOCK, and the particles follow the driver at τ.
   seeds, My Sky excluded, reduced-motion static, disclosure line
   updated. Probes on __swStage.particles; stage spec test 7 pins
   flow/stillness/hiding.
-- **S5b — CME structure**: sheath pile-up between shock and ejecta
-  front (density × the kernel's compression ratio, turbulent jitter),
-  ejecta interior coloring via decimated fieldAt, arrival-spread fan
-  from member quantiles. Ghosts stay lines — no double-encoding.
+- **S5b — CME structure. ✅ SHIPPED 2026-07-23.** The §15.4b member
+  binding, literal: 60/25/15 of the cloud is ambient/ejecta/sheath by
+  deterministic seed; each CME particle carries a slot into a 128×2
+  member texture baked per updateScene from the PURE memberFieldRows
+  (apexes via the same dbmApexKm mirror the wavefronts use, per-member
+  lon/lat direction in the ropeFrame eDir convention, filter weight →
+  brightness — the fan IS the assimilated distribution). Sheath band
+  rides each member front out to sheathK × the kernel σ_apex probe;
+  its glow scales with the R–H compression from the EXISTING
+  sheathCompression oracle (swap to a kernel probe when the wrapper
+  exposes one); ejecta tint from ONE decimated kernel.fieldAt probe at
+  the median nose (the rope mesh keeps full-fidelity vertex colors).
+  No live forecast → kinds collapse to ambient (measurement, never
+  prediction — pinned offline in the stage spec). Probes:
+  particles.{cmeActive, members, comp, ejSouth}; live-path spec pins
+  the bound cloud end-to-end. Ghosts stay lines — no double-encoding.
 - **S5c — SEP + aurora ends**: proton-event streaks (gate: S1+;
   spiral-aligned; near-instant arrival is the honest physics and the
   visual contrast), precipitation curtains into the oval band at

@@ -481,3 +481,34 @@ export function windFieldAt(rAu, ambient = {}, cme = null) {
     }
     return { vKms: v0, nRel, regime: 'ambient' };
 }
+
+/* ── S5b: per-member field rows for the particle-cloud bake ──────────
+   Each CME particle is BOUND to an ensemble member (plan §15.4b): the
+   renderer bakes these rows to a texture; the shader places a member's
+   plume at ITS apex along ITS direction (the ropeFrame eDir convention:
+   (cosλcosφ, cosλsinφ, sinλ)), faded by ITS filter weight — so the
+   cloud's on-screen spread IS the forecast distribution. Apexes come
+   from the SAME dbmApexKm mirror the wavefront shells use (kernel-
+   pinned by this file's gate); front speed is its finite difference.
+   Slots past `count` keep weight 0 — invisible, never wrong. PURE. */
+export function memberFieldRows(members, wEffKms, tS,
+    { M = 128, d0Km = D0_KM_DEFAULT, shockOffsetAu = 0 } = {}) {
+    const count = Math.min(M, members?.length ?? 0);
+    if (!count || !(tS > 0)) return null;
+    const apexAu = new Float32Array(M), shockAu = new Float32Array(M);
+    const weight = new Float32Array(M), vKms = new Float32Array(M);
+    const lonRad = new Float32Array(M), latRad = new Float32Array(M);
+    const dt = Math.min(600, tS * 0.5);
+    for (let i = 0; i < count; i++) {
+        const m = members[i];
+        const a1 = dbmApexKm(d0Km, m.v0Kms, wEffKms, m.gammaPerKm, tS);
+        const a0 = dbmApexKm(d0Km, m.v0Kms, wEffKms, m.gammaPerKm, tS - dt);
+        apexAu[i] = a1 / AU_KM;
+        shockAu[i] = a1 / AU_KM + Math.max(0, shockOffsetAu);
+        weight[i] = Math.max(0, Math.min(1, m.weight ?? 1));
+        vKms[i] = Math.max(0, (a1 - a0) / dt);
+        lonRad[i] = (m.lonDeg ?? 0) * DEG;
+        latRad[i] = (m.latDeg ?? 0) * DEG;
+    }
+    return { apexAu, shockAu, weight, vKms, lonRad, latRad, count };
+}

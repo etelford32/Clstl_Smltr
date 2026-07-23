@@ -179,6 +179,9 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         expect(s0.p.count).toBeGreaterThanOrEqual(4000);
         expect(s0.p.timeLapse).toBe(3600);
         expect(s0.p.visible).toBe(true);
+        // Offline quiet corridor: the cloud honestly claims NO ensemble
+        // (S5b kinds collapse to ambient — measurement, not prediction).
+        expect(s0.p.cmeActive).toBe(false);
         // The dishonesty is disclosed on-stage, in words.
         await expect(host.locator('.swst-disclose')).toContainText('×3600');
 
