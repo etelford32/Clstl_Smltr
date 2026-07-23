@@ -89,6 +89,24 @@ export function rulerTicks(mix = 0) {
 export const EARTH_LOCAL_RE = 55;   // R_E per stage unit
 export const reToUnits = (re) => re / EARTH_LOCAL_RE;
 
+// ── The Stage's one TEMPORAL dishonesty (S5a, plan §15.2) ──────────────
+// At wall clock a 450 km/s parcel takes ~4 days Sun→Earth — imperceptible.
+// The ambient particle flow therefore renders at a TIME-LAPSE: one transit
+// ≈ 100 s on screen at the default. Same doctrine as the spatial map:
+// declared here (never smuggled into the renderer), disclosed on-stage,
+// and REMOVABLE — the true-scale toggle blends it to ×1 via flowLapse(mix),
+// an honestly motionless corridor. τ-playback/scrubbing move the CLOCK
+// instead and are not affected by this constant.
+export const FLOW = Object.freeze({
+    TIME_LAPSE: 3600,            // ambient flow speedup at mix=0
+});
+
+/** Effective flow time-lapse at compression mix (mix=1 ⇒ ×1, honest). */
+export function flowLapse(mix = 0) {
+    const m = Math.min(1, Math.max(0, mix));
+    return (1 - m) * FLOW.TIME_LAPSE + m * 1;
+}
+
 export const BODY = Object.freeze({
     // Stage-unit draw radii. Real: Sun 0.00465 AU → 0.014 stage units at
     // A=4; Earth 4.26e-5 AU → invisible. Factors stated for the HUD line.

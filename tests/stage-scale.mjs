@@ -11,7 +11,8 @@
 
 import assert from 'node:assert/strict';
 import { stageRadius, stageRadiusInv, stagePoint, rulerTicks,
-         R1, R2, A, B, EARTH_S, BODY, EARTH_LOCAL_RE, reToUnits }
+         R1, R2, A, B, EARTH_S, BODY, EARTH_LOCAL_RE, reToUnits,
+         FLOW, flowLapse }
     from '../js/stage/scale.js';
 
 let n = 0;
@@ -82,6 +83,21 @@ test('disclosed exaggerations are finite and stated', () => {
     // The quiet magnetopause nose (~10 R_E) must clear the drawn Earth.
     assert.ok(reToUnits(10) > BODY.earthRadiusUnits, 'nose outside the drawn Earth');
     assert.ok(EARTH_LOCAL_RE > 0);
+});
+
+test('S5a flow time-lapse: declared, useful magnitude, removable', () => {
+    // One 450 km/s transit at the default lapse lands in the tens-of-
+    // seconds-to-minutes window (the "dynamic" requirement) — pinned as
+    // a RANGE so tuning stays possible without rewriting the doctrine.
+    assert.ok(FLOW.TIME_LAPSE >= 600 && FLOW.TIME_LAPSE <= 20000);
+    const transitS = (1.496e8 / 450) / FLOW.TIME_LAPSE;
+    assert.ok(transitS > 20 && transitS < 600, `on-screen transit ${transitS}s`);
+    // Removability IS the honesty: true scale blends to real time.
+    assert.equal(flowLapse(0), FLOW.TIME_LAPSE);
+    assert.equal(flowLapse(1), 1);
+    assert.ok(flowLapse(0.5) < FLOW.TIME_LAPSE && flowLapse(0.5) > 1);
+    assert.equal(flowLapse(2), 1);                    // clamped
+    assert.equal(flowLapse(-1), FLOW.TIME_LAPSE);     // clamped
 });
 
 console.log(`stage-scale: ALL PASS (${n} tests)`);

@@ -166,6 +166,43 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+    test('S5a: particle stream flows at the disclosed lapse; true scale stills it; My Sky hides it', async ({ page }) => {
+        test.slow();
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('canvas')).toBeVisible({ timeout: 30_000 });
+        const probe = () => page.evaluate(() => ({
+            p: window.__swStage.particles,
+            lost: getComputedStyle(
+                document.querySelector('#sw-stage-host .swst-lost')).display !== 'none',
+        }));
+        const s0 = await probe();
+        expect(s0.p.count).toBeGreaterThanOrEqual(4000);
+        expect(s0.p.timeLapse).toBe(3600);
+        expect(s0.p.visible).toBe(true);
+        // The dishonesty is disclosed on-stage, in words.
+        await expect(host.locator('.swst-disclose')).toContainText('×3600');
+
+        // The flow advances under the wall-clock time-lapse. (Context
+        // loss under software GL halts rendering honestly — skip, as in
+        // the true-scale test.)
+        const phase0 = s0.p.phase;
+        await expect.poll(async () => {
+            const s = await probe();
+            test.skip(s.lost, 'WebGL context lost — honest fallback shown');
+            return Math.abs(s.p.phase - phase0);
+        }, { timeout: 20_000 }).toBeGreaterThan(1e-4);
+
+        // True scale blends the lapse to ×1 — removability is the honesty.
+        await host.locator('.swst-truescale').click();
+        await expect.poll(async () => (await probe()).p.timeLapse,
+            { timeout: 15_000 }).toBeLessThan(2);
+
+        // My Sky is a ground-level sky view: the heliospheric cloud hides.
+        await host.locator('.swst-stations button', { hasText: 'My Sky' }).click();
+        await expect.poll(async () => (await probe()).p.visible).toBe(false);
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
     test('true-scale toggle animates the compression away and back', async ({ page }) => {
         // The tween is wall-clock-anchored (lands in 800 ms at ANY frame
         // rate), but if software-GL CI loses the WebGL context outright,

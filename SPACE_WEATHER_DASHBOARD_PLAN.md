@@ -673,10 +673,17 @@ those move the CLOCK, and the particles follow the driver at τ.
 
 ### 15.4 Phasing (PR-sized arcs, each behind the standing gates)
 
-- **S5a — Ambient stream**: point cloud + field model + time-lapse
-  disclosure + τ/driver coupling + reduced-motion. Node: windFieldAt
-  fixtures (ambient speed = driver V; regime boundaries at kernel
-  radii). Stage spec: probes + no-console-error + timing canary.
+- **S5a — Ambient stream. ✅ SHIPPED 2026-07-23.** Landed as: FLOW +
+  flowLapse in stage/scale.js (the temporal dishonesty beside the
+  spatial one; true-scale blends to ×1); pure windFieldAt in
+  stage/model.js (ambient passthrough + the S5b regime boundaries,
+  node-pinned); 16k/4k-point in-shader stream in stage.js — one
+  advected phase uniform, stageRadius sampled from a baked texture
+  (no third copy of the scale math), speed/density/Bz-tint from
+  driver.at(τ) with honest climatology fallback, deterministic LCG
+  seeds, My Sky excluded, reduced-motion static, disclosure line
+  updated. Probes on __swStage.particles; stage spec test 7 pins
+  flow/stillness/hiding.
 - **S5b — CME structure**: sheath pile-up between shock and ejecta
   front (density × the kernel's compression ratio, turbulent jitter),
   ejecta interior coloring via decimated fieldAt, arrival-spread fan
@@ -689,6 +696,21 @@ those move the CLOCK, and the particles follow the driver at τ.
 - **S5d — Parity dividend**: click-a-parcel lead-time annotation in the
   corridor (the transit view's retirement gate from §12's parity
   review); run the retire-review for the transit panel.
+
+### 15.4b Refinement (author framing 2026-07-23: "animate in 4D,
+depicting and predicting what could happen")
+
+The 4th axis is τ, but the future half of τ is a BUNDLE of timelines,
+not one: in S5b each particle is BOUND TO AN ENSEMBLE MEMBER and
+inherits its kinematics and filter weight — heavily-weighted members
+contribute dense bright streams, near-dead members faint stragglers.
+The on-screen spread of the cloud then IS the forecast distribution:
+scrub forward and the futures diverge; scrub to now and they converge
+on what the L1 data allows (the hourglass). No separate "uncertainty
+layer" — the uncertainty is the cloud. Honesty note: the ensemble
+covers the CME corridor only; quiet-time ambient particles represent
+MEASUREMENT (nowcast persistence), not prediction, and the disclosure
+must never imply otherwise.
 
 ### 15.5 Open author decisions (none block S5a)
 

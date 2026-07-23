@@ -41,13 +41,14 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { stagePoint, stageRadius, rulerTicks, BODY, EARTH_S, AU_KM, RE_KM, reToUnits }
+import { stagePoint, stageRadius, rulerTicks, BODY, EARTH_S, AU_KM, RE_KM, reToUnits,
+         FLOW, flowLapse }
     from './scale.js';
 import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          wavefrontRadiiAu, shueSurfaceGrid, parkerSpiralPoints,
          stationDefs, flightPose, dynamicPressure,
          ovalBandGrid, kpBandAt, earthLocal, subsolarLonDeg, temeToStageRe,
-         assetOrbitRing, parseTleRaan, mySkyPose } from './model.js';
+         assetOrbitRing, parseTleRaan, mySkyPose, windFieldAt } from './model.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
 import { ropeFrame } from '../flux-rope/view.js';
 import { magneticLatitude, boundaryForKp } from '../verdict-engine.js';
@@ -198,7 +199,8 @@ function mount(host) {
         <div class="swst-scale">
           <button type="button" class="swst-truescale" aria-pressed="false">⇲ True scale</button>
           <div class="swst-disclose">Mid-corridor distance log-compressed · bodies enlarged ·
-            magnetosphere at local R<sub>E</sub> scale — ruler shows true AU</div>
+            magnetosphere at local R<sub>E</sub> scale — ruler shows true AU ·
+            wind flow at ×${FLOW.TIME_LAPSE} (true scale = real time)</div>
         </div>
         <div class="swst-tau">
           <span class="swst-regime live" aria-live="polite">LIVE</span>
@@ -496,6 +498,118 @@ function mount(host) {
         scene.add(mesh);
         return mesh;
     });
+
+    /* ── S5a: ambient particle stream (plan §15) ──────────────────────
+       The solar wind as INSTRUMENT: speed from the ONE provider's
+       driver at τ (fallback: climatology), density-vs-climatology sets
+       brightness, Bz polarity sets the tint (the rope's SOUTH/NORTH
+       palette). Positions are computed IN-SHADER from per-particle
+       seeds + one advected phase uniform — zero per-frame CPU geometry
+       work (software-GL CI constraint). The compressed radial map is
+       SAMPLED from a texture baked off scale.js stageRadius — the
+       shader never re-implements the scale math (no third copy).
+       Motion runs at the DISCLOSED time-lapse (scale.js FLOW; the
+       true-scale toggle blends it to ×1 via flowLapse). Quiet-time
+       honesty: with no CME this shows measurement, not prediction. */
+    const P_COUNT = (typeof window !== 'undefined' && window.innerWidth <= 768)
+        ? 4000 : 16000;
+    const P_MAX_AU = 1.12;               // stream past Earth a little
+    const pMapTex = new THREE.DataTexture(
+        new Float32Array(128 * 4), 128, 1, THREE.RGBAFormat, THREE.FloatType);
+    pMapTex.minFilter = pMapTex.magFilter = THREE.LinearFilter;
+    pMapTex.wrapS = THREE.ClampToEdgeWrapping;
+    let pMapKey = '';
+    function bakeFlowMap() {
+        // stageRadius(f·P_MAX_AU, mix) → red channel; re-baked only when
+        // mix moves (updateScene cadence — 128 samples, trivial).
+        const key = state.mix.toFixed(3);
+        if (key === pMapKey) return;
+        pMapKey = key;
+        const a = pMapTex.image.data;
+        for (let i = 0; i < 128; i++) {
+            a[i * 4] = stageRadius((i / 127) * P_MAX_AU, state.mix);
+        }
+        pMapTex.needsUpdate = true;
+    }
+    const pUniforms = {
+        uPhase: { value: 0 },            // advected radial fraction offset
+        uMap: { value: pMapTex },
+        uSouth: { value: 0 },            // 0..1 southward-Bz tint weight
+        uNRel: { value: 1 },             // density vs climatology (0.2..4)
+        uPx: { value: Math.min(1.5, window.devicePixelRatio || 1) },
+    };
+    const pGeom = new THREE.BufferGeometry();
+    {
+        // Deterministic LCG so every boot (and CI run) draws the same dust.
+        let s = 42;
+        const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+        const pos = new Float32Array(P_COUNT * 3);          // required, unused
+        const aSeed = new Float32Array(P_COUNT);
+        const aF0 = new Float32Array(P_COUNT);
+        const aAng = new Float32Array(P_COUNT * 2);
+        for (let i = 0; i < P_COUNT; i++) {
+            aSeed[i] = rnd();
+            aF0[i] = rnd();
+            aAng[i * 2] = (rnd() * 2 - 1) * 0.42;           // ±24° corridor wedge
+            aAng[i * 2 + 1] = (rnd() * 2 - 1);              // ecliptic-z shaping
+        }
+        pGeom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        pGeom.setAttribute('aSeed', new THREE.BufferAttribute(aSeed, 1));
+        pGeom.setAttribute('aF0', new THREE.BufferAttribute(aF0, 1));
+        pGeom.setAttribute('aAng', new THREE.BufferAttribute(aAng, 2));
+    }
+    const points = new THREE.Points(pGeom, new THREE.ShaderMaterial({
+        uniforms: pUniforms,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        vertexShader: `
+            uniform float uPhase; uniform sampler2D uMap; uniform float uPx;
+            attribute float aSeed; attribute float aF0; attribute vec2 aAng;
+            varying float vFade;
+            void main() {
+                // Per-particle dispersion around the shared advection phase.
+                float f = fract(aF0 + uPhase * (0.85 + 0.30 * aSeed));
+                float sR = texture2D(uMap, vec2(f, 0.5)).r;
+                float th = aAng.x;
+                float z = aAng.y * (0.04 + 0.16 * f);
+                vec3 dir = normalize(vec3(cos(th), sin(th), z));
+                vec4 mv = modelViewMatrix * vec4(dir * sR, 1.0);
+                gl_Position = projectionMatrix * mv;
+                float dist = max(0.4, -mv.z);
+                gl_PointSize = clamp(uPx * 2.4 / dist, 1.0, 3.5);
+                // Fade in near the Sun, out past Earth; dim edge-of-wedge.
+                vFade = smoothstep(0.015, 0.06, f) * (1.0 - smoothstep(0.9, 1.0, f))
+                      * (1.0 - 0.5 * abs(aAng.y));
+            }`,
+        fragmentShader: `
+            uniform float uSouth; uniform float uNRel;
+            varying float vFade;
+            void main() {
+                vec2 q = gl_PointCoord - 0.5;
+                float d = dot(q, q);
+                if (d > 0.25) discard;
+                float a = smoothstep(0.25, 0.02, d) * vFade
+                        * clamp(0.10 + 0.14 * uNRel, 0.0, 0.75);
+                vec3 north = vec3(0.45, 0.72, 0.95);   // rope palette family
+                vec3 south = vec3(0.98, 0.55, 0.38);
+                gl_FragColor = vec4(mix(north, south, uSouth), a);
+            }`,
+    }));
+    points.frustumCulled = false;
+    scene.add(points);
+    bakeFlowMap();
+    // Driver sample at τ: the provider's SolarWindDriver when live,
+    // else its latest RTSW sample, else climatology (honest fallback).
+    function driverAt(tauMs) {
+        const d = state.fc?.driver;
+        if (d?.at) {
+            const s = d.at(tauMs);
+            if (s && Number.isFinite(s.v)) return { vKms: s.v, nCc: s.n, bzNt: s.bz };
+        }
+        const s = state.fc?.rtsw?.samples?.at?.(-1);
+        if (s && Number.isFinite(s.v)) return { vKms: s.v, nCc: s.n, bzNt: s.bz };
+        return { vKms: NaN, nCc: NaN, bzNt: NaN };
+    }
+    let flowPrevTau = state.tauMs;
 
     /* ── HTML overlay annotations ─────────────────────────────────── */
     const labels = [];
@@ -994,7 +1108,21 @@ function mount(host) {
         // shows the sky story only: oval band, pin, stations chrome.
         const inMySky = state.station === 'my-sky';
         atmo.visible = !inMySky;
+        points.visible = !inMySky;
         ropeMesh.visible = !!live && !inMySky;
+
+        // S5a particle-field refresh at the updateScene cadence: driver
+        // sample at τ → pure windFieldAt → shader uniforms. The frame
+        // loop only advects the phase; it never touches the oracles.
+        bakeFlowMap();
+        {
+            const amb = driverAt(state.tauMs);
+            const wf = windFieldAt(0.5, { vKms: amb.vKms, nCc: amb.nCc });
+            state.flowVKms = wf.vKms;
+            pUniforms.uNRel.value = wf.nRel;
+            pUniforms.uSouth.value = Number.isFinite(amb.bzNt)
+                ? Math.min(1, Math.max(0, -amb.bzNt / 10)) : 0;
+        }
         if (live) {
             // Median rope geometry: apex/σ straight from the KERNEL probes.
             const dAu = state.kernel.apexKmAt(0, tS) / AU_KM;
@@ -1254,6 +1382,19 @@ function mount(host) {
         glow.position.copy(sun.position);
         corona.position.copy(sun.position);
         sunUniforms.uTime.value = now / 1000;   // wall-clock granulation drift
+        // S5a flow advection: τ motion (scrub/playback) moves the field
+        // 1:1; on top, wall-clock adds the DISCLOSED time-lapse — which
+        // flowLapse() blends to ×1 under true scale (honestly still).
+        // Reduced motion: static dust (phase frozen).
+        {
+            const dTauS = (state.tauMs - flowPrevTau) / 1000;
+            flowPrevTau = state.tauMs;
+            if (!reduced) {
+                const simS = dTauS + (dt / 1000) * (flowLapse(state.mix) - 1);
+                const df = simS * (state.flowVKms || 400) / (P_MAX_AU * AU_KM);
+                pUniforms.uPhase.value = ((pUniforms.uPhase.value + df) % 1 + 1) % 1;
+            }
+        }
         projectLabels();
         renderer.render(scene, camera);
     }
@@ -1271,6 +1412,14 @@ function mount(host) {
         get ropeVisible() { return ropeMesh.visible; },
         get forecastState() {
             return !state.fc ? 'none' : state.fc.idle ? 'idle' : 'live';
+        },
+        // S5a probes (state, not pixels — the CI-safe test surface).
+        get particles() {
+            return { count: P_COUNT, timeLapse: flowLapse(state.mix),
+                     phase: pUniforms.uPhase.value,
+                     south: pUniforms.uSouth.value,
+                     vKms: state.flowVKms || null,
+                     visible: points.visible };
         },
         flyTo, setTau,
     };

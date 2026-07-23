@@ -441,3 +441,43 @@ export function flightPose(a, b, t) {
     const lerp3 = (p, q) => [0, 1, 2].map((i) => p[i] + (q[i] - p[i]) * k);
     return { pos: lerp3(a.pos, b.pos), target: lerp3(a.target, b.target) };
 }
+
+/* ── S5a: the particle wind field (plan §15) ─────────────────────────
+   PURE oracle for the Stage's particle layer: given a heliocentric
+   radius and the ambient sample at τ (from the ONE provider's
+   SolarWindDriver — never a second fetch), plus optionally the
+   kernel-derived CME structure (S5b), classify the regime and return
+   the flow speed and relative density there. The renderer bakes this
+   to a small texture; the shader only advects. Quiet-time honesty
+   (plan §15.4b): with no CME context this REPRESENTS MEASUREMENT
+   (nowcast persistence), not prediction. Node gate: tests/stage-model.mjs. */
+
+export const AMBIENT_V_KMS = 400;   // climatological fallback (driver absent)
+export const AMBIENT_N_CC = 5;      // matches flux-rope-forecast ambientNCc
+
+/**
+ * @param {number} rAu      heliocentric radius [AU]
+ * @param {object} [ambient] { vKms?, nCc? } — driver sample at τ
+ * @param {object} [cme]     { shockAu, ejectaAu, compression?, vKms? } —
+ *        kernel CME structure at τ (shock AHEAD of ejecta: ejectaAu<shockAu)
+ * @returns {{ vKms:number, nRel:number, regime:'ambient'|'sheath'|'ejecta' }}
+ */
+export function windFieldAt(rAu, ambient = {}, cme = null) {
+    const v0 = Number.isFinite(ambient.vKms) && ambient.vKms > 50
+        ? ambient.vKms : AMBIENT_V_KMS;
+    const n0 = Number.isFinite(ambient.nCc) && ambient.nCc > 0
+        ? ambient.nCc : AMBIENT_N_CC;
+    // Relative density vs climatology, clamped so a gust can neither
+    // wash out the scene nor empty it.
+    const nRel = Math.min(4, Math.max(0.2, n0 / AMBIENT_N_CC));
+    if (cme && Number.isFinite(cme.shockAu) && Number.isFinite(cme.ejectaAu)
+        && cme.ejectaAu < cme.shockAu && rAu >= 0 && rAu <= cme.shockAu) {
+        const vCme = Number.isFinite(cme.vKms) && cme.vKms > 50 ? cme.vKms : v0;
+        if (rAu > cme.ejectaAu) {
+            const comp = Math.min(6, Math.max(1, cme.compression ?? 1));
+            return { vKms: vCme, nRel: Math.min(8, nRel * comp), regime: 'sheath' };
+        }
+        return { vKms: vCme, nRel, regime: 'ejecta' };
+    }
+    return { vKms: v0, nRel, regime: 'ambient' };
+}

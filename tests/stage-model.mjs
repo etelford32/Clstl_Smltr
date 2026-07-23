@@ -24,6 +24,7 @@ import {
     flightPose, D0_KM_DEFAULT, dynamicPressure,
     ovalLatAtLon, ovalBandGrid, kpBandAt, subsolarLonDeg, earthLocal,
     sunEclipticLonDeg, temeToStageRe, parseTleRaan, assetOrbitRing, mySkyPose,
+    windFieldAt, AMBIENT_V_KMS, AMBIENT_N_CC,
 } from '../js/stage/model.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
 import { magneticLatitude, boundaryForKp } from '../js/verdict-engine.js';
@@ -302,6 +303,46 @@ test('thermosphere density rises with activity (UA-engine oracle)', () => {
     const at = (kp) => density({ altitudeKm: 550, f107Sfu: 150, ap: kpToAp(kp) }).rho;
     assert.ok(at(5) > at(2) && at(8) > at(5), 'monotone in Kp');
     assert.ok(at(8) / at(2) > 1.5, 'a G4 storm is a visible drag event at 550 km');
+});
+
+test('S5a windFieldAt: ambient = the driver sample, clamped density', () => {
+    // The particle field is MEASUREMENT in quiet time: speed passes the
+    // driver sample through untouched, density is relative-to-climatology.
+    const r = windFieldAt(0.5, { vKms: 520, nCc: 10 });
+    assert.equal(r.regime, 'ambient');
+    assert.equal(r.vKms, 520);
+    assert.equal(r.nRel, 2);                       // 10 / AMBIENT_N_CC
+    // Clamps: a gust can neither wash out nor empty the scene.
+    assert.equal(windFieldAt(0.5, { nCc: 500 }).nRel, 4);
+    assert.equal(windFieldAt(0.5, { nCc: 0.01 }).nRel, 0.2);
+    // Honest fallbacks with no driver.
+    const f = windFieldAt(0.5);
+    assert.equal(f.vKms, AMBIENT_V_KMS);
+    assert.equal(f.nRel, 1);
+    assert.equal(AMBIENT_N_CC, 5);                 // matches provider ambientNCc
+});
+
+test('S5a windFieldAt: regime boundaries at the kernel radii (S5b contract)', () => {
+    const amb = { vKms: 420, nCc: 5 };
+    const cme = { shockAu: 0.8, ejectaAu: 0.7, compression: 3, vKms: 750 };
+    // Upstream of the shock: undisturbed ambient.
+    assert.equal(windFieldAt(0.9, amb, cme).regime, 'ambient');
+    assert.equal(windFieldAt(0.9, amb, cme).vKms, 420);
+    // Between ejecta front and shock: sheath — CME speed, piled-up density.
+    const sh = windFieldAt(0.75, amb, cme);
+    assert.equal(sh.regime, 'sheath');
+    assert.equal(sh.vKms, 750);
+    assert.equal(sh.nRel, 3);                      // 1 × compression
+    // Behind the ejecta front: ejecta — CME speed, no pile-up.
+    const ej = windFieldAt(0.5, amb, cme);
+    assert.equal(ej.regime, 'ejecta');
+    assert.equal(ej.vKms, 750);
+    assert.equal(ej.nRel, 1);
+    // Degenerate structure (shock not ahead of ejecta) → ambient.
+    assert.equal(windFieldAt(0.5, amb, { shockAu: 0.6, ejectaAu: 0.7 }).regime,
+        'ambient');
+    // Compression is clamped (RH limit is 4; guard allows headroom to 6).
+    assert.equal(windFieldAt(0.75, amb, { ...cme, compression: 99 }).nRel, 6);
 });
 
 console.log(`stage-model: ALL PASS (${n} tests)`);
