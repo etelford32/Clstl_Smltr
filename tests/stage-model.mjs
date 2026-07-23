@@ -26,6 +26,7 @@ import {
     sunEclipticLonDeg, temeToStageRe, parseTleRaan, assetOrbitRing, mySkyPose,
     windFieldAt, AMBIENT_V_KMS, AMBIENT_N_CC, memberFieldRows,
     xrayClassOf, sunActivityAt, flareFlashAt,
+    normalizeFlares, parcelProbe, liftoffAt,
 } from '../js/stage/model.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
 import { magneticLatitude, boundaryForKp } from '../js/verdict-engine.js';
@@ -403,6 +404,71 @@ test('the sun always has behavior: X-ray grammar, τ-lookup, flare flash', () =>
     assert.equal(flareFlashAt(flares, T - 30 * 60e3), 0);         // not yet
     assert.equal(flareFlashAt([{ timeMs: T, letter: 'B' }], T), 0);  // sub-C ignored
     assert.equal(flareFlashAt(null, T), 0);
+});
+
+test('S5d measurement: parcelProbe reads the field, lead time, Parker source', () => {
+    const T = Date.parse('2026-07-22T00:00Z');
+    // Ambient monitor at 0.5 AU, 400 km/s: lead time to Earth is the
+    // remaining half-AU at the local flow speed (~52 h), and the Parker
+    // source longitude sits WEST of (ahead of) the probe longitude.
+    const p = parcelProbe(0.5, 0.3, { vKms: 400, nCc: 5 }, null, T);
+    assert.equal(p.regime, 'ambient');
+    assert.ok(Math.abs(p.leadHours - 0.5 * 1.495978707e8 / 400 / 3600) < 1e-9);
+    assert.ok(Math.abs(p.etaMs - (T + p.leadHours * 3.6e6)) < 1);
+    assert.ok(p.srcLonRad > 0.3, 'source longitude ahead of the probe');
+    // The connectivity curve parkerSpiralPoints draws from spiralPhi0Deg
+    // passes through the probe point (same Ω, same 0.05 AU base).
+    const pts = parkerSpiralPoints(p.vKms, p.spiralPhi0Deg, 901, 1.12);
+    let best = Infinity;
+    for (let i = 0; i < 901; i++) {
+        const r = Math.hypot(pts[i * 3], pts[i * 3 + 1]);
+        const phi = Math.atan2(pts[i * 3 + 1], pts[i * 3]);
+        best = Math.min(best, Math.hypot(r - 0.5, phi - 0.3));
+    }
+    assert.ok(best < 5e-3, `spiral passes through the probe (miss ${best})`);
+    // A faster wind unwinds the spiral: source longitude closer to the probe.
+    const fast = parcelProbe(0.5, 0.3, { vKms: 700, nCc: 5 }, null, T);
+    assert.ok(fast.srcLonRad < p.srcLonRad);
+    // CME structure flips the regime through the SAME windFieldAt oracle.
+    const cme = { shockAu: 0.6, ejectaAu: 0.45, compression: 3, vKms: 800 };
+    assert.equal(parcelProbe(0.5, 0, {}, cme, T).regime, 'sheath');
+    assert.equal(parcelProbe(0.4, 0, {}, cme, T).regime, 'ejecta');
+    assert.equal(parcelProbe(0.7, 0, {}, cme, T).regime, 'ambient');
+    // At/past 1 AU there is nothing left to lead.
+    assert.equal(parcelProbe(1.0, 0, {}, null, T).leadHours, null);
+});
+
+test('S5d flare sourcing: normalizeFlares merges NOAA + DONKI honestly', () => {
+    const T = Date.parse('2026-07-22T00:00Z');
+    const noaa = [{ time: new Date(T), parsed: { letter: 'M' }, region: 14001 }];
+    const donki = [
+        // Same event seen by DONKI 2 min later (dedupe, keep NOAA row)…
+        { peak_time: new Date(T + 2 * 60e3), class_letter: 'M', active_region: 14001 },
+        // …and a DONKI-only X flare (NOAA feed retired — the production path).
+        { peak_time: new Date(T + 7.2e6), class_letter: 'X', active_region: 14002 },
+    ];
+    const merged = normalizeFlares(noaa, donki);
+    assert.equal(merged.length, 2);
+    assert.equal(merged[0].letter, 'X');              // most recent first
+    assert.equal(merged[0].region, 14002);
+    assert.equal(merged[1].timeMs, T);                // NOAA row kept
+    // DONKI-only input works alone (recent_flares empty in production).
+    const only = normalizeFlares([], donki);
+    assert.equal(only.length, 2);
+    assert.ok(only.every((f) => Number.isFinite(f.timeMs) && f.letter));
+    // …and feeds the flash envelope directly.
+    assert.equal(flareFlashAt(only, T + 7.2e6), 1);   // X peak
+    assert.equal(normalizeFlares(null, null).length, 0);
+});
+
+test('S5d liftoff: envelope rises into launch and decays over 90 min', () => {
+    const L = Date.parse('2026-07-22T06:00Z');
+    assert.equal(liftoffAt(L, L - 3.6e6), 0);          // an hour before: nothing
+    assert.ok(Math.abs(liftoffAt(L, L - 7.5 * 60e3) - 0.5) < 1e-9);  // rising
+    assert.equal(liftoffAt(L, L), 1);                  // eruption
+    assert.ok(Math.abs(liftoffAt(L, L + 45 * 60e3) - 0.5) < 1e-9);   // decaying
+    assert.equal(liftoffAt(L, L + 2 * 3.6e6), 0);      // cleared the corona
+    assert.equal(liftoffAt(null, L), 0);               // no event, no plume
 });
 
 console.log(`stage-model: ALL PASS (${n} tests)`);

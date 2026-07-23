@@ -573,3 +573,89 @@ export function flareFlashAt(flares, tauMs) {
     }
     return flash;
 }
+
+/**
+ * Normalize + merge the two flare sources the bus carries into the shape
+ * flareFlashAt consumes. NOAA retired xray-flares-7day.json, so in
+ * production `recent_flares` is usually EMPTY and flares arrive only as
+ * `donki_flares` — the Stage must accept both (the 2026-07-23 flash
+ * feature silently never fired live until this landed). Dedupe pairs
+ * within ±5 min (same event, two catalogs), most recent first. PURE.
+ * @param {Array} noaaRows  swpc-feed recent_flares rows
+ *        ({time: Date|iso, parsed:{letter}, region?})
+ * @param {Array} donkiRows swpc-feed donki_flares rows
+ *        ({peak_time|begin_time: Date|iso, class_letter, active_region?})
+ * @returns {Array<{timeMs:number, letter:string, region:number|null}>}
+ */
+export function normalizeFlares(noaaRows, donkiRows) {
+    const ms = (t) => t instanceof Date ? t.getTime() : Date.parse(t ?? '');
+    const out = [];
+    for (const f of noaaRows || []) {
+        const timeMs = ms(f?.time);
+        const letter = f?.parsed?.letter ?? String(f?.cls ?? '')[0];
+        if (Number.isFinite(timeMs) && letter)
+            out.push({ timeMs, letter, region: f?.region ?? null });
+    }
+    for (const f of donkiRows || []) {
+        const timeMs = ms(f?.peak_time ?? f?.begin_time);
+        const letter = f?.class_letter ?? String(f?.flare_class ?? '')[0];
+        if (!Number.isFinite(timeMs) || !letter) continue;
+        // Same event seen by both catalogs → keep the NOAA row (it carries
+        // the region more reliably), just backfill a missing region.
+        const twin = out.find((g) => Math.abs(g.timeMs - timeMs) <= 5 * 60e3
+            && g.letter === letter);
+        if (twin) { twin.region = twin.region ?? f?.active_region ?? null; continue; }
+        out.push({ timeMs, letter, region: f?.active_region ?? null });
+    }
+    return out.sort((a, b) => b.timeMs - a.timeMs).slice(0, 16);
+}
+
+/* ── S5d: measurement — the virtual probe (author, 2026-07-23:
+   "I want some measurement ability here") ────────────────────────────
+   A click in the corridor drops a stationary virtual monitor — like L1,
+   but anywhere. This oracle answers what a spacecraft AT that point
+   reads at τ: the local field (windFieldAt — the same regime the
+   particles render, never a second model), the operational lead time to
+   Earth at the local flow speed, and the Parker-spiral solar source
+   longitude (the same OMEGA_SUN + 0.05 AU base parkerSpiralPoints
+   draws, so the drawn connectivity curve passes exactly through the
+   probe). PURE; node-gated. */
+
+/**
+ * @param {number} rAu     probe heliocentric radius [AU]
+ * @param {number} lonRad  probe heliocentric longitude [rad, stage frame]
+ * @param {object} [ambient] { vKms?, nCc? } driver sample at τ
+ * @param {object} [cme]     windFieldAt CME structure at τ (or null)
+ * @param {number} [tauMs]   scrub time — stamps the ETA
+ * @returns {{ rAu, lonRad, vKms, nRel, regime, leadHours, etaMs,
+ *             srcLonRad, spiralPhi0Deg }}
+ *   leadHours/etaMs are null at/beyond 1 AU (nothing left to lead).
+ */
+export function parcelProbe(rAu, lonRad, ambient = {}, cme = null, tauMs = 0) {
+    const field = windFieldAt(rAu, ambient, cme);
+    const leadS = rAu < 1 ? (1 - rAu) * AU_KM / field.vKms : null;
+    // Parker connectivity: phi(r) = phi0 − Ω(r−0.05)AU/v  ⇒  the source
+    // longitude phi0 sits AHEAD (west) of the probe.
+    const srcLonRad = lonRad + OMEGA_SUN * Math.max(0, rAu - 0.05) * AU_KM / field.vKms;
+    return {
+        rAu, lonRad,
+        vKms: field.vKms, nRel: field.nRel, regime: field.regime,
+        leadHours: leadS == null ? null : leadS / 3600,
+        etaMs: leadS == null ? null : tauMs + leadS * 1000,
+        srcLonRad,
+        spiralPhi0Deg: srcLonRad * 180 / Math.PI,
+    };
+}
+
+/**
+ * CME liftoff envelope at τ: 0..1 pulse around a launch time — 15-min
+ * rise into the eruption, 90-min decay as the front clears the low
+ * corona. Drives the launch-site plume on the Stage sun; the transit
+ * itself belongs to the wavefronts + member cloud. PURE.
+ */
+export function liftoffAt(launchMs, tauMs) {
+    if (!Number.isFinite(launchMs)) return 0;
+    const d = tauMs - launchMs;
+    if (d < -15 * 60e3 || d > 90 * 60e3) return 0;
+    return d < 0 ? 1 + d / (15 * 60e3) : 1 - d / (90 * 60e3);
+}

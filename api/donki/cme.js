@@ -197,6 +197,9 @@ export default async function handler(request) {
 
     return jsonOk({
         source:    'NASA DONKI CMEAnalysis via Vercel Edge',
+        // Diagnosability: 'demo' means the shared 30 req/hr DEMO_KEY quota —
+        // the usual cause of intermittent 429s on this proxy. Never the key.
+        key_mode:  nasaKey === 'DEMO_KEY' ? 'demo' : 'configured',
         data: {
             updated:         new Date().toISOString(),
             window:          {

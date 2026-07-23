@@ -10,7 +10,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { stageRadius, stageRadiusInv, stagePoint, rulerTicks,
+import { stageRadius, stageRadiusInv, stageRadiusInvMix, stagePoint, rulerTicks,
          R1, R2, A, B, EARTH_S, BODY, EARTH_LOCAL_RE, reToUnits,
          FLOW, flowLapse }
     from '../js/stage/scale.js';
@@ -98,6 +98,18 @@ test('S5a flow time-lapse: declared, useful magnitude, removable', () => {
     assert.ok(flowLapse(0.5) < FLOW.TIME_LAPSE && flowLapse(0.5) > 1);
     assert.equal(flowLapse(2), 1);                    // clamped
     assert.equal(flowLapse(-1), FLOW.TIME_LAPSE);     // clamped
+});
+
+test('S5d picking: stageRadiusInvMix inverts the blend at every mix', () => {
+    for (const mix of [0, 0.25, 0.5, 0.99, 1]) {
+        for (const r of [0.07, 0.1, 0.3, 0.62, 0.9, 1.0, 1.12]) {
+            const back = stageRadiusInvMix(stageRadius(r, mix), mix);
+            assert.ok(Math.abs(back - r) < 1e-6, `mix ${mix} r ${r} → ${back}`);
+        }
+    }
+    // mix=0 agrees with the closed form; degenerate input stays sane.
+    assert.equal(stageRadiusInvMix(stageRadius(0.5, 0), 0), stageRadiusInv(stageRadius(0.5, 0)));
+    assert.equal(stageRadiusInvMix(0, 0.7), 0);
 });
 
 console.log(`stage-scale: ALL PASS (${n} tests)`);

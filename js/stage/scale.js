@@ -63,6 +63,23 @@ export function stageRadiusInv(s) {
     return R2 + (s - s2) / A;
 }
 
+/** Mix-aware inverse of stageRadius — bisection over the (monotone) blend.
+ *  Closed form covers mix=0; the probe picker needs the inverse at ANY mix
+ *  so a dropped virtual monitor reads the same true AU under the scale
+ *  toggle. ~40 iterations ≪ one raycast; called only on click. */
+export function stageRadiusInvMix(s, mix = 0) {
+    const m = Math.min(1, Math.max(0, mix));
+    if (m === 0) return stageRadiusInv(s);
+    if (s <= 0) return 0;
+    let lo = 0, hi = 2;
+    while (stageRadius(hi, m) < s && hi < 64) hi *= 2;
+    for (let i = 0; i < 48; i++) {
+        const mid = (lo + hi) / 2;
+        if (stageRadius(mid, m) < s) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+}
+
 /** Map a physical heliocentric point [AU]³ through the radial compression
  *  (direction preserved — compression is purely radial). */
 export function stagePoint(pAu, mix = 0, out = [0, 0, 0]) {

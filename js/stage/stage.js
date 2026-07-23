@@ -41,15 +41,16 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { stagePoint, stageRadius, rulerTicks, BODY, EARTH_S, AU_KM, RE_KM, reToUnits,
-         FLOW, flowLapse }
+import { stagePoint, stageRadius, stageRadiusInvMix, rulerTicks, BODY, EARTH_S,
+         AU_KM, RE_KM, reToUnits, FLOW, flowLapse }
     from './scale.js';
 import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          wavefrontRadiiAu, shueSurfaceGrid, parkerSpiralPoints,
          stationDefs, flightPose, dynamicPressure,
          ovalBandGrid, kpBandAt, earthLocal, subsolarLonDeg, temeToStageRe,
          assetOrbitRing, parseTleRaan, mySkyPose, windFieldAt,
-         memberFieldRows, sunActivityAt, flareFlashAt } from './model.js';
+         memberFieldRows, sunActivityAt, flareFlashAt,
+         normalizeFlares, parcelProbe, liftoffAt } from './model.js';
 import { sheathCompression } from '../cme-propagation.js';
 import { carringtonL0 } from '../ring-current-model.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
@@ -232,6 +233,7 @@ function mount(host) {
     const state = {
         fc: null, kernel: null, rope: null, launchMs: 0,
         ghosts: [], kin: [], weights: null,
+        probe: null, probeRead: null, cmeField: null,   // S5d virtual monitor
         mix: 0, mixTarget: 0,
         tauMs: Date.now(), anchorMs: Date.now(),   // scrub window anchor
         playing: false, station: 'corridor', flying: false,
@@ -349,6 +351,41 @@ function mount(host) {
             [new THREE.Vector3(0, 0, 0), new THREE.Vector3(EARTH_S, 0, 0)]),
         new THREE.LineBasicMaterial({ color: 0x25344a, transparent: true, opacity: 0.6 }));
     scene.add(rulerLine);
+
+    // S5d VIRTUAL PROBE ("I want some measurement ability here", author
+    // 2026-07-23): click empty corridor → a stationary monitor at that
+    // heliocentric point, like L1 but anywhere. Its readings come from
+    // the SAME parcelProbe/windFieldAt oracle the particle layer renders
+    // — the probe never disagrees with the scene. Two trajectory lines:
+    // the RADIAL one is the parcel path (solar wind moves ~radially);
+    // the SPIRAL one is magnetic connectivity back to the solar source
+    // longitude (the Parker locus — a pattern, not a parcel path; the
+    // chip labels both so the two aren't conflated).
+    const probeMarker = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.045),
+        new THREE.MeshBasicMaterial({ color: 0x6ff2c5 }));
+    probeMarker.visible = false;
+    scene.add(probeMarker);
+    const probeRadial = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(
+            [new THREE.Vector3(), new THREE.Vector3()]),
+        new THREE.LineDashedMaterial({ color: 0x6ff2c5, transparent: true,
+            opacity: 0.55, dashSize: 0.06, gapSize: 0.05 }));
+    probeRadial.visible = false;
+    scene.add(probeRadial);
+    const probeSpiral = new THREE.Line(
+        physLineGeometry(parkerSpiralPoints(400, 0, 90, 1.12)),
+        new THREE.LineBasicMaterial({ color: 0x49b890, transparent: true, opacity: 0.6 }));
+    probeSpiral.visible = false;
+    scene.add(probeSpiral);
+
+    // CME LIFTOFF plume ("active processes of the sun"): a directional
+    // flash at the launch site while τ crosses the catalogued launch
+    // time — geometry from the provider's own event (lon/lat), envelope
+    // from the pure liftoffAt. The transit belongs to the wavefronts.
+    const liftoffSprite = makeGlowSprite('#ffe9bf', 1.0);
+    liftoffSprite.visible = false;
+    scene.add(liftoffSprite);
 
     const l1 = new THREE.Mesh(
         new THREE.OctahedronGeometry(0.02),
@@ -717,6 +754,15 @@ function mount(host) {
         () => [0, 0, -BODY.sunRadiusUnits * 2.0]);
     addLabel('swst-label', 'EARTH', () => [EARTH_S, 0, BODY.earthRadiusUnits * 2.2]);
     addLabel('swst-label', 'L1', () => [stageRadius(0.99, state.mix), 0, 0.05]);
+    // S5d probe readout — follows the dropped monitor; hidden until one
+    // exists (display toggled by the probe update block, like pinLabel).
+    const probeChip = addLabel('swst-chip', '', () => {
+        const p = state.probe;
+        if (!p) return [0, 0, -9];
+        const s = stageRadius(p.rAu, state.mix);
+        return [s * Math.cos(p.lonRad), s * Math.sin(p.lonRad), -0.12];
+    });
+    probeChip.style.display = 'none';
     const chip = addLabel('swst-chip dim', 'awaiting L1 feed…',
         () => [stageRadius(0.99, state.mix), 0, 0]);
     for (const t of rulerTicks()) {
@@ -945,11 +991,12 @@ function mount(host) {
         if (Number.isFinite(d?.xray_flux) && d.xray_flux > 0) {
             state.xrayLatest = d.xray_flux;
         }
-        if (Array.isArray(d?.recent_flares) && d.recent_flares.length) {
-            state.flares = d.recent_flares.map((f) => ({
-                timeMs: f?.time instanceof Date ? f.time.getTime() : Date.parse(f?.time ?? ''),
-                letter: f?.parsed?.letter ?? String(f?.cls ?? '')[0],
-            })).filter((f) => Number.isFinite(f.timeMs));
+        // BOTH flare catalogs: NOAA retired its 7-day flare JSON, so live
+        // flares usually arrive ONLY as donki_flares — reading recent_flares
+        // alone meant the flash never fired in production. The pure merge
+        // dedupes the overlap and keeps the AR number for localization.
+        if (d?.recent_flares?.length || d?.donki_flares?.length) {
+            state.flares = normalizeFlares(d.recent_flares, d.donki_flares);
         }
         updateScene();
     });
@@ -1161,9 +1208,36 @@ function mount(host) {
         const targets = [];
         if (ropeMesh.visible) targets.push(ropeMesh);
         if (pinMarker.visible) targets.push(pinMarker);
+        if (probeMarker.visible) targets.push(probeMarker);
         for (const o of assetObjs) targets.push(o.dot);
         const hit = raycaster.intersectObjects(targets, false)[0];
-        if (!hit) return;
+        if (!hit) {
+            // S5d: empty corridor → drop/move the virtual probe on the
+            // ecliptic. The stage→AU inverse is mix-aware, so the monitor
+            // lands on the same TRUE radius under either scale.
+            if (state.station === 'my-sky') return;
+            const pt = new THREE.Vector3();
+            if (!raycaster.ray.intersectPlane(
+                new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), pt)) return;
+            const rAu = stageRadiusInvMix(Math.hypot(pt.x, pt.y), state.mix);
+            if (rAu < 0.07 || rAu > 1.12) return;   // outside the corridor
+            state.probe = { rAu, lonRad: Math.atan2(pt.y, pt.x) };
+            updateScene(true);
+            track('stage_pick', { type: 'probe' });
+            try {
+                window.dispatchEvent(new CustomEvent('sw-pick', {
+                    detail: { type: 'probe', rAu,
+                        lonDeg: state.probe.lonRad * 180 / Math.PI } }));
+            } catch {}
+            return;
+        }
+        if (hit.object === probeMarker) {
+            // Clicking the monitor retrieves it.
+            state.probe = null;
+            updateScene(true);
+            track('stage_pick', { type: 'probe-clear' });
+            return;
+        }
         track('stage_pick', {
             type: hit.object === ropeMesh ? 'rope'
                 : hit.object === pinMarker ? 'pin' : 'asset',
@@ -1227,22 +1301,33 @@ function mount(host) {
             const sa = sunActivityAt(state.xraySeries, state.tauMs, state.xrayLatest);
             const flash = flareFlashAt(state.flares, state.tauMs);
             const act = Math.min(1, Math.max(sa.act, flash));
-            state.sunAct = { cls: sa.cls, act, flash };
+            // Localize the flash when the catalog names the source AR:
+            // find the flare currently inside its envelope that carries a
+            // region number (honest attribution only — no region, no site).
+            const src = flash > 0.05
+                ? (state.flares ?? []).find((f) => f.region != null
+                    && flareFlashAt([f], state.tauMs) >= flash - 1e-9)
+                : null;
+            state.sunAct = { cls: sa.cls, act, flash, flareRegion: src?.region ?? null };
             sunUniforms.uAct.value = act;
             corona.material.opacity = 0.25 + 0.4 * act + 0.25 * flash;
             corona.scale.setScalar(2.4 * (1 + 0.3 * act));
             const nAr = (state.regions ?? []).length;
             const nCx = (state.regions ?? []).filter((r) => r.is_complex).length;
-            sunChip.textContent = `☀ X-ray ${sa.cls}${flash > 0.05 ? ' · FLARE' : ''}`
+            sunChip.textContent = `☀ X-ray ${sa.cls}${flash > 0.05 ? (src ? ` · FLARE @ AR ${src.region}` : ' · FLARE') : ''}`
                 + (nAr ? ` · ${nAr} AR${nAr > 1 ? 's' : ''}${nCx ? ` (${nCx} complex)` : ''}` : '')
                 + (Number.isFinite(state.f107) ? ` · F10.7 ${Math.round(state.f107)}` : '');
         }
 
         // Active-region markers at Stonyhurst positions for τ (Carrington
-        // lon − L0(τ), the carringtonL0 oracle): +x faces Earth.
+        // lon − L0(τ), the carringtonL0 oracle): +x faces Earth. The AR the
+        // catalog blames for an in-envelope flare ERUPTS: white-hot and
+        // swollen by the flash — the measured process, placed on record.
         {
             const regions = state.regions ?? [];
             const L0 = carringtonL0(state.tauMs).L0 * Math.PI / 180;
+            const flash = state.sunAct?.flash ?? 0;
+            const flareRegion = state.sunAct?.flareRegion ?? null;
             for (let i = 0; i < arMarkers.length; i++) {
                 const r = regions[i], m = arMarkers[i];
                 if (!r) { m.visible = false; continue; }
@@ -1251,9 +1336,33 @@ function mount(host) {
                 m.position.set(
                     cl * Math.cos(stony), cl * Math.sin(stony),
                     Math.sin(r.lat_rad ?? 0)).multiplyScalar(BODY.sunRadiusUnits * 1.02);
-                m.scale.setScalar(BODY.sunRadiusUnits * (0.05 + 0.12 * (r.area_norm ?? 0.1)));
-                m.material.color.setHex(r.is_complex ? 0xff6a3d : 0xffe08a);
+                const erupting = flareRegion != null && r.region === flareRegion;
+                m.scale.setScalar(BODY.sunRadiusUnits
+                    * (0.05 + 0.12 * (r.area_norm ?? 0.1))
+                    * (erupting ? 1 + 1.6 * flash : 1));
+                if (erupting) m.material.color.setHex(0xfff6e0);
+                else m.material.color.setHex(r.is_complex ? 0xff6a3d : 0xffe08a);
                 m.visible = true;
+            }
+        }
+
+        // CME liftoff plume: while τ crosses the provider event's launch
+        // time, a directional flash rises at the launch site (lon/lat from
+        // the SAME catalogued event the rope uses — no invented geometry).
+        {
+            const lo = state.rope ? liftoffAt(state.launchMs, state.tauMs) : 0;
+            if (lo > 0.02 && state.station !== 'my-sky') {
+                const lon = (state.rope.lonDeg ?? 0) * Math.PI / 180;
+                const lat = (state.rope.latDeg ?? 0) * Math.PI / 180;
+                const cl = Math.cos(lat);
+                liftoffSprite.position.set(
+                    cl * Math.cos(lon), cl * Math.sin(lon), Math.sin(lat))
+                    .multiplyScalar(BODY.sunRadiusUnits * (1.1 + 0.9 * (1 - lo)));
+                liftoffSprite.scale.setScalar(BODY.sunRadiusUnits * (0.6 + 1.2 * lo));
+                liftoffSprite.material.opacity = 0.85 * lo;
+                liftoffSprite.visible = true;
+            } else {
+                liftoffSprite.visible = false;
             }
         }
 
@@ -1336,6 +1445,10 @@ function mount(host) {
                 const vFront = vs[vs.length >> 1] || vAmb;
                 const sc = sheathCompression(vFront, vAmb, nAmb);
                 pUniforms.uComp.value = Math.min(6, Math.max(1, (sc.n_sheath ?? nAmb) / nAmb));
+                // The probe reads the SAME nose-line structure the cloud
+                // renders (median apex/shock, R–H compression, front speed).
+                state.cmeField = { shockAu: dAu + (state.rope.sheathK ?? 0.8) * sigAu,
+                    ejectaAu: dAu, compression: pUniforms.uComp.value, vKms: vFront };
 
                 // Ejecta tint: ONE decimated kernel.fieldAt probe just
                 // inside the median nose — the rope MESH carries the
@@ -1353,9 +1466,68 @@ function mount(host) {
             } else {
                 state.pMemberCount = 0;
                 pUniforms.uCmeOn.value = 0;
+                state.cmeField = null;
             }
         }
-        if (!live) { state.pMemberCount = 0; pUniforms.uCmeOn.value = 0; }
+        if (!live) { state.pMemberCount = 0; pUniforms.uCmeOn.value = 0; state.cmeField = null; }
+
+        // S5d probe refresh: the dropped monitor is FIXED IN SPACE; every
+        // scrub re-reads the field through the SAME oracle the particles
+        // render, so its regime flips exactly when a wavefront sweeps it.
+        {
+            const p = state.probe;
+            const show = !!p && !inMySky;
+            probeMarker.visible = probeRadial.visible = probeSpiral.visible = show;
+            probeChip.style.display = show ? '' : 'none';
+            if (show) {
+                const amb = driverAt(state.tauMs);
+                const read = parcelProbe(p.rAu, p.lonRad,
+                    { vKms: amb.vKms, nCc: amb.nCc }, state.cmeField, state.tauMs);
+                state.probeRead = read;
+                const s = stageRadius(p.rAu, state.mix);
+                const cosL = Math.cos(p.lonRad), sinL = Math.sin(p.lonRad);
+                probeMarker.position.set(s * cosL, s * sinL, 0);
+                // Radial parcel path: launch base → past 1 AU along the ray.
+                const s0 = stageRadius(0.05, state.mix), s1 = stageRadius(1.12, state.mix);
+                const rp = probeRadial.geometry.getAttribute('position');
+                rp.setXYZ(0, s0 * cosL, s0 * sinL, 0);
+                rp.setXYZ(1, s1 * cosL, s1 * sinL, 0);
+                rp.needsUpdate = true;
+                probeRadial.computeLineDistances();
+                // Spiral connectivity: rebuild only when the curve changes
+                // (speed or source longitude moved, or the scale toggled).
+                const key = `${Math.round(read.vKms)}|${read.spiralPhi0Deg.toFixed(1)}|${state.mix.toFixed(3)}`;
+                if (probeSpiral.userData.key !== key) {
+                    probeSpiral.userData.key = key;
+                    const phys = parkerSpiralPoints(read.vKms, read.spiralPhi0Deg, 90, Math.max(1.12, p.rAu));
+                    probeSpiral.userData.phys = phys;
+                    probeSpiral.geometry.dispose();
+                    probeSpiral.geometry = physLineGeometry(phys);
+                    remapLine(probeSpiral, state.mix);
+                }
+                // Source-AR connectivity: an AR whose Stonyhurst longitude
+                // sits within 15° of the spiral footpoint is "connected".
+                const L0 = carringtonL0(state.tauMs).L0 * Math.PI / 180;
+                const TWO_PI = Math.PI * 2;
+                const conn = (state.regions ?? []).find((r) => {
+                    let d = ((r.lon_rad ?? 0) - L0 - read.srcLonRad) % TWO_PI;
+                    if (d > Math.PI) d -= TWO_PI;
+                    if (d < -Math.PI) d += TWO_PI;
+                    return Math.abs(d) < 15 * Math.PI / 180;
+                });
+                state.probeRead.connectedAr = conn?.region ?? null;
+                const lead = read.leadHours == null ? 'at/past Earth'
+                    : `Earth +${read.leadHours < 10 ? read.leadHours.toFixed(1) : Math.round(read.leadHours)} h`;
+                const srcDeg = ((read.srcLonRad * 180 / Math.PI) % 360 + 360) % 360;
+                probeChip.innerHTML =
+                    `⌖ ${p.rAu.toFixed(2)} AU · ${Math.round(read.vKms)} km/s · `
+                    + `${read.nRel.toFixed(1)}×n · ${read.regime} · ${lead}`
+                    + `<br>path ⟶ radial · field ⟿ src ${Math.round(srcDeg)}°`
+                    + (conn ? ` ⇢ AR ${conn.region}` : '');
+            } else {
+                state.probeRead = null;
+            }
+        }
 
         // Ghost member axes (weight-faded) + ensemble wavefronts.
         const showGhosts = live && !inMySky && state.ghosts.length;
@@ -1649,7 +1821,23 @@ function mount(host) {
                      complex: (state.regions ?? []).filter((r) => r.is_complex).length,
                      cls: state.sunAct?.cls ?? null,
                      act: state.sunAct?.act ?? 0,
-                     flash: state.sunAct?.flash ?? 0 };
+                     flash: state.sunAct?.flash ?? 0,
+                     flareRegion: state.sunAct?.flareRegion ?? null,
+                     liftoff: liftoffSprite.visible };
+        },
+        // S5d: the virtual monitor (null when none is dropped).
+        get probe() {
+            const r = state.probeRead;
+            return !r ? null : { rAu: r.rAu, lonDeg: r.lonRad * 180 / Math.PI,
+                     vKms: r.vKms, nRel: r.nRel, regime: r.regime,
+                     leadHours: r.leadHours, srcLonDeg: r.spiralPhi0Deg,
+                     connectedAr: r.connectedAr ?? null,
+                     visible: probeMarker.visible };
+        },
+        setProbe(rAu, lonDeg) {   // test/deep-link hook — same path as a click
+            state.probe = Number.isFinite(rAu)
+                ? { rAu, lonRad: (lonDeg ?? 0) * Math.PI / 180 } : null;
+            updateScene(true);
         },
         flyTo, setTau,
     };

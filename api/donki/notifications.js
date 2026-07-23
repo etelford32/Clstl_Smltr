@@ -68,6 +68,7 @@ export default async function handler(request) {
 
     return jsonOk({
         source:    'NASA DONKI notifications via Vercel Edge',
+        key_mode:  nasaKey === 'DEMO_KEY' ? 'demo' : 'configured',
         plan:      pro ? 'pro' : 'free',
         data: {
             updated:       new Date().toISOString(),

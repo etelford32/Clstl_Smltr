@@ -740,9 +740,37 @@ those move the CLOCK, and the particles follow the driver at τ.
   visual contrast), precipitation curtains into the oval band at
   Earth-local scale — the input the future My Sky sky-dome renders
   from below. §9b: instrument whether particle drama moves dwell.
-- **S5d — Parity dividend**: click-a-parcel lead-time annotation in the
-  corridor (the transit view's retirement gate from §12's parity
-  review); run the retire-review for the transit panel.
+- **S5d — MEASUREMENT: the virtual probe. ✅ SHIPPED 2026-07-23**
+  (author: "how can we show particle trajectories? I want some
+  measurement ability here"). Click empty corridor → a stationary
+  virtual monitor (like L1, anywhere): pure `parcelProbe` in
+  stage/model.js reads the SAME windFieldAt oracle the particles
+  render (regime flips exactly when a wavefront sweeps the probe),
+  plus lead time to Earth at the local flow speed and the
+  Parker-spiral source longitude (same Ω + 0.05 AU base as
+  parkerSpiralPoints — node-pinned that the drawn connectivity curve
+  passes through the probe). TWO trajectory lines, honestly labeled:
+  the RADIAL dashed line is the parcel path (solar wind moves
+  ~radially); the SPIRAL is magnetic connectivity, a pattern — the
+  chip says `path ⟶ radial · field ⟿ src N°` so they can't be
+  conflated, and appends `⇢ AR n` when the footpoint lands within 15°
+  of a catalogued region. Picking: empty-click drops/moves (mix-aware
+  stageRadiusInvMix inverse in scale.js, node-pinned), clicking the
+  probe retrieves it, `sw-pick {type:'probe'}` dispatched, `?`-hook
+  `__swStage.setProbe(rAu, lonDeg)` for tests/deep links. Probes:
+  __swStage.probe. The transit-panel retire review (§12) remains OPEN.
+- **SOLAR PROCESSES — ✅ SHIPPED 2026-07-23** (author: "maybe we also
+  show active processes of the sun"). Two honest additions: (1) flare
+  LOCALIZATION — state.flares now merges recent_flares + donki_flares
+  via pure `normalizeFlares` (NOAA retired its flare JSON, so live
+  flares arrive DONKI-only; the 07-23 flash feature never fired in
+  production until this landed — spec-pinned on the DONKI-only path),
+  and when the catalog names the source AR the marker ERUPTS
+  (white-hot, swollen by the flash envelope) with the chip reading
+  `FLARE @ AR n` — no region on record, no site invented; (2) CME
+  LIFTOFF — pure `liftoffAt` envelope (15-min rise / 90-min decay)
+  drives a directional plume at the provider event's own lon/lat while
+  τ crosses its launch. Probes: sun.{flareRegion, liftoff}.
 
 ### 15.4b Refinement (author framing 2026-07-23: "animate in 4D,
 depicting and predicting what could happen")
