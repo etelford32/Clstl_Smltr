@@ -161,4 +161,22 @@ test('deepestSunAltitude is pure and deterministic', () => {
         'winter Fairbanks has true dark');
 });
 
+test('calendar replay labels the outlook + arrival cells, never as the live watch', () => {
+    // A replayed past event: P50 arrival 2 days AGO.
+    const summary = { pHit: 0.8, p10: 0.6, p20: 0.3,
+        arrivalP10Ms: T0 - 60 * HOUR, arrivalP50Ms: T0 - 48 * HOUR,
+        arrivalP90Ms: T0 - 40 * HOUR, minBzP50: -12 };
+    const m = statusBandModel({ summary, kp: 3, loc: null, nowMs: T0,
+        replay: 'CME 07-18 12:36Z · 900 km/s' });
+    const o = cell(m, 'outlook');
+    assert.equal(o.label, 'Outlook · REPLAY');
+    assert.ok(o.detail.startsWith('⟲ CME 07-18'), o.detail);
+    const a = cell(m, 'arrival');
+    assert.equal(a.label, 'Arrival · REPLAY');
+    assert.equal(a.value, 'arrived');            // past P50 says arrived, not "now"
+    // No replay → labels untouched (the live grammar is unchanged).
+    const live = statusBandModel({ summary, kp: 3, loc: null, nowMs: T0 });
+    assert.equal(cell(live, 'outlook').label, 'Storm outlook');
+});
+
 console.log(`space-weather-status-band: ALL PASS (${n} tests)`);

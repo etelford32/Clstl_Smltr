@@ -837,6 +837,11 @@ function mount(host) {
         playBtn.setAttribute('aria-pressed', 'false');
         state.anchorMs = Date.now();
         setTau(Date.now());
+        // Now = back to the LIVE watch: exit any calendar replay (the
+        // provider re-runs and republishes; loose-coupled via the event).
+        if (state.fc?.replay) {
+            try { window.dispatchEvent(new CustomEvent('sw-replay-cme', { detail: null })); } catch {}
+        }
     });
     playBtn.addEventListener('click', () => {
         state.playing = !state.playing;
@@ -869,6 +874,9 @@ function mount(host) {
         const s = fc.rtsw?.samples?.at?.(-1);
         chip.className = 'swst-chip';
         chip.innerHTML = [
+            // Calendar replay: the corridor is showing a SELECTED event,
+            // not the live watch — say so; Now returns to live.
+            fc.replay ? `⟲ REPLAY ${fc.replay.label}` : null,
             s && Number.isFinite(s.bz) ? `Bz ${s.bz.toFixed(1)} nT` : null,
             s && Number.isFinite(s.v) ? `V ${Math.round(s.v)} km/s` : null,
             s && Number.isFinite(s.n) ? `N ${s.n.toFixed(1)} /cc` : null,

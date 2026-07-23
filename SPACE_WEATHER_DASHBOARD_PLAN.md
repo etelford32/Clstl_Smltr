@@ -700,6 +700,24 @@ those move the CLOCK, and the particles follow the driver at τ.
   prediction — pinned offline in the stage spec). Probes:
   particles.{cmeActive, members, comp, ejSouth}; live-path spec pins
   the bound cloud end-to-end. Ghosts stay lines — no double-encoding.
+- **EVENT REPLAY — ✅ SHIPPED 2026-07-23** (author: "we should be able
+  to scrub historically through the most recent events using the
+  calendar… show the actual events as options for the canvas").
+  New contract `sw-replay-cme` {cme: swpc-feed row} | null: clicking an
+  ⊕ arrival chip scrubs τ AND re-runs the page's ONE flux-rope
+  provider seeded with that event (`sources.cmes` override — the same
+  pipeline, never a fork); the republished result time-travels every
+  consumer together: Stage rope + member-bound cloud at the event's
+  own transit, band cells relabeled `Outlook/Arrival · REPLAY` (a past
+  event must never read as the live watch — node-pinned), panel banner
+  with "back to live", Stage Now button exits replay. Assimilation is
+  honest per event age: inside the RTSW archive window the filter
+  conditions on the ACTUAL observed L1 record; outside it the run is
+  the launch-time ensemble and the banner says so. Locked-forecast
+  visibility rode along: chips show 🔒 + per-model locked ETAs in the
+  tooltip and the strip counts locked events before any resolve —
+  the predictor is visibly working while skill accrues. Gate:
+  live-path spec 'calendar replay' (full pipeline, both directions).
 - **S5c — SEP + aurora ends**: proton-event streaks (gate: S1+;
   spiral-aligned; near-instant arrival is the honest physics and the
   visual contrast), precipitation curtains into the oval band at

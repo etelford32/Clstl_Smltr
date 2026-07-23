@@ -13,10 +13,18 @@ const H = 3.6e6;
 
 function fixtures(nowMs) {
     const launch = new Date(nowMs - 36 * H).toISOString().slice(0, 16) + 'Z';
+    const pastLaunch = new Date(nowMs - 5 * 24 * H).toISOString().slice(0, 16) + 'Z';
     const donki = { data: { cmes: [{
         cme_id: 'CME-e2e-001', time: launch, most_accurate: true,
         speed_km_s: 800, latitude_deg: 5, longitude_deg: -10,
         half_angle_deg: 40, earth_directed: true, note: 'e2e fixture',
+    }, {
+        // A PAST Earth-directed event for the calendar-replay test —
+        // listed second so the LIVE run still targets the recent one.
+        cme_id: 'CME-e2e-PAST', time: pastLaunch, most_accurate: true,
+        speed_km_s: 900, latitude_deg: -4, longitude_deg: 12,
+        half_angle_deg: 45, earth_directed: true, note: 'e2e past fixture',
+        enlil: { shock_arrival: new Date(nowMs - 4 * 24 * H).toISOString(), kp_90: 6 },
     }] } };
     const mag = [], wind = [];
     for (let i = 24 * 12; i >= 0; i--) {   // last 24 h, 5-min cadence
@@ -85,6 +93,60 @@ test.describe('live forecast path (faithful fixtures, real pipeline)', () => {
         // …and the status band's outlook cell leaves 'Quiet'.
         await expect(page.locator('#sw-status-band [data-cell="outlook"] .swb-value'))
             .not.toHaveText('Quiet', { timeout: 30_000 });
+    });
+
+    test('calendar replay: clicking a past event re-seeds the whole page', async ({ page }) => {
+        test.slow();
+        const { donki, mag, wind } = fixtures(Date.now());
+        await page.addInitScript(() => {
+            localStorage.setItem('pp_auth', JSON.stringify({
+                signedIn: true, id: 'e2e-replay', email: 'e2e@playwright.test',
+                plan: 'free', role: 'user', provider: 'password',
+            }));
+            try {
+                localStorage.setItem('pp_consent_v1', JSON.stringify(
+                    { strict: true, functional: true, analytics: false, ts: Date.now(), version: 1 }));
+            } catch {}
+        });
+        await page.route('**/api/donki/cme*', (r) => r.fulfill({ json: donki }));
+        await page.route('**/rtsw/rtsw_mag_1m.json', (r) => r.fulfill({ json: mag }));
+        await page.route('**/rtsw/rtsw_wind_1m.json', (r) => r.fulfill({ json: wind }));
+        await page.goto('/space-weather.html', { waitUntil: 'domcontentloaded' });
+
+        // Live run publishes first: no replay stamp, and it targets the
+        // RECENT event (36 h-old launch), not the past one.
+        await page.waitForFunction(() => window.__fluxRopeForecast?.idle === false,
+            null, { timeout: 90_000 });
+        const live0 = await page.evaluate(() => ({
+            replay: window.__fluxRopeForecast.replay ?? null,
+            launchMs: window.__fluxRopeForecast.launchMs,
+        }));
+        expect(live0.replay).toBe(null);
+        expect(Date.now() - live0.launchMs).toBeLessThan(48 * 3.6e6);
+
+        // …then clicking the PAST event's calendar chip re-runs the ONE
+        // provider seeded with it: replay stamped, Stage rope shows the
+        // event at its own transit, band cells relabel, chip scrubbed τ.
+        const chip = page.locator('.cal-ev[data-cme-id="CME-e2e-PAST"]');
+        await expect(chip).toBeVisible({ timeout: 30_000 });
+        await chip.click();
+        await expect.poll(() => page.evaluate(
+            () => window.__fluxRopeForecast?.replay?.id ?? null),
+            { timeout: 90_000 }).toBe('CME-e2e-PAST');
+        await expect.poll(() => page.evaluate(() => window.__swStage?.ropeVisible),
+            { timeout: 30_000 }).toBe(true);
+        await expect(page.locator('#sw-status-band [data-cell="outlook"] .swb-label'))
+            .toContainText('REPLAY', { timeout: 15_000 });
+        await expect(page.locator('#sw-stage-host .swst-chip', { hasText: 'REPLAY' }))
+            .toBeVisible();
+        // τ was scrubbed to the event's arrival (a past instant).
+        expect(await page.evaluate(() => window.__swStage.tauMs)).toBeLessThan(Date.now());
+
+        // Exit via the panel link → the live watch returns.
+        await page.locator('.frd-exit-replay').click();
+        await expect.poll(() => page.evaluate(
+            () => window.__fluxRopeForecast?.replay ?? null),
+            { timeout: 90_000 }).toBe(null);
     });
 
     test('NOAA-blocked client falls back to the same-origin mirror', async ({ page }) => {
