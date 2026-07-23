@@ -1,10 +1,11 @@
 # CME Forecasting & Validation Pipeline — Design + Phasing
 
-*Status: Phases 0–3 + 6 shipped (schema APPLIED 2026-07-12; the live
-lock/resolve loop + `/api/cme/skill` + the calendar scorecard shipped
-2026-07-23 on `claude/session-c9y6k9`). Phase 4 (hindcast backtest CLI)
-and the Phase 0 human-confirmation runbook remain open. Last updated
-2026-07-23.*
+*Status: Phases 0–3 + 6 + 7 shipped (CME schema APPLIED 2026-07-12; the
+live lock/resolve loop + `/api/cme/skill` + the calendar scorecard shipped
+2026-07-23 on `claude/session-c9y6k9`; the Phase 7 HSS corotation program —
+schema APPLIED 2026-07-23 — extends the same loop to the second weather).
+Phase 4 (hindcast backtest CLI) and the Phase 0 human-confirmation runbook
+remain open. Last updated 2026-07-23.*
 
 The physics differentiator of this platform is validated, physics-first
 forecasting — skill shown, not claimed. This plan turns the existing daily
@@ -247,6 +248,56 @@ fires the `sw_panel_resize` engagement event.
 6. Kill switch: flip back to `'paused'` (everyone gets control), or
    `?layoutlab=0` to hide the Lab button.
 
+### Phase 7 — HSS corotation program (the second weather) ✅ SHIPPED 2026-07-23
+
+Same architecture, second phenomenon: every coronal hole the platform
+detects gets an issue-time-locked corotation arrival window, and the daily
+cron scores it against the observed L1 speed rise. One scorecard covers
+both kinds of space weather.
+
+- **Schema** — `supabase-hss-validation-migration.sql`, **APPLIED
+  2026-07-23** (migration `hss_validation_program`): `hss_events`
+  (`hole_id` unique — `HSS-YYYY-MM-DD-E20`, 5° Stonyhurst bins),
+  `hss_arrival_forecasts` (UNIQUE(hole_id, model_id), INSERT-only),
+  `hss_l1_observations`, the `hss_model_skill` view (shaped like
+  `cme_model_skill`; a hit = arrival inside the ±1 d window), and the
+  `validation_speed_series(p_days)` RPC (15-min `speed_km_s` medians from
+  `solar_wind_samples`; EXECUTE revoked from anon/authenticated). All
+  tables are zero-policy service-role-only — same intentional advisor
+  flag as the CME rows in CLAUDE.md §4.2.
+- **Detection source** — the cron reads recent HEK SPoCA coronal holes
+  (|lat| ≤ 65°, |Stonyhurst lon| ≤ 75°), NOT the Stage's client-side 171
+  detector: server truth must not depend on a browser having been open.
+  Dedupe is Carrington-aware (<20° apart within 20 days = same hole
+  recurring). The Stage's `detectCoronalHoles` remains the *visual* story;
+  the two agree on the corotation oracle below.
+- **Model** — `corotation-v1`: the hole corotates to the central meridian
+  (`hssArrivalWindow` in `js/stage/model.js`, Carrington synodic 27.2753 d,
+  east-positive Stonyhurst) + a 600 km/s transit; window = ETA ± 1 d.
+  The oracle lives in the Stage model and is re-exported by
+  `js/validation-scoring.js` so cron and canvas can never disagree.
+- **Truth** — `resolveHssTruth` (node-gated): baseline = median speed over
+  [start−24 h, start−6 h]; arrived if the window's peak exceeds baseline
+  + 80 km/s, with `arrival_at` = first sample ≥ baseline + 50 km/s.
+  DATA-COVERAGE guard (≥8 baseline AND ≥8 window samples, resolve only
+  after window end + 12 h) — a feed gap resolves as *pending*, never as a
+  false alarm. Same honesty rule as `resolveEventTruth`.
+- **Read path** — `/api/cme/skill` gains a `hss:{models, events}` section
+  (three flat reads stitched by `hole_id` — text joins, no FK embedding;
+  missing tables degrade to empty so the CME data still serves).
+- **Calendar** — `js/cme-calendar.js` renders corotation windows as teal
+  `◐` chips (upcoming = window countdown; scored = struck prediction →
+  bold speed-rise time with the same signed error convention, + = forecast
+  late; false alarm = `✗ no stream`), and `corotation-v1` joins the ONE
+  merged skill strip as `Corotation·HSS`. Pure parts node-gated
+  (`hssCalendarRows`/`hssByDay` in tests/cme-calendar.mjs), page wiring
+  browser-gated (tests/cme-calendar.spec.js).
+- **Calendar diagnosability** (the "calendar seems broke" fix, same
+  round): a `DEMO_KEY` bus flag (`donki_key_mode`) surfaces as an amber
+  note naming `NASA_API_KEY`, and a failed `/api/cme/skill` fetch renders
+  a scorecard-feed-unavailable note — data-plane starvation is *named*,
+  never mistaken for a quiet sun.
+
 ---
 
 ## 5. Ops / hygiene
@@ -257,8 +308,10 @@ fires the `sw_panel_resize` engagement event.
 - Advisor warnings for the four new zero-policy tables are expected — add
   them to the CLAUDE.md §4.2 list when the migration is applied.
 - Tests to run when touching this program: `node tests/layout-lab.mjs`,
-  `node tests/validation-scoring.mjs`, `python3 pipelines/cme/step0_pull.py
-  --self-test`, `node scripts/lint-nav.mjs`.
+  `node tests/validation-scoring.mjs`, `node tests/cme-calendar.mjs`,
+  `npx playwright test tests/cme-calendar.spec.js`,
+  `python3 pipelines/cme/step0_pull.py --self-test`,
+  `node scripts/lint-nav.mjs`.
 
 ## 6. Shipped on this branch
 

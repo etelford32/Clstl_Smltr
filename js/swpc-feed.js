@@ -765,6 +765,10 @@ async function fetchRegions(state) {
 
 async function fetchDONKICME(state) {
     const json = await fetchEdge(API.donkiCME);
+    // Diagnosability: 'demo' = the shared 30 req/hr DEMO_KEY quota —
+    // the calendar surfaces this so a starved grid reads as a CONFIG
+    // problem, not a quiet sun.
+    if (json?.key_mode) state.donki_key_mode = json.key_mode;
     const list = json?.data?.cmes;
     if (!Array.isArray(list)) { state.recent_cmes = []; return; }
 
@@ -1186,6 +1190,7 @@ export class SpaceWeatherFeed {
             xray_class:     raw.xray_class ?? fluxToClass(raw.xray_flux),
             xray_series:    raw.xray_series ?? [],
             proton_series:  raw.proton_series ?? [],
+            donki_key_mode: raw.donki_key_mode ?? null,
             flare_class:    raw.flare_class  ?? null,
             flare_letter:   raw.flare_letter ?? 'A',
             flare_time:     raw.flare_time   ?? null,

@@ -47,6 +47,8 @@ import {
     backmapRows, backmapScore, runHindcast, BACKMAP,
     detectShockArrivals, scoreCmeArrivals,
     rtEventId, needsNewIssue, resolveEventTruth,
+    hssHoleId, resolveHssTruth, HSS_SCORE, hssArrivalWindow,
+    carringtonL0, circDist,
 } from '../../js/validation-scoring.js';
 import { cmeTransit } from '../../js/ring-current-model.js';
 import { CmeEvent } from '../../js/cme-propagation.js';
@@ -256,6 +258,120 @@ async function sbInsert(table, rows, prefer = 'return=minimal') {
     }
 }
 
+/* ── HSS program (2026-07-23): the second weather on the scorecard.
+   Events come from the SAME HEK SPoCA holes the recurrence study uses;
+   the corotation-v1 forecast (stage/model.js hssArrivalWindow — the ONE
+   oracle the Stage chip also renders) is issued ONCE per event and
+   locked (UNIQUE(hole_id, model_id) + ignore-duplicates = idempotent);
+   truth is the observed L1 speed rise via validation_speed_series with
+   resolveHssTruth's coverage guard — a data gap reads as pending, never
+   as "no stream came". Recurrent holes are deduped 20° Carrington. */
+async function lockAndResolveHss(holes, nowMs) {
+    const summary = { events: 0, issued: 0, resolved: 0, falseAlarms: 0, pending: 0 };
+    const iso = ms => new Date(ms).toISOString();
+    const DAY_MS = 86400e3;
+
+    // 1 ── Candidate detections: last 3 days, meridian-relevant.
+    const recent = holes.filter(h => {
+        const dMs = Date.parse(`${h.day}T12:00:00Z`);
+        if (!Number.isFinite(dMs) || nowMs - dMs > 3 * DAY_MS) return false;
+        if (Math.abs(h.lat) > 65) return false;
+        const stony = h.lonCar - carringtonL0(dMs).L0;
+        const s = ((stony % 360) + 540) % 360 - 180;
+        return Math.abs(s) <= 75;
+    });
+
+    // 2 ── Dedupe against existing OPEN events (same recurrent hole:
+    //      within 20° Carrington, seen in the last 20 days).
+    const existing = await sbGet('hss_events?select=hole_id,carr_lon_deg,detected_at'
+        + `&detected_at=gte.${encodeURIComponent(iso(nowMs - 27 * DAY_MS))}`);
+    const newEvents = [];
+    for (const h of recent) {
+        const dMs = Date.parse(`${h.day}T12:00:00Z`);
+        const stony = ((h.lonCar - carringtonL0(dMs).L0) % 360 + 540) % 360 - 180;
+        const dup = existing.some(e => Number.isFinite(e.carr_lon_deg)
+            && circDist(e.carr_lon_deg, h.lonCar) < 20
+            && nowMs - Date.parse(e.detected_at) < 20 * DAY_MS)
+            || newEvents.some(e => circDist(e.carr_lon_deg, h.lonCar) < 20);
+        if (dup) continue;
+        newEvents.push({
+            hole_id: hssHoleId(h.day, stony),
+            detected_at: iso(dMs),
+            stony_lon_deg: stony,
+            carr_lon_deg: h.lonCar,
+            lat_deg: h.lat,
+            source: 'hek-spoca',
+        });
+    }
+    if (newEvents.length) {
+        await sbInsert('hss_events?on_conflict=hole_id', newEvents,
+            'return=minimal,resolution=ignore-duplicates');
+    }
+    summary.events = newEvents.length;
+
+    // 3 ── Issue-time-locked corotation forecasts for events that lack one.
+    const openEvents = await sbGet('hss_events?select=hole_id,detected_at,stony_lon_deg'
+        + `&detected_at=gte.${encodeURIComponent(iso(nowMs - 27 * DAY_MS))}`);
+    const haveFc = new Set((await sbGet('hss_arrival_forecasts?select=hole_id'
+        + '&model_id=eq.corotation-v1')).map(r => r.hole_id));
+    const fcRows = [];
+    for (const e of openEvents) {
+        if (haveFc.has(e.hole_id)) continue;
+        const win = hssArrivalWindow(e.stony_lon_deg, Date.parse(e.detected_at));
+        fcRows.push({
+            hole_id: e.hole_id, model_id: 'corotation-v1',
+            predicted_arrival: iso(win.etaMs),
+            window_start: iso(win.startMs), window_end: iso(win.endMs),
+            v_kms_assumed: 600,
+        });
+    }
+    if (fcRows.length) {
+        await sbInsert('hss_arrival_forecasts?on_conflict=hole_id,model_id', fcRows,
+            'return=minimal,resolution=ignore-duplicates');
+    }
+    summary.issued = fcRows.length;
+
+    // 4 ── Resolve truth for windows that have fully passed.
+    const unresolved = await sbGet('hss_arrival_forecasts?select=hole_id,window_start,window_end'
+        + '&model_id=eq.corotation-v1&order=window_end.asc');
+    const resolvedIds = new Set((await sbGet('hss_l1_observations?select=hole_id'))
+        .map(r => r.hole_id));
+    const toResolve = unresolved.filter(f => !resolvedIds.has(f.hole_id)
+        && nowMs > Date.parse(f.window_end) + HSS_SCORE.RESOLVE_LAG_H * 3.6e6);
+    if (toResolve.length) {
+        const speedRes = await fetchWithTimeout(
+            `${SUPABASE_URL}/rest/v1/rpc/validation_speed_series`, {
+                method: 'POST', timeoutMs: 10_000, headers: sbHeaders,
+                body: JSON.stringify({ p_days: 27 }),
+            });
+        if (!speedRes.ok) throw new Error(`speed_series ${speedRes.status}`);
+        const series = (await speedRes.json())
+            .map(r => ({ t: Date.parse(r.bucket), v: r.speed_med }))
+            .filter(r => Number.isFinite(r.t) && Number.isFinite(r.v));
+        const obsRows = [];
+        for (const f of toResolve) {
+            const r = resolveHssTruth({ series,
+                startMs: Date.parse(f.window_start),
+                endMs: Date.parse(f.window_end), nowMs });
+            if (r.status === 'pending') { summary.pending++; continue; }
+            obsRows.push({
+                hole_id: f.hole_id,
+                arrived: r.status === 'arrived',
+                arrival_at: r.arrivalMs ? iso(r.arrivalMs) : null,
+                v_before_kms: r.vBefore ?? null,
+                v_peak_kms: r.vPeak ?? null,
+            });
+            if (r.status === 'arrived') summary.resolved++;
+            else summary.falseAlarms++;
+        }
+        if (obsRows.length) {
+            await sbInsert('hss_l1_observations?on_conflict=hole_id', obsRows,
+                'return=minimal,resolution=ignore-duplicates');
+        }
+    }
+    return summary;
+}
+
 async function lockAndResolveCme(catalog, pdynSeries, nowMs) {
     const summary = { events: 0, locked: 0, resolved: 0, falseAlarms: 0, pending: 0 };
     const relevant = catalog.filter(c => c.earthRelevant);
@@ -459,6 +575,15 @@ async function runValidation(request) {
         cmeProgram = { reason: `lock_resolve_failed: ${String(e?.message || e)}` };
     }
 
+    // ── HSS program: the SAME HEK SPoCA holes feed the corotation
+    //    forecast-locking loop — the second weather on the scorecard.
+    let hssProgram = { reason: 'not_run' };
+    try {
+        hssProgram = await lockAndResolveHss(holes, Date.now());
+    } catch (e) {
+        hssProgram = { reason: `hss_failed: ${String(e?.message || e)}` };
+    }
+
     // ── Study 3: CME arrival verification (predicted vs actual shock) ──
     // Only inserts when there was something to verify — CMEs are episodic
     // and an empty run would poison the sparkline with zeros.
@@ -506,6 +631,7 @@ async function runValidation(request) {
         },
         cme: cmeSummary,
         cmeProgram,
+        hssProgram,
         dur_ms: Date.now() - started,
     });
 }

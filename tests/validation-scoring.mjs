@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import {
     detectShockArrivals, scoreCmeArrivals, CME_SCORE,
     rtEventId, needsNewIssue, resolveEventTruth,
+    hssHoleId, resolveHssTruth, HSS_SCORE, hssArrivalWindow,
 } from '../js/validation-scoring.js';
 
 let n = 0;
@@ -123,6 +124,45 @@ const H = 3.6e6;
     assert.equal(resolveEventTruth({ predictedMsList: [], shocks: [],
         nowMs: 0, seriesStartMs: 0, seriesEndMs: 0 }).status, 'pending');
     ok('resolveEventTruth: arrived/pending/false-alarm + coverage guard');
+}
+
+// ── 6. HSS truth: speed rise, quiet window, coverage + timing guards ────────
+{
+    const T = Date.parse('2026-07-10T00:00Z');
+    const startMs = T, endMs = T + 48 * H;
+    const mk = (fn) => {   // 15-min series over [start−30h, end]
+        const s = [];
+        for (let t = startMs - 30 * H; t <= endMs; t += 0.25 * H) s.push({ t, v: fn(t) });
+        return s;
+    };
+    const nowMs = endMs + 24 * H;
+    // Clean stream: 380 baseline, ramps to 620 six hours into the window.
+    const rise = mk((t) => t < startMs + 6 * H ? 380
+        : Math.min(620, 380 + (t - startMs - 6 * H) / H * 40));
+    const r = resolveHssTruth({ series: rise, startMs, endMs, nowMs });
+    assert.equal(r.status, 'arrived');
+    assert.ok(Math.abs(r.vBefore - 380) < 1);
+    assert.ok(r.vPeak > 600);
+    // Arrival stamps the ONSET (baseline + 50), inside the window.
+    assert.ok(r.arrivalMs > startMs + 6 * H && r.arrivalMs < startMs + 10 * H);
+    // Quiet window: no rise → no_arrival (the false-alarm ledger).
+    const quiet = resolveHssTruth({ series: mk(() => 390), startMs, endMs, nowMs });
+    assert.equal(quiet.status, 'no_arrival');
+    // Too early to call, even with data.
+    assert.equal(resolveHssTruth({ series: rise, startMs, endMs,
+        nowMs: endMs + 1 * H }).status, 'pending');
+    // Coverage guard: a data gap must NEVER read as "no stream came".
+    const gappy = rise.filter((s) => s.t < startMs - 26 * H || s.t > startMs - 2 * H);
+    assert.equal(resolveHssTruth({ series: gappy, startMs, endMs, nowMs }).status,
+        'pending', 'missing baseline → pending');
+    assert.equal(resolveHssTruth({ series: [], startMs, endMs, nowMs }).status, 'pending');
+    // Ids are deterministic + binned; the corotation oracle is the ONE
+    // re-exported stage oracle (spot-check it is callable from here).
+    assert.equal(hssHoleId('2026-07-10T03:00Z', 22), 'HSS-2026-07-10-E20');
+    assert.equal(hssHoleId('2026-07-10', -37), 'HSS-2026-07-10-W35');
+    assert.ok(hssArrivalWindow(30, T).etaMs > T);
+    assert.ok(HSS_SCORE.RISE_KMS > HSS_SCORE.ONSET_KMS);
+    ok('HSS truth: rise/quiet/pending + coverage guard + ids + oracle');
 }
 
 console.log(`\nvalidation-scoring: all ${n} test groups passed`);

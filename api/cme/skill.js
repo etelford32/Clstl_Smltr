@@ -90,12 +90,57 @@ export default async function handler(request) {
         };
     });
 
+    // HSS program (2026-07-23): the second weather. hole_id joins are
+    // text (no FK embedding) — three flat reads, stitched here. Missing
+    // tables (migration not applied on an environment) degrade to empty.
+    let hss = { models: [], events: [] };
+    try {
+        const since = new Date(Date.now() - 37 * 86400e3).toISOString();
+        const [hSkill, hEvents, hFc, hObs] = await Promise.all([
+            get('hss_model_skill?select=*'),
+            get('hss_events?select=hole_id,detected_at,stony_lon_deg,lat_deg'
+                + `&detected_at=gte.${encodeURIComponent(since)}`
+                + '&order=detected_at.desc&limit=30'),
+            get('hss_arrival_forecasts?select=hole_id,model_id,issued_at,'
+                + 'predicted_arrival,window_start,window_end'
+                + `&issued_at=gte.${encodeURIComponent(since)}`),
+            get('hss_l1_observations?select=hole_id,arrived,arrival_at,'
+                + 'v_before_kms,v_peak_kms'),
+        ]);
+        const fcById = new Map();
+        for (const f of hFc ?? []) {
+            const cur = fcById.get(f.hole_id) ?? {};
+            cur[f.model_id] = { issued_at: f.issued_at, predicted: f.predicted_arrival,
+                window_start: f.window_start, window_end: f.window_end };
+            fcById.set(f.hole_id, cur);
+        }
+        const obsById = new Map((hObs ?? []).map(o => [o.hole_id, o]));
+        hss = {
+            models: hSkill ?? [],
+            events: (hEvents ?? []).map(e => ({
+                hole_id: e.hole_id,
+                detected_at: e.detected_at,
+                stony_lon_deg: e.stony_lon_deg,
+                lat_deg: e.lat_deg,
+                forecasts: fcById.get(e.hole_id) ?? {},
+                truth: obsById.has(e.hole_id) ? {
+                    arrived: obsById.get(e.hole_id).arrived === true,
+                    arrival_at: obsById.get(e.hole_id).arrival_at ?? null,
+                    v_before: obsById.get(e.hole_id).v_before_kms ?? null,
+                    v_peak: obsById.get(e.hole_id).v_peak_kms ?? null,
+                } : null,
+            })),
+        };
+    } catch { /* tables absent or unreachable → empty hss, CME data still served */ }
+
     return jsonOk({
-        source: 'cme_model_skill + cme_events (issue-time-locked forecasts)',
+        source: 'cme_model_skill + cme_events (issue-time-locked forecasts)'
+            + ' + hss_model_skill + hss_events (corotation windows)',
         data: {
             updated: new Date().toISOString(),
             models: skill ?? [],
             events: trimmed,
+            hss,
         },
     }, { maxAge: 600, swr: 120 });
 }

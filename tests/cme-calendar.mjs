@@ -6,7 +6,8 @@
 
 import { strict as assert } from 'node:assert';
 import { calendarEvents, calendarModel, utcMidnight,
-         scorecardModel, validationIndex, fmtErrH, fmtCountdown } from '../js/cme-calendar.js';
+         scorecardModel, validationIndex, fmtErrH, fmtCountdown,
+         hssCalendarRows, hssByDay } from '../js/cme-calendar.js';
 import { CmeEvent } from '../js/cme-propagation.js';
 
 const DAY = 86_400e3;
@@ -157,6 +158,52 @@ test('fmtErrH sign convention (+ = predicted late) and fmtCountdown', () => {
     assert.equal(fmtCountdown(41 * 3.6e6), 'in 41 h');
     assert.equal(fmtCountdown(3.4 * 24 * 3.6e6), 'in 3.4 d');
     assert.equal(fmtCountdown(-5), 'now');
+});
+
+test('HSS rows: corotation windows become calendar chips, both weathers scored', () => {
+    const ev = (id, eta, truth = null) => ({
+        hole_id: id, stony_lon_deg: 22,
+        forecasts: { 'corotation-v1': {
+            predicted: eta, window_start: new Date(Date.parse(eta) - 86400e3).toISOString(),
+            window_end: new Date(Date.parse(eta) + 86400e3).toISOString() } },
+        truth,
+    });
+    const rows = hssCalendarRows([
+        ev('HSS-2026-07-20-E20', '2026-07-25T06:00:00Z',
+            { arrived: true, arrival_at: '2026-07-25T14:00:00Z', v_peak: 640 }),
+        ev('HSS-2026-07-21-W35', '2026-07-23T00:00:00Z',
+            { arrived: false }),
+        ev('HSS-2026-07-22-E45', '2026-07-28T12:00:00Z'),
+        // No corotation forecast → not renderable, dropped.
+        { hole_id: 'HSS-x', forecasts: {}, truth: null },
+    ]);
+    assert.equal(rows.length, 3);
+    assert.ok(rows.every((r, i) => i === 0 || r.etaMs >= rows[i - 1].etaMs), 'eta-sorted');
+    const scored = rows.find((r) => r.id === 'HSS-2026-07-20-E20');
+    assert.ok(scored.resolved && scored.arrived);
+    assert.equal(scored.actualMs, Date.parse('2026-07-25T14:00:00Z'));
+    assert.equal(scored.vPeak, 640);
+    const falarm = rows.find((r) => r.id === 'HSS-2026-07-21-W35');
+    assert.ok(falarm.resolved && !falarm.arrived);
+    const open = rows.find((r) => r.id === 'HSS-2026-07-22-E45');
+    assert.ok(!open.resolved);
+    // Day placement: keyed by the UTC midnight of the predicted arrival.
+    const byDay = hssByDay(rows);
+    assert.deepEqual([...byDay.get(utcMidnight(scored.etaMs))].map((r) => r.id),
+        ['HSS-2026-07-20-E20']);
+    assert.equal(byDay.size, 3);
+    assert.equal(hssByDay([]).size, 0);
+    assert.deepEqual(hssCalendarRows(null), []);
+    // The merged scorecard labels the corotation model as the HSS row.
+    const sc = scorecardModel([
+        { model_id: 'enlil', is_hindcast: false, n_scored: 4, mae_hours: 6, hits_12h: 3 },
+        { model_id: 'corotation-v1', is_hindcast: false, n_scored: 2,
+          mae_hours: 9.5, bias_hours: 3, hits_12h: 2, false_alarms: 1 },
+    ]);
+    const hssRow = sc.rows.find((r) => r.modelId === 'corotation-v1');
+    assert.equal(hssRow.label, 'Corotation·HSS');
+    assert.equal(hssRow.n, 2);
+    assert.equal(hssRow.falseAlarms, 1);
 });
 
 console.log(`${n} passed`);

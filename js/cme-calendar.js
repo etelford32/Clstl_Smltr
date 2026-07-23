@@ -163,7 +163,8 @@ export function scorecardModel(models) {
     const rt = scored.filter((m) => m.is_hindcast !== true);
     const use = rt.length ? rt : scored;
     const label = (id) => id === 'dbm-v1' ? 'DBM'
-        : id === 'ballistic-v1' ? 'Ballistic' : String(id).toUpperCase();
+        : id === 'ballistic-v1' ? 'Ballistic'
+        : id === 'corotation-v1' ? 'Corotation·HSS' : String(id).toUpperCase();
     const rows = use.map((m) => ({
         modelId: m.model_id, label: label(m.model_id),
         n: m.n_scored | 0,
@@ -174,6 +175,42 @@ export function scorecardModel(models) {
         misses: m.misses | 0,
     })).sort((a, b) => (a.maeH ?? 1e9) - (b.maeH ?? 1e9));
     return { rows, hindcastOnly: !rt.length && scored.length > 0, empty: !use.length };
+}
+
+/** /api/cme/skill hss events → renderable rows, one per hole with a
+ *  corotation forecast: predicted arrival + window, resolution state.
+ *  PURE; node-tested. The SECOND weather on the calendar. */
+export function hssCalendarRows(hssEvents) {
+    const rows = [];
+    for (const e of hssEvents || []) {
+        const fc = e?.forecasts?.['corotation-v1'];
+        const etaMs = Date.parse(fc?.predicted);
+        if (!Number.isFinite(etaMs)) continue;
+        const truth = e.truth;
+        rows.push({
+            id: e.hole_id,
+            lonDeg: Number.isFinite(+e.stony_lon_deg) ? +e.stony_lon_deg : null,
+            etaMs,
+            startMs: Date.parse(fc.window_start) || etaMs - 86400e3,
+            endMs: Date.parse(fc.window_end) || etaMs + 86400e3,
+            resolved: !!truth,
+            arrived: truth?.arrived === true,
+            actualMs: Date.parse(truth?.arrival_at) || null,
+            vPeak: Number.isFinite(+truth?.v_peak) ? +truth.v_peak : null,
+        });
+    }
+    return rows.sort((a, b) => a.etaMs - b.etaMs);
+}
+
+/** hss rows → Map(utcMidnight(etaMs) → rows) for day-cell placement. */
+export function hssByDay(rows) {
+    const map = new Map();
+    for (const r of rows || []) {
+        const day = utcMidnight(r.etaMs);
+        if (!map.has(day)) map.set(day, []);
+        map.get(day).push(r);
+    }
+    return map;
 }
 
 /** /api/cme/skill events → Map(donki_id → {resolved, arrived, actualMs,
@@ -268,6 +305,10 @@ const CSS = `
 .cal-ev.hit { border-style: solid; }
 .cal-ev.falarm { background: rgba(140,140,160,.12); color: #99a;
     border-color: rgba(140,140,160,.35); text-decoration: none; }
+.cal-ev.hss { background: rgba(47,168,160,.12); color: #6fdcd2;
+    border-color: rgba(47,168,160,.45); }
+.cal-ev.hss.falarm { color: #8aa; }
+.cal-note-warn { flex-basis: 100%; font-size: .62rem; color: #e0a642; }
 .cal-count { display: inline-block; margin-left: 4px; padding: 0 4px;
     border-radius: 3px; background: rgba(79,195,247,.18); color: #7fd4ff;
     font-size: .56rem; font-weight: 700; }
@@ -337,17 +378,35 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
         // The prediction-correctness ledger (/api/cme/skill): per-model
         // skill strip + per-event predicted-vs-actual chip annotations.
         let validation = { models: [], byId: new Map() };
+        let hssRows = [];
+        let hssModels = [];
+        // Data-plane diagnosability (author 2026-07-23: "the calendar
+        // seems broke" — in prod it was silently starved): the skill
+        // fetch reports WHY it has nothing, and the DONKI key mode
+        // surfaces the DEMO_KEY quota.
+        let skillStatus = 'pending';
+        let keyMode = null;
         async function fetchSkill() {
             try {
                 const res = await fetch('/api/cme/skill');
-                if (!res.ok) return;
+                if (!res.ok) {
+                    skillStatus = `HTTP ${res.status}`;
+                    render();
+                    return;
+                }
                 const j = await res.json();
                 validation = {
                     models: j?.data?.models || [],
                     byId: validationIndex(j?.data?.events || []),
                 };
+                hssRows = hssCalendarRows(j?.data?.hss?.events || []);
+                hssModels = j?.data?.hss?.models || [];
+                skillStatus = 'ok';
                 render();
-            } catch {}
+            } catch (e) {
+                skillStatus = String(e?.message || 'unreachable');
+                render();
+            }
         }
 
         let feed = null;   // null=pending · {ok:true} · {ok:false, reason}
@@ -363,6 +422,7 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
             const nowMs = Date.now();
             const events = calendarEvents([...ledger.values()], { vSw });
             const model = calendarModel({ events, nowMs, span });
+            const hssDays = hssByDay(hssRows);   // the second weather
 
             // Status pip in the section title: red while an Earth arrival
             // is still ahead, amber when the corridor is clear.
@@ -428,12 +488,31 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
                         v && Object.keys(v.models).length ? '🔒' : '⊕'} ${a.hhmm}${a.gScale ? ` G${a.gScale}` : ''}${
                         isNext ? `<span class="cal-count">${fmtCountdown(a.arrivalMs - nowMs)}</span>` : ''}</span>`;
                 }).join('');
+                // HSS chips: corotation windows from detected coronal
+                // holes — the SECOND weather, scored like the first.
+                const hssChips = (hssDays.get(day.dayMs) || []).map((h) => {
+                    const ew = h.lonDeg == null ? ''
+                        : ` (${h.lonDeg >= 0 ? 'E' : 'W'}${Math.abs(Math.round(h.lonDeg))})`;
+                    const win = `${new Date(h.startMs).toISOString().slice(5, 10)}…${new Date(h.endMs).toISOString().slice(5, 10)}`;
+                    if (h.resolved && h.arrived && Number.isFinite(h.actualMs)) {
+                        const err = fmtErrH(h.etaMs, h.actualMs);
+                        const actual = new Date(h.actualMs).toISOString().slice(11, 16);
+                        return `<span class="cal-ev hss scored" data-tau="${h.actualMs}"
+                            title="◐ HSS from coronal hole${ew} · predicted ${new Date(h.etaMs).toISOString().slice(0, 16).replace('T', ' ')}Z ±1d · observed speed rise ${new Date(h.actualMs).toISOString().slice(0, 16).replace('T', ' ')}Z${h.vPeak ? ` · peak ${Math.round(h.vPeak)} km/s` : ''} · error ${err}"><s>${new Date(h.etaMs).toISOString().slice(11, 16)}</s> <span class="cal-act">${actual}</span><span class="cal-err">${err}</span></span>`;
+                    }
+                    if (h.resolved && !h.arrived) {
+                        return `<span class="cal-ev hss falarm" data-tau="${h.etaMs}"
+                            title="◐ HSS window${ew} ${win} — no sustained speed rise (L1 data covered the window). Logged against corotation-v1.">✗ ◐ no stream</span>`;
+                    }
+                    return `<span class="cal-ev hss${h.etaMs < nowMs ? ' pastev' : ''}" data-tau="${h.etaMs}"
+                        title="◐ high-speed stream window${ew} · ${win} · corotation-v1, locked at detection · scored against the L1 speed rise after passage">◐ ${new Date(h.etaMs).toISOString().slice(11, 16)}</span>`;
+                }).join('');
                 const p50 = day.isP50 ? '<span class="cal-p50">◈ ensemble P50</span>' : '';
                 cells.push(`<button type="button" class="${cls}" style="--i:${ci++}" data-day="${day.dayMs}"
-                    aria-label="${day.iso}${day.arrivals.length ? `, ${day.arrivals.length} CME arrival(s)` : ''}">
+                    aria-label="${day.iso}${day.arrivals.length ? `, ${day.arrivals.length} CME arrival(s)` : ''}${hssDays.get(day.dayMs)?.length ? ', HSS window' : ''}">
                     <span class="cal-dom">${day.dom}</span>${
                         day.monthLabel ? `<span class="cal-mon">${day.monthLabel}</span>` : ''
-                    }${dots}${chips}${p50}</button>`);
+                    }${dots}${chips}${hssChips}${p50}</button>`);
             }
             // Quiet-corridor honesty: an empty grid must read as QUIET,
             // not broken (author feedback 2026-07-22: "it looks empty").
@@ -444,9 +523,10 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
                 Earth-directed forecast below is scored after passage.</div>`;
 
             // Skill strip: the LIVE forward ledger (per-model MAE/bias from
-            // issue-time-locked forecasts). Hindcast receipts stay on the
-            // separate D3 validation card.
-            const sc = scorecardModel(validation.models);
+            // issue-time-locked forecasts) — BOTH weathers merged: CME
+            // shock models + the corotation HSS model. Hindcast receipts
+            // stay on the separate D3 validation card.
+            const sc = scorecardModel([...validation.models, ...hssModels]);
             const fmtBias = (b) => b == null ? '' :
                 ` <span class="k">bias</span> <b>${b >= 0 ? '+' : '−'}${Math.abs(b).toFixed(1)} h</b>`;
             // Even with zero SCORED events, locked forecasts are evidence
@@ -470,11 +550,23 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
                     <b>${r.label}</b>${r.maeH != null
                         ? ` <span class="k">MAE</span> <b>${r.maeH.toFixed(1)} h</b>` : ''}${
                     fmtBias(r.biasH)} <span class="k">·</span> ${r.n} ev</span>`).join('');
+            // Data-plane honesty notes: WHY the grid might be starved.
+            const planeNotes = [
+                keyMode === 'demo' ? `<span class="cal-note-warn">⚠ NASA DEMO_KEY
+                    quota (30 req/hr shared) — DONKI events may be missing or
+                    stale · set NASA_API_KEY in the Vercel env to lift it</span>` : '',
+                skillStatus !== 'ok' && skillStatus !== 'pending'
+                    ? `<span class="cal-note-warn">⚠ scorecard feed unavailable
+                        (${skillStatus}) — chips render without locked/scored
+                        annotations until it recovers</span>` : '',
+            ].join('');
             const strip = `<div class="cal-skill">
                 <span class="cal-skill-title">Prediction scorecard${sc.hindcastOnly ? ' · hindcast' : ''}</span>
-                ${skillChips}
-                <span class="cal-skill-note">skill shown, not claimed — forecasts are
-                    locked before arrival and scored against the observed L1 shock;
+                ${skillChips}${planeNotes}
+                <span class="cal-skill-note">skill shown, not claimed — both weathers:
+                    ⊕ CME forecasts are locked before arrival and scored against the
+                    observed L1 shock; ◐ high-speed-stream windows are locked at
+                    coronal-hole detection and scored against the L1 speed rise;
                     struck-through times were our call, bold is what happened</span>
             </div>`;
 
@@ -540,6 +632,10 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
         window.addEventListener('swpc-update', (e) => {
             const d = e.detail || {};
             if (Number.isFinite(d.solar_wind?.speed)) vSw = d.solar_wind.speed;
+            if (d.donki_key_mode && d.donki_key_mode !== keyMode) {
+                keyMode = d.donki_key_mode;
+                render();
+            }
             let changed = false;
             for (const c of d.recent_cmes || []) {
                 const key = c?.cme_id || c?.time;

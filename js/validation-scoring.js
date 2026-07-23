@@ -329,6 +329,63 @@ export function resolveEventTruth({ predictedMsList, shocks, nowMs,
     return { status: 'pending' };
 }
 
+/* ── HSS validation (2026-07-23, S9 follow-through) ──────────────────
+   High-speed-stream arrivals scored like CME arrivals: the corotation
+   forecast is issued ONCE per (hole, model) and locked; truth is the
+   observed L1 SPEED RISE, with the same data-coverage honesty — a gap
+   in the samples reads as 'pending', never as "no stream came". The
+   corotation kinematics themselves are stage/model.js hssArrivalWindow
+   (re-exported below — ONE oracle for the Stage chip and the cron). */
+
+export const HSS_SCORE = Object.freeze({
+    RISE_KMS: 80,     // vPeak − vBaseline to call an arrival (sustained HSS)
+    ONSET_KMS: 50,    // first sample this far above baseline = arrival time
+    BASE_H: 24,       // baseline window: [start−24h, start−6h]
+    BASE_GAP_H: 6,
+    COVER_MIN: 8,     // min 15-min samples in baseline AND window
+    RESOLVE_LAG_H: 12,
+});
+
+/** Deterministic HSS event id: detection day + east/west longitude bin. */
+export function hssHoleId(dayIso, stonyLonDeg) {
+    const ew = stonyLonDeg >= 0 ? 'E' : 'W';
+    return `HSS-${String(dayIso).slice(0, 10)}-${ew}${Math.abs(Math.round(stonyLonDeg / 5) * 5)}`;
+}
+
+/**
+ * Resolve one HSS window against the L1 speed series.
+ * @param {object} a
+ * @param {Array<{t:number, v:number}>} a.series  15-min speed medians
+ * @param {number} a.startMs  forecast window start
+ * @param {number} a.endMs    forecast window end
+ * @param {number} a.nowMs
+ * @returns {{status:'pending'|'arrived'|'no_arrival',
+ *            arrivalMs?, vBefore?, vPeak?}}
+ */
+export function resolveHssTruth({ series, startMs, endMs, nowMs }) {
+    if (nowMs < endMs + HSS_SCORE.RESOLVE_LAG_H * 3.6e6) return { status: 'pending' };
+    const s = (series || []).filter((r) => Number.isFinite(r?.t) && Number.isFinite(r?.v));
+    const b0 = startMs - HSS_SCORE.BASE_H * 3.6e6;
+    const b1 = startMs - HSS_SCORE.BASE_GAP_H * 3.6e6;
+    const base = s.filter((r) => r.t >= b0 && r.t <= b1).map((r) => r.v).sort((a2, b2) => a2 - b2);
+    const win = s.filter((r) => r.t >= startMs && r.t <= endMs);
+    // Coverage guard: both the baseline and the window need real data.
+    if (base.length < HSS_SCORE.COVER_MIN || win.length < HSS_SCORE.COVER_MIN) {
+        return { status: 'pending' };
+    }
+    const vBefore = base[base.length >> 1];
+    let vPeak = -Infinity, arrivalMs = null;
+    for (const r of win) {
+        if (r.v > vPeak) vPeak = r.v;
+        if (arrivalMs === null && r.v >= vBefore + HSS_SCORE.ONSET_KMS) arrivalMs = r.t;
+    }
+    if (vPeak - vBefore >= HSS_SCORE.RISE_KMS && arrivalMs !== null) {
+        return { status: 'arrived', arrivalMs, vBefore, vPeak };
+    }
+    return { status: 'no_arrival', vBefore, vPeak: Math.max(vPeak, vBefore) };
+}
+
 // Re-exported so consumers of the scoring module get the constants they
 // need to build inputs without importing the model directly.
 export { SOLAR, PHYS, carringtonL0, sunDepartureMs };
+export { hssArrivalWindow, CARRINGTON_SYNODIC_DAYS } from './stage/model.js';
