@@ -433,6 +433,47 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+    test('S9: coronal hole detected on a fixture 171 disk → HSS story chip', async ({ page }) => {
+        // Build a synthetic 171 disk (bright, one dark blob EAST of
+        // center) and serve it on the aia route — later-registered routes
+        // win over the beforeEach abort, exercising the real load→detect
+        // path deterministically.
+        const png = await page.evaluate(() => {
+            const c = document.createElement('canvas');
+            c.width = c.height = 512;
+            const x = c.getContext('2d');
+            x.fillStyle = '#000'; x.fillRect(0, 0, 512, 512);
+            x.fillStyle = '#c9a45e';
+            x.beginPath(); x.arc(256, 256, 248, 0, 7); x.fill();
+            x.fillStyle = '#120e04';
+            x.beginPath(); x.arc(150, 250, 52, 0, 7); x.fill();
+            return c.toDataURL('image/png').split(',')[1];
+        });
+        await page.route('**/api/solar/aia**', (route) => route.fulfill({
+            contentType: 'image/png', body: Buffer.from(png, 'base64') }));
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
+
+        // The detector finds the blob, east-positive, with a plausible area.
+        await expect.poll(() => page.evaluate(() => window.__swStage.sun.holes.length),
+            { timeout: 20_000 }).toBeGreaterThan(0);
+        const h = await page.evaluate(() => window.__swStage.sun.holes[0]);
+        expect(h.lonDeg).toBeGreaterThan(10);        // image-left = east
+        expect(h.areaFrac).toBeGreaterThan(0.005);
+        // The corotation story: a finite HSS ETA in the future window
+        // (east hole → meridian in days, transit ~2.9 d more). Set by the
+        // next scene update after detection — poll.
+        await expect.poll(() => page.evaluate(() => window.__swStage.sun.hssEtaMs),
+            { timeout: 15_000 }).toBeGreaterThan(Date.now());
+        expect(await page.evaluate(() => window.__swStage.sun.hssEtaMs))
+            .toBeLessThan(Date.now() + 12 * 86400e3);
+        // Chip narrates it.
+        await expect(host.locator('.swst-chip', { hasText: 'coronal hole' }))
+            .toContainText('HSS @ Earth');
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
     test('true-scale toggle animates the compression away and back', async ({ page }) => {
         // The tween is wall-clock-anchored (lands in 800 ms at ANY frame
         // rate), but if software-GL CI loses the WebGL context outright,

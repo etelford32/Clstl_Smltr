@@ -697,6 +697,110 @@ export function imfSector(bx, by) {
     return s > 0.25 ? 'away' : s < -0.25 ? 'toward' : null;
 }
 
+/* ── S9: coronal holes from the 171 Å darkness → the HSS story ───────
+   Coronal holes are the dark EUV regions where open field lets the
+   fast wind escape; when a hole's center crosses the central meridian,
+   its high-speed stream reaches Earth a transit later. The DETECTOR is
+   pure over an ImageData-like object (node-testable with synthetic
+   disks); the ARRIVAL oracle is pure corotation kinematics. This layer
+   is the LIVE on-disk view — the HEK/SPoCA catalog (api/hek) remains
+   the validation-grade record. ANNOTATION ONLY: no synthetic HSS speed
+   is injected into the wind field until the validation program scores
+   HSS arrivals like it scores CMEs.
+   Longitude convention here: Stonyhurst with EAST POSITIVE (+y stage
+   side, left limb as seen from Earth) — documented, node-pinned. */
+
+/**
+ * Detect dark, contiguous on-disk regions in a 171 Å disk image.
+ * Relative threshold (× mean disk luminance) so exposure changes don't
+ * move the cut; grid clustering with 4-neighbor flood; off-disk pixels
+ * (the black frame corners) are excluded BEFORE the mean.
+ * @param {{width, height, data}} img  RGBA bytes (ImageData-like)
+ * @returns {Array<{lonDeg, latDeg, areaFrac}>} east-positive Stonyhurst
+ */
+export function detectCoronalHoles(img,
+    { grid = 32, thresh = 0.45, minFrac = 0.01, diskR = 0.9 } = {}) {
+    if (!img?.data || !img.width || !img.height) return [];
+    const { width: w, height: h, data } = img;
+    const lum = new Float32Array(grid * grid);
+    const inDisk = new Uint8Array(grid * grid);
+    let diskSum = 0, diskN = 0;
+    for (let gy = 0; gy < grid; gy++) {
+        for (let gx = 0; gx < grid; gx++) {
+            const u = (gx + 0.5) / grid, v = (gy + 0.5) / grid;
+            const r = Math.hypot(u - 0.5, v - 0.5) / 0.485;
+            if (r > diskR) continue;
+            // Mean over the cell's pixel block.
+            const x0 = Math.floor(u * w - w / grid / 2), x1 = x0 + Math.ceil(w / grid);
+            const y0 = Math.floor(v * h - h / grid / 2), y1 = y0 + Math.ceil(h / grid);
+            let s = 0, n = 0;
+            for (let y = Math.max(0, y0); y < Math.min(h, y1); y++) {
+                for (let x = Math.max(0, x0); x < Math.min(w, x1); x++) {
+                    const k = (y * w + x) * 4;
+                    s += 0.30 * data[k] + 0.50 * data[k + 1] + 0.20 * data[k + 2];
+                    n++;
+                }
+            }
+            const i = gy * grid + gx;
+            lum[i] = n ? s / n / 255 : 0;
+            inDisk[i] = 1;
+            diskSum += lum[i]; diskN++;
+        }
+    }
+    if (!diskN) return [];
+    const cut = thresh * (diskSum / diskN);
+    const dark = new Uint8Array(grid * grid);
+    for (let i = 0; i < grid * grid; i++) dark[i] = inDisk[i] && lum[i] < cut ? 1 : 0;
+    // 4-neighbor flood fill into components.
+    const seen = new Uint8Array(grid * grid);
+    const holes = [];
+    const cellFrac = 1 / diskN;
+    for (let i0 = 0; i0 < grid * grid; i0++) {
+        if (!dark[i0] || seen[i0]) continue;
+        const stack = [i0]; seen[i0] = 1;
+        let cells = 0, su = 0, sv = 0;
+        while (stack.length) {
+            const i = stack.pop();
+            cells++;
+            const gx = i % grid, gy = (i / grid) | 0;
+            su += (gx + 0.5) / grid; sv += (gy + 0.5) / grid;
+            for (const j of [i - 1, i + 1, i - grid, i + grid]) {
+                if (j < 0 || j >= grid * grid || seen[j] || !dark[j]) continue;
+                const jx = j % grid;
+                if (Math.abs(jx - gx) > 1) continue;   // no row wrap
+                seen[j] = 1; stack.push(j);
+            }
+        }
+        const areaFrac = cells * cellFrac;
+        if (areaFrac < minFrac) continue;
+        // Inverse orthographic at the centroid: image u→ −y (east left),
+        // row v→ −z (north up).
+        const ySol = (0.5 - su / cells) / 0.485;
+        const zSol = (0.5 - sv / cells) / 0.485;
+        const latDeg = Math.asin(Math.min(1, Math.max(-1, zSol))) / DEG;
+        const x = Math.sqrt(Math.max(1e-6, 1 - ySol * ySol - zSol * zSol));
+        const lonDeg = Math.atan2(ySol, x) / DEG;      // east POSITIVE
+        holes.push({ lonDeg, latDeg, areaFrac });
+    }
+    return holes.sort((a, b) => b.areaFrac - a.areaFrac).slice(0, 4);
+}
+
+export const CARRINGTON_SYNODIC_DAYS = 27.2753;
+
+/**
+ * Corotation arrival window for a hole's high-speed stream: the hole
+ * center crosses the central meridian (east-positive lon → in
+ * lon/rate days; west → already crossed), then the stream transits
+ * 1 AU at a representative 600 km/s (documented HSS range 500–800 →
+ * the ±1 d window). PURE kinematics; no wind-field injection.
+ */
+export function hssArrivalWindow(stonyLonDeg, nowMs, { vKms = 600 } = {}) {
+    const rate = 360 / CARRINGTON_SYNODIC_DAYS;        // synodic °/day
+    const crossMs = nowMs + (stonyLonDeg / rate) * 86400e3;
+    const etaMs = crossMs + (AU_KM / vKms / 86400) * 86400e3;
+    return { crossMs, etaMs, startMs: etaMs - 86400e3, endMs: etaMs + 86400e3 };
+}
+
 /* ── S7: the Moon in the Earth-local frame ───────────────────────────
    Mean circular ecliptic-plane orbit phased by the SAME new-moon epoch
    + synodic month verdict-engine's moonPhase uses — the two oracles can

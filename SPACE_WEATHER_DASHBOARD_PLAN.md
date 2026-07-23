@@ -758,6 +758,27 @@ those move the CLOCK, and the particles follow the driver at τ.
   S-scale gate, DONKI-free quiet default, disclosure text, and the
   My Sky split. §9b dwell instrumentation rides the existing
   stage_pick/staging telemetry — revisit after the next usage pull.
+- **S9 — CORONAL HOLES → THE HSS STORY. ✅ SHIPPED 2026-07-23**
+  (author: "coronal-hole detection from the 171 darkness feeding the
+  high-speed-stream story"). Pure `detectCoronalHoles` over an
+  ImageData-like object (node-tested with synthetic disks): relative
+  threshold (× mean DISK luminance — exposure-proof; the black
+  off-disk frame is excluded BEFORE the mean), 32² grid clustering
+  with 4-neighbor flood, inverse orthographic → Stonyhurst lon/lat
+  (EAST POSITIVE convention — documented + pinned). Pure
+  `hssArrivalWindow`: corotation at the synodic Carrington rate to
+  the central meridian + 1 AU transit at a representative 600 km/s
+  (500–800 documented range → the ±1 d window). Renderer: detector
+  runs on each 171 load (128² downsample); up to 4 teal ring markers
+  rotate with τ via the SAME carringtonL0 oracle as the ARs; chip
+  `◐ n coronal holes · E22 · 8% disk · HSS @ Earth ~Jul 27 ±1d`.
+  ANNOTATION ONLY: no synthetic HSS speed enters the wind field until
+  the validation program scores HSS arrivals like CMEs (the obvious
+  next validation table). HEK/SPoCA (api/hek) remains the
+  catalog-grade record; this is the live on-disk layer. Spec test
+  serves a fixture disk with a known east blob on the aia route —
+  the full load→detect→story path runs deterministically offline.
+  Probes: sun.{holes, hssEtaMs}.
 - **S8 — THE MAGNETIC SUN. ✅ SHIPPED 2026-07-23** (author: "AIA 171
   corona as a second live channel… the sun and its magnetic
   qualities"). Three additions: (1) EUV CORONA SHELL — the live AIA

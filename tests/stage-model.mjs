@@ -31,6 +31,7 @@ import {
     bearingGamma, apparentAltitudeRad, skyCurtainRibbon, enuBasis, skyDir,
     CURTAIN_BASE_KM,
     moonLocalRe, MOON_ORBIT_RE, beltShellGrid, imfSector,
+    detectCoronalHoles, hssArrivalWindow, CARRINGTON_SYNODIC_DAYS,
 } from '../js/stage/model.js';
 import { moonPhase } from '../js/verdict-engine.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
@@ -622,6 +623,57 @@ test('S7 belts: dipole L-shell geometry, r = L·cos²λ, anchored at rMin', () =
     assert.ok(Math.max(...g.index) < g.positions.length / 3);
     // lat parameter spans the anchors.
     assert.ok(Math.abs(g.lat[0] + 1) < 1e-9 && Math.abs(g.lat[g.lat.length - 1] - 1) < 1e-9);
+});
+
+test('S9 coronal holes: darkness found on the disk, background refused', () => {
+    // Synthetic 171 disk: bright everywhere, one dark blob east of
+    // center, one at the north pole; black off-disk corners.
+    const W = 128, img = { width: W, height: W, data: new Uint8ClampedArray(W * W * 4) };
+    const put = (x, y, v) => {
+        const k = (y * W + x) * 4;
+        img.data[k] = img.data[k + 1] = img.data[k + 2] = v; img.data[k + 3] = 255;
+    };
+    for (let y = 0; y < W; y++) {
+        for (let x = 0; x < W; x++) {
+            const r = Math.hypot(x / W - 0.5, y / W - 0.5) / 0.485;
+            put(x, y, r <= 1 ? 200 : 0);
+        }
+    }
+    // East blob (image LEFT = east-positive lon), mid-latitude.
+    for (let y = 52; y < 76; y++) for (let x = 22; x < 44; x++) put(x, y, 18);
+    const holes = detectCoronalHoles(img);
+    assert.equal(holes.length, 1, `found ${holes.length}`);
+    assert.ok(holes[0].lonDeg > 15, `east-positive (${holes[0].lonDeg.toFixed(1)})`);
+    assert.ok(Math.abs(holes[0].latDeg) < 15, 'near-equatorial blob');
+    assert.ok(holes[0].areaFrac > 0.01 && holes[0].areaFrac < 0.2);
+    // A pristine disk finds nothing; null-safety.
+    const clean = { width: W, height: W, data: img.data.slice() };
+    for (let y = 40; y < 90; y++) for (let x = 10; x < 60; x++) {
+        const r = Math.hypot(x / W - 0.5, y / W - 0.5) / 0.485;
+        const k = (y * W + x) * 4;
+        clean.data[k] = clean.data[k + 1] = clean.data[k + 2] = r <= 1 ? 200 : 0;
+    }
+    assert.equal(detectCoronalHoles(clean).length, 0, 'uniform disk → no holes');
+    assert.deepEqual(detectCoronalHoles(null), []);
+    assert.deepEqual(detectCoronalHoles({ width: 0, height: 0, data: [] }), []);
+});
+
+test('S9 HSS arrival: corotation to the meridian + 600 km/s transit', () => {
+    const T = Date.parse('2026-07-22T00:00Z');
+    const rate = 360 / CARRINGTON_SYNODIC_DAYS;
+    // East hole at +30°: crosses the meridian in ~2.27 d, stream lands
+    // ~2.89 d later (1 AU at 600 km/s).
+    const e = hssArrivalWindow(30, T);
+    assert.ok(Math.abs((e.crossMs - T) / 86400e3 - 30 / rate) < 1e-9);
+    assert.ok(Math.abs((e.etaMs - e.crossMs) / 86400e3 - 2.886) < 0.01);
+    assert.ok(e.startMs < e.etaMs && e.etaMs < e.endMs);
+    // West hole (−30°): crossed 2.27 d AGO — its stream is nearly here.
+    const w = hssArrivalWindow(-30, T);
+    assert.ok(w.crossMs < T);
+    assert.ok(w.etaMs > T, 'stream still in transit');
+    // Faster stream, earlier arrival.
+    assert.ok(hssArrivalWindow(0, T, { vKms: 800 }).etaMs
+        < hssArrivalWindow(0, T, { vKms: 500 }).etaMs);
 });
 
 console.log(`stage-model: ALL PASS (${n} tests)`);

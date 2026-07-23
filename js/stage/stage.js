@@ -53,7 +53,8 @@ import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          normalizeFlares, parcelProbe, liftoffAt,
          sepStateAt, SEP_V_KMS,
          skyCurtainRibbon, enuBasis, skyDir,
-         moonLocalRe, MOON_ORBIT_RE, beltShellGrid, imfSector } from './model.js';
+         moonLocalRe, MOON_ORBIT_RE, beltShellGrid, imfSector,
+         detectCoronalHoles, hssArrivalWindow } from './model.js';
 import { sheathCompression } from '../cme-propagation.js';
 import { carringtonL0, shueStandoffRe } from '../ring-current-model.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
@@ -404,6 +405,18 @@ function mount(host) {
             euvUniforms.uTex.value = tex;
             euvShell.visible = true;
             state.sunCorona171 = true;
+            // S9: run the pure hole detector on the freshly loaded disk
+            // (downsampled 128² — grid clustering needs no more).
+            try {
+                const c = document.createElement('canvas');
+                c.width = c.height = 128;
+                const x = c.getContext('2d');
+                x.drawImage(tex.image, 0, 0, 128, 128);
+                const holes = detectCoronalHoles(x.getImageData(0, 0, 128, 128));
+                state.holes = holes;
+                state.holesMs = Date.now();
+                state.holesL0 = carringtonL0(state.holesMs).L0;
+            } catch { state.holes = []; }
         }, () => { euvShell.visible = false; state.sunCorona171 = false; });
         loadSunChannel('mag', (tex) => {
             sunUniforms.uMagTex.value = tex;
@@ -431,6 +444,21 @@ function mount(host) {
         m.visible = false;
         scene.add(m);
         arMarkers.push(m);
+    }
+
+    // S9 coronal-hole rings: dark-teal outlines at the DETECTED holes
+    // (pure detector over the live 171 disk). Detected at Stonyhurst-now;
+    // under τ-scrub they rotate at the true Carrington rate via the same
+    // carringtonL0 oracle the AR markers use.
+    const chMarkers = [];
+    for (let i = 0; i < 4; i++) {
+        const m = new THREE.Mesh(
+            new THREE.RingGeometry(0.72, 1, 26),
+            new THREE.MeshBasicMaterial({ color: 0x2fa8a0, transparent: true,
+                opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+        m.visible = false;
+        scene.add(m);
+        chMarkers.push(m);
     }
 
     const spiralMat = new THREE.LineBasicMaterial({
@@ -1158,6 +1186,10 @@ function mount(host) {
         return r ? [EARTH_S - reToUnits(r), 0, -reToUnits(3)] : [0, 0, -9];
     });
     mpChip.style.display = 'none';
+    // S9 coronal-hole chip: largest detected hole + its HSS arrival.
+    const chChip = addLabel('swst-chip dim', '',
+        () => [0, 0, -BODY.sunRadiusUnits * 2.6]);
+    chChip.style.display = 'none';
     // S6 cardinal horizon marks — only in the My Sky dome (display
     // toggled with it). World closures read the pin's ENU basis so the
     // marks turn with the geography under the mean sun.
@@ -1830,6 +1862,47 @@ function mount(host) {
             }
         }
 
+        // S9: coronal-hole rings at Stonyhurst(τ) = detected Stonyhurst +
+        // L0(detect) − L0(τ) — the same Carrington oracle as the ARs —
+        // plus the HSS-story chip for the largest hole.
+        {
+            const holes = state.holes ?? [];
+            const dL0 = holes.length
+                ? (state.holesL0 - carringtonL0(state.tauMs).L0) * Math.PI / 180 : 0;
+            for (let i = 0; i < chMarkers.length; i++) {
+                const hle = holes[i], m = chMarkers[i];
+                if (!hle) { m.visible = false; continue; }
+                const stony = hle.lonDeg * Math.PI / 180 + dL0;
+                const cl = Math.cos(hle.latDeg * Math.PI / 180);
+                m.position.set(
+                    cl * Math.cos(stony), cl * Math.sin(stony),
+                    Math.sin(hle.latDeg * Math.PI / 180))
+                    .multiplyScalar(BODY.sunRadiusUnits * 1.015);
+                m.lookAt(m.position.x * 2, m.position.y * 2, m.position.z * 2);
+                m.scale.setScalar(BODY.sunRadiusUnits
+                    * Math.max(0.1, Math.sqrt(hle.areaFrac) * 1.2));
+                m.visible = true;
+            }
+            if (holes.length) {
+                const h0 = holes[0];
+                const win = hssArrivalWindow(h0.lonDeg, state.holesMs ?? state.tauMs);
+                const ew = h0.lonDeg >= 0 ? 'E' : 'W';
+                const eta = new Date(win.etaMs);
+                const mon = eta.toLocaleString('en', { month: 'short', timeZone: 'UTC' });
+                chChip.textContent = `◐ ${holes.length} coronal hole${holes.length > 1 ? 's' : ''}`
+                    + ` · ${ew}${Math.abs(Math.round(h0.lonDeg))}`
+                    + ` · ${Math.round(h0.areaFrac * 100)}% disk`
+                    + (win.etaMs > Date.now()
+                        ? ` · HSS @ Earth ~${mon} ${eta.getUTCDate()} ±1d`
+                        : ' · HSS window passed');
+                chChip.style.display = '';
+                state.hssEtaMs = win.etaMs;
+            } else {
+                chChip.style.display = 'none';
+                state.hssEtaMs = null;
+            }
+        }
+
         // Remap statics through the current compression mix. (Ruler-tick
         // labels track automatically — their world() closures read state.mix.)
         for (const line of spirals) remapLine(line, state.mix);
@@ -2425,7 +2498,10 @@ function mount(host) {
                      live: !!state.sunLive,          // S7: SDO photosphere
                      corona171: !!state.sunCorona171, // S8: AIA 171 shell
                      magLive: !!state.sunMag,         // S8: HMI magnetogram
-                     imfSector: state.imfSectorNow ?? null };
+                     imfSector: state.imfSectorNow ?? null,
+                     // S9: detected holes + the largest one's HSS ETA.
+                     holes: (state.holes ?? []).map((h) => ({ ...h })),
+                     hssEtaMs: state.hssEtaMs ?? null };
         },
         // S7: system-completeness probes.
         get moon() {
