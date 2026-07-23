@@ -39,6 +39,9 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         // Offline: the quiet corridor must not need any live feed.
         await page.route('**/services.swpc.noaa.gov/**', (r) => r.abort());
         await page.route('**/api/nasa/**', (r) => r.abort());
+        // S7: block the SDO proxy too — the sun must stay procedural
+        // (sun.live false) and never error when the photo can't load.
+        await page.route('**/api/solar/**', (r) => r.abort());
         await page.goto('/space-weather.html', { waitUntil: 'domcontentloaded' });
     });
 
@@ -352,6 +355,57 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         await expect.poll(() => page.evaluate(() => window.__swStage.curtains.visible))
             .toBe(false);
         expect(await page.evaluate(() => window.__swStage.mySky.dome)).toBe(false);
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
+    test('S7: Moon in the tail at full moon, measured belts, live Shue readout', async ({ page }) => {
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
+
+        // Moon: on its mean orbit, phase from the verdict-engine oracle.
+        const m0 = await page.evaluate(() => window.__swStage.moon);
+        expect(Math.hypot(m0.xRe, m0.yRe)).toBeCloseTo(60.27, 1);
+        expect(m0.illumPct).toBeGreaterThanOrEqual(0);
+        expect(m0.illumPct).toBeLessThanOrEqual(100);
+        await expect.poll(() => page.evaluate(() => window.__swStage.moon.visible),
+            { timeout: 15_000 }).toBe(true);
+
+        // Scrub τ to the next full moon: the Moon crosses the magnetotail
+        // (the probe computes from τ synchronously — scan the window).
+        const tail = await page.evaluate(() => {
+            const now = Date.now();
+            for (let d = 0; d <= 30; d += 0.25) {
+                window.__swStage.setTau(now + d * 86400e3);
+                const m = window.__swStage.moon;
+                if (m.inTail) return { d, illum: m.illumPct };
+            }
+            return null;
+        });
+        expect(tail).not.toBeNull();
+        expect(tail.illum).toBeGreaterThan(85);   // tail crossing ≈ full moon
+        await page.evaluate(() => window.__swStage.setTau(Date.now()));
+
+        // Van Allen belts: visible, outer driven by the MEASURED ≥2 MeV
+        // electron flux (re-inject each poll tick — the offline feed's
+        // quiet fallback overwrites between ticks).
+        await expect.poll(() => page.evaluate(() => window.__swStage.belts.visible),
+            { timeout: 15_000 }).toBe(true);
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update',
+                { detail: { electron_flux_2mev: 1e5 } }));
+            return window.__swStage.belts.outer;
+        }), { timeout: 15_000 }).toBe(1);
+
+        // Shue standoff: live readout from the bus wind (fallback 400 km/s
+        // offline), in the honest 6–13 R_E range, stated on the nose chip.
+        await expect.poll(() => page.evaluate(() => window.__swStage.shue.r0Re),
+            { timeout: 15_000 }).toBeGreaterThan(6);
+        expect(await page.evaluate(() => window.__swStage.shue.r0Re)).toBeLessThan(13);
+        await expect(host.locator('.swst-chip', { hasText: 'Shue' }))
+            .toContainText('Rₑ');
+
+        // Offline: the sun stays procedural, honestly labeled not-live.
+        expect(await page.evaluate(() => window.__swStage.sun.live)).toBe(false);
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 

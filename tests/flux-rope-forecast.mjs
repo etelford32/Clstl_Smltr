@@ -8,7 +8,8 @@
 
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { computeFluxRopeForecast, forecastDriverSamples, summarizeForecast } from '../js/flux-rope-forecast.js';
+import { computeFluxRopeForecast, forecastDriverSamples, summarizeForecast,
+         eventSeed } from '../js/flux-rope-forecast.js';
 import { fromArrays, DRIVER_SOURCES } from '../js/solar-wind-driver.js';
 
 const wasm = await readFile(fileURLToPath(new URL('../js/flux-rope-wasm/flux_rope_core.wasm', import.meta.url)));
@@ -108,6 +109,18 @@ check('summary min-Bz percentiles ordered (p5 at least as deep as median)',
     check('summarizeForecast: quantiles + minima',
         s2.p10 === 0.5 && s2.minBzP50 === -8 && s2.minBzP5 === -15
             && s2.arrivalP10Ms === 1000 + 40 * 3600_000);
+}
+
+// Diagonalized determinism (2026-07-23): every catalogued event gets its
+// OWN reproducible ensemble seed — replays are bit-stable per event.
+{
+    const a = eventSeed('2013-06-02T20:24:00-CME-001');
+    check('eventSeed is deterministic', a === eventSeed('2013-06-02T20:24:00-CME-001'));
+    check('distinct events get distinct seeds',
+        a !== eventSeed('2013-06-03T08:12:00-CME-001'));
+    check('seed is a positive uint32', Number.isInteger(a) && a > 0 && a < 2 ** 32);
+    check('empty identity falls back to the base seed', eventSeed(null, 6180) !== 0);
+    check('base folds in', eventSeed('x', 1) !== eventSeed('x', 2));
 }
 
 if (failures) {

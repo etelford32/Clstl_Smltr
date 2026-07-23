@@ -36,6 +36,20 @@ import { loadFluxRopeKernel, L1_OBSERVER } from './flux-rope-kernel.js';
 import { fetchDonkiCmes, donkiToPreset, fetchRtswDriver } from './flux-rope-live.js';
 import { fromArrays } from './solar-wind-driver.js';
 
+/**
+ * Deterministic per-event ensemble seed: FNV-1a over the event identity
+ * (DONKI activityID or launch ISO) folded into the base seed. PURE —
+ * the reproducibility contract for replays lives here.
+ */
+export function eventSeed(id, base = FORECAST_DEFAULTS.seed) {
+    let h = 0x811c9dc5;
+    for (const ch of String(id ?? '')) {
+        h ^= ch.codePointAt(0);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return ((base ^ h) >>> 0) || base;
+}
+
 export const FORECAST_DEFAULTS = Object.freeze({
     days: 7,            // DONKI lookback window
     members: 500,
@@ -102,6 +116,11 @@ export async function computeFluxRopeForecast(opts = {}) {
     const cmes = src.cmes ?? await fetchDonkiCmes({ days: cfg.days });
     const target = cmes.find((c) => c.earthDirected) ?? null;
     if (!target) return { idle: true, reason: 'no-earth-directed-cme' };
+    // Diagonalized determinism (2026-07-23): every catalogued event gets
+    // its OWN reproducible ensemble — seed = base ⊕ hash(event identity).
+    // Same event → bit-identical fan on every load and every replay;
+    // different events → distinguishable fans. Never wall-clock random.
+    const evSeed = eventSeed(target.id ?? target.timeIso, cfg.seed);
 
     // Live L1 for ambient wind + assimilation (best-effort).
     let rtsw = src.rtsw;
@@ -119,7 +138,7 @@ export async function computeFluxRopeForecast(opts = {}) {
     const n = Math.round(cfg.gridHours * 3600 / cfg.gridDtS);
     const launchMs = Date.parse(preset.launchIso);
     const det = kernel.series(0, cfg.gridDtS, n, L1_OBSERVER);
-    const prior = kernel.ensembleRun(cfg.seed, cfg.members, 0, cfg.gridDtS, n);
+    const prior = kernel.ensembleRun(evSeed, cfg.members, 0, cfg.gridDtS, n);
 
     // Condition on live observed Bz where coverage overlaps the past grid.
     const nowMs = cfg.nowMs ?? Date.now();

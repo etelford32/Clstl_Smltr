@@ -682,6 +682,67 @@ export const SEP_V_KMS = 9.0e4;
  * `intensity` is the log ramp S1→~0 … S5→1 for brightness.
  * @returns {{ pfu10:number, s:number, on:boolean, intensity:number }}
  */
+/* ── S7: the Moon in the Earth-local frame ───────────────────────────
+   Mean circular ecliptic-plane orbit phased by the SAME new-moon epoch
+   + synodic month verdict-engine's moonPhase uses — the two oracles can
+   never disagree about phase. In this frame −x IS the mean sun, so the
+   synodic phase angle is exactly the geometry angle: new moon sits
+   sunward, and every FULL MOON the Moon crosses the magnetotail (+x).
+   Documented tolerances (context display, like the mean-sun geography):
+   eccentricity (±5.5% of distance), inclination (5.1°, drawn in-plane),
+   ellipticity of the synodic rate. */
+
+const SYNODIC_DAYS = 29.53058867;                    // = verdict-engine
+const NEW_MOON_EPOCH_MS = Date.UTC(2000, 0, 6, 18, 14);
+export const MOON_ORBIT_RE = 60.27;                  // mean distance
+
+/** Moon position [R_E] in the Earth-local stage frame; prograde
+ *  (counterclockwise from ecliptic north). */
+export function moonLocalRe(tauMs, out = [0, 0, 0]) {
+    const days = (tauMs - NEW_MOON_EPOCH_MS) / 86400e3;
+    const phase = ((days % SYNODIC_DAYS) + SYNODIC_DAYS) % SYNODIC_DAYS / SYNODIC_DAYS;
+    const a = TAU * phase;
+    out[0] = -MOON_ORBIT_RE * Math.cos(a);
+    out[1] = -MOON_ORBIT_RE * Math.sin(a);
+    out[2] = 0;
+    return out;
+}
+
+/* ── S7: Van Allen belts — dipole L-shell surfaces ───────────────────
+   r(λ) = L·cos²λ revolved about the dipole (stage z) axis, cut where
+   the field line reaches rMin (the atmospheric anchor). Same dipole
+   convention as the oval's magneticLatitude oracle; belt L-values match
+   the house magnetosphere-engine (inner ~1.6, outer 4–6 R_E). PURE
+   geometry in R_E; the renderer scales via reToUnits and drives the
+   OUTER belt's brightness from the MEASURED GOES ≥2 MeV electron flux
+   on the bus — storm dropouts included, because the data includes them. */
+export function beltShellGrid(L, nLam = 20, nPhi = 48, rMin = 1.08) {
+    const lamC = Math.acos(Math.sqrt(Math.min(1, rMin / L)));
+    const positions = new Float32Array((nLam + 1) * (nPhi + 1) * 3);
+    const lat = new Float32Array((nLam + 1) * (nPhi + 1));   // λ/λc ∈ [−1,1]
+    let k = 0;
+    for (let i = 0; i <= nLam; i++) {
+        const lam = -lamC + (2 * lamC) * (i / nLam);
+        const r = L * Math.cos(lam) * Math.cos(lam);
+        for (let j = 0; j <= nPhi; j++) {
+            const phi = TAU * (j / nPhi);
+            positions[k * 3] = r * Math.cos(lam) * Math.cos(phi);
+            positions[k * 3 + 1] = r * Math.cos(lam) * Math.sin(phi);
+            positions[k * 3 + 2] = r * Math.sin(lam);
+            lat[k] = lam / lamC;
+            k++;
+        }
+    }
+    const index = [];
+    for (let i = 0; i < nLam; i++) {
+        for (let j = 0; j < nPhi; j++) {
+            const a = i * (nPhi + 1) + j, b = a + nPhi + 1;
+            index.push(a, b, a + 1, b, b + 1, a + 1);
+        }
+    }
+    return { positions, lat, index, lamC };
+}
+
 /* ── S6: the My Sky dome — the sky story from UNDERNEATH ─────────────
    The outside stagings draw the curtains with the DISCLOSED ×10.6
    height exaggeration (scale.js AURORA) because 300 km is invisible at

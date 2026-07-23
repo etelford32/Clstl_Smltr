@@ -758,6 +758,36 @@ those move the CLOCK, and the particles follow the driver at τ.
   S-scale gate, DONKI-free quiet default, disclosure text, and the
   My Sky split. §9b dwell instrumentation rides the existing
   stage_pick/staging telemetry — revisit after the next usage pull.
+- **S7 — SYSTEM COMPLETENESS. ✅ SHIPPED 2026-07-23** (author: "Sun ·
+  Earth · Moon · Magnetosphere — live photosphere + corona, Shue-1998
+  magnetopause, Van Allen belts, Kp/Bz simulation… tied
+  deterministically to real-time"). Four additions, each on an
+  existing oracle: (1) LIVE PHOTOSPHERE — the Earth-facing hemisphere
+  of the Stage sun samples the actual SDO/HMI continuum through the
+  house /api/solar/aia proxy (12-min cadence), orthographic disk→
+  sphere projection on the near side only; far side stays procedural
+  (we don't see it — that's the far-side program's job); fail-quiet:
+  offline stays procedural, probe sun.live says which. (2) THE MOON —
+  pure moonLocalRe on the SAME new-moon epoch + synodic month as
+  verdict-engine moonPhase (the two can never disagree); in the
+  Earth-local frame −x is the mean sun, so the synodic angle IS the
+  geometry: every full moon the Moon crosses the magnetotail (probe
+  moon.inTail; chip says so; node-pinned). World-frame terminator
+  shading; drawn 1.1 R_E (×4, the smallest disclosed body
+  exaggeration — scale.js BODY.moonExaggeration). (3) VAN ALLEN
+  BELTS — pure beltShellGrid dipole L-shells r = L·cos²λ (same dipole
+  convention as the oval oracle; house L-values from
+  magnetosphere-engine: inner 1.6, outer 5); the OUTER belt breathes
+  with the MEASURED GOES ≥2 MeV electron flux on the bus (log ramp
+  10²→10⁵ pfu — storm dropouts included, because the data includes
+  them). (4) LIVE SHUE READOUT — updateMagnetopause now also fires
+  from the bus's measured L1 wind (no longer waits for the forecast
+  provider), and a nose chip states `⌓ Shue r₀ · Pdyn · Bz` from the
+  same shueStandoffRe oracle the surface is built from. Plus
+  DIAGONALIZED DETERMINISM in the provider: eventSeed(id) = FNV-1a
+  over the event identity ⊕ base — every catalogued CME gets its OWN
+  bit-reproducible ensemble on every load and replay (node-pinned in
+  the forecast gate). Probes: __swStage.{moon, belts, shue, sun.live}.
 - **S6 — MY SKY DOME. ✅ SHIPPED 2026-07-23** (the sky-dome follow-up
   the S5c walls were "the input" for). The staging now renders the sky
   story FROM UNDERNEATH at the pin, and it is the Stage's only

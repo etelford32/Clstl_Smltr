@@ -52,12 +52,13 @@ import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          memberFieldRows, sunActivityAt, flareFlashAt,
          normalizeFlares, parcelProbe, liftoffAt,
          sepStateAt, SEP_V_KMS,
-         skyCurtainRibbon, enuBasis, skyDir } from './model.js';
+         skyCurtainRibbon, enuBasis, skyDir,
+         moonLocalRe, MOON_ORBIT_RE, beltShellGrid } from './model.js';
 import { sheathCompression } from '../cme-propagation.js';
-import { carringtonL0 } from '../ring-current-model.js';
+import { carringtonL0, shueStandoffRe } from '../ring-current-model.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
 import { ropeFrame } from '../flux-rope/view.js';
-import { magneticLatitude, boundaryForKp, sunAltitudeDeg } from '../verdict-engine.js';
+import { magneticLatitude, boundaryForKp, sunAltitudeDeg, moonPhase } from '../verdict-engine.js';
 import { density, kpToAp } from '../upper-atmosphere-engine.js';
 import { propagate } from '../satellite-tracker.js';
 import { loadProfile, CHANGE_EVENT as THRESHOLD_EVENT } from '../threshold-profile.js';
@@ -258,7 +259,14 @@ function mount(host) {
     // dressing, like the Parker spirals — no physics claim). Shader math
     // stays clamped (the ionosphere cage-shader overflow lesson) and
     // cheap (3 octaves, no derivatives) for software-GL CI.
-    const sunUniforms = { uTime: { value: 0 }, uAct: { value: 0 } };
+    // S7 LIVE PHOTOSPHERE: the Earth-facing hemisphere samples the actual
+    // SDO/HMI continuum through the house edge proxy (/api/solar/aia —
+    // 12-min cadence, CDN-cached). Orthographic disk→sphere projection on
+    // the near side only; the far side keeps the procedural granulation —
+    // honest: we don't see the far side (that's the far-side program's
+    // job). Texture load is fail-quiet: offline/CI stays procedural.
+    const sunUniforms = { uTime: { value: 0 }, uAct: { value: 0 },
+        uLive: { value: 0 }, uLiveTex: { value: null } };
     const sun = new THREE.Mesh(
         new THREE.SphereGeometry(BODY.sunRadiusUnits, 48, 28),
         new THREE.ShaderMaterial({
@@ -291,6 +299,7 @@ function mount(host) {
                     return 0.55 * vnoise(p) + 0.30 * vnoise(p * 2.31)
                          + 0.15 * vnoise(p * 5.17);
                 }
+                uniform float uLive; uniform sampler2D uLiveTex;
                 void main() {
                     // Granulation drifts slowly; scale chosen so cells read
                     // at the Stage's default camera distance.
@@ -300,6 +309,17 @@ function mount(host) {
                     vec3 bright = vec3(1.00, 0.95, 0.80);
                     vec3 c = mix(deep, mid, clamp(g * 1.6, 0.0, 1.0));
                     c = mix(c, bright, clamp((g - 0.55) * 2.2, 0.0, 1.0));
+                    // S7: live SDO disk on the Earth-facing (+x) hemisphere.
+                    // Orthographic projection: the photo's (u,v) are the
+                    // sphere's (−y, z) as seen from Earth; SDO disks fill
+                    // ~0.97 of the frame. Warm-tint the grayscale HMI.
+                    if (uLive > 0.01 && vObj.x > 0.0) {
+                        vec2 duv = vec2(0.5 - vObj.y * 0.485, 0.5 + vObj.z * 0.485);
+                        vec3 photo = texture2D(uLiveTex, duv).rgb;
+                        vec3 tinted = photo * vec3(1.05, 0.88, 0.62) * 1.25;
+                        float seam = smoothstep(0.0, 0.18, vObj.x);
+                        c = mix(c, tinted, uLive * seam);
+                    }
                     // Limb darkening: μ = cos(view angle), Eddington-ish ramp.
                     float mu = clamp(dot(normalize(vN), normalize(vView)), 0.0, 1.0);
                     c *= 0.45 + 0.55 * pow(mu, 0.55);
@@ -318,6 +338,22 @@ function mount(host) {
     const corona = makeGlowSprite('#ffb95e', 2.4);
     corona.material.opacity = 0.35;
     scene.add(corona);
+
+    // S7 live-photosphere fetch: same-origin edge proxy, fail-quiet,
+    // refresh at AIA's native 12-min cadence.
+    const loadSunPhoto = () => {
+        new THREE.TextureLoader().load('/api/solar/aia?channel=white&res=1024',
+            (tex) => {
+                tex.colorSpace = THREE.SRGBColorSpace;
+                sunUniforms.uLiveTex.value = tex;
+                sunUniforms.uLive.value = 1;
+                state.sunLive = true;
+            },
+            undefined,
+            () => { state.sunLive = false; });   // offline → procedural
+    };
+    loadSunPhoto();
+    setInterval(loadSunPhoto, 12 * 60e3);
 
     // Live ACTIVE REGIONS on the Sun (the S2 "on record" upgrade; author
     // feedback 2026-07-23 "still not seeing solar activity"): up to 8
@@ -740,6 +776,87 @@ function mount(host) {
     heatShell.visible = false;
     earthGroup.add(heatShell);
 
+    // ── S7 THE MOON: mean-orbit position from the SAME new-moon epoch
+    // verdict-engine's moonPhase uses — τ-scrubbing swings it around the
+    // orbit, and every FULL MOON it crosses the magnetotail. Terminator
+    // shading is real: lit from the mean-sun direction (−x).
+    const moon = new THREE.Mesh(
+        new THREE.SphereGeometry(BODY.moonRadiusUnits, 20, 14),
+        new THREE.ShaderMaterial({
+            vertexShader: `
+                varying vec3 vNW;
+                void main() {
+                    // WORLD-frame normal (earthGroup is a pure translation,
+                    // so mat3(modelMatrix) is safe) — the terminator must
+                    // face the mean sun, not the camera.
+                    vNW = normalize(mat3(modelMatrix) * normal);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                varying vec3 vNW;
+                void main() {
+                    // Mean sun sits at world −x.
+                    float lit = clamp(dot(normalize(vNW), vec3(-1.0, 0.0, 0.0)), 0.0, 1.0);
+                    vec3 c = mix(vec3(0.05, 0.05, 0.06), vec3(0.78, 0.77, 0.74),
+                        pow(lit, 0.7));
+                    gl_FragColor = vec4(c, 1.0);
+                }`,
+        }));
+    earthGroup.add(moon);
+    const moonRing = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(
+            Array.from({ length: 97 }, (_, i) => {
+                const a = (i / 96) * Math.PI * 2;
+                const r = reToUnits(MOON_ORBIT_RE);
+                return new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), 0);
+            })),
+        new THREE.LineBasicMaterial({ color: 0x2a3550, transparent: true, opacity: 0.5 }));
+    earthGroup.add(moonRing);
+
+    // ── S7 VAN ALLEN BELTS: dipole L-shell surfaces (model.js
+    // beltShellGrid — same dipole convention as the oval oracle; house
+    // belt L-values from magnetosphere-engine). The OUTER belt breathes
+    // with the MEASURED GOES ≥2 MeV electron flux on the bus — including
+    // the storm-time dropouts, because the data includes them.
+    const beltUniforms = { uInner: { value: 0.5 }, uOuter: { value: 0.5 } };
+    const mkBelt = (L, colorVec, uniName) => {
+        const g = beltShellGrid(L);
+        const geom = new THREE.BufferGeometry();
+        const pos = new Float32Array(g.positions.length);
+        for (let i = 0; i < g.positions.length; i++) {
+            pos[i] = g.positions[i] * reToUnits(1);
+        }
+        geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geom.setAttribute('aLat', new THREE.BufferAttribute(g.lat, 1));
+        geom.setIndex(g.index);
+        const mesh = new THREE.Mesh(geom, new THREE.ShaderMaterial({
+            uniforms: beltUniforms,
+            transparent: true, depthWrite: false, side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            vertexShader: `
+                attribute float aLat; varying float vLat;
+                void main() {
+                    vLat = aLat;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform float ${uniName};
+                varying float vLat;
+                void main() {
+                    // Brightest at the equator, fading toward the anchors.
+                    float eq = pow(clamp(1.0 - abs(vLat), 0.0, 1.0), 1.5);
+                    float a = ${uniName} * eq * 0.16;
+                    if (a < 0.004) discard;
+                    gl_FragColor = vec4(${colorVec}, a);
+                }`,
+        }));
+        mesh.visible = false;
+        earthGroup.add(mesh);
+        return mesh;
+    };
+    const beltInner = mkBelt(1.6, 'vec3(0.35, 0.55, 1.0)', 'uInner');
+    const beltOuter = mkBelt(5.0, 'vec3(1.0, 0.55, 0.25)', 'uOuter');
+
     const assetObjs = [];   // { asset, ring: Line, dot: Mesh, label }
 
     /* ── Rope + ghosts + wavefronts (dynamic) ─────────────────────── */
@@ -970,6 +1087,18 @@ function mount(host) {
         () => [0, 0, -BODY.sunRadiusUnits * 2.0]);
     addLabel('swst-label', 'EARTH', () => [EARTH_S, 0, BODY.earthRadiusUnits * 2.2]);
     addLabel('swst-label', 'L1', () => [stageRadius(0.99, state.mix), 0, 0.05]);
+    // S7 Moon chip: phase glyph + name from the verdict-engine oracle,
+    // anchored to the live orbit position.
+    const moonChip = addLabel('swst-chip dim', '', () => {
+        const m = state.moonPos;
+        return m ? [EARTH_S + m[0], m[1], m[2] - BODY.moonRadiusUnits * 2.5] : [0, 0, -9];
+    });
+    // S7 Shue nose chip: the LIVE standoff, at the nose it measures.
+    const mpChip = addLabel('swst-chip dim', '', () => {
+        const r = state.shueR0;
+        return r ? [EARTH_S - reToUnits(r), 0, -reToUnits(3)] : [0, 0, -9];
+    });
+    mpChip.style.display = 'none';
     // S6 cardinal horizon marks — only in the My Sky dome (display
     // toggled with it). World closures read the pin's ENU basis so the
     // marks turn with the geography under the mean sun.
@@ -1239,6 +1368,17 @@ function mount(host) {
         }
         if (Number.isFinite(d?.proton_flux_10mev)) {
             state.protonLatest = d.proton_flux_10mev;
+        }
+        // S7: measured ≥2 MeV electrons drive the outer Van Allen belt.
+        if (Number.isFinite(d?.electron_flux_2mev) && d.electron_flux_2mev > 0) {
+            state.electronFlux = d.electron_flux_2mev;
+        }
+        // S7: the magnetopause breathes with the MEASURED L1 wind from
+        // the bus — the Shue surface + r₀ chip no longer wait for the
+        // forecast provider (which may be idle on a quiet sun).
+        if (d?.solar_wind && Number.isFinite(d.solar_wind.speed)) {
+            updateMagnetopause({ v: d.solar_wind.speed,
+                n: d.solar_wind.density ?? 5, bz: d.solar_wind.bz ?? 0 });
         }
         // BOTH flare catalogs: NOAA retired its 7-day flare JSON, so live
         // flares usually arrive ONLY as donki_flares — reading recent_flares
@@ -1518,6 +1658,13 @@ function mount(host) {
         const key = `${(pdyn ?? 2).toFixed(2)}|${(s?.bz ?? 0).toFixed(1)}`;
         if (key === mpKey) return;
         mpKey = key;
+        // S7: the LIVE Shue-1998 standoff, stated at the nose it measures
+        // (same shueStandoffRe oracle the grid is built from).
+        const r0 = shueStandoffRe(pdyn ?? 2, s?.bz ?? 0);
+        state.shueR0 = r0;
+        mpChip.textContent = `⌓ Shue r₀ ${r0.toFixed(1)} Rₑ · `
+            + `Pdyn ${(pdyn ?? 2).toFixed(1)} nPa · Bz ${(s?.bz ?? 0).toFixed(1)} nT`;
+        mpChip.style.display = '';
         const grid = shueSurfaceGrid(pdyn ?? 2, s?.bz ?? 0, 30, 20);
         const pos = new Float32Array(grid.positions.length);
         for (let i = 0; i < pos.length; i++) pos[i] = reToUnits(grid.positions[i]);
@@ -1921,6 +2068,33 @@ function mount(host) {
             }
         }
 
+        // S7: the Moon marches with τ (mean orbit, moonPhase-locked) and
+        // the belts breathe with the measured electron environment.
+        {
+            const mRe = moonLocalRe(state.tauMs);
+            moon.position.set(reToUnits(mRe[0]), reToUnits(mRe[1]), reToUnits(mRe[2]));
+            state.moonPos = [moon.position.x, moon.position.y, moon.position.z];
+            const ph = moonPhase(state.tauMs);
+            // Tail crossing: anti-sunward of Earth, inside the ~25 R_E
+            // tail cross-section at lunar distance — every full moon.
+            const inTail = mRe[0] > 20 && Math.abs(mRe[1]) < 25;
+            state.moonInTail = inTail;
+            moonChip.textContent = `${ph.glyph} ${ph.name} · ${ph.illumPct}%`
+                + (inTail ? ' · crossing the magnetotail' : '');
+            moon.visible = moonRing.visible = !inMySky;
+            moonChip.style.display = inMySky ? 'none' : '';
+            // Outer belt: log ramp over the measured GOES ≥2 MeV flux
+            // (quiet ~10² pfu → storm-injected 10⁵; dropouts included).
+            const ef = state.electronFlux;
+            const outer = Number.isFinite(ef) && ef > 0
+                ? Math.min(1, Math.max(0.15, (Math.log10(ef) - 2) / 3)) : 0.5;
+            beltUniforms.uOuter.value = outer;
+            state.beltOuter = outer;
+            beltInner.visible = beltOuter.visible = !inMySky;
+            if (inMySky || !state.shueR0) mpChip.style.display = 'none';
+            else mpChip.style.display = '';
+        }
+
         // S5c SEP streaks: gated on the MEASURED ≥10 MeV S-scale at τ.
         // The context spirals run hot while protons are in the corridor.
         {
@@ -2179,7 +2353,26 @@ function mount(host) {
                      act: state.sunAct?.act ?? 0,
                      flash: state.sunAct?.flash ?? 0,
                      flareRegion: state.sunAct?.flareRegion ?? null,
-                     liftoff: liftoffSprite.visible };
+                     liftoff: liftoffSprite.visible,
+                     live: !!state.sunLive };   // S7: SDO photosphere loaded
+        },
+        // S7: system-completeness probes.
+        get moon() {
+            // Pure function of τ (synchronous for tests/deep links — no
+            // updateScene dependency).
+            const m = moonLocalRe(state.tauMs);
+            const ph = moonPhase(state.tauMs);
+            return { xRe: m[0], yRe: m[1], phase: ph.phase,
+                     illumPct: ph.illumPct,
+                     inTail: m[0] > 20 && Math.abs(m[1]) < 25,
+                     visible: moon.visible };
+        },
+        get belts() {
+            return { visible: beltOuter.visible,
+                     outer: state.beltOuter ?? null };
+        },
+        get shue() {
+            return { r0Re: state.shueR0 ?? null };
         },
         // S5d: the virtual monitor (null when none is dropped).
         get probe() {

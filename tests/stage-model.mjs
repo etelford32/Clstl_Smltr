@@ -30,7 +30,9 @@ import {
     sepStateAt, SEP_V_KMS,
     bearingGamma, apparentAltitudeRad, skyCurtainRibbon, enuBasis, skyDir,
     CURTAIN_BASE_KM,
+    moonLocalRe, MOON_ORBIT_RE, beltShellGrid,
 } from '../js/stage/model.js';
+import { moonPhase } from '../js/verdict-engine.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
 import { magneticLatitude, boundaryForKp } from '../js/verdict-engine.js';
 import { density, kpToAp } from '../js/upper-atmosphere-engine.js';
@@ -567,6 +569,46 @@ test('S6 ENU basis: orthonormal, geography-consistent, skyDir sane', () => {
     assert.ok(Math.abs(n0[0] - b.north[0]) < 1e-9);
     const e0 = skyDir(Math.PI / 2, 0, b);
     assert.ok(Math.abs(e0[1] - b.east[1]) < 1e-9);
+});
+
+test('S7 Moon: phase-locked to the verdict-engine oracle, tail at full moon', () => {
+    // The epoch itself is a new moon: sunward (−x) in the stage frame.
+    const NEW_MOON = Date.UTC(2000, 0, 6, 18, 14);
+    const atNew = moonLocalRe(NEW_MOON);
+    assert.ok(Math.abs(atNew[0] + MOON_ORBIT_RE) < 1e-6, 'new moon sunward');
+    assert.ok(Math.abs(atNew[1]) < 1e-6);
+    // Half a synodic month later: FULL moon, anti-sunward — crossing the
+    // magnetotail. And the verdict-engine oracle agrees it is full.
+    const FULL = NEW_MOON + 29.53058867 / 2 * 86400e3;
+    const atFull = moonLocalRe(FULL);
+    assert.ok(Math.abs(atFull[0] - MOON_ORBIT_RE) < 1e-3, 'full moon tailward');
+    assert.ok(moonPhase(FULL).illumPct > 98, 'moonPhase agrees: full');
+    assert.ok(moonPhase(NEW_MOON).illumPct < 2, 'moonPhase agrees: new');
+    // Constant mean distance, ecliptic-plane (documented tolerances).
+    for (const dt of [3, 11, 21]) {
+        const p = moonLocalRe(NEW_MOON + dt * 86400e3);
+        assert.ok(Math.abs(Math.hypot(...p) - MOON_ORBIT_RE) < 1e-6);
+        assert.equal(p[2], 0);
+    }
+});
+
+test('S7 belts: dipole L-shell geometry, r = L·cos²λ, anchored at rMin', () => {
+    const g = beltShellGrid(5, 20, 32, 1.08);
+    // Equatorial row sits exactly at L.
+    let maxR = 0, minR = Infinity;
+    for (let k = 0; k < g.positions.length / 3; k++) {
+        const r = Math.hypot(g.positions[k * 3], g.positions[k * 3 + 1], g.positions[k * 3 + 2]);
+        maxR = Math.max(maxR, r); minR = Math.min(minR, r);
+    }
+    assert.ok(Math.abs(maxR - 5) < 1e-6, `equator at L (${maxR})`);
+    assert.ok(Math.abs(minR - 1.08) < 0.02, `anchored at rMin (${minR})`);
+    // λc solves L·cos²λ = rMin.
+    assert.ok(Math.abs(5 * Math.cos(g.lamC) ** 2 - 1.08) < 1e-9);
+    // Index buffer is complete triangles inside the vertex range.
+    assert.equal(g.index.length % 3, 0);
+    assert.ok(Math.max(...g.index) < g.positions.length / 3);
+    // lat parameter spans the anchors.
+    assert.ok(Math.abs(g.lat[0] + 1) < 1e-9 && Math.abs(g.lat[g.lat.length - 1] - 1) < 1e-9);
 });
 
 console.log(`stage-model: ALL PASS (${n} tests)`);
