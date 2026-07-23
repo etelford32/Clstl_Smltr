@@ -399,8 +399,10 @@ export function assetOrbitRing({ inclDeg = 0, raanDeg = 0, altKm = 550 }, n = 96
    camera floats just above the pin, target on the northward horizon. */
 export function mySkyPose(latDeg, lonDeg, tauMs) {
     const pos = earthLocal(latDeg, lonDeg, 1.10, tauMs);
-    const northLat = Math.min(88, latDeg + 24);
-    const target = earthLocal(northLat, lonDeg, 1.02, tauMs);
+    // Look POLEWARD — the aurora lives toward the pole in each
+    // hemisphere (a southern observer faces south, S6).
+    const poleLat = Math.max(-88, Math.min(88, latDeg + (latDeg >= 0 ? 24 : -24)));
+    const target = earthLocal(poleLat, lonDeg, 1.02, tauMs);
     return { pos, target };
 }
 
@@ -680,6 +682,284 @@ export const SEP_V_KMS = 9.0e4;
  * `intensity` is the log ramp S1→~0 … S5→1 for brightness.
  * @returns {{ pfu10:number, s:number, on:boolean, intensity:number }}
  */
+/* ── S8: IMF sector polarity from the measured L1 field ──────────────
+   The Parker spiral's field points either OUTWARD along the spiral
+   ("away" sector: Bx<0, By>0 at Earth) or inward ("toward": Bx>0,
+   By<0) — the Sun's magnetic polarity sampled in situ. Projection of
+   the measured (Bx,By) onto the nominal away direction (−1,+1)/√2,
+   with honest refusal: too weak, degenerate (the feed's quiet fallback
+   has Bx≡0), or ambiguous → null, never a guess. PURE. */
+export function imfSector(bx, by) {
+    if (!Number.isFinite(bx) || !Number.isFinite(by)) return null;
+    const mag = Math.hypot(bx, by);
+    if (mag < 1 || Math.abs(bx) < 0.3) return null;
+    const s = (by - bx) / (Math.SQRT2 * mag);
+    return s > 0.25 ? 'away' : s < -0.25 ? 'toward' : null;
+}
+
+/* ── S9: coronal holes from the 171 Å darkness → the HSS story ───────
+   Coronal holes are the dark EUV regions where open field lets the
+   fast wind escape; when a hole's center crosses the central meridian,
+   its high-speed stream reaches Earth a transit later. The DETECTOR is
+   pure over an ImageData-like object (node-testable with synthetic
+   disks); the ARRIVAL oracle is pure corotation kinematics. This layer
+   is the LIVE on-disk view — the HEK/SPoCA catalog (api/hek) remains
+   the validation-grade record. ANNOTATION ONLY: no synthetic HSS speed
+   is injected into the wind field until the validation program scores
+   HSS arrivals like it scores CMEs.
+   Longitude convention here: Stonyhurst with EAST POSITIVE (+y stage
+   side, left limb as seen from Earth) — documented, node-pinned. */
+
+/**
+ * Detect dark, contiguous on-disk regions in a 171 Å disk image.
+ * Relative threshold (× mean disk luminance) so exposure changes don't
+ * move the cut; grid clustering with 4-neighbor flood; off-disk pixels
+ * (the black frame corners) are excluded BEFORE the mean.
+ * @param {{width, height, data}} img  RGBA bytes (ImageData-like)
+ * @returns {Array<{lonDeg, latDeg, areaFrac}>} east-positive Stonyhurst
+ */
+export function detectCoronalHoles(img,
+    { grid = 32, thresh = 0.45, minFrac = 0.01, diskR = 0.9 } = {}) {
+    if (!img?.data || !img.width || !img.height) return [];
+    const { width: w, height: h, data } = img;
+    const lum = new Float32Array(grid * grid);
+    const inDisk = new Uint8Array(grid * grid);
+    let diskSum = 0, diskN = 0;
+    for (let gy = 0; gy < grid; gy++) {
+        for (let gx = 0; gx < grid; gx++) {
+            const u = (gx + 0.5) / grid, v = (gy + 0.5) / grid;
+            const r = Math.hypot(u - 0.5, v - 0.5) / 0.485;
+            if (r > diskR) continue;
+            // Mean over the cell's pixel block.
+            const x0 = Math.floor(u * w - w / grid / 2), x1 = x0 + Math.ceil(w / grid);
+            const y0 = Math.floor(v * h - h / grid / 2), y1 = y0 + Math.ceil(h / grid);
+            let s = 0, n = 0;
+            for (let y = Math.max(0, y0); y < Math.min(h, y1); y++) {
+                for (let x = Math.max(0, x0); x < Math.min(w, x1); x++) {
+                    const k = (y * w + x) * 4;
+                    s += 0.30 * data[k] + 0.50 * data[k + 1] + 0.20 * data[k + 2];
+                    n++;
+                }
+            }
+            const i = gy * grid + gx;
+            lum[i] = n ? s / n / 255 : 0;
+            inDisk[i] = 1;
+            diskSum += lum[i]; diskN++;
+        }
+    }
+    if (!diskN) return [];
+    const cut = thresh * (diskSum / diskN);
+    const dark = new Uint8Array(grid * grid);
+    for (let i = 0; i < grid * grid; i++) dark[i] = inDisk[i] && lum[i] < cut ? 1 : 0;
+    // 4-neighbor flood fill into components.
+    const seen = new Uint8Array(grid * grid);
+    const holes = [];
+    const cellFrac = 1 / diskN;
+    for (let i0 = 0; i0 < grid * grid; i0++) {
+        if (!dark[i0] || seen[i0]) continue;
+        const stack = [i0]; seen[i0] = 1;
+        let cells = 0, su = 0, sv = 0;
+        while (stack.length) {
+            const i = stack.pop();
+            cells++;
+            const gx = i % grid, gy = (i / grid) | 0;
+            su += (gx + 0.5) / grid; sv += (gy + 0.5) / grid;
+            for (const j of [i - 1, i + 1, i - grid, i + grid]) {
+                if (j < 0 || j >= grid * grid || seen[j] || !dark[j]) continue;
+                const jx = j % grid;
+                if (Math.abs(jx - gx) > 1) continue;   // no row wrap
+                seen[j] = 1; stack.push(j);
+            }
+        }
+        const areaFrac = cells * cellFrac;
+        if (areaFrac < minFrac) continue;
+        // Inverse orthographic at the centroid: image u→ −y (east left),
+        // row v→ −z (north up).
+        const ySol = (0.5 - su / cells) / 0.485;
+        const zSol = (0.5 - sv / cells) / 0.485;
+        const latDeg = Math.asin(Math.min(1, Math.max(-1, zSol))) / DEG;
+        const x = Math.sqrt(Math.max(1e-6, 1 - ySol * ySol - zSol * zSol));
+        const lonDeg = Math.atan2(ySol, x) / DEG;      // east POSITIVE
+        holes.push({ lonDeg, latDeg, areaFrac });
+    }
+    return holes.sort((a, b) => b.areaFrac - a.areaFrac).slice(0, 4);
+}
+
+export const CARRINGTON_SYNODIC_DAYS = 27.2753;
+
+/**
+ * Corotation arrival window for a hole's high-speed stream: the hole
+ * center crosses the central meridian (east-positive lon → in
+ * lon/rate days; west → already crossed), then the stream transits
+ * 1 AU at a representative 600 km/s (documented HSS range 500–800 →
+ * the ±1 d window). PURE kinematics; no wind-field injection.
+ */
+export function hssArrivalWindow(stonyLonDeg, nowMs, { vKms = 600 } = {}) {
+    const rate = 360 / CARRINGTON_SYNODIC_DAYS;        // synodic °/day
+    const crossMs = nowMs + (stonyLonDeg / rate) * 86400e3;
+    const etaMs = crossMs + (AU_KM / vKms / 86400) * 86400e3;
+    return { crossMs, etaMs, startMs: etaMs - 86400e3, endMs: etaMs + 86400e3 };
+}
+
+/* ── S7: the Moon in the Earth-local frame ───────────────────────────
+   Mean circular ecliptic-plane orbit phased by the SAME new-moon epoch
+   + synodic month verdict-engine's moonPhase uses — the two oracles can
+   never disagree about phase. In this frame −x IS the mean sun, so the
+   synodic phase angle is exactly the geometry angle: new moon sits
+   sunward, and every FULL MOON the Moon crosses the magnetotail (+x).
+   Documented tolerances (context display, like the mean-sun geography):
+   eccentricity (±5.5% of distance), inclination (5.1°, drawn in-plane),
+   ellipticity of the synodic rate. */
+
+const SYNODIC_DAYS = 29.53058867;                    // = verdict-engine
+const NEW_MOON_EPOCH_MS = Date.UTC(2000, 0, 6, 18, 14);
+export const MOON_ORBIT_RE = 60.27;                  // mean distance
+
+/** Moon position [R_E] in the Earth-local stage frame; prograde
+ *  (counterclockwise from ecliptic north). */
+export function moonLocalRe(tauMs, out = [0, 0, 0]) {
+    const days = (tauMs - NEW_MOON_EPOCH_MS) / 86400e3;
+    const phase = ((days % SYNODIC_DAYS) + SYNODIC_DAYS) % SYNODIC_DAYS / SYNODIC_DAYS;
+    const a = TAU * phase;
+    out[0] = -MOON_ORBIT_RE * Math.cos(a);
+    out[1] = -MOON_ORBIT_RE * Math.sin(a);
+    out[2] = 0;
+    return out;
+}
+
+/* ── S7: Van Allen belts — dipole L-shell surfaces ───────────────────
+   r(λ) = L·cos²λ revolved about the dipole (stage z) axis, cut where
+   the field line reaches rMin (the atmospheric anchor). Same dipole
+   convention as the oval's magneticLatitude oracle; belt L-values match
+   the house magnetosphere-engine (inner ~1.6, outer 4–6 R_E). PURE
+   geometry in R_E; the renderer scales via reToUnits and drives the
+   OUTER belt's brightness from the MEASURED GOES ≥2 MeV electron flux
+   on the bus — storm dropouts included, because the data includes them. */
+export function beltShellGrid(L, nLam = 20, nPhi = 48, rMin = 1.08) {
+    const lamC = Math.acos(Math.sqrt(Math.min(1, rMin / L)));
+    const positions = new Float32Array((nLam + 1) * (nPhi + 1) * 3);
+    const lat = new Float32Array((nLam + 1) * (nPhi + 1));   // λ/λc ∈ [−1,1]
+    let k = 0;
+    for (let i = 0; i <= nLam; i++) {
+        const lam = -lamC + (2 * lamC) * (i / nLam);
+        const r = L * Math.cos(lam) * Math.cos(lam);
+        for (let j = 0; j <= nPhi; j++) {
+            const phi = TAU * (j / nPhi);
+            positions[k * 3] = r * Math.cos(lam) * Math.cos(phi);
+            positions[k * 3 + 1] = r * Math.cos(lam) * Math.sin(phi);
+            positions[k * 3 + 2] = r * Math.sin(lam);
+            lat[k] = lam / lamC;
+            k++;
+        }
+    }
+    const index = [];
+    for (let i = 0; i < nLam; i++) {
+        for (let j = 0; j < nPhi; j++) {
+            const a = i * (nPhi + 1) + j, b = a + nPhi + 1;
+            index.push(a, b, a + 1, b, b + 1, a + 1);
+        }
+    }
+    return { positions, lat, index, lamC };
+}
+
+/* ── S6: the My Sky dome — the sky story from UNDERNEATH ─────────────
+   The outside stagings draw the curtains with the DISCLOSED ×10.6
+   height exaggeration (scale.js AURORA) because 300 km is invisible at
+   Earth-local scale. From below, no exaggeration is needed: a curtain
+   100–300 km up is tall in ANGLE — the dome renders the same oval
+   oracle honestly in horizontal (az/alt) coordinates. All PURE; the
+   observer is the user's pin; darkness comes from the ONE solar oracle
+   (verdict-engine sunAltitudeDeg — consumed by the renderer, not here). */
+
+export const CURTAIN_BASE_KM = 100;   // 557.7 nm green lower border
+
+/**
+ * Great-circle bearing (from north, eastward) and angular distance from
+ * observer to target, both in radians. Standard spherical formulas.
+ */
+export function bearingGamma(lat1, lon1, lat2, lon2) {
+    const p1 = lat1 * DEG, p2 = lat2 * DEG, dl = (lon2 - lon1) * DEG;
+    const g = Math.acos(Math.min(1, Math.max(-1,
+        Math.sin(p1) * Math.sin(p2) + Math.cos(p1) * Math.cos(p2) * Math.cos(dl))));
+    const az = Math.atan2(Math.sin(dl) * Math.cos(p2),
+        Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl));
+    return { az, gamma: g };
+}
+
+/**
+ * Apparent altitude (radians) of a point hKm above the surface at
+ * angular ground distance gamma: the exact spherical-Earth expression —
+ * overhead (γ→0) → +90°, and beyond acos(R/(R+h)) it dips below the
+ * horizon (why mid-latitudes see storm aurora only low on the north).
+ */
+export function apparentAltitudeRad(hKm, gamma) {
+    const r = RE_KM + hKm;
+    return Math.atan2(r * Math.cos(gamma) - RE_KM, r * Math.sin(gamma));
+}
+
+/**
+ * The aurora curtain in the observer's SKY: sample the oval's median
+ * boundary (SAME ovalLatAtLon oracle as the band) around all
+ * longitudes, keep columns whose TOP clears the horizon, return
+ * {az, altBase, altTop, w} sorted by azimuth. w fades with ground
+ * distance. Quiet mid-latitudes honestly get an EMPTY ribbon; a Kp 9
+ * storm puts a low glow on Miami's northern horizon and full sheets
+ * over Fairbanks.
+ */
+export function skyCurtainRibbon(kpBand, latDeg, lonDeg,
+    { n = 144, topKm = 300 } = {}) {
+    if (!kpBand || !Number.isFinite(latDeg)) return [];
+    const hemisphere = latDeg >= 0 ? 1 : -1;
+    const bMed = boundaryForKp(kpBand.p50);
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+        const lon = -180 + 360 * (i / n);
+        const blat = ovalLatAtLon(bMed, lon, hemisphere);
+        const { az, gamma } = bearingGamma(latDeg, lonDeg, blat, lon);
+        const altTop = apparentAltitudeRad(topKm, gamma);
+        if (altTop < 0.5 * DEG) continue;              // below the horizon
+        const altBase = Math.max(-1 * DEG, apparentAltitudeRad(CURTAIN_BASE_KM, gamma));
+        pts.push({ az, altBase, altTop,
+            w: Math.min(1, Math.max(0.15, 1 - (gamma * RE_KM) / 3000)) });
+    }
+    return pts.sort((a, b) => a.az - b.az);
+}
+
+/**
+ * Local east/north/up basis at the pin, in the Earth-local stage frame —
+ * built NUMERICALLY from earthLocal so the dome can never disagree with
+ * the geography placement (mean-sun frame, same documented tolerances).
+ */
+export function enuBasis(latDeg, lonDeg, tauMs) {
+    const norm = (v) => {
+        const m = Math.hypot(v[0], v[1], v[2]) || 1;
+        return [v[0] / m, v[1] / m, v[2] / m];
+    };
+    const p = earthLocal(latDeg, lonDeg, 1, tauMs);
+    const up = norm(p);
+    const pE = earthLocal(latDeg, lonDeg + 0.1, 1, tauMs);
+    let east = [pE[0] - p[0], pE[1] - p[1], pE[2] - p[2]];
+    const de = east[0] * up[0] + east[1] * up[1] + east[2] * up[2];
+    east = norm([east[0] - de * up[0], east[1] - de * up[1], east[2] - de * up[2]]);
+    // Right-handed horizontal frame: up × east = north.
+    const north = [
+        up[1] * east[2] - up[2] * east[1],
+        up[2] * east[0] - up[0] * east[2],
+        up[0] * east[1] - up[1] * east[0]];
+    return { east, north, up };
+}
+
+/** Unit sky direction for (azimuth from north eastward, altitude). */
+export function skyDir(azRad, altRad, basis, out = [0, 0, 0]) {
+    const ca = Math.cos(altRad), sa = Math.sin(altRad);
+    const h = [Math.sin(azRad), Math.cos(azRad)];   // east, north components
+    for (let k = 0; k < 3; k++) {
+        out[k] = ca * (h[0] * basis.east[k] + h[1] * basis.north[k])
+            + sa * basis.up[k];
+    }
+    return out;
+}
+
 export function sepStateAt(series, tauMs, fallbackPfu = 0) {
     let pfu = Number.isFinite(fallbackPfu) && fallbackPfu > 0 ? fallbackPfu : 0;
     if (Array.isArray(series) && series.length) {
