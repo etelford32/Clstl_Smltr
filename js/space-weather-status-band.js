@@ -71,14 +71,19 @@ const fmtWin = (v) => (isNum(v)
  * @returns {{cells: Array<{id,label,value,detail,cls}>}}
  */
 export function statusBandModel({ summary, kp, loc, profile = null, nowMs,
-                                  replay = null }) {
+                                  replay = null, feedDown = null }) {
     const cells = [];
 
     // 1 ── Storm outlook (tier via the ONE stormOutlook oracle). When the
     // provider run is a calendar REPLAY, the cell must say so — a past
-    // event's outlook must never read as the current watch.
+    // event's outlook must never read as the current watch. And a BROKEN
+    // feed must never read as a quiet sun (data-plane honesty).
     const outlook = summary ? stormOutlook(summary, nowMs) : null;
-    if (summary === undefined) {
+    if (feedDown) {
+        cells.push({ id: 'outlook', label: 'Storm outlook', value: '—',
+            detail: `forecast feed unavailable — ${feedDown} · retrying`,
+            cls: 'elevated' });
+    } else if (summary === undefined) {
         cells.push({ id: 'outlook', label: 'Storm outlook', value: '…',
             detail: 'ensemble forecast loading', cls: 'quiet' });
     } else if (!outlook) {
@@ -230,9 +235,11 @@ export function mountStatusBand(hostId = 'sw-status-band') {
         let loc = null;
         let profile = loadProfile();
         let replay = null;                 // calendar replay label (or null)
+        let feedDown = null;               // provider hard-failure reason
 
         const render = () => {
-            const { cells } = statusBandModel({ summary, kp, loc, profile, replay, nowMs: Date.now() });
+            const { cells } = statusBandModel({ summary, kp, loc, profile, replay,
+                feedDown, nowMs: Date.now() });
             cellsEl.innerHTML = cells.map((c) => `
                 <div class="swb-cell ${c.cls}" data-cell="${c.id}">
                     <div class="swb-label">${c.label}</div>
@@ -295,6 +302,7 @@ export function mountStatusBand(hostId = 'sw-status-band') {
             if (!fc) return;
             summary = fc.idle ? null : (fc.summary ?? null);
             replay = fc.replay?.label ?? null;
+            feedDown = fc.failed ? (fc.reason ?? 'unknown error') : null;
             render();
         };
         takeForecast(window.__fluxRopeForecast);

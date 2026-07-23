@@ -87,14 +87,29 @@ export async function mountFluxRopeDashboard(containerId) {
     });
 
     function render(fc) {
+        // Data-plane honesty (author feedback 2026-07-23, "still not
+        // seeing solar activity, i think its a bug"): a broken feed must
+        // LOOK broken — never like a quiet sun, and never a vanished
+        // panel. The panel stays up with the actual error + auto-retry.
+        if (fc.failed) {
+            cur = null;
+            panel.innerHTML = `
+                <div class="frd-title"><span class="frd-pip"></span>
+                    Flux-Rope Bz Forecast · ensemble engine (beta)</div>
+                <div class="frd-quiet" style="color:#ffb454">⚠ Forecast feed
+                unavailable — ${String(fc.reason).replace(/</g, '&lt;').slice(0, 160)}
+                · retrying automatically</div>`;
+            return;
+        }
         if (fc.idle) {
             cur = null;
             panel.innerHTML = `
                 <div class="frd-title"><span class="frd-pip"></span>
                     Flux-Rope Bz Forecast · ensemble engine (beta)</div>
-                <div class="frd-quiet">☀ No Earth-directed CME analyses in the
-                DONKI catalog (last 7 days). The ensemble engine is idle —
-                replay a calendar event, or explore hindcasts in the
+                <div class="frd-quiet">☀ DONKI catalog reachable · no
+                Earth-directed CME analyses in the last 7 days. The ensemble
+                engine is idle — replay a calendar event, or explore
+                hindcasts in the
                 <a href="flux-rope.html" style="color:#4fc3f7">Flux Rope Simulator</a>.</div>`;
             return;
         }
@@ -159,10 +174,24 @@ export async function mountFluxRopeDashboard(containerId) {
     // chosen catalog row (sources.cmes override) and republishes — every
     // consumer (Stage rope + cloud, band, calendar cursor) follows the
     // ONE published result, so the whole page time-travels together.
+    // A live (non-replay) run REFRESHES every 15 min (CDN-cached, cheap)
+    // so a boot-time feed hiccup or a newly analyzed CME never requires
+    // a reload; failures retry on a 2-min leash and are PUBLISHED as
+    // {failed} so the band + calendar can say "feed down", not "quiet".
     let running = false;
-    async function run(replay, { initial = false } = {}) {
+    let replayActive = false;
+    let refreshTimer = 0;
+    const scheduleRefresh = (ms) => {
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => {
+            if (replayActive) scheduleRefresh(ms);   // never yank a replay
+            else run(null);
+        }, ms);
+    };
+    async function run(replay) {
         if (running) return;
         running = true;
+        let failed = false;
         try {
             const fc = await computeFluxRopeForecast({
                 days: 7, members: MEMBERS, seed: SEED,
@@ -170,21 +199,25 @@ export async function mountFluxRopeDashboard(containerId) {
                 ...(replay ? { sources: { cmes: [replay.cme] } } : {}),
             });
             if (replay && !fc.idle) fc.replay = { id: replay.cme.id, label: replay.label };
+            replayActive = !!fc.replay;
             try {
                 window.__fluxRopeForecast = fc;
                 window.dispatchEvent(new CustomEvent('flux-rope-forecast', { detail: fc }));
             } catch {}
             render(fc);
         } catch (e) {
-            if (initial) {
-                // Hard boot failure keeps the historic fail-quiet posture.
-                console.info('flux-rope dashboard panel unavailable:', e?.message ?? e);
-                host.style.display = 'none';
-            } else {
-                console.info('flux-rope replay failed:', e?.message ?? e);
-            }
+            failed = true;
+            console.info('flux-rope provider run failed:', e?.message ?? e);
+            const fc = { idle: true, failed: true, reason: e?.message ?? String(e) };
+            replayActive = false;
+            try {
+                window.__fluxRopeForecast = fc;
+                window.dispatchEvent(new CustomEvent('flux-rope-forecast', { detail: fc }));
+            } catch {}
+            try { render(fc); } catch {}
         } finally {
             running = false;
+            scheduleRefresh(failed ? 2 * 60e3 : 15 * 60e3);
         }
     }
 
@@ -207,5 +240,5 @@ export async function mountFluxRopeDashboard(containerId) {
         run({ cme, label: `CME ${timeIso.slice(5, 16).replace('T', ' ')}Z · ${Math.round(cme.speedKms)} km/s` });
     });
 
-    await run(null, { initial: true });
+    await run(null);
 }

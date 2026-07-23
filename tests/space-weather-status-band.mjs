@@ -179,4 +179,17 @@ test('calendar replay labels the outlook + arrival cells, never as the live watc
     assert.equal(cell(live, 'outlook').label, 'Storm outlook');
 });
 
+test('a broken forecast feed must LOOK broken — never a quiet sun', () => {
+    const m = statusBandModel({ summary: null, kp: 3, loc: null, nowMs: T0,
+        feedDown: 'donki proxy: HTTP 503' });
+    const o = cell(m, 'outlook');
+    assert.equal(o.value, '—');
+    assert.equal(o.cls, 'elevated');
+    assert.ok(o.detail.includes('feed unavailable'), o.detail);
+    assert.ok(o.detail.includes('HTTP 503'), o.detail);
+    // Without the flag, a null summary is still the honest quiet.
+    const q = cell(statusBandModel({ summary: null, kp: 3, loc: null, nowMs: T0 }), 'outlook');
+    assert.equal(q.value, 'Quiet');
+});
+
 console.log(`space-weather-status-band: ALL PASS (${n} tests)`);

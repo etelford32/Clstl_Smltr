@@ -103,13 +103,23 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         const host = page.locator('#sw-stage-host');
         await expect(host.locator('.swst-stations button')).toHaveCount(6, { timeout: 30_000 });
 
-        // Inject Kp through the page bus → the oval band appears and the
-        // pin label carries the drive-ring annotation.
+        // Inject Kp + active regions through the page bus → the oval band
+        // appears, and the Sun grows its AR markers (one complex).
         await page.evaluate(() => {
-            window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 6 } }));
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 6,
+                active_regions: [
+                    { region: 14001, lat_rad: 0.2, lon_rad: 1.1, area_norm: 0.5,
+                      mag_class: 'beta-gamma-delta', is_complex: true },
+                    { region: 14002, lat_rad: -0.15, lon_rad: 2.0, area_norm: 0.2,
+                      mag_class: 'beta', is_complex: false },
+                ] } }));
         });
         await expect.poll(() => page.evaluate(() => window.__swStage?.ovalVisible),
             { timeout: 15_000 }).toBe(true);
+        await expect.poll(() => page.evaluate(() => window.__swStage?.sun.regions),
+            { timeout: 15_000 }).toBe(2);
+        await expect.poll(() => page.evaluate(() => window.__swStage.sun.complex),
+            { timeout: 15_000 }).toBe(1);
         await expect.poll(() => page.evaluate(() => window.__swStage?.pinVisible)).toBe(true);
         await expect(host.locator('.swst-pin-label')).toContainText('Fairbanks');
         await expect(host.locator('.swst-pin-label')).toContainText(/oval/);

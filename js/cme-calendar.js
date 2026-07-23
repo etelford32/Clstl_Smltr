@@ -218,6 +218,11 @@ const CSS = `
     margin-bottom: 8px; font-size: .68rem; color: #889; }
 .cal-head .cal-hint { color: #667; }
 .cal-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-left: auto; }
+.cal-feed { font-size: .62rem; padding: 1px 7px; border-radius: 8px; }
+.cal-feed.ok { color: #7fdca0; background: rgba(84,224,138,.08);
+    border: 1px solid rgba(84,224,138,.25); }
+.cal-feed.bad { color: #ffb454; background: rgba(255,180,84,.1);
+    border: 1px solid rgba(255,180,84,.35); }
 .cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .cal-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .cal-swatch.past { background: rgba(255,215,94,.16); border: 1px solid rgba(255,215,94,.35); }
@@ -345,10 +350,13 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
             } catch {}
         }
 
+        let feed = null;   // null=pending · {ok:true} · {ok:false, reason}
         const takeForecast = (fc) => {
             const s = fc?.summary;
             span = (s && !fc.idle) ? { p10Ms: s.arrivalP10Ms, p50Ms: s.arrivalP50Ms,
                                        p90Ms: s.arrivalP90Ms } : null;
+            feed = fc?.failed ? { ok: false, reason: fc.reason ?? 'error' }
+                : fc ? { ok: true } : null;
         };
 
         function render() {
@@ -470,11 +478,18 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
                     struck-through times were our call, bold is what happened</span>
             </div>`;
 
+            // Data-plane chip: a broken feed must LOOK broken here too,
+            // never like a quiet week.
+            const feedChip = feed === null ? ''
+                : feed.ok
+                    ? `<span class="cal-feed ok" title="NASA DONKI reachable via the edge proxy">feed ✓</span>`
+                    : `<span class="cal-feed bad" title="${String(feed.reason).replace(/"/g, '&quot;').slice(0, 200)}">feed ✗ ${String(feed.reason).slice(0, 48)} · retrying</span>`;
             host.innerHTML = `
                 <div class="cal-head">
                     <span><span class="cal-swatch past"></span> last 7 days · observed</span>
                     <span><span class="cal-swatch span"></span> ensemble P10–P90 arrival</span>
-                    <span class="cal-hint">click a day or an ⊕ arrival to scrub the Stage timeline</span>
+                    <span class="cal-hint">click an ⊕ arrival to scrub + replay it in the corridor</span>
+                    ${feedChip}
                 </div>
                 <div class="cal-grid">${cells.join('')}${quiet}</div>
                 ${strip}`;

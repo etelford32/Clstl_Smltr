@@ -51,6 +51,7 @@ import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          assetOrbitRing, parseTleRaan, mySkyPose, windFieldAt,
          memberFieldRows } from './model.js';
 import { sheathCompression } from '../cme-propagation.js';
+import { carringtonL0 } from '../ring-current-model.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
 import { ropeFrame } from '../flux-rope/view.js';
 import { magneticLatitude, boundaryForKp } from '../verdict-engine.js';
@@ -307,6 +308,25 @@ function mount(host) {
     const corona = makeGlowSprite('#ffb95e', 2.4);
     corona.material.opacity = 0.35;
     scene.add(corona);
+
+    // Live ACTIVE REGIONS on the Sun (the S2 "on record" upgrade; author
+    // feedback 2026-07-23 "still not seeing solar activity"): up to 8
+    // markers from the page's 'swpc-update' bus (NOAA solar_regions —
+    // never a second fetch). NOAA reports CARRINGTON longitude; the
+    // markers convert through the carringtonL0 oracle at τ, so the
+    // Earth-facing side (+x) shows what actually faces Earth and a τ
+    // scrub rotates the regions across the disk at the true rotation
+    // rate. Complex (β-γ-δ) regions run hot orange. Occlusion is real:
+    // far-side markers hide behind the sphere via the depth test.
+    const arMarkers = [];
+    for (let i = 0; i < 8; i++) {
+        const m = new THREE.Mesh(
+            new THREE.SphereGeometry(1, 10, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffe08a }));
+        m.visible = false;
+        scene.add(m);
+        arMarkers.push(m);
+    }
 
     const spiralMat = new THREE.LineBasicMaterial({
         color: 0x2a4a66, transparent: true, opacity: 0.35 });
@@ -900,6 +920,14 @@ function mount(host) {
         const f = d?.solar_activity?.f107_sfu;
         if (Number.isFinite(k)) state.kpNow = k;
         if (Number.isFinite(f)) state.f107 = f;
+        // Adopt non-empty lists only: the feed emits [] both for a
+        // spotless sun AND for a failed solar_regions sub-fetch, and a
+        // transient fetch failure must not blank real markers. (A truly
+        // spotless sun keeps the last markers until reload — display
+        // dressing, acceptable.)
+        if (Array.isArray(d?.active_regions) && d.active_regions.length) {
+            state.regions = d.active_regions;
+        }
         updateScene();
     });
     {
@@ -1168,6 +1196,25 @@ function mount(host) {
         // Earth geography follows the same τ through the mean-sun oracle
         // the pin/oval use (model.js subsolarLonDeg).
         earthUniforms.uSubsolarLon.value = subsolarLonDeg(state.tauMs) * Math.PI / 180;
+
+        // Active-region markers at Stonyhurst positions for τ (Carrington
+        // lon − L0(τ), the carringtonL0 oracle): +x faces Earth.
+        {
+            const regions = state.regions ?? [];
+            const L0 = carringtonL0(state.tauMs).L0 * Math.PI / 180;
+            for (let i = 0; i < arMarkers.length; i++) {
+                const r = regions[i], m = arMarkers[i];
+                if (!r) { m.visible = false; continue; }
+                const stony = (r.lon_rad ?? 0) - L0;
+                const cl = Math.cos(r.lat_rad ?? 0);
+                m.position.set(
+                    cl * Math.cos(stony), cl * Math.sin(stony),
+                    Math.sin(r.lat_rad ?? 0)).multiplyScalar(BODY.sunRadiusUnits * 1.02);
+                m.scale.setScalar(BODY.sunRadiusUnits * (0.05 + 0.12 * (r.area_norm ?? 0.1)));
+                m.material.color.setHex(r.is_complex ? 0xff6a3d : 0xffe08a);
+                m.visible = true;
+            }
+        }
 
         // Remap statics through the current compression mix. (Ruler-tick
         // labels track automatically — their world() closures read state.mix.)
@@ -1554,6 +1601,11 @@ function mount(host) {
                      members: state.pMemberCount || 0,
                      comp: pUniforms.uComp.value,
                      ejSouth: pUniforms.uEjSouth.value };
+        },
+        get sun() {
+            const shown = arMarkers.filter((m) => m.visible).length;
+            return { regions: shown,
+                     complex: (state.regions ?? []).filter((r) => r.is_complex).length };
         },
         flyTo, setTau,
     };
