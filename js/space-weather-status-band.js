@@ -70,12 +70,20 @@ const fmtWin = (v) => (isNum(v)
  * @param {number} opts.nowMs
  * @returns {{cells: Array<{id,label,value,detail,cls}>}}
  */
-export function statusBandModel({ summary, kp, loc, profile = null, nowMs }) {
+export function statusBandModel({ summary, kp, loc, profile = null, nowMs,
+                                  replay = null, feedDown = null }) {
     const cells = [];
 
-    // 1 ── Storm outlook (tier via the ONE stormOutlook oracle)
+    // 1 ── Storm outlook (tier via the ONE stormOutlook oracle). When the
+    // provider run is a calendar REPLAY, the cell must say so — a past
+    // event's outlook must never read as the current watch. And a BROKEN
+    // feed must never read as a quiet sun (data-plane honesty).
     const outlook = summary ? stormOutlook(summary, nowMs) : null;
-    if (summary === undefined) {
+    if (feedDown) {
+        cells.push({ id: 'outlook', label: 'Storm outlook', value: '—',
+            detail: `forecast feed unavailable — ${feedDown} · retrying`,
+            cls: 'elevated' });
+    } else if (summary === undefined) {
         cells.push({ id: 'outlook', label: 'Storm outlook', value: '…',
             detail: 'ensemble forecast loading', cls: 'quiet' });
     } else if (!outlook) {
@@ -92,6 +100,10 @@ export function statusBandModel({ summary, kp, loc, profile = null, nowMs }) {
         cells.push({ id: 'outlook', label: 'Storm outlook', value,
             detail: outlook.desc, cls });
     }
+    if (replay && cells[0]) {
+        cells[0].label = 'Outlook · REPLAY';
+        cells[0].detail = `⟲ ${replay} — ${cells[0].detail}`;
+    }
 
     // 2 ── Arrival countdown
     const p50 = summary?.arrivalP50Ms;
@@ -100,9 +112,11 @@ export function statusBandModel({ summary, kp, loc, profile = null, nowMs }) {
             detail: 'no inbound event', cls: 'quiet' });
     } else {
         const h = (p50 - nowMs) / HOUR;
-        const value = h <= 0 ? 'now' : h < 1 ? `T−${Math.max(1, Math.round(h * 60))} min`
+        const value = h <= 0 ? (replay ? 'arrived' : 'now')
+            : h < 1 ? `T−${Math.max(1, Math.round(h * 60))} min`
             : `T−${Math.round(h)} h`;
-        cells.push({ id: 'arrival', label: 'CME arrival (P50)', value,
+        cells.push({ id: 'arrival', label: replay ? 'Arrival · REPLAY' : 'CME arrival (P50)',
+            value,
             detail: `window ${fmtWin(summary.arrivalP10Ms)} – ${fmtWin(summary.arrivalP90Ms)}`,
             cls: cells[0].cls });                 // urgency follows the outlook tier
     }
@@ -220,9 +234,12 @@ export function mountStatusBand(hostId = 'sw-status-band') {
         let kp = null;
         let loc = null;
         let profile = loadProfile();
+        let replay = null;                 // calendar replay label (or null)
+        let feedDown = null;               // provider hard-failure reason
 
         const render = () => {
-            const { cells } = statusBandModel({ summary, kp, loc, profile, nowMs: Date.now() });
+            const { cells } = statusBandModel({ summary, kp, loc, profile, replay,
+                feedDown, nowMs: Date.now() });
             cellsEl.innerHTML = cells.map((c) => `
                 <div class="swb-cell ${c.cls}" data-cell="${c.id}">
                     <div class="swb-label">${c.label}</div>
@@ -284,6 +301,8 @@ export function mountStatusBand(hostId = 'sw-status-band') {
         const takeForecast = (fc) => {
             if (!fc) return;
             summary = fc.idle ? null : (fc.summary ?? null);
+            replay = fc.replay?.label ?? null;
+            feedDown = fc.failed ? (fc.reason ?? 'unknown error') : null;
             render();
         };
         takeForecast(window.__fluxRopeForecast);

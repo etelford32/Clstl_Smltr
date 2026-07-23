@@ -441,3 +441,259 @@ export function flightPose(a, b, t) {
     const lerp3 = (p, q) => [0, 1, 2].map((i) => p[i] + (q[i] - p[i]) * k);
     return { pos: lerp3(a.pos, b.pos), target: lerp3(a.target, b.target) };
 }
+
+/* ── S5a: the particle wind field (plan §15) ─────────────────────────
+   PURE oracle for the Stage's particle layer: given a heliocentric
+   radius and the ambient sample at τ (from the ONE provider's
+   SolarWindDriver — never a second fetch), plus optionally the
+   kernel-derived CME structure (S5b), classify the regime and return
+   the flow speed and relative density there. The renderer bakes this
+   to a small texture; the shader only advects. Quiet-time honesty
+   (plan §15.4b): with no CME context this REPRESENTS MEASUREMENT
+   (nowcast persistence), not prediction. Node gate: tests/stage-model.mjs. */
+
+export const AMBIENT_V_KMS = 400;   // climatological fallback (driver absent)
+export const AMBIENT_N_CC = 5;      // matches flux-rope-forecast ambientNCc
+
+/**
+ * @param {number} rAu      heliocentric radius [AU]
+ * @param {object} [ambient] { vKms?, nCc? } — driver sample at τ
+ * @param {object} [cme]     { shockAu, ejectaAu, compression?, vKms? } —
+ *        kernel CME structure at τ (shock AHEAD of ejecta: ejectaAu<shockAu)
+ * @returns {{ vKms:number, nRel:number, regime:'ambient'|'sheath'|'ejecta' }}
+ */
+export function windFieldAt(rAu, ambient = {}, cme = null) {
+    const v0 = Number.isFinite(ambient.vKms) && ambient.vKms > 50
+        ? ambient.vKms : AMBIENT_V_KMS;
+    const n0 = Number.isFinite(ambient.nCc) && ambient.nCc > 0
+        ? ambient.nCc : AMBIENT_N_CC;
+    // Relative density vs climatology, clamped so a gust can neither
+    // wash out the scene nor empty it.
+    const nRel = Math.min(4, Math.max(0.2, n0 / AMBIENT_N_CC));
+    if (cme && Number.isFinite(cme.shockAu) && Number.isFinite(cme.ejectaAu)
+        && cme.ejectaAu < cme.shockAu && rAu >= 0 && rAu <= cme.shockAu) {
+        const vCme = Number.isFinite(cme.vKms) && cme.vKms > 50 ? cme.vKms : v0;
+        if (rAu > cme.ejectaAu) {
+            const comp = Math.min(6, Math.max(1, cme.compression ?? 1));
+            return { vKms: vCme, nRel: Math.min(8, nRel * comp), regime: 'sheath' };
+        }
+        return { vKms: vCme, nRel, regime: 'ejecta' };
+    }
+    return { vKms: v0, nRel, regime: 'ambient' };
+}
+
+/* ── S5b: per-member field rows for the particle-cloud bake ──────────
+   Each CME particle is BOUND to an ensemble member (plan §15.4b): the
+   renderer bakes these rows to a texture; the shader places a member's
+   plume at ITS apex along ITS direction (the ropeFrame eDir convention:
+   (cosλcosφ, cosλsinφ, sinλ)), faded by ITS filter weight — so the
+   cloud's on-screen spread IS the forecast distribution. Apexes come
+   from the SAME dbmApexKm mirror the wavefront shells use (kernel-
+   pinned by this file's gate); front speed is its finite difference.
+   Slots past `count` keep weight 0 — invisible, never wrong. PURE. */
+export function memberFieldRows(members, wEffKms, tS,
+    { M = 128, d0Km = D0_KM_DEFAULT, shockOffsetAu = 0 } = {}) {
+    const count = Math.min(M, members?.length ?? 0);
+    if (!count || !(tS > 0)) return null;
+    const apexAu = new Float32Array(M), shockAu = new Float32Array(M);
+    const weight = new Float32Array(M), vKms = new Float32Array(M);
+    const lonRad = new Float32Array(M), latRad = new Float32Array(M);
+    const dt = Math.min(600, tS * 0.5);
+    for (let i = 0; i < count; i++) {
+        const m = members[i];
+        const a1 = dbmApexKm(d0Km, m.v0Kms, wEffKms, m.gammaPerKm, tS);
+        const a0 = dbmApexKm(d0Km, m.v0Kms, wEffKms, m.gammaPerKm, tS - dt);
+        apexAu[i] = a1 / AU_KM;
+        shockAu[i] = a1 / AU_KM + Math.max(0, shockOffsetAu);
+        weight[i] = Math.max(0, Math.min(1, m.weight ?? 1));
+        vKms[i] = Math.max(0, (a1 - a0) / dt);
+        lonRad[i] = (m.lonDeg ?? 0) * DEG;
+        latRad[i] = (m.latDeg ?? 0) * DEG;
+    }
+    return { apexAu, shockAu, weight, vKms, lonRad, latRad, count };
+}
+
+/* ── The sun ALWAYS has behavior (author, 2026-07-23) ────────────────
+   τ-indexed solar activity from the MEASURED GOES X-ray record — the
+   Stage sun must express what the star is doing at every τ, CME or no
+   CME. PURE; the series comes off the page's 'swpc-update' bus
+   (js/swpc-feed.js xray_series), never a second fetch. */
+
+/** GOES long-band flux [W/m²] → flare class string (A/B/C/M/X grammar,
+ *  same thresholds as the feed's ticker). */
+export function xrayClassOf(flux) {
+    if (!Number.isFinite(flux) || flux <= 0) return 'A0.0';
+    const bands = [['X', 1e-4], ['M', 1e-5], ['C', 1e-6], ['B', 1e-7], ['A', 1e-8]];
+    for (const [letter, base] of bands) {
+        if (flux >= base) return `${letter}${Math.min(9.9, flux / base).toFixed(1)}`;
+    }
+    return `A${Math.max(0.1, flux / 1e-8).toFixed(1)}`;
+}
+
+/**
+ * Measured X-ray state at τ: nearest series sample (clamped at the
+ * edges), falling back to the latest scalar, then to A-class quiet.
+ * `act` is the display-normalized activity: log-scaled A(1e-8)→0 …
+ * X(1e-4)→1.
+ * @returns {{ flux:number, act:number, cls:string }}
+ */
+export function sunActivityAt(series, tauMs, fallbackFlux = 1e-8) {
+    let flux = Number.isFinite(fallbackFlux) && fallbackFlux > 0 ? fallbackFlux : 1e-8;
+    if (Array.isArray(series) && series.length) {
+        let best = null, bestD = Infinity;
+        for (const s of series) {
+            if (!Number.isFinite(s?.t) || !(s?.flux > 0)) continue;
+            const d = Math.abs(s.t - tauMs);
+            if (d < bestD) { bestD = d; best = s; }
+        }
+        if (best) flux = best.flux;
+    }
+    const act = Math.min(1, Math.max(0, (Math.log10(flux) + 8) / 4));
+    return { flux, act, cls: xrayClassOf(flux) };
+}
+
+/**
+ * Flare flash envelope at τ over the feed's recent-flare list: 0..1,
+ * a fast-rise (10 min) / slow-decay (40 min) pulse per flare, weighted
+ * by class (C 0.35 · M 0.7 · X 1.0), max over flares. Scrubbing τ
+ * across yesterday's M-flare replays its flash.
+ * @param {Array<{timeMs:number, letter:string}>} flares
+ */
+export function flareFlashAt(flares, tauMs) {
+    const W = { C: 0.35, M: 0.7, X: 1.0 };
+    let flash = 0;
+    for (const f of flares || []) {
+        const w = W[f?.letter];
+        if (!w || !Number.isFinite(f.timeMs)) continue;
+        const d = tauMs - f.timeMs;
+        const env = d < -10 * 60e3 || d > 40 * 60e3 ? 0
+            : d < 0 ? 1 + d / (10 * 60e3)
+            : 1 - d / (40 * 60e3);
+        flash = Math.max(flash, w * Math.max(0, env));
+    }
+    return flash;
+}
+
+/**
+ * Normalize + merge the two flare sources the bus carries into the shape
+ * flareFlashAt consumes. NOAA retired xray-flares-7day.json, so in
+ * production `recent_flares` is usually EMPTY and flares arrive only as
+ * `donki_flares` — the Stage must accept both (the 2026-07-23 flash
+ * feature silently never fired live until this landed). Dedupe pairs
+ * within ±5 min (same event, two catalogs), most recent first. PURE.
+ * @param {Array} noaaRows  swpc-feed recent_flares rows
+ *        ({time: Date|iso, parsed:{letter}, region?})
+ * @param {Array} donkiRows swpc-feed donki_flares rows
+ *        ({peak_time|begin_time: Date|iso, class_letter, active_region?})
+ * @returns {Array<{timeMs:number, letter:string, region:number|null}>}
+ */
+export function normalizeFlares(noaaRows, donkiRows) {
+    const ms = (t) => t instanceof Date ? t.getTime() : Date.parse(t ?? '');
+    const out = [];
+    for (const f of noaaRows || []) {
+        const timeMs = ms(f?.time);
+        const letter = f?.parsed?.letter ?? String(f?.cls ?? '')[0];
+        if (Number.isFinite(timeMs) && letter)
+            out.push({ timeMs, letter, region: f?.region ?? null });
+    }
+    for (const f of donkiRows || []) {
+        const timeMs = ms(f?.peak_time ?? f?.begin_time);
+        const letter = f?.class_letter ?? String(f?.flare_class ?? '')[0];
+        if (!Number.isFinite(timeMs) || !letter) continue;
+        // Same event seen by both catalogs → keep the NOAA row (it carries
+        // the region more reliably), just backfill a missing region.
+        const twin = out.find((g) => Math.abs(g.timeMs - timeMs) <= 5 * 60e3
+            && g.letter === letter);
+        if (twin) { twin.region = twin.region ?? f?.active_region ?? null; continue; }
+        out.push({ timeMs, letter, region: f?.active_region ?? null });
+    }
+    return out.sort((a, b) => b.timeMs - a.timeMs).slice(0, 16);
+}
+
+/* ── S5d: measurement — the virtual probe (author, 2026-07-23:
+   "I want some measurement ability here") ────────────────────────────
+   A click in the corridor drops a stationary virtual monitor — like L1,
+   but anywhere. This oracle answers what a spacecraft AT that point
+   reads at τ: the local field (windFieldAt — the same regime the
+   particles render, never a second model), the operational lead time to
+   Earth at the local flow speed, and the Parker-spiral solar source
+   longitude (the same OMEGA_SUN + 0.05 AU base parkerSpiralPoints
+   draws, so the drawn connectivity curve passes exactly through the
+   probe). PURE; node-gated. */
+
+/**
+ * @param {number} rAu     probe heliocentric radius [AU]
+ * @param {number} lonRad  probe heliocentric longitude [rad, stage frame]
+ * @param {object} [ambient] { vKms?, nCc? } driver sample at τ
+ * @param {object} [cme]     windFieldAt CME structure at τ (or null)
+ * @param {number} [tauMs]   scrub time — stamps the ETA
+ * @returns {{ rAu, lonRad, vKms, nRel, regime, leadHours, etaMs,
+ *             srcLonRad, spiralPhi0Deg }}
+ *   leadHours/etaMs are null at/beyond 1 AU (nothing left to lead).
+ */
+export function parcelProbe(rAu, lonRad, ambient = {}, cme = null, tauMs = 0) {
+    const field = windFieldAt(rAu, ambient, cme);
+    const leadS = rAu < 1 ? (1 - rAu) * AU_KM / field.vKms : null;
+    // Parker connectivity: phi(r) = phi0 − Ω(r−0.05)AU/v  ⇒  the source
+    // longitude phi0 sits AHEAD (west) of the probe.
+    const srcLonRad = lonRad + OMEGA_SUN * Math.max(0, rAu - 0.05) * AU_KM / field.vKms;
+    return {
+        rAu, lonRad,
+        vKms: field.vKms, nRel: field.nRel, regime: field.regime,
+        leadHours: leadS == null ? null : leadS / 3600,
+        etaMs: leadS == null ? null : tauMs + leadS * 1000,
+        srcLonRad,
+        spiralPhi0Deg: srcLonRad * 180 / Math.PI,
+    };
+}
+
+/**
+ * CME liftoff envelope at τ: 0..1 pulse around a launch time — 15-min
+ * rise into the eruption, 90-min decay as the front clears the low
+ * corona. Drives the launch-site plume on the Stage sun; the transit
+ * itself belongs to the wavefronts + member cloud. PURE.
+ */
+export function liftoffAt(launchMs, tauMs) {
+    if (!Number.isFinite(launchMs)) return 0;
+    const d = tauMs - launchMs;
+    if (d < -15 * 60e3 || d > 90 * 60e3) return 0;
+    return d < 0 ? 1 + d / (15 * 60e3) : 1 - d / (90 * 60e3);
+}
+
+/* ── S5c: SEP proton streaks (plan §15.4) ────────────────────────────
+   Solar energetic protons travel ALONG the Parker field lines and
+   cross 1 AU in tens of minutes — the near-instant arrival IS the
+   honest visual contrast against the days-long CME transit. The Stage
+   gates the streaks on the MEASURED GOES ≥10 MeV integral flux at τ
+   (bus proton_series, same τ-lookup pattern as the X-ray record),
+   using NOAA's S-scale boundaries. PURE. */
+
+/** Representative SEP speed: a 10–100 MeV proton runs ~0.15–0.43 c;
+ *  streaks advect at ~0.3 c (documented display choice — the honest
+ *  order of magnitude, not a per-event spectrum). */
+export const SEP_V_KMS = 9.0e4;
+
+/**
+ * Measured SEP state at τ: nearest ≥10 MeV sample (edge-clamped),
+ * falling back to the latest scalar. S-scale per NOAA: S1 at 10 pfu,
+ * ×10 per step. `on` gates the streaks (S1+, per the plan);
+ * `intensity` is the log ramp S1→~0 … S5→1 for brightness.
+ * @returns {{ pfu10:number, s:number, on:boolean, intensity:number }}
+ */
+export function sepStateAt(series, tauMs, fallbackPfu = 0) {
+    let pfu = Number.isFinite(fallbackPfu) && fallbackPfu > 0 ? fallbackPfu : 0;
+    if (Array.isArray(series) && series.length) {
+        let best = null, bestD = Infinity;
+        for (const p of series) {
+            if (!Number.isFinite(p?.t) || !Number.isFinite(p?.flux)) continue;
+            const d = Math.abs(p.t - tauMs);
+            if (d < bestD) { bestD = d; best = p; }
+        }
+        if (best) pfu = best.flux;
+    }
+    const s = pfu >= 1e5 ? 5 : pfu >= 1e4 ? 4 : pfu >= 1e3 ? 3
+        : pfu >= 100 ? 2 : pfu >= 10 ? 1 : 0;
+    const intensity = s >= 1
+        ? Math.min(1, Math.max(0, (Math.log10(pfu) - 1) / 4)) : 0;
+    return { pfu10: pfu, s, on: s >= 1, intensity };
+}

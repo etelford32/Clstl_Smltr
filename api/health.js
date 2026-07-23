@@ -61,6 +61,47 @@ async function ping({ source, url, edge_authoritative }) {
     }
 }
 
+/**
+ * Credential PRESENCE report (never values). The 2026-07 feed audit found
+ * the #1 diagnosability gap was silent DEMO_KEY fallback: every DONKI proxy
+ * quietly degrades to api.nasa.gov's 30 req/hr shared demo quota when
+ * NASA_API_KEY is unset, and nothing anywhere said so. Each entry is
+ * {status, note} where status ∈ ok | degraded | off.
+ */
+function credentialPresence() {
+    const env = (typeof process !== 'undefined' && process.env) || {};
+    const has = (...names) => names.some((n) => !!env[n]);
+    return {
+        nasa_api_key: has('NASA_API_KEY')
+            ? { status: 'ok', note: 'configured — full DONKI quota' }
+            : { status: 'degraded', note: 'DEMO_KEY fallback — 30 req/hr shared quota throttles DONKI (CME/flares/SEP/GST)' },
+        nasa_earthdata_token: has('NASA_EARTHDATA_TOKEN')
+            ? { status: 'ok', note: 'set (unused today — reserved for the GES DISC/OPeNDAP numeric-grid path)' }
+            : { status: 'off', note: 'not set — nothing consumes it yet; GIBS imagery is keyless' },
+        metno_user_agent: has('METNO_USER_AGENT')
+            ? { status: 'ok', note: 'configured' }
+            : { status: 'degraded', note: 'default UA — MET.no policy prefers a contactable identifier' },
+        nws_user_agent: has('NWS_USER_AGENT')
+            ? { status: 'ok', note: 'configured' }
+            : { status: 'degraded', note: 'default UA — api.weather.gov may throttle' },
+        supabase_service_key: has('SUPABASE_SERVICE_KEY', 'SUPABASE_SECRET_KEY')
+            ? { status: 'ok', note: 'configured' }
+            : { status: 'off', note: 'MISSING — cron writes, caches, and heartbeats are down' },
+        resend_api_key: has('RESEND_API_KEY')
+            ? { status: 'ok', note: 'configured' }
+            : { status: 'off', note: 'missing — all outbound email (alerts, digests) disabled' },
+        cron_secret: has('CRON_SECRET')
+            ? { status: 'ok', note: 'configured — manual cron kicks accepted' }
+            : { status: 'degraded', note: 'not set — crons run on the Vercel header only; no manual kicks' },
+        r2_mirror: has('R2_ACCOUNT_ID')
+            ? { status: 'ok', note: 'configured — density/far-side mirrors active' }
+            : { status: 'degraded', note: 'not set — TU Delft density + far-side fall back to live upstreams' },
+        slack_webhook: has('SLACK_WEBHOOK_URL')
+            ? { status: 'ok', note: 'configured' }
+            : { status: 'off', note: 'not set — watchdog alerts go to email only' },
+    };
+}
+
 export default async function handler() {
     const upstreams = await Promise.all(UPSTREAMS.map(ping));
     const up   = upstreams.filter(u => u.ok).length;
@@ -74,5 +115,6 @@ export default async function handler() {
         note: 'swpc-* rows are fetched browser-side on the live page; an edge 403 there is expected and does not affect users.',
         summary: { up, down, total: upstreams.length },
         upstreams,
+        credentials: credentialPresence(),
     }, { maxAge: 30, swr: 15 });
 }

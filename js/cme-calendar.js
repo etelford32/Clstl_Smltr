@@ -218,6 +218,11 @@ const CSS = `
     margin-bottom: 8px; font-size: .68rem; color: #889; }
 .cal-head .cal-hint { color: #667; }
 .cal-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-left: auto; }
+.cal-feed { font-size: .62rem; padding: 1px 7px; border-radius: 8px; }
+.cal-feed.ok { color: #7fdca0; background: rgba(84,224,138,.08);
+    border: 1px solid rgba(84,224,138,.25); }
+.cal-feed.bad { color: #ffb454; background: rgba(255,180,84,.1);
+    border: 1px solid rgba(255,180,84,.35); }
 .cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .cal-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .cal-swatch.past { background: rgba(255,215,94,.16); border: 1px solid rgba(255,215,94,.35); }
@@ -345,10 +350,13 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
             } catch {}
         }
 
+        let feed = null;   // null=pending · {ok:true} · {ok:false, reason}
         const takeForecast = (fc) => {
             const s = fc?.summary;
             span = (s && !fc.idle) ? { p10Ms: s.arrivalP10Ms, p50Ms: s.arrivalP50Ms,
                                        p90Ms: s.arrivalP90Ms } : null;
+            feed = fc?.failed ? { ok: false, reason: fc.reason ?? 'error' }
+                : fc ? { ok: true } : null;
         };
 
         function render() {
@@ -392,6 +400,13 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
                         : 'drag-based (DBM) arrival';
                     const kp = Number.isFinite(a.kpMax) ? ` · Kp≈${(+a.kpMax).toFixed(1)}` : '';
                     const v = validation.byId.get(a.id);
+                    // Locked issue-time forecasts (the predictor's receipt,
+                    // visible BEFORE truth resolves): per-model ETAs.
+                    const locked = v && Object.keys(v.models).length
+                        ? ' · locked: ' + Object.entries(v.models).map(([m, ms]) =>
+                            `${m} ${new Date(ms).toISOString().slice(5, 16).replace('T', ' ')}Z`).join(' · ')
+                        : '';
+                    const replayNote = ' · click: scrub + REPLAY this event in the corridor';
                     // Resolved truth rewrites the chip: predicted struck
                     // through, actual bold, signed error (+ = we were late).
                     if (v?.resolved && v.arrived && Number.isFinite(v.actualMs)) {
@@ -399,17 +414,18 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
                         const hit = Math.abs(a.arrivalMs - v.actualMs) <= 12 * 3.6e6;
                         const actual = new Date(v.actualMs).toISOString().slice(11, 16);
                         return `<span class="cal-ev scored g${a.gScale}${hit ? ' hit' : ''}"
-                            data-tau="${v.actualMs}"
-                            title="Predicted ${new Date(a.arrivalMs).toISOString().slice(0, 16).replace('T', ' ')}Z (${eta}) · observed shock ${new Date(v.actualMs).toISOString().slice(0, 16).replace('T', ' ')}Z · error ${err} (+ = forecast late) · ${hit ? 'HIT ≤12 h' : 'outside the 12 h hit window'} · click to scrub the Stage to the OBSERVED arrival"><s>${a.hhmm}</s> <span class="cal-act">${actual}</span><span class="cal-err">${err}</span></span>`;
+                            data-tau="${v.actualMs}" data-cme-id="${a.id}"
+                            title="Predicted ${new Date(a.arrivalMs).toISOString().slice(0, 16).replace('T', ' ')}Z (${eta}) · observed shock ${new Date(v.actualMs).toISOString().slice(0, 16).replace('T', ' ')}Z · error ${err} (+ = forecast late) · ${hit ? 'HIT ≤12 h' : 'outside the 12 h hit window'}${locked}${replayNote}"><s>${a.hhmm}</s> <span class="cal-act">${actual}</span><span class="cal-err">${err}</span></span>`;
                     }
                     if (v?.resolved && !v.arrived) {
-                        return `<span class="cal-ev falarm" data-tau="${a.arrivalMs}"
-                            title="Predicted ${new Date(a.arrivalMs).toISOString().slice(0, 16).replace('T', ' ')}Z (${eta}) — NO shock arrived (L1 data covered the window). Logged as a false alarm against the model.">✗ ${a.hhmm} no arrival</span>`;
+                        return `<span class="cal-ev falarm" data-tau="${a.arrivalMs}" data-cme-id="${a.id}"
+                            title="Predicted ${new Date(a.arrivalMs).toISOString().slice(0, 16).replace('T', ' ')}Z (${eta}) — NO shock arrived (L1 data covered the window). Logged as a false alarm against the model.${locked}${replayNote}">✗ ${a.hhmm} no arrival</span>`;
                     }
                     const isNext = a.arrivalMs === nextArrivalMs;
                     return `<span class="cal-ev g${a.gScale}${a.arrivalMs < nowMs ? ' pastev' : ''}${isNext ? ' next' : ''}"
-                        data-tau="${a.arrivalMs}"
-                        title="⊕ Earth arrival ${new Date(a.arrivalMs).toISOString().slice(0, 16).replace('T', ' ')}Z · ${eta} · ${a.speedKms} km/s${kp} · click to scrub the Stage">⊕ ${a.hhmm}${a.gScale ? ` G${a.gScale}` : ''}${
+                        data-tau="${a.arrivalMs}" data-cme-id="${a.id}"
+                        title="⊕ Earth arrival ${new Date(a.arrivalMs).toISOString().slice(0, 16).replace('T', ' ')}Z · ${eta} · ${a.speedKms} km/s${kp}${locked}${replayNote}">${
+                        v && Object.keys(v.models).length ? '🔒' : '⊕'} ${a.hhmm}${a.gScale ? ` G${a.gScale}` : ''}${
                         isNext ? `<span class="cal-count">${fmtCountdown(a.arrivalMs - nowMs)}</span>` : ''}</span>`;
                 }).join('');
                 const p50 = day.isP50 ? '<span class="cal-p50">◈ ensemble P50</span>' : '';
@@ -433,9 +449,19 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
             const sc = scorecardModel(validation.models);
             const fmtBias = (b) => b == null ? '' :
                 ` <span class="k">bias</span> <b>${b >= 0 ? '+' : '−'}${Math.abs(b).toFixed(1)} h</b>`;
+            // Even with zero SCORED events, locked forecasts are evidence
+            // the predictor is running — count them (author feedback
+            // 2026-07-23: "the predictor isn't working" when it was arming).
+            let lockedEvents = 0;
+            for (const v of validation.byId.values()) {
+                if (Object.keys(v.models).length) lockedEvents++;
+            }
             const skillChips = sc.empty
-                ? `<span class="cal-skill-arming">ledger arming — every forecast is
-                    locked at issue time; per-model skill appears as events resolve</span>`
+                ? `<span class="cal-skill-arming">${lockedEvents
+                    ? `${lockedEvents} event forecast${lockedEvents > 1 ? 's' : ''} locked
+                       (🔒 on the chips) — scored against the observed shock after passage`
+                    : `ledger arming — every forecast is locked at issue time;
+                       per-model skill appears as events resolve`}</span>`
                 : sc.rows.map((r) => `<span class="cal-skill-chip"
                     title="${r.label}: mean |arrival error| over ${r.n} scored event(s)${
                         r.biasH != null ? ` · mean signed error ${r.biasH >= 0 ? '+' : ''}${r.biasH.toFixed(1)} h (+ = late)` : ''}${
@@ -452,11 +478,18 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
                     struck-through times were our call, bold is what happened</span>
             </div>`;
 
+            // Data-plane chip: a broken feed must LOOK broken here too,
+            // never like a quiet week.
+            const feedChip = feed === null ? ''
+                : feed.ok
+                    ? `<span class="cal-feed ok" title="NASA DONKI reachable via the edge proxy">feed ✓</span>`
+                    : `<span class="cal-feed bad" title="${String(feed.reason).replace(/"/g, '&quot;').slice(0, 200)}">feed ✗ ${String(feed.reason).slice(0, 48)} · retrying</span>`;
             host.innerHTML = `
                 <div class="cal-head">
                     <span><span class="cal-swatch past"></span> last 7 days · observed</span>
                     <span><span class="cal-swatch span"></span> ensemble P10–P90 arrival</span>
-                    <span class="cal-hint">click a day or an ⊕ arrival to scrub the Stage timeline</span>
+                    <span class="cal-hint">click an ⊕ arrival to scrub + replay it in the corridor</span>
+                    ${feedChip}
                 </div>
                 <div class="cal-grid">${cells.join('')}${quiet}</div>
                 ${strip}`;
@@ -469,7 +502,11 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
             }
         }
 
-        // Clicks → the Stage's τ scrubber. The Stage clamps + dispatches
+        // Clicks → the Stage's τ scrubber; an ⊕ ARRIVAL chip additionally
+        // LOADS that event into the canvas ('sw-replay-cme' → the page's
+        // ONE flux-rope provider re-runs seeded with it and republishes,
+        // so the Stage rope + particle cloud + band + this calendar's
+        // cursor all time-travel together). The Stage clamps + dispatches
         // 'sw-tau' itself, keeping the dock contract one-way.
         host.addEventListener('click', (e) => {
             const chip = e.target.closest('.cal-ev');
@@ -479,7 +516,13 @@ export function mountCmeCalendar(hostId = 'cme-calendar-host') {
             if (!Number.isFinite(tau)) return;
             if (chip) e.stopPropagation();
             window.__swStage?.setTau?.(tau);
-            track('cme_calendar_scrub', { via: chip ? 'arrival' : 'day' });
+            const row = chip?.dataset.cmeId ? ledger.get(chip.dataset.cmeId) : null;
+            if (row?.earthDirected) {
+                window.dispatchEvent(new CustomEvent('sw-replay-cme',
+                    { detail: { cme: row } }));
+            }
+            track('cme_calendar_scrub',
+                { via: chip ? 'arrival' : 'day', replay: !!row });
         });
 
         // Stage → calendar: follow the scrubber with a day cursor. Cheap
