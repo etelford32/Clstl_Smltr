@@ -399,8 +399,10 @@ export function assetOrbitRing({ inclDeg = 0, raanDeg = 0, altKm = 550 }, n = 96
    camera floats just above the pin, target on the northward horizon. */
 export function mySkyPose(latDeg, lonDeg, tauMs) {
     const pos = earthLocal(latDeg, lonDeg, 1.10, tauMs);
-    const northLat = Math.min(88, latDeg + 24);
-    const target = earthLocal(northLat, lonDeg, 1.02, tauMs);
+    // Look POLEWARD — the aurora lives toward the pole in each
+    // hemisphere (a southern observer faces south, S6).
+    const poleLat = Math.max(-88, Math.min(88, latDeg + (latDeg >= 0 ? 24 : -24)));
+    const target = earthLocal(poleLat, lonDeg, 1.02, tauMs);
     return { pos, target };
 }
 
@@ -680,6 +682,104 @@ export const SEP_V_KMS = 9.0e4;
  * `intensity` is the log ramp S1→~0 … S5→1 for brightness.
  * @returns {{ pfu10:number, s:number, on:boolean, intensity:number }}
  */
+/* ── S6: the My Sky dome — the sky story from UNDERNEATH ─────────────
+   The outside stagings draw the curtains with the DISCLOSED ×10.6
+   height exaggeration (scale.js AURORA) because 300 km is invisible at
+   Earth-local scale. From below, no exaggeration is needed: a curtain
+   100–300 km up is tall in ANGLE — the dome renders the same oval
+   oracle honestly in horizontal (az/alt) coordinates. All PURE; the
+   observer is the user's pin; darkness comes from the ONE solar oracle
+   (verdict-engine sunAltitudeDeg — consumed by the renderer, not here). */
+
+export const CURTAIN_BASE_KM = 100;   // 557.7 nm green lower border
+
+/**
+ * Great-circle bearing (from north, eastward) and angular distance from
+ * observer to target, both in radians. Standard spherical formulas.
+ */
+export function bearingGamma(lat1, lon1, lat2, lon2) {
+    const p1 = lat1 * DEG, p2 = lat2 * DEG, dl = (lon2 - lon1) * DEG;
+    const g = Math.acos(Math.min(1, Math.max(-1,
+        Math.sin(p1) * Math.sin(p2) + Math.cos(p1) * Math.cos(p2) * Math.cos(dl))));
+    const az = Math.atan2(Math.sin(dl) * Math.cos(p2),
+        Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl));
+    return { az, gamma: g };
+}
+
+/**
+ * Apparent altitude (radians) of a point hKm above the surface at
+ * angular ground distance gamma: the exact spherical-Earth expression —
+ * overhead (γ→0) → +90°, and beyond acos(R/(R+h)) it dips below the
+ * horizon (why mid-latitudes see storm aurora only low on the north).
+ */
+export function apparentAltitudeRad(hKm, gamma) {
+    const r = RE_KM + hKm;
+    return Math.atan2(r * Math.cos(gamma) - RE_KM, r * Math.sin(gamma));
+}
+
+/**
+ * The aurora curtain in the observer's SKY: sample the oval's median
+ * boundary (SAME ovalLatAtLon oracle as the band) around all
+ * longitudes, keep columns whose TOP clears the horizon, return
+ * {az, altBase, altTop, w} sorted by azimuth. w fades with ground
+ * distance. Quiet mid-latitudes honestly get an EMPTY ribbon; a Kp 9
+ * storm puts a low glow on Miami's northern horizon and full sheets
+ * over Fairbanks.
+ */
+export function skyCurtainRibbon(kpBand, latDeg, lonDeg,
+    { n = 144, topKm = 300 } = {}) {
+    if (!kpBand || !Number.isFinite(latDeg)) return [];
+    const hemisphere = latDeg >= 0 ? 1 : -1;
+    const bMed = boundaryForKp(kpBand.p50);
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+        const lon = -180 + 360 * (i / n);
+        const blat = ovalLatAtLon(bMed, lon, hemisphere);
+        const { az, gamma } = bearingGamma(latDeg, lonDeg, blat, lon);
+        const altTop = apparentAltitudeRad(topKm, gamma);
+        if (altTop < 0.5 * DEG) continue;              // below the horizon
+        const altBase = Math.max(-1 * DEG, apparentAltitudeRad(CURTAIN_BASE_KM, gamma));
+        pts.push({ az, altBase, altTop,
+            w: Math.min(1, Math.max(0.15, 1 - (gamma * RE_KM) / 3000)) });
+    }
+    return pts.sort((a, b) => a.az - b.az);
+}
+
+/**
+ * Local east/north/up basis at the pin, in the Earth-local stage frame —
+ * built NUMERICALLY from earthLocal so the dome can never disagree with
+ * the geography placement (mean-sun frame, same documented tolerances).
+ */
+export function enuBasis(latDeg, lonDeg, tauMs) {
+    const norm = (v) => {
+        const m = Math.hypot(v[0], v[1], v[2]) || 1;
+        return [v[0] / m, v[1] / m, v[2] / m];
+    };
+    const p = earthLocal(latDeg, lonDeg, 1, tauMs);
+    const up = norm(p);
+    const pE = earthLocal(latDeg, lonDeg + 0.1, 1, tauMs);
+    let east = [pE[0] - p[0], pE[1] - p[1], pE[2] - p[2]];
+    const de = east[0] * up[0] + east[1] * up[1] + east[2] * up[2];
+    east = norm([east[0] - de * up[0], east[1] - de * up[1], east[2] - de * up[2]]);
+    // Right-handed horizontal frame: up × east = north.
+    const north = [
+        up[1] * east[2] - up[2] * east[1],
+        up[2] * east[0] - up[0] * east[2],
+        up[0] * east[1] - up[1] * east[0]];
+    return { east, north, up };
+}
+
+/** Unit sky direction for (azimuth from north eastward, altitude). */
+export function skyDir(azRad, altRad, basis, out = [0, 0, 0]) {
+    const ca = Math.cos(altRad), sa = Math.sin(altRad);
+    const h = [Math.sin(azRad), Math.cos(azRad)];   // east, north components
+    for (let k = 0; k < 3; k++) {
+        out[k] = ca * (h[0] * basis.east[k] + h[1] * basis.north[k])
+            + sa * basis.up[k];
+    }
+    return out;
+}
+
 export function sepStateAt(series, tauMs, fallbackPfu = 0) {
     let pfu = Number.isFinite(fallbackPfu) && fallbackPfu > 0 ? fallbackPfu : 0;
     if (Array.isArray(series) && series.length) {

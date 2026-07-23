@@ -28,6 +28,8 @@ import {
     xrayClassOf, sunActivityAt, flareFlashAt,
     normalizeFlares, parcelProbe, liftoffAt,
     sepStateAt, SEP_V_KMS,
+    bearingGamma, apparentAltitudeRad, skyCurtainRibbon, enuBasis, skyDir,
+    CURTAIN_BASE_KM,
 } from '../js/stage/model.js';
 import { shueStandoffRe, shueAlpha } from '../js/ring-current-model.js';
 import { magneticLatitude, boundaryForKp } from '../js/verdict-engine.js';
@@ -292,12 +294,15 @@ test('asset orbit ring: constant mean-altitude radius, inclination sets max |z|'
     assert.ok(Math.abs(eq[0]) < 1e-6 && Math.abs(eq[1] - r) < 1e-6, 'u=0 at the node');
 });
 
-test('mySkyPose: camera just above the pin, target on the northward horizon', () => {
+test('mySkyPose: camera just above the pin, target on the POLEWARD horizon', () => {
     const t = Date.parse('2026-07-22T06:00:00Z');
     const { pos, target } = mySkyPose(45, -105, t);
     assert.ok(Math.abs(Math.hypot(...pos) - 1.10) < 1e-9);
     assert.ok(Math.abs(Math.hypot(...target) - 1.02) < 1e-9);
-    assert.ok(target[2] > pos[2], 'looking poleward');
+    assert.ok(target[2] > pos[2], 'north: looking poleward (+z)');
+    // Southern observers face SOUTH — the aurora australis side (S6).
+    const s = mySkyPose(-42.9, 147.3, t);
+    assert.ok(s.target[2] < s.pos[2], 'south: looking poleward (−z)');
 });
 
 /* ── S2: the drag oracle the heat-shell colors encode ───────────────── */
@@ -501,6 +506,67 @@ test('S5d liftoff: envelope rises into launch and decays over 90 min', () => {
     assert.ok(Math.abs(liftoffAt(L, L + 45 * 60e3) - 0.5) < 1e-9);   // decaying
     assert.equal(liftoffAt(L, L + 2 * 3.6e6), 0);      // cleared the corona
     assert.equal(liftoffAt(null, L), 0);               // no event, no plume
+});
+
+test('S6 sky geometry: bearings, apparent altitude, the horizon cut', () => {
+    const RE = 6371.2;
+    // Due-north target → azimuth 0; due-east on the equator → azimuth 90°.
+    assert.ok(Math.abs(bearingGamma(40, -100, 50, -100).az) < 1e-9);
+    assert.ok(Math.abs(bearingGamma(0, 0, 0, 30).az - Math.PI / 2) < 1e-9);
+    assert.ok(Math.abs(bearingGamma(0, 0, 0, 90).gamma - Math.PI / 2) < 1e-9);
+    // Overhead point reads +90°; the horizon sits at γ_h = acos(R/(R+h)).
+    assert.ok(Math.abs(apparentAltitudeRad(300, 1e-9) - Math.PI / 2) < 1e-6);
+    const gH = Math.acos(RE / (RE + CURTAIN_BASE_KM));
+    assert.ok(Math.abs(apparentAltitudeRad(CURTAIN_BASE_KM, gH)) < 1e-9);
+    assert.ok(apparentAltitudeRad(CURTAIN_BASE_KM, gH * 1.5) < 0);
+    // Monotone: closer → higher in the sky.
+    assert.ok(apparentAltitudeRad(300, 0.05) > apparentAltitudeRad(300, 0.15));
+});
+
+test('S6 sky ribbon: quiet oval over Fairbanks, storm displacement, Miami glow', () => {
+    // Quiet-to-moderate Kp: the oval sits over Fairbanks — tall sheets.
+    const fbQuiet = skyCurtainRibbon({ p10: 2, p50: 2, p90: 3 }, 64.84, -147.72);
+    assert.ok(fbQuiet.length > 10, `Fairbanks columns ${fbQuiet.length}`);
+    assert.ok(Math.max(...fbQuiet.map((c) => c.altTop)) > 30 * Math.PI / 180);
+    assert.ok(fbQuiet.every((c, i) => i === 0 || c.az >= fbQuiet[i - 1].az), 'az-sorted');
+    assert.ok(fbQuiet.every((c) => c.altTop >= c.altBase), 'top above base');
+    // G3 storm: the oval expands EQUATORWARD past Fairbanks — the median
+    // boundary now hangs low on the SOUTHERN horizon (the real polar-cap
+    // displacement; the verdict card's margin logic encodes the same).
+    const fbStorm = skyCurtainRibbon({ p10: 6, p50: 7, p90: 8 }, 64.84, -147.72);
+    assert.ok(fbStorm.length > 0);
+    assert.ok(fbStorm.every((c) => Math.abs(c.az) > Math.PI / 2), 'displaced south');
+    // Miami, Kp 9: the classic LOW GLOW on the northern horizon — every
+    // visible column within ~15° altitude, azimuths clustered northward.
+    const mi = skyCurtainRibbon({ p10: 9, p50: 9, p90: 9 }, 25.76, -80.19);
+    assert.ok(mi.length > 0, 'Kp 9 reaches Miami');
+    assert.ok(mi.every((c) => c.altTop < 15 * Math.PI / 180), 'low on the horizon');
+    assert.ok(mi.every((c) => Math.abs(c.az) < Math.PI / 2), 'northward');
+    // Miami on a quiet day: EMPTY — never a fabricated glow.
+    assert.equal(skyCurtainRibbon({ p10: 2, p50: 2, p90: 2 }, 25.76, -80.19).length, 0);
+    assert.deepEqual(skyCurtainRibbon(null, 25.76, -80.19), []);
+});
+
+test('S6 ENU basis: orthonormal, geography-consistent, skyDir sane', () => {
+    const T = Date.parse('2026-07-22T06:00Z');
+    const b = enuBasis(64.84, -147.72, T);
+    const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    for (const v of [b.east, b.north, b.up]) {
+        assert.ok(Math.abs(Math.hypot(...v) - 1) < 1e-9, 'unit');
+    }
+    assert.ok(Math.abs(dot(b.east, b.north)) < 1e-6);
+    assert.ok(Math.abs(dot(b.east, b.up)) < 1e-6);
+    assert.ok(Math.abs(dot(b.north, b.up)) < 1e-6);
+    // North tilts poleward (+z) in the northern hemisphere; up is radial.
+    assert.ok(b.north[2] > 0);
+    assert.ok(Math.abs(b.up[2] - Math.sin(64.84 * Math.PI / 180)) < 1e-6);
+    // skyDir: zenith is up; the horizon points are the basis vectors.
+    const d = skyDir(0, Math.PI / 2, b);
+    assert.ok(Math.abs(d[0] - b.up[0]) < 1e-9 && Math.abs(d[2] - b.up[2]) < 1e-9);
+    const n0 = skyDir(0, 0, b);
+    assert.ok(Math.abs(n0[0] - b.north[0]) < 1e-9);
+    const e0 = skyDir(Math.PI / 2, 0, b);
+    assert.ok(Math.abs(e0[1] - b.east[1]) < 1e-9);
 });
 
 console.log(`stage-model: ALL PASS (${n} tests)`);

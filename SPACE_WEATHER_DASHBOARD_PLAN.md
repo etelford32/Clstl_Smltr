@@ -758,6 +758,34 @@ those move the CLOCK, and the particles follow the driver at τ.
   S-scale gate, DONKI-free quiet default, disclosure text, and the
   My Sky split. §9b dwell instrumentation rides the existing
   stage_pick/staging telemetry — revisit after the next usage pull.
+- **S6 — MY SKY DOME. ✅ SHIPPED 2026-07-23** (the sky-dome follow-up
+  the S5c walls were "the input" for). The staging now renders the sky
+  story FROM UNDERNEATH at the pin, and it is the Stage's only
+  scale-HONEST staging: real 100–300 km curtains are tall in ANGLE, so
+  no height exaggeration is needed from below. Pure oracles in
+  stage/model.js — `bearingGamma` + `apparentAltitudeRad` (exact
+  spherical-Earth altitude: why mid-latitudes only ever see storm
+  aurora low on the poleward horizon), `skyCurtainRibbon` (the oval's
+  median boundary in az/alt from the SAME ovalLatAtLon oracle; node
+  pins: quiet oval overhead at Fairbanks, G3 displacement to
+  Fairbanks's SOUTHERN sky, Kp 9 Miami = low northern glow, quiet
+  Miami = honestly empty), `enuBasis` (numerical from earthLocal —
+  the dome can't disagree with the geography) + `skyDir`. Renderer:
+  background dome at the pin (twilight gradient + hash stars, darkness
+  from the ONE verdict-engine sunAltitudeDeg — scrubbing τ into
+  daylight honestly washes the sky out), curtain ribbon sharing the
+  walls' uInt but with a quiet-arc base floor (from directly beneath
+  even the quiet oval is plainly visible), N/E/S/W horizon marks,
+  camera-up = local vertical (world-z twisted the horizon at high
+  latitudes), mySkyPose now looks POLEWARD in both hemispheres
+  (southern observers face the aurora australis). In My Sky the
+  ×10.6-exaggerated walls AND the flat band annulus yield to the dome
+  (map chrome reads as glitch sheets from the ground; staging change
+  busts the ovalKey cache). No pin → no observer → no sky, honestly.
+  Probes: __swStage.mySky.{dome, ribbonPts, ribbonVisible, sunAltDeg,
+  dark}. House lesson (2026-07-23): headless-CI screenshots of the
+  canvas go stale — capture via canvas.toDataURL inside a rAF
+  callback, not page.screenshot.
 - **S5d — MEASUREMENT: the virtual probe. ✅ SHIPPED 2026-07-23**
   (author: "how can we show particle trajectories? I want some
   measurement ability here"). Click empty corridor → a stationary

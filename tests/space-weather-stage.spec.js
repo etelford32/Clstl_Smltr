@@ -146,10 +146,26 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         await expect(host.locator('.swst-pin-label')).toContainText(/oval/);
 
         // My Sky flight lands at the pin (ground-level: camera well inside
-        // the Earth-local neighbourhood).
+        // the Earth-local neighbourhood) and the S6 sky dome comes up:
+        // sky background + the curtain ribbon computed from the SAME oval
+        // oracle in az/alt coordinates (geometry asserted, never the
+        // wall-clock-dependent lighting), while the ×10.6-exaggerated
+        // walls yield to the honest from-below projection.
         await host.locator('.swst-stations button', { hasText: 'My Sky' }).click();
         await expect.poll(() => page.evaluate(() => window.__swStage?.station))
             .toBe('my-sky');
+        await expect.poll(() => page.evaluate(() => window.__swStage.mySky.dome),
+            { timeout: 15_000 }).toBe(true);
+        await expect.poll(() => page.evaluate(() => {
+            window.dispatchEvent(new CustomEvent('swpc-update', { detail: { kp: 6 } }));
+            return window.__swStage.mySky.ribbonPts;
+        }), { timeout: 15_000 }).toBeGreaterThan(0);
+        expect(await page.evaluate(() => window.__swStage.curtains.visible))
+            .toBe(false);   // walls hide under the dome
+        expect(await page.evaluate(() => window.__swStage.mySky.sunAltDeg))
+            .not.toBeNull();
+        // Cardinal horizon marks are part of the dome chrome.
+        await expect(host.locator('.swst-overlay')).toContainText('N');
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
@@ -325,14 +341,17 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         // The disclosure line names the curtain exaggeration.
         await expect(host.locator('.swst-disclose')).toContainText('aurora curtain height');
 
-        // My Sky: heliospheric streaks hide, but the curtains are the sky
-        // story — they STAY.
+        // My Sky: heliospheric streaks hide, and the exaggerated curtain
+        // WALLS yield to the S6 dome. With no pin there is no observer,
+        // so the dome (and any sky) honestly stays down too.
         await host.locator('.swst-stations button', { hasText: 'My Sky' }).click();
         await expect.poll(() => page.evaluate(() => window.__swStage?.station))
             .toBe('my-sky');
         await expect.poll(() => page.evaluate(() => window.__swStage.sep.visible))
             .toBe(false);
-        expect(await page.evaluate(() => window.__swStage.curtains.visible)).toBe(true);
+        await expect.poll(() => page.evaluate(() => window.__swStage.curtains.visible))
+            .toBe(false);
+        expect(await page.evaluate(() => window.__swStage.mySky.dome)).toBe(false);
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 

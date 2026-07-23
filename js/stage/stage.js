@@ -51,12 +51,13 @@ import { ropeSurfaceGrid, ropeAxisPoints, ropeSpecAt, ghostMembers,
          assetOrbitRing, parseTleRaan, mySkyPose, windFieldAt,
          memberFieldRows, sunActivityAt, flareFlashAt,
          normalizeFlares, parcelProbe, liftoffAt,
-         sepStateAt, SEP_V_KMS } from './model.js';
+         sepStateAt, SEP_V_KMS,
+         skyCurtainRibbon, enuBasis, skyDir } from './model.js';
 import { sheathCompression } from '../cme-propagation.js';
 import { carringtonL0 } from '../ring-current-model.js';
 import { EARTH_TEXTURES } from '../earth-skin.js';
 import { ropeFrame } from '../flux-rope/view.js';
-import { magneticLatitude, boundaryForKp } from '../verdict-engine.js';
+import { magneticLatitude, boundaryForKp, sunAltitudeDeg } from '../verdict-engine.js';
 import { density, kpToAp } from '../upper-atmosphere-engine.js';
 import { propagate } from '../satellite-tracker.js';
 import { loadProfile, CHANGE_EVENT as THRESHOLD_EVENT } from '../threshold-profile.js';
@@ -613,6 +614,119 @@ function mount(host) {
         return mesh;
     });
 
+    /* ── S6 MY SKY DOME: the sky story from UNDERNEATH ──────────────
+       A background sphere centered on the PIN (twilight gradient +
+       procedural stars, darkness from the ONE solar oracle) plus the
+       curtain ribbon in az/alt coordinates from the SAME oval oracle
+       the band and walls use. From below no height exaggeration is
+       needed — real 100–300 km curtains are tall in ANGLE, so this
+       staging is scale-honest. Camera sits 0.10 R_E above the pin
+       (mySkyPose); at dome radius ~15 R_E that off-center parallax is
+       <1% — documented approximation. Scrubbing τ moves the sun:
+       daylight honestly washes the sky out. */
+    const DOME_R = 0.28;
+    const domeUniforms = {
+        uUp: { value: new THREE.Vector3(0, 0, 1) },
+        uSunAlt: { value: -18 },
+    };
+    const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(DOME_R, 48, 32),
+        new THREE.ShaderMaterial({
+            uniforms: domeUniforms,
+            side: THREE.BackSide, transparent: false,
+            depthWrite: false, depthTest: false,
+            vertexShader: `
+                varying vec3 vDir;
+                void main() {
+                    vDir = normalize(position);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform vec3 uUp; uniform float uSunAlt;
+                varying vec3 vDir;
+                void main() {
+                    vec3 d = normalize(vDir);
+                    float alt = dot(d, normalize(uUp));           // sin(altitude)
+                    float day = clamp((uSunAlt + 6.0) / 12.0, 0.0, 1.0);
+                    float dark = clamp((-uSunAlt - 3.0) / 9.0, 0.0, 1.0);
+                    vec3 night = vec3(0.012, 0.016, 0.035);
+                    vec3 dayC = mix(vec3(0.60, 0.75, 0.92), vec3(0.20, 0.42, 0.78),
+                        clamp(alt * 1.6, 0.0, 1.0));
+                    vec3 c = mix(night, dayC, day);
+                    // Twilight warms the horizon band (bounded args only).
+                    float tw = clamp(1.0 - abs(uSunAlt + 4.0) / 8.0, 0.0, 1.0);
+                    c += vec3(0.55, 0.25, 0.08) * tw * pow(clamp(1.0 - alt, 0.0, 1.0), 6.0);
+                    // Hash stars: dark skies only, above the horizon.
+                    vec3 q = floor(d * 220.0);
+                    float h = fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+                    if (h > 0.9965 && alt > 0.02) {
+                        c += vec3(0.9) * dark * pow((h - 0.9965) / 0.0035, 2.0);
+                    }
+                    // Ground plane below the horizon.
+                    if (alt < 0.0) c = mix(c, vec3(0.015, 0.018, 0.02),
+                        clamp(-alt * 8.0, 0.0, 1.0));
+                    gl_FragColor = vec4(c, 1.0);
+                }`,
+        }));
+    dome.renderOrder = -3;
+    dome.visible = false;
+    earthGroup.add(dome);
+
+    // Curtain ribbon on the dome — columns from skyCurtainRibbon.
+    const RIB_N = 144;
+    const ribbonMat = new THREE.ShaderMaterial({
+        uniforms: { uTime: curtainUniforms.uTime, uInt: curtainUniforms.uInt,
+            uDark: { value: 0 } },
+        transparent: true, depthWrite: false, depthTest: false,
+        side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+        vertexShader: `
+            attribute float aV; attribute float aCol; attribute float aW;
+            varying float vV; varying float vCol; varying float vW;
+            void main() {
+                vV = aV; vCol = aCol; vW = aW;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+        fragmentShader: `
+            uniform float uTime; uniform float uInt; uniform float uDark;
+            varying float vV; varying float vCol; varying float vW;
+            void main() {
+                float ray = 0.55 + 0.45 * sin(vCol * 30.0 - uTime * 1.4);
+                float fade = pow(clamp(1.0 - vV, 0.0, 1.0), 1.4);
+                vec3 c = mix(vec3(0.30, 0.95, 0.55), vec3(0.90, 0.35, 0.45), vV);
+                // From directly beneath, even the quiet oval's arcs are
+                // plainly visible — a base floor with Kp growth, unlike
+                // the distant walls (pure uInt). Darkness still gates.
+                float amp = 0.25 + 0.75 * uInt;
+                float a = amp * uDark * fade * ray * vW * 0.9;
+                if (a < 0.008) discard;
+                gl_FragColor = vec4(c, a);
+            }`,
+    });
+    const ribbonGeom = new THREE.BufferGeometry();
+    ribbonGeom.setAttribute('position',
+        new THREE.BufferAttribute(new Float32Array(RIB_N * 2 * 3), 3));
+    {
+        const aV = new Float32Array(RIB_N * 2);
+        for (let i = 0; i < RIB_N; i++) { aV[i * 2] = 0; aV[i * 2 + 1] = 1; }
+        ribbonGeom.setAttribute('aV', new THREE.BufferAttribute(aV, 1));
+        ribbonGeom.setAttribute('aCol',
+            new THREE.BufferAttribute(new Float32Array(RIB_N * 2), 1));
+        ribbonGeom.setAttribute('aW',
+            new THREE.BufferAttribute(new Float32Array(RIB_N * 2), 1));
+        const idx = [];
+        for (let i = 0; i < RIB_N - 1; i++) {
+            const a = i * 2, b = a + 2;
+            idx.push(a, a + 1, b, a + 1, b + 1, b);
+        }
+        ribbonGeom.setIndex(idx);
+        ribbonGeom.setDrawRange(0, 0);
+    }
+    const ribbon = new THREE.Mesh(ribbonGeom, ribbonMat);
+    ribbon.renderOrder = -2;
+    ribbon.frustumCulled = false;   // dome-relative strip, range-driven
+    ribbon.visible = false;
+    earthGroup.add(ribbon);
+
     const pinMarker = new THREE.Mesh(
         new THREE.SphereGeometry(reToUnits(0.22), 12, 8),
         new THREE.MeshBasicMaterial({ color: 0x4fc97f }));
@@ -856,6 +970,24 @@ function mount(host) {
         () => [0, 0, -BODY.sunRadiusUnits * 2.0]);
     addLabel('swst-label', 'EARTH', () => [EARTH_S, 0, BODY.earthRadiusUnits * 2.2]);
     addLabel('swst-label', 'L1', () => [stageRadius(0.99, state.mix), 0, 0.05]);
+    // S6 cardinal horizon marks — only in the My Sky dome (display
+    // toggled with it). World closures read the pin's ENU basis so the
+    // marks turn with the geography under the mean sun.
+    const cardinalEls = ['N', 'E', 'S', 'W'].map((t, i) => {
+        const el = addLabel('swst-label', t, () => {
+            const b = state.skyBasis, dp = state.domePos;
+            if (!b || !dp) return [0, 0, -9];
+            const dir = [b.north, b.east,
+                b.north.map((v) => -v), b.east.map((v) => -v)][i];
+            const R = DOME_R * 0.88;
+            return [EARTH_S + dp[0] + dir[0] * R,
+                dp[1] + dir[1] * R,
+                dp[2] + dir[2] * R + b.up[2] * DOME_R * 0.05];
+        });
+        el.style.display = 'none';
+        return el;
+    });
+
     // S5d probe readout — follows the dropped monitor; hidden until one
     // exists (display toggled by the probe update block, like pinLabel).
     const probeChip = addLabel('swst-chip', '', () => {
@@ -907,6 +1039,14 @@ function mount(host) {
             const toStage = (v) =>
                 [EARTH_S + reToUnits(v[0]), reToUnits(v[1]), reToUnits(v[2])];
             to = { ...to, pos: toStage(p.pos), target: toStage(p.target) };
+            // S6: the observer's LOCAL vertical is camera-up, so the dome's
+            // horizon sits level — world-z up twists the sky at high
+            // latitudes (earthGroup is a pure translation; directions are
+            // world-valid).
+            const b = enuBasis(state.pin.lat, state.pin.lon, state.tauMs);
+            camera.up.set(b.up[0], b.up[1], b.up[2]);
+        } else {
+            camera.up.set(0, 0, 1);
         }
         if (!cut && !state.attract && id !== state.station) track('station_change', { station: id });
         state.station = id;
@@ -1673,13 +1813,16 @@ function mount(host) {
         /* ── S2: oval band, pin, heat-shell, live assets ──────────── */
         const band = kpBandAt(state.tauMs, state.timeline, state.kpNow);
         const ovalKey = band
-            ? `${band.p10.toFixed(1)}|${band.p50.toFixed(1)}|${band.p90.toFixed(1)}|${Math.round(state.tauMs / 600e3)}`
+            ? `${band.p10.toFixed(1)}|${band.p50.toFixed(1)}|${band.p90.toFixed(1)}|${Math.round(state.tauMs / 600e3)}|${inMySky ? 1 : 0}`
             : '';
         if (ovalKey !== state.ovalKey) {
             state.ovalKey = ovalKey;
             for (let h = 0; h < 2; h++) {
                 const { mesh, median } = ovalHemis[h];
-                mesh.visible = median.visible = !!band;
+                // The flat band annulus is MAP chrome — seen edge-on from
+                // the ground it reads as a glitch sheet; in My Sky the S6
+                // ribbon is the oval's sky representation.
+                mesh.visible = median.visible = !!band && !inMySky;
                 if (!band) { curtains[h].visible = false; continue; }
                 const g = ovalBandGrid(band, OVAL_NLON, h === 0 ? 1 : -1);
                 const mp = mesh.geometry.getAttribute('position');
@@ -1705,17 +1848,77 @@ function mount(host) {
                 median.geometry.computeBoundingSphere();
                 curtains[h].geometry.computeBoundingSphere();
             }
+
+            // S6 sky ribbon rebuild (same cadence as the band — ovalKey
+            // includes a 10-min τ bucket, which also refreshes the ENU
+            // basis as geography turns under the mean sun).
+            if (state.pin && Number.isFinite(state.pin.lat)) {
+                const basis = enuBasis(state.pin.lat, state.pin.lon, state.tauMs);
+                state.skyBasis = basis;
+                const cols = band
+                    ? skyCurtainRibbon(band, state.pin.lat, state.pin.lon, { n: RIB_N })
+                    : [];
+                const usable = Math.min(cols.length, RIB_N);
+                const rp = ribbonGeom.getAttribute('position');
+                const rc = ribbonGeom.getAttribute('aCol');
+                const rw = ribbonGeom.getAttribute('aW');
+                const R = DOME_R * 0.97;
+                for (let i = 0; i < usable; i++) {
+                    const c = cols[i];
+                    skyDir(c.az, c.altBase, basis, p3);
+                    rp.setXYZ(i * 2, p3[0] * R, p3[1] * R, p3[2] * R);
+                    skyDir(c.az, c.altTop, basis, p3);
+                    rp.setXYZ(i * 2 + 1, p3[0] * R, p3[1] * R, p3[2] * R);
+                    rc.setX(i * 2, c.az); rc.setX(i * 2 + 1, c.az);
+                    rw.setX(i * 2, c.w); rw.setX(i * 2 + 1, c.w);
+                }
+                rp.needsUpdate = rc.needsUpdate = rw.needsUpdate = true;
+                ribbonGeom.setDrawRange(0, Math.max(0, (usable - 1) * 6));
+                state.ribbonPts = usable;
+            } else {
+                state.ribbonPts = 0;
+                ribbonGeom.setDrawRange(0, 0);
+            }
         }
 
         // Curtain intensity tracks the SAME forecast median the band draws
         // (kpBandAt — never a second Kp model): faint by Kp 2, full sheets
-        // at Kp 8+. Visible whenever the oval is (My Sky INCLUDED — the
-        // curtains are the sky story the plan promises that staging).
+        // at Kp 8+. In My Sky the exaggerated WALLS yield to the S6 dome
+        // ribbon — the honest from-below projection of the same oracle.
         {
             const kInt = band ? Math.min(1, Math.max(0, (band.p50 - 1.5) / 6.5)) : 0;
             curtainUniforms.uInt.value = kInt;
             state.curtainInt = kInt;
-            for (const c of curtains) c.visible = !!band && kInt > 0.04;
+            for (const c of curtains) c.visible = !!band && kInt > 0.04 && !inMySky;
+        }
+
+        // S6 dome: only in My Sky, only with a pin (no observer, no sky).
+        {
+            const showDome = inMySky && !!state.pin && Number.isFinite(state.pin.lat);
+            dome.visible = showDome;
+            // Any columns in your sky → drawn (quiet arcs included; the
+            // fragment's base floor + darkness handle the brightness).
+            ribbon.visible = showDome && (state.ribbonPts ?? 0) > 1;
+            if (showDome) {
+                earthLocal(state.pin.lat, state.pin.lon, reToUnits(1.005), state.tauMs, p3);
+                dome.position.set(p3[0], p3[1], p3[2]);
+                ribbon.position.copy(dome.position);
+                state.domePos = [p3[0], p3[1], p3[2]];
+                const b = state.skyBasis
+                    ?? enuBasis(state.pin.lat, state.pin.lon, state.tauMs);
+                domeUniforms.uUp.value.set(b.up[0], b.up[1], b.up[2]);
+                // Sky darkness at the pin AT τ — scrubbing into daylight
+                // honestly washes the curtains out (you can't see aurora
+                // through a blue sky).
+                const sAlt = sunAltitudeDeg(state.pin.lat, state.pin.lon, state.tauMs);
+                state.sunAltDeg = sAlt;
+                domeUniforms.uSunAlt.value = sAlt;
+                ribbonMat.uniforms.uDark.value =
+                    Math.min(1, Math.max(0, (-sAlt - 3) / 9));
+            }
+            for (const el of cardinalEls) {
+                el.style.display = showDome ? '' : 'none';
+            }
         }
 
         // S5c SEP streaks: gated on the MEASURED ≥10 MeV S-scale at τ.
@@ -2002,6 +2205,15 @@ function mount(host) {
         get curtains() {
             return { visible: curtains[0].visible,
                      intensity: state.curtainInt ?? 0 };
+        },
+        // S6: the My Sky dome (sky-state probes; ribbon alpha scales with
+        // dark — tests assert geometry, never wall-clock-dependent light).
+        get mySky() {
+            return { dome: dome.visible,
+                     ribbonPts: state.ribbonPts ?? 0,
+                     ribbonVisible: ribbon.visible,
+                     sunAltDeg: state.sunAltDeg ?? null,
+                     dark: ribbonMat.uniforms.uDark.value };
         },
         flyTo, setTau,
     };
