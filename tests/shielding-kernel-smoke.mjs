@@ -68,6 +68,8 @@ check('overshielding reverses penetration E', kernel.penEMvpm() < 0,
 
 check('R1/R2 sane', kernel.r1Ma() > 0.2 && kernel.r2Ma() > 0.2,
     `R1 ${kernel.r1Ma().toFixed(2)} MA, R2 ${kernel.r2Ma().toFixed(2)} MA`);
+check('R2 alpha exported for the verdict classifier',
+    kernel.r2Alpha() > 0.5 && kernel.r2Alpha() < 1.0, `α=${kernel.r2Alpha()}`);
 check('solver converged', kernel.solverResidual() < 1e-5,
     `res ${kernel.solverResidual().toExponential(1)}, ${kernel.solverIters()} iters`);
 
