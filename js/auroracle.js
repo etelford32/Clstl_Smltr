@@ -31,6 +31,7 @@ import {
   removeLocationFromList, locationId,
 } from './user-location.js';
 import { solarPosition } from './sun-altitude.js';
+import { openGate, consumeResume } from './gate-modal.js';
 
 /* ════ lightweight physical odds model (identical to aurora.html sketch) ════ */
 const RAD = Math.PI / 180;
@@ -135,7 +136,7 @@ function tonightWindow(lat, lon) {
 const state = {
   user: { name: 'Calgary, AB', lat: 51.05, lon: -114.07 },
   week: [], month: null, best: null, bestP: 0,
-  access: 'locked',          // 'locked' | 'unlocked'
+  access: 'teaser',          // 'teaser' (signed-out) | 'week' (free) | 'full' (basic+)
   kpForecast: null,          // { 0, 1, 3, 6, 24 } map for the engine, from live Kp
   kpEntries: null,           // raw SWPC 3-day Kp blocks: [{ t_hours_from_now, kp }]
   live: null,                // { power_n, power_s, activity, bz, hole } drivers
@@ -592,35 +593,54 @@ function renderMonth() {
    ACCESS GATE — teaser vs unlocked
    ════════════════════════════════════════════════════════════════════════ */
 function computeAccess() {
-  // Basic+ unlock. tierLevel honors admin(99)/tester(98) and basic/educator(2),
-  // advanced+(3). Signed-out → free → level 1 → locked.
+  // Three-tier ladder (HOME_GATING_PLAN.md Phase 2). tierLevel honors
+  // admin(99)/tester(98) and basic/educator(2), advanced+(3).
+  //   signed-out            → 'teaser'  (first three nights)
+  //   signed-in, free (1)    → 'week'    (full 7-night outlook)
+  //   basic+ (>=2)           → 'full'    (30-day outlook + live model + alerts)
   try {
-    if (!auth.isSignedIn()) return 'locked';
-    return tierLevel(auth.getPlan(), auth.getRole()) >= 2 ? 'unlocked' : 'locked';
-  } catch (_) { return 'locked'; }
+    if (!auth.isSignedIn()) return 'teaser';
+    return tierLevel(auth.getPlan(), auth.getRole()) >= 2 ? 'full' : 'week';
+  } catch (_) { return 'teaser'; }
 }
 
 function applyAccess() {
-  const unlocked = state.access === 'unlocked';
-  document.body.classList.toggle('au-unlocked', unlocked);
-  document.body.classList.toggle('au-locked', !unlocked);
+  const full = state.access === 'full';
+  const week = full || state.access === 'week';   // 7-night unlocked at week AND full
+  // au-locked keeps its historical meaning: the 30-day premium is gated. Free
+  // accounts stay au-locked (no 30-day) but gain au-week (nights 4–7 un-frost).
+  document.body.classList.toggle('au-unlocked', full);
+  document.body.classList.toggle('au-locked', !full);
+  document.body.classList.toggle('au-week', week);
   renderAccessBanner();
-  if (unlocked && !state.hydrated) hydrateLive();
+  // Live OVATION power + the ensemble refinement + the 30-day stay a Basic
+  // feature — the boot-populated 7-night forecast is what 'week' un-frosts.
+  if (full && !state.hydrated) hydrateLive();
 }
 
 function renderAccessBanner() {
   const el = document.getElementById('au-access'); if (!el) return;
-  if (state.access === 'unlocked') {
+  if (state.access === 'full') {
     const plan = (() => { try { return auth.getPlan(); } catch (_) { return ''; } })();
     el.innerHTML =
       `<span class="au-acc-pip live"></span>
        <span class="au-acc-txt"><b>Intro access active</b> — live OVATION power, the 30-day outlook and the model breakdown are unlocked${plan ? ` for your <b>${plan}</b> plan` : ''}.</span>`;
     el.className = 'au-access ok';
+  } else if (state.access === 'week') {
+    // Free account: the 7-night is theirs; Basic is the next rung (30-day).
+    el.innerHTML =
+      `<span class="au-acc-pip live"></span>
+       <span class="au-acc-txt"><b>7-night outlook unlocked.</b> The 30-day outlook, live model breakdown and custom alerts are on Basic.</span>
+       <a class="au-acc-cta" href="signup.html?plan=basic" data-funnel-cta="auroracle_banner_upgrade">See the month · $9.99/mo</a>`;
+    el.className = 'au-access';
   } else {
+    // Teaser (signed-out). Keep the "free preview" wording; the CTA now opens
+    // the FREE-account gate for the 7-night (the click is intercepted in
+    // initAccess — the href is a no-JS fallback).
     el.innerHTML =
       `<span class="au-acc-pip"></span>
-       <span class="au-acc-txt">You're viewing the <b>free preview</b> — the first three nights. Unlock the full 7-night + 30-day outlook, custom alerts and the model breakdown.</span>
-       <a class="au-acc-cta" href="signup.html?plan=basic" data-funnel-cta="auroracle_banner_unlock">Start intro · $9.99/mo</a>`;
+       <span class="au-acc-txt">You're viewing the <b>free preview</b> — the first three nights. A free account opens the full 7-night outlook for your location.</span>
+       <a class="au-acc-cta" href="signup.html?plan=free" data-funnel-cta="auroracle_banner_unlock">See all 7 nights — free</a>`;
     el.className = 'au-access';
   }
 }
@@ -629,6 +649,20 @@ async function initAccess() {
   try { await auth.ready(); } catch (_) {}
   state.access = computeAccess();
   applyAccess();
+  // Return-from-gate: strip a lingering ?resume= token (the banner already
+  // reflects the new tier). Harmless when no token is present.
+  try { consumeResume(state.access === 'full' || state.access === 'week' ? 'outlook-7night' : 'outlook-30day'); } catch (_) {}
+  // Intercept every unlock CTA → the shared conversion gate, chosen by where
+  // the visitor sits on the ladder (not which overlay they clicked):
+  //   teaser → free-account gate for the 7-night
+  //   week   → paid Basic gate for the 30-day
+  // Delegated so it survives the innerHTML re-render of the access banner.
+  document.addEventListener('click', (e) => {
+    const cta = e.target.closest?.('.au-gate-go, .cta-go, .au-acc-cta');
+    if (!cta) return;
+    e.preventDefault();
+    openGate(state.access === 'teaser' ? 'outlook-7night' : 'outlook-30day', { resume: 'auroracle' });
+  });
   // Re-evaluate on sign-in / sign-out / plan change.
   window.addEventListener('auth-changed', () => {
     const next = computeAccess();

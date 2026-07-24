@@ -183,7 +183,7 @@ section{position:relative;z-index:1}
 .cta-band .cta-go:hover{filter:brightness(1.08)}
 .cta-band .cta-go:active{transform:scale(.97)}
 /* the mid-page CTA is for the teaser audience only */
-body.au-unlocked .au-cta-locked-only{display:none}
+body.au-unlocked .au-cta-locked-only,body.au-week .au-cta-locked-only{display:none}
 
 /* section heads */
 .hl-head{margin:28px 0 12px}
@@ -214,7 +214,7 @@ body.au-unlocked .au-cta-locked-only{display:none}
 .weekhead .hint{font-family:'JetBrains Mono',monospace;font-size:.66rem;color:var(--c-text-faint)}
 .au-weeklock{display:none;align-items:center;gap:6px;font-size:.7rem;font-weight:600;padding:4px 10px;border-radius:999px;
   color:var(--c-loc);background:rgba(var(--c-loc-rgb),.08);border:1px solid var(--c-loc-border)}
-body.au-locked .au-weeklock{display:inline-flex}
+body.au-locked:not(.au-week) .au-weeklock{display:inline-flex}
 .week{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
 .daycard{border-radius:var(--r-xl);padding:10px 8px 11px;text-align:center;
   background:linear-gradient(180deg,var(--c-surface-1),var(--c-surface-2));
@@ -232,7 +232,7 @@ body.au-locked .au-weeklock{display:inline-flex}
 .daycard .kp{font-family:'JetBrains Mono',monospace;font-size:.74rem;color:var(--c-text-muted);margin-top:9px}
 .daycard .kp small{color:var(--c-text-faint)}
 .daycard.promising{border-color:rgba(var(--c-loc-rgb),.3)}
-body.au-locked .daycard.au-far{filter:blur(5px);opacity:.5;pointer-events:none}
+body.au-locked:not(.au-week) .daycard.au-far{filter:blur(5px);opacity:.5;pointer-events:none}
 
 /* ── month outlook chart ── */
 .month-card{margin-top:16px;border-radius:var(--r-2xl);padding:var(--sp-7) var(--sp-8) var(--sp-6);
@@ -523,7 +523,7 @@ footer a{color:var(--c-text-muted)}
   <!-- compact week — nights 1–3 free, 4–7 frosted for the teaser -->
   <div class="weekhead">
     <h2>Next 7 nights</h2>
-    <span class="au-weeklock">🔒 nights 4–7 unlock with intro</span>
+    <span class="au-weeklock">🔒 nights 4–7 — free with an account</span>
     <span class="hint">likelihood · Kp · ±</span>
   </div>
   <div class="week" id="week"></div>

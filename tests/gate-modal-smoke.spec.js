@@ -153,3 +153,73 @@ test.describe('satellite-designer save gate', () => {
         expect(draft).toBeTruthy();
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Integration — spaceship-designer save loop (Phase 2)
+// ─────────────────────────────────────────────────────────────────────
+
+test.describe('spaceship-designer save gate', () => {
+    test('signed-out pilot clicking Save opens the save-rocket gate', async ({ page }) => {
+        await page.goto('/');
+        await page.evaluate(() => localStorage.removeItem('pp_auth'));
+        await page.goto('/spaceship-designer.html');
+
+        const saveBtn = page.locator('#ssd-save');
+        await expect(saveBtn).toBeVisible({ timeout: 20_000 });
+        await saveBtn.click();
+
+        const root = page.locator('#pp-gate-root');
+        await expect(root).toBeVisible();
+        await expect(root.locator('.pp-gate-headline')).toHaveText("Don't lose this rocket.");
+
+        const href = await root.locator('[data-gate-primary]').getAttribute('href');
+        expect(href).toContain('plan=free');
+        expect(href).toContain('next=%2Fspaceship-designer.html');
+        expect(href).toContain('resume=draft');
+
+        // Build stashed locally before the redirect.
+        const draft = await page.evaluate(() => localStorage.getItem('pp_ssd_draft_v1'));
+        expect(draft).toBeTruthy();
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Integration — auroracle outlook ladder (Phase 2)
+// ─────────────────────────────────────────────────────────────────────
+
+function mockAuth(plan, role) {
+    return { signedIn: true, email: `${role}-${plan}@pw.test`, name: 'T', plan, role, provider: 'mock', ts: Date.now() };
+}
+
+test.describe('auroracle outlook gates', () => {
+    test('signed-out visitor gets the FREE 7-night gate from the unlock CTA', async ({ page }) => {
+        await page.goto('/');
+        await page.evaluate(() => localStorage.removeItem('pp_auth'));
+        await page.goto('/auroracle.html');
+
+        await expect(page.locator('body')).toHaveClass(/au-locked/, { timeout: 20_000 });
+        await page.locator('.au-acc-cta').first().click();
+
+        const root = page.locator('#pp-gate-root');
+        await expect(root).toBeVisible();
+        await expect(root.locator('.pp-gate-headline')).toHaveText('See the next seven nights.');
+        const href = await root.locator('[data-gate-primary]').getAttribute('href');
+        expect(href).toContain('plan=free');
+        expect(href).toContain('next=%2Fauroracle.html');
+    });
+
+    test('free account reaching for the month gets the PAID 30-day gate', async ({ page }) => {
+        await page.goto('/');
+        await page.evaluate((a) => localStorage.setItem('pp_auth', JSON.stringify(a)), mockAuth('free', 'user'));
+        await page.goto('/auroracle.html');
+
+        await expect(page.locator('body')).toHaveClass(/au-week/, { timeout: 20_000 });
+        await page.locator('.au-premium > .au-gate .au-gate-go').first().click();
+
+        const root = page.locator('#pp-gate-root');
+        await expect(root).toBeVisible();
+        await expect(root.locator('.pp-gate-headline')).toHaveText("You've got the week. Want the month?");
+        const href = await root.locator('[data-gate-primary]').getAttribute('href');
+        expect(href).toContain('plan=basic');   // D1: 30-day → Basic id
+    });
+});
