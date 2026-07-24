@@ -54,10 +54,14 @@ function percentile(sorted, p) {
 }
 
 // Hold-last-valid over a nullable series (the replay.js driver policy —
-// the solver cannot ingest null).
-function heldSeries(arr, fallback) {
+// the solver cannot ingest null). `n` is the bundle length: a MISSING
+// series must still yield n fallbacks — the 2026-07-24 null-config bake
+// happened because a missing by_nt gave [] here, so by[i] was undefined
+// and went into the WASM boundary as NaN, poisoning every solve.
+function heldSeries(arr, fallback, n) {
     let last = fallback;
-    return (arr || []).map((v) => {
+    return Array.from({ length: n }, (_, i) => {
+        const v = arr ? arr[i] : null;
         if (v != null && Number.isFinite(v)) last = v;
         return last;
     });
@@ -78,12 +82,12 @@ for (const src of BUNDLES) {
         continue;
     }
     const stepS = (bundle.window.step_minutes || 5) * 60;
-    const bz = heldSeries(bundle.series.bz_nt, 0);
-    const by = heldSeries(bundle.series.by_nt, 0);
-    const v = heldSeries(bundle.series.v_kms, 400);
-    const n = heldSeries(bundle.series.n_cc, 5);
+    const nSamples = (bundle.series.bz_nt || []).length;
+    const bz = heldSeries(bundle.series.bz_nt, 0, nSamples);
+    const by = heldSeries(bundle.series.by_nt, 0, nSamples);
+    const v = heldSeries(bundle.series.v_kms, 400, nSamples);
+    const n = heldSeries(bundle.series.n_cc, 5, nSamples);
     const symH = bundle.series.sym_h_nt || [];
-    const nSamples = bz.length;
 
     const kernel = await loadKernel(wasmBytes);
     kernel.setR2Mode('relaxation');

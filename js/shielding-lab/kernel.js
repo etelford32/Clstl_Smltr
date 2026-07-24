@@ -48,6 +48,13 @@ export async function loadKernel(source) {
         reset() { x.shl_init(); },
 
         setControls({ bz, by, vsw, n: nDens, f107, tauMin, sapsOn }) {
+            // Loud beats silent: a non-finite control crossing the WASM
+            // boundary becomes NaN state that poisons every later solve
+            // with no error anywhere (the 2026-07-24 null-config bake:
+            // an undefined `by` NaN'd 26k solves without a whisper).
+            for (const [k2, v2] of Object.entries({ bz, by, vsw, n: nDens, f107, tauMin })) {
+                if (!Number.isFinite(v2)) throw new Error(`shielding setControls: non-finite ${k2}=${v2}`);
+            }
             x.shl_set_controls(bz, by, vsw, nDens, f107, tauMin, sapsOn ? 1 : 0);
         },
 
