@@ -45,7 +45,23 @@ const BUNDLES = [
 ];
 
 const KERNEL_DT_S = 10;
-const STORM_SYMH_NT = -30;      // storm interval: SYM-H at/below this
+const STORM_SYMH_NT = -30;
+
+// Interval buckets are PHASE-AWARE, not purely SYM-H-conditioned: the
+// first (2026-07-24) bake showed quiet-p95 ABOVE the storm tiers because
+// penetration LEADS the ring current — the sheath's biggest undershielding
+// spikes happen while SYM-H is still > −30, so a SYM-H-only cut files the
+// most driven solves under "quiet". Driven = the bundle's sheath/main
+// phases OR SYM-H ≤ −30 (catches the recovery); quiet = the pre-storm
+// quiet phase with SYM-H still > −30.
+const DRIVEN_PHASES = new Set(['sheath', 'main']);
+
+function phaseIdAt(phases, hours) {
+    for (const p of phases || []) {
+        if (p.until_h == null || hours < p.until_h) return p.id;
+    }
+    return 'storm';
+}
 
 function percentile(sorted, p) {
     if (!sorted.length) return null;
@@ -114,8 +130,11 @@ for (const src of BUNDLES) {
                 }
                 continue;
             }
-            if (symH[i] != null && symH[i] <= STORM_SYMH_NT) { stormAbsE.push(absE); storm++; }
-            else if (symH[i] != null) { quietAbsE.push(absE); quiet++; }
+            const phase = phaseIdAt(bundle.phases, (i * stepS) / 3600);
+            const driven = DRIVEN_PHASES.has(phase)
+                || (symH[i] != null && symH[i] <= STORM_SYMH_NT);
+            if (driven) { stormAbsE.push(absE); storm++; }
+            else if (phase === 'quiet' && symH[i] != null) { quietAbsE.push(absE); quiet++; }
         }
     }
     console.log(`  done in ${((Date.now() - t0) / 1000).toFixed(0)} s — ${storm} storm / ${quiet} quiet solves`
@@ -126,7 +145,7 @@ for (const src of BUNDLES) {
         storm_solves: storm,
         quiet_solves: quiet,
         nonfinite_solves_excluded: nan,
-        storm_definition: `SYM-H <= ${STORM_SYMH_NT} nT`,
+        storm_definition: `phase in {sheath, main} OR SYM-H <= ${STORM_SYMH_NT} nT; quiet = pre-storm quiet phase (penetration leads SYM-H — a SYM-H-only cut misfiles the sheath spikes)`,
     });
 }
 
