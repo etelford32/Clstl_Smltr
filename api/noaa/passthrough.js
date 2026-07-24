@@ -25,8 +25,10 @@ export const config = { runtime: 'edge' };
 const UPSTREAM = 'https://services.swpc.noaa.gov/';
 
 // Exactly the products the client tiers consume (js/config.js NOAA table
-// + the RTSW pair js/flux-rope-live.js uses + the two inline pulls).
+// + the RTSW pair js/flux-rope-live.js uses + the two inline pulls + the
+// Geospace propagated feed the Shielding Lab's LIVE mode drives from).
 const ALLOW = new Set([
+    'products/geospace/propagated-solar-wind-1-hour.json',
     'json/rtsw/rtsw_wind_1m.json',
     'json/rtsw/rtsw_mag_1m.json',
     'json/planetary_k_index_1m.json',
