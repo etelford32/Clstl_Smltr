@@ -1154,6 +1154,14 @@ function setLocStatus(msg, cls = '') {
 async function addLocationByQuery(q) {
   const query = (q || '').trim();
   if (!query) { setLocStatus('Type a city or zip first.', 'err'); return; }
+  // Ownership moment (HOME_GATING_PLAN.md, variant 'set-location'): saving a
+  // place is the free-account hook — an account tunes the outlook + alerts to
+  // it. Fire the gate for signed-out visitors; onUnlock re-runs the save so
+  // the place they typed is kept the moment they have an account.
+  if (!auth.isSignedIn() && !hasProvisionalAccount()) {
+    openGate('set-location', { resume: 'auroracle', onUnlock: () => addLocationByQuery(query) });
+    return;
+  }
   setLocStatus('Searching…');
   try {
     const r = await geocodeQuery(query);
@@ -1170,20 +1178,30 @@ function initSignedInPanel() {
   const syncSignedIn = () => {
     let on = false; try { on = auth.isSignedIn(); } catch (_) {}
     document.body.classList.toggle('au-signedin', on);
-    if (on) renderSavedLocations();
+    // Always render — the panel is a conversion surface for signed-out
+    // visitors too, and provisional members (email submitted) can save.
+    renderSavedLocations();
   };
 
   const input = document.getElementById('au-loc-input');
   document.getElementById('au-loc-add-btn')?.addEventListener('click', () => addLocationByQuery(input?.value));
   input?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addLocationByQuery(input.value); } });
 
-  document.getElementById('au-loc-geo')?.addEventListener('click', () => {
+  const runGeoSave = () => {
     if (!navigator.geolocation) { setLocStatus('Geolocation not available in this browser.', 'err'); return; }
     setLocStatus('Locating…');
     navigator.geolocation.getCurrentPosition(pos => {
       const loc = { name: 'My location', lat: pos.coords.latitude, lon: pos.coords.longitude };
       addLocationToList(loc); selectLocation(loc); setLocStatus('✓ Saved your current location.', 'ok');
     }, () => setLocStatus('Could not get your location — check permissions.', 'err'), { timeout: 8000, maximumAge: 6e5 });
+  };
+  document.getElementById('au-loc-geo')?.addEventListener('click', () => {
+    // Same set-location gate as the typed save; onUnlock re-runs the geolocate.
+    if (!auth.isSignedIn() && !hasProvisionalAccount()) {
+      openGate('set-location', { resume: 'auroracle', onUnlock: runGeoSave });
+      return;
+    }
+    runGeoSave();
   });
 
   document.getElementById('au-realtime-go')?.addEventListener('click', () => {

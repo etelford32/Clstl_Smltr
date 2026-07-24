@@ -290,3 +290,36 @@ test.describe('auroracle outlook gates', () => {
         expect(href).toContain('plan=basic');   // D1: 30-day → Basic id
     });
 });
+
+test.describe('auroracle set-location gate', () => {
+    test('signed-out save opens the gate; onUnlock keeps the typed place', async ({ page }) => {
+        await mockGateApi(page, 202, { ok: true });
+        // Deterministic geocoder so the post-unlock re-save doesn't need network.
+        await page.route('**://nominatim.openstreetmap.org/**', route => route.fulfill({
+            status: 200, contentType: 'application/json',
+            body: JSON.stringify([{ lat: '64.14', lon: '-21.94', display_name: 'Reykjavík, Iceland', address: { city: 'Reykjavík' } }]),
+        }));
+        await page.goto('/');
+        await page.evaluate(() => {
+            localStorage.removeItem('pp_auth');
+            localStorage.removeItem('pp_gate_member');
+            localStorage.removeItem('ppx_user_locations');
+        });
+        await page.goto('/auroracle.html');
+
+        // The locations panel is a conversion surface for signed-out visitors.
+        const saveBtn = page.locator('#au-loc-add-btn');
+        await expect(saveBtn).toBeVisible({ timeout: 20_000 });
+        await page.locator('#au-loc-input').fill('Reykjavik');
+        await saveBtn.click();
+
+        const root = page.locator('#pp-gate-root');
+        await expect(root).toBeVisible();
+        await expect(root.locator('.pp-gate-headline')).toHaveText('Make this about your sky.');
+
+        // Submit the email → provisional member → onUnlock re-runs the save.
+        await root.locator('[data-gate-email]').fill('sky@example.com');
+        await root.locator('[data-gate-submit]').click();
+        await expect(page.locator('#au-loc-status')).toContainText(/saved/i, { timeout: 10_000 });
+    });
+});

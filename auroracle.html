@@ -376,7 +376,9 @@ body.au-locked .au-premium>.au-gate{display:flex;position:absolute;inset:0;z-ind
 @media(min-width:981px){.head>:not(.au-scope){padding-right:328px}}
 
 /* ── saved-locations + real-time panel (signed-in, bottom of page) ── */
-.au-mylocs{display:none;margin-top:30px;border-radius:var(--r-2xl);padding:20px 24px;
+/* Visible to everyone — for signed-out visitors it's a conversion surface:
+   the "Save location" action opens the set-location gate (js/auroracle.js). */
+.au-mylocs{display:block;margin-top:30px;border-radius:var(--r-2xl);padding:20px 24px;
   background:radial-gradient(130% 220% at 100% 0%,rgba(var(--c-accent-rgb),.08),transparent 55%),
     linear-gradient(180deg,var(--c-surface-1),var(--c-surface-2));
   border:1px solid var(--c-border-medium);backdrop-filter:var(--blur-glass);box-shadow:var(--shadow-panel)}
