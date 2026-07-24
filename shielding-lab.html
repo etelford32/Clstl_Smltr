@@ -219,6 +219,10 @@ canvas.sl-chart-tall { height:150px; }
 .sl-v-gap { border-color:rgba(255,176,102,.6); }
 .sl-v-gap .sl-verdict-state { color:#ffd9ae; }
 
+/* ── Live data readout ───────────────────────────────────────────── */
+.sl-live-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:10px 18px; }
+.sl-chart-k { font-size:.7rem; letter-spacing:.06em; text-transform:uppercase; color:#8b94ad; margin-bottom:2px; }
+
 /* ── Analysis cut ────────────────────────────────────────────────── */
 .sl-cutbar { display:inline-flex; align-items:center; gap:8px; font-weight:400; text-transform:none; letter-spacing:0; }
 .sl-cutbar input[type=range] { width:110px; accent-color:#ffb066; }
@@ -298,6 +302,7 @@ canvas.sl-chart-tall { height:150px; }
                 <span class="sl-vchip sl-vchip-off" id="sl-verdict-saps">SAPS quiet</span>
             </div>
             <div class="sl-verdict-driver" id="sl-verdict-driver">—</div>
+            <div class="sl-verdict-driver" id="sl-verdict-ctx"></div>
             <div class="sl-verdict-impact" id="sl-verdict-impact"></div>
             <div class="sl-verdict-age" id="sl-verdict-age">—</div>
             <div class="sl-verdict-note" id="sl-verdict-note"></div>
@@ -345,6 +350,10 @@ canvas.sl-chart-tall { height:150px; }
         <div class="sl-panel">
             <h2>CPCP history</h2>
             <canvas id="sl-chart-cpcp" class="sl-chart"></canvas>
+            <div class="sl-legend" id="sl-cpcp-legend" style="display:none">
+                <span><span class="sw"></span>solved (this model)</span>
+                <span><span class="sw dash"></span>Boyle 1997 empirical (no saturation)</span>
+            </div>
         </div>
 
         <div class="sl-panel">
@@ -361,6 +370,25 @@ canvas.sl-chart-tall { height:150px; }
                     <div class="sl-note" id="sl-saps-meta">—</div>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── LIVE data readout (visible while live) ─────────────────────── -->
+<div class="sl-wrap" style="grid-template-columns:1fr; padding-top:0; display:block">
+    <div class="sl-panel" id="sl-live-drivers" style="display:none">
+        <h2>Live drivers · SWPC propagated to the Geospace boundary
+            <span class="sl-hint">shaded region right of NOW = forecast lead already in hand · B<sub>z</sub> as fed to the solver (3-pt median) · B<sub>y</sub> dashed · Dst is observed context, not a driver</span>
+        </h2>
+        <div class="sl-live-grid">
+            <div><div class="sl-chart-k">IMF B<sub>z</sub> / B<sub>y</sub> (nT)</div>
+                <canvas id="sl-chart-live-bz" class="sl-chart"></canvas></div>
+            <div><div class="sl-chart-k">Solar wind v (km/s)</div>
+                <canvas id="sl-chart-live-v" class="sl-chart"></canvas></div>
+            <div><div class="sl-chart-k">Density n (/cm³)</div>
+                <canvas id="sl-chart-live-n" class="sl-chart"></canvas></div>
+            <div><div class="sl-chart-k">Dst · Kyoto quicklook · 24 h</div>
+                <canvas id="sl-chart-live-dst" class="sl-chart"></canvas></div>
         </div>
     </div>
 </div>
@@ -491,8 +519,14 @@ canvas.sl-chart-tall { height:150px; }
         equilibrium instead of integrating through garbage (the same cold-restart policy as the
         operational model). The verdict thresholds are not asserted: they are percentiles of this
         solver's own St. Patrick's 2015 replay (<code>scripts/calibrate-shielding-verdict.mjs</code>),
-        re-bakeable when the Gannon bundle lands. Real-time data courtesy of
-        <a class="sl-xlink" href="https://www.swpc.noaa.gov/" target="_blank" rel="noopener">NOAA SWPC</a>.</p>
+        re-bakeable when the Gannon bundle lands. While live, the data readout shows the driver
+        ring buffer on the wall clock (the shaded region past NOW is forecast lead already in
+        hand), the observed 1-minute Kp and Kyoto Dst quicklook as context — they never feed the
+        solver — and the Boyle et&nbsp;al. (1997) empirical CPCP as a dashed reference on the CPCP
+        chart, deliberately unsaturated so solved-vs-empirical divergence in big storms stays
+        visible. Real-time data courtesy of
+        <a class="sl-xlink" href="https://www.swpc.noaa.gov/" target="_blank" rel="noopener">NOAA SWPC</a>;
+        Dst quicklook from WDC Kyoto via SWPC.</p>
     </section>
 
     <section>

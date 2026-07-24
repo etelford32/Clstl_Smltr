@@ -30,11 +30,13 @@
 
 import { loadKernel } from './kernel.js';
 import { DialRenderer } from './render.js';
-import { StripChart, ProfileChart } from './charts.js';
+import { StripChart, ProfileChart, DriverChart } from './charts.js';
 import { REPLAY_SOURCES, loadReplaySource, pearson } from './replay.js';
 import { LiveDriver, kanLeeMvpm } from './live-driver.js';
+import { LiveContext, boyleCpcpKv, gScale, stormPhaseFromDst } from './live-context.js';
 import { createClassifier, createShieldingFraction, impactSentence, mergeConfig } from './verdict.js';
 import { westwardProfileAt, profileSummary } from './analysis.js';
+import { dynamicPressureNPa } from '../solar-wind-driver.js';
 
 const KERNEL_DT_S = 10;        // fixed physics step (plan §2.3)
 const MAX_STEPS_PER_FRAME = 18; // 3 min sim per frame cap — keeps UI live
@@ -73,6 +75,18 @@ export async function boot() {
     const chartSymH = new StripChart($('sl-chart-symh'), {
         unit: 'nT', color: '#ffb066', windowS: 86400, signed: true,
     });
+    // LIVE data readout (Phase 2): the driver ring buffer on the wall
+    // clock — the shaded region right of NOW is the propagated feed's
+    // lead window — plus observed Dst for storm-phase context.
+    const liveCharts = {
+        bz: new DriverChart($('sl-chart-live-bz'), { unit: 'nT', signed: true }),
+        v: new DriverChart($('sl-chart-live-v'), { unit: 'km/s' }),
+        n: new DriverChart($('sl-chart-live-n'), { unit: '/cm³' }),
+        dst: new DriverChart($('sl-chart-live-dst'), {
+            unit: 'nT', color: '#ffb066', signed: true,
+            pastMs: 24 * 3600_000, futureMs: 0,
+        }),
+    };
 
     const state = {
         tau: TAU_PRESETS[1],
@@ -376,8 +390,10 @@ export async function boot() {
         cancelReplay('live');
         if (state.live) { reengageLive(); return; }
         const driver = new LiveDriver({}); // badges refresh per solve in tick()
+        const context = new LiveContext({});
         state.live = {
             driver,
+            context,
             engaged: true,
             prevTau: state.tau,
             classifier: createClassifier(verdictConfig),
@@ -385,14 +401,21 @@ export async function boot() {
             verdict: null,
             restarted: false,
             firstDataMs: null,
+            chartStamp: null,   // buffer stamp → rebuild chart arrays lazily
+            chartData: null,
             turn: { sign: Math.sign(state.controls.bz) || -1, pendSign: 0, pendSinceS: 0, lastMarkSign: 0 },
         };
         driver.start();
+        context.start();
         state.tau = 1;
         $('sl-tau-speed').textContent = '×1';
         state.paused = false;
         $('sl-pause').textContent = '⏸ pause';
         state.simBacklogS = 0;
+        // Boyle 1997 empirical CPCP rides the CPCP chart as the dashed
+        // reference while live — solved-vs-empirical divergence, visibly.
+        chartCpcp.refLabel = 'Boyle 1997';
+        $('sl-cpcp-legend').style.display = '';
         applyLiveChrome(true);
         record('live-start');
     }
@@ -432,6 +455,7 @@ export async function boot() {
         const live = state.live;
         if (!live) return;
         live.driver.stop();
+        live.context.stop();
         if (live.engaged) {
             state.tau = live.prevTau;
             tauLabel();
@@ -441,6 +465,9 @@ export async function boot() {
         $('sl-live-btn').textContent = '● go live';
         $('sl-live-btn').classList.remove('sl-live-armed', 'active');
         $('sl-verdict').style.display = 'none';
+        $('sl-live-drivers').style.display = 'none';
+        chartCpcp.refLabel = null;
+        $('sl-cpcp-legend').style.display = 'none';
         $('sl-live-hud').textContent = '';
         record('live-stop', { why });
     }
@@ -454,10 +481,40 @@ export async function boot() {
             $('sl-live-btn').classList.add('active');
             $('sl-live-btn').classList.remove('sl-live-armed');
             $('sl-verdict').style.display = '';
+            // The readout panel stays up through a take-over (state.live
+            // persists): observed data is true regardless of who drives.
+            $('sl-live-drivers').style.display = '';
             $('sl-scn-status').textContent = 'LIVE — NOAA SWPC solar wind, propagated to the Geospace boundary';
         } else {
             $('sl-live-btn').classList.remove('active');
         }
+    }
+
+    /** Redraw the live data readout (any time state.live exists). */
+    function drawLiveReadout() {
+        const live = state.live;
+        const nowMs = Date.now();
+        // Rebuild the chart arrays only when the buffer actually changed.
+        const stamp = `${live.driver.buffer.size}:${live.driver.buffer.newestT()}:${live.context.dstSeries.length}`;
+        if (stamp !== live.chartStamp) {
+            live.chartStamp = stamp;
+            // Bz/By from the driver (median-filtered — what the solver
+            // eats); v/n from the raw buffer rows.
+            const filtered = live.driver.buffer.size ? live.driver.buffer.driver().samples : [];
+            const rows = live.driver.buffer.sorted();
+            live.chartData = {
+                bz: filtered.map((s) => ({ t: s.t, v: s.bz })),
+                by: filtered.map((s) => ({ t: s.t, v: s.by })),
+                v: rows.map((s) => ({ t: s.t, v: s.v })),
+                n: rows.map((s) => ({ t: s.t, v: s.n })),
+                dst: live.context.dstSeries.map((s) => ({ t: s.t, v: s.dst })),
+            };
+        }
+        const d = live.chartData;
+        liveCharts.bz.draw(d.bz, nowMs, d.by);
+        liveCharts.v.draw(d.v, nowMs);
+        liveCharts.n.draw(d.n, nowMs);
+        liveCharts.dst.draw(d.dst, nowMs);
     }
 
     $('sl-live-btn').addEventListener('click', () => {
@@ -575,6 +632,17 @@ export async function boot() {
         sapsChip.textContent = v.saps === 'off' ? 'SAPS quiet'
             : `SAPS ${kernel.sapsPeakMs().toFixed(0)} m/s · ${v.saps.toUpperCase()}`;
         sapsChip.className = `sl-vchip sl-vchip-${v.saps}`;
+
+        // Observed geomagnetic context — Kp/Dst are CONTEXT, not drivers.
+        const kp = state.live.context.kp;
+        const dst = state.live.context.dst;
+        const pdyn = dynamicPressureNPa(state.controls.n, state.controls.vsw);
+        const ctxBits = [];
+        if (kp) ctxBits.push(`Kp ${kp.kp.toFixed(1)}${gScale(kp.kp) ? ` (${gScale(kp.kp)})` : ''}`);
+        if (dst) ctxBits.push(`Dst ${dst.dst.toFixed(0)} nT · ${stormPhaseFromDst(dst.dst)}`);
+        if (Number.isFinite(pdyn)) ctxBits.push(`Pdyn ${pdyn.toFixed(1)} nPa`);
+        $('sl-verdict-ctx').textContent = ctxBits.length
+            ? `observed: ${ctxBits.join(' · ')}` : '';
 
         const mode = state.live.driver.mode === 'propagated'
             ? 'SWPC propagated' : 'L1 fallback (self-propagated)';
@@ -696,7 +764,9 @@ export async function boot() {
         if (dtSimThisFrame > 0) {
             const t = kernel.simTimeS();
             chartPen.push(t, kernel.penEMvpm(), kernel.penEUnshieldedMvpm());
-            chartCpcp.push(t, kernel.cpcpKv());
+            chartCpcp.push(t, kernel.cpcpKv(), state.live?.engaged
+                ? boyleCpcpKv(state.controls.bz, state.controls.by, state.controls.vsw)
+                : null);
             if (state.replay) {
                 const truth = state.replay.truthAt(t);
                 chartCpcpCmp.push(t, kernel.cpcpKv(), truth.phiPcRidley);
@@ -709,6 +779,7 @@ export async function boot() {
         }
         chartPen.draw();
         chartCpcp.draw();
+        if (state.live) drawLiveReadout();
         if (state.replay) {
             chartCpcpCmp.draw();
             chartSymH.draw();

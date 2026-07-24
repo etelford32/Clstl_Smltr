@@ -320,6 +320,168 @@ export class ProfileChart {
     }
 }
 
+/**
+ * Wall-clock windowed series chart for the LIVE data readout: draws
+ * epoch-ms samples in a [now − past, now + future] window with a NOW
+ * cursor. Everything right of the cursor is data already in hand for
+ * the future (the propagated feed's lead window) — shaded so "the
+ * forecast margin" is a visible region, not a number you take on faith.
+ * Null/NaN samples break the trace (gaps stay gaps).
+ */
+export class DriverChart {
+    constructor(canvas, { unit, color = '#00c6ff', pastMs = 2 * 3600_000, futureMs = 45 * 60_000, signed = false }) {
+        this.canvas = canvas;
+        this.unit = unit;
+        this.color = color;
+        this.pastMs = pastMs;
+        this.futureMs = futureMs;
+        this.signed = signed;
+        this.hoverX = null;
+        canvas.addEventListener('pointermove', (e) => {
+            const r = canvas.getBoundingClientRect();
+            this.hoverX = e.clientX - r.left;
+        });
+        canvas.addEventListener('pointerleave', () => { this.hoverX = null; });
+    }
+
+    /** samples: ascending [{t, v}] (v may be null/NaN); ref: same, dashed. */
+    draw(samples, nowMs, ref = null) {
+        const { ctx, w, h } = setupCanvas(this.canvas);
+        ctx.clearRect(0, 0, w, h);
+        const padL = 8, padR = 54, padT = 8, padB = 16;
+        const iw = w - padL - padR, ih = h - padT - padB;
+        const t0 = nowMs - this.pastMs, t1 = nowMs + this.futureMs;
+        const inWin = (s) => s.t >= t0 && s.t <= t1;
+        const vis = (samples || []).filter(inWin);
+        const visRef = (ref || []).filter(inWin);
+        ctx.font = FONT;
+        if (vis.length < 2) {
+            ctx.fillStyle = INK_MUTED;
+            ctx.textAlign = 'center';
+            ctx.fillText('awaiting live data…', w / 2, h / 2);
+            return;
+        }
+
+        let lo = Infinity, hi = -Infinity;
+        for (const arr of [vis, visRef]) {
+            for (const s of arr) {
+                if (s.v == null || Number.isNaN(s.v)) continue;
+                if (s.v < lo) lo = s.v;
+                if (s.v > hi) hi = s.v;
+            }
+        }
+        if (!(hi > lo)) { lo -= 1; hi = lo + 2; }
+        if (this.signed) {
+            const m = Math.max(Math.abs(lo), Math.abs(hi), 1e-6) * 1.15;
+            lo = -m; hi = m;
+        } else {
+            const span = hi - lo;
+            lo -= span * 0.1; hi += span * 0.15;
+        }
+        const X = (t) => padL + ((t - t0) / (t1 - t0)) * iw;
+        const Y = (v) => padT + (1 - (v - lo) / (hi - lo)) * ih;
+
+        // Lead window: everything ahead of NOW that we already hold.
+        const xNow = X(nowMs);
+        ctx.fillStyle = 'rgba(55,224,160,0.06)';
+        ctx.fillRect(xNow, padT, padL + iw - xNow, ih);
+
+        // Recessive time grid: hour marks.
+        ctx.strokeStyle = GRID;
+        ctx.fillStyle = INK_MUTED;
+        ctx.lineWidth = 1;
+        ctx.textAlign = 'center';
+        const firstHour = Math.ceil(t0 / 3600_000) * 3600_000;
+        for (let t = firstHour; t <= t1; t += 3600_000) {
+            const x = X(t);
+            ctx.beginPath();
+            ctx.moveTo(x, padT);
+            ctx.lineTo(x, padT + ih);
+            ctx.stroke();
+            ctx.fillText(new Date(t).toISOString().slice(11, 16), x, h - 4);
+        }
+        if (this.signed) {
+            ctx.strokeStyle = ZERO;
+            ctx.beginPath();
+            ctx.moveTo(padL, Y(0));
+            ctx.lineTo(padL + iw, Y(0));
+            ctx.stroke();
+        }
+
+        const trace = (arr) => {
+            ctx.beginPath();
+            let pen = false;
+            for (const s of arr) {
+                if (s.v == null || Number.isNaN(s.v)) { pen = false; continue; }
+                const x = X(s.t), y = Y(s.v);
+                if (!pen) { ctx.moveTo(x, y); pen = true; }
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        };
+        if (visRef.length) {
+            ctx.strokeStyle = 'rgba(139,148,173,0.7)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            trace(visRef);
+            ctx.setLineDash([]);
+        }
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 2;
+        trace(vis);
+
+        // NOW cursor above the traces.
+        ctx.strokeStyle = 'rgba(55,224,160,0.7)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(xNow, padT);
+        ctx.lineTo(xNow, padT + ih);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(55,224,160,0.9)';
+        ctx.textAlign = xNow > padL + iw - 30 ? 'right' : 'left';
+        ctx.fillText('now', xNow + (xNow > padL + iw - 30 ? -3 : 3), padT + 10);
+
+        // Latest-value direct label at the newest sample.
+        let last = null;
+        for (let i = vis.length - 1; i >= 0; i--) {
+            if (vis[i].v != null && !Number.isNaN(vis[i].v)) { last = vis[i]; break; }
+        }
+        if (last) {
+            ctx.fillStyle = INK;
+            ctx.textAlign = 'left';
+            ctx.fillText(`${fmt(last.v)} ${this.unit}`, padL + iw + 6, Y(last.v) + 4);
+        }
+
+        // Hover crosshair + readout.
+        if (this.hoverX != null && this.hoverX >= padL && this.hoverX <= padL + iw) {
+            const tH = t0 + ((this.hoverX - padL) / iw) * (t1 - t0);
+            let bi = 0;
+            for (let i = 0; i < vis.length; i++) {
+                if (Math.abs(vis[i].t - tH) < Math.abs(vis[bi].t - tH)) bi = i;
+            }
+            const s = vis[bi];
+            if (s && s.v != null && !Number.isNaN(s.v)) {
+                const x = X(s.t);
+                ctx.strokeStyle = 'rgba(205,213,228,0.35)';
+                ctx.beginPath();
+                ctx.moveTo(x, padT);
+                ctx.lineTo(x, padT + ih);
+                ctx.stroke();
+                const txt = `${fmt(s.v)} ${this.unit} · ${new Date(s.t).toISOString().slice(11, 16)}Z`;
+                const tw = ctx.measureText(txt).width + 10;
+                const bx = Math.min(Math.max(x - tw / 2, padL), padL + iw - tw);
+                ctx.fillStyle = 'rgba(8,14,30,0.92)';
+                ctx.fillRect(bx, padT, tw, 16);
+                ctx.strokeStyle = 'rgba(0,198,255,0.3)';
+                ctx.strokeRect(bx, padT, tw, 16);
+                ctx.fillStyle = INK;
+                ctx.textAlign = 'left';
+                ctx.fillText(txt, bx + 5, padT + 12);
+            }
+        }
+    }
+}
+
 function fmt(v) {
     const a = Math.abs(v);
     if (a >= 100) return v.toFixed(0);

@@ -153,6 +153,14 @@ test.describe('shielding lab', () => {
         await page.route('**/api/noaa/passthrough**', (route) => route.fulfill({ json: fixture }));
         await page.route('**/api/noaa/radio-flux**', (route) =>
             route.fulfill({ json: { current: { flux_sfu: 145 } } }));
+        // Phase-2 observed context feeds.
+        await page.route('**/json/planetary_k_index_1m.json', (route) =>
+            route.fulfill({ json: [{ time_tag: iso(now - 60_000), estimated_kp: 5.33 }] }));
+        await page.route('**/products/kyoto-dst.json', (route) =>
+            route.fulfill({
+                json: [['time_tag', 'dst'],
+                    [iso(now - 2 * 3600_000), '-48'], [iso(now - 3600_000), '-63']],
+            }));
 
         await expect(page.locator('#sl-cpcp')).not.toHaveText('—', { timeout: 20_000 });
         await page.click('#sl-live-btn');
@@ -173,16 +181,32 @@ test.describe('shielding lab', () => {
         const bz = parseFloat(await page.locator('#sl-bz').inputValue());
         expect(bz).toBeCloseTo(-7.5, 1);
 
+        // Phase 2 readout: driver charts panel, observed context line,
+        // and the Boyle reference legend on the CPCP chart.
+        await expect(page.locator('#sl-live-drivers')).toBeVisible();
+        await expect(page.locator('#sl-verdict-ctx')).toContainText('Kp 5.3', { timeout: 10_000 });
+        await expect(page.locator('#sl-verdict-ctx')).toContainText('Dst -63 nT · storm');
+        await expect(page.locator('#sl-verdict-ctx')).toContainText('Pdyn');
+        await expect(page.locator('#sl-cpcp-legend')).toBeVisible();
+        await expect(page.locator('#sl-cpcp-legend')).toContainText('Boyle 1997');
+        const bzChartPainted = await page.evaluate(() => {
+            const c = document.getElementById('sl-chart-live-bz');
+            return c.width > 0 && c.height > 0;
+        });
+        expect(bzChartPainted).toBe(true);
+
         // Take over by grabbing the (locked) slider grid.
         await page.locator('#sl-controls-grid').dispatchEvent('pointerdown');
         await expect(page.locator('#sl-live-btn')).toContainText('return to live');
         await expect(page.locator('#sl-controls-grid')).not.toHaveClass(/sl-live-lock/);
 
-        // One-click return, then a full stop hides the card.
+        // One-click return, then a full stop hides card + readout panel.
         await page.click('#sl-live-btn');
         await expect(page.locator('#sl-live-btn')).toContainText('stop live');
         await page.click('#sl-live-btn');
         await expect(page.locator('#sl-verdict')).toBeHidden();
+        await expect(page.locator('#sl-live-drivers')).toBeHidden();
+        await expect(page.locator('#sl-cpcp-legend')).toBeHidden();
         expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
     });
 
