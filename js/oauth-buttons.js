@@ -124,12 +124,23 @@ function injectStyles() {
  *                                 there for future A/B copy.
  * @param {string} [opts.redirectTo]  Override the default callback URL.
  *                                    Generally only for tests.
+ * @param {string[]} [opts.providers] Restrict to this subset of providers
+ *                                    (intersected with SOCIAL_PROVIDERS). The
+ *                                    conversion gate passes ['google'] to show
+ *                                    a single one-tap button; signin/signup
+ *                                    omit it to render everything configured.
+ * @param {(provider:string)=>void} [opts.onClick]  Fired when a provider button
+ *                                    is clicked, before the redirect starts —
+ *                                    lets the caller record its own telemetry
+ *                                    or stash a return-to-origin.
  */
 export function mountOAuthButtons(target, opts = {}) {
     const root = typeof target === 'string' ? document.querySelector(target) : target;
     if (!root) return;
 
-    const enabled = (SOCIAL_PROVIDERS || []).filter(p => OAUTH_PROVIDERS[p]);
+    const filter = Array.isArray(opts.providers) ? opts.providers : null;
+    const enabled = (SOCIAL_PROVIDERS || [])
+        .filter(p => OAUTH_PROVIDERS[p] && (!filter || filter.includes(p)));
     if (!enabled.length) {
         // Nothing to mount; remove any prior contents so a stale
         // placeholder doesn't render.
@@ -167,6 +178,10 @@ export function mountOAuthButtons(target, opts = {}) {
 }
 
 async function handleClick(provider, btn, errEl, opts) {
+    // Caller hook — fired before anything else so the gate can record its own
+    // telemetry and stash a return-to-origin even if the redirect then fails.
+    try { opts.onClick?.(provider); } catch {}
+
     // Funnel: which provider, from which page (signin vs signup vs other).
     // Fired BEFORE the redirect call so a Supabase outage that prevents
     // the redirect still leaves a click-through datapoint server-side.

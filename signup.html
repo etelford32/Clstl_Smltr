@@ -613,6 +613,26 @@
     const _dealiased  = _aliasedPlan.replace(/-(annual|yearly)$/, '');
     const urlPlan     = _dealiased === 'enterprise' ? 'advanced' : _dealiased;
     window._ppYearlyPlan = _urlYearly ? urlPlan : null;
+
+    // ── ?next= return-to-origin (conversion gates, HOME_GATING_PLAN.md §3.4) ──
+    // The gate modal (js/gate-modal.js) sends a signed-out user here with
+    // ?next=<same-origin path>&resume=<token> so that "save a build → sign up
+    // → land back on exactly what you were doing" works. Mirrors signin.html's
+    // readSafeNext() same-origin allowlist verbatim — reject protocol-relative
+    // and off-origin values so ?next=https://evil.example can't smuggle an
+    // open redirect through the signup page. Returns "/path?q#frag" or null.
+    window._readSafeNext = function readSafeNext() {
+        try {
+            const raw = new URLSearchParams(location.search).get('next');
+            if (!raw) return null;
+            if (raw.startsWith('//')) return null;
+            if (!raw.startsWith('/'))  return null;
+            const u = new URL(raw, window.location.origin);
+            if (u.origin !== window.location.origin) return null;
+            const safe = u.pathname + u.search + u.hash;
+            return safe.length > 512 ? null : safe;
+        } catch { return null; }
+    };
     const planMap = {
         free:        'pill-free',
         basic:       'pill-basic',
@@ -1092,17 +1112,33 @@
                     window.location.href = 'welcome.html';
                 }, 1500);
             } else {
-                // Free / class-seat / invite-comped paths all land on the
-                // welcome hub. It's the canonical first-step picker and
-                // doubles as the tutorial library.
+                // Free / class-seat / invite-comped paths land on the welcome
+                // hub — UNLESS the user arrived from a conversion gate with a
+                // validated ?next= (HOME_GATING_PLAN.md §3.4), in which case we
+                // return them to exactly what they were doing (e.g. saving a
+                // satellite build) rather than dropping them on the hub.
                 const msgEl = document.querySelector('#success-view p');
+                const _safeNext = window._readSafeNext?.();
                 if (classSeatApplied) {
                     const plabel = parentPlan ? parentPlan.charAt(0).toUpperCase() + parentPlan.slice(1) : 'class';
                     if (msgEl) msgEl.innerHTML = `Welcome! You've joined a Parkers Physics ${plabel} class.<br><a href="welcome.html" style="color:#a080ff;">Open your welcome page →</a>`;
+                    setTimeout(() => { window.location.href = 'welcome.html'; }, 2500);
                 } else if (invitedComp) {
                     if (msgEl) msgEl.innerHTML = `Welcome! Your invite unlocked the <strong>${invite.plan.charAt(0).toUpperCase() + invite.plan.slice(1)}</strong> plan.<br><a href="welcome.html" style="color:#a080ff;">Open your welcome page →</a>`;
+                    setTimeout(() => { window.location.href = 'welcome.html'; }, 2500);
+                } else if (_safeNext) {
+                    // Carry the gate's ?resume= token onto the return path so
+                    // the origin page can rehydrate + toast its success message.
+                    const _resume = (new URLSearchParams(location.search).get('resume') || '').slice(0, 120);
+                    let _dest = _safeNext;
+                    if (_resume && !/[?&]resume=/.test(_dest)) {
+                        _dest += (_dest.includes('?') ? '&' : '?') + 'resume=' + encodeURIComponent(_resume);
+                    }
+                    if (msgEl) msgEl.innerHTML = 'Account created! Taking you back&hellip;';
+                    setTimeout(() => { window.location.href = _dest; }, 1400);
+                } else {
+                    setTimeout(() => { window.location.href = 'welcome.html'; }, 2500);
                 }
-                setTimeout(() => { window.location.href = 'welcome.html'; }, 2500);
             }
         })();
     });
