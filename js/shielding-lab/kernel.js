@@ -77,6 +77,8 @@ export async function loadKernel(source) {
         sapsWidthDeg() { return x.shl_saps_width_deg(); },
         r1Ma() { return x.shl_r1_ma(); },
         r2Ma() { return x.shl_r2_ma(); },
+        /** R2 equilibrium ratio α (I_R2_eq = α·I_R1) — the classifier's S denominator. */
+        r2Alpha() { return x.shl_r2_alpha(); },
         simTimeS() { return x.shl_sim_time_s(); },
         solverIters() { return x.shl_solver_iters(); },
         solverResidual() { return x.shl_solver_residual(); },

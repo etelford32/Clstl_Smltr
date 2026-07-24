@@ -218,6 +218,14 @@ pub extern "C" fn shl_r2_ma() -> f64 {
     sim().i_r2_ma
 }
 
+/// Region-2 equilibrium ratio α (I_R2_eq = α·I_R1, state.rs). Read-only:
+/// exported so the page's live shielding-fraction S = I_R2/(α·I_R1) reads
+/// the real constant instead of hardcoding a JS copy that could drift.
+#[no_mangle]
+pub extern "C" fn shl_r2_alpha() -> f64 {
+    sim().alpha
+}
+
 #[no_mangle]
 pub extern "C" fn shl_sim_time_s() -> f64 {
     sim().t_sim_s

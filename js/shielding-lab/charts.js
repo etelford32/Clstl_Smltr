@@ -43,6 +43,7 @@ export class StripChart {
         this.t = [];
         this.v = [];
         this.ref = [];
+        this.marks = [];
         this.hoverX = null;
         canvas.addEventListener('pointermove', (e) => {
             const r = canvas.getBoundingClientRect();
@@ -65,9 +66,18 @@ export class StripChart {
             this.v.splice(0, drop);
             this.ref.splice(0, drop);
         }
+        while (this.marks.length && this.marks[0].t < cutoff) this.marks.shift();
     }
 
-    clear() { this.t.length = this.v.length = this.ref.length = 0; }
+    /** Timeline event marker (e.g. a sustained Bz turning in LIVE mode). */
+    mark(tSimS, label, color = '#ffb066') {
+        this.marks.push({ t: tSimS, label, color });
+    }
+
+    clear() {
+        this.t.length = this.v.length = this.ref.length = 0;
+        this.marks.length = 0;
+    }
 
     draw() {
         const { ctx, w, h } = setupCanvas(this.canvas);
@@ -135,6 +145,26 @@ export class StripChart {
             }
             ctx.stroke();
         };
+
+        // Event markers (behind the traces): dashed vertical + label.
+        for (const m of this.marks) {
+            if (m.t < tStart || m.t > tEnd) continue;
+            const x = X(m.t);
+            ctx.strokeStyle = m.color;
+            ctx.globalAlpha = 0.55;
+            ctx.setLineDash([3, 4]);
+            ctx.beginPath();
+            ctx.moveTo(x, padT);
+            ctx.lineTo(x, padT + ih);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 0.9;
+            ctx.fillStyle = m.color;
+            ctx.textAlign = x > padL + iw * 0.75 ? 'right' : 'left';
+            ctx.fillText(m.label, x + (x > padL + iw * 0.75 ? -4 : 4), padT + 10);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = INK_MUTED;
+        }
 
         if (this.refLabel) {
             ctx.strokeStyle = 'rgba(139,148,173,0.7)';

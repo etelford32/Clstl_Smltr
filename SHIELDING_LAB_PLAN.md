@@ -4,9 +4,9 @@
 **Core:** Real ionospheric potential solver in Rust (`rust-shielding/`), compiled to WASM, running client-side in real time
 **Positioning:** The only interactive, physically honest magnetosphere–ionosphere coupling solver on the open web. Companion to ring-current.html — the ring current page shows *where the current comes from*; this page shows *what it does to the ionosphere*.
 
-## Status (2026-07-14)
+## Status (2026-07-24)
 
-All six phases have shipped code; Phase 5's Gannon leg awaits one networked baker run:
+Seven phases have shipped code; Phase 5's Gannon leg awaits one networked baker run:
 
 | Phase | Scope | State |
 |---|---|---|
@@ -16,6 +16,7 @@ All six phases have shipped code; Phase 5's Gannon leg awaits one networked bake
 | 4 | SAPS: trough model, conductance feedback, |E| layer, 21-MLT profile panel | ✅ storm driving → 700–1400 m/s jet, 2–3.5° wide |
 | 5 | Hindcast replay + validation | ✅ St. Patrick's 2015 replay ships (committed 5-min OMNI drivers; validation panel = our CPCP vs the BATS-R-US+Ridley SWMF-IE hindcast + observed SYM-H, live Pearson r). ⬜ Gannon 2024: run `scripts/build-shielding-gannon-replay.mjs` on a machine that can reach SPDF and commit `data/hindcast/gannon_shielding_replay.json` — the page's button lights up automatically. ⬜ INTERMAGNET equatorial ΔH comparison (needs the GSA pipeline data; flagship follow-up). |
 | 6 | mini-RCM R2 (2-invariant drift physics) | ✅ `rcm.rs`: 6 proton λ-channels, Hamiltonian advection in dipole (ψ,φ) Euler coordinates, corotation, plasma-sheet boundary (Borovsky-style), charge-exchange loss, Vasyliunas FAC closure (exactly current-conserving). UI mode toggle + ring-pressure dial layer. Emergent under/overshielding is test-pinned. |
+| 7 | LIVE mode + verdict card + 3D spherical view | ✅ `live-driver.js` (SWPC geospace **propagated** feed — L1→32 Re, lead time is real forecast margin; RTSW L1 pair + self ballistic shift as fallback; `products/solar-wind/*` is RETIRED at NOAA, never restore it), τ locked ×1, staleness ladder fresh→aged→stale→2 h re-seed, take-over/return; `verdict.js` classifier (persistence 3 solves + 5 min dwell, tiers CALIBRATED from the St. Patrick's replay via `scripts/calibrate-shielding-verdict.mjs` → committed `data/shielding-verdict-config.json`); `globe.js` spherical view (three r0.160.0, DataTexture shader sampling, OrbitControls, raycast probe, MLT-selectable SAPS cut). Node gates: `tests/shielding-live-driver.mjs`, `tests/shielding-verdict.mjs`. |
 
 Guardrails for future sessions:
 
@@ -27,6 +28,9 @@ Guardrails for future sessions:
 - **rcm.rs sign conventions are test-pinned** (`rcm_drift_directions`): the (ψ, φ) Euler pair orientation was chosen so corotation advects eastward AND ion gradient drift advects westward AND E×B matches diagnostics.rs. All three lock the same sign — if one looks wrong, the other two are how you find the real bug.
 - **The Vasyliunas FAC is the discrete divergence of the gc-only charge flux with the sign J∥_down = −div** (charge converging horizontally flows down into the ionosphere). It sums to zero exactly by the single-valued-face-flux construction; `rcm_vasyliunas_current_balance` pins it.
 - **Replay bundles follow `pp.hindcast.replay.v1`** and are consumed through `js/hindcast-replay-engine.js` (never forked, per CLAUDE.md). Driver series hold last-valid through gaps (the solver can't ingest null) and the hold count is surfaced in the status line; validation series render gaps.
+- **`globe.js` color ramps MIRROR `render.js` `_drawHeat`** — the 2D dial is the color oracle; retune a ramp in both files in the same commit. Same rule for its streaklet advection math (identical constants, same one sim clock).
+- **LIVE mode parses SWPC products BY HEADER NAME only** and builds the ring buffer on the house `SolarWindDriver` contract (js/solar-wind-driver.js) — no per-page driver schema. It NEVER fabricates: interpolation only between real samples, hold-and-flag beyond the newest, DATA GAP past 10 min, R2 re-seed past 2 h (kernel reset ≡ α·R1 equilibrium / drift re-init — the Geospace cold-restart policy).
+- **Verdict thresholds live in `data/shielding-verdict-config.json`** (generated — do not hand-edit). Regenerate with `node scripts/calibrate-shielding-verdict.mjs` when the Gannon bundle bakes; `verdict.js` DEFAULT_CONFIG is only the cold-start fallback. `S = I_R2/(α·I_R1)` reads α from the kernel's `shl_r2_alpha()` export — never hardcode a JS copy.
 
 ---
 
