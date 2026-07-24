@@ -85,6 +85,27 @@ test.describe('gate-modal component', () => {
         await expect(root.locator('.pp-gate-fineprint')).toContainText(/no credit card/i);
     });
 
+    test('free gate offers a Google one-tap button alongside the email field', async ({ page }) => {
+        await page.goto('/');
+        await page.evaluate(async () => (await import('/js/gate-modal.js')).openGate('save-satellite'));
+        const root = page.locator('#pp-gate-root');
+        const google = root.locator('.pp-oauth-btn[data-provider="google"]');
+        await expect(google).toBeVisible();
+        await expect(google).toContainText(/continue with google/i);
+        await expect(root.locator('[data-gate-or]')).toBeVisible();           // divider revealed
+        await expect(root.locator('[data-gate-email]')).toBeVisible();        // email still there
+        // Gate is Google-only — Apple (also in SOCIAL_PROVIDERS) is filtered out.
+        await expect(root.locator('.pp-oauth-btn[data-provider="apple"]')).toHaveCount(0);
+    });
+
+    test('paid gate does not show the email form or Google button', async ({ page }) => {
+        await page.goto('/');
+        await page.evaluate(async () => (await import('/js/gate-modal.js')).openGate('outlook-30day'));
+        const root = page.locator('#pp-gate-root');
+        await expect(root.locator('[data-gate-form]')).toHaveCount(0);
+        await expect(root.locator('.pp-oauth-btn')).toHaveCount(0);
+    });
+
     test('free gate: valid email submit → posts, sets provisional flag, shows success', async ({ page }) => {
         await mockGateApi(page, 202, { ok: true });
         await page.goto('/');

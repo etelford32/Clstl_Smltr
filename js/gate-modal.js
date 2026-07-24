@@ -50,6 +50,7 @@
  */
 
 import { telemetry } from './telemetry.js';
+import { mountOAuthButtons } from './oauth-buttons.js';
 
 // ── Identifiers ─────────────────────────────────────────────────────────────
 const STYLE_ID = 'pp-gate-styles';
@@ -250,6 +251,11 @@ const CSS = `
 #${ROOT_ID} .pp-gate-headline{font-family:var(--font-display,'Orbitron',sans-serif);
   font-weight:800;font-size:1.32rem;line-height:1.2;color:var(--fg-1,#f5f0ff);margin-bottom:10px}
 #${ROOT_ID} .pp-gate-body{font-size:.95rem;line-height:1.6;color:var(--fg-3,#9d92c8);margin-bottom:20px}
+#${ROOT_ID} .pp-gate-oauth{margin-bottom:2px}
+#${ROOT_ID} .pp-gate-or{display:flex;align-items:center;gap:10px;margin:6px 0 12px;
+  font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--fg-4,#6f6695)}
+#${ROOT_ID} .pp-gate-or::before,#${ROOT_ID} .pp-gate-or::after{content:'';flex:1;
+  height:1px;background:rgba(157,58,255,.2)}
 #${ROOT_ID} .pp-gate-form{display:flex;flex-direction:column;gap:9px}
 #${ROOT_ID} .pp-gate-email{width:100%;padding:12px 14px;border-radius:9px;
   background:rgba(0,0,0,.35);border:1px solid rgba(157,58,255,.3);color:var(--fg-1,#f5f0ff);
@@ -421,6 +427,8 @@ export function openGate(key, opts = {}) {
         // Free gates capture an email inline; paid gates route to checkout.
         const actionBlock = variant.gateType === 'free'
             ? `
+            <div class="pp-gate-oauth" data-gate-oauth></div>
+            <div class="pp-gate-or" data-gate-or hidden>or</div>
             <form class="pp-gate-form" data-gate-form novalidate>
                 <input class="pp-gate-email" data-gate-email type="email" inputmode="email"
                        autocomplete="email" placeholder="you@email.com" aria-label="Email" required>
@@ -456,6 +464,7 @@ export function openGate(key, opts = {}) {
 
         // ── Wire the primary action ────────────────────────────────────────
         if (variant.gateType === 'free') {
+            wireGoogleOneTap(card, key, plan, opts);
             wireEmailForm(card, key, variant, plan, opts);
         } else {
             card.querySelector('[data-gate-primary]').addEventListener('click', () => {
@@ -490,6 +499,36 @@ export function openGate(key, opts = {}) {
     } catch (err) {
         try { console.warn('[gate-modal] openGate failed:', err); } catch {}
         return false;
+    }
+}
+
+/** Mount the "Continue with Google" one-tap button above the email field.
+ *  Reuses the shared js/oauth-buttons.js renderer (same button signin/signup
+ *  use) restricted to Google. Hidden gracefully if Google isn't configured. */
+function wireGoogleOneTap(card, key, plan, opts) {
+    const mount = card.querySelector('[data-gate-oauth]');
+    if (!mount) return;
+    try {
+        mountOAuthButtons(mount, {
+            source:    'gate',
+            providers: ['google'],
+            onClick: (provider) => {
+                // OAuth navigates away, so record the intent + stash where to
+                // return BEFORE the redirect. auth-callback.html honours
+                // pp_auth_redirect for returning users (new accounts land on
+                // welcome.html — the site-wide OAuth-signup contract).
+                track(key, 'gate_signup', { gateType: 'free', plan, method: provider });
+                try {
+                    const nxt = safeNextPath(opts.next || currentPath()) || currentPath();
+                    sessionStorage.setItem('pp_auth_redirect', window.location.origin + nxt);
+                } catch {}
+            },
+        });
+    } catch { /* OAuth optional — email path still works */ }
+    // Reveal the "or" divider only if a provider button actually rendered.
+    if (mount.querySelector('.pp-oauth-btn')) {
+        const orEl = card.querySelector('[data-gate-or]');
+        if (orEl) orEl.hidden = false;
     }
 }
 
