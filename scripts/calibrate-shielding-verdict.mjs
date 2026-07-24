@@ -89,7 +89,7 @@ for (const src of BUNDLES) {
     kernel.setR2Mode('relaxation');
     console.log(`replaying ${src.id}: ${nSamples} × ${stepS / 60} min…`);
     const t0 = Date.now();
-    let storm = 0, quiet = 0;
+    let storm = 0, quiet = 0, nan = 0, firstNanAt = null;
     for (let i = 0; i < nSamples; i++) {
         kernel.setControls({
             bz: bz[i], by: by[i], vsw: v[i], n: n[i],
@@ -99,16 +99,29 @@ for (const src of BUNDLES) {
         for (let k = 0; k < solves; k++) {
             kernel.step(KERNEL_DT_S, 1);
             const absE = Math.abs(kernel.penEMvpm());
+            // A non-finite solve must never poison the percentile arrays
+            // (Array.sort with NaN is unspecified and JSON turns NaN into
+            // null — the exact silent-null-config failure this guards).
+            if (!Number.isFinite(absE)) {
+                nan++;
+                if (firstNanAt == null) {
+                    firstNanAt = i;
+                    console.warn(`  WARN: non-finite E_pen at sample ${i} (hour ${(i * stepS / 3600).toFixed(1)}) — bz ${bz[i]} v ${v[i]} n ${n[i]}`);
+                }
+                continue;
+            }
             if (symH[i] != null && symH[i] <= STORM_SYMH_NT) { stormAbsE.push(absE); storm++; }
             else if (symH[i] != null) { quietAbsE.push(absE); quiet++; }
         }
     }
-    console.log(`  done in ${((Date.now() - t0) / 1000).toFixed(0)} s — ${storm} storm / ${quiet} quiet solves`);
+    console.log(`  done in ${((Date.now() - t0) / 1000).toFixed(0)} s — ${storm} storm / ${quiet} quiet solves`
+        + (nan ? ` / ${nan} NON-FINITE solves EXCLUDED (first at sample ${firstNanAt})` : ''));
     provenance.push({
         bundle: src.id,
         window: { start: bundle.window.start, end: bundle.window.end },
         storm_solves: storm,
         quiet_solves: quiet,
+        nonfinite_solves_excluded: nan,
         storm_definition: `SYM-H <= ${STORM_SYMH_NT} nT`,
     });
 }
@@ -138,6 +151,15 @@ const p75 = percentile(stormAbsE, 75);
 const p90 = percentile(stormAbsE, 90);
 const p98 = percentile(stormAbsE, 98);
 const noiseFloor = percentile(quietAbsE, 95);
+
+// Refuse to write a config that would null a threshold — the classifier
+// merge ignores non-finite values anyway, but a null config on disk reads
+// as "calibrated" when it isn't.
+if (![p75, p90, p98, noiseFloor].every(Number.isFinite)) {
+    console.error('non-finite percentiles — refusing to write a null config. '
+        + `storm n=${stormAbsE.length}, quiet n=${quietAbsE.length}`);
+    process.exit(1);
+}
 
 const round = (x, d = 4) => (x == null ? null : Number(x.toFixed(d)));
 const config = {

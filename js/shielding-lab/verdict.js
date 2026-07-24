@@ -56,12 +56,17 @@ export const DEFAULT_CONFIG = {
     trend_window_s: 600,
 };
 
-/** Deep-merge a (possibly partial) calibration config over the defaults. */
+/** Deep-merge a (possibly partial) calibration config over the defaults.
+ *  Only FINITE numbers are taken — a null/NaN in a generated config must
+ *  fall back to the default, never poison a threshold (a null tier would
+ *  make `absE >= null` truthy and pin severity at "strong"). */
 export function mergeConfig(partial) {
     const cfg = structuredClone(DEFAULT_CONFIG);
     if (!partial || typeof partial !== 'object') return cfg;
     for (const k of ['thresholds', 'tiers', 'saps']) {
-        Object.assign(cfg[k], partial[k] || {});
+        for (const [key, val] of Object.entries(partial[k] || {})) {
+            if (Number.isFinite(val)) cfg[k][key] = val;
+        }
     }
     for (const k of ['drift_quiet_ratio', 'persistence_solves', 'dwell_s', 'eta_floor_mvpm', 'trend_window_s']) {
         if (Number.isFinite(partial[k])) cfg[k] = partial[k];

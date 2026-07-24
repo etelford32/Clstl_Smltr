@@ -30,6 +30,13 @@ check('merge keeps unspecified keys', cfg.tiers.moderate_mvpm === DEFAULT_CONFIG
     && cfg.thresholds.under_s === 0.85);
 check('merge accepts scalars', cfg.dwell_s === 120);
 check('merge of null is pure defaults', mergeConfig(null).dwell_s === DEFAULT_CONFIG.dwell_s);
+// A generated config carrying nulls (e.g. a NaN-poisoned calibration run)
+// must fall back to defaults, never null out a threshold.
+const nulled = mergeConfig({ tiers: { watch_mvpm: null, moderate_mvpm: NaN }, thresholds: { under_e_mvpm: null } });
+check('merge ignores null/NaN values (defaults survive)',
+    nulled.tiers.watch_mvpm === DEFAULT_CONFIG.tiers.watch_mvpm
+    && nulled.tiers.moderate_mvpm === DEFAULT_CONFIG.tiers.moderate_mvpm
+    && nulled.thresholds.under_e_mvpm === DEFAULT_CONFIG.thresholds.under_e_mvpm);
 
 // ── Shielding fraction ─────────────────────────────────────────────────
 const fp = createShieldingFraction({ mode: 'param', alpha: 0.8 });
