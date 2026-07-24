@@ -6,65 +6,71 @@
  * decisions (D1–D5), and the trigger-point audit.
  *
  * TWO gate types, ONE component:
- *   • gateType:'free'  — Gate 1: fires at the *moment of ownership* (save /
- *                        favorite / set-location / open a gated sim). Drives
- *                        the free-account signup goal.
- *   • gateType:'paid'  — Gate 2: fires when reaching for depth/power. Drives
- *                        subscriptions.
+ *   • gateType:'free'  — Gate 1: fires at the *moment of ownership*. The visitor
+ *                        "just submits an email" INLINE — no password, no page
+ *                        hop. We fire a magic-link sign-up on the back end
+ *                        (/api/auth/gate-signup) and unlock the page
+ *                        optimistically. Account creation defaults to email +
+ *                        one tap (copy §0, HOME_GATING_PLAN.md D4).
+ *   • gateType:'paid'  — Gate 2: fires when reaching for depth/power. Routes to
+ *                        signup.html?plan=basic|advanced for Stripe checkout
+ *                        (a single email can't create a paid subscription).
  *
  * Usage:
- *   import { openGate } from './js/gate-modal.js';
- *   openGate('save-satellite', {
- *       resume: 'draft',            // optional: what the origin page rehydrates
- *       onDismiss() { ... },        // optional
+ *   import { openGate, hasProvisionalAccount } from './js/gate-modal.js';
+ *   openGate('outlook-7night', {
+ *       resume: 'auroracle',        // optional: what the origin page rehydrates
+ *       onUnlock(email) { ... },    // optional: unlock the page live on submit
+ *       onDismiss(via) { ... },     // optional
  *   });
  *
+ * Optimistic unlock (the "dynamic" bit): a successful email submit stamps a
+ * provisional-member flag in localStorage and calls opts.onUnlock so the page
+ * reveals the reward immediately. The magic link the visitor clicks turns that
+ * into a real, cross-device session. Server-backed rewards (e.g. cloud save)
+ * still wait for the real session — those pages simply don't pass onUnlock and
+ * show the "check your inbox" state instead.
+ *
  * Load-bearing behaviours (do not "simplify"):
- *   • DIMS the page, never destroys it (copy global rule — keep the "whoa"
- *     while the user decides). The scrim blocks pointer-events to the page;
- *     the sim keeps rendering behind it.
- *   • Every modal carries a quiet exit: an ✕, an Esc handler, a backdrop
- *     click, AND a persistent "Already have an account? Sign in" affordance
- *     (copy §0 global rule) — so a returning user is never trapped.
- *   • SUPPRESSED inside preview/embed frames (html[data-preview]) — attract
- *     loops and iframes must never pop a signup wall (mirrors the
- *     space-weather gate's preview exemption).
- *   • FAILS OPEN: any error in openGate() logs and returns false; the caller's
- *     sim stays usable. Gates are conversion chrome, never a hard block.
+ *   • DIMS the page, never destroys it (copy global rule). The scrim blocks
+ *     pointer-events to the page; the sim keeps rendering behind it.
+ *   • Quiet exit always: ✕, Esc, backdrop click, AND a persistent
+ *     "Already have an account? Sign in" affordance (copy §0).
+ *   • SUPPRESSED inside preview/embed frames (html[data-preview]).
+ *   • FAILS OPEN: any error in openGate() logs and returns false.
  *
- * Return-to-origin (copy §4): the primary CTA routes to signup.html carrying
- *   ?plan=…&next=<same-origin path>&resume=<id>. signup.html honours ?next=
- *   on the free-signup path (mirrors signin's same-origin allowlist), so
- *   "save a build → sign up → land back on exactly what you were doing" works.
+ * Telemetry (copy §4): gate_view / gate_signup / gate_signin / gate_dismiss via
+ *   telemetry.recordFeature('<variantKey>_gate', action, { gateType, plan }).
+ *   The 'feature' kind is already migrated — no new migration. No email/PII in
+ *   telemetry. Best-effort; failures never block UI.
  *
- * Telemetry (copy §4): every open/convert/dismiss →
- *   telemetry.recordFeature('<variantKey>_gate', 'gate_view'|'gate_signup'
- *     |'gate_signin'|'gate_dismiss', { gateType, plan, via }). The 'feature'
- *   kind is already migrated (supabase-feature-telemetry-migration.sql) — no
- *   new migration needed. Telemetry is best-effort; failures never block UI.
- *
- * Plan naming (HOME_GATING_PLAN.md D1): the copy's marketing names
- *   "Forecaster"/"Researcher" are NOT real plan ids. The load-bearing ids are
- *   'basic' ($9.99) and 'advanced' ($100); the UI labels are "Basic"/
- *   "Advanced". This registry uses the real ids + labels.
+ * Plan naming (D1): the copy's "Forecaster"/"Researcher" are NOT real plan ids.
+ *   The load-bearing ids are 'basic' ($9.99) and 'advanced' ($100); labels are
+ *   "Basic"/"Advanced". This registry uses the real ids + labels.
  */
 
 import { telemetry } from './telemetry.js';
 
-// ── Style / DOM identifiers (namespaced so no page collides) ────────────────
+// ── Identifiers ─────────────────────────────────────────────────────────────
 const STYLE_ID = 'pp-gate-styles';
 const ROOT_ID  = 'pp-gate-root';
+// A validated email submit provisionally marks the visitor a free member so the
+// page can unlock optimistically before the magic link is clicked. Low-stakes
+// by design (the gated content is public forecast data); the link makes it real.
+const PROVISION_KEY = 'pp_gate_member';
+// Back-end that validates the email + fires the magic-link sign-up.
+const GATE_ENDPOINT = '/api/auth/gate-signup';
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 // ── The variant registry — copy §1 (free) + §2 (paid), as pure data ─────────
-// Shape per entry:
 //   gateType   'free' | 'paid'
 //   eyebrow    small label (optional)
 //   headline   3–7 words, sentence case
 //   body       1–2 short sentences
-//   primary    { label, plan }   — plan drives the signup destination
+//   primary    { label, plan }   — label = submit/CTA text; plan drives paid dest
 //   secondary  { label, kind:'signin'|'dismiss' }
-//   finePrint  reassurance line (Gate-1 defaults to the free-forever line)
-//   success    shown after the action completes / on resume return
+//   finePrint  reassurance line
+//   success    shown after the email submit / on resume return
 export const GATE_VARIANTS = Object.freeze({
     // ── Gate 1 · free account ──────────────────────────────────────────────
     'aurora-alerts': {
@@ -218,9 +224,8 @@ export const GATE_VARIANTS = Object.freeze({
     },
 });
 
-// ── Namespaced styles. Token fallbacks are baked in because not every page
-//    loads js/design-tokens.css; where it IS loaded the var() wins. Mirrors
-//    the self-injecting-stylesheet approach in aurora-capture.js / verdict-card.js.
+// ── Namespaced styles (token fallbacks baked in — not every page loads
+//    js/design-tokens.css). Mirrors aurora-capture.js / verdict-card.js. ──────
 const CSS = `
 #${ROOT_ID}{position:fixed;inset:0;z-index:2147483000;display:flex;
   align-items:center;justify-content:center;padding:20px;
@@ -245,6 +250,14 @@ const CSS = `
 #${ROOT_ID} .pp-gate-headline{font-family:var(--font-display,'Orbitron',sans-serif);
   font-weight:800;font-size:1.32rem;line-height:1.2;color:var(--fg-1,#f5f0ff);margin-bottom:10px}
 #${ROOT_ID} .pp-gate-body{font-size:.95rem;line-height:1.6;color:var(--fg-3,#9d92c8);margin-bottom:20px}
+#${ROOT_ID} .pp-gate-form{display:flex;flex-direction:column;gap:9px}
+#${ROOT_ID} .pp-gate-email{width:100%;padding:12px 14px;border-radius:9px;
+  background:rgba(0,0,0,.35);border:1px solid rgba(157,58,255,.3);color:var(--fg-1,#f5f0ff);
+  font-size:.95rem;font-family:inherit}
+#${ROOT_ID} .pp-gate-email:focus{outline:none;border-color:var(--uv-400,#b765ff);
+  box-shadow:0 0 0 3px rgba(157,58,255,.2)}
+#${ROOT_ID} .pp-gate-email::placeholder{color:var(--fg-4,#6f6695)}
+#${ROOT_ID} .pp-gate-error{font-size:.78rem;color:var(--status-danger,#ff3050);line-height:1.4}
 #${ROOT_ID} .pp-gate-primary{display:block;width:100%;text-align:center;
   padding:13px 20px;border:0;border-radius:9px;cursor:pointer;
   background:var(--grad-uv-pink,linear-gradient(135deg,#9d3aff,#ff1f9c));color:#fff;
@@ -252,6 +265,7 @@ const CSS = `
   letter-spacing:.08em;text-transform:uppercase;
   box-shadow:0 0 22px rgba(157,58,255,.5);transition:filter .15s,transform .12s}
 #${ROOT_ID} .pp-gate-primary:hover{filter:brightness(1.1);transform:translateY(-1px)}
+#${ROOT_ID} .pp-gate-primary:disabled{opacity:.7;cursor:default;transform:none}
 #${ROOT_ID} .pp-gate-secondary{display:block;width:100%;margin-top:12px;
   background:transparent;border:0;cursor:pointer;text-align:center;
   color:var(--fg-3,#9d92c8);font-size:.86rem;font-family:inherit}
@@ -263,6 +277,7 @@ const CSS = `
 #${ROOT_ID} .pp-gate-signin a{color:var(--uv-300,#d29aff);text-decoration:none}
 #${ROOT_ID} .pp-gate-signin a:hover{text-decoration:underline}
 #${ROOT_ID} .pp-gate-success .pp-gate-headline{color:var(--status-ok,#2eff9e)}
+#${ROOT_ID} .pp-gate-hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
 @keyframes pp-gate-fade{from{opacity:0}to{opacity:1}}
 @keyframes pp-gate-pop{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){
@@ -280,24 +295,21 @@ function injectStyles() {
     document.head.appendChild(s);
 }
 
-/** True when the page is running as a preview/attract/embed surface — gates
- *  must not fire there (mirrors js/preview-mode.js's html[data-preview] stamp). */
+/** True on a preview/attract/embed surface (mirrors js/preview-mode.js). */
 function isPreview() {
     try {
         if (document.documentElement.dataset.preview) return true;
-        if (window.self !== window.top) return true;   // embedded iframe
-    } catch { return true; }                            // cross-origin frame → treat as embed
+        if (window.self !== window.top) return true;
+    } catch { return true; }
     return false;
 }
 
-/** Same-origin path allowlist — mirrors signin.html's readSafeNext(). Returns
- *  a safe "/path?q#frag" string or null. Defends against open-redirect
- *  smuggling through ?next=. */
+/** Same-origin path allowlist — mirrors signin.html's readSafeNext(). */
 function safeNextPath(raw) {
     try {
         if (!raw) return null;
-        if (raw.startsWith('//')) return null;   // protocol-relative → reject
-        if (!raw.startsWith('/'))  return null;  // must be an absolute same-origin path
+        if (raw.startsWith('//')) return null;
+        if (!raw.startsWith('/'))  return null;
         const u = new URL(raw, window.location.origin);
         if (u.origin !== window.location.origin) return null;
         const safe = u.pathname + u.search + u.hash;
@@ -305,13 +317,13 @@ function safeNextPath(raw) {
     } catch { return null; }
 }
 
-/** Current page as a same-origin path — the default return destination. */
 function currentPath() {
     try { return window.location.pathname + window.location.search + window.location.hash; }
     catch { return '/'; }
 }
 
-/** Build the signup destination carrying plan + return-to-origin. */
+/** Build the signup destination carrying plan + return-to-origin (paid gates,
+ *  and the no-JS fallback / password path). */
 function buildSignupUrl(plan, next, resume) {
     const params = new URLSearchParams();
     params.set('plan', plan || 'free');
@@ -321,24 +333,36 @@ function buildSignupUrl(plan, next, resume) {
     return `signup.html?${params.toString()}`;
 }
 
-/** Build the signin destination carrying the same return-to-origin. */
 function buildSigninUrl(next) {
     const nxt = safeNextPath(next || currentPath());
     return nxt ? `signin.html?next=${encodeURIComponent(nxt)}` : 'signin.html';
 }
 
-function featureId(key) { return `${key}_gate`.slice(0, 80); }
+/** Has the visitor provisionally created a free account this browser (submitted
+ *  a validated email through a gate)? Pages read this to unlock optimistically
+ *  on reload before the magic link is clicked. */
+export function hasProvisionalAccount() {
+    try { return !!localStorage.getItem(PROVISION_KEY); } catch { return false; }
+}
 
+function setProvisional(email) {
+    try { localStorage.setItem(PROVISION_KEY, JSON.stringify({ email, ts: Date.now() })); } catch {}
+}
+
+function featureId(key) { return `${key}_gate`.slice(0, 80); }
 function track(key, action, meta) {
-    try { telemetry.recordFeature(featureId(key), action, meta || {}); } catch { /* best-effort */ }
+    try { telemetry.recordFeature(featureId(key), action, meta || {}); } catch {}
+}
+function variantType(key) { return GATE_VARIANTS[key]?.gateType || 'free'; }
+
+function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // ── Live-instance state (only one gate at a time) ───────────────────────────
 let _open = null;   // { root, key, opts, lastFocus, keyHandler }
 
-/** Close the active gate. `via` is recorded on the dismiss event unless the
- *  close is a conversion (via === null → no dismiss event, e.g. after a
- *  primary-CTA navigation). */
 export function closeGate(via = 'programmatic') {
     if (!_open) return;
     const { root, key, opts, lastFocus, keyHandler } = _open;
@@ -350,8 +374,6 @@ export function closeGate(via = 'programmatic') {
     if (via && typeof opts.onDismiss === 'function') { try { opts.onDismiss(via); } catch {} }
 }
 
-function variantType(key) { return GATE_VARIANTS[key]?.gateType || 'free'; }
-
 /**
  * Open a conversion gate.
  *
@@ -359,21 +381,22 @@ function variantType(key) { return GATE_VARIANTS[key]?.gateType || 'free'; }
  * @param {object} opts
  *   opts.next      {string}  same-origin return path (default: current page)
  *   opts.resume    {string}  token the origin page rehydrates on return
- *   opts.plan      {string}  override the variant's default plan id
+ *   opts.plan      {string}  override the variant's default plan id (paid)
+ *   opts.onUnlock  {fn}      called with the email after a successful free submit
+ *                            — the page reveals the reward optimistically
  *   opts.onDismiss {fn}      called with the dismiss reason
- * @returns {boolean} true if the gate opened, false if suppressed/failed-open
+ * @returns {boolean} true if opened, false if suppressed/failed-open
  */
 export function openGate(key, opts = {}) {
     try {
         const variant = GATE_VARIANTS[key];
         if (!variant) { console.warn(`[gate-modal] unknown variant "${key}"`); return false; }
-        if (isPreview()) return false;         // never gate an attract/embed surface
-        if (_open) closeGate(null);            // replace any existing gate, no dismiss event
+        if (isPreview()) return false;
+        if (_open) closeGate(null);
 
         injectStyles();
 
         const plan = opts.plan || variant.primary.plan || 'free';
-        const signupUrl = buildSignupUrl(plan, opts.next, opts.resume);
         const signinUrl = buildSigninUrl(opts.next);
 
         const root = document.createElement('div');
@@ -391,17 +414,29 @@ export function openGate(key, opts = {}) {
 
         const eyebrow = variant.eyebrow
             ? `<span class="pp-gate-eyebrow">${esc(variant.eyebrow)}</span>` : '';
-        // Global rule: always guarantee a sign-in path. When the variant's own
-        // secondary is a dismiss, add the persistent sign-in link below.
+        // Global rule: always guarantee a sign-in path.
         const persistentSignin = variant.secondary?.kind === 'signin' ? '' :
             `<div class="pp-gate-signin">Already have an account? <a data-gate-signin href="${signinUrl}">Sign in</a></div>`;
+
+        // Free gates capture an email inline; paid gates route to checkout.
+        const actionBlock = variant.gateType === 'free'
+            ? `
+            <form class="pp-gate-form" data-gate-form novalidate>
+                <input class="pp-gate-email" data-gate-email type="email" inputmode="email"
+                       autocomplete="email" placeholder="you@email.com" aria-label="Email" required>
+                <input class="pp-gate-hp" data-gate-hp type="text" name="company" tabindex="-1"
+                       autocomplete="off" aria-hidden="true">
+                <div class="pp-gate-error" data-gate-error hidden></div>
+                <button class="pp-gate-primary" data-gate-submit type="submit">${esc(variant.primary.label)}</button>
+            </form>`
+            : `<a class="pp-gate-primary" data-gate-primary href="${buildSignupUrl(plan, opts.next, opts.resume)}">${esc(variant.primary.label)}</a>`;
 
         card.innerHTML = `
             <button class="pp-gate-x" type="button" aria-label="Close" data-gate-close>&times;</button>
             ${eyebrow}
             <h2 class="pp-gate-headline" id="pp-gate-headline">${esc(variant.headline)}</h2>
             <p class="pp-gate-body">${esc(variant.body)}</p>
-            <a class="pp-gate-primary" data-gate-primary href="${signupUrl}">${esc(variant.primary.label)}</a>
+            ${actionBlock}
             <button class="pp-gate-secondary" type="button" data-gate-secondary>${esc(variant.secondary.label)}</button>
             ${variant.finePrint ? `<p class="pp-gate-fineprint">${esc(variant.finePrint)}</p>` : ''}
             ${persistentSignin}
@@ -412,16 +447,25 @@ export function openGate(key, opts = {}) {
         document.body.appendChild(root);
 
         const lastFocus = document.activeElement;
+        const keyHandler = (e) => {
+            if (e.key === 'Escape') { e.preventDefault(); closeGate('escape'); return; }
+            if (e.key === 'Tab') trapFocus(e, card);
+        };
+        document.addEventListener('keydown', keyHandler, true);
+        _open = { root, key, opts, lastFocus, keyHandler };
 
-        // Primary CTA — record the conversion, then let the anchor navigate.
-        card.querySelector('[data-gate-primary]').addEventListener('click', () => {
-            track(key, 'gate_signup', { gateType: variant.gateType, plan });
-            // Anchor href does the navigation; no closeGate (we're leaving).
-        });
+        // ── Wire the primary action ────────────────────────────────────────
+        if (variant.gateType === 'free') {
+            wireEmailForm(card, key, variant, plan, opts);
+        } else {
+            card.querySelector('[data-gate-primary]').addEventListener('click', () => {
+                track(key, 'gate_signup', { gateType: variant.gateType, plan });
+                // Anchor navigates to checkout.
+            });
+        }
 
-        // Secondary — sign-in link navigates; dismiss closes the modal.
-        const secondaryBtn = card.querySelector('[data-gate-secondary]');
-        secondaryBtn.addEventListener('click', () => {
+        // Secondary — sign-in navigates; dismiss closes.
+        card.querySelector('[data-gate-secondary]').addEventListener('click', () => {
             if (variant.secondary.kind === 'signin') {
                 track(key, 'gate_signin', { gateType: variant.gateType });
                 window.location.href = signinUrl;
@@ -429,37 +473,102 @@ export function openGate(key, opts = {}) {
                 closeGate('secondary');
             }
         });
-
-        // Persistent sign-in link (when present) is also a tracked exit.
         card.querySelector('[data-gate-signin]')?.addEventListener('click', () => {
             track(key, 'gate_signin', { gateType: variant.gateType });
-            // Anchor navigates.
         });
-
         card.querySelector('[data-gate-close]').addEventListener('click', () => closeGate('x'));
 
-        // Esc closes; Tab is trapped inside the card.
-        const keyHandler = (e) => {
-            if (e.key === 'Escape') { e.preventDefault(); closeGate('escape'); return; }
-            if (e.key === 'Tab') trapFocus(e, card);
-        };
-        document.addEventListener('keydown', keyHandler, true);
-
-        _open = { root, key, opts, lastFocus, keyHandler };
-
-        // Focus the primary CTA so keyboard users land on the affordance.
-        requestAnimationFrame(() => { try { card.querySelector('[data-gate-primary]').focus(); } catch {} });
+        // Focus the primary affordance.
+        requestAnimationFrame(() => {
+            try {
+                (card.querySelector('[data-gate-email]') || card.querySelector('[data-gate-primary]'))?.focus();
+            } catch {}
+        });
 
         track(key, 'gate_view', { gateType: variant.gateType, plan });
         return true;
     } catch (err) {
-        // Fail open — a broken gate must never strand the sim.
         try { console.warn('[gate-modal] openGate failed:', err); } catch {}
         return false;
     }
 }
 
-/** Keep Tab focus within the modal card. */
+/** Wire the inline email → magic-link sign-up flow for a free gate. */
+function wireEmailForm(card, key, variant, plan, opts) {
+    const form   = card.querySelector('[data-gate-form]');
+    const input  = card.querySelector('[data-gate-email]');
+    const hp     = card.querySelector('[data-gate-hp]');
+    const submit = card.querySelector('[data-gate-submit]');
+    const errEl  = card.querySelector('[data-gate-error]');
+
+    const showError = (msg) => { errEl.textContent = msg; errEl.hidden = false; };
+    const clearError = () => { errEl.hidden = true; errEl.textContent = ''; };
+    input.addEventListener('input', clearError);
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = String(input.value || '').trim();
+        if (!EMAIL_RE.test(email)) { showError('Enter a valid email address.'); input.focus(); return; }
+
+        clearError();
+        submit.disabled = true;
+        const restore = submit.textContent;
+        submit.textContent = 'Spinning up your console…';   // copy §3 loading state
+
+        let ok = false;
+        try {
+            const res = await fetch(GATE_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email,
+                    company: hp?.value || '',                 // honeypot
+                    source:  key,
+                    variant: key,
+                    next:    safeNextPath(opts.next || currentPath()) || undefined,
+                    resume:  opts.resume ? String(opts.resume).slice(0, 120) : undefined,
+                }),
+            });
+            ok = res.ok;
+            if (!ok) {
+                let err = '';
+                try { err = (await res.json())?.error || ''; } catch {}
+                submit.disabled = false;
+                submit.textContent = restore;
+                if (err === 'invalid_email') showError('Enter a valid email address.');
+                else showError("That didn't go through. Try again?");   // copy §3 generic error
+                return;
+            }
+        } catch {
+            submit.disabled = false;
+            submit.textContent = restore;
+            showError("That didn't go through. Try again?");
+            return;
+        }
+
+        // Success — provisionally a free member, unlock optimistically.
+        setProvisional(email);
+        track(key, 'gate_signup', { gateType: 'free', plan });
+        try { opts.onUnlock?.(email); } catch {}
+        renderSuccess(card, variant, email);
+    });
+}
+
+/** Swap the card body to the success / check-your-inbox state (copy §3). */
+function renderSuccess(card, variant, email) {
+    card.classList.add('pp-gate-success');
+    card.innerHTML = `
+        <button class="pp-gate-x" type="button" aria-label="Close" data-gate-close>&times;</button>
+        <span class="pp-gate-eyebrow">You're in</span>
+        <h2 class="pp-gate-headline" id="pp-gate-headline">${esc(variant.success || 'You’re in.')}</h2>
+        <p class="pp-gate-body">Check your inbox — one tap and you're in. We sent a magic link to <b>${esc(email)}</b>.</p>
+        <button class="pp-gate-primary" type="button" data-gate-done>Done</button>
+    `;
+    card.querySelector('[data-gate-done]').addEventListener('click', () => closeGate(null));
+    card.querySelector('[data-gate-close]').addEventListener('click', () => closeGate(null));
+    requestAnimationFrame(() => { try { card.querySelector('[data-gate-done]').focus(); } catch {} });
+}
+
 function trapFocus(e, card) {
     const f = card.querySelectorAll(
         'a[href],button:not([disabled]),input,select,textarea,[tabindex]:not([tabindex="-1"])');
@@ -469,33 +578,21 @@ function trapFocus(e, card) {
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 }
 
-function esc(s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
-        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 /**
  * Return-to-origin helper for the ORIGIN page. Call on load: if the page was
- * reached via a gate's ?resume= token AND the user is now signed in, returns
- * the variant's success message (so the page can toast it and rehydrate),
- * then strips ?resume= from the URL so a refresh doesn't re-toast. Returns
- * null when there's nothing to resume.
- *
- *   import { consumeResume } from './js/gate-modal.js';
- *   const msg = consumeResume('save-satellite');
- *   if (msg) toast(msg);
+ * reached via a gate's ?resume= token, returns the variant's success message
+ * (so the page can toast it) and strips ?resume= from the URL. Returns null
+ * when there's nothing to resume.
  */
 export function consumeResume(expectedKey) {
     try {
         const params = new URLSearchParams(window.location.search);
         const resume = params.get('resume');
         if (!resume) return null;
-        // Strip ?resume= so a manual refresh doesn't replay the success state.
         params.delete('resume');
         const qs = params.toString();
         const clean = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
         try { window.history.replaceState(null, '', clean); } catch {}
-        const variant = GATE_VARIANTS[expectedKey];
-        return variant?.success || null;
+        return GATE_VARIANTS[expectedKey]?.success || null;
     } catch { return null; }
 }

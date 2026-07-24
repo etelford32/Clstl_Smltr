@@ -1,32 +1,47 @@
 /**
  * gate-modal-smoke.spec.js — smoke test for the reusable conversion gate.
  * ═══════════════════════════════════════════════════════════════════════════
- * Guards the Phase-1 contract of js/gate-modal.js + its satellite-designer
- * wiring (see HOME_GATING_PLAN.md):
+ * Guards the contract of js/gate-modal.js + its integrations (see
+ * HOME_GATING_PLAN.md). The gate captures a free-account signup INLINE:
+ * the visitor submits an email, we POST to /api/auth/gate-signup (mocked
+ * here), the page unlocks optimistically, and the modal shows "check your
+ * inbox". Paid gates instead route to signup.html for Stripe checkout.
  *
- *   1. GATE_VARIANTS holds all 15 copy variants, each with the required
- *      shell fields (headline/body/primary/secondary/gateType).
- *   2. openGate() mounts a DIMMED modal (scrim present) and builds a
- *      return-to-origin signup URL: signup.html?plan=…&next=<same-origin
- *      path>&resume=<token>.
- *   3. The same-origin allowlist rejects off-origin ?next= smuggling.
- *   4. Esc / ✕ / backdrop all close the modal (quiet-exit contract).
- *   5. Gates are SUPPRESSED inside a preview/embed surface (html[data-preview]).
- *   6. Integration: a signed-out pilot on satellite-designer.html sees the
- *      "Save my craft — free" button, and it opens the save-satellite gate
- *      wired back to /satellite-designer.html with ?resume=draft.
+ *   1. GATE_VARIANTS holds all 15 copy variants with the required fields.
+ *   2. A FREE gate renders a dimmed modal with an inline email form (no
+ *      redirect); submitting posts to the endpoint, sets the provisional
+ *      member flag, and swaps to the success state.
+ *   3. Invalid email → inline error, no request. Endpoint error → retry copy.
+ *   4. A PAID gate routes to signup.html?plan=<real id> (Basic/Advanced).
+ *   5. Esc / backdrop close; gates suppressed in preview/embed surfaces.
+ *   6. Integrations: satellite-designer + spaceship-designer save loops open
+ *      the gate; auroracle's 7-night gate unlocks the week LIVE on submit,
+ *      and its 30-day gate is the paid Basic upsell.
  *
- * Auth: the Supabase CDN import is aborted so js/auth.js deterministically
- * falls to its mock loader (CI runners can otherwise reach jsdelivr).
+ * Auth: the Supabase CDN import is aborted so js/auth.js falls to its mock
+ * loader. The signup endpoint is mocked per-test.
  *
  * Run: npx playwright test tests/gate-modal-smoke.spec.js
  */
 
 import { test, expect } from '@playwright/test';
 
+const GATE_API = '**/api/auth/gate-signup';
+
 test.beforeEach(async ({ page }) => {
     await page.route('**://cdn.jsdelivr.net/**', route => route.abort());
 });
+
+/** Mock the gate-signup endpoint with a given status/body. */
+async function mockGateApi(page, status = 202, body = { ok: true }) {
+    await page.route(GATE_API, route => route.fulfill({
+        status, contentType: 'application/json', body: JSON.stringify(body),
+    }));
+}
+
+function mockAuth(plan, role) {
+    return { signedIn: true, email: `${role}-${plan}@pw.test`, name: 'T', plan, role, provider: 'mock', ts: Date.now() };
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Component-level
@@ -46,59 +61,105 @@ test.describe('gate-modal component', () => {
             }
             const free = keys.filter(k => m.GATE_VARIANTS[k].gateType === 'free').length;
             const paid = keys.filter(k => m.GATE_VARIANTS[k].gateType === 'paid').length;
-            return { count: keys.length, bad, free, paid, hasSave: keys.includes('save-satellite') };
+            return { count: keys.length, bad, free, paid };
         });
         expect(report.count).toBe(15);
         expect(report.bad).toEqual([]);
-        expect(report.free).toBe(11);   // copy §1
-        expect(report.paid).toBe(4);    // copy §2
-        expect(report.hasSave).toBe(true);
+        expect(report.free).toBe(11);
+        expect(report.paid).toBe(4);
     });
 
-    test('openGate mounts a dimmed modal + return-to-origin signup URL', async ({ page }) => {
+    test('free gate mounts a dimmed modal with an inline email form (no redirect)', async ({ page }) => {
         await page.goto('/');
-        const opened = await page.evaluate(async () => {
-            const m = await import('/js/gate-modal.js');
-            return m.openGate('save-satellite', { next: '/satellite-designer.html', resume: 'draft' });
-        });
+        const opened = await page.evaluate(async () =>
+            (await import('/js/gate-modal.js')).openGate('save-satellite', { resume: 'draft' }));
         expect(opened).toBe(true);
 
         const root = page.locator('#pp-gate-root');
         await expect(root).toBeVisible();
         await expect(root.locator('.pp-gate-headline')).toHaveText('Nice build. Keep it.');
-        await expect(root.locator('.pp-gate-scrim')).toBeVisible();   // dims, never destroys
+        await expect(root.locator('.pp-gate-scrim')).toBeVisible();          // dims, never destroys
+        await expect(root.locator('[data-gate-form]')).toBeVisible();
+        await expect(root.locator('[data-gate-email]')).toBeVisible();       // email capture
+        await expect(root.locator('[data-gate-primary]')).toHaveCount(0);    // no signup anchor
         await expect(root.locator('.pp-gate-fineprint')).toContainText(/no credit card/i);
-
-        const href = await root.locator('[data-gate-primary]').getAttribute('href');
-        expect(href).toContain('signup.html');
-        expect(href).toContain('plan=free');
-        expect(href).toContain('next=%2Fsatellite-designer.html');
-        expect(href).toContain('resume=draft');
-
-        // save-satellite's secondary is the sign-in exit.
-        await expect(root.locator('[data-gate-secondary]')).toContainText(/sign in/i);
     });
 
-    test('paid variant routes to the real plan id (Basic/Advanced, not Forecaster/Researcher)', async ({ page }) => {
+    test('free gate: valid email submit → posts, sets provisional flag, shows success', async ({ page }) => {
+        await mockGateApi(page, 202, { ok: true });
+        await page.goto('/');
+        await page.evaluate(async () => (await import('/js/gate-modal.js')).openGate('outlook-7night'));
+
+        const root = page.locator('#pp-gate-root');
+        const [req] = await Promise.all([
+            page.waitForRequest(r => r.url().includes('/api/auth/gate-signup')),
+            (async () => {
+                await root.locator('[data-gate-email]').fill('pilot@example.com');
+                await root.locator('[data-gate-submit]').click();
+            })(),
+        ]);
+        // Email leaves the page only in the POST body (never in telemetry/URL).
+        expect(JSON.parse(req.postData() || '{}').email).toBe('pilot@example.com');
+
+        // Success / check-your-inbox state.
+        await expect(root.locator('.pp-gate-card.pp-gate-success')).toBeVisible();
+        await expect(root.locator('.pp-gate-headline')).toHaveText(/here's your week/i);
+        await expect(root.locator('.pp-gate-body')).toContainText(/check your inbox/i);
+
+        // Provisional member flag set for optimistic unlock on reload.
+        const flag = await page.evaluate(() => localStorage.getItem('pp_gate_member'));
+        expect(flag).toBeTruthy();
+    });
+
+    test('free gate: invalid email shows an inline error and sends no request', async ({ page }) => {
+        let hit = false;
+        await page.route(GATE_API, route => { hit = true; route.fulfill({ status: 202, body: '{}' }); });
+        await page.goto('/');
+        await page.evaluate(async () => (await import('/js/gate-modal.js')).openGate('save-satellite'));
+
+        const root = page.locator('#pp-gate-root');
+        await root.locator('[data-gate-email]').fill('not-an-email');
+        await root.locator('[data-gate-submit]').click();
+        await expect(root.locator('[data-gate-error]')).toBeVisible();
+        await expect(root.locator('[data-gate-error]')).toContainText(/valid email/i);
+        expect(hit).toBe(false);
+    });
+
+    test('free gate: endpoint error surfaces the retry copy', async ({ page }) => {
+        await mockGateApi(page, 502, { error: 'otp_failed' });
+        await page.goto('/');
+        await page.evaluate(async () => (await import('/js/gate-modal.js')).openGate('save-satellite'));
+
+        const root = page.locator('#pp-gate-root');
+        await root.locator('[data-gate-email]').fill('pilot@example.com');
+        await root.locator('[data-gate-submit]').click();
+        await expect(root.locator('[data-gate-error]')).toContainText(/didn.t go through/i);
+        // Still on the form (no success swap).
+        await expect(root.locator('[data-gate-form]')).toBeVisible();
+    });
+
+    test('paid gate routes to signup.html with the real plan id + return-to-origin', async ({ page }) => {
         await page.goto('/');
         await page.evaluate(async () =>
             (await import('/js/gate-modal.js')).openGate('advanced-solvers', { next: '/star2d-advanced.html' }));
-        const href = await page.locator('#pp-gate-root [data-gate-primary]').getAttribute('href');
-        expect(href).toContain('plan=advanced');   // D1: id is 'advanced'
-        await expect(page.locator('#pp-gate-root [data-gate-primary]')).toContainText(/advanced/i);
+        const root = page.locator('#pp-gate-root');
+        await expect(root.locator('[data-gate-form]')).toHaveCount(0);        // no email form on paid
+        const href = await root.locator('[data-gate-primary]').getAttribute('href');
+        expect(href).toContain('signup.html');
+        expect(href).toContain('plan=advanced');                             // D1: id is 'advanced'
+        expect(href).toContain('next=%2Fstar2d-advanced.html');
     });
 
-    test('off-origin ?next= is dropped by the same-origin allowlist', async ({ page }) => {
+    test('paid gate drops an off-origin ?next=', async ({ page }) => {
         await page.goto('/');
         await page.evaluate(async () =>
-            (await import('/js/gate-modal.js')).openGate('save-satellite', { next: 'https://evil.example/phish' }));
+            (await import('/js/gate-modal.js')).openGate('outlook-30day', { next: 'https://evil.example/phish' }));
         const href = await page.locator('#pp-gate-root [data-gate-primary]').getAttribute('href');
         expect(href).not.toContain('evil.example');
-        // Falls back to the current same-origin path, never an off-origin next.
         expect(href).not.toContain('next=https');
     });
 
-    test('Esc closes the modal and restores the page', async ({ page }) => {
+    test('Esc closes the modal', async ({ page }) => {
         await page.goto('/');
         await page.evaluate(async () => (await import('/js/gate-modal.js')).openGate('save-satellite'));
         await expect(page.locator('#pp-gate-root')).toBeVisible();
@@ -116,7 +177,7 @@ test.describe('gate-modal component', () => {
     test('gates are suppressed inside a preview/embed surface', async ({ page }) => {
         await page.goto('/');
         const opened = await page.evaluate(async () => {
-            document.documentElement.dataset.preview = '1';   // mimic js/preview-mode.js
+            document.documentElement.dataset.preview = '1';
             return (await import('/js/gate-modal.js')).openGate('save-satellite');
         });
         expect(opened).toBe(false);
@@ -125,41 +186,31 @@ test.describe('gate-modal component', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────
-// Integration — satellite-designer save loop
+// Integration — designer save loops
 // ─────────────────────────────────────────────────────────────────────
 
 test.describe('satellite-designer save gate', () => {
-    test('signed-out pilot gets the free-save gate wired back to this page', async ({ page }) => {
+    test('signed-out pilot gets the free-save email gate; build kept as a draft', async ({ page }) => {
         await page.goto('/');
-        await page.evaluate(() => localStorage.removeItem('pp_auth'));   // ensure signed-out
+        await page.evaluate(() => localStorage.removeItem('pp_auth'));
         await page.goto('/satellite-designer.html');
 
         const btn = page.locator('#hangar-auth button', { hasText: /save my craft/i });
         await expect(btn).toBeVisible({ timeout: 20_000 });
-
         await btn.click();
+
         const root = page.locator('#pp-gate-root');
         await expect(root).toBeVisible();
         await expect(root.locator('.pp-gate-headline')).toHaveText('Nice build. Keep it.');
+        await expect(root.locator('[data-gate-email]')).toBeVisible();
 
-        const href = await root.locator('[data-gate-primary]').getAttribute('href');
-        expect(href).toContain('plan=free');
-        expect(href).toContain('next=%2Fsatellite-designer.html');
-        expect(href).toContain('resume=draft');
-
-        // The build was stashed as a local draft before the redirect so it
-        // survives the signup round-trip.
         const draft = await page.evaluate(() => localStorage.getItem('pp_sd_draft'));
         expect(draft).toBeTruthy();
     });
 });
 
-// ─────────────────────────────────────────────────────────────────────
-// Integration — spaceship-designer save loop (Phase 2)
-// ─────────────────────────────────────────────────────────────────────
-
 test.describe('spaceship-designer save gate', () => {
-    test('signed-out pilot clicking Save opens the save-rocket gate', async ({ page }) => {
+    test('signed-out pilot clicking Save opens the save-rocket email gate', async ({ page }) => {
         await page.goto('/');
         await page.evaluate(() => localStorage.removeItem('pp_auth'));
         await page.goto('/spaceship-designer.html');
@@ -171,30 +222,22 @@ test.describe('spaceship-designer save gate', () => {
         const root = page.locator('#pp-gate-root');
         await expect(root).toBeVisible();
         await expect(root.locator('.pp-gate-headline')).toHaveText("Don't lose this rocket.");
+        await expect(root.locator('[data-gate-email]')).toBeVisible();
 
-        const href = await root.locator('[data-gate-primary]').getAttribute('href');
-        expect(href).toContain('plan=free');
-        expect(href).toContain('next=%2Fspaceship-designer.html');
-        expect(href).toContain('resume=draft');
-
-        // Build stashed locally before the redirect.
         const draft = await page.evaluate(() => localStorage.getItem('pp_ssd_draft_v1'));
         expect(draft).toBeTruthy();
     });
 });
 
 // ─────────────────────────────────────────────────────────────────────
-// Integration — auroracle outlook ladder (Phase 2)
+// Integration — auroracle outlook ladder
 // ─────────────────────────────────────────────────────────────────────
 
-function mockAuth(plan, role) {
-    return { signedIn: true, email: `${role}-${plan}@pw.test`, name: 'T', plan, role, provider: 'mock', ts: Date.now() };
-}
-
 test.describe('auroracle outlook gates', () => {
-    test('signed-out visitor gets the FREE 7-night gate from the unlock CTA', async ({ page }) => {
+    test('signed-out visitor: 7-night gate unlocks the week LIVE on email submit', async ({ page }) => {
+        await mockGateApi(page, 202, { ok: true });
         await page.goto('/');
-        await page.evaluate(() => localStorage.removeItem('pp_auth'));
+        await page.evaluate(() => { localStorage.removeItem('pp_auth'); localStorage.removeItem('pp_gate_member'); });
         await page.goto('/auroracle.html');
 
         await expect(page.locator('body')).toHaveClass(/au-locked/, { timeout: 20_000 });
@@ -203,9 +246,12 @@ test.describe('auroracle outlook gates', () => {
         const root = page.locator('#pp-gate-root');
         await expect(root).toBeVisible();
         await expect(root.locator('.pp-gate-headline')).toHaveText('See the next seven nights.');
-        const href = await root.locator('[data-gate-primary]').getAttribute('href');
-        expect(href).toContain('plan=free');
-        expect(href).toContain('next=%2Fauroracle.html');
+
+        // Submit the email → the page unlocks the week without a reload.
+        await root.locator('[data-gate-email]').fill('sky@example.com');
+        await root.locator('[data-gate-submit]').click();
+        await expect(page.locator('body')).toHaveClass(/au-week/, { timeout: 10_000 });
+        await expect(root.locator('.pp-gate-body')).toContainText(/check your inbox/i);
     });
 
     test('free account reaching for the month gets the PAID 30-day gate', async ({ page }) => {

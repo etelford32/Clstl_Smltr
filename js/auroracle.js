@@ -31,7 +31,7 @@ import {
   removeLocationFromList, locationId,
 } from './user-location.js';
 import { solarPosition } from './sun-altitude.js';
-import { openGate, consumeResume } from './gate-modal.js';
+import { openGate, consumeResume, hasProvisionalAccount } from './gate-modal.js';
 
 /* ════ lightweight physical odds model (identical to aurora.html sketch) ════ */
 const RAD = Math.PI / 180;
@@ -598,10 +598,13 @@ function computeAccess() {
   //   signed-out            → 'teaser'  (first three nights)
   //   signed-in, free (1)    → 'week'    (full 7-night outlook)
   //   basic+ (>=2)           → 'full'    (30-day outlook + live model + alerts)
+  // A provisional free member (submitted an email through the gate but hasn't
+  // clicked the magic link yet) gets the 'week' optimistically — same as a
+  // real free account. The link upgrades them to a persistent session.
   try {
-    if (!auth.isSignedIn()) return 'teaser';
+    if (!auth.isSignedIn()) return hasProvisionalAccount() ? 'week' : 'teaser';
     return tierLevel(auth.getPlan(), auth.getRole()) >= 2 ? 'full' : 'week';
-  } catch (_) { return 'teaser'; }
+  } catch (_) { return hasProvisionalAccount() ? 'week' : 'teaser'; }
 }
 
 function applyAccess() {
@@ -661,7 +664,16 @@ async function initAccess() {
     const cta = e.target.closest?.('.au-gate-go, .cta-go, .au-acc-cta');
     if (!cta) return;
     e.preventDefault();
-    openGate(state.access === 'teaser' ? 'outlook-7night' : 'outlook-30day', { resume: 'auroracle' });
+    if (state.access === 'teaser') {
+      // Free-account gate. On a successful email submit the week unlocks live
+      // (onUnlock) — no reload, no redirect.
+      openGate('outlook-7night', {
+        resume: 'auroracle',
+        onUnlock: () => { state.access = computeAccess(); applyAccess(); },
+      });
+    } else {
+      openGate('outlook-30day', { resume: 'auroracle' });
+    }
   });
   // Re-evaluate on sign-in / sign-out / plan change.
   window.addEventListener('auth-changed', () => {
