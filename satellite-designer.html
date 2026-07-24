@@ -1333,6 +1333,7 @@ select option{background:#0a1024}
 <script type="module">
 import { auth } from './js/auth.js';
 import { getSupabase, isConfigured } from './js/supabase-config.js';
+import { openGate, consumeResume } from './js/gate-modal.js';
 import * as ENG from './js/satellite-designer-engine.js';
 import * as BUILDER from './js/satellite-builder.js';
 import * as SCENE3D from './js/satellite-designer-3d.js';
@@ -3373,14 +3374,28 @@ async function initAuth() {
       authBox.innerHTML = `<div class="hint">Signed in as <b>${escapeHtml(user.email || 'pilot')}</b>.
         Your ships sync across devices.</div>`;
       refreshHangar();
+      // Return-from-gate: if they just created a free account to save this
+      // craft (?resume=), rehydrate is automatic (loadDraft ran at boot) —
+      // toast the gate's success message so the loop feels closed.
+      const msg = consumeResume('save-satellite');
+      if (msg) toast(msg);
     } else {
       user = null;
       $('hangar-actions').hidden = true;
-      const ret = encodeURIComponent(location.pathname + location.search);
-      authBox.innerHTML = `<div class="hint">
-        <a href="signin.html?redirect=${ret}">Sign in</a> or
-        <a href="signup.html?redirect=${ret}">create an account</a>
-        to save ships to your hangar and keep your best runs.</div>`;
+      // Ownership gate (HOME_GATING_PLAN.md, variant 'save-satellite'): the
+      // primary affordance for signed-out pilots is the gate itself — it
+      // stashes the build as a local draft first so it survives the signup
+      // round-trip, then routes to signup with ?next= back to this page.
+      authBox.innerHTML = `<div class="hint">Save ships to your hangar and keep your best runs across devices.</div>`;
+      const gateBtn = document.createElement('button');
+      gateBtn.className = 'btn primary sm';
+      gateBtn.style.marginTop = '9px';
+      gateBtn.textContent = '💾 Save my craft — free';
+      gateBtn.addEventListener('click', () => {
+        saveDraft();                                  // survive the signup redirect
+        openGate('save-satellite', { resume: 'draft' });
+      });
+      authBox.appendChild(gateBtn);
     }
   }
   applyState();

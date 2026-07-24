@@ -387,6 +387,7 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 <script type="module">
 import { auth } from './js/auth.js';
 import { getSupabase } from './js/supabase-config.js';
+import { openGate, consumeResume } from './js/gate-modal.js';
 import {
   defaultDesign, computeStats, computeAero, computeNozzle, expansionState, runAscent, gradeAscent,
   PROPELLANTS, ENGINE_CATALOG, NOSECONE_TYPES, FIN_TYPES, COCKPIT_LAYOUTS,
@@ -792,7 +793,19 @@ async function refreshHangar() {
   if (!signedIn) {
     tag.textContent = 'local';
     lock.style.display = '';
-    lock.innerHTML = 'You can design and fly freely. <a href="signin.html?next=%2Fspaceship-designer.html">Sign in</a> to save a fleet to the cloud and unlock advanced parts. Your current design is kept as a local draft.';
+    lock.innerHTML = 'Your current design is kept as a local draft. <a href="signin.html?next=%2Fspaceship-designer.html">Sign in</a> to sync a fleet and unlock advanced parts, or:';
+    // Ownership gate button — mirrors the #ssd-save flow so the hangar itself
+    // offers the free-save path (variant 'save-rocket').
+    const gateBtn = document.createElement('button');
+    gateBtn.className = 'ssd-btn ssd-primary';
+    gateBtn.style.marginTop = '8px';
+    gateBtn.textContent = '💾 Save my rocket — free';
+    gateBtn.addEventListener('click', () => {
+      readControls();
+      store.saveDraft(design);
+      openGate('save-rocket', { resume: 'draft', onDismiss: () => toast('Kept as a local draft on this device.') });
+    });
+    lock.appendChild(gateBtn);
     list.innerHTML = '';
     return;
   }
@@ -827,8 +840,11 @@ function loadShip(data) {
 async function doSave() {
   readControls();
   if (!signedIn) {
+    // Ownership moment (HOME_GATING_PLAN.md, variant 'save-rocket'): stash the
+    // build as a local draft so it survives the signup round-trip, then gate to
+    // a free account. On dismiss, reassure the pilot the draft is safe.
     store.saveDraft(design);
-    toast('Saved local draft. Sign in to keep a cloud fleet.');
+    openGate('save-rocket', { resume: 'draft', onDismiss: () => toast('Kept as a local draft on this device.') });
     return;
   }
   const best = Math.round((runAscent(design).final_alt_km) || 0);
@@ -1017,6 +1033,9 @@ function wire() {
   hydrateControls();
   refresh();
   refreshHangar();
+  // Return-from-gate: they created a free account to keep this rocket — the
+  // draft rehydrated at module load, so just close the loop with a toast.
+  if (signedIn) { const _m = consumeResume('save-rocket'); if (_m) toast(_m); }
 
   // React to later sign-in/out without a reload. auth.js has no change event,
   // so listen to the Supabase client directly (same singleton auth.js uses).
@@ -1034,6 +1053,7 @@ function wire() {
       hydrateControls();
       refresh();
       refreshHangar();
+      if (signedIn) { const _m = consumeResume('save-rocket'); if (_m) toast(_m); }
     });
   } catch { /* anonymous-only session — fine */ }
 })();

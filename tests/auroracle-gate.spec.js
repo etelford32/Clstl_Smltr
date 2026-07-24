@@ -60,11 +60,28 @@ test.describe('AurOracle access gate', () => {
         await expect(page.locator('#au-access')).toContainText(/free preview/i);
     });
 
-    test('free user stays locked', async ({ page }) => {
+    test('free user stays locked (30-day premium)', async ({ page }) => {
         await setAuth(page, 'free', 'user');
         await page.goto('/auroracle.html');
         await expect(page.locator('body')).toHaveClass(/au-locked/, { timeout: 15_000 });
         await expect(page.locator('.au-premium > .au-gate').first()).toBeVisible();
+    });
+
+    // Three-tier ladder (HOME_GATING_PLAN.md Phase 2): a free ACCOUNT unlocks
+    // the 7-night outlook (nights 4–7 un-frost via body.au-week) while the
+    // 30-day premium stays gated behind Basic+.
+    test('free account unlocks the 7-night but NOT the 30-day', async ({ page }) => {
+        await setAuth(page, 'free', 'user');
+        await page.goto('/auroracle.html');
+        await expect(page.locator('body')).toHaveClass(/au-week/, { timeout: 15_000 });
+        // Nights 4–7 un-frost for the free account.
+        await expect.poll(() => page.evaluate(() => {
+            const c = document.querySelector('.daycard.au-far');
+            return c ? getComputedStyle(c).filter : 'missing';
+        }), { timeout: 10_000 }).toBe('none');
+        // …but the 30-day premium overlay is still up (Basic gate intact).
+        await expect(page.locator('.au-premium > .au-gate').first()).toBeVisible();
+        await expect(page.locator('#au-access')).toContainText(/7-night outlook unlocked/i);
     });
 
     test('basic ("intro") user unlocks the 30-day outlook', async ({ page }) => {
