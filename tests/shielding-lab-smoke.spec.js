@@ -1,16 +1,19 @@
 /**
  * shielding-lab-smoke.spec.js — smoke test for the Shielding Lab page.
  * ═══════════════════════════════════════════════════════════════════════════
- * Boots shielding-lab.html in headless Chromium — no network mocking needed:
- * the page is fully self-contained (WASM kernel + canvases, all local) —
- * and verifies the page contract:
+ * Boots shielding-lab.html in headless Chromium. The page is fully
+ * self-contained (WASM kernel + canvases, all local); only the LIVE-mode
+ * test mocks its SWPC routes so no test touches live network. Verifies:
  *
  *   1. The WASM solver boots: CPCP readout becomes a plausible number
  *      (20–120 kV near the quiet steady state), R1/R2 populate.
- *   2. The dial canvas is painted (non-blank pixels).
+ *   2. The dial canvas is painted (non-blank pixels); the 3D globe view
+ *      boots (or falls back cleanly) and the toggle round-trips.
  *   3. A scenario button arms its script and lights up.
  *   4. Clicking the dial opens the probe readout with real local values.
  *   5. The SAPS feedback toggle and layer toggles don't throw.
+ *   6. LIVE mode: mocked propagated feed drives the sliders read-only,
+ *      verdict card populates, take-over/return/stop all work.
  *
  * Physics correctness is NOT tested here — that's rust-shielding's cargo
  * test suite plus tests/shielding-kernel-smoke.mjs (Node, committed wasm).
@@ -46,6 +49,15 @@ test.describe('shielding lab', () => {
         const r1 = parseFloat(await page.locator('#sl-r1').textContent());
         expect(r1).toBeGreaterThan(0.2);
 
+        // The 3D sphere is the default view where WebGL exists; the 2D
+        // dial is the fallback. Either is a valid boot — but the toggle
+        // must always land on a painted dial.
+        const view = await page.evaluate(() => window.__shieldingLab.state.view);
+        expect(['3d', '2d']).toContain(view);
+        await page.click('#sl-view-2d');
+        await expect(page.locator('#sl-dial')).toBeVisible();
+        await page.waitForTimeout(300); // a frame or two on the dial
+
         // Canvas actually painted: some non-transparent pixels off-center.
         const painted = await page.evaluate(() => {
             const c = document.getElementById('sl-dial');
@@ -57,6 +69,20 @@ test.describe('shielding lab', () => {
         });
         expect(painted).toBeGreaterThan(100);
 
+        expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+    });
+
+    test('3D globe view boots when WebGL is available', async ({ page }) => {
+        await expect(page.locator('#sl-cpcp')).not.toHaveText('—', { timeout: 20_000 });
+        const view = await page.evaluate(() => window.__shieldingLab.state.view);
+        test.skip(view !== '3d', 'no WebGL in this environment — 2D fallback took over');
+        await expect(page.locator('#sl-globe')).toBeVisible();
+        await expect(page.locator('#sl-dial')).toBeHidden();
+        // Toggle round-trip keeps both alive.
+        await page.click('#sl-view-2d');
+        await expect(page.locator('#sl-globe')).toBeHidden();
+        await page.click('#sl-view-3d');
+        await expect(page.locator('#sl-globe')).toBeVisible();
         expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
     });
 
@@ -110,6 +136,56 @@ test.describe('shielding lab', () => {
         expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
     });
 
+    test('LIVE mode drives, locks sliders, takes over, returns', async ({ page }) => {
+        // Mock the SWPC propagated feed (fresh timestamps, lead ahead of
+        // wall clock) so the test runs with zero live network.
+        const now = Date.now();
+        const iso = (ms) => new Date(ms).toISOString().replace('.000Z', 'Z');
+        const header = ['time_tag', 'speed', 'density', 'temperature', 'bx', 'by', 'bz', 'bt', 'propagated_time_tag'];
+        const rows = [];
+        for (let i = 0; i < 60; i++) {
+            const obs = now - (75 - i) * 60_000;
+            rows.push([iso(obs), '612', '7.5', '90000', '1.0', '2.0', '-7.5', '8.0', iso(now + (i - 45) * 60_000)]);
+        }
+        const fixture = [header, ...rows];
+        await page.route('**/products/geospace/propagated-solar-wind-1-hour.json', (route) =>
+            route.fulfill({ json: fixture }));
+        await page.route('**/api/noaa/passthrough**', (route) => route.fulfill({ json: fixture }));
+        await page.route('**/api/noaa/radio-flux**', (route) =>
+            route.fulfill({ json: { current: { flux_sfu: 145 } } }));
+
+        await expect(page.locator('#sl-cpcp')).not.toHaveText('—', { timeout: 20_000 });
+        await page.click('#sl-live-btn');
+        await expect(page.locator('#sl-live-btn')).toContainText('stop live');
+        // Sliders become read-only live readouts; speed locks at ×1.
+        await expect(page.locator('#sl-controls-grid')).toHaveClass(/sl-live-lock/);
+        await expect(page.locator('#sl-speed')).toBeDisabled();
+        await expect(page.locator('#sl-tau-speed')).toHaveText('×1');
+        await expect(page.locator('#sl-verdict')).toBeVisible();
+
+        // ×1 means one solve per 10 wall-seconds — fast-forward the
+        // backlog so the first live solve happens now, not in 10 s.
+        await page.evaluate(() => { window.__shieldingLab.state.simBacklogS = 10; });
+        await expect(page.locator('#sl-verdict-state')).not.toHaveText('—', { timeout: 10_000 });
+        await expect(page.locator('#sl-verdict-age')).toContainText('lead');
+        await expect(page.locator('#sl-clock')).toContainText('LIVE');
+        // The mocked drivers reached the solver: Bz slider follows −7.5.
+        const bz = parseFloat(await page.locator('#sl-bz').inputValue());
+        expect(bz).toBeCloseTo(-7.5, 1);
+
+        // Take over by grabbing the (locked) slider grid.
+        await page.locator('#sl-controls-grid').dispatchEvent('pointerdown');
+        await expect(page.locator('#sl-live-btn')).toContainText('return to live');
+        await expect(page.locator('#sl-controls-grid')).not.toHaveClass(/sl-live-lock/);
+
+        // One-click return, then a full stop hides the card.
+        await page.click('#sl-live-btn');
+        await expect(page.locator('#sl-live-btn')).toContainText('stop live');
+        await page.click('#sl-live-btn');
+        await expect(page.locator('#sl-verdict')).toBeHidden();
+        expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+    });
+
     test('drift-physics R2 mode enables the pressure layer', async ({ page }) => {
         await expect(page.locator('#sl-cpcp')).not.toHaveText('—', { timeout: 20_000 });
         await page.click('#sl-r2-drift');
@@ -127,6 +203,7 @@ test.describe('shielding lab', () => {
 
     test('probe opens with local values; toggles are safe', async ({ page }) => {
         await expect(page.locator('#sl-cpcp')).not.toHaveText('—', { timeout: 20_000 });
+        await page.click('#sl-view-2d'); // probe via the dial's hit-test path
         const dial = page.locator('#sl-dial');
         const box = await dial.boundingBox();
         // Click the auroral zone north of center (12 MLT, high lat).

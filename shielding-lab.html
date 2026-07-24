@@ -29,6 +29,17 @@
      here (js/nav-styles.css owns it). -->
 <link rel="stylesheet" href="js/nav-styles.css">
 
+<!-- Vendored three r0.160.0 (house convention — same importmap as
+     ring-current.html); globe.js is lazy-imported so a WebGL failure
+     falls back to the 2D dial without killing the page. -->
+<script type="importmap">
+{ "imports": {
+    "three": "/js/vendor/three-0.160.0/three.module.js",
+    "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+} }
+</script>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
+
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { scroll-behavior:smooth; }
@@ -161,6 +172,64 @@ canvas.sl-chart-tall { height:150px; }
     border-radius:10px; color:#ffd9ae; font-size:.85rem; display:none;
 }
 
+/* ── View toggle ─────────────────────────────────────────────────── */
+.sl-viewbar { display:inline-flex; gap:6px; }
+.sl-viewbtn { padding:3px 10px; font-size:.7rem; text-transform:none; letter-spacing:0; }
+#sl-globe { width:100%; height:100%; display:block; border-radius:10px; touch-action:none; }
+
+/* ── LIVE mode ───────────────────────────────────────────────────── */
+.sl-live-go { border-color:rgba(55,224,160,.5); background:rgba(55,224,160,.1); color:#b8ffe4; }
+.sl-live-go:hover { background:rgba(55,224,160,.2); }
+.sl-live-go.active { background:rgba(55,224,160,.28); border-color:#37e0a0; }
+.sl-live-go.sl-live-armed { border-color:#ffb066; color:#ffd9ae; background:rgba(255,176,102,.12); }
+/* Locked sliders become live readouts: pointer grabs land on the grid
+   (the take-over gesture) because the inputs stop receiving events. */
+.sl-live-lock input[type=range] { pointer-events:none; opacity:.75; accent-color:#37e0a0; }
+.sl-live-lock .sl-slider .val::after {
+    content:' · LIVE'; color:#37e0a0; font-size:.68rem; letter-spacing:.06em;
+}
+#sl-live-hud { color:#7fe6c3; }
+
+/* ── Verdict card ────────────────────────────────────────────────── */
+.sl-verdict { border-width:1px; }
+.sl-verdict-head { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.sl-verdict-state { font-size:1.5rem; font-weight:800; letter-spacing:.04em; color:#eaf2ff; }
+.sl-verdict-dur { font-size:.78rem; color:#8b94ad; }
+.sl-verdict-sub { font-size:.75rem; letter-spacing:.08em; text-transform:uppercase; color:#8b94ad; min-height:1em; }
+.sl-verdict-nums { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:8px;
+    font-size:.85rem; color:#aeb6cc; }
+.sl-verdict-nums b { color:#eaf2ff; font-variant-numeric:tabular-nums; }
+.sl-verdict-driver { font-size:.78rem; color:#8b94ad; font-variant-numeric:tabular-nums; margin-top:6px; }
+.sl-verdict-impact { font-size:.85rem; color:#cdd5e4; line-height:1.45; margin-top:8px; }
+.sl-verdict-age { font-size:.72rem; color:#8b94ad; margin-top:8px; font-variant-numeric:tabular-nums; }
+.sl-verdict-age.sl-v-agewarn { color:#ffd9ae; }
+.sl-verdict-note { font-size:.72rem; color:#ffb066; min-height:0; }
+.sl-verdict-foot { font-size:.68rem; color:#5f687f; margin-top:8px; border-top:1px dashed rgba(120,140,180,.25); padding-top:6px; }
+.sl-vchip { font-size:.7rem; font-weight:700; letter-spacing:.06em; padding:2px 9px;
+    border-radius:999px; border:1px solid rgba(139,148,173,.4); color:#8b94ad; }
+.sl-vchip-active { border-color:rgba(255,176,102,.6); color:#ffd9ae; background:rgba(255,176,102,.12); }
+.sl-vchip-strong { border-color:#ff8866; color:#ffb49e; background:rgba(255,110,80,.16); }
+/* State accents */
+.sl-v-under { border-color:rgba(255,140,90,.55); box-shadow:0 0 22px rgba(255,120,70,.12) inset; }
+.sl-v-under .sl-verdict-state { color:#ffb49e; }
+.sl-v-over { border-color:rgba(140,150,255,.55); box-shadow:0 0 22px rgba(120,130,255,.12) inset; }
+.sl-v-over .sl-verdict-state { color:#c3c9ff; }
+.sl-v-ok { border-color:rgba(55,224,160,.45); }
+.sl-v-ok .sl-verdict-state { color:#7fe6c3; }
+.sl-v-gap { border-color:rgba(255,176,102,.6); }
+.sl-v-gap .sl-verdict-state { color:#ffd9ae; }
+
+/* ── Analysis cut ────────────────────────────────────────────────── */
+.sl-cutbar { display:inline-flex; align-items:center; gap:8px; font-weight:400; text-transform:none; letter-spacing:0; }
+.sl-cutbar input[type=range] { width:110px; accent-color:#ffb066; }
+.sl-cutbar .val { color:#eaf2ff; font-size:.72rem; font-variant-numeric:tabular-nums; }
+#sl-cut-note { color:#ffb066; }
+
+@media (max-width: 420px) {
+    .sl-verdict-state { font-size:1.2rem; }
+    .sl-verdict-nums { gap:8px; font-size:.78rem; }
+}
+
 @media (max-width: 980px) {
     .sl-wrap { grid-template-columns: 1fr; }
 }
@@ -184,14 +253,19 @@ canvas.sl-chart-tall { height:150px; }
 </div>
 
 <div class="sl-wrap">
-    <!-- ── Polar dial ─────────────────────────────────────────────── -->
+    <!-- ── Solution view: 3D sphere (default) / 2D polar dial ─────── -->
     <div class="sl-panel sl-dial-panel">
-        <h2>Ionospheric potential · polar view
-            <span class="sl-hint">noon at top · click anywhere to probe · contours are the drift streamlines</span>
+        <h2>Ionospheric potential
+            <span class="sl-viewbar">
+                <button class="sl-btn sl-viewbtn active" id="sl-view-3d">3D sphere</button>
+                <button class="sl-btn sl-viewbtn" id="sl-view-2d">2D dial</button>
+            </span>
+            <span class="sl-hint" id="sl-dial-hint">drag to orbit · scroll to zoom · double-click resets · click the cap to probe</span>
         </h2>
         <div class="sl-dial-box">
-            <canvas id="sl-dial"></canvas>
-            <div class="sl-dial-hud">t = <b id="sl-clock">00:00:00</b> · <span id="sl-solver">—</span></div>
+            <canvas id="sl-globe"></canvas>
+            <canvas id="sl-dial" style="display:none"></canvas>
+            <div class="sl-dial-hud">t = <b id="sl-clock">00:00:00</b> · <span id="sl-solver">—</span><span id="sl-live-hud"></span></div>
         </div>
         <div class="sl-layerbar">
             <label><input type="checkbox" id="sl-layer-cond" checked> conductance Σ<sub>P</sub></label>
@@ -211,6 +285,26 @@ canvas.sl-chart-tall { height:150px; }
 
     <!-- ── Readouts ───────────────────────────────────────────────── -->
     <div class="sl-col">
+        <!-- Verdict card: LIVE-mode operator answer. Hidden until live. -->
+        <div class="sl-panel sl-verdict" id="sl-verdict" style="display:none">
+            <div class="sl-verdict-head">
+                <span class="sl-verdict-state" id="sl-verdict-state">—</span>
+                <span class="sl-verdict-dur" id="sl-verdict-dur"></span>
+            </div>
+            <div class="sl-verdict-sub" id="sl-verdict-sub"></div>
+            <div class="sl-verdict-nums">
+                <span title="penetration E at the 40° MLAT noon readout">E_pen <b id="sl-verdict-epen">—</b></span>
+                <span title="shielding efficiency 1 − E_pen/E_unshielded" id="sl-verdict-eta">η —</span>
+                <span class="sl-vchip sl-vchip-off" id="sl-verdict-saps">SAPS quiet</span>
+            </div>
+            <div class="sl-verdict-driver" id="sl-verdict-driver">—</div>
+            <div class="sl-verdict-impact" id="sl-verdict-impact"></div>
+            <div class="sl-verdict-age" id="sl-verdict-age">—</div>
+            <div class="sl-verdict-note" id="sl-verdict-note"></div>
+            <div class="sl-verdict-foot">40° readout is a shape/timing signal, not absolute amplitude —
+                <a class="sl-xlink" href="#sl-simplifications">known simplifications</a></div>
+        </div>
+
         <div class="sl-panel">
             <h2>State of the circuit</h2>
             <div class="sl-stats">
@@ -254,7 +348,11 @@ canvas.sl-chart-tall { height:150px; }
         </div>
 
         <div class="sl-panel">
-            <h2>SAPS probe · westward flow at 21 MLT</h2>
+            <h2>SAPS probe · westward flow
+                <span class="sl-cutbar"><input type="range" id="sl-cut-mlt" min="0" max="23.75" step="0.25" value="21">
+                    <span class="val" id="sl-cut-mlt-val">21 MLT</span></span>
+                <span class="sl-hint" id="sl-cut-note"></span>
+            </h2>
             <canvas id="sl-chart-saps" class="sl-chart sl-chart-tall"></canvas>
             <div class="sl-stats" style="margin-top:8px">
                 <div class="sl-stat amber" style="grid-column:1/-1">
@@ -271,9 +369,9 @@ canvas.sl-chart-tall { height:150px; }
 <div class="sl-wrap" style="grid-template-columns:1fr; padding-top:0">
     <div class="sl-panel">
         <h2>Drive the magnetosphere
-            <span class="sl-hint">the solver re-solves the full potential every 10 s of sim time</span>
+            <span class="sl-hint">the solver re-solves the full potential every 10 s of sim time — in LIVE mode that is every 10 real seconds</span>
         </h2>
-        <div class="sl-controls">
+        <div class="sl-controls" id="sl-controls-grid">
             <div class="sl-slider"><div class="row"><span>IMF B<sub>z</sub></span><span class="val" id="sl-bz-val">—</span></div>
                 <input type="range" id="sl-bz" min="-25" max="10" step="0.5" value="-2"></div>
             <div class="sl-slider"><div class="row"><span>IMF B<sub>y</sub></span><span class="val" id="sl-by-val">—</span></div>
@@ -288,6 +386,7 @@ canvas.sl-chart-tall { height:150px; }
                 <input type="range" id="sl-tau" min="5" max="60" step="1" value="25"></div>
         </div>
         <div class="sl-btnrow">
+            <button class="sl-btn sl-live-go" id="sl-live-btn">● go live</button>
             <button class="sl-btn sl-scn" id="sl-scn-southward">Southward turning</button>
             <button class="sl-btn sl-scn" id="sl-scn-northward">Northward turning</button>
             <button class="sl-btn sl-scn" id="sl-scn-sawtooth">Sawtooth</button>
@@ -379,6 +478,21 @@ canvas.sl-chart-tall { height:150px; }
         against the full BATS-R-US + Ridley (SWMF IE) hindcast of the same storm — the two solve
         the same equation, one on a supercomputer, one in your browser tab — with the observed
         SYM-H alongside for storm-phase context.</p>
+        <p><b>LIVE mode.</b> "Go live" drives the solver from NOAA SWPC's real-time solar wind,
+        ballistically propagated from L1 to 32 R<sub>E</sub> — the upstream boundary of NOAA's
+        operational Geospace model — so the propagated timestamps run <i>ahead</i> of the wall
+        clock by roughly 30–60 minutes depending on wind speed; that gap is genuine forecast lead
+        time, shown on the verdict card. The 1-minute feed is polled every 60 s and linearly
+        interpolated to the solver's 10-second re-solve; B<sub>z</sub> and B<sub>y</sub> pass
+        through a 3-sample median filter before the Kan–Lee coupling function so a single noisy
+        sample cannot whipsaw the driving. Interpolation happens only between real samples —
+        past the newest sample the drivers are held and flagged, after 10 minutes the card
+        declares a DATA GAP, and after a 2-hour gap the Region-2 state is re-seeded toward
+        equilibrium instead of integrating through garbage (the same cold-restart policy as the
+        operational model). The verdict thresholds are not asserted: they are percentiles of this
+        solver's own St. Patrick's 2015 replay (<code>scripts/calibrate-shielding-verdict.mjs</code>),
+        re-bakeable when the Gannon bundle lands. Real-time data courtesy of
+        <a class="sl-xlink" href="https://www.swpc.noaa.gov/" target="_blank" rel="noopener">NOAA SWPC</a>.</p>
     </section>
 
     <section>
@@ -416,7 +530,7 @@ canvas.sl-chart-tall { height:150px; }
         flagship follow-up.</p>
     </section>
 
-    <section>
+    <section id="sl-simplifications">
         <h2>Known simplifications — read before trusting</h2>
         <ul>
             <li><b>Electrostatic, height-integrated ionosphere; no neutral-wind dynamo.</b> The model
