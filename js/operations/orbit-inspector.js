@@ -30,6 +30,7 @@
 
 import { propagate, tleEpochToJd, getWasmSgp4 } from '../satellite-tracker.js';
 import { decayWithSigma, deltaAPerDay, fmtLifetime } from './decision-deck.js';
+import { msisRhoAt, onMsisReady } from './msis-drag.js';
 import { provStore } from './provenance.js';
 import { computePills, renderPills } from './satellite-pills.js';
 import { annotate as annotateDebris, hazardEnergyMJ } from '../debris-catalog.js';
@@ -215,16 +216,22 @@ function renderAltSpark(altitudes, perigeeKm, apogeeKm) {
 
 /**
  * Drag + decay block. Pulls live F10.7 / Ap from provStore (same
- * source the prop-budget panel uses) and combines them with the
- * shared King-Hele surrogate via decayWithSigma + deltaAPerDay so
- * the inspector and Decay Watch can never diverge.
+ * source the prop-budget panel uses) and calls decision-deck's
+ * decayWithSigma + deltaAPerDay so the inspector and Decay Watch
+ * can never diverge. Those functions dispatch to the NRLMSISE-00
+ * decay integration (js/operations/msis-drag.js) when the WASM is
+ * live and fall back to the King-Hele surrogate otherwise — the
+ * section header names which model produced the numbers.
  *
- * Renders three numbers:
+ * Renders:
  *   - dā/dt  (km/day, signed; negative = decaying, ≈0 for stable
  *     orbits above 1000 km)
  *   - lifetime (formatted into the most legible coarse unit)
- *   - 1σ band on lifetime (forecast spread + ±25 % B*
- *     uncertainty in quadrature)
+ *   - 1σ band on lifetime (forecast spread + B* uncertainty in
+ *     quadrature; per-source σ under MSIS, blanket ±25 % under
+ *     the surrogate)
+ *   - TLE age + B* — what the operator is actually trusting
+ *     (OPERATIONS_STATUS.md roadmap item #2)
  *
  * The active F10.7 / Ap are echoed in a one-line subscript so an
  * operator can tell at a glance whether the projection is
@@ -242,7 +249,10 @@ function renderDragSection(tle) {
     const sigAp   = provStore.get('idx.ap')?.sigma   ?? 4;
 
     const decay   = decayWithSigma(tle, f107Mid, sigF107, apMid, sigAp);
-    const dadtDay = deltaAPerDay(tle, f107Mid, apMid);
+    const isMsis  = decay?.model === 'msis';
+    const dadtDay = Number.isFinite(decay?.dadt_km_day)
+        ? decay.dadt_km_day
+        : deltaAPerDay(tle, f107Mid, apMid);
 
     const lifeStr = decay?.lifetime_days != null
         ? fmtLifetime(decay.lifetime_days)
@@ -293,22 +303,47 @@ function renderDragSection(tle) {
         ? `${(ratePerDayKm * 365.25).toFixed(1)} km/yr`
         : '';
 
+    // TLE age + B* — the two trust inputs behind every number above.
+    // Age from the TLE epoch; B* straight off the record (MSIS path
+    // reports what it actually used, incl. the default-B fallback).
+    const nowJd   = Date.now() / 86400000 + 2440587.5;
+    const ageDays = nowJd - tleEpochToJd(tle);
+    const ageStr  = Number.isFinite(ageDays) && ageDays > -1
+        ? (ageDays < 1 ? `${Math.max(0, ageDays * 24).toFixed(1)} h` : `${ageDays.toFixed(1)} d`)
+        : '—';
+    let bstarStr = '—';
+    if (isMsis) {
+        bstarStr = decay.bcSource === 'tle-bstar'
+            ? `${decay.bstar.toExponential(1)}`
+            : `default B`;
+    }
+    const trustRow = `
+            <div title="TLE age since epoch — position error grows ~1-2 km/day for LEO — and the TLE's B* drag term${isMsis ? (decay.bcSource === 'tle-bstar' ? ' (used by the MSIS decay integration; an SGP4 fit parameter, can sit a factor ~2 from physical C_D·A/m)' : ' (unusable on this record — the integration used a generic default ballistic coefficient with a wider σ)') : ''}.">
+                <span class="op-orbit-tag">TLE</span>${ageStr}<span class="op-orbit-unit"> old · B* ${bstarStr}</span>
+            </div>`;
+
+    const modelTag = isMsis ? 'NRLMSISE-00' : 'surrogate';
+    const lifeTip = isMsis
+        ? 'Time until perigee re-entry from the NRLMSISE-00 orbit-averaged decay integration. 1σ band combines solar-index forecast spread with the B* uncertainty (±35 % from TLE, ±60 % when defaulted) in quadrature.'
+        : 'Time until perigee re-entry, with a 1σ band combining solar-index forecast spread and ±25 % B* uncertainty in quadrature.';
+
     return `
         <div class="op-orbit-rates op-orbit-drag">
-            <div class="op-orbit-rate-title" title="Atmospheric drag drives semi-major axis decay; rate is the slope of the lifetime model at the current perigee.">
+            <div class="op-orbit-rate-title" title="Atmospheric drag drives semi-major axis decay. '${modelTag}' names the density/decay model in charge: NRLMSISE-00 = orbit-averaged integration over the real thermosphere model; surrogate = calibrated King-Hele-style fallback.">
                 Drag &amp; decay
                 ${reentryBadge}
-                <span class="op-orbit-rate-conds">F10.7 ${f107Mid.toFixed(0)} · Ap ${apMid.toFixed(0)}</span>
+                <span class="op-orbit-rate-conds">${modelTag} · F10.7 ${f107Mid.toFixed(0)} · Ap ${apMid.toFixed(0)}</span>
             </div>
-            <div title="Instantaneous rate of change of semi-major axis at the current perigee, derived by differencing the lifetime model.">
+            <div title="Instantaneous orbit-averaged rate of change of semi-major axis at the current elements.">
                 <span class="op-orbit-tag">dā/dt</span>${rateStr}
             </div>
             <div title="Same rate expressed annually for horizon-style framing.">
                 <span class="op-orbit-tag">/yr</span>${ratePerYearStr || '—'}
             </div>
-            <div title="Time until perigee re-entry, with a 1σ band combining solar-index forecast spread and ±25 % B* uncertainty in quadrature.">
+            <div title="${lifeTip}">
                 <span class="op-orbit-tag">life</span>${lifeStr}<span class="op-orbit-unit"> ${sigStr}</span>
             </div>
+            ${trustRow}
         </div>
     `;
 }
@@ -355,11 +390,26 @@ function renderDensitySection(tle) {
     const n0_rad_s = (tle.mean_motion * 2 * Math.PI) / 86400;
     const a_km     = (n0_rad_s > 0) ? Math.cbrt(MU_KM3_S2 / (n0_rad_s * n0_rad_s)) : NaN;
 
+    // MSIS first (same cached profile the decay integration reads, so ρ
+    // here and the lifetime above can't disagree about the atmosphere);
+    // Bates surrogate fallback. `usedMsis` drives the labels + provenance.
+    let usedMsis = false;
     let rhoPer = NaN, rhoApo = NaN, species = null, qPer = NaN, hKm = NaN;
     try {
-        const dPer = atmoDensity({ altitudeKm: perigee, f107Sfu: f107, ap });
-        rhoPer  = dPer.rho;
-        hKm     = dPer.H_km;
+        const mPer = msisRhoAt(perigee, f107, ap);
+        if (Number.isFinite(mPer) && mPer > 0) {
+            usedMsis = true;
+            rhoPer = mPer;
+            // Local scale height from the profile's own log-slope.
+            const mUp = msisRhoAt(perigee + 10, f107, ap);
+            hKm = (Number.isFinite(mUp) && mUp > 0 && mUp !== mPer)
+                ? 10 / Math.log(mPer / mUp)
+                : NaN;
+        } else {
+            const dPer = atmoDensity({ altitudeKm: perigee, f107Sfu: f107, ap });
+            rhoPer  = dPer.rho;
+            hKm     = dPer.H_km;
+        }
         species = dominantSpecies(perigee);
 
         // Dynamic pressure q = ½ ρ v² at perigee. v from vis-viva
@@ -379,20 +429,30 @@ function renderDensitySection(tle) {
     const apogee = tle.apogee_km;
     if (Number.isFinite(apogee) && apogee >= 80 && apogee <= RHO_MAX_ALT_KM
         && Math.abs(apogee - perigee) > 5) {
-        try { rhoApo = atmoDensity({ altitudeKm: apogee, f107Sfu: f107, ap }).rho; }
-        catch (_) { rhoApo = NaN; }
+        try {
+            rhoApo = usedMsis
+                ? msisRhoAt(apogee, f107, ap)
+                : atmoDensity({ altitudeKm: apogee, f107Sfu: f107, ap }).rho;
+            if (!Number.isFinite(rhoApo)) rhoApo = NaN;
+        } catch (_) { rhoApo = NaN; }
     }
 
     provStore.set?.('atmo.rho.perigee', {
         value: rhoPer, unit: 'kg/m³',
-        source: 'derived (thermospheric surrogate)',
-        model:  'NRLMSIS-class Bates/exponential profile (upper-atmosphere-engine.js)',
+        source: usedMsis
+            ? 'derived (NRLMSISE-00, Rust/WASM)'
+            : 'derived (thermospheric surrogate)',
+        model:  usedMsis
+            ? 'NRLMSISE-00 (day/night-averaged equatorial profile)'
+            : 'NRLMSIS-class Bates/exponential profile (upper-atmosphere-engine.js)',
         inputs: ['idx.f107', 'idx.ap'],
         cacheState: 'derived',
         description:
             `Neutral mass density at the selected asset's perigee ` +
             `(${perigee.toFixed(0)} km), evaluated at the live F10.7 ${f107.toFixed(0)} / ` +
-            `Ap ${ap.toFixed(0)}. Same surrogate as the upper-atmosphere lab.`,
+            `Ap ${ap.toFixed(0)}. ` + (usedMsis
+                ? `NRLMSISE-00 — the same profile the decay integration consumes.`
+                : `Same surrogate as the upper-atmosphere lab.`),
     });
 
     const apoRow = Number.isFinite(rhoApo)
@@ -403,9 +463,9 @@ function renderDensitySection(tle) {
 
     return `
         <div class="op-orbit-rates op-orbit-atmo">
-            <div class="op-orbit-rate-title" title="Neutral atmospheric density the satellite flies through, from a thermospheric surrogate driven by live solar/geomagnetic indices. This is the input that drag and decay are computed from.">
+            <div class="op-orbit-rate-title" title="Neutral atmospheric density the satellite flies through, from ${usedMsis ? 'NRLMSISE-00 (Rust/WASM — the same profile the decay integration reads)' : 'a thermospheric surrogate'} driven by live solar/geomagnetic indices. This is the input that drag and decay are computed from.">
                 Atmosphere &amp; drag pressure
-                <span class="op-orbit-rate-conds">F10.7 ${f107.toFixed(0)} · Ap ${ap.toFixed(0)}</span>
+                <span class="op-orbit-rate-conds">${usedMsis ? 'NRLMSISE-00' : 'surrogate'} · F10.7 ${f107.toFixed(0)} · Ap ${ap.toFixed(0)}</span>
             </div>
             <div title="Neutral mass density at perigee — where drag bites hardest.">
                 <span class="op-orbit-tag">ρ per</span>${fmtRho(rhoPer)}<span class="op-orbit-unit"> kg/m³</span>
@@ -663,11 +723,14 @@ export function mountOrbitInspector(opts = {}) {
 
             <div class="op-orbit-caveat">
                 Mean elements (TLE / Brouwer-Lyddane). Drag rate +
-                lifetime use the same King-Hele-style surrogate as
-                Decay Watch, modulated by live SWPC F10.7 / Ap.
-                Physical roll-up reads from CelesTrak SATCAT when
-                available; otherwise it falls back to a name-pattern
-                heuristic (labelled in the section header).
+                lifetime use the same decay model as Decay Watch —
+                NRLMSISE-00 orbit-averaged integration when the WASM
+                is live (named in the section header), King-Hele-style
+                surrogate otherwise — modulated by live SWPC
+                F10.7 / Ap. Physical roll-up reads from CelesTrak
+                SATCAT when available; otherwise it falls back to a
+                name-pattern heuristic (labelled in the section
+                header).
             </div>
         `;
     }
@@ -709,6 +772,13 @@ export function mountOrbitInspector(opts = {}) {
         if (selectedId != null) render();
     });
 
+    // Same upgrade story for the decay model: when the NRLMSISE-00
+    // WASM finishes booting, repaint so the drag / density sections
+    // flip from "surrogate" to MSIS numbers on the open selection.
+    const offMsis = onMsisReady(() => {
+        if (selectedId != null) render();
+    });
+
     // Initial paint.
     selectedId = getSelectedId();
     render();
@@ -718,6 +788,7 @@ export function mountOrbitInspector(opts = {}) {
             offSel?.();
             offProv?.();
             offSatcat?.();
+            offMsis?.();
             if (pollTimer) clearTimeout(pollTimer);
         },
     };

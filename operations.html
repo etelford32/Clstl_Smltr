@@ -479,14 +479,28 @@ body {
 }
 #op-density .op-density-cell { stroke: none; }
 #op-density .op-density-legend {
-    display: flex; justify-content: space-between;
+    display: block;
     margin-top: 4px;
     font-family: monospace;
     color: #aac;
     font-size: .62rem;
 }
+#op-density .op-density-legend-row { display: flex; justify-content: space-between; }
 #op-density .op-density-empty { color: #788; font-style: italic; }
 #op-density .op-density-max { color: #fbf; }
+/* Family strip under the heatmap legend — top fragmentation events among
+   the loaded debris, swatched with the same colors the upper-atmosphere
+   globe uses for those clouds. */
+#op-density .op-density-fams {
+    display: flex; flex-wrap: wrap; gap: 3px 10px;
+    margin-top: 3px;
+    color: #9ab;
+}
+#op-density .op-density-fam { display: inline-flex; align-items: center; gap: 4px; cursor: default; }
+#op-density .op-density-fam-dot {
+    width: 7px; height: 7px; border-radius: 2px; display: inline-block;
+    box-shadow: 0 0 4px rgba(255,255,255,.15);
+}
 
 @media (max-width: 720px) {
     #op-bplane, #op-density { width: 92vw; right: 4vw; }
@@ -1227,6 +1241,21 @@ body {
     padding: 0 5px; border-radius: 2px;
     align-self: center;
 }
+/* Debris-family chip — replaces the generic group chip on conjunction
+   sub-rows when the secondary is attributed to a fragmentation event.
+   --fam-c carries the family swatch color from debris-catalog. */
+.op-conj-sub-family {
+    font-family: monospace; font-size: .6rem;
+    color: var(--fam-c, #9bd);
+    background: rgba(255,255,255,.05);
+    border-left: 2px solid var(--fam-c, #9bd);
+    padding: 0 5px; border-radius: 2px;
+    align-self: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 11em;
+}
+.op-conj-fam-critical { background: rgba(255,48,96,.12); }
+.op-conj-fam-high     { background: rgba(255,112,64,.10); }
 .op-conj-sub-miss { font-family: monospace; color: #fc8; text-align: right; }
 .op-conj-sub-tca  { font-family: monospace; color: #79b; text-align: right; white-space: nowrap; }
 .op-conj-sub-more { color: #678; font-size: .62rem; padding: 4px 8px; cursor: default; }
@@ -2448,6 +2477,7 @@ import { mountGlobePicker }   from './js/operations/globe-picker.js';
 import { mountConjTimeline }  from './js/operations/conj-timeline.js';
 import { mountManeuverPanel } from './js/operations/maneuver.js';
 import { mountOrbitInspector } from './js/operations/orbit-inspector.js';
+import { startMsisDecay }     from './js/operations/msis-drag.js';
 import { showToast }          from './js/operations/toast.js';
 import * as bPlane            from './js/operations/b-plane.js';
 import * as densityMap        from './js/operations/density-map.js';
@@ -2637,6 +2667,17 @@ const stopSwpcBridge = startSwpcBridge();
 // ETAs shorten. Started before the deck mounts so they read live values on
 // first paint rather than the ?? 150/15 fallbacks.
 const stopSwDriver = startSwDriver();
+
+/* ─── NRLMSISE-00 decay integration ────────────────────── */
+// Boots the shared Rust/WASM MSIS kernel and registers the density
+// provider msis-drag.js integrates over. Once resolved, Decay Watch and
+// the orbit inspector repaint from the King-Hele surrogate to the real
+// model (onMsisReady hooks); until then — or on any failure — the
+// surrogate stays in charge. Date source is the sim cursor so a scrub
+// into a forecast window evaluates MSIS at the sim date.
+startMsisDecay({ getDateMs: () => timeBus.getState().simTimeMs }).then(ok => {
+    if (ok) console.log('[msis-drag] NRLMSISE-00 decay integration active');
+});
 
 /* ─── Atmospheric drag shell (globe layer) ─────────────── */
 // The forecast made visible. Brightness/colour track drag.rho450 — the same
