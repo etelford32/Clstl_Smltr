@@ -34,6 +34,9 @@ import { ConjunctionScreener } from './conjunction-screener.js';
 import {
     msisDecayWithSigma, msisDeltaAPerDay, onMsisReady,
 } from './msis-drag.js';
+import {
+    annotate as annotateDebris, hazardEnergyMJ, shortFamilyName,
+} from '../debris-catalog.js';
 
 /* ─── Decay heuristic ─────────────────────────────────────────
  * The existing js/orbital-analytics.js estimateOrbitLifetime() ships
@@ -823,12 +826,30 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
                 const sub = severityFor(c.dist_km);
                 const subAhead = fmtAhead(simNow, c.tca_ms);
                 const subDv = c.dv_kms != null ? ` · ${c.dv_kms.toFixed(2)} km/s` : '';
-                const groupBit = c.group ? `<span class="op-conj-sub-group">${escapeHtml(c.group)}</span>` : '';
+                // Debris intelligence: replace the generic group chip with
+                // the fragmentation-event family when the secondary is
+                // attributed (NORAD range / name pattern via debris-catalog).
+                // "COSMOS 2251 DEB" and "a Starlink" demand different reads
+                // of the same 3-km miss. KE uses the SCREEN's own closing
+                // speed rather than the generic 14 km/s LEO assumption.
+                let idBit = c.group ? `<span class="op-conj-sub-group">${escapeHtml(c.group)}</span>` : '';
+                try {
+                    const annot  = annotateDebris({ name: c.name, noradId: c.norad_id });
+                    const family = annot?.family;
+                    if (family && family.id !== 'unknown') {
+                        const keMJ = hazardEnergyMJ(annot.size.massKg, c.dv_kms ?? 14);
+                        const keStr = keMJ >= 100 ? Math.round(keMJ).toLocaleString() : keMJ.toFixed(1);
+                        idBit = `<span class="op-conj-sub-family op-conj-fam-${family.hazardTier}"
+                            style="--fam-c:${family.color}"
+                            title="${escapeHtml(family.name)} — ${escapeHtml(family.summary ?? '')} Hazard tier: ${family.hazardTier}. Est. mass ~${annot.size.massKg} kg (${annot.size.class}); KE at this encounter's ${c.dv_kms != null ? `${c.dv_kms.toFixed(1)} km/s` : 'assumed 14 km/s'} closing speed ≈ ${keStr} MJ.${c.group ? ` Catalog group: ${escapeHtml(c.group)}.` : ''}"
+                            >${escapeHtml(shortFamilyName(family))}</span>`;
+                    }
+                } catch (_) { /* annotation is best-effort — keep the group chip */ }
                 const sparkSvg = renderSparkSvg(c.spark, c.dist_km);
                 html += `<li class="op-conj-sub op-conj-sub-${sub}" data-norad="${asset.noradId}" data-secondary="${c.norad_id}" data-tca-ms="${c.tca_ms}" tabindex="0" role="button"
                     title="${escapeHtml(c.name)} · click to scrub to TCA and load encounter">
                     <span class="op-conj-sub-name">${escapeHtml(c.name)} <span class="op-conj-sub-id">#${c.norad_id}</span></span>
-                    ${groupBit}
+                    ${idBit}
                     <span class="op-conj-sub-miss">${c.dist_km.toFixed(2)} km</span>
                     ${sparkSvg}
                     <span class="op-conj-sub-tca">${fmtUtc(c.tca_ms)} (${subAhead})${subDv}</span>

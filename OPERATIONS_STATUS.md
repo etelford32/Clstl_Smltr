@@ -243,7 +243,7 @@ In rough priority order. Each item is sized to be a single sprint slice unless n
 
 17. **Live SOCRATES / 18 SDS daily-conjunction ingestion** — Aristotle panel exists but the feed is partial. *Small-medium.*
 18. **Per-asset alert subscriptions** — push a notification (browser, email) when a new conjunction below threshold appears for a fleet primary. *Medium.*
-19. **Orbital-debris event feed** — fragment events (anti-sat tests, breakups) automatically widen the screening window for sats in the affected shell. *Medium.*
+19. **Orbital-debris event feed** — fragment events (anti-sat tests, breakups) automatically widen the screening window for sats in the affected shell. *Medium.* **Groundwork shipped 2026-07**: conjunction sub-rows now chip the secondary's fragmentation family + hazard tier (KE at the screen's own closing speed), and the density map reports per-cell dominant family + a family legend — all from `js/debris-catalog.js` attribution. Gate: `node tests/operations-debris-intel.mjs`.
 
 ### Polish
 
