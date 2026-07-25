@@ -136,7 +136,7 @@ operations.html
 - **`P1 — TLE-age uncertainty isn't full covariance.** The σ rings and the encounter tube use Vallado's age-map (an isotropic-ish radial/along/cross model). Real Space-Track CDMs ship full 6×6 covariances; we don't ingest them yet. Operators familiar with CDMs will read the σ as approximate.
 - **P2 — Maneuver model holds the secondary fixed.** Δv is applied at the chief; the secondary's path is the same SGP4 prediction. Correct for the use case but means the projected new TCA may shift in time vs. the original screen's TCA. The follow-up is a re-screen with the perturbed primary.
 - **P2 — Maneuver model is linearised.** Assumes |Δr| << |r_chief|. Fine until Δr ~100 km (1.5 % of orbit radius). Bigger maneuvers should run a fresh screen, not a what-if.
-- **P3 — Drag model is a King-Hele surrogate.** baseLifetimeMonths(perigee) is calibrated against ISS / HST / 800-km-LEO but doesn't read TLE B* directly. ±25 % B* uncertainty is folded into the σ band in lieu. This sprint's reentry refinement (90–200 km buckets) helps below 200 km but the model is still a heuristic.
+- **~~P3 — Drag model is a King-Hele surrogate.~~ SHIPPED 2026-07: decay is now an NRLMSISE-00 orbit-averaged integration** (`js/operations/msis-drag.js`) reading the TLE's own B* (roadmap items #13 + #14). The King-Hele surrogate remains as the no-WASM fallback; results carry `model: 'msis' | 'surrogate'` and the inspector/provenance label which ran. Residual caveat: TLE B* is an SGP4 fit parameter that can sit a factor ~2 from physical C_D·A/m — σ carries ±35 % (TLE) / ±60 % (default-B fallback). Gate: `node tests/operations-msis-drag.mjs`.
 - **P3 — GMST is simplified.** TEME→ECEF rotation uses GMST without nutation/precession (≤1 km error). Fine for visualisation; insufficient for production conjunction screening.
 
 ### Data feeds
@@ -214,7 +214,7 @@ In rough priority order. Each item is sized to be a single sprint slice unless n
 ### Trust-and-safety (unblock real-operator usage)
 
 1. **Space-Track CDM ingestion** — read the standard Conjunction Data Message format. Replaces the synthetic σ rings + isotropic combined miss with operator-grade covariances. Largest single trust win for the page. *Medium-large; needs an Enterprise-tier auth pathway and a CDM XML parser.*
-2. **TLE-age + B* in the inspector** — show "TLE 2.4 d old; B* 3.2e-4" so the operator knows what they're trusting. *Small.*
+2. ~~**TLE-age + B* in the inspector**~~ — **SHIPPED 2026-07**: the Drag & decay block now shows "TLE 2.4 d old · B* 3.2e-4" with the trust caveats in the tooltip.
 3. **"Re-screen with maneuver" button** — drops the "TCA held fixed" caveat. Fork the screener, swap the primary's propagator for a perturbed-state one (already designed), surface old vs. new TCAs in the diff list. *Medium.*
 4. **Provenance pane for the maneuver model** — let the operator see exactly which model was used (CW vs. YA-equivalent vs. free-flight fallback) for a given conjunction, with the residual estimate. *Small.*
 
@@ -234,8 +234,8 @@ In rough priority order. Each item is sized to be a single sprint slice unless n
 
 ### Numerics
 
-13. **Direct B* in the drag model** — read the TLE's ballistic coefficient instead of an aggregate ±25 % band. Tightens the σ for assets we have good B* for; keeps the band wide for those we don't. *Small.*
-14. **NRLMSISE-00 atmospheric density** — replace the King-Hele lifetime surrogate with an NRLMSIS-driven decay integration. Per-orbit Δa instead of bucket-based. *Large.*
+13. ~~**Direct B* in the drag model**~~ — **SHIPPED 2026-07** (`ballisticFromTle` in `js/operations/msis-drag.js`; ±35 % σ for TLE B*, ±60 % for the default-B fallback when B* is zero/negative/absurd).
+14. ~~**NRLMSISE-00 atmospheric density**~~ — **SHIPPED 2026-07** (`js/operations/msis-drag.js`: orbit-averaged Gauss ȧ/ė integration over the committed Rust/WASM NRLMSISE-00, day/night-averaged equatorial profile, one WASM profile call per index state). Decay Watch + orbit inspector dispatch through it via `decision-deck.decayWithSigma`/`deltaAPerDay`; surrogate stays as fallback. Gate: `node tests/operations-msis-drag.mjs`. NOT yet migrated: the drag shell / prop budget (`sw-model.js` `drag.rho450`) stay on the Bates surrogate deliberately — the shell's ×N-vs-quiet overhead normalises against `RHO_REF_450` inside one model; migrate both together or not at all (see the msis-drag.js header).
 15. **Full GMST with nutation/precession** — IAU-2006/2000A. Gets us to sub-100 m TEME→ECEF accuracy. Unblocks production-grade screening. *Medium.*
 16. **Yamanaka-Ankersen closed-form** — drop the RK4 walk; faster for very long coasts. *Medium.* (Numerical equivalent already shipped — this is an optimisation.)
 
@@ -243,7 +243,7 @@ In rough priority order. Each item is sized to be a single sprint slice unless n
 
 17. **Live SOCRATES / 18 SDS daily-conjunction ingestion** — Aristotle panel exists but the feed is partial. *Small-medium.*
 18. **Per-asset alert subscriptions** — push a notification (browser, email) when a new conjunction below threshold appears for a fleet primary. *Medium.*
-19. **Orbital-debris event feed** — fragment events (anti-sat tests, breakups) automatically widen the screening window for sats in the affected shell. *Medium.*
+19. **Orbital-debris event feed** — fragment events (anti-sat tests, breakups) automatically widen the screening window for sats in the affected shell. *Medium.* **Groundwork shipped 2026-07**: conjunction sub-rows now chip the secondary's fragmentation family + hazard tier (KE at the screen's own closing speed), and the density map reports per-cell dominant family + a family legend — all from `js/debris-catalog.js` attribution. Gate: `node tests/operations-debris-intel.mjs`.
 
 ### Polish
 

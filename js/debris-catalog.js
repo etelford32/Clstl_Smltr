@@ -169,6 +169,18 @@ const _BY_ID = Object.fromEntries(DEBRIS_FAMILIES.map(f => [f.id, f]));
 /** Look up a family by id (e.g. 'fengyun-1c'). */
 export function getFamily(id) { return _BY_ID[id] || null; }
 
+/**
+ * Compact display label for a family — the full registry name with the
+ * year folded to a tick ("Fengyun-1C ASAT (2007)" → "Fengyun-1C ASAT ’07")
+ * so tight UI rows (conjunction sub-rows, legend chips) stay one-line.
+ * Null-safe: returns '' for a missing family and passes the 'unknown'
+ * family through unchanged.
+ */
+export function shortFamilyName(family) {
+    if (!family?.name) return '';
+    return family.name.replace(/\s*\((\d{2})(\d{2})\)$/, ' ’$2');
+}
+
 // ── Optional SATCAT enrichment ─────────────────────────────────────────────
 // `satcat-catalog.js` pushes a lookup here once the bulk CelesTrak
 // SATCAT response has been parsed. When present:

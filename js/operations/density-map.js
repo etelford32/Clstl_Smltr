@@ -13,8 +13,23 @@
  */
 
 import { provStore } from './provenance.js';
+import { classifyDebris, shortFamilyName } from '../debris-catalog.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// NORAD → family cache; the catalog doesn't reattribute an object, so
+// this survives re-renders (layer toggles, fleet edits) for free.
+const _famCache = new Map();
+
+function familyOf(t) {
+    const id = t.norad_id;
+    let f = _famCache.get(id);
+    if (f === undefined) {
+        f = classifyDebris({ name: t.name, noradId: id });
+        _famCache.set(id, f);
+    }
+    return f;
+}
 
 const ALT_MIN_KM = 200;
 const ALT_MAX_KM = 1500;
@@ -43,6 +58,12 @@ function buildBins(debrisTles) {
     const altBins = Math.ceil((ALT_MAX_KM - ALT_MIN_KM) / ALT_STEP);
     const incBins = Math.ceil(180 / INC_STEP);
     const grid = Array.from({ length: incBins }, () => new Int32Array(altBins));
+    // Per-cell family tallies (lazy Maps — most cells are empty) plus a
+    // global per-family tally for the legend strip. Attribution comes
+    // from debris-catalog's NORAD-range / name-pattern classifier, so
+    // the crowded 800 km × 98° cell can say "mostly Fengyun-1C ASAT".
+    const famGrid   = Array.from({ length: incBins }, () => new Array(altBins).fill(null));
+    const famTotals = new Map();     // family.id → { family, count }
     let total = 0;
     for (const t of debrisTles) {
         if (!t) continue;
@@ -56,10 +77,29 @@ function buildBins(debrisTles) {
         const ii = Math.min(incBins - 1, Math.max(0, Math.floor(inc / INC_STEP)));
         grid[ii][ai]++;
         total++;
+        const fam = familyOf(t);
+        if (fam) {
+            let cell = famGrid[ii][ai];
+            if (!cell) { cell = new Map(); famGrid[ii][ai] = cell; }
+            cell.set(fam.id, (cell.get(fam.id) ?? 0) + 1);
+            const g = famTotals.get(fam.id);
+            if (g) g.count++;
+            else famTotals.set(fam.id, { family: fam, count: 1 });
+        }
     }
     let max = 0;
     for (const row of grid) for (const v of row) if (v > max) max = v;
-    return { grid, max, total };
+    return { grid, max, total, famGrid, famTotals };
+}
+
+/** Dominant family in a cell's tally Map: { family, count } | null. */
+function dominantFamily(cellMap, famTotals) {
+    if (!cellMap) return null;
+    let bestId = null, bestN = 0;
+    for (const [id, n] of cellMap) {
+        if (n > bestN) { bestN = n; bestId = id; }
+    }
+    return bestId ? { family: famTotals.get(bestId)?.family ?? null, count: bestN } : null;
 }
 
 function colorFor(count, max) {
@@ -99,7 +139,7 @@ function ensureMounted() {
 function render() {
     if (!_hostEl) return;
     const debris = _trackerRef?.getTlesByGroup?.('debris') || [];
-    const { grid, max, total } = buildBins(debris);
+    const { grid, max, total, famGrid, famTotals } = buildBins(debris);
 
     const incBins = grid.length;
     const altBins = grid[0]?.length ?? 0;
@@ -119,14 +159,27 @@ function render() {
             const c = grid[i][a];
             const fill = colorFor(c, max);
             if (!fill) continue;
-            elems.push(el('rect', {
+            const rect = el('rect', {
                 x: (PAD_L + a * cellW).toFixed(2),
                 y: (PAD_T + (incBins - 1 - i) * cellH).toFixed(2),
                 width: cellW.toFixed(2),
                 height: cellH.toFixed(2),
                 fill,
                 class: 'op-density-cell',
-            }));
+            });
+            // Native SVG tooltip: bin bounds, count, and the dominant
+            // fragmentation family when one is attributed.
+            const altLo = ALT_MIN_KM + a * ALT_STEP;
+            const dom = dominantFamily(famGrid[i][a], famTotals);
+            const domBit = (dom?.family && dom.family.id !== 'unknown')
+                ? ` · mostly ${shortFamilyName(dom.family)} (${Math.round(100 * dom.count / c)}%)`
+                : '';
+            const tip = el('title');
+            tip.textContent =
+                `${altLo}–${altLo + ALT_STEP} km × ${i * INC_STEP}–${(i + 1) * INC_STEP}° · ` +
+                `${c} object${c === 1 ? '' : 's'}${domBit}`;
+            rect.appendChild(tip);
+            elems.push(rect);
         }
     }
 
@@ -181,11 +234,27 @@ function render() {
     _gridEl.innerHTML = '';
     elems.forEach(e => _gridEl.appendChild(e));
 
-    // Legend: total + "max cell" with a swatch
+    // Legend: total + "max cell", then the family strip — the top
+    // fragmentation events among the loaded debris, colored with the
+    // same swatches the upper-atmosphere globe uses for those clouds.
+    let famStrip = '';
+    if (total > 0 && famTotals.size > 0) {
+        const top = [...famTotals.values()]
+            .filter(x => x.family && x.family.id !== 'unknown')
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 4);
+        if (top.length > 0) {
+            famStrip = `<div class="op-density-fams">` + top.map(x =>
+                `<span class="op-density-fam" title="${x.family.name} — ${x.family.summary ?? ''} Hazard tier: ${x.family.hazardTier}.">` +
+                `<span class="op-density-fam-dot" style="background:${x.family.color}"></span>` +
+                `${shortFamilyName(x.family)} ${x.count.toLocaleString()}</span>`,
+            ).join('') + `</div>`;
+        }
+    }
     _legendEl.innerHTML = total === 0
         ? `<span class="op-density-empty">No debris loaded — toggle the Tracked Debris layer.</span>`
-        : `<span>${total.toLocaleString()} debris in window</span>
-           <span class="op-density-max">peak ${max} / cell</span>`;
+        : `<div class="op-density-legend-row"><span>${total.toLocaleString()} debris in window</span>
+           <span class="op-density-max">peak ${max} / cell</span></div>${famStrip}`;
 }
 
 let _visible = false;
