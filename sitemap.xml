@@ -285,4 +285,36 @@
     <priority>0.8</priority>
   </url>
 
+  <!-- ── FIELD NOTES (blog) ────────────────────────────────────────────
+       Extensionless URLs matching each page's <link rel="canonical">.
+       vercel.json carries the matching rewrites — without them these
+       resolve to 404 and the canonicals point nowhere. -->
+  <url>
+    <loc>https://parkersphysics.com/blog</loc>
+    <lastmod>2026-07-25</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
+  <url>
+    <loc>https://parkersphysics.com/blog-why-aurora-forecasts-miss</loc>
+    <lastmod>2026-07-25</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.75</priority>
+  </url>
+
+  <url>
+    <loc>https://parkersphysics.com/blog-gannon-hindcast</loc>
+    <lastmod>2026-07-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
+  <url>
+    <loc>https://parkersphysics.com/blog-stpatrick-hindcast</loc>
+    <lastmod>2026-06-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
 </urlset>

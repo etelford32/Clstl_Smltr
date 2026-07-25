@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Field Notes — Space Weather Post-Mortems · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/blog">
+<meta name="description" content="Event post-mortems, hindcast write-ups and simulation methods. What was forecast, what arrived, where our models diverged — published either way.">
+<meta name="theme-color" content="#03010e">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="https://parkersphysics.com/blog">
+<meta property="og:title" content="Field Notes — Parkers Physics">
+<meta property="og:description" content="Space weather event post-mortems, hindcast write-ups and simulation methods.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta property="og:image:alt" content="Parkers Physics — Field Notes">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Field Notes — Parkers Physics">
+<meta name="twitter:description" content="Space weather event post-mortems, hindcast write-ups and simulation methods.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="alternate" type="application/rss+xml" title="Parkers Physics Field Notes" href="/rss.xml">
+<link rel="stylesheet" href="colors_and_type.css">
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Blog",
+  "@id": "https://parkersphysics.com/blog#blog",
+  "name": "Parkers Physics Field Notes",
+  "description": "Space weather event post-mortems, hindcast write-ups and simulation methods from Parkers Physics.",
+  "url": "https://parkersphysics.com/blog",
+  "inLanguage": "en",
+  "publisher": { "@type": "Organization", "name": "Parkers Physics", "url": "https://parkersphysics.com/" },
+  "mainEntity": {
+    "@type": "ItemList",
+    "itemListOrder": "https://schema.org/ItemListOrderDescending",
+    "numberOfItems": 3,
+    "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "NOAA said G1. Earth got G3. The variable the models can't see.", "url": "https://parkersphysics.com/blog-why-aurora-forecasts-miss" },
+      { "@type": "ListItem", "position": 2, "name": "The index that lied: replaying the Gannon superstorm with a ring current", "url": "https://parkersphysics.com/blog-gannon-hindcast" },
+      { "@type": "ListItem", "position": 3, "name": "The storm every model takes", "url": "https://parkersphysics.com/blog-stpatrick-hindcast" }
+    ]
+  }
+}
+</script>
+
+<style>
+/* ── Field Notes hub ────────────────────────────────────────────────────
+ * Shares the bp-* post shell with the individual posts so the hub and
+ * the articles read as one surface, plus the fn-* card list.
+ * NOTE: no `nav`/`.nav-*` selectors here — scripts/lint-nav.mjs treats
+ * inline nav CSS as ghost CSS and fails CI.
+ * ──────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#040210; color:#d0cce8;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    line-height:1.65;
+}
+
+.bp-wrap { max-width:760px; margin:0 auto; padding:88px 20px 80px; }
+
+.bp-kicker {
+    font-size:.72rem; letter-spacing:.18em; text-transform:uppercase;
+    color:#4fc3f7; font-weight:700; margin-bottom:14px;
+}
+p { margin-bottom:16px; font-size:.95rem; }
+strong { color:#f0edff; }
+em { color:#cfc6f2; }
+
+.bp-foot { margin-top:40px; font-size:.74rem; color:#6f6996; }
+.bp-foot a { color:#4fc3f7; text-decoration:none; }
+
+/* ── hub header + post cards ── */
+.fn-head { margin-bottom:42px; }
+.fn-head h1 { font-size:2.1rem; color:#f0edff; letter-spacing:-.02em; margin-bottom:12px; line-height:1.15; }
+.fn-head p { color:#a49ccd; font-size:1.02rem; max-width:56ch; margin-bottom:0; }
+
+.fn-section {
+    font-size:.68rem; text-transform:uppercase; letter-spacing:.16em;
+    color:#6f6996; font-weight:700; margin:34px 0 14px;
+}
+.fn-section:first-of-type { margin-top:0; }
+
+.fn-card {
+    display:block; text-decoration:none; padding:24px 22px; margin-bottom:18px;
+    border-radius:14px; background:rgba(123,92,255,.06);
+    border:1px solid rgba(123,92,255,.20); transition:border-color .18s, background .18s;
+}
+.fn-card:hover { border-color:rgba(123,92,255,.55); background:rgba(123,92,255,.11); }
+.fn-kicker {
+    font-size:.68rem; text-transform:uppercase; letter-spacing:.16em;
+    color:#9d3aff; margin-bottom:10px;
+}
+.fn-card h2 { font-size:1.24rem; color:#f0edff; margin-bottom:9px; line-height:1.32; letter-spacing:-.01em; font-weight:750; }
+.fn-dek { color:#a49ccd; font-size:.95rem; line-height:1.6; margin-bottom:11px; }
+.fn-meta { color:#6f6996; font-size:.76rem; margin-bottom:0; }
+
+@media (max-width:768px) {
+    .bp-wrap { padding:76px 16px 60px; }
+    .fn-head h1 { font-size:1.7rem; }
+}
+</style>
+</head>
+
+<body>
+
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260725"; initNav("field-notes");</script>
+
+<main class="bp-wrap">
+
+  <header class="fn-head">
+    <div class="bp-kicker">Parkers Physics</div>
+    <h1>Field Notes</h1>
+    <p>Event post-mortems, hindcast write-ups and simulation methods. What was forecast, what actually arrived, and where our own models diverged — published whether or not it flatters us.</p>
+  </header>
+
+  <h2 class="fn-section">Latest</h2>
+
+  <a class="fn-card" href="/blog-why-aurora-forecasts-miss.html" data-funnel-cta="blog-index-why-aurora-forecasts-miss">
+    <div class="fn-kicker">Field note · Forecast verification</div>
+    <h2>NOAA said G1. Earth got G3. The variable the models can't see.</h2>
+    <p class="fn-dek">A July 4 storm arrived two levels above forecast on an unremarkable solar wind. Bz did all the work — and operational CME models don't carry it.</p>
+    <p class="fn-meta"><time datetime="2026-07-25">July 25, 2026</time> · 9 min read</p>
+  </a>
+
+  <h2 class="fn-section">Hindcast papers</h2>
+
+  <a class="fn-card" href="/blog-gannon-hindcast.html" data-funnel-cta="blog-index-gannon-hindcast">
+    <div class="fn-kicker">Research note · MHD density hindcast</div>
+    <h2>The index that lied: replaying the Gannon superstorm with a ring current</h2>
+    <p class="fn-dek">The May 2024 G5 pushed the planetary Ap index past its ceiling — and every empirical drag model in operational use inherited the error.</p>
+    <p class="fn-meta"><time datetime="2026-07-01">July 2026</time> · 6 min read · EN / ES / FR</p>
+  </a>
+
+  <a class="fn-card" href="/blog-stpatrick-hindcast.html" data-funnel-cta="blog-index-stpatrick-hindcast">
+    <div class="fn-kicker">Research note · Community benchmark</div>
+    <h2>The storm every model takes</h2>
+    <p class="fn-dek">St. Patrick's Day 2015 is the benchmark event for magnetospheric models. Here is how ours does on the two-step main phase.</p>
+    <p class="fn-meta"><time datetime="2026-06-15">June 2026</time> · 7 min read · EN / ES / FR</p>
+  </a>
+
+  <p class="bp-foot">
+    Subscribe via <a href="/rss.xml">RSS</a> ·
+    Replay these events yourself in the <a href="/gannon-superstorm.html">Hindcast Lab</a> ·
+    Live conditions on the <a href="/space-weather.html">space weather dashboard</a>
+  </p>
+
+</main>
+
+<script type="module">
+    import { experiments } from './js/experiments.js';
+    experiments.track('blog_index_view', {});
+    document.addEventListener('click', (e) => {
+        const a = e.target?.closest?.('[data-funnel-cta]');
+        if (!a) return;
+        experiments.track('blog_index_click', {
+            cta: a.getAttribute('data-funnel-cta'),
+            dest: a.getAttribute('href') || null,
+        });
+    }, { capture: true, passive: true });
+</script>
+
+</body>
+</html>

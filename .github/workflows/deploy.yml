@@ -74,8 +74,11 @@ jobs:
           for f in *.png *.jpg *.svg *.ico *.webp; do
             [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
           done
-          # Copy sitemap/robots
-          for f in sitemap.xml robots.txt; do
+          # Copy sitemap/robots/feed. rss.xml is the Field Notes feed that
+          # blog.html + every post links via <link rel="alternate">; the
+          # globs above only match *.html/*.css/*.js, so without this line
+          # the feed link 404s in production while working locally.
+          for f in sitemap.xml robots.txt rss.xml; do
             [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
           done
           # Copy Vercel project config so the deployed branch carries the

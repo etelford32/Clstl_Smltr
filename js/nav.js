@@ -3,9 +3,10 @@
  *
  * Generates a full navigation bar with:
  *   - Logo + brand
- *   - Dropdown menus: Earth, Space Weather, Hindcast Lab, Stars, Black Holes,
- *     Simulators — Hindcast Lab groups each validation-database event's
- *     replay page with its paper as a nested (↳) link
+ *   - Dropdown menus: Earth, Space Weather, Hindcast Lab, Field Notes, Stars,
+ *     Black Holes, Simulators — Hindcast Lab groups each validation-database
+ *     event's replay page with its paper as a nested (↳) link; Field Notes
+ *     is the reading-first index of the same papers plus standalone posts
  *   - Tier-gated items (public, free, advanced) where 'advanced' ≡ PRO
  *     (Advanced + Institution + Enterprise). See auth.isPro().
  *   - Auth state (Sign In / Dashboard / Admin badge)
@@ -93,6 +94,28 @@ const NAV_DROPDOWNS = [
             { section: "Mar 2015 · St. Patrick's Day (G4)" },
             { href: 'st-patrick-storm.html', label: "St. Patrick's Storm", sub: 'Two-step main phase · the community benchmark', tier: 'public', icon: '🍀', badge: 'NEW', id: 'st-patrick-storm' },
             { href: 'blog-stpatrick-hindcast.html', label: '↳ Paper · The Storm Every Model Takes', sub: 'Write-up · EN/ES/FR', tier: 'public', icon: '📝', badge: 'NEW', id: 'blog-stpatrick-hindcast' },
+        ],
+    },
+    {
+        // Field Notes — the writing surface: event post-mortems, hindcast
+        // papers, method notes. The two hindcast papers appear here AND
+        // nested under their events in Hindcast Lab above; that duplication
+        // is deliberate (event-first vs reading-first entry points) — do
+        // not "de-duplicate" it away.
+        //
+        // ACTIVE-ID NOTE: the hub's id is 'field-notes', NOT 'blog'. The
+        // active-item match below is a prefix match in both directions
+        // (`_hid.startsWith(activeId) || activeId.startsWith(_hid)`), so an
+        // id of 'blog' would light up every 'blog-*' post at once.
+        label: 'Field Notes',
+        id: 'field-notes',
+        items: [
+            { href: 'blog.html', label: 'All Field Notes', sub: 'Post-mortems, hindcasts, methods', tier: 'public', icon: '📓', id: 'field-notes' },
+            { section: 'Latest' },
+            { href: 'blog-why-aurora-forecasts-miss.html', label: 'NOAA said G1. Earth got G3.', sub: 'July 4 2026 · the Bz gap', tier: 'public', icon: '📉', badge: 'NEW', id: 'blog-why-aurora-forecasts-miss' },
+            { section: 'Hindcast papers' },
+            { href: 'blog-gannon-hindcast.html', label: 'The Index That Lied', sub: 'Gannon G5 · EN/ES/FR', tier: 'public', icon: '📝', id: 'blog-gannon-hindcast' },
+            { href: 'blog-stpatrick-hindcast.html', label: 'The Storm Every Model Takes', sub: "St. Patrick's 2015 · EN/ES/FR", tier: 'public', icon: '📝', id: 'blog-stpatrick-hindcast' },
         ],
     },
     {
