@@ -89,7 +89,23 @@ jobs:
           # blog.html + every post links via <link rel="alternate">; the
           # globs above only match *.html/*.css/*.js, so without this line
           # the feed link 404s in production while working locally.
-          for f in sitemap.xml robots.txt rss.xml llms.txt; do
+          # manifest.json is <link rel="manifest"> on every page — the PWA
+          # manifest. Same 404-in-production-only failure as the icons.
+          for f in sitemap.xml robots.txt rss.xml llms.txt manifest.json; do
+            [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
+          done
+          # The reproducibility docs the hindcast pages link by name from
+          # their Methodology sections ("Reproduce it: event runbook").
+          # Enumerated deliberately rather than globbed *.md — a glob would
+          # publish CLAUDE.md, AUTH_FLOW_REVIEW.md and every internal plan
+          # doc in the repo root. Only files a public page actually links
+          # belong here; if you add a doc link to a page, add it here too.
+          for f in MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md \
+                   GANNON_SIMULATION_DESIGN.md \
+                   HINDCAST_STPATRICK_2015_RUNBOOK.md \
+                   HINDCAST_DATABASE_STANDARD.md \
+                   HINDCAST_BACKLOG.md \
+                   RING_CURRENT_SIMULATION_PLAN.md; do
             [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
           done
           # Copy Vercel project config so the deployed branch carries the

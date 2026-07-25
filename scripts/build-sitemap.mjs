@@ -133,6 +133,7 @@ function lastmod(relPath) {
 const errors = [];
 const warnings = [];
 const entries = [];
+const linkedAssets = new Set();
 
 for (const page of walk(ROOT).sort()) {
   if (EXCLUDE.has(page)) continue;
@@ -183,6 +184,28 @@ for (const page of walk(ROOT).sort()) {
   }
 
   entries.push({ page, url, lastmod: lastmod(page) });
+  for (const a of html.matchAll(/(?:href|src)="\/([A-Za-z0-9._-]+)"/g)) linkedAssets.add(a[1]);
+}
+
+/* ── Guard 6 — root-relative assets pages link must actually ship ──────
+ * The gh-pages build copies an explicit set of globs and filenames; a page
+ * can link /manifest.json or /icons/foo.png and have it resolve perfectly
+ * in local dev (which serves the repo root) while 404ing in production.
+ * That gap hid broken favicons, a missing PWA manifest and dead runbook
+ * links for months. Warn, don't fail: deploy.yml is edited separately. */
+// Strip comment lines first: the workflow's comments name the very files
+// they explain, so matching raw text would let a comment satisfy the guard
+// while the actual cp never runs.
+const deployText = (existsSync(join(ROOT, '.github/workflows/deploy.yml'))
+  ? readFileSync(join(ROOT, '.github/workflows/deploy.yml'), 'utf8') : '')
+  .split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+const COPY_GLOBS = [/\.html$/, /\.css$/, /\.js$/, /\.png$/, /\.jpg$/, /\.svg$/, /\.ico$/, /\.webp$/];
+for (const asset of [...linkedAssets].sort()) {
+  if (asset.endsWith('.html')) continue;                 // pages, handled above
+  if (!existsSync(join(ROOT, asset))) continue;           // not a repo file
+  if (COPY_GLOBS.some((re) => re.test(asset))) continue;  // matched by a glob
+  if (deployText.includes(asset)) continue;               // explicitly listed
+  warnings.push(`/${asset} is linked by a page but is not copied by .github/workflows/deploy.yml — it 404s in production (works locally)`);
 }
 
 // Home first, then alphabetical by URL — purely for human readability.
