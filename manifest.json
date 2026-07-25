@@ -1,0 +1,60 @@
+{
+  "name": "Parkers Physics App",
+  "short_name": "ParkerPhysics",
+  "description": "Real-time astrophysics simulations powered by WebGL, Rust/WASM, and live NASA/NOAA space weather data.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0a1a",
+  "theme_color": "#0a0a1a",
+  "categories": ["education", "science", "utilities"],
+  "lang": "en-US",
+  "icons": [
+    {
+      "src": "/icons/favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/favicon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "Celestial_Simulator.jpg",
+      "sizes": "1536x1024",
+      "type": "image/jpeg",
+      "label": "Celestial Simulator — Star and Solar System Views"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Solar System", "url": "/solar-system.html", "description": "Interactive 3D Solar System" },
+    { "name": "The Sun",      "url": "/sun.html",     "description": "Real-time Solar Activity" },
+    { "name": "Galactic Map", "url": "/galactic-map.html", "description": "Explore the Galaxy" }
+  ]
+}

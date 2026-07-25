@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Parkers Physics Field Notes — RSS 2.0.
+
+  Hand-maintained. When a post lands: add an <item> at the TOP of the list,
+  bump <lastBuildDate>, and add the URL to sitemap.xml + the Field Notes
+  dropdown in js/nav.js. <link> URLs are the extensionless canonical form,
+  which requires the matching rewrite in vercel.json.
+
+  Deployment note: .github/workflows/deploy.yml copies this file explicitly
+  into build/web (the gh-pages tree Vercel serves) alongside sitemap.xml and
+  robots.txt — the workflow only globs *.html/*.css/*.js at the top level,
+  so a new root asset that is not in that copy list silently never ships.
+-->
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Parkers Physics — Field Notes</title>
+    <link>https://parkersphysics.com/blog</link>
+    <atom:link href="https://parkersphysics.com/rss.xml" rel="self" type="application/rss+xml"/>
+    <description>Space weather event post-mortems, hindcast write-ups and simulation methods. What was forecast, what actually arrived, and where our own models diverged.</description>
+    <language>en-us</language>
+    <copyright>Telford Projects LLC</copyright>
+    <lastBuildDate>Sat, 25 Jul 2026 08:00:00 GMT</lastBuildDate>
+    <image>
+      <url>https://parkersphysics.com/ParkersPhysics_logo2.jpg</url>
+      <title>Parkers Physics — Field Notes</title>
+      <link>https://parkersphysics.com/blog</link>
+    </image>
+
+    <item>
+      <title>NOAA said G1. Earth got G3. The variable the models can't see.</title>
+      <link>https://parkersphysics.com/blog-why-aurora-forecasts-miss</link>
+      <guid isPermaLink="true">https://parkersphysics.com/blog-why-aurora-forecasts-miss</guid>
+      <pubDate>Sat, 25 Jul 2026 08:00:00 GMT</pubDate>
+      <category>Forecast verification</category>
+      <description>On July 4, 2026 a geomagnetic storm arrived two full levels above forecast and put aurora over more than thirty states. Solar wind speed was unremarkable — Bz hit −19 nT and held southward for hours. Operational CME models carry no internal flux rope, so they cannot forecast the one variable that decided the outcome.</description>
+    </item>
+
+    <item>
+      <title>The index that lied: replaying the Gannon superstorm with a ring current</title>
+      <link>https://parkersphysics.com/blog-gannon-hindcast</link>
+      <guid isPermaLink="true">https://parkersphysics.com/blog-gannon-hindcast</guid>
+      <pubDate>Wed, 01 Jul 2026 08:00:00 GMT</pubDate>
+      <category>MHD density hindcast</category>
+      <description>The May 2024 G5 pinned the planetary Ap index at its 400 ceiling for roughly a day while the magnetosphere kept going. A coupled BATS-R-US + Ridley + RCM replay measured Ap* = 524 past the clamp and cut storm-time density error 48% against GRACE-FO and Swarm-C truth.</description>
+    </item>
+
+    <item>
+      <title>The storm every model takes</title>
+      <link>https://parkersphysics.com/blog-stpatrick-hindcast</link>
+      <guid isPermaLink="true">https://parkersphysics.com/blog-stpatrick-hindcast</guid>
+      <pubDate>Mon, 15 Jun 2026 08:00:00 GMT</pubDate>
+      <category>Community benchmark</category>
+      <description>St. Patrick's Day 2015 is the benchmark event for magnetospheric models. Here is how ours does on the two-step main phase.</description>
+    </item>
+
+  </channel>
+</rss>
