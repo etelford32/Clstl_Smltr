@@ -539,10 +539,12 @@ function buildPolarCusps(r0, alpha) {
  * @param {boolean} isNorth  true = northern oval, false = southern oval
  * @returns {THREE.Mesh}
  */
-function buildAuroralCurtains(kp, isNorth) {
+function buildAuroralCurtains(kp, isNorth, rTop = 2.50) {
     const N_SEG  = 180;     // segments around the oval (smoother)
     const R_BASE = 1.02;    // curtain bottom (just above surface, Re)
-    const R_TOP  = 2.50;    // curtain top (~9600 km altitude, visually dramatic)
+    const R_TOP  = rTop;    // curtain top (default ~9600 km — visually dramatic
+                            // at earth.html camera distances; close-camera
+                            // consumers pass a smaller auroraTop)
     const N_LAYERS = 3;     // concentric curtain layers for volumetric depth
 
     // Auroral oval colatitude θ from pole: expands equatorward during storms
@@ -707,11 +709,15 @@ function buildDipoleFieldLines(lShells, nLongs, color, opacity) {
 // ─────────────────────────────────────────────────────────────────────────────
 export class MagnetosphereEngine {
     /**
-     * @param {THREE.Scene}       scene
-     * @param {THREE.Vector3Ref}  sunDirRef  — mutable reference to earthU.u_sun_dir.value
+     * @param {THREE.Scene} scene
+     * @param {object}      [opts]
+     * @param {number}      [opts.auroraTop]  aurora curtain top radius (Re,
+     *     default 2.5). Close-camera consumers (hero) pass a smaller value so
+     *     the curtains don't dominate the frame; earth.html keeps the default.
      */
-    constructor(scene) {
+    constructor(scene, opts = {}) {
         this._scene = scene;
+        this._auroraTop = opts.auroraTop ?? 2.50;
 
         // ── Sun-aligned group (magnetopause, bow shock, tail) ──────────────
         this._solarGroup = new THREE.Group();
@@ -1177,9 +1183,9 @@ export class MagnetosphereEngine {
         // ── 3D Auroral curtains (North + South ovals) ─────────────────────────
         // Placed in _eqGroup which is Earth-local space centred at origin.
         // The curtain oval colatitude contracts equatorward with rising Kp.
-        this._auroraN = buildAuroralCurtains(kp, true);
+        this._auroraN = buildAuroralCurtains(kp, true, this._auroraTop);
         this._eqGroup.add(this._auroraN);
-        this._auroraS = buildAuroralCurtains(kp, false);
+        this._auroraS = buildAuroralCurtains(kp, false, this._auroraTop);
         this._eqGroup.add(this._auroraS);
 
         // ── Magnetic dipole tilt ──────────────────────────────────────────────

@@ -92,7 +92,12 @@ img{display:block}
    doubles as the reduced-motion / WebGL-fallback background. */
 #hero{position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;background:radial-gradient(ellipse at 50% 40%,#071026 0%,#03010e 70%)}
 #hero-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
+/* Legibility scrim: a gentle dim behind the headline block so the bloomed
+   scene can run hot without washing out the text. Sits above the canvas
+   (later in paint order), below .hero-content (z-index 1). */
+#hero::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 56% 48% at 50% 46%,rgba(2,0,10,.34),transparent 72%)}
 .hero-content{position:relative;z-index:1;max-width:740px;padding:80px 24px 100px;text-align:center}
+.hero-content [data-hero-hud]{margin-top:40px}
 .hero-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;background:rgba(157,58,255,.10);border:1px solid rgba(183,101,255,.35);border-radius:20px;font-family:var(--font-display);font-size:.7rem;color:var(--uv-300);letter-spacing:var(--tracking-cyber);text-transform:uppercase;margin-bottom:28px;box-shadow:var(--glow-uv-sm)}
 .hero-badge::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 8px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite;flex-shrink:0}
 @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
@@ -308,19 +313,24 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 <main id="main-content">
 
 <!-- ── S1 · HERO — the spectacle layer ────────────────────────────────────
-     The hero IS the demo: js/hero-space-weather.js renders Earth + the live
-     magnetosphere into #hero-canvas, driven by the page's single
-     SpaceWeatherFeed (see the module at the bottom of <body>). -->
+     The hero IS the demo: js/hero-space-weather.js renders the cinematic
+     Earth + live magnetosphere (shader Earth, bow-shock-deflected solar
+     wind, bloom, CME cue) into #hero-canvas, and js/hero-live-hud.js
+     renders the live readout chips below the CTAs — both driven by the
+     page's single SpaceWeatherFeed (see the module at the bottom of
+     <body>). The H1 is the 2026-07 home_headline experiment WINNER — do
+     not reword it without a new experiment. -->
 <section id="hero" aria-label="Live magnetosphere">
   <canvas id="hero-canvas" aria-hidden="true"></canvas>
   <div class="hero-content">
     <div class="hero-badge" role="status" aria-live="polite">Live NASA &amp; NOAA Data — Updated Every 60 Seconds</div>
     <h1 class="hero-h1">Watch space weather happen. Live.</h1>
-    <p class="hero-sub">Real-time simulations of Earth's magnetosphere, the upper atmosphere, and the Sun — driven by live NASA and NOAA satellite data, rendered in your browser.</p>
+    <p class="hero-sub">This is Earth's magnetic shield, right now — bow shock, radiation belts, and aurora rendered from live NASA and NOAA satellite telemetry. The same physics engine we validated against the May 2024 G5 superstorm, running in your browser.</p>
     <div class="hero-cta" role="group" aria-label="Primary actions">
       <a href="space-weather.html" class="btn-primary" data-funnel-cta="hero_magnetosphere" aria-label="See Earth's magnetosphere live">See Earth's magnetosphere live <span aria-hidden="true">→</span></a>
       <a href="#depth" class="btn-secondary" data-funnel-cta="hero_depth" aria-label="Scroll to the depth continuum">How deep does it go? <span aria-hidden="true">↓</span></a>
     </div>
+    <div data-hero-hud></div>
   </div>
 </section>
 
@@ -681,14 +691,15 @@ window.addEventListener('message', (e) => {
 </footer>
 
 <!-- ── PAGE WIRING ─────────────────────────────────────────────────────────
-     One SpaceWeatherFeed for the whole page. The hero (HeroSpaceWeather)
-     and the ticker (initHomeTicker) both consume the window 'swpc-update'
-     event — NEITHER constructs a feed (hero-space-weather.js only listens).
-     The feed starts LAST so every listener is attached before the first
+     One SpaceWeatherFeed for the whole page. The hero (HeroSpaceWeather),
+     the hero readout (initHeroLiveHud) and the ticker (initHomeTicker) all
+     consume the window 'swpc-update' event — NONE constructs a feed. The
+     feed starts LAST so every listener is attached before the first
      dispatch. Do not import page modules that start their own feed. -->
 <script type="module">
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { initHomeTicker } from './js/home-ticker.js';
+import { initHeroLiveHud } from './js/hero-live-hud.js';
 
 /* Intersection-observer fade-ins */
 (function(){
@@ -706,8 +717,11 @@ import { initHomeTicker } from './js/home-ticker.js';
   els.forEach(el => obs.observe(el));
 })();
 
-/* Live ticker — attaches its swpc-update listener before the feed starts. */
+/* Live ticker + hero readout — swpc-update listeners attach before the
+   feed starts. The HUD works even when WebGL/reduced-motion kills the
+   canvas: the numbers are the proof either way. */
 initHomeTicker(document.querySelector('[data-sw-ticker]'));
+initHeroLiveHud(document.querySelector('[data-hero-hud]'));
 
 /* Card posters + live previews (featured grid + depth ladder thumbs). */
 import('./js/card-previews.js').then(m => m.initCardPreviews()).catch(() => {});
