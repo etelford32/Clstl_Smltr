@@ -16,12 +16,12 @@
 <meta property="og:url" content="https://parkersphysics.com/gannon-superstorm">
 <meta property="og:title" content="May 2024 Gannon Superstorm — MHD-corrected density hindcast">
 <meta property="og:description" content="Replay of the May 2024 G5 storm with BATS-R-US-driven thermospheric density vs. saturated-Ap MSIS. Exposes the Ap=400 ceiling that empirical models can't see past.">
-<meta property="og:image" content="https://parkersphysics.com/static/og/gannon-superstorm.jpg">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 <meta property="og:image:alt" content="Gannon May 2024 G5 superstorm hindcast">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="May 2024 Gannon Superstorm — MHD-corrected density hindcast">
 <meta name="twitter:description" content="Replay of the May 2024 G5 storm with BATS-R-US-driven thermospheric density vs. saturated-Ap MSIS.">
-<meta name="twitter:image" content="https://parkersphysics.com/static/og/gannon-superstorm.jpg">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
 <meta name="description" content="Interactive hindcast of the May 2024 Gannon G5 superstorm. MHD-corrected thermospheric density vs. saturated-Ap MSIS, validated against GRACE-FO and Swarm-C accelerometer truth.">
 
 <link rel="stylesheet" href="colors_and_type.css">
@@ -60,6 +60,21 @@ body {
     font-size:.68rem; text-transform:uppercase; letter-spacing:.14em;
     color:#f96; font-weight:700; margin-bottom:10px;
 }
+
+/* ── Paper CTA ─────────────────────────────────────────────
+ * The event→paper link. This used to live only in the nav as a
+ * nested ↳ item under Hindcast Lab; when the papers moved to the
+ * Field Notes dropdown (2026-07-25) this in-page link became the
+ * path from the replay to its write-up. Mirrors .sp-cta on
+ * st-patrick-storm.html in the Gannon palette. */
+.gn-cta {
+    display:block; margin-top:12px; padding:14px 16px; border-radius:10px;
+    background:linear-gradient(120deg, rgba(255,140,80,.14), rgba(79,195,247,.08));
+    border:1px solid rgba(255,140,80,.35); text-decoration:none;
+}
+.gn-cta .t { color:#ffeede; font-weight:750; font-size:.9rem; display:block; }
+.gn-cta .s { color:#c0a08c; font-size:.74rem; margin-top:4px; display:block; }
+.gn-cta:hover { border-color:rgba(79,195,247,.55); }
 
 /* ── Hero ──────────────────────────────────────────────── */
 #gn-hero { padding:18px 22px 16px; grid-column:1 / -1; }
@@ -561,6 +576,10 @@ body {
         Sources: NOAA SWPC · NASA SPDF (OMNI/DSCOVR) · GFZ Potsdam ·
         TU Delft Thermosphere · ESA Swarm · SuperMAG · INTERMAGNET.
       </p>
+      <a class="gn-cta" href="/blog-gannon-hindcast.html">
+        <span class="t">📝 Read the paper: “The index that lied” →</span>
+        <span class="s">The write-up — Ap pinned at 400 while Ap* reached 524, and the 48% storm-time density-error reduction we scored against it. EN/ES/FR.</span>
+      </a>
     </section>
 
   </aside>

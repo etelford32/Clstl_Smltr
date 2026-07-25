@@ -4,9 +4,9 @@
  * Generates a full navigation bar with:
  *   - Logo + brand
  *   - Dropdown menus: Earth, Space Weather, Hindcast Lab, Field Notes, Stars,
- *     Black Holes, Simulators — Hindcast Lab groups each validation-database
- *     event's replay page with its paper as a nested (↳) link; Field Notes
- *     is the reading-first index of the same papers plus standalone posts
+ *     Black Holes, Simulators — Hindcast Lab holds the interactive replay
+ *     page for each validation-database event; Field Notes holds all the
+ *     writing (event post-mortems + the hindcast papers). Run vs read.
  *   - Tier-gated items (public, free, advanced) where 'advanced' ≡ PRO
  *     (Advanced + Institution + Enterprise). See auth.isPro().
  *   - Auth state (Sign In / Dashboard / Admin badge)
@@ -80,20 +80,24 @@ const NAV_DROPDOWNS = [
         ],
     },
     {
-        // Hindcast Lab — the validation database, one section per event with
-        // its interactive replay page and the accompanying paper nested
-        // under it. Events land here as their runs complete
+        // Hindcast Lab — the validation database: the INTERACTIVE replay
+        // page for each event. Events land here as their runs complete
         // (HINDCAST_BACKLOG.md order: Gannon → St. Patrick's → Feb 2022
         // Starlink → Sep 2017).
+        //
+        // The write-up papers used to be nested here as ↳ links under each
+        // event. They moved to Field Notes (2026-07-25, author's call) so
+        // there is exactly ONE place to find the writing: this dropdown is
+        // "run the simulation", Field Notes is "read the analysis". Each
+        // event's replay page still links its own paper in-page, so the
+        // event→paper path survives; it just isn't duplicated in the nav.
         label: 'Hindcast Lab',
         id: 'hindcast-lab',
         items: [
             { section: 'May 2024 · Gannon superstorm (G5)' },
             { href: 'gannon-superstorm.html', label: 'Gannon Superstorm', sub: '72 h replay · MHD-corrected density vs the Ap ceiling', tier: 'public', icon: '⚡', id: 'gannon-superstorm' },
-            { href: 'blog-gannon-hindcast.html', label: '↳ Paper · The Index That Lied', sub: 'Write-up · EN/ES/FR', tier: 'public', icon: '📝', id: 'blog-gannon-hindcast' },
             { section: "Mar 2015 · St. Patrick's Day (G4)" },
             { href: 'st-patrick-storm.html', label: "St. Patrick's Storm", sub: 'Two-step main phase · the community benchmark', tier: 'public', icon: '🍀', badge: 'NEW', id: 'st-patrick-storm' },
-            { href: 'blog-stpatrick-hindcast.html', label: '↳ Paper · The Storm Every Model Takes', sub: 'Write-up · EN/ES/FR', tier: 'public', icon: '📝', badge: 'NEW', id: 'blog-stpatrick-hindcast' },
         ],
     },
     {

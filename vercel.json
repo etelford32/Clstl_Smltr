@@ -346,6 +346,34 @@
       "destination": "/feedback.html"
     },
     {
+      "source": "/far-side-watch",
+      "destination": "/far-side-watch.html"
+    },
+    {
+      "source": "/gannon-superstorm",
+      "destination": "/gannon-superstorm.html"
+    },
+    {
+      "source": "/st-patrick-storm",
+      "destination": "/st-patrick-storm.html"
+    },
+    {
+      "source": "/request-access",
+      "destination": "/request-access.html"
+    },
+    {
+      "source": "/satellite-designer",
+      "destination": "/satellite-designer.html"
+    },
+    {
+      "source": "/spaceship-designer",
+      "destination": "/spaceship-designer.html"
+    },
+    {
+      "source": "/satellite-game",
+      "destination": "/satellite-game.html"
+    },
+    {
       "source": "/blog",
       "destination": "/blog.html"
     },
@@ -367,15 +395,15 @@
     },
     {
       "source": "/satellite-operator",
-      "destination": "/satellite-operator/landing.html"
+      "destination": "/for-operators.html"
     },
     {
       "source": "/satellite-operators",
-      "destination": "/satellite-operator/landing.html"
+      "destination": "/for-operators.html"
     },
     {
       "source": "/for-operators",
-      "destination": "/satellite-operator/landing.html"
+      "destination": "/for-operators.html"
     },
     {
       "source": "/educators",
