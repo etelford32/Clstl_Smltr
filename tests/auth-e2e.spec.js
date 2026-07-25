@@ -83,26 +83,70 @@ async function stubSupabase(page, { tokenResult = 'success' } = {}) {
 // ─────────────────────────────────────────────────────────────────────────────
 // A. OAuth misland sentinel — the regression test for the original outage
 // ─────────────────────────────────────────────────────────────────────────────
+/*
+ * WAIT STRATEGY — read before changing any goto() in this block.
+ *
+ * page.goto() defaults to waitUntil:'load'. That default is WRONG for these
+ * specs and caused a long-running CI flake (e2e-auth red on main 2026-07-21
+ * and 07-24, and on PR #957, always the same webkit-auth spec):
+ *
+ *   Error: page.goto: Test timeout of 60000ms exceeded.
+ *     - navigating to ".../space-weather.html#error=access_denied", waiting until "load"
+ *
+ * The sentinel exists to navigate AWAY from the page under test. It runs when
+ * nav.js's module graph evaluates (before DOMContentLoaded) and then calls
+ * location.replace() 200ms later. The pages it lands on are heavy — measured
+ * locally, `load` fires at ~5.6s on space-weather.html and ~19s on index.html,
+ * while the bounce happens at ~1.1s. So the original document is ALWAYS torn
+ * down mid-load and its `load` event never fires. Asking goto() to wait for
+ * that event is asking for something the feature guarantees will not happen.
+ *
+ * Chromium and Firefox resolve the interrupted navigation against the new
+ * document and move on; WebKit does not, so goto() hung for the full 60s test
+ * timeout. It looked intermittent only because it depends on whether `load`
+ * happens to beat the 200ms timer — on a fast runner it sometimes did.
+ *
+ * So: assert on the outcome (the URL we bounce to), never on a lifecycle
+ * event of a document we are deliberately destroying.
+ *   - Redirect-expected specs use waitUntil:'commit' — resolve as soon as the
+ *     response lands; waitForURL below is the real assertion.
+ *   - The redirect-NOT-expected spec uses 'domcontentloaded' instead, because
+ *     "it stayed put" is only meaningful once the sentinel has actually had a
+ *     chance to run. ES modules evaluate before DOMContentLoaded, so that
+ *     event is the earliest point where a non-redirect proves anything; with
+ *     'commit' the assertion would pass vacuously against a blank document.
+ *
+ * The waitForURL budget is 30s rather than 10s: 'commit' returns before the
+ * module graph has evaluated, so this timeout now covers the sentinel's whole
+ * startup path (nav.js → oauth-sentinel.js → telemetry.js + auth-funnel.js)
+ * on a cold, contended CI runner, which the old 10s no longer masks.
+ */
+const BOUNCE = /\/auth-callback\.html\?from=recovered_misland/;
+const BOUNCE_TIMEOUT = 30_000;
+
 test.describe('OAuth misland sentinel', () => {
     test.beforeEach(async ({ page }) => { await stubSupabase(page); });
 
     test('an access_token landing on the root is forwarded to /auth-callback', async ({ page }) => {
         const hash = '#access_token=' + fakeJwt(USER_ID) +
             '&refresh_token=fake-refresh-token&token_type=bearer&expires_in=3600';
-        await page.goto('/' + hash);
-        await page.waitForURL(/\/auth-callback\.html\?from=recovered_misland/, { timeout: 10_000 });
+        await page.goto('/' + hash, { waitUntil: 'commit' });
+        await page.waitForURL(BOUNCE, { timeout: BOUNCE_TIMEOUT });
         // The token payload must survive the bounce so the callback can use it.
         expect(page.url()).toContain('access_token');
     });
 
     test('an OAuth error landing on a normal page is forwarded too', async ({ page }) => {
-        await page.goto('/space-weather.html#error=access_denied&error_description=User+cancelled');
-        await page.waitForURL(/\/auth-callback\.html\?from=recovered_misland/, { timeout: 10_000 });
+        await page.goto('/space-weather.html#error=access_denied&error_description=User+cancelled',
+            { waitUntil: 'commit' });
+        await page.waitForURL(BOUNCE, { timeout: BOUNCE_TIMEOUT });
         expect(page.url()).toContain('error=access_denied');
     });
 
     test('a plain in-page anchor is NOT treated as an auth payload', async ({ page }) => {
-        await page.goto('/#features');
+        // 'domcontentloaded' — not 'commit' — so the sentinel has demonstrably
+        // run by the time we assert it did nothing. See the note above.
+        await page.goto('/#features', { waitUntil: 'domcontentloaded' });
         // Give the sentinel its 200ms window and then some — it must stay put.
         await page.waitForTimeout(1000);
         expect(page.url()).not.toContain('auth-callback');
