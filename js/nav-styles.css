@@ -21,7 +21,10 @@ nav {
     -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
     margin-right: 2px; flex-shrink: 0;
 }
-.nav-logo-img { height: 30px; width: auto; border-radius: 50%; flex-shrink: 0; }
+/* The mark is now SVG (icons/logo-mark.svg). NO border-radius: the old 50%
+   crop existed because the logo was a square JPEG photo that needed rounding;
+   applied to the vector it slices the orbital rings off at the corners. */
+.nav-logo-img { height: 30px; width: auto; flex-shrink: 0; }
 .nav-menu { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
 .nav-item {
     padding: 5px 10px; background: rgba(255,255,255,.07);
@@ -172,7 +175,18 @@ nav {
 }
 .nav-drop-link.active { background: rgba(255,200,0,.06); }
 .nav-drop-link.active .ndl-title { color: #ffd700 !important; font-weight: 600; }
-.ndl-icon { font-size: 1.05rem; width: 20px; text-align: center; flex-shrink: 0; opacity: .72; transition: opacity .15s; }
+/* Icons are inline SVG from js/glyphs.js. text-align no longer centres an
+   SVG child, so this is a flex box; font-size stays as the fallback path for
+   a non-glyph value (see navIcon() in nav.js). The glyphs paint with
+   currentColor, so the .72 -> 1 hover ramp below now actually tints them
+   instead of fading a fixed-palette emoji bitmap. */
+.ndl-icon {
+    font-size: 1.05rem; width: 20px; height: 20px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #9fb4d0; opacity: .72; transition: opacity .15s, color .15s;
+}
+.nav-drop-link:hover .ndl-icon { color: #ffd700; }
+.ndl-icon .pp-glyph { display: block; }
 .ndl-body { display: flex; flex-direction: column; gap: 1px; }
 .ndl-title { color: #c8c8c8; font-size: .82rem; font-weight: 500; line-height: 1.25; transition: color .15s; }
 .ndl-sub { color: #484e60; font-size: .70rem; line-height: 1.2; transition: color .15s; }
@@ -278,7 +292,8 @@ nav {
         border-radius: 6px;
     }
     .nav-drop-link:active { background: rgba(255,255,255,.10); }
-    .ndl-icon { font-size: .9rem; }
+    .ndl-icon { font-size: .9rem; width: 18px; height: 18px; }
+    .ndl-icon .pp-glyph { width: 18px; height: 18px; }
 
     /* Visual indicator for open dropdown */
     .nav-drop.open .nav-drop-btn:not(.active) {
