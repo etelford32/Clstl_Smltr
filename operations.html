@@ -2448,6 +2448,7 @@ import { mountGlobePicker }   from './js/operations/globe-picker.js';
 import { mountConjTimeline }  from './js/operations/conj-timeline.js';
 import { mountManeuverPanel } from './js/operations/maneuver.js';
 import { mountOrbitInspector } from './js/operations/orbit-inspector.js';
+import { startMsisDecay }     from './js/operations/msis-drag.js';
 import { showToast }          from './js/operations/toast.js';
 import * as bPlane            from './js/operations/b-plane.js';
 import * as densityMap        from './js/operations/density-map.js';
@@ -2637,6 +2638,17 @@ const stopSwpcBridge = startSwpcBridge();
 // ETAs shorten. Started before the deck mounts so they read live values on
 // first paint rather than the ?? 150/15 fallbacks.
 const stopSwDriver = startSwDriver();
+
+/* ─── NRLMSISE-00 decay integration ────────────────────── */
+// Boots the shared Rust/WASM MSIS kernel and registers the density
+// provider msis-drag.js integrates over. Once resolved, Decay Watch and
+// the orbit inspector repaint from the King-Hele surrogate to the real
+// model (onMsisReady hooks); until then — or on any failure — the
+// surrogate stays in charge. Date source is the sim cursor so a scrub
+// into a forecast window evaluates MSIS at the sim date.
+startMsisDecay({ getDateMs: () => timeBus.getState().simTimeMs }).then(ok => {
+    if (ok) console.log('[msis-drag] NRLMSISE-00 decay integration active');
+});
 
 /* ─── Atmospheric drag shell (globe layer) ─────────────── */
 // The forecast made visible. Brightness/colour track drag.rho450 — the same

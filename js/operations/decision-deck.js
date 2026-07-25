@@ -31,6 +31,9 @@ import { bindBand }           from './bands.js';
 import { attachDelta }        from './delta.js';
 import { timeBus }            from './time-bus.js';
 import { ConjunctionScreener } from './conjunction-screener.js';
+import {
+    msisDecayWithSigma, msisDeltaAPerDay, onMsisReady,
+} from './msis-drag.js';
 
 /* ─── Decay heuristic ─────────────────────────────────────────
  * The existing js/orbital-analytics.js estimateOrbitLifetime() ships
@@ -52,6 +55,15 @@ import { ConjunctionScreener } from './conjunction-screener.js';
  * The provenance record makes that explicit, and Enterprise
  * customers can wire their own propagator output into the same
  * provStore key without touching the deck.
+ *
+ * 2026-07: the surrogate is now the FALLBACK. decayWithSigma and
+ * deltaAPerDay dispatch to js/operations/msis-drag.js first — an
+ * NRLMSISE-00-driven orbit-averaged decay integration reading the
+ * TLE's own B* — and only run the piecewise surrogate when the MSIS
+ * path is unavailable (WASM failed, no provider, bad TLE). Results
+ * carry `model: 'msis' | 'surrogate'` so provenance + UI labels can
+ * say which one produced the number. Keep BOTH paths: the surrogate
+ * is the no-WASM story and the sanity cross-check.
  */
 function altPerigeeKmFromTle(tle) {
     if (Number.isFinite(tle?.perigee_km)) return tle.perigee_km;
@@ -120,6 +132,12 @@ function decayLifetimeDays(tle, f107, ap) {
  * any input where the lifetime is non-finite.
  */
 export function deltaAPerDay(tle, f107, ap, perigeeStepKm = 25) {
+    // MSIS path first: real orbit-averaged ȧ from the NRLMSISE-00
+    // profile — smooth, no bucket differencing. Null → surrogate.
+    try {
+        const m = msisDeltaAPerDay(tle, f107, ap);
+        if (m != null && Number.isFinite(m)) return m;
+    } catch (_) { /* fall through to the surrogate */ }
     const perigee = altPerigeeKmFromTle(tle);
     if (!Number.isFinite(perigee) || perigee >= 1000) return 0;
     const L0 = decayLifetimeDays(tle, f107, ap);
@@ -135,8 +153,15 @@ export function deltaAPerDay(tle, f107, ap, perigeeStepKm = 25) {
 }
 
 export function decayWithSigma(tle, f107Mid, sigF107, apMid, sigAp) {
+    // MSIS path first — see the dispatch note in the header comment.
+    try {
+        const m = msisDecayWithSigma(tle, f107Mid, sigF107, apMid, sigAp);
+        if (m) return m;
+    } catch (err) {
+        console.warn('[decision-deck] MSIS decay failed, using surrogate:', err);
+    }
     const mid = decayLifetimeDays(tle, f107Mid, apMid);
-    if (mid == null || !Number.isFinite(mid)) return { lifetime_days: mid, sigma_days: 0, perigee_km: altPerigeeKmFromTle(tle) };
+    if (mid == null || !Number.isFinite(mid)) return { lifetime_days: mid, sigma_days: 0, perigee_km: altPerigeeKmFromTle(tle), model: 'surrogate' };
 
     const hi = decayLifetimeDays(tle, f107Mid + sigF107, apMid + sigAp);
     const lo = decayLifetimeDays(tle, Math.max(60, f107Mid - sigF107), Math.max(5, apMid - sigAp));
@@ -151,6 +176,7 @@ export function decayWithSigma(tle, f107Mid, sigF107, apMid, sigAp) {
         lifetime_days: mid,
         sigma_days:    sigma,
         perigee_km:    altPerigeeKmFromTle(tle),
+        model:         'surrogate',
     };
 }
 
@@ -370,25 +396,41 @@ export function mountDecayWatch(fleet) {
             if (!a.tle) continue;
             const provKey = `decay.lifetime.${a.noradId}`;
             const r = decayWithSigma(a.tle, f107, sigF107, ap, sigAp);
+            const isMsis = r.model === 'msis';
+            const bstarStr = Number.isFinite(r.bstar) && r.bcSource === 'tle-bstar'
+                ? `B* ${r.bstar.toExponential(2)} R⊕⁻¹ from the TLE`
+                : `default C_D·A/m ${r.bc ?? '?'} m²/kg (TLE B* unusable)`;
             provStore.set(provKey, {
                 value: r.lifetime_days,
                 unit:  'days',
                 sigma: r.sigma_days,
-                source: 'derived (Operations decay heuristic v1)',
-                model:  'Calibrated piecewise altitude × F10.7 × Ap surrogate',
-                formula: 'months(perigee) · (150/F10.7)^1.5 · (15/Ap)^0.4',
+                source: isMsis
+                    ? 'derived (NRLMSISE-00 decay integration)'
+                    : 'derived (Operations decay heuristic v1)',
+                model:  isMsis
+                    ? 'NRLMSISE-00 ρ · orbit-averaged Gauss ȧ/ė integration'
+                    : 'Calibrated piecewise altitude × F10.7 × Ap surrogate',
+                formula: isMsis
+                    ? 'ȧ = −a²ρ(h)v³B/μ orbit-averaged; B = 12.74·B*'
+                    : 'months(perigee) · (150/F10.7)^1.5 · (15/Ap)^0.4',
                 inputs: ['idx.f107', 'idx.ap'],
                 cacheState: 'derived',
                 fetchedAt: new Date().toISOString(),
-                description:
-                    `Triage estimate of orbit lifetime for ${a.name} (NORAD ` +
-                    `${a.noradId}) at perigee ${r.perigee_km ?? '?'} km. ` +
-                    `Calibrated to NASA / ESA published decay reference values; ` +
-                    `NOT a King-Hele integration. Decision-grade lifetime forecasts ` +
-                    `require an SP propagator (STELA / HEAVENS) — Enterprise can ` +
-                    `wire their propagator output into this same provStore key. ` +
-                    `Uncertainty band combines F10.7 + Ap forecast spreads with a ` +
-                    `±25 % ballistic-coefficient assumption.`,
+                description: isMsis
+                    ? `Orbit lifetime for ${a.name} (NORAD ${a.noradId}) at perigee ` +
+                      `${r.perigee_km ?? '?'} km, integrated over NRLMSISE-00 density ` +
+                      `(day/night-averaged equatorial profile) with ${bstarStr}. ` +
+                      `TLE B* is an SGP4 fit parameter, not a measurement — it can sit a ` +
+                      `factor ~2 from the physical C_D·A/m; the σ band carries that plus ` +
+                      `the F10.7 / Ap forecast spread. Triage-grade, not flight dynamics.`
+                    : `Triage estimate of orbit lifetime for ${a.name} (NORAD ` +
+                      `${a.noradId}) at perigee ${r.perigee_km ?? '?'} km. ` +
+                      `Calibrated to NASA / ESA published decay reference values; ` +
+                      `NOT a King-Hele integration. Decision-grade lifetime forecasts ` +
+                      `require an SP propagator (STELA / HEAVENS) — Enterprise can ` +
+                      `wire their propagator output into this same provStore key. ` +
+                      `Uncertainty band combines F10.7 + Ap forecast spreads with a ` +
+                      `±25 % ballistic-coefficient assumption.`,
             });
 
             const node = document.getElementById(`op-decay-life-${a.noradId}`);
@@ -399,7 +441,10 @@ export function mountDecayWatch(fleet) {
                 const rec = provStore.get(provKey);
                 if (!rec) return;
                 const v   = fmtLifetime(rec.value);
-                const lo  = fmtLifetime(rec.value - 1.2816 * rec.sigma);
+                // Clamp the P10 at zero — the wider MSIS σ (B* doubt +
+                // index spread) can push value − 1.28σ negative, and a
+                // "−3 mo" bound reads as a bug, not an uncertainty.
+                const lo  = fmtLifetime(Math.max(0, rec.value - 1.2816 * rec.sigma));
                 const hi  = fmtLifetime(rec.value + 1.2816 * rec.sigma);
                 node.innerHTML = `
                     <span class="op-band-v">${v}</span>
@@ -421,13 +466,23 @@ export function mountDecayWatch(fleet) {
             // scrubbing into a storm steepens this rate in lockstep with the
             // ETA shortening. Published for the data dictionary / export.
             const subNode = document.getElementById(`op-decay-sub-${a.noradId}`);
-            const rateKmDay = perigeeDropRate(r.perigee_km, r.lifetime_days);   // km/day, ≤ 0
+            // MSIS results carry the true instantaneous orbit-averaged ȧ;
+            // the surrogate keeps its lifetime-consistent smooth rate.
+            const rateKmDay = Number.isFinite(r.dadt_km_day)
+                ? r.dadt_km_day
+                : perigeeDropRate(r.perigee_km, r.lifetime_days);   // km/day, ≤ 0
             const rateProvKey = `decay.rate.${a.noradId}`;
             provStore.set(rateProvKey, {
                 value: rateKmDay, unit: 'km/day',
-                source: 'derived (Operations decay heuristic v1)',
-                model:  'Lifetime-consistent average dā/dt',
-                formula: '−(perigee − 120 km) / lifetime',
+                source: isMsis
+                    ? 'derived (NRLMSISE-00 decay integration)'
+                    : 'derived (Operations decay heuristic v1)',
+                model:  isMsis
+                    ? 'Orbit-averaged instantaneous ȧ over NRLMSISE-00 ρ'
+                    : 'Lifetime-consistent average dā/dt',
+                formula: isMsis
+                    ? 'ȧ = −a²ρ(h)v³B/μ orbit-averaged'
+                    : '−(perigee − 120 km) / lifetime',
                 inputs: ['idx.f107', 'idx.ap'],
                 cacheState: 'derived',
                 description:
@@ -447,6 +502,10 @@ export function mountDecayWatch(fleet) {
     provStore.subscribe(key => {
         if (key === 'idx.f107' || key === 'idx.ap') recompute();
     });
+    // WASM lands after first paint on cold loads — repaint so rows
+    // upgrade from the surrogate to MSIS without waiting for an index
+    // move or a fleet edit.
+    onMsisReady(recompute);
 }
 
 /* ─── Conjunctions panel ──────────────────────────────────── */

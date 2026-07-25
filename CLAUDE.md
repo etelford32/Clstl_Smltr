@@ -55,6 +55,7 @@ This is **parkersphysics.com** — a physics-first space weather forecasting pla
 | Tier gates / plan logic | `js/config.js` (TIER constants), `js/tier-config.js`, `TIER_EXPANSION_SPRINT.md` |
 | Telemetry / analytics RPCs | `ANALYTICS.md`, `js/telemetry.js`, `js/auth-funnel.js` |
 | Vercel cron / pipeline ops | `OPERATIONS_STATUS.md`, `vercel.json`, `api/cron/*` |
+| Operations console decay math (operations.html Decay Watch / orbit inspector) | `OPERATIONS_STATUS.md` (roadmap + known limits), then `js/operations/msis-drag.js` header — NRLMSISE-00 orbit-averaged decay integration with the King-Hele surrogate as the deliberate no-WASM fallback (results carry `model: 'msis'\|'surrogate'`; keep BOTH paths). Run `node tests/operations-msis-drag.mjs` after ANY decay-math edit. The drag shell / prop budget (`sw-model.js` `drag.rho450` ÷ `RHO_REF_450`) stay on the Bates surrogate ON PURPOSE — numerator and reference must move to MSIS together or the ×N-vs-quiet overhead silently skews |
 | SWMF Docker container | `swmf/Dockerfile` header comments, `MHD_DENSITY_PHASE0_RUNBOOK.md` |
 | Gannon hindcast | `GANNON_SIMULATION_DESIGN.md`, `MHD_DENSITY_PHASE0_GANNON_RUNBOOK.md` |
 | Hindcast database (new events, scorecards) | `HINDCAST_BACKLOG.md`, `HINDCAST_DATABASE_STANDARD.md`, then the per-event runbook |
