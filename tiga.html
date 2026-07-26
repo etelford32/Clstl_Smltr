@@ -174,6 +174,11 @@ body {
     background:rgba(6,9,28,.72); border:1px solid rgba(90,110,160,.24); border-radius:12px;
 }
 .tg-stagebar .tg-field { margin-bottom:0; }
+/* Inert, not hidden: the control still says what it would do, and why it
+   currently does not. Hiding it would make the bar jump on every mode change. */
+.tg-field.tg-inert { opacity:.42; }
+.tg-field.tg-inert label { text-decoration:line-through; text-decoration-thickness:1px; }
+.tg-field.tg-inert input { cursor:not-allowed; }
 .tg-stagestats { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:8px; margin-top:10px; }
 .tg-stage {
     position:relative; width:100%; height:560px; border-radius:10px; overflow:hidden;
@@ -1702,6 +1707,7 @@ async function boot3d() {
         apply3d();
         applyScreening();
         applyCutaway();
+        syncStageControls();
         const active = layerButtons.find((b) => b.getAttribute('aria-selected') === 'true');
         scene3d.setLayer(active ? active.dataset.layer : 'external');
 
@@ -1815,8 +1821,31 @@ function applyCutaway() {
 $('tg-3d-cut').addEventListener('input', applyCutaway);
 $('tg-3d-cutaz').addEventListener('input', applyCutaway);
 
+/**
+ * Reflect which controls actually DO anything in the current mode.
+ *
+ * The cutaway plane is attached only to the layer-shell materials, and the
+ * mantle shell is forced transparent while the layer stack is open. Both
+ * sliders therefore go inert depending on mode — and a control that looks live
+ * and does nothing reads as a broken app, not as a setting that does not apply.
+ */
+function syncStageControls() {
+    const layers = $('tg-3d-interior').value === 'layers';
+    const setEnabled = (id, on, why) => {
+        const el = $(id);
+        el.disabled = !on;
+        const row = el.closest('.tg-field');
+        row.classList.toggle('tg-inert', !on);
+        row.title = on ? '' : why;
+    };
+    setEnabled('tg-3d-cut', layers, 'Cutaway applies to the layer stack — switch Interior to “Layer structure”.');
+    setEnabled('tg-3d-cutaz', layers, 'Cut angle applies to the layer stack — switch Interior to “Layer structure”.');
+    setEnabled('tg-3d-mantle', !layers, 'The mantle is hidden while the layer stack is open.');
+}
+
 $('tg-3d-interior').addEventListener('change', () => {
     const layers = $('tg-3d-interior').value === 'layers';
+    syncStageControls();
     if (scene3d) {
         scene3d.setLayerMode(layers);
         // Re-apply the current layer so the field shells come back correctly

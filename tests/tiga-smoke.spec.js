@@ -471,6 +471,38 @@ test.describe('tiga.html', () => {
         await expect(page.locator('#tg-tc-lat')).toHaveText(/69\.\d°/);
     });
 
+    test('controls that cannot act are visibly disabled, not silently inert', async ({ page }) => {
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+        if (await page.locator('#tg-stage-msg').count()) test.skip(true, 'no WebGL on this runner');
+
+        // The clip plane is attached only to the layer-shell materials, and the
+        // mantle shell is forced transparent while the layer stack is open. So
+        // each of these sliders is genuinely inert in one mode — and a control
+        // that looks live and does nothing reads as a broken app rather than as
+        // a setting that does not apply here.
+        await expect(page.locator('#tg-3d-cut')).toBeDisabled();
+        await expect(page.locator('#tg-3d-cutaz')).toBeDisabled();
+        await expect(page.locator('#tg-3d-mantle')).toBeEnabled();
+
+        await page.selectOption('#tg-3d-interior', 'layers');
+        await expect(page.locator('#tg-3d-cut')).toBeEnabled();
+        await expect(page.locator('#tg-3d-cutaz')).toBeEnabled();
+        await expect(page.locator('#tg-3d-mantle')).toBeDisabled();
+
+        // Disabled is not enough on its own — it has to say WHY.
+        const row = page.locator('#tg-3d-mantle').locator('xpath=ancestor::div[contains(@class,"tg-field")][1]');
+        await expect(row).toHaveAttribute('title', /layer stack/);
+
+        await page.selectOption('#tg-3d-interior', 'field');
+        await expect(page.locator('#tg-3d-cut')).toBeDisabled();
+        await expect(page.locator('#tg-3d-mantle')).toBeEnabled();
+    });
+
     test('every layer carries its honest label', async ({ page }) => {
         await killFeed(page);
         await page.goto(PAGE, { waitUntil: 'load' });
