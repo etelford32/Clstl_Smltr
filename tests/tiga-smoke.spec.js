@@ -57,14 +57,29 @@ async function mockFeed(page) {
     });
 }
 
-/** Collect page errors and console errors, ignoring the mocked-route noise. */
+/**
+ * Collect page errors and console errors.
+ *
+ * Two classes are filtered, both narrowly and for a stated reason — a broad
+ * filter here would quietly swallow the import typos this check exists to catch:
+ *
+ *  1. Resource-load failures. The observatory route is deliberately mocked to
+ *     503 in most of these tests, and favicons/manifests are absent locally.
+ *  2. The shared nav's OPTIONAL Supabase client, which it lazy-imports from a
+ *     CDN. Mounting the site nav on this page (it previously had none, which
+ *     was the bug) brought that dependency with it, and the CDN is unreachable
+ *     from a sandboxed test runner. It is third-party and outside this page's
+ *     control; auth is not part of what tiga.html does. Anything else — including
+ *     any error naming a js/geomag module — still fails the test.
+ */
 function watchErrors(page) {
     const errors = [];
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
     page.on('console', (m) => {
         if (m.type() !== 'error') return;
         const t = m.text();
-        if (/Failed to load resource/i.test(t)) return;   // mocked 503s and favicons
+        if (/Failed to load resource/i.test(t)) return;
+        if (/\[Supabase\].*(cdn\.jsdelivr\.net|supabase-js)/i.test(t)) return;
         errors.push(`console: ${t}`);
     });
     return errors;
@@ -215,6 +230,82 @@ test.describe('tiga.html', () => {
         // ONE DECADE. That is the result: a dipole is not inevitable.
         await expect(page.locator('#tg-window-decades')).toHaveText(/1\.0\d decades/);
         expect(errors).toEqual([]);
+    });
+
+    test('the site navigation actually mounts', async ({ page }) => {
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+
+        // REGRESSION GATE. initNav() does `document.querySelector('nav')` and
+        // returns early when there is none — it POPULATES a shell, it does not
+        // create one. This page shipped once without the shell: no console
+        // error, nothing in the diff, and no navigation on the page at all.
+        // Asserting the <nav> tag exists is not enough, because an empty shell
+        // looks identical in the markup — assert it got FILLED.
+        await expect(page.locator('nav')).toHaveCount(1);
+        await expect(page.locator('nav a').first()).toBeVisible();
+        expect(await page.locator('nav a').count()).toBeGreaterThan(20);
+        await expect(page.locator('#nav-burger')).toHaveCount(1);
+
+        // The skip link must reach the main landmark.
+        const target = await page.locator('.skip-link').getAttribute('href');
+        expect(target).toBe('#main-content');
+        await expect(page.locator('#main-content')).toHaveCount(1);
+    });
+
+    test('the layer tabs follow the ARIA tabs keyboard pattern', async ({ page }) => {
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+
+        const tabs = page.locator('.tg-layer');
+        // Roving tabindex: exactly one tab in the tab order, not three.
+        const tabIndexes = await tabs.evaluateAll((els) => els.map((e) => e.tabIndex));
+        expect(tabIndexes.filter((t) => t === 0)).toHaveLength(1);
+
+        await page.locator('#tg-tab-external').focus();
+        await page.keyboard.press('ArrowRight');   // wraps to the first tab
+        await expect(page.locator('#tg-tab-core')).toHaveAttribute('aria-selected', 'true');
+        // Arrow keys must MOVE FOCUS as well as selection, or a keyboard user
+        // is stranded on the tab they started from.
+        expect(await page.evaluate(() => document.activeElement.dataset.layer)).toBe('core');
+
+        await page.keyboard.press('End');
+        await expect(page.locator('#tg-tab-external')).toHaveAttribute('aria-selected', 'true');
+        await page.keyboard.press('Home');
+        await expect(page.locator('#tg-tab-core')).toHaveAttribute('aria-selected', 'true');
+
+        // Panels must be focusable so focus can land inside them.
+        await expect(page.locator('#tg-panel-core')).toHaveAttribute('tabindex', '0');
+
+        // The toggle groups announce their state.
+        await expect(page.locator('#tg-field-tabs button[aria-pressed="true"]')).toHaveCount(1);
+        await expect(page.locator('#tg-alias-tabs button[aria-pressed="true"]')).toHaveCount(1);
+    });
+
+    test('charts carry text alternatives with the actual numbers in them', async ({ page }) => {
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+
+        // A <canvas> is an empty element to a screen reader. Every chart that
+        // has been drawn must carry role="img" and a label containing the
+        // finding, not just "chart".
+        const floor = page.locator('#tg-floor-chart');
+        await expect(floor).toHaveAttribute('role', 'img', { timeout: 30000 });
+        const label = await floor.getAttribute('aria-label');
+        expect(label).toMatch(/11\.3\d nanotesla/);       // the definition floor
+        expect(label.length).toBeGreaterThan(60);
+
+        await expect(page.locator('#tg-dropout-chart'))
+            .toHaveAttribute('aria-label', /stations/, { timeout: 30000 });
+
+        // Status regions must announce async results rather than changing silently.
+        await expect(page.locator('#tg-live-status')).toHaveAttribute('aria-live', 'polite');
+        await expect(page.locator('#tg-dropout-status')).toHaveAttribute('aria-live', 'polite');
+
+        // And the lazily-drawn panels label their charts too, once drawn.
+        await page.click('[data-layer="field"]');
+        await expect(page.locator('#tg-field-map'))
+            .toHaveAttribute('aria-label', /South Atlantic Anomaly/, { timeout: 30000 });
     });
 
     test('every layer carries its honest label', async ({ page }) => {
