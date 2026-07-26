@@ -167,8 +167,16 @@ body {
    by 14px, which is a sideways-scrolling page on every phone.
    tabindex makes the region reachable by keyboard: a scrollable box that only
    a mouse or finger can pan is a WCAG 2.1.1 failure. */
+.tg-front { margin-bottom:18px; }
+.tg-stagebar {
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px 18px;
+    margin-top:12px; padding:12px 14px;
+    background:rgba(6,9,28,.72); border:1px solid rgba(90,110,160,.24); border-radius:12px;
+}
+.tg-stagebar .tg-field { margin-bottom:0; }
+.tg-stagestats { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:8px; margin-top:10px; }
 .tg-stage {
-    position:relative; width:100%; height:520px; border-radius:10px; overflow:hidden;
+    position:relative; width:100%; height:560px; border-radius:10px; overflow:hidden;
     background:radial-gradient(circle at 50% 45%, #0a1030 0%, #03010e 72%);
     border:1px solid rgba(90,110,160,.22);
 }
@@ -254,14 +262,56 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
 
 <main id="main-content" class="tg-wrap">
 
-<p class="tg-lede">
+<section class="tg-front" aria-label="Three-dimensional view">
+    <div class="tg-stage" id="tg-stage">
+        <div class="tg-stage-msg" id="tg-stage-msg">Building the field&hellip;</div>
+    </div>
+    <div class="tg-stagebar">
+        <div class="tg-field">
+            <label for="tg-3d-year">Epoch</label>
+            <input type="range" id="tg-3d-year" min="1900" max="2030" step="5" value="2025">
+            <output id="tg-3d-year-out">2025</output>
+        </div>
+        <div class="tg-field">
+            <label for="tg-3d-nmax">Truncation n</label>
+            <input type="range" id="tg-3d-nmax" min="1" max="13" step="1" value="10">
+            <output id="tg-3d-nmax-out">10</output>
+        </div>
+        <div class="tg-field">
+            <label for="tg-3d-mantle">Mantle</label>
+            <input type="range" id="tg-3d-mantle" min="0" max="100" step="1" value="28">
+            <output id="tg-3d-mantle-out">0.28</output>
+        </div>
+        <div class="tg-field">
+            <label for="tg-3d-period">Signal period</label>
+            <input type="range" id="tg-3d-period" min="-3" max="3" step="0.1" value="0.5">
+            <output id="tg-3d-period-out">3 yr</output>
+        </div>
+    </div>
+    <div class="tg-stagestats">
+        <div class="tg-stat"><div class="v hot" id="tg-3d-peak">&mdash;</div><div class="k">peak |B_r| at CMB</div></div>
+        <div class="tg-stat"><div class="v warn" id="tg-3d-reversed">&mdash;</div><div class="k">reversed flux, CMB</div></div>
+        <div class="tg-stat"><div class="v" id="tg-3d-revsurf">&mdash;</div><div class="k">reversed flux, surface</div></div>
+        <div class="tg-stat"><div class="v" id="tg-3d-lines">&mdash;</div><div class="k">lines escaping core</div></div>
+        <div class="tg-stat"><div class="v" id="tg-3d-gain">&mdash;</div><div class="k">continuation gain at n</div></div>
+        <div class="tg-stat"><div class="v good" id="tg-3d-survival">&mdash;</div><div class="k">reaches the surface</div></div>
+    </div>
+    <div class="tg-status" id="tg-3d-status" role="status" aria-live="polite"></div>
+</section>
+
+<p class="tg-lede" style="padding-top:16px">
     A ground magnetometer records two physically separate planets at once, and each one's signal is
     the other's noise. Below about a cycle per decade the record is the <strong>geodynamo</strong> —
     currents in liquid iron 2,891&nbsp;km down. Above it, the record is the
     <strong>magnetosphere</strong>. Field modellers subtract the second to see the first; space-weather
-    modellers subtract the first to see the second. This page runs all three layers and labels each one
-    honestly: only the top layer is real-time, and it is a <strong>nowcast with zero lead time</strong>,
-    not a forecast.
+    modellers subtract the first to see the second.
+    <br><br>
+    <strong>Pick a layer below.</strong> The view above is one Earth seen three ways — the camera flies,
+    the shells cross-fade, and the panel changes with it. Only the top layer is real-time, and it is a
+    <strong>nowcast with zero lead time</strong>, not a forecast. Nothing here is a geodynamo
+    simulation: what is drawn is the <em>observed</em> field continued down to the core, field lines
+    integrated through it, and magnetic diffusion actually solved. The missing piece is the flow — and
+    that is the piece that needs a supercomputer.
 </p>
 
 <div class="tg-spine" role="tablist" aria-label="Timescale layers">
@@ -575,6 +625,11 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
 <!-- ══════════════════════════ CORE ══════════════════════════════════ -->
 <section id="tg-panel-core" role="tabpanel" tabindex="0" aria-labelledby="tg-tab-core">
     <div class="tg-callout warn" style="margin-top:0;margin-bottom:14px">
+        <strong>The view above is now showing the core.</strong> Radii are true &mdash; Earth 1.0,
+        core&ndash;mantle boundary 0.546, inner core 0.192, nothing compressed. Pull the mantle down to
+        see inside, and the truncation slider down to watch the small-scale structure &mdash; and its
+        uncertainty &mdash; disappear together.
+        <br><br>
         <strong>This is not a geodynamo simulation, and nothing on this page claims to be one.</strong>
         A real 3-D MHD dynamo needs a supercomputer, and the best published runs still sit eight orders of
         magnitude from Earth's Ekman number — you can read that number off the table below. What runs here
@@ -582,60 +637,13 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
         almost all of the physics. They still answer real questions.
     </div>
 
-    <div class="tg-card" style="margin-bottom:14px">
-        <h3>The field at the core&ndash;mantle boundary <span class="tg-tag derived">Observation-derived</span></h3>
-        <p class="tg-note">
-            The IGRF field, continued <em>down</em> to 3,480&nbsp;km and traced in 3D. Radii are true:
-            Earth 1.0, core&ndash;mantle boundary 0.546, inner core 0.192 &mdash; nothing is compressed.
-            Field lines are integrated by RK4 through the actual spherical-harmonic field, so their
-            shapes are computed, not drawn. Drag to orbit, scroll to zoom.
-        </p>
-        <div class="tg-stage" id="tg-stage">
-            <div class="tg-stage-msg" id="tg-stage-msg">Building the field&hellip;</div>
-        </div>
-        <div class="tg-grid tg-2e" style="margin-top:12px">
-            <div>
-                <div class="tg-field">
-                    <label for="tg-3d-year">Epoch</label>
-                    <input type="range" id="tg-3d-year" min="1900" max="2030" step="5" value="2025">
-                    <output id="tg-3d-year-out">2025</output>
-                </div>
-                <div class="tg-field">
-                    <label for="tg-3d-nmax">Truncation n</label>
-                    <input type="range" id="tg-3d-nmax" min="1" max="13" step="1" value="10">
-                    <output id="tg-3d-nmax-out">10</output>
-                </div>
-                <div class="tg-field">
-                    <label for="tg-3d-mantle">Mantle opacity</label>
-                    <input type="range" id="tg-3d-mantle" min="0" max="100" step="1" value="45">
-                    <output id="tg-3d-mantle-out">0.45</output>
-                </div>
-                <div class="tg-field">
-                    <label for="tg-3d-period">Signal period</label>
-                    <input type="range" id="tg-3d-period" min="-3" max="3" step="0.1" value="0.5">
-                    <output id="tg-3d-period-out">3 yr</output>
-                </div>
-            </div>
-            <div>
-                <div class="tg-stats">
-                    <div class="tg-stat"><div class="v hot" id="tg-3d-peak">&mdash;</div><div class="k">peak |B_r| at CMB</div></div>
-                    <div class="tg-stat"><div class="v warn" id="tg-3d-reversed">&mdash;</div><div class="k">reversed-flux area</div></div>
-                    <div class="tg-stat"><div class="v" id="tg-3d-lines">&mdash;</div><div class="k">lines escaping core</div></div>
-                    <div class="tg-stat"><div class="v" id="tg-3d-gain">&mdash;</div><div class="k">continuation gain at n</div></div>
-                    <div class="tg-stat"><div class="v good" id="tg-3d-survival">&mdash;</div><div class="k">reaches the surface</div></div>
-                </div>
-                <div class="tg-status" id="tg-3d-status" role="status" aria-live="polite"></div>
-            </div>
-        </div>
-        <div class="tg-callout warn">
-            <strong>Downward continuation is real, and it is where over-interpretation starts.</strong>
-            The expansion is valid anywhere the field is current-free, so evaluating it at the CMB is
-            legitimate &mdash; but each degree gains (a/r)<sup>n+2</sup>, which is about 6&times; at
-            degree&nbsp;1 and <strong>8,700&times; at degree&nbsp;13</strong>. Continuation amplifies the
-            coefficients' own error along with the signal, and past degree&nbsp;13 it would amplify the
-            <em>crustal</em> field as though it came from the core. Pull the truncation slider down and
-            watch the small-scale structure &mdash; and its uncertainty &mdash; disappear together.
-        </div>
+    <div class="tg-callout warn" style="margin-bottom:14px">
+        <strong>Downward continuation is real, and it is where over-interpretation starts.</strong>
+        The expansion is valid anywhere the field is current-free, so evaluating it at the CMB is
+        legitimate &mdash; but each degree gains (a/r)<sup>n+2</sup>, about 6&times; at degree&nbsp;1 and
+        <strong>8,700&times; at degree&nbsp;13</strong>. Continuation amplifies the coefficients' own
+        error along with the signal, and past degree&nbsp;13 it would amplify the <em>crustal</em> field
+        as though it came from the core.
     </div>
 
     <div class="tg-card" style="margin-bottom:14px">
@@ -968,6 +976,8 @@ function showLayer(name, { focusTab = false } = {}) {
     // not at boot. Drawing all three up front produced 1-pixel-wide canvases.
     if (!rendered.has(name)) { rendered.add(name); renderLayer(name); }
     else if (name === 'field') drawFieldMap();
+    // The front-door view follows the tabs — same Earth, three framings.
+    if (scene3d) scene3d.setLayer(name);
     try { history.replaceState(null, '', `#${name}`); } catch (_) {}
 }
 layerButtons.forEach((b, i) => {
@@ -1583,6 +1593,9 @@ async function boot3d() {
         scene3d = new CoreFieldScene(host, { year: 2025, nmax: 10 });
         msg.remove();
         apply3d();
+        applyScreening();
+        const active = layerButtons.find((b) => b.getAttribute('aria-selected') === 'true');
+        scene3d.setLayer(active ? active.dataset.layer : 'external');
 
         // Pause GL when the panel is hidden or scrolled away — the tab is
         // running a Kalman filter and a dynamo solver too.
@@ -1608,12 +1621,15 @@ function apply3d() {
     const d = scene3d.update({ year, nmax, lineCount: 24 });
     $('tg-3d-peak').innerHTML = `${d.peakCmbFieldUt.toFixed(0)} <small>µT</small>`;
     $('tg-3d-reversed').textContent = `${d.reversedFluxPercent.toFixed(1)}%`;
+    $('tg-3d-revsurf').textContent = `${d.surfaceReversedPercent.toFixed(1)}%`;
     $('tg-3d-lines').textContent = `${d.lines.escaping} / ${d.lines.total}`;
     $('tg-3d-gain').textContent = `${Math.round(d.gainDegreeMax).toLocaleString()}×`;
     $('tg-3d-status').textContent =
-        `IGRF-14 at epoch ${year}, truncated at degree ${nmax}, continued to 3,480 km. `
-        + `${d.lines.closed} of ${d.lines.total} traced lines close inside the core rather than `
-        + `reaching the surface — that split is L-shell structure, not a drawing choice.`;
+        `IGRF-14 at epoch ${year}, truncated at degree ${nmax}. Peak radial field `
+        + `${d.peakSurfaceFieldUt.toFixed(0)} µT at the surface against ${d.peakCmbFieldUt.toFixed(0)} µT `
+        + `at the core — that ratio is the continuation, not a stronger field. `
+        + `${d.lines.closed} of ${d.lines.total} traced lines close inside the core rather than reaching `
+        + `the surface, which is L-shell structure and not a drawing choice.`;
 }
 
 function applyScreening() {
@@ -1828,15 +1844,18 @@ function renderLayer(name) {
         fillCoreTables();
         drawRikitake();
         drawParity();
-        applyScreening();
         drawDecayLive();
-        if (!scene3d) boot3d();
     }
 }
 
 const initial = ['core', 'field', 'external'].includes(location.hash.slice(1))
     ? location.hash.slice(1) : 'external';
 showLayer(initial);
+applyScreening();
+// The 3D view is the front door now, so it boots with the page rather than
+// waiting for the Core tab. Still dynamically imported: a WebGL failure has to
+// degrade to a message, not take the page with it.
+boot3d();
 
 let resizeTimer = null;
 window.addEventListener('resize', () => {

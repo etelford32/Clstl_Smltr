@@ -54,6 +54,7 @@ import {
     radialFieldSphere, seedFieldLines, R_CMB_KM, R_INNER_CORE_KM, continuationGain,
 } from './field-lines.js';
 import { mantleScreening, D_MANTLE_M } from './core-model.js';
+import { KYOTO_TABLE1 } from './observatories.js';
 
 const R_EARTH = 1;
 const R_CMB = R_CMB_KM / REF_RADIUS_KM;
@@ -231,6 +232,19 @@ void main() {
     gl_FragColor = vec4(col, uOpacity * (0.25 + 0.75 * fade));
 }`;
 
+/**
+ * What each page layer means for the camera and for what is visible.
+ *
+ * One Earth, three framings — the page's whole argument is that these are
+ * layers of the SAME system separated by timescale, so showing three different
+ * objects would undercut it.
+ */
+export const LAYER_VIEW = Object.freeze({
+    core:     { dist: 1.55, mantle: 0.18, cmb: 1.0,  surface: 0.0, innerCore: true,  obs: false, lines: 1.0 },
+    field:    { dist: 2.60, mantle: 0.10, cmb: 0.30, surface: 0.92, innerCore: false, obs: false, lines: 0.55 },
+    external: { dist: 3.30, mantle: 0.16, cmb: 0.0,  surface: 0.96, innerCore: false, obs: true,  lines: 0.85 },
+});
+
 // ── Scene ────────────────────────────────────────────────────────────────────
 
 export class CoreFieldScene {
@@ -276,8 +290,16 @@ export class CoreFieldScene {
 
         this._buildInnerCore();
         this._buildCmb();
+        this._buildSurface();
+        this._buildObservatories();
         this._buildMantle();
         this.fieldLines = null;
+
+        // Camera flight state. The layer switch MOVES the camera rather than
+        // cutting, because a cut between two spheres of different size reads
+        // as a different object; a flight reads as the same Earth seen closer.
+        this.layer = 'external';
+        this._targetDist = LAYER_VIEW.external.dist;
 
         this._onResize = () => this.resize();
         window.addEventListener('resize', this._onResize);
@@ -312,6 +334,71 @@ export class CoreFieldScene {
         });
         this.cmb = new THREE.Mesh(geo, this.cmbMaterial);
         this.group.add(this.cmb);
+    }
+
+    _buildSurface() {
+        // The SAME shader as the CMB, at r = 1. Using one shader for both is
+        // the point: it is one field evaluated at two radii, and the visual
+        // difference between them is entirely the continuation gain.
+        const geo = new THREE.SphereGeometry(R_EARTH * 0.999, 128, 80);
+        this.surfaceUniforms = {
+            uField: { value: null }, uScale: { value: 1 },
+            uReversedMix: { value: 0.85 }, uOpacity: { value: 0 },
+        };
+        this.surfaceMaterial = new THREE.ShaderMaterial({
+            vertexShader: CMB_VERT, fragmentShader: CMB_FRAG,
+            uniforms: this.surfaceUniforms, transparent: true,
+        });
+        // Render the surface EARLY and let it write depth once it is opaque.
+        // Additively-blended field lines inside the sphere otherwise shine
+        // straight through it, which reads as clutter rather than as depth.
+        this.surface = new THREE.Mesh(geo, this.surfaceMaterial);
+        this.surface.visible = false;
+        this.surface.renderOrder = -1;
+        this.group.add(this.surface);
+    }
+
+    _buildObservatories() {
+        // The eleven canonical SYM-H stations, at their real geographic
+        // positions from the primary-source table. Placed slightly above the
+        // surface so they are not z-fighting with it.
+        this.observatories = new THREE.Group();
+        this.observatories.visible = false;
+        const geo = new THREE.SphereGeometry(0.022, 14, 10);
+        const DEGR = Math.PI / 180;
+        for (const [code, v] of Object.entries(KYOTO_TABLE1)) {
+            const lat = v.latDeg * DEGR;
+            const lon = v.lonDeg * DEGR;
+            const r = 1.02;
+            const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+                color: v.gmLatDeg >= 0 ? 0xc792ea : 0x7fe6c3,
+                transparent: true, opacity: 0.95,
+            }));
+            // Geographic → the scene's Y-up frame, same convention as the lines.
+            m.position.set(
+                r * Math.cos(lat) * Math.cos(lon),
+                r * Math.sin(lat),
+                -r * Math.cos(lat) * Math.sin(lon),
+            );
+            m.userData.code = code;
+            this.observatories.add(m);
+        }
+        this.group.add(this.observatories);
+    }
+
+    /**
+     * Switch which layer the view is showing. Everything cross-fades and the
+     * camera flies; see LAYER_VIEW for why.
+     */
+    setLayer(name) {
+        const v = LAYER_VIEW[name] || LAYER_VIEW.external;
+        this.layer = name;
+        this._targetDist = v.dist;
+        this._targetOpacity = v;
+        this.innerCore.visible = v.innerCore;
+        this.observatories.visible = v.obs;
+        this.surface.visible = v.surface > 0;
+        this.cmb.visible = v.cmb > 0;
     }
 
     _buildMantle() {
@@ -378,6 +465,32 @@ export class CoreFieldScene {
         if (this.cmbUniforms.uField.value) this.cmbUniforms.uField.value.dispose();
         this.cmbUniforms.uField.value = tex;
 
+        // The same field at the SURFACE, for the Field layer.
+        const surfSphere = radialFieldSphere(c, { radiusKm: REF_RADIUS_KM, nLat, nLon, nmax });
+        const speak = Math.max(Math.abs(surfSphere.min), Math.abs(surfSphere.max)) || 1;
+        const sdata = new Uint8Array(nLat * nLon * 4);
+        for (let i = 0; i < nLat; i++) {
+            const theta = (90 - (90 - (180 * i) / (nLat - 1))) * DEG;
+            const row = nLat - 1 - i;
+            for (let j = 0; j < nLon; j++) {
+                const phi = (-180 + (360 * j) / (nLon - 1)) * DEG;
+                const val = surfSphere.br[i * nLon + j] / speak;
+                const dBr = 2 * (
+                    d.g10 * Math.cos(theta)
+                    + (d.g11 * Math.cos(phi) + d.h11 * Math.sin(phi)) * Math.sin(theta));
+                const k = (row * nLon + j) * 4;
+                sdata[k] = Math.round((val * 0.5 + 0.5) * 255);
+                sdata[k + 1] = dBr >= 0 ? 255 : 0;
+                sdata[k + 2] = 0; sdata[k + 3] = 255;
+            }
+        }
+        const stex = new THREE.DataTexture(sdata, nLon, nLat, THREE.RGBAFormat);
+        stex.needsUpdate = true;
+        stex.minFilter = THREE.LinearFilter; stex.magFilter = THREE.LinearFilter;
+        if (this.surfaceUniforms.uField.value) this.surfaceUniforms.uField.value.dispose();
+        this.surfaceUniforms.uField.value = stex;
+        this.surfaceReversedPercent = surfSphere.reversedAreaFraction * 100;
+
         // ── Field lines ─────────────────────────────────────────────────
         this._buildFieldLines(c, lineCount);
 
@@ -385,6 +498,8 @@ export class CoreFieldScene {
             year,
             peakCmbFieldUt: peak / 1000,
             reversedFluxPercent: sphere.reversedAreaFraction * 100,
+            surfaceReversedPercent: this.surfaceReversedPercent,
+            peakSurfaceFieldUt: speak / 1000,
             dipoleTiltDeg: d.tiltDeg,
             gainDegree1: continuationGain(1),
             gainDegreeMax: continuationGain(nmax),
@@ -456,7 +571,9 @@ export class CoreFieldScene {
                 depthWrite: false,
                 blending: THREE.AdditiveBlending,
             });
-            grp.add(new THREE.Mesh(geo, mat));
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.userData.escapes = line.escapes;
+            grp.add(mesh);
         }
         this.fieldLines = grp;
         this.lineStats = { total: lines.length, escaping, closed: lines.length - escaping };
@@ -492,6 +609,39 @@ export class CoreFieldScene {
     render() {
         if (this.disposed) return;
         const t = this.clock.getElapsedTime();
+
+        // Ease the camera toward the layer's framing, and cross-fade the
+        // shells. Exponential smoothing rather than a tween so an impatient
+        // click mid-flight retargets cleanly instead of queueing.
+        const v = this._targetOpacity || LAYER_VIEW[this.layer] || LAYER_VIEW.external;
+        const dist = this.camera.position.length();
+        const want = this._targetDist;
+        if (Math.abs(dist - want) > 1e-3) {
+            this.camera.position.multiplyScalar(1 + (want / dist - 1) * 0.07);
+        }
+        const ease = (u, target) => u + (target - u) * 0.08;
+        this.mantleUniforms.uOpacity.value = ease(this.mantleUniforms.uOpacity.value, v.mantle);
+        this.cmbUniforms.uOpacity.value = ease(this.cmbUniforms.uOpacity.value, v.cmb);
+        this.surfaceUniforms.uOpacity.value = ease(this.surfaceUniforms.uOpacity.value, v.surface);
+        this.surfaceMaterial.depthWrite = this.surfaceUniforms.uOpacity.value > 0.7;
+        // Lines that close INSIDE the core are the Core layer's story. From
+        // outside the planet they are hidden, because they genuinely are.
+        if (this.fieldLines) {
+            const showClosed = this.layer !== 'external';
+            this.fieldLines.children.forEach((m) => {
+                const target = m.userData.escapes ? v.lines : (showClosed ? v.lines * 0.8 : 0);
+                if (m.material?.uniforms?.uOpacity) {
+                    m.material.uniforms.uOpacity.value = ease(m.material.uniforms.uOpacity.value, target);
+                }
+                m.visible = m.material.uniforms.uOpacity.value > 0.01;
+            });
+        }
+        if (this.observatories.visible) {
+            this.observatories.children.forEach((m) => {
+                m.material.opacity = ease(m.material.opacity, 0.95);
+            });
+        }
+
         if (this.fieldLines) {
             this.fieldLines.traverse((o) => {
                 if (o.material?.uniforms?.uTime) o.material.uniforms.uTime.value = t;
