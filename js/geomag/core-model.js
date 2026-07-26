@@ -91,7 +91,13 @@ export function dimensionlessNumbers(core = CORE) {
 export function sphericalJn(n, x) {
     if (x === 0) return n === 0 ? 1 : 0;
     if (n === 0) return Math.sin(x) / x;
-    const start = n + 25 + Math.ceil(Math.sqrt(40 * n));
+    // The recurrence must start above BOTH n and x. Starting from n alone is
+    // fine while x ≲ n (which is where the first zeros live, so the zeros were
+    // never wrong) but loses accuracy badly for x ≫ n — the independent
+    // cross-check in tests/geomag-diffusion.mjs caught 1.8e-4 of disagreement
+    // at n=1, x=28.
+    const m = Math.max(n, Math.ceil(x));
+    const start = m + 25 + Math.ceil(Math.sqrt(40 * m));
     let jp1 = 0;
     let j = 1e-300;
     let want = 0;

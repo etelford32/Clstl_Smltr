@@ -60,6 +60,9 @@ js/geomag/
   dynamo.js                Rikitake + αΩ parity selection
   osse.js                  observing-system experiment (offline, deterministic)
   ingest.js                live USGS → epochs → nowcast
+  diffusion.js             ∂B/∂t = η∇²B on the core — SOLVED, validated to 0.03%
+  field-lines.js           RK4 tracing + downward continuation to the CMB
+  core-3d.js               three.js scene + three custom shaders (renderer only)
 api/geomag/observatories.js  USGS edge proxy
 tiga.html                    the three-layer page
 ```
@@ -95,8 +98,47 @@ node tests/geomag-tiga.mjs        # T1–T5, aliasing, robustness, the SM frame
 node tests/geomag-core-model.mjs  # Bessel zeros, decay times, screening
 node tests/geomag-dynamo.mjs      # αΩ vs the SciPy eigensolver (~40 s)
 node tests/geomag-osse.mjs        # the definition floor, dropout, calibration
+node tests/geomag-diffusion.mjs   # the diffusion solve + field-line tracing
 npx playwright test tests/tiga-smoke.spec.js
 ```
+
+### 3.0 The 3D core view — what "high fidelity" means here
+
+The Core layer renders three things, in descending order of how well-founded
+they are, and none of them is a dynamo:
+
+1. **The observed field, downward-continued to the core–mantle boundary.**
+   Exact within IGRF-14 and a standard scientific product. The reversed-flux
+   patches are real published features. The continuation gain is surfaced in
+   the UI (6× at degree 1, **8,700× at degree 13**) because this is precisely
+   where over-interpretation starts — continuation amplifies the coefficients'
+   own error along with the signal, and past degree 13 it would amplify the
+   *crustal* field as though it came from the core.
+2. **Field lines traced by RK4 through that same field.** Exact integration of
+   an exact field, so the shapes are computed rather than drawn. Reverse-tracing
+   returns to the start to **0 km**. The L-shell split is emergent: a 30° seed
+   band closes entirely inside the core, a 68° band escapes.
+3. **Magnetic diffusion, ∂B/∂t = η∇²B, actually solved.** Spectral in angle
+   (the angular structure separates exactly, so a 3-D problem is exactly one
+   1-D radial solve per degree), implicit in radius. Validated against the
+   analytic eigenvalues τ_n = μ₀σa²/k_n² to **0.026%** at every degree, and an
+   arbitrary initial profile is shown to relax onto the fundamental
+   (3,630 → 23,831 yr against an analytic 23,884).
+
+**What is missing is the u×B term**, and that is the whole dynamo. Keeping it
+means resolving a turbulent rotating flow at Ekman 10⁻¹⁵ and magnetic Prandtl
+10⁻⁶ — numbers this page prints — which is a supercomputer problem. What the
+diffusion solve buys instead is the other half of the physics done exactly:
+*switch the dynamo off and watch what survives*. After 12 kyr the dipole is at
+61% and degree 13 at 0.04%. **The dipole is what is left**, demonstrated rather
+than asserted.
+
+The three shaders each earn their place: the CMB fragment shader derives the
+reversed-flux contour from the sampled field so it sits on the zero crossing at
+any zoom; the mantle shader renders skin-depth attenuation as literal depth;
+the field-line shader uses tubes rather than lines because a 1px line carries
+no depth cue, which is the only reason to be in 3D at all. Radii are TRUE —
+Earth 1.0, CMB 0.546, inner core 0.192, nothing compressed.
 
 ### 3.1 Numerical gates, all passing
 
@@ -113,6 +155,10 @@ npx playwright test tests/tiga-smoke.spec.js
 | αΩ growth rates vs SciPy (N=400) | < 0.3% | passes at D = −200, −600, −1500 |
 | Index definition floor | 11.36 nT | **11.36** (exact — it is deterministic) |
 | Grid evaluator vs scalar path | identical | **0.0** |
+| Diffusion solver vs analytic τ_n | < 0.5% | **0.026%** at every degree |
+| Field-line reverse-trace closure | < 120 km | **0 km** |
+| Reversed flux, pure dipole | exactly 0 | **0** |
+| Two independent j_n implementations | < 1e-9 | **1.8e-16** |
 
 ### 3.2 Regression traps — each was a real bug, each fails silently
 
@@ -133,7 +179,21 @@ npx playwright test tests/tiga-smoke.spec.js
    ill-conditioned three-term recurrence that returned μ = 1 exactly (growth 0)
    for a genuinely decaying non-oscillatory mode. Fixed by measuring ρ(M)
    directly and guarding on the snapshot *correlation*.
-6. **Convergence near an eigenvalue collision** (new). A fixed settle budget
+6. **Miller recurrence start index** (new, and it was in BOTH copies). The
+   spherical-Bessel routine must start its downward recurrence above **x** as
+   well as above **n**. Starting from n alone is fine where the first zeros
+   live (x ≲ n) so the decay times were never wrong — but it loses four digits
+   for x ≫ n. `diffusion.js` deliberately carries its own independent copy of
+   the routine so a shared bug cannot cancel on both sides of the
+   solver-vs-analytic check, and that cross-check is exactly what exposed this:
+   1.8×10⁻⁴ of disagreement at n=1, x=28. Both copies fixed; now 1.8×10⁻¹⁶.
+7. **Reversed flux compared against the wrong thing** (new). A patch is
+   reversed where B_r opposes the DIPOLE's own B_r at that point. The first
+   version compared against the sign of the magnetic colatitude and got the
+   sense inverted, reporting ~80% of the planet as reversed — wrong in a way
+   that looks like a result. The gate now asserts a pure dipole field contains
+   *exactly zero* reversed flux, which cannot pass with an inverted sign.
+8. **Convergence near an eigenvalue collision**. A fixed settle budget
    left the quadrupole family unconverged near |D| ≈ 220 — where two of its
    real eigenvalues collide into a complex pair — returning +3.76 for a value
    near −0.5. That single bad sample inverted the family comparison and put a

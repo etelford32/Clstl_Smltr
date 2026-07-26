@@ -31,6 +31,16 @@
      here (js/nav-styles.css owns it). -->
 <link rel="stylesheet" href="js/nav-styles.css">
 
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
+
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { scroll-behavior:smooth; }
@@ -157,6 +167,16 @@ body {
    by 14px, which is a sideways-scrolling page on every phone.
    tabindex makes the region reachable by keyboard: a scrollable box that only
    a mouse or finger can pan is a WCAG 2.1.1 failure. */
+.tg-stage {
+    position:relative; width:100%; height:520px; border-radius:10px; overflow:hidden;
+    background:radial-gradient(circle at 50% 45%, #0a1030 0%, #03010e 72%);
+    border:1px solid rgba(90,110,160,.22);
+}
+.tg-stage canvas { display:block; }
+.tg-stage .tg-stage-msg {
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:.8rem; color:#767f9a; text-align:center; padding:20px;
+}
 .tg-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
 .tg-scroll:focus-visible { outline:2px solid #7fe6c3; outline-offset:2px; }
 table.tg-table { width:100%; min-width:340px; border-collapse:collapse; font-size:.74rem; font-variant-numeric:tabular-nums; }
@@ -213,6 +233,7 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
     .tg-stats { grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); }
     .tg-field { grid-template-columns:92px 1fr 58px; gap:7px; }
     .tg-callout { padding:9px 11px; }
+    .tg-stage { height:330px; }
 }
 </style>
 </head>
@@ -561,6 +582,85 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
         almost all of the physics. They still answer real questions.
     </div>
 
+    <div class="tg-card" style="margin-bottom:14px">
+        <h3>The field at the core&ndash;mantle boundary <span class="tg-tag derived">Observation-derived</span></h3>
+        <p class="tg-note">
+            The IGRF field, continued <em>down</em> to 3,480&nbsp;km and traced in 3D. Radii are true:
+            Earth 1.0, core&ndash;mantle boundary 0.546, inner core 0.192 &mdash; nothing is compressed.
+            Field lines are integrated by RK4 through the actual spherical-harmonic field, so their
+            shapes are computed, not drawn. Drag to orbit, scroll to zoom.
+        </p>
+        <div class="tg-stage" id="tg-stage">
+            <div class="tg-stage-msg" id="tg-stage-msg">Building the field&hellip;</div>
+        </div>
+        <div class="tg-grid tg-2e" style="margin-top:12px">
+            <div>
+                <div class="tg-field">
+                    <label for="tg-3d-year">Epoch</label>
+                    <input type="range" id="tg-3d-year" min="1900" max="2030" step="5" value="2025">
+                    <output id="tg-3d-year-out">2025</output>
+                </div>
+                <div class="tg-field">
+                    <label for="tg-3d-nmax">Truncation n</label>
+                    <input type="range" id="tg-3d-nmax" min="1" max="13" step="1" value="10">
+                    <output id="tg-3d-nmax-out">10</output>
+                </div>
+                <div class="tg-field">
+                    <label for="tg-3d-mantle">Mantle opacity</label>
+                    <input type="range" id="tg-3d-mantle" min="0" max="100" step="1" value="45">
+                    <output id="tg-3d-mantle-out">0.45</output>
+                </div>
+                <div class="tg-field">
+                    <label for="tg-3d-period">Signal period</label>
+                    <input type="range" id="tg-3d-period" min="-3" max="3" step="0.1" value="0.5">
+                    <output id="tg-3d-period-out">3 yr</output>
+                </div>
+            </div>
+            <div>
+                <div class="tg-stats">
+                    <div class="tg-stat"><div class="v hot" id="tg-3d-peak">&mdash;</div><div class="k">peak |B_r| at CMB</div></div>
+                    <div class="tg-stat"><div class="v warn" id="tg-3d-reversed">&mdash;</div><div class="k">reversed-flux area</div></div>
+                    <div class="tg-stat"><div class="v" id="tg-3d-lines">&mdash;</div><div class="k">lines escaping core</div></div>
+                    <div class="tg-stat"><div class="v" id="tg-3d-gain">&mdash;</div><div class="k">continuation gain at n</div></div>
+                    <div class="tg-stat"><div class="v good" id="tg-3d-survival">&mdash;</div><div class="k">reaches the surface</div></div>
+                </div>
+                <div class="tg-status" id="tg-3d-status" role="status" aria-live="polite"></div>
+            </div>
+        </div>
+        <div class="tg-callout warn">
+            <strong>Downward continuation is real, and it is where over-interpretation starts.</strong>
+            The expansion is valid anywhere the field is current-free, so evaluating it at the CMB is
+            legitimate &mdash; but each degree gains (a/r)<sup>n+2</sup>, which is about 6&times; at
+            degree&nbsp;1 and <strong>8,700&times; at degree&nbsp;13</strong>. Continuation amplifies the
+            coefficients' own error along with the signal, and past degree&nbsp;13 it would amplify the
+            <em>crustal</em> field as though it came from the core. Pull the truncation slider down and
+            watch the small-scale structure &mdash; and its uncertainty &mdash; disappear together.
+        </div>
+    </div>
+
+    <div class="tg-card" style="margin-bottom:14px">
+        <h3>Switch the dynamo off <span class="tg-tag model">Solved, not sketched</span></h3>
+        <p class="tg-note">
+            This runs the induction equation with the flow set to zero &mdash;
+            &part;B/&part;t = &eta;&nabla;<sup>2</sup>B &mdash; as a real diffusion solve on the core,
+            spectral in angle and implicit in radius. It is checkable: the decay rates it produces match
+            the analytic eigenvalues &tau;<sub>n</sub> = &mu;<sub>0</sub>&sigma;a<sup>2</sup>/k<sub>n</sub><sup>2</sup>
+            to <strong>0.03%</strong>. Drag the clock forward and watch which multipole is left.
+        </p>
+        <div class="tg-field">
+            <label for="tg-decay-time">Years elapsed</label>
+            <input type="range" id="tg-decay-time" min="0" max="40000" step="250" value="0">
+            <output id="tg-decay-time-out">0</output>
+        </div>
+        <canvas id="tg-decay-live" height="190"></canvas>
+        <div class="tg-legend" id="tg-decay-live-legend"></div>
+        <div class="tg-callout">
+            Every degree starts at the same amplitude. Nothing selects the dipole &mdash; it is simply
+            the last one still standing, because &tau;<sub>n</sub> falls as 1/k<sub>n</sub><sup>2</sup>.
+            <strong>The dipole is what is left.</strong>
+        </div>
+    </div>
+
     <div class="tg-grid tg-2e">
         <div class="tg-card">
             <h3>Does a dynamo run at all?</h3>
@@ -760,6 +860,7 @@ import {
     mantleScreening, halfAttenuationPeriodYears, YEAR_S,
 } from './js/geomag/core-model.js';
 import { runRikitake, alphaOmegaParity, dipoleWindow } from './js/geomag/dynamo.js';
+import { freeDecayEnsemble, advanceEnsemble } from './js/geomag/diffusion.js';
 import {
     makeNetwork, stormTruth, observe, trueSymH, zonalTruth, definitionFloor, runOsse, makeRng,
 } from './js/geomag/osse.js';
@@ -1467,6 +1568,120 @@ function drawRikitake() {
         + `${fmt(r.minChron, 1)} to ${fmt(r.maxChron, 1)} — irregular, with no periodicity.`);
 }
 
+// ── 3D core/mantle stage ─────────────────────────────────────────────────────
+let scene3d = null;
+let raf3d = null;
+
+async function boot3d() {
+    const host = $('tg-stage');
+    const msg = $('tg-stage-msg');
+    try {
+        // Dynamic import so a WebGL or importmap failure degrades to a message
+        // rather than taking the whole Core panel down with it. Everything else
+        // on this layer is pure computation and must survive a GPU that isn't.
+        const { CoreFieldScene } = await import('./js/geomag/core-3d.js');
+        scene3d = new CoreFieldScene(host, { year: 2025, nmax: 10 });
+        msg.remove();
+        apply3d();
+
+        // Pause GL when the panel is hidden or scrolled away — the tab is
+        // running a Kalman filter and a dynamo solver too.
+        let visible = true;
+        const io = new IntersectionObserver((e) => { visible = e[0].isIntersecting; }, { threshold: 0 });
+        io.observe(host);
+        const loop = () => {
+            raf3d = requestAnimationFrame(loop);
+            if (!visible || document.hidden) return;
+            scene3d.render();
+        };
+        loop();
+    } catch (err) {
+        msg.textContent = `3D view unavailable (${err.message}). `
+            + 'Everything else on this layer is pure computation and is unaffected.';
+    }
+}
+
+function apply3d() {
+    if (!scene3d) return;
+    const year = Number($('tg-3d-year').value);
+    const nmax = Number($('tg-3d-nmax').value);
+    const d = scene3d.update({ year, nmax, lineCount: 24 });
+    $('tg-3d-peak').innerHTML = `${d.peakCmbFieldUt.toFixed(0)} <small>µT</small>`;
+    $('tg-3d-reversed').textContent = `${d.reversedFluxPercent.toFixed(1)}%`;
+    $('tg-3d-lines').textContent = `${d.lines.escaping} / ${d.lines.total}`;
+    $('tg-3d-gain').textContent = `${Math.round(d.gainDegreeMax).toLocaleString()}×`;
+    $('tg-3d-status').textContent =
+        `IGRF-14 at epoch ${year}, truncated at degree ${nmax}, continued to 3,480 km. `
+        + `${d.lines.closed} of ${d.lines.total} traced lines close inside the core rather than `
+        + `reaching the surface — that split is L-shell structure, not a drawing choice.`;
+}
+
+function applyScreening() {
+    const logP = Number($('tg-3d-period').value);
+    const period = Math.pow(10, logP);
+    const survival = mantleScreening(period, 1);
+    $('tg-3d-period-out').textContent = period < 1
+        ? `${(period * 365.25).toFixed(0)} d` : `${period.toFixed(period < 10 ? 1 : 0)} yr`;
+    $('tg-3d-survival').textContent = survival > 1e-4
+        ? `${(survival * 100).toFixed(1)}%` : survival.toExponential(0);
+    if (scene3d) scene3d.setScreeningPeriod(period, 1);
+}
+
+// ── Live free-decay ensemble ────────────────────────────────────────────────
+let decayEnsemble = null;
+function drawDecayLive() {
+    const years = Number($('tg-decay-time').value);
+    $('tg-decay-time-out').textContent = years.toLocaleString();
+    // Rebuild from t=0 each time: the slider is a scrubber, not a play button,
+    // and marching the SAME solver backwards is not a thing diffusion does.
+    const degrees = [1, 2, 3, 5, 8, 13];
+    decayEnsemble = freeDecayEnsemble({ degrees, nr: 90 });
+    const state = years > 0
+        ? advanceEnsemble(decayEnsemble, years, Math.max(8, Math.round(years / 400)))
+        : degrees.map((n) => ({ degree: n, fraction: 1 }));
+
+    const { ctx, w, h } = prepare($('tg-decay-live'));
+    const box = { x: 52, y: 12, w: w - 66, h: h - 42 };
+    axes(ctx, box, {
+        xLabel: 'spherical harmonic degree n', yLabel: 'remaining',
+        xTicks: state.map((r, i) => ({
+            px: scale(i, 0, state.length - 1, box.x + 22, box.x + box.w - 22), label: String(r.degree),
+        })),
+        yTicks: [0, 0.25, 0.5, 0.75, 1].map((v) => ({ py: scale(v, 0, 1, box.y + box.h, box.y), label: v.toFixed(2) })),
+    });
+    const bw = (box.w / state.length) * 0.55;
+    state.forEach((r, i) => {
+        const x = scale(i, 0, state.length - 1, box.x + 22, box.x + box.w - 22);
+        const y = scale(r.fraction, 0, 1, box.y + box.h, box.y);
+        ctx.fillStyle = r.degree === 1 ? '#ff9a56' : 'rgba(255,154,86,.34)';
+        ctx.fillRect(x - bw / 2, y, bw, box.y + box.h - y);
+        ctx.fillStyle = '#cdd5e4';
+        ctx.font = '10px system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        if (r.fraction > 0.02) ctx.fillText(`${(r.fraction * 100).toFixed(0)}%`, x, y - 3);
+    });
+    const dip = state[0].fraction, hi = state[state.length - 1].fraction;
+    $('tg-decay-live-legend').innerHTML =
+        `<span>after <strong style="color:#e4e9f5">${years.toLocaleString()}</strong> years: `
+        + `degree 1 at ${(dip * 100).toFixed(1)}%, degree 13 at ${(hi * 100).toFixed(1)}%</span>`;
+    describe($('tg-decay-live'),
+        `Amplitude remaining by degree after ${years} years of pure magnetic diffusion: `
+        + state.map((r) => `degree ${r.degree} at ${(r.fraction * 100).toFixed(0)} percent`).join(', ') + '.');
+    if (scene3d) scene3d.setDecay(dip);
+}
+
+$('tg-3d-year').addEventListener('input', () => { $('tg-3d-year-out').textContent = $('tg-3d-year').value; });
+$('tg-3d-year').addEventListener('change', apply3d);
+$('tg-3d-nmax').addEventListener('input', () => { $('tg-3d-nmax-out').textContent = $('tg-3d-nmax').value; });
+$('tg-3d-nmax').addEventListener('change', apply3d);
+$('tg-3d-mantle').addEventListener('input', () => {
+    const v = Number($('tg-3d-mantle').value) / 100;
+    $('tg-3d-mantle-out').textContent = v.toFixed(2);
+    if (scene3d) scene3d.setMantleOpacity(v);
+});
+$('tg-3d-period').addEventListener('input', applyScreening);
+$('tg-decay-time').addEventListener('input', drawDecayLive);
+
 let paritySweep = null;
 async function runParitySweep() {
     const btn = $('tg-run-parity');
@@ -1613,6 +1828,9 @@ function renderLayer(name) {
         fillCoreTables();
         drawRikitake();
         drawParity();
+        applyScreening();
+        drawDecayLive();
+        if (!scene3d) boot3d();
     }
 }
 

@@ -86,6 +86,15 @@ function watchErrors(page) {
 }
 
 test.describe('tiga.html', () => {
+    // The page genuinely COMPUTES on boot — the External layer runs the full
+    // observing-system experiment before it can print the definition floor, and
+    // the Core layer solves a diffusion problem. Under parallel workers that
+    // contends with the 3D test and can exceed a 30s assertion timeout; the
+    // suite showed exactly one flake there. Raising the budget is the honest
+    // fix (the work is real and CI runners are slower than this one) rather
+    // than retrying until it passes.
+    test.slow();
+
     test('boots clean, and the External layer computes the definition floor offline', async ({ page }) => {
         const errors = watchErrors(page);
         await killFeed(page);
@@ -95,7 +104,7 @@ test.describe('tiga.html', () => {
 
         // The index definition floor is deterministic — the same 11.36 nT the
         // Node gate pins — and it must appear WITHOUT any network.
-        await expect(page.locator('#tg-floor-value')).toHaveText(/11\.3[0-9] nT/, { timeout: 30000 });
+        await expect(page.locator('#tg-floor-value')).toHaveText(/11\.3[0-9] nT/, { timeout: 60000 });
 
         // Estimation error must be materially below the floor. That separation
         // is the product argument, so a page that showed otherwise is broken.
@@ -109,7 +118,7 @@ test.describe('tiga.html', () => {
         await expect(rows.first()).toContainText('-87.300000000');
 
         // The dropout curve must have run and reported a flat result.
-        await expect(page.locator('#tg-dropout-status')).toContainText('Flat across', { timeout: 30000 });
+        await expect(page.locator('#tg-dropout-status')).toContainText('Flat across', { timeout: 60000 });
 
         expect(errors).toEqual([]);
     });
@@ -120,7 +129,7 @@ test.describe('tiga.html', () => {
         await page.goto(PAGE, { waitUntil: 'load' });
 
         const status = page.locator('#tg-live-status');
-        await expect(status).toHaveClass(/err/, { timeout: 30000 });
+        await expect(status).toHaveClass(/err/, { timeout: 60000 });
         await expect(status).toContainText('Live network unavailable');
         // …and it says WHY that is not a failure of the argument.
         await expect(status).toContainText('runs offline');
@@ -137,7 +146,7 @@ test.describe('tiga.html', () => {
         await page.goto(PAGE, { waitUntil: 'load' });
 
         // The posterior is the product — a value without a σ is not the deliverable.
-        await expect(page.locator('#tg-live-sigma')).toHaveText(/± \d+(\.\d+)? nT/, { timeout: 30000 });
+        await expect(page.locator('#tg-live-sigma')).toHaveText(/± \d+(\.\d+)? nT/, { timeout: 60000 });
         await expect(page.locator('#tg-live-value')).toHaveText(/-?\d+(\.\d+)? nT/);
         await expect(page.locator('#tg-live-n')).toHaveText('6');   // BRW cut, six kept
 
@@ -290,13 +299,13 @@ test.describe('tiga.html', () => {
         // has been drawn must carry role="img" and a label containing the
         // finding, not just "chart".
         const floor = page.locator('#tg-floor-chart');
-        await expect(floor).toHaveAttribute('role', 'img', { timeout: 30000 });
+        await expect(floor).toHaveAttribute('role', 'img', { timeout: 60000 });
         const label = await floor.getAttribute('aria-label');
         expect(label).toMatch(/11\.3\d nanotesla/);       // the definition floor
         expect(label.length).toBeGreaterThan(60);
 
         await expect(page.locator('#tg-dropout-chart'))
-            .toHaveAttribute('aria-label', /stations/, { timeout: 30000 });
+            .toHaveAttribute('aria-label', /stations/, { timeout: 60000 });
 
         // Status regions must announce async results rather than changing silently.
         await expect(page.locator('#tg-live-status')).toHaveAttribute('aria-live', 'polite');
@@ -305,7 +314,7 @@ test.describe('tiga.html', () => {
         // And the lazily-drawn panels label their charts too, once drawn.
         await page.click('[data-layer="field"]');
         await expect(page.locator('#tg-field-map'))
-            .toHaveAttribute('aria-label', /South Atlantic Anomaly/, { timeout: 30000 });
+            .toHaveAttribute('aria-label', /South Atlantic Anomaly/, { timeout: 60000 });
     });
 
     test('the page never scrolls horizontally, at any width', async ({ page }) => {
@@ -316,7 +325,7 @@ test.describe('tiga.html', () => {
         for (const width of [390, 768, 1024]) {
             await page.setViewportSize({ width, height: 900 });
             await page.goto(PAGE, { waitUntil: 'load' });
-            await expect(page.locator('#tg-floor-value')).toHaveText(/nT/, { timeout: 30000 });
+            await expect(page.locator('#tg-floor-value')).toHaveText(/nT/, { timeout: 60000 });
             const doc = await page.evaluate(() => document.documentElement.scrollWidth);
             expect(doc, `body scrolls horizontally at ${width}px`).toBeLessThanOrEqual(width);
         }
@@ -327,6 +336,57 @@ test.describe('tiga.html', () => {
         expect(await regions.count()).toBeGreaterThan(0);
         await expect(regions.first()).toHaveAttribute('tabindex', '0');
         await expect(regions.first()).toHaveAttribute('aria-label', /.+/);
+    });
+
+    test('the 3D core view mounts and its numbers come from the kernels', async ({ page }) => {
+        test.setTimeout(180000);
+        const errors = watchErrors(page);
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.click('[data-layer="core"]');
+
+        // WebGL may be unavailable on a runner. The scene is dynamically
+        // imported so that degrades to a message rather than taking the whole
+        // Core layer down — and the layer's other content must be intact
+        // either way, since all of it is pure computation.
+        const msg = page.locator('#tg-stage-msg');
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+
+        const failed = (await msg.count()) > 0;
+        if (failed) {
+            await expect(msg).toContainText('unaffected');
+        } else {
+            await expect(page.locator('#tg-stage canvas')).toHaveCount(1);
+            // Peak |B_r| at the CMB is ~800 µT — roughly an order of magnitude
+            // above the surface field, which is the continuation doing its job.
+            const peak = parseFloat(await page.locator('#tg-3d-peak').textContent());
+            expect(peak).toBeGreaterThan(300);
+            expect(peak).toBeLessThan(2000);
+            // Reversed flux is a real, bounded quantity — an inverted sign
+            // convention showed up as ~80% and it must not come back.
+            const rev = parseFloat(await page.locator('#tg-3d-reversed').textContent());
+            expect(rev).toBeGreaterThan(2);
+            expect(rev).toBeLessThan(45);
+            // Some traced lines escape the core and some close inside it.
+            await expect(page.locator('#tg-3d-lines')).toHaveText(/\d+ \/ \d+/);
+            await expect(page.locator('#tg-3d-status')).toContainText('L-shell');
+        }
+
+        // The diffusion solve runs regardless of WebGL — it is pure JS.
+        await expect(page.locator('#tg-decay-live-legend')).toContainText('degree 1 at 100.0%');
+        await page.locator('#tg-decay-time').fill('12000');
+        await page.locator('#tg-decay-time').dispatchEvent('input');
+        // THE RESULT: the dipole survives where the high degrees do not.
+        await expect(page.locator('#tg-decay-live-legend'))
+            .toContainText(/degree 1 at [456]\d\.\d%/, { timeout: 60000 });
+        const legend = await page.locator('#tg-decay-live-legend').textContent();
+        const hi = parseFloat(legend.match(/degree 13 at ([\d.]+)%/)[1]);
+        expect(hi).toBeLessThan(2);
+
+        expect(errors).toEqual([]);
     });
 
     test('every layer carries its honest label', async ({ page }) => {
