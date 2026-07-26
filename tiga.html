@@ -72,7 +72,19 @@ body {
     color:inherit; font:inherit; transition:border-color .15s, background .15s;
 }
 .tg-layer:hover { border-color:rgba(140,170,230,.5); }
+/* Selected state needs to survive being STACKED. On mobile the three tabs
+   become three full-width cards and a border-colour change alone does not
+   read as "this one is active" — there is no neighbour in view to compare it
+   against. The inset left bar is an absolute cue rather than a relative one. */
+.tg-layer { position:relative; padding-left:18px; }
+.tg-layer::before {
+    content:''; position:absolute; left:6px; top:12px; bottom:12px; width:3px;
+    border-radius:2px; background:transparent; transition:background .15s;
+}
 .tg-layer[aria-selected="true"] { background:rgba(12,18,44,.9); }
+.tg-layer[data-layer="core"][aria-selected="true"]::before     { background:#ff9a56; }
+.tg-layer[data-layer="field"][aria-selected="true"]::before    { background:#4fc3f7; }
+.tg-layer[data-layer="external"][aria-selected="true"]::before { background:#c792ea; }
 .tg-layer[data-layer="core"][aria-selected="true"]     { border-color:rgba(255,154,86,.7); }
 .tg-layer[data-layer="field"][aria-selected="true"]    { border-color:rgba(79,195,247,.7); }
 .tg-layer[data-layer="external"][aria-selected="true"] { border-color:rgba(199,146,234,.75); }
@@ -140,7 +152,14 @@ body {
 }
 .tg-btn:disabled { opacity:.45; cursor:progress; }
 
-table.tg-table { width:100%; border-collapse:collapse; font-size:.74rem; font-variant-numeric:tabular-nums; }
+/* Wide content scrolls INSIDE its own container — the page body must never
+   scroll horizontally. Four-column numeric tables overflowed a 390px viewport
+   by 14px, which is a sideways-scrolling page on every phone.
+   tabindex makes the region reachable by keyboard: a scrollable box that only
+   a mouse or finger can pan is a WCAG 2.1.1 failure. */
+.tg-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+.tg-scroll:focus-visible { outline:2px solid #7fe6c3; outline-offset:2px; }
+table.tg-table { width:100%; min-width:340px; border-collapse:collapse; font-size:.74rem; font-variant-numeric:tabular-nums; }
 table.tg-table th { text-align:left; color:#7c86a0; font-weight:600; padding:4px 6px; border-bottom:1px solid rgba(90,110,160,.24); }
 table.tg-table td { padding:4px 6px; border-bottom:1px solid rgba(90,110,160,.1); }
 table.tg-table td.num, table.tg-table th.num { text-align:right; }
@@ -181,6 +200,19 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
 @media (max-width:900px) {
     .tg-grid.tg-2 { grid-template-columns:1fr; }
     .tg-spine { grid-template-columns:1fr; }
+}
+
+@media (max-width:768px) {
+    .tg-wrap { padding:0 12px 40px; }
+    .tg-hero { padding:18px 0 8px; }
+    .tg-hero h1 { font-size:1.25rem; }
+    .tg-lede { font-size:.84rem; padding:0 0 14px; }
+    .tg-card { padding:12px 12px; }
+    /* Three stat tiles per row at 118px each did not fit a 390px viewport
+       once padding was counted; two is the honest maximum. */
+    .tg-stats { grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); }
+    .tg-field { grid-template-columns:92px 1fr 58px; gap:7px; }
+    .tg-callout { padding:9px 11px; }
 }
 </style>
 </head>
@@ -277,10 +309,12 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 current IGRF epoch. Stations poleward of 50° dipole latitude are cut because the auroral
                 electrojets take over there and the station stops measuring the ring current.
             </p>
-            <table class="tg-table" id="tg-station-table">
+            <div class="tg-scroll" tabindex="0" role="region" aria-label="Reporting observatories">
+                <table class="tg-table" id="tg-station-table">
                 <thead><tr><th>IAGA</th><th class="num">dip lat</th><th class="num">MLT</th><th class="num">samples</th></tr></thead>
                 <tbody><tr class="tg-dim"><td colspan="4">loading…</td></tr></tbody>
             </table>
+            </div>
             <div class="tg-callout">
                 <strong>Station count is the wrong variable.</strong> Longitudinal spread is the right one.
                 In the OSSE, dropping 23 clustered Europe/Africa stations <em>improved</em> the order-1
@@ -375,10 +409,12 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 dividing by mean cos λ — the Dst and SYM-H recipe exactly — <em>is</em> the least-squares
                 estimator of that coefficient.
             </p>
-            <table class="tg-table" id="tg-identity-table">
+            <div class="tg-scroll" tabindex="0" role="region" aria-label="Classical index versus the degree-1 zonal coefficient">
+                <table class="tg-table" id="tg-identity-table">
                 <thead><tr><th>Station set</th><th class="num">classical average</th><th class="num">−q₁⁰</th><th class="num">|difference|</th></tr></thead>
                 <tbody></tbody>
             </table>
+            </div>
             <div class="tg-callout">
                 So the distinction is not estimator-versus-index. Everything here is an estimator; they
                 differ in how many parameters they fit, how they weight stations, and whether they carry a
@@ -489,10 +525,12 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 </div>
             </div>
             <div>
-                <table class="tg-table" id="tg-screening-table">
+                <div class="tg-scroll" tabindex="0" role="region" aria-label="Mantle screening by conductivity">
+                    <table class="tg-table" id="tg-screening-table">
                     <thead><tr><th>σ (S/m)</th><th class="num">50% attenuation at</th><th class="num">a 1-day signal arrives as</th></tr></thead>
                     <tbody></tbody>
                 </table>
+                </div>
                 <div class="tg-callout">
                     At σ = 1 S/m a one-day core signal reaches the surface with <strong>3×10⁻⁹</strong> of
                     its amplitude. Daily core analysis is not a data problem; no instrument fixes it.
@@ -527,10 +565,12 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
         <div class="tg-card">
             <h3>Does a dynamo run at all?</h3>
             <p class="tg-note">Six numbers, computed from outer-core estimates. One of them is the whole answer.</p>
-            <table class="tg-table" id="tg-numbers-table">
+            <div class="tg-scroll" tabindex="0" role="region" aria-label="Outer-core dimensionless numbers">
+                <table class="tg-table" id="tg-numbers-table">
                 <thead><tr><th>Quantity</th><th class="num">Value</th><th>Meaning</th></tr></thead>
                 <tbody></tbody>
             </table>
+            </div>
             <div class="tg-callout">
                 <strong>R<sub>m</sub> ≈ 1135</strong> against a threshold near 40: induction beats diffusion
                 by about a thousand to one. Elsasser ≈ 10 says the field it makes is strong enough to react
@@ -545,10 +585,12 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 τ<sub>n</sub> = μ₀σa²/k<sub>n</sub>².
             </p>
             <canvas id="tg-decay-chart" height="200"></canvas>
-            <table class="tg-table" id="tg-decay-table" style="margin-top:8px">
+            <div class="tg-scroll" tabindex="0" role="region" aria-label="Free-decay time by spherical harmonic degree">
+                <table class="tg-table" id="tg-decay-table" style="margin-top:8px">
                 <thead><tr><th>degree n</th><th class="num">first zero of j<sub>n</sub></th><th class="num">free-decay time</th><th class="num">vs dipole</th></tr></thead>
                 <tbody></tbody>
             </table>
+            </div>
             <div class="tg-callout">
                 Three reasons, in increasing order of interest. <strong>(1)</strong> ∇·B = 0 forbids a
                 monopole, so degree 1 is the lowest multipole <em>available</em> — a constraint of Maxwell's
@@ -648,10 +690,12 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
         <div class="tg-card">
             <h3>Nothing down there is a magnet</h3>
             <p class="tg-note">Layer structure, conductivity, and the temperatures that settle the question.</p>
-            <table class="tg-table" id="tg-layers-table">
+            <div class="tg-scroll" tabindex="0" role="region" aria-label="Earth layer structure and conductivity">
+                <table class="tg-table" id="tg-layers-table">
                 <thead><tr><th>Layer</th><th class="num">depth (km)</th><th class="num">σ (S/m)</th><th>state</th></tr></thead>
                 <tbody></tbody>
             </table>
+            </div>
             <div class="tg-callout">
                 Curie temperatures are 858 K for magnetite, 948 K for hematite, 1043 K for iron. The core
                 runs at 5000–6000 K and the lower mantle above 2000 K. <strong>Every deep layer is far

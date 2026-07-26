@@ -308,6 +308,27 @@ test.describe('tiga.html', () => {
             .toHaveAttribute('aria-label', /South Atlantic Anomaly/, { timeout: 30000 });
     });
 
+    test('the page never scrolls horizontally, at any width', async ({ page }) => {
+        // The repo rule: wide content scrolls inside its own container, the
+        // body never does. Four-column numeric tables overflowed a 390px
+        // viewport by 14px — a sideways-scrolling page on every phone.
+        await killFeed(page);
+        for (const width of [390, 768, 1024]) {
+            await page.setViewportSize({ width, height: 900 });
+            await page.goto(PAGE, { waitUntil: 'load' });
+            await expect(page.locator('#tg-floor-value')).toHaveText(/nT/, { timeout: 30000 });
+            const doc = await page.evaluate(() => document.documentElement.scrollWidth);
+            expect(doc, `body scrolls horizontally at ${width}px`).toBeLessThanOrEqual(width);
+        }
+
+        // The tables that would otherwise overflow must be inside a keyboard-
+        // reachable scroll region — a box only a finger can pan fails 2.1.1.
+        const regions = page.locator('.tg-scroll');
+        expect(await regions.count()).toBeGreaterThan(0);
+        await expect(regions.first()).toHaveAttribute('tabindex', '0');
+        await expect(regions.first()).toHaveAttribute('aria-label', /.+/);
+    });
+
     test('every layer carries its honest label', async ({ page }) => {
         await killFeed(page);
         await page.goto(PAGE, { waitUntil: 'load' });
