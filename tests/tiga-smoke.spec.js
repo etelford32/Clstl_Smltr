@@ -389,6 +389,88 @@ test.describe('tiga.html', () => {
         expect(errors).toEqual([]);
     });
 
+    test('the layer cutaway opens toward the camera and survives orbiting', async ({ page }) => {
+        test.setTimeout(180000);
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.click('[data-layer="core"]');
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+        if (await page.locator('#tg-stage-msg').count()) test.skip(true, 'no WebGL on this runner');
+
+        // Switching to the layer stack must auto-open the cut. Showing a
+        // layered body intact is the least informative view of it there is.
+        await page.selectOption('#tg-3d-interior', 'layers');
+        await expect(page.locator('#tg-3d-cut-out')).not.toHaveText('0%');
+
+        // The cut plane is re-derived from the CAMERA every frame. A world-fixed
+        // plane means orbiting 180° puts the opening behind the body, so the
+        // control only works from one angle.
+        //
+        // Asserting the INVARIANT directly rather than dragging: the plane
+        // normal must point opposite the camera's azimuth, so
+        // normal.x = −x/√(x²+z²). A synthetic drag tests whether Playwright can
+        // reach OrbitControls, which is not the behaviour under test.
+        const check = async () => page.evaluate(() => {
+            const s = window.__tigaScene;
+            if (!s) return null;
+            const p = s.camera.position;
+            const len = Math.hypot(p.x, p.z) || 1;
+            return { nx: s.clipPlane.normal.x, want: -p.x / len, constant: s.clipPlane.constant };
+        });
+
+        const a = await check();
+        expect(a).not.toBeNull();
+        expect(Math.abs(a.nx - a.want)).toBeLessThan(0.02);
+
+        // Setting the camera position by hand does NOT work here and it is worth
+        // saying why: OrbitControls keeps its own damped spherical state and
+        // restores the camera from it on the next update, so a direct write is
+        // reverted before the clip is derived. The offset slider is the honest
+        // way to move the plane relative to the camera.
+        await page.locator('#tg-3d-cutaz').fill('90');
+        await page.locator('#tg-3d-cutaz').dispatchEvent('input');
+        await page.waitForTimeout(500);
+        const b = await check();
+        // A 90° offset must rotate the normal 90° from the camera-facing one.
+        expect(Math.abs(b.nx - a.nx)).toBeGreaterThan(0.3);
+        expect(Math.hypot(b.nx, 0)).toBeLessThanOrEqual(1.001);
+
+        await page.locator('#tg-3d-cutaz').fill('0');
+        await page.locator('#tg-3d-cutaz').dispatchEvent('input');
+        await page.waitForTimeout(500);
+        const back = await check();
+        expect(Math.abs(back.nx - back.want)).toBeLessThan(0.02);
+
+        // Opening the cut further must push the plane toward the centre.
+        await page.locator('#tg-3d-cut').fill('100');
+        await page.locator('#tg-3d-cut').dispatchEvent('input');
+        await page.waitForTimeout(400);
+        const c = await check();
+        expect(c.constant).toBeLessThan(back.constant);
+        expect(c.constant).toBeCloseTo(0, 5);   // a full hemisphere removed
+    });
+
+    test('the layer table shows exactly one dynamo-capable shell', async ({ page }) => {
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.click('[data-layer="core"]');
+
+        const rows = page.locator('#tg-layerdiag-table tbody tr');
+        await expect(rows).toHaveCount(5, { timeout: 30000 });
+        // Exactly one layer clears Rm ≈ 40 — and it is not the most conductive
+        // one, it is the only one that MOVES.
+        await expect(page.locator('#tg-layerdiag-table tbody tr.tg-hi')).toHaveCount(1);
+        await expect(page.locator('#tg-layerdiag-table tbody tr.tg-hi')).toContainText('Outer core');
+        await expect(page.locator('#tg-layerdiag-table tbody')).toContainText('magnetisable');
+
+        // The two numbers the callouts quote must be live, not hard-coded prose.
+        await expect(page.locator('#tg-ic-tau')).toHaveText(/6,0\d\d-year/);
+        await expect(page.locator('#tg-tc-lat')).toHaveText(/69\.\d°/);
+    });
+
     test('every layer carries its honest label', async ({ page }) => {
         await killFeed(page);
         await page.goto(PAGE, { waitUntil: 'load' });

@@ -140,6 +140,45 @@ the field-line shader uses tubes rather than lines because a 1px line carries
 no depth cue, which is the only reason to be in 3D at all. Radii are TRUE —
 Earth 1.0, CMB 0.546, inner core 0.192, nothing compressed.
 
+### 3.0.1 Layer structure and the tangent cylinder
+
+The Core layer's interior view answers a question the shells make visible:
+**only one of the five layers can host a dynamo, and it is not the most
+conductive one.**
+
+| Layer | σ (S/m) | flow U | R_m | τ diffusion | dynamo? |
+|---|---|---|---|---|---|
+| Inner core | 10⁶ | — | **0** | 6,020 yr | no |
+| Outer core | 10⁶ | 0.4 mm/s | **1,135** | 20,580 yr | **YES** |
+| Lower mantle | 3 | — | 0 | 1.9×10⁶ s | no |
+| Upper mantle | 10⁻² | — | 0 | 5×10² s | no |
+| Crust | 10⁻³ | — | 0 | 0.16 s | no · magnetisable |
+
+The inner core is **exactly as conductive as the outer core** and still cannot
+host a dynamo, because R_m = UL/η is a *product* and a solid layer contributes
+U = 0 however conductive it is. Conductivity is necessary; motion is what is
+scarce. The inner core is not idle either — field can only *diffuse* through
+it, on a 6,020-year timescale, which is the basis of the published idea that it
+stabilises reversals.
+
+**The tangent cylinder** — tangent to the inner core, aligned with the spin
+axis — is where the Taylor–Proudman constraint splits the fluid in two. At
+Rossby ≈ 10⁻⁶ Coriolis overwhelms inertia, flow becomes invariant along the
+rotation axis, and a column that would have to pass through the solid inner
+core cannot exist. Outside it: columnar rolls, helical with opposite handedness
+per hemisphere — which *is* the antisymmetric α-effect that `dynamo.js` shows
+can prefer a dipole. Inside it: the polar regions, largely decoupled. It meets
+the CMB at **69.45°** latitude (sin θ = r_IC/r_CMB), so the boundary projects to
+high latitude at the top of the core, not to the pole.
+
+So "rotation selects the dipole" is not a slogan — it is this geometry.
+
+The cutaway plane is re-derived from the camera every frame, so opening it
+always opens *toward the viewer*. A world-fixed plane is the obvious
+implementation and the wrong one: orbit 180° and the opening is behind the
+body. Camera range spans 0.14–30 R_E, from inside the inner core out to roughly
+the sunward magnetopause.
+
 ### 3.1 Numerical gates, all passing
 
 | Gate | Threshold | Current |
@@ -159,6 +198,8 @@ Earth 1.0, CMB 0.546, inner core 0.192, nothing compressed.
 | Field-line reverse-trace closure | < 120 km | **0 km** |
 | Reversed flux, pure dipole | exactly 0 | **0** |
 | Two independent j_n implementations | < 1e-9 | **1.8e-16** |
+| Layers able to host a dynamo | exactly 1 | **1** (outer core) |
+| Tangent cylinder meets CMB at | closed form | **69.45°** |
 
 ### 3.2 Regression traps — each was a real bug, each fails silently
 

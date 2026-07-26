@@ -53,7 +53,10 @@ import { coeffsAt, dipole, REF_RADIUS_KM } from './igrf.js';
 import {
     radialFieldSphere, seedFieldLines, R_CMB_KM, R_INNER_CORE_KM, continuationGain,
 } from './field-lines.js';
-import { mantleScreening, D_MANTLE_M } from './core-model.js';
+import {
+    mantleScreening, D_MANTLE_M, LAYERS, layerDiagnostics,
+    tangentCylinderLatitudeDeg, R_IC_M,
+} from './core-model.js';
 import { KYOTO_TABLE1 } from './observatories.js';
 
 const R_EARTH = 1;
@@ -264,6 +267,9 @@ export class CoreFieldScene {
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         this.renderer.setClearColor(0x03010e, 0);
+        // Local clipping drives the cutaway. Without it the nested shells are
+        // just a stack of spheres you can only ever see the outermost of.
+        this.renderer.localClippingEnabled = true;
         host.appendChild(this.renderer.domElement);
         this.renderer.domElement.style.width = '100%';
         this.renderer.domElement.style.height = '100%';
@@ -276,18 +282,38 @@ export class CoreFieldScene {
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.08;
-        this.controls.minDistance = 0.75;
-        this.controls.maxDistance = 9;
+        // Range spans from INSIDE the inner core (0.14 R_E) out to 30 R_E,
+        // which is roughly the sunward magnetopause — so the same view covers
+        // "what the solid inner core looks like from within" and "where this
+        // field stops being Earth's problem". Zoom speed is damped because a
+        // 200× range on a linear wheel makes the near end unusable.
+        this.controls.minDistance = 0.14;
+        this.controls.maxDistance = 30;
+        this.controls.zoomSpeed = 0.65;
+        this.controls.rotateSpeed = 0.85;
         this.controls.enablePan = false;
+        this.controls.zoomToCursor = true;
 
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
         const key = new THREE.DirectionalLight(0xbfd4ff, 1.0);
         key.position.set(3, 2, 2);
         this.scene.add(key);
+        // A point light at the centre. Without it, opening the cutaway reveals
+        // an interior that no light reaches — the layers are technically there
+        // and visually a black hole.
+        this.coreLight = new THREE.PointLight(0xffd0a0, 0, 3.2, 1.6);
+        this.scene.add(this.coreLight);
 
         this.group = new THREE.Group();
         this.scene.add(this.group);
 
+        // One clipping plane, shared by every shell, so the cutaway is a single
+        // coherent slice through the whole body rather than five independent
+        // cuts that drift apart.
+        this.clipPlane = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 2.0);
+
+        this._buildLayerShells();
+        this._buildTangentCylinder();
         this._buildInnerCore();
         this._buildCmb();
         this._buildSurface();
@@ -304,6 +330,130 @@ export class CoreFieldScene {
         this._onResize = () => this.resize();
         window.addEventListener('resize', this._onResize);
         this.resize();
+    }
+
+    /**
+     * The five layers as nested shells, each carrying its own conductivity and
+     * its own answer to "could a dynamo run here".
+     *
+     * Colour encodes STATE, not temperature: the two metallic layers read warm,
+     * the three silicate ones cool. That is the distinction that matters
+     * magnetically — σ drops by six orders of magnitude across the
+     * core–mantle boundary, and everything else about the field follows from it.
+     */
+    _buildLayerShells() {
+        this.layerShells = new THREE.Group();
+        const diag = layerDiagnostics();
+        // The two metallic layers are EMISSIVE. Not for drama: the centre light
+        // that lets you see into the cutaway sits inside the inner core, so the
+        // inner core's own surface is backlit and renders black without it —
+        // the hottest object in the model looking like a void.
+        //
+        // Colour encodes STATE. Warm = metallic and conducting, cool = silicate
+        // and effectively insulating. σ falls six orders of magnitude across
+        // the core–mantle boundary, and that jump is the one the eye should
+        // catch first. The three silicate shells are separated in hue as well
+        // as lightness so they stay distinct when the cut face is in shadow.
+        const PALETTE = {
+            'Inner core':   { color: 0xfff0d0, opacity: 1.00, metal: 0.90, rough: 0.30, emissive: 0xffa54a, ei: 0.55 },
+            'Outer core':   { color: 0xef6a30, opacity: 0.88, metal: 0.65, rough: 0.58, emissive: 0x8f2c06, ei: 0.30 },
+            'Lower mantle': { color: 0x6a4a7a, opacity: 0.62, metal: 0.05, rough: 0.92, emissive: 0x000000, ei: 0 },
+            'Upper mantle': { color: 0x3f5a92, opacity: 0.50, metal: 0.05, rough: 0.95, emissive: 0x000000, ei: 0 },
+            'Crust':        { color: 0x9fc6e8, opacity: 0.42, metal: 0.10, rough: 0.80, emissive: 0x000000, ei: 0 },
+        };
+        // Outermost first so the inner shells draw over them when clipped.
+        for (const L of [...diag].reverse()) {
+            const pal = PALETTE[L.name];
+            const geo = new THREE.SphereGeometry(L.rOuterKm / REF_RADIUS_KM, 72, 48);
+            const mat = new THREE.MeshStandardMaterial({
+                color: pal.color,
+                emissive: new THREE.Color(pal.emissive),
+                emissiveIntensity: pal.ei,
+                metalness: pal.metal,
+                roughness: pal.rough,
+                transparent: true,
+                opacity: pal.opacity,
+                // side: DoubleSide so a clipped shell shows its INNER surface
+                // rather than a hole — the hollow-shell look is the classic
+                // giveaway of a cutaway done with front-face culling.
+                side: THREE.DoubleSide,
+                clippingPlanes: [this.clipPlane],
+                clipShadows: true,
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.userData.layer = L;
+            mesh.visible = false;
+            this.layerShells.add(mesh);
+        }
+        this.layerShells.visible = false;
+        this.group.add(this.layerShells);
+        this.layerDiagnostics = diag;
+    }
+
+    /**
+     * The tangent cylinder — the wall between the two flow regimes, and the
+     * geometry behind "rotation selects the dipole".
+     *
+     * Drawn as a wireframe because it is not a material surface: it is where
+     * the Taylor–Proudman constraint changes what flow is possible. Rendering
+     * it solid would imply a boundary that is not there.
+     */
+    _buildTangentCylinder() {
+        const r = R_IC_M / (REF_RADIUS_KM * 1e3);
+        const h = 2 * Math.sqrt(Math.max(R_CMB * R_CMB - r * r, 1e-6));
+        const geo = new THREE.CylinderGeometry(r, r, h, 16, 1, true);
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0x7fe6c3, wireframe: true, transparent: true, opacity: 0.28,
+        });
+        this.tangentCylinder = new THREE.Mesh(geo, mat);
+        this.tangentCylinder.visible = false;
+        this.group.add(this.tangentCylinder);
+        this.tangentCylinderLatDeg = tangentCylinderLatitudeDeg();
+    }
+
+    /**
+     * Cutaway. 0 = intact, 1 = a full hemisphere removed.
+     * The plane can also be spun so the cut face can be turned toward the eye.
+     */
+    setCutaway(t, azimuthOffsetRad = 0) {
+        this.cutaway = Math.max(0, Math.min(1, t));
+        this.cutAzimuthOffset = azimuthOffsetRad;
+        this._updateClip();
+    }
+
+    /**
+     * Point the cut AT THE CAMERA, plus whatever offset the user dialled in.
+     *
+     * A world-fixed cut plane is the obvious implementation and the wrong one:
+     * orbit 180° and the opening is on the far side, so the user is looking at
+     * an intact sphere and has to hunt for an angle that works. Re-deriving the
+     * normal from the camera every frame means "cutaway" always means "open it
+     * toward me", and the angle slider becomes a fine adjustment rather than a
+     * prerequisite.
+     */
+    _updateClip() {
+        const p = this.camera.position;
+        const az = Math.atan2(p.z, p.x) + (this.cutAzimuthOffset || 0);
+        this.clipPlane.normal.set(-Math.cos(az), 0, -Math.sin(az));
+        // Constant runs from outside the body (no cut) to the centre.
+        this.clipPlane.constant = 1.25 * (1 - (this.cutaway || 0));
+    }
+
+    /** Show the layer stack (and hide the field shells that would occlude it). */
+    setLayerMode(on) {
+        this.layerMode = !!on;
+        this.layerShells.visible = !!on;
+        this.layerShells.children.forEach((m) => { m.visible = !!on; });
+        this.tangentCylinder.visible = !!on;
+        this.coreLight.intensity = on ? 0.85 : 0;
+        if (on) {
+            this.cmb.visible = false;
+            this.surface.visible = false;
+            // Pull back far enough to see the whole stack. At the Core layer's
+            // 1.55 the crust is outside the frame, which is the one thing a
+            // layer view must not do.
+            this._targetDist = 2.75;
+        }
     }
 
     _buildInnerCore() {
@@ -393,10 +543,18 @@ export class CoreFieldScene {
     setLayer(name) {
         const v = LAYER_VIEW[name] || LAYER_VIEW.external;
         this.layer = name;
-        this._targetDist = v.dist;
+        this._targetDist = this.layerMode ? 2.75 : v.dist;
         this._targetOpacity = v;
-        this.innerCore.visible = v.innerCore;
         this.observatories.visible = v.obs;
+        if (this.layerMode) {
+            // The layer stack is its own view of the interior; the field
+            // shells would sit right on top of it.
+            this.innerCore.visible = false;
+            this.surface.visible = false;
+            this.cmb.visible = false;
+            return;
+        }
+        this.innerCore.visible = v.innerCore;
         this.surface.visible = v.surface > 0;
         this.cmb.visible = v.cmb > 0;
     }
@@ -620,7 +778,8 @@ export class CoreFieldScene {
             this.camera.position.multiplyScalar(1 + (want / dist - 1) * 0.07);
         }
         const ease = (u, target) => u + (target - u) * 0.08;
-        this.mantleUniforms.uOpacity.value = ease(this.mantleUniforms.uOpacity.value, v.mantle);
+        this.mantleUniforms.uOpacity.value = ease(
+            this.mantleUniforms.uOpacity.value, this.layerMode ? 0 : v.mantle);
         this.cmbUniforms.uOpacity.value = ease(this.cmbUniforms.uOpacity.value, v.cmb);
         this.surfaceUniforms.uOpacity.value = ease(this.surfaceUniforms.uOpacity.value, v.surface);
         this.surfaceMaterial.depthWrite = this.surfaceUniforms.uOpacity.value > 0.7;
@@ -628,8 +787,9 @@ export class CoreFieldScene {
         // outside the planet they are hidden, because they genuinely are.
         if (this.fieldLines) {
             const showClosed = this.layer !== 'external';
+            const layerDim = this.layerMode ? 0.22 : 1;
             this.fieldLines.children.forEach((m) => {
-                const target = m.userData.escapes ? v.lines : (showClosed ? v.lines * 0.8 : 0);
+                const target = layerDim * (m.userData.escapes ? v.lines : (showClosed ? v.lines * 0.8 : 0));
                 if (m.material?.uniforms?.uOpacity) {
                     m.material.uniforms.uOpacity.value = ease(m.material.uniforms.uOpacity.value, target);
                 }
@@ -648,6 +808,9 @@ export class CoreFieldScene {
             });
         }
         this.controls.update();
+        // Re-derive the cut from the camera each frame, so orbiting rotates the
+        // opening with you instead of hiding it.
+        if (this.cutaway > 0) this._updateClip();
         this.renderer.render(this.scene, this.camera);
     }
 

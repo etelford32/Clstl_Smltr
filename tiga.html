@@ -287,6 +287,24 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
             <input type="range" id="tg-3d-period" min="-3" max="3" step="0.1" value="0.5">
             <output id="tg-3d-period-out">3 yr</output>
         </div>
+        <div class="tg-field">
+            <label for="tg-3d-cut">Cutaway</label>
+            <input type="range" id="tg-3d-cut" min="0" max="100" step="1" value="0">
+            <output id="tg-3d-cut-out">0%</output>
+        </div>
+        <div class="tg-field">
+            <label for="tg-3d-cutaz">Cut angle</label>
+            <input type="range" id="tg-3d-cutaz" min="0" max="360" step="1" value="0">
+            <output id="tg-3d-cutaz-out">0°</output>
+        </div>
+        <div class="tg-field">
+            <label for="tg-3d-interior">Interior</label>
+            <select id="tg-3d-interior">
+                <option value="field">Magnetic field</option>
+                <option value="layers">Layer structure</option>
+            </select>
+            <span aria-hidden="true"></span>
+        </div>
     </div>
     <div class="tg-stagestats">
         <div class="tg-stat"><div class="v hot" id="tg-3d-peak">&mdash;</div><div class="k">peak |B_r| at CMB</div></div>
@@ -637,6 +655,66 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
         almost all of the physics. They still answer real questions.
     </div>
 
+    <div class="tg-card" style="margin-bottom:14px">
+        <h3>Only one layer can run a dynamo &mdash; and not the one you would guess</h3>
+        <p class="tg-note">
+            Switch the view above to <em>Layer structure</em> and pull the cutaway open. Each shell
+            carries its own conductivity, its own diffusion time, and its own answer to whether a
+            dynamo could operate in it.
+        </p>
+        <div class="tg-scroll" tabindex="0" role="region" aria-label="Magnetic diagnostics by layer">
+            <table class="tg-table" id="tg-layerdiag-table">
+                <thead><tr>
+                    <th>Layer</th><th class="num">thickness</th><th class="num">&sigma; (S/m)</th>
+                    <th class="num">flow U</th><th class="num">R<sub>m</sub></th>
+                    <th class="num">&tau; diffusion</th><th>dynamo?</th>
+                </tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div class="tg-callout">
+            <strong>The inner core is exactly as conductive as the outer core.</strong> It still cannot
+            host a dynamo, because R<sub>m</sub> = UL/&eta; is a <em>product</em> &mdash; and a solid
+            layer contributes U&nbsp;=&nbsp;0 however conductive it is. The outer core is the only shell
+            that is both conducting <em>and</em> moving. Conductivity is necessary; motion is what is
+            scarce.
+            <br><br>
+            The inner core is not idle, though: field can only <em>diffuse</em> through it, on a
+            <strong id="tg-ic-tau">&mdash;</strong> timescale. That is slow enough to resist a rapid
+            reversal of the field around it, which is the basis of the published idea that the inner
+            core stabilises reversals.
+        </div>
+    </div>
+
+    <div class="tg-card" style="margin-bottom:14px">
+        <h3>The tangent cylinder <span class="tg-tag model">Geometry, not a surface</span></h3>
+        <p class="tg-note">
+            The cylinder tangent to the inner core, aligned with the spin axis. It is drawn as a
+            wireframe because it is not a material boundary &mdash; it is where the physics of the
+            flow changes.
+        </p>
+        <div class="tg-stats">
+            <div class="tg-stat"><div class="v good" id="tg-tc-lat">&mdash;</div><div class="k">meets the CMB at</div></div>
+            <div class="tg-stat"><div class="v" id="tg-tc-rossby">&mdash;</div><div class="k">Rossby number</div></div>
+            <div class="tg-stat"><div class="v" id="tg-tc-radius">&mdash;</div><div class="k">radius</div></div>
+        </div>
+        <div class="tg-callout">
+            The Taylor&ndash;Proudman theorem: when Coriolis overwhelms inertia &mdash; and at
+            Rossby&nbsp;&asymp;&nbsp;10<sup>&minus;6</sup> it overwhelmingly does &mdash; flow becomes
+            invariant along the rotation axis and organises into <em>columns</em>. A column that would
+            have to pass through the solid inner core cannot exist, so the fluid splits in two:
+            <br><br>
+            <strong>Outside</strong> the cylinder, columnar rolls, made helical by Coriolis with
+            opposite handedness in each hemisphere &mdash; which <em>is</em> the antisymmetric
+            &alpha;-effect that the controlled experiment below shows can prefer a dipole.
+            <strong>Inside</strong>, the polar regions, largely decoupled.
+            <br><br>
+            So &ldquo;rotation selects the dipole&rdquo; is not a slogan. <strong>It is this
+            geometry.</strong> Remove the rotation and you keep a magnetic field but lose the axial
+            dipole.
+        </div>
+    </div>
+
     <div class="tg-callout warn" style="margin-bottom:14px">
         <strong>Downward continuation is real, and it is where over-interpretation starts.</strong>
         The expansion is valid anywhere the field is current-free, so evaluating it at the CMB is
@@ -866,6 +944,7 @@ import { KYOTO_TABLE1, SYMH6_TYPICAL, SYMH6_BALANCED, DST4 } from './js/geomag/o
 import {
     LAYERS, CURIE_K, dimensionlessNumbers, freeDecayTable, freeDecayTime,
     mantleScreening, halfAttenuationPeriodYears, YEAR_S,
+    layerDiagnostics, tangentCylinderLatitudeDeg, R_IC_M,
 } from './js/geomag/core-model.js';
 import { runRikitake, alphaOmegaParity, dipoleWindow } from './js/geomag/dynamo.js';
 import { freeDecayEnsemble, advanceEnsemble } from './js/geomag/diffusion.js';
@@ -1550,6 +1629,31 @@ function fillCoreTables() {
         + `degree 13 — ${(freeDecayTime(1) / freeDecayTime(13)).toFixed(1)} times longer.`);
 }
 
+function fillLayerDiagnostics() {
+    const diag = layerDiagnostics();
+    const fmtTau = (yr) => (yr > 1
+        ? `${Math.round(yr).toLocaleString()} yr`
+        : `${(yr * YEAR_S).toExponential(1)} s`);
+    $('tg-layerdiag-table').querySelector('tbody').innerHTML = diag.map((L) => `
+        <tr class="${L.canSustainDynamo ? 'tg-hi' : ''}">
+            <td>${L.name}</td>
+            <td class="num">${L.thicknessKm.toLocaleString()} km</td>
+            <td class="num">${L.sigma.toExponential(0)}</td>
+            <td class="num">${L.flowMs ? `${(L.flowMs * 1e3).toFixed(1)} mm/s` : '—'}</td>
+            <td class="num">${L.magneticReynolds >= 1 ? Math.round(L.magneticReynolds).toLocaleString() : '0'}</td>
+            <td class="num">${fmtTau(L.diffusionTimeYears)}</td>
+            <td>${L.canSustainDynamo ? 'YES' : 'no'}${L.permanentlyMagnetisable ? ' · magnetisable' : ''}</td>
+        </tr>`).join('');
+
+    const ic = diag.find((L) => L.name === 'Inner core');
+    $('tg-ic-tau').textContent = `${Math.round(ic.diffusionTimeYears).toLocaleString()}-year`;
+
+    const n = dimensionlessNumbers();
+    $('tg-tc-lat').textContent = `${tangentCylinderLatitudeDeg().toFixed(1)}°`;
+    $('tg-tc-rossby').textContent = n.rossby.toExponential(1);
+    $('tg-tc-radius').innerHTML = `${(R_IC_M / 1e3).toFixed(0)} <small>km</small>`;
+}
+
 function drawRikitake() {
     // Coarser step than the reference run — this is a browser tab, and the
     // result being demonstrated is the IRREGULARITY, which is robust.
@@ -1591,9 +1695,13 @@ async function boot3d() {
         // on this layer is pure computation and must survive a GPU that isn't.
         const { CoreFieldScene } = await import('./js/geomag/core-3d.js');
         scene3d = new CoreFieldScene(host, { year: 2025, nmax: 10 });
+        // Exposed so tests/tiga-smoke.spec.js can assert the clip plane really
+        // tracks the camera. Read-only from the page's point of view.
+        window.__tigaScene = scene3d;
         msg.remove();
         apply3d();
         applyScreening();
+        applyCutaway();
         const active = layerButtons.find((b) => b.getAttribute('aria-selected') === 'true');
         scene3d.setLayer(active ? active.dataset.layer : 'external');
 
@@ -1696,6 +1804,33 @@ $('tg-3d-mantle').addEventListener('input', () => {
     if (scene3d) scene3d.setMantleOpacity(v);
 });
 $('tg-3d-period').addEventListener('input', applyScreening);
+
+function applyCutaway() {
+    const t = Number($('tg-3d-cut').value) / 100;
+    const az = Number($('tg-3d-cutaz').value);
+    $('tg-3d-cut-out').textContent = `${Math.round(t * 100)}%`;
+    $('tg-3d-cutaz-out').textContent = `${az}°`;
+    if (scene3d) scene3d.setCutaway(t, (az * Math.PI) / 180);
+}
+$('tg-3d-cut').addEventListener('input', applyCutaway);
+$('tg-3d-cutaz').addEventListener('input', applyCutaway);
+
+$('tg-3d-interior').addEventListener('change', () => {
+    const layers = $('tg-3d-interior').value === 'layers';
+    if (scene3d) {
+        scene3d.setLayerMode(layers);
+        // Re-apply the current layer so the field shells come back correctly
+        // when switching out of layer mode.
+        const active = layerButtons.find((b) => b.getAttribute('aria-selected') === 'true');
+        scene3d.setLayer(active ? active.dataset.layer : 'external');
+    }
+    // Opening the layer stack with no cut shows only the outermost shell,
+    // which is the least informative possible view of a layered body.
+    if (layers && Number($('tg-3d-cut').value) === 0) {
+        $('tg-3d-cut').value = '55';
+        applyCutaway();
+    }
+});
 $('tg-decay-time').addEventListener('input', drawDecayLive);
 
 let paritySweep = null;
@@ -1842,6 +1977,7 @@ function renderLayer(name) {
         drawScreening();
     } else if (name === 'core') {
         fillCoreTables();
+        fillLayerDiagnostics();
         drawRikitake();
         drawParity();
         drawDecayLive();
