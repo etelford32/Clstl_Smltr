@@ -1738,6 +1738,27 @@ async function boot3d() {
         const active = layerButtons.find((b) => b.getAttribute('aria-selected') === 'true');
         scene3d.setLayer(active ? active.dataset.layer : 'external');
 
+        // Release the GL context when the page goes away. Without this every
+        // load leaks a WebGLRenderer: browsers cap live contexts (~16), and
+        // past the cap they start force-losing the oldest ones, which shows up
+        // as the view silently dying or the page stalling. A long-lived tab
+        // that navigates back and forth hits it, and so does a test suite —
+        // which is how this was found.
+        window.addEventListener('pagehide', () => {
+            try { scene3d?.dispose(); } catch (_) { /* nothing useful to do */ }
+            scene3d = null;
+            if (raf3d) cancelAnimationFrame(raf3d);
+        }, { once: true });
+
+        // If the context is lost anyway, say so instead of showing a dead box.
+        scene3d.renderer.domElement.addEventListener('webglcontextlost', (e) => {
+            e.preventDefault();
+            if (raf3d) cancelAnimationFrame(raf3d);
+            host.insertAdjacentHTML('beforeend',
+                '<div class="tg-stage-msg">3D context lost — reload to restore it. '
+                + 'Everything else on this page is pure computation and is unaffected.</div>');
+        });
+
         // Pause GL when the panel is hidden or scrolled away — the tab is
         // running a Kalman filter and a dynamo solver too.
         let visible = true;
