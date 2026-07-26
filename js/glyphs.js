@@ -84,6 +84,15 @@ export const GLYPHS = {
     shield:
         `<path d="M12 2.8l7.4 3v5.6c0 4.6-3 8.2-7.4 9.8-4.4-1.6-7.4-5.2-7.4-9.8V5.8z"/>` +
         `<path d="M12 8v6"/>`,
+    dynamo:
+        // the INTERIOR: a surface, the conducting core inside it, and the
+        // tilted dipole axis that core sustains — stubs only, so it does not
+        // read as a crosshair. Deliberately unlike `magnet`, which is the
+        // external toroidal ring current.
+        `<circle cx="12" cy="12" r="8.4"/>` +
+        `<circle cx="12" cy="12" r="3.7"/>` +
+        `<path d="M9.4 2.6l.9 3.1M13.7 18.3l.9 3.1"/>` +
+        NODE(12, 12, 1.1),
     'flux-rope':
         // twisted pair with rungs — a rope/helix. The earlier two-strand
         // sine version rendered as a row of X's ('XXI') at nav size.

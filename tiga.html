@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TIGA · Geomagnetic Estimator · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/tiga.html">
+<meta name="description" content="A real-time geomagnetic nowcast with an honest posterior, sitting on an explorable IGRF-14 field model, sitting on a dynamo you can only model. TIGA is a sequential Bayesian estimator of the degree-1 external Gauss coefficients — and the classical Dst index is its one-parameter degenerate case.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/tiga.html">
+<meta property="og:title" content="TIGA — a geomagnetic estimator that publishes its uncertainty">
+<meta property="og:description" content="Core → field → nowcast, layered by timescale. A Kalman filter on the degree-1 external Gauss coefficients, updated each minute from whichever observatories reported. Dropout tolerance is architectural, not trained.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/tiga.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="TIGA — Parkers Physics">
+<meta name="twitter:description" content="The classical geomagnetic index is a one-parameter fit written as arithmetic. This is the full estimator, with the posterior neither Kyoto nor USGS publishes.">
+<meta name="twitter:image" content="https://parkersphysics.com/static/og/tiga.jpg">
+
+<!-- Canonical nav: structure + styling owned by js/nav.js + js/nav-styles.css.
+     All page CSS below is tg- prefixed; there is intentionally NO nav styling
+     here (js/nav-styles.css owns it). -->
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+    min-height:100vh;
+    background:#03010e;
+    color:#cdd5e4;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    overflow-x:hidden;
+}
+.skip-link{position:absolute;left:-9999px;top:0;background:#ffd700;color:#000;padding:8px 16px;font-weight:700;border-radius:0 0 6px 6px;z-index:9999}
+.skip-link:focus{left:16px}
+
+.tg-wrap { max-width:1320px; margin:0 auto; padding:0 18px 60px; }
+
+/* ── Hero ─────────────────────────────────────────────────────────────── */
+.tg-hero { padding:26px 4px 12px; display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; }
+.tg-hero h1 {
+    font-size:1.45rem; font-weight:800;
+    background:linear-gradient(45deg,#ff9a56,#4fc3f7,#c792ea);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.tg-hero .tg-sub { font-size:.85rem; color:#8b94ad; }
+.tg-badge {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:.7rem; font-weight:700; letter-spacing:.08em; color:#c792ea;
+    border:1px solid rgba(199,146,234,.35); border-radius:999px; padding:3px 10px;
+}
+.tg-badge::before { content:''; width:7px; height:7px; border-radius:50%; background:#c792ea; box-shadow:0 0 8px #c792ea; }
+
+.tg-lede { font-size:.88rem; line-height:1.6; color:#9aa4bd; max-width:74ch; padding:0 4px 18px; }
+.tg-lede strong { color:#cdd5e4; font-weight:600; }
+
+/* ── The honest-label spine ───────────────────────────────────────────── */
+.tg-spine { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:18px; }
+.tg-layer {
+    background:rgba(6,9,28,.72); border:1px solid rgba(90,110,160,.26);
+    border-radius:12px; padding:12px 14px; cursor:pointer; text-align:left;
+    color:inherit; font:inherit; transition:border-color .15s, background .15s;
+}
+.tg-layer:hover { border-color:rgba(140,170,230,.5); }
+.tg-layer[aria-selected="true"] { background:rgba(12,18,44,.9); }
+.tg-layer[data-layer="core"][aria-selected="true"]     { border-color:rgba(255,154,86,.7); }
+.tg-layer[data-layer="field"][aria-selected="true"]    { border-color:rgba(79,195,247,.7); }
+.tg-layer[data-layer="external"][aria-selected="true"] { border-color:rgba(199,146,234,.75); }
+.tg-layer h2 { font-size:.95rem; font-weight:700; margin-bottom:2px; }
+.tg-layer[data-layer="core"] h2     { color:#ff9a56; }
+.tg-layer[data-layer="field"] h2    { color:#4fc3f7; }
+.tg-layer[data-layer="external"] h2 { color:#c792ea; }
+.tg-layer .tg-scale { font-size:.7rem; color:#7c86a0; font-variant-numeric:tabular-nums; }
+.tg-layer .tg-what { font-size:.76rem; color:#9aa4bd; margin-top:6px; line-height:1.45; }
+/* The label is the point of the whole page — it is never decoration. */
+.tg-tag {
+    display:inline-block; margin-top:8px; font-size:.62rem; font-weight:700;
+    letter-spacing:.09em; text-transform:uppercase; padding:2px 8px; border-radius:999px;
+}
+.tg-tag.model      { color:#ff9a56; background:rgba(255,154,86,.13);  border:1px solid rgba(255,154,86,.32); }
+.tg-tag.derived    { color:#4fc3f7; background:rgba(79,195,247,.12);  border:1px solid rgba(79,195,247,.3); }
+.tg-tag.realtime   { color:#7fe6c3; background:rgba(127,230,195,.12); border:1px solid rgba(127,230,195,.32); }
+.tg-tag.provisional{ color:#ffb454; background:rgba(255,180,84,.12);  border:1px solid rgba(255,180,84,.34); }
+
+/* ── Panels ───────────────────────────────────────────────────────────── */
+.tg-panels > section { display:none; }
+.tg-panels > section.tg-on { display:block; }
+
+.tg-grid { display:grid; gap:14px; align-items:start; }
+.tg-grid.tg-2 { grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); }
+.tg-grid.tg-2e { grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); }
+
+.tg-card {
+    background:rgba(6,9,28,.72); border:1px solid rgba(90,110,160,.24);
+    border-radius:12px; padding:14px 16px; min-width:0;
+}
+.tg-card > h3 {
+    font-size:.82rem; font-weight:700; letter-spacing:.04em; color:#e4e9f5;
+    margin-bottom:3px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+}
+.tg-card > p.tg-note { font-size:.74rem; color:#7c86a0; line-height:1.5; margin-bottom:10px; }
+.tg-card canvas { width:100%; display:block; border-radius:8px; background:rgba(2,4,16,.6); }
+
+.tg-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:8px; margin-top:10px; }
+.tg-stat { background:rgba(5,8,26,.62); border:1px solid rgba(90,110,160,.22); border-radius:10px; padding:8px 10px; }
+.tg-stat .v { font-size:1.02rem; font-weight:700; color:#4fc3f7; font-variant-numeric:tabular-nums; line-height:1.25; }
+.tg-stat .v.warn { color:#ffb454; }
+.tg-stat .v.good { color:#7fe6c3; }
+.tg-stat .v.hot  { color:#ff9a56; }
+.tg-stat .v small { font-size:.62rem; font-weight:600; color:#8b94ad; }
+.tg-stat .k { font-size:.63rem; color:#8b94ad; letter-spacing:.05em; text-transform:uppercase; margin-top:3px; }
+
+.tg-field { display:grid; grid-template-columns:112px 1fr 74px; align-items:center; gap:9px; font-size:.76rem; margin-bottom:7px; }
+.tg-field label { color:#8b94ad; }
+.tg-field input[type=range] { width:100%; accent-color:#4fc3f7; }
+.tg-field output { color:#e4e9f5; text-align:right; font-variant-numeric:tabular-nums; }
+.tg-field select {
+    background:#0b0e26; color:#cdd5e4; border:1px solid rgba(90,110,160,.35);
+    border-radius:6px; padding:4px 6px; font-size:.76rem; width:100%;
+}
+.tg-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+.tg-tabs button {
+    background:rgba(90,110,160,.12); color:#8b94ad; border:1px solid rgba(90,110,160,.3);
+    border-radius:7px; padding:4px 10px; font-size:.72rem; cursor:pointer;
+}
+.tg-tabs button.active { color:#e4e9f5; border-color:rgba(79,195,247,.6); background:rgba(79,195,247,.14); }
+.tg-btn {
+    background:rgba(199,146,234,.14); color:#e4e9f5; border:1px solid rgba(199,146,234,.45);
+    border-radius:8px; padding:6px 14px; font-size:.76rem; cursor:pointer;
+}
+.tg-btn:disabled { opacity:.45; cursor:progress; }
+
+table.tg-table { width:100%; border-collapse:collapse; font-size:.74rem; font-variant-numeric:tabular-nums; }
+table.tg-table th { text-align:left; color:#7c86a0; font-weight:600; padding:4px 6px; border-bottom:1px solid rgba(90,110,160,.24); }
+table.tg-table td { padding:4px 6px; border-bottom:1px solid rgba(90,110,160,.1); }
+table.tg-table td.num, table.tg-table th.num { text-align:right; }
+table.tg-table tr.tg-dim td { color:#6d7691; }
+table.tg-table tr.tg-hi td { color:#7fe6c3; }
+
+.tg-callout {
+    border-left:3px solid rgba(199,146,234,.6); background:rgba(199,146,234,.06);
+    padding:10px 14px; border-radius:0 8px 8px 0; font-size:.78rem; line-height:1.55; color:#9aa4bd;
+    margin-top:12px;
+}
+.tg-callout.warn { border-left-color:rgba(255,180,84,.7); background:rgba(255,180,84,.06); }
+.tg-callout strong { color:#e4e9f5; }
+.tg-callout .tg-big { display:block; font-size:1.5rem; font-weight:800; color:#c792ea; font-variant-numeric:tabular-nums; margin:2px 0 4px; }
+
+.tg-legend { display:flex; flex-wrap:wrap; gap:12px; font-size:.7rem; color:#8b94ad; margin-top:8px; }
+.tg-legend i { display:inline-block; width:14px; height:3px; border-radius:2px; margin-right:5px; vertical-align:middle; }
+
+.tg-status { font-size:.72rem; color:#7c86a0; margin-top:8px; min-height:1.1em; }
+.tg-status.err { color:#ff8a7a; }
+
+.tg-foot { margin-top:26px; font-size:.72rem; color:#6d7691; line-height:1.65; }
+.tg-foot a { color:#8fa6d8; }
+.tg-foot h4 { color:#9aa4bd; font-size:.74rem; margin:14px 0 4px; }
+
+@media (max-width:900px) {
+    .tg-grid.tg-2 { grid-template-columns:1fr; }
+    .tg-spine { grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<main id="main-content" class="tg-wrap">
+
+<div class="tg-hero">
+    <h1>TIGA</h1>
+    <span class="tg-badge">Temporally Integrated Geomagnetic Assimilation</span>
+    <span class="tg-sub">One instrument, two planets, three timescales</span>
+</div>
+
+<p class="tg-lede">
+    A ground magnetometer records two physically separate planets at once, and each one's signal is
+    the other's noise. Below about a cycle per decade the record is the <strong>geodynamo</strong> —
+    currents in liquid iron 2,891&nbsp;km down. Above it, the record is the
+    <strong>magnetosphere</strong>. Field modellers subtract the second to see the first; space-weather
+    modellers subtract the first to see the second. This page runs all three layers and labels each one
+    honestly: only the top layer is real-time, and it is a <strong>nowcast with zero lead time</strong>,
+    not a forecast.
+</p>
+
+<div class="tg-spine" role="tablist" aria-label="Timescale layers">
+    <button class="tg-layer" data-layer="core" role="tab" aria-selected="false" aria-controls="tg-panel-core" id="tg-tab-core">
+        <h2>Core</h2>
+        <div class="tg-scale">10³ – 10⁵ years</div>
+        <div class="tg-what">Reduced dynamo models: why there is a dipole, why it reverses, and how long it would take to die.</div>
+        <span class="tg-tag model">Model</span>
+    </button>
+    <button class="tg-layer" data-layer="field" role="tab" aria-selected="false" aria-controls="tg-panel-field" id="tg-tab-field">
+        <h2>Field</h2>
+        <div class="tg-scale">1 – 10² years</div>
+        <div class="tg-what">IGRF-14 evaluated live to degree 13 — the observed main field and its secular variation.</div>
+        <span class="tg-tag derived">Observation-derived</span>
+    </button>
+    <button class="tg-layer" data-layer="external" role="tab" aria-selected="true" aria-controls="tg-panel-external" id="tg-tab-external">
+        <h2>External</h2>
+        <div class="tg-scale">minutes</div>
+        <div class="tg-what">The TIGA estimator: degree-1 external Gauss coefficients, updated every minute from whoever reported.</div>
+        <span class="tg-tag realtime">Real-time estimate</span>
+    </button>
+</div>
+
+<div class="tg-panels">
+
+<!-- ══════════════════════════ EXTERNAL ══════════════════════════════ -->
+<section id="tg-panel-external" class="tg-on" role="tabpanel" aria-labelledby="tg-tab-external">
+
+    <div class="tg-grid tg-2">
+        <div class="tg-card">
+            <h3>Live nowcast <span class="tg-tag provisional" id="tg-live-tag">Provisional baseline</span></h3>
+            <p class="tg-note">
+                −q₁⁰ estimated each minute from the USGS observatory network, with its posterior.
+                The shaded band is ±1σ. <strong>This is not SYM-H</strong>: it is the physical coefficient
+                the index approximates, and the two differ by the index's own definition error.
+            </p>
+            <canvas id="tg-live-chart" height="260"></canvas>
+            <div class="tg-legend">
+                <span><i style="background:#c792ea"></i>−q₁⁰ estimate</span>
+                <span><i style="background:rgba(199,146,234,.35)"></i>±1σ posterior</span>
+                <span><i style="background:#7fe6c3"></i>stations reporting</span>
+            </div>
+            <div class="tg-stats">
+                <div class="tg-stat"><div class="v" id="tg-live-value">—</div><div class="k">−q₁⁰ now</div></div>
+                <div class="tg-stat"><div class="v" id="tg-live-sigma">—</div><div class="k">posterior σ</div></div>
+                <div class="tg-stat"><div class="v" id="tg-live-n">—</div><div class="k">stations</div></div>
+                <div class="tg-stat"><div class="v" id="tg-live-asym">—</div><div class="k">asymmetry</div></div>
+                <div class="tg-stat"><div class="v" id="tg-live-mlt">—</div><div class="k">peak MLT</div></div>
+                <div class="tg-stat"><div class="v" id="tg-live-gap">—</div><div class="k">largest MLT gap</div></div>
+            </div>
+            <div class="tg-status" id="tg-live-status">Contacting the observatory network…</div>
+            <div class="tg-callout warn">
+                <strong>What is provisional, precisely.</strong> Removing each station's internal field
+                and its regular daily variation properly needs a causal trailing-window S<sub>q</sub>
+                baseline. That is not built yet — this uses a trailing median, which is honest about
+                storm <em>shape</em> and wrong about absolute <em>level</em>. The causal-baseline penalty
+                is expected to dominate the real-data error budget, so it gets measured against a
+                non-causal oracle before any live RMSE is quoted.
+            </div>
+        </div>
+
+        <div class="tg-card">
+            <h3>Reporting stations</h3>
+            <p class="tg-note">
+                Coordinates come from the feed itself, converted to centred-dipole latitude against the
+                current IGRF epoch. Stations poleward of 50° dipole latitude are cut because the auroral
+                electrojets take over there and the station stops measuring the ring current.
+            </p>
+            <table class="tg-table" id="tg-station-table">
+                <thead><tr><th>IAGA</th><th class="num">dip lat</th><th class="num">MLT</th><th class="num">samples</th></tr></thead>
+                <tbody><tr class="tg-dim"><td colspan="4">loading…</td></tr></tbody>
+            </table>
+            <div class="tg-callout">
+                <strong>Station count is the wrong variable.</strong> Longitudinal spread is the right one.
+                In the OSSE, dropping 23 clustered Europe/Africa stations <em>improved</em> the order-1
+                estimate while dropping 9 well-placed American stations made it much worse — the mechanism
+                is conditioning, and it is measurable. For a USGS-only network that is the binding
+                constraint, and it is stated rather than hidden.
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-grid tg-2e" style="margin-top:14px">
+        <div class="tg-card">
+            <h3>The index's own definition error</h3>
+            <p class="tg-note">
+                Both curves are computed from the <em>same</em> synthetic truth field. One is Kyoto's
+                six-station recipe; the other is the pure degree-1 zonal coefficient. Their difference is
+                irreducible — no estimator of q₁⁰ can beat it, and no number of extra stations touches it.
+            </p>
+            <canvas id="tg-floor-chart" height="220"></canvas>
+            <div class="tg-legend">
+                <span><i style="background:#4fc3f7"></i>Kyoto 6-station recipe</span>
+                <span><i style="background:#7fe6c3"></i>pure zonal −q₁⁰</span>
+                <span><i style="background:#ff8a7a"></i>difference</span>
+            </div>
+            <div class="tg-callout">
+                <strong>The index costs more than the estimator.</strong>
+                <span class="tg-big" id="tg-floor-value">—</span>
+                RMS definition error, against <strong id="tg-est-error">—</strong> of TIGA estimation error
+                in q₁⁰. Because the estimand is a physical coefficient rather than the index, those two can
+                be <em>separated</em>. Estimate "SYM-H" directly and they are inseparable — you would be
+                measuring the index.
+            </div>
+        </div>
+
+        <div class="tg-card">
+            <h3>Dropout: the curve is flat</h3>
+            <p class="tg-note">
+                Remove stations at random and re-run. The observation operator is rebuilt every epoch from
+                whoever is present, so dropout tolerance is <strong>architectural, not trained</strong> —
+                which is why the knee sits at the fitted-parameter count. There are three parameters.
+            </p>
+            <canvas id="tg-dropout-chart" height="220"></canvas>
+            <div class="tg-legend">
+                <span><i style="background:#c792ea"></i>RMSE in q₁⁰</span>
+                <span><i style="background:#ffb454"></i>bias</span>
+                <span><i style="background:rgba(255,138,122,.6)"></i>index definition floor</span>
+            </div>
+            <div class="tg-status" id="tg-dropout-status">Running the observing-system experiment…</div>
+            <div class="tg-callout">
+                <strong>Bias, not variance, is the dropout signature.</strong> The calibration is fitted
+                <em>once</em> and frozen. Refitting it per dropout level lets it absorb dropout-induced
+                bias — on the first pass that produced a curve which <em>improved</em> as stations were
+                removed. Freezing it produced this one.
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-grid tg-2e" style="margin-top:14px">
+        <div class="tg-card">
+            <h3>Why an asymmetric ring current aliases as a 24-hour sinusoid</h3>
+            <p class="tg-note">
+                A partial ring current is fixed in magnetic local time; the station set is fixed to the
+                Earth. So the asymmetry does not enter a classical index as a constant offset — it enters
+                as a sinusoid in UT. Pick a station set:
+            </p>
+            <div class="tg-tabs" id="tg-alias-tabs">
+                <button data-set="dst4">Dst 4-station</button>
+                <button data-set="symh6" class="active">SYM-H 6, all-northern</button>
+                <button data-set="symh6b">SYM-H 6, balanced</button>
+                <button data-set="pool11">Full 11 pool</button>
+            </div>
+            <canvas id="tg-alias-chart" height="200"></canvas>
+            <div class="tg-stats">
+                <div class="tg-stat"><div class="v warn" id="tg-alias-amp">—</div><div class="k">bias amplitude</div></div>
+                <div class="tg-stat"><div class="v" id="tg-alias-balance">—</div><div class="k">hemispheric balance</div></div>
+                <div class="tg-stat"><div class="v" id="tg-alias-phase">—</div><div class="k">UT phase</div></div>
+            </div>
+            <div class="tg-callout">
+                The driver is one line of algebra: the numerator is mean(sin λ·e<sup>iφ</sup>), so
+                <strong>southern stations enter with opposite sign and cancel northern ones</strong>.
+                Hemispheric balance, not station count, sets the amplitude — and reselecting six of eleven
+                every month changes both the amplitude <em>and</em> the UT phase of a bias reaching tens of
+                nT during a large storm.
+            </div>
+        </div>
+
+        <div class="tg-card">
+            <h3>Dst is TIGA with one parameter</h3>
+            <p class="tg-note">
+                Write out the degree-1 expansion, keep only the zonal term, and
+                X<sub>i</sub>/cos λ<sub>i</sub> = −(q₁⁰+g₁⁰) identically at every station. Averaging and
+                dividing by mean cos λ — the Dst and SYM-H recipe exactly — <em>is</em> the least-squares
+                estimator of that coefficient.
+            </p>
+            <table class="tg-table" id="tg-identity-table">
+                <thead><tr><th>Station set</th><th class="num">classical average</th><th class="num">−q₁⁰</th><th class="num">|difference|</th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <div class="tg-callout">
+                So the distinction is not estimator-versus-index. Everything here is an estimator; they
+                differ in how many parameters they fit, how they weight stations, and whether they carry a
+                prior. <strong>Dst is the one-parameter, equal-weight, no-memory degenerate case</strong> —
+                and that is why a Bayesian version has a posterior to publish, which neither Kyoto nor USGS
+                emits.
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-card" style="margin-top:14px">
+        <h3>Open problem, published rather than papered over</h3>
+        <p class="tg-note">
+            The posterior is <strong>not calibrated</strong>. Measured against q₁⁰ in the OSSE:
+        </p>
+        <div class="tg-stats" id="tg-calib-stats">
+            <div class="tg-stat"><div class="v warn" id="tg-cov68">—</div><div class="k">nominal 68% covers</div></div>
+            <div class="tg-stat"><div class="v warn" id="tg-cov95">—</div><div class="k">nominal 95% covers</div></div>
+            <div class="tg-stat"><div class="v" id="tg-memoryless">—</div><div class="k">vs memoryless control</div></div>
+        </div>
+        <div class="tg-callout warn">
+            Representativeness error — the degree≥2 field a degree-1 model cannot represent — is five times
+            the instrument noise and <strong>correlated at 0.50 between stations</strong>. With a diagonal
+            R the filter believed 64 stations averaged that down by √64; nominal 68% intervals covered 2.7%.
+            A rank-1 common-mode term in R fixed most of it. The rest is open, and the number above is
+            what it is — widening the bars until they look right would be fitting the metric.
+        </div>
+    </div>
+</section>
+
+<!-- ══════════════════════════ FIELD ═════════════════════════════════ -->
+<section id="tg-panel-field" role="tabpanel" aria-labelledby="tg-tab-field">
+    <div class="tg-grid tg-2">
+        <div class="tg-card">
+            <h3>IGRF-14, evaluated live to degree 13</h3>
+            <p class="tg-note">
+                Not a picture — the spherical-harmonic sum is running in your browser, on the WGS-84
+                ellipsoid, every time you move the slider. Degree 13 is not an arbitrary truncation: the
+                Lowes–Mauersberger spectrum flattens above it because that is where the thin magnetised
+                crust takes over from the core.
+            </p>
+            <div class="tg-tabs" id="tg-field-tabs">
+                <button data-comp="f" class="active">|B| total</button>
+                <button data-comp="z">Z down</button>
+                <button data-comp="x">X north</button>
+                <button data-comp="y">Y east</button>
+            </div>
+            <canvas id="tg-field-map" height="330"></canvas>
+            <div class="tg-field">
+                <label for="tg-year">Epoch</label>
+                <input type="range" id="tg-year" min="1900" max="2030" step="1" value="2026">
+                <output id="tg-year-out">2026</output>
+            </div>
+            <div class="tg-legend" id="tg-field-legend"></div>
+        </div>
+
+        <div class="tg-card">
+            <h3>What the degree-1 coefficients say</h3>
+            <div class="tg-stats">
+                <div class="tg-stat"><div class="v" id="tg-moment">—</div><div class="k">dipole moment</div></div>
+                <div class="tg-stat"><div class="v" id="tg-dipfrac">—</div><div class="k">dipolarity</div></div>
+                <div class="tg-stat"><div class="v" id="tg-pole">—</div><div class="k">geomagnetic pole</div></div>
+                <div class="tg-stat"><div class="v" id="tg-tilt">—</div><div class="k">axis offset</div></div>
+                <div class="tg-stat"><div class="v hot" id="tg-saa">—</div><div class="k">SAA minimum</div></div>
+                <div class="tg-stat"><div class="v" id="tg-saa-pos">—</div><div class="k">SAA position</div></div>
+            </div>
+            <h3 style="margin-top:16px">Lowes–Mauersberger spectrum</h3>
+            <p class="tg-note">
+                Mean-square field per degree. At the surface it falls by nearly six decades. Continue it
+                <em>down</em> to the core–mantle boundary and it goes nearly flat — and a near-white
+                spectrum at 3,480 km is the signature of a source <em>there</em>. That is what makes
+                degree 13 the crossover, not convenience.
+            </p>
+            <canvas id="tg-spectrum" height="180"></canvas>
+            <div class="tg-legend">
+                <span><i style="background:#4fc3f7"></i>at the surface</span>
+                <span><i style="background:#ff9a56"></i>continued to the CMB</span>
+            </div>
+
+            <h3 style="margin-top:16px">Dipole tilt through the UT day</h3>
+            <p class="tg-note">
+                The Sun <em>does</em> set a daily rhythm in Earth's magnetism — through coupling geometry,
+                not through the core. The dipole sits ~9.2° off the spin axis, so rotation swings the
+                dipole–Sun angle through <strong>twice that</strong> every day.
+            </p>
+            <canvas id="tg-tilt-chart" height="170"></canvas>
+            <div class="tg-stats">
+                <div class="tg-stat"><div class="v" id="tg-tilt-range">—</div><div class="k">daily range</div></div>
+                <div class="tg-stat"><div class="v" id="tg-tilt-utmax">—</div><div class="k">UT of maximum</div></div>
+                <div class="tg-stat"><div class="v" id="tg-tilt-now">—</div><div class="k">right now</div></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-card" style="margin-top:14px">
+        <h3>The frequency split — and why the two communities need each other</h3>
+        <p class="tg-note">
+            A core signal of period T must diffuse outward through 2,891&nbsp;km of conducting mantle.
+            This is the transfer function, and it is why nothing fast gets through.
+        </p>
+        <div class="tg-grid tg-2e">
+            <div>
+                <canvas id="tg-screening" height="220"></canvas>
+                <div class="tg-legend">
+                    <span><i style="background:#7fe6c3"></i>σ = 0.1 S/m</span>
+                    <span><i style="background:#4fc3f7"></i>σ = 1 S/m</span>
+                    <span><i style="background:#c792ea"></i>σ = 10 S/m</span>
+                </div>
+            </div>
+            <div>
+                <table class="tg-table" id="tg-screening-table">
+                    <thead><tr><th>σ (S/m)</th><th class="num">50% attenuation at</th><th class="num">a 1-day signal arrives as</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+                <div class="tg-callout">
+                    At σ = 1 S/m a one-day core signal reaches the surface with <strong>3×10⁻⁹</strong> of
+                    its amplitude. Daily core analysis is not a data problem; no instrument fixes it.
+                    <br><br>
+                    The logic runs backwards too, and that half is better: we <em>do</em> observe jerks at
+                    1–3 years and torsional waves at ~6 years, so the mantle cannot be as conductive as the
+                    uniform σ = 10 case. <strong>The observations bound the interior.</strong>
+                </div>
+            </div>
+        </div>
+        <div class="tg-callout">
+            <strong>And this is why the three layers belong on one page.</strong> Core signals at short
+            period are ~1–3 nT. S<sub>q</sub> is 30 nT, storm recovery 50, main phase 100. The core signals
+            we most want are buried an order of magnitude under external noise — so detecting them is an
+            external-field-removal problem. The better the magnetosphere is modelled, the deeper into the
+            Earth we can see.
+        </div>
+    </div>
+</section>
+
+<!-- ══════════════════════════ CORE ══════════════════════════════════ -->
+<section id="tg-panel-core" role="tabpanel" aria-labelledby="tg-tab-core">
+    <div class="tg-callout warn" style="margin-top:0;margin-bottom:14px">
+        <strong>This is not a geodynamo simulation, and nothing on this page claims to be one.</strong>
+        A real 3-D MHD dynamo needs a supercomputer, and the best published runs still sit eight orders of
+        magnitude from Earth's Ekman number — you can read that number off the table below. What runs here
+        are <em>reduced</em> models, small enough for a browser tab precisely because they throw away
+        almost all of the physics. They still answer real questions.
+    </div>
+
+    <div class="tg-grid tg-2e">
+        <div class="tg-card">
+            <h3>Does a dynamo run at all?</h3>
+            <p class="tg-note">Six numbers, computed from outer-core estimates. One of them is the whole answer.</p>
+            <table class="tg-table" id="tg-numbers-table">
+                <thead><tr><th>Quantity</th><th class="num">Value</th><th>Meaning</th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <div class="tg-callout">
+                <strong>R<sub>m</sub> ≈ 1135</strong> against a threshold near 40: induction beats diffusion
+                by about a thousand to one. Elsasser ≈ 10 says the field it makes is strong enough to react
+                back on the flow. And P<sub>m</sub> ≈ 10⁻⁶ is exactly why simulations cannot reach Earth.
+            </div>
+        </div>
+
+        <div class="tg-card">
+            <h3>Why the field is a dipole</h3>
+            <p class="tg-note">
+                Switch the dynamo off and each multipole decays ohmically at its own rate,
+                τ<sub>n</sub> = μ₀σa²/k<sub>n</sub>².
+            </p>
+            <canvas id="tg-decay-chart" height="200"></canvas>
+            <table class="tg-table" id="tg-decay-table" style="margin-top:8px">
+                <thead><tr><th>degree n</th><th class="num">first zero of j<sub>n</sub></th><th class="num">free-decay time</th><th class="num">vs dipole</th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <div class="tg-callout">
+                Three reasons, in increasing order of interest. <strong>(1)</strong> ∇·B = 0 forbids a
+                monopole, so degree 1 is the lowest multipole <em>available</em> — a constraint of Maxwell's
+                equations, not a preference. <strong>(2)</strong> The dipole survives
+                <strong id="tg-decay-ratio">—</strong> longer than degree 13, so the dynamo works least hard
+                to sustain it. <strong>(3)</strong> Rotation selects it — but only inside a window, which is
+                the interesting one.
+            </div>
+        </div>
+    </div>
+
+    <div class="tg-card" style="margin-top:14px">
+        <h3>The controlled experiment: why a <em>dipole</em>, and why <em>axial</em></h3>
+        <p class="tg-note">
+            An αΩ mean-field dynamo, solved live. Flip the equatorial symmetry of the α-effect and watch
+            which magnetic parity is preferred. Antisymmetric α is what Coriolis-driven helicity actually
+            gives — opposite handedness in the two hemispheres. Symmetric α is a deliberately
+            <em>unphysical</em> control, and without it "antisymmetric α gives a dipole" would be an
+            observation about one run rather than a result.
+        </p>
+        <div class="tg-grid tg-2">
+            <div>
+                <canvas id="tg-parity-chart" height="250"></canvas>
+                <div class="tg-legend">
+                    <span><i style="background:#ff9a56"></i>dipole family growth</span>
+                    <span><i style="background:#4fc3f7"></i>quadrupole family growth</span>
+                    <span><i style="background:rgba(127,230,195,.25)"></i>dipole wins here</span>
+                </div>
+            </div>
+            <div>
+                <div class="tg-field">
+                    <label for="tg-alpha">α symmetry</label>
+                    <select id="tg-alpha">
+                        <option value="antisymmetric">Antisymmetric (physical)</option>
+                        <option value="symmetric">Symmetric (control)</option>
+                    </select>
+                    <output></output>
+                </div>
+                <div class="tg-field">
+                    <label for="tg-res">Resolution N</label>
+                    <input type="range" id="tg-res" min="48" max="160" step="8" value="96">
+                    <output id="tg-res-out">96</output>
+                </div>
+                <button class="tg-btn" id="tg-run-parity">Run the sweep</button>
+                <p class="tg-note" style="margin-top:8px">
+                    The window edges converge with N like 1/N² — at N = 48 the upper edge lands near
+                    1220 and settles toward 1167 by N = 400. Raise the resolution and watch it move;
+                    that drift is the discretisation, not a disagreement.
+                </p>
+                <div class="tg-status" id="tg-parity-status"></div>
+                <div class="tg-stats">
+                    <div class="tg-stat"><div class="v good" id="tg-window-lo">—</div><div class="k">window lower |D|</div></div>
+                    <div class="tg-stat"><div class="v good" id="tg-window-hi">—</div><div class="k">window upper |D|</div></div>
+                    <div class="tg-stat"><div class="v" id="tg-window-decades">—</div><div class="k">width</div></div>
+                </div>
+            </div>
+        </div>
+        <div class="tg-callout">
+            Two findings, and the second is the one worth having. <strong>(a)</strong> Antisymmetric α
+            <em>can</em> prefer the dipole family; symmetric α never does — it stays mixed or frankly
+            quadrupolar at every dynamo number. <strong>(b)</strong> But the dipole preference holds only
+            for |D| between roughly 116 and 1166 — <strong>one decade</strong>. Weaker or stronger driving
+            both give a quadrupole.
+            <br><br>
+            <strong>A dipole is therefore not inevitable.</strong> It requires the right symmetry
+            <em>and</em> the right strength, and Earth happens to sit in the window. That is the same
+            message as the dipolar/multipolar transition found in full 3-D simulations, reached here from a
+            model that runs in a second.
+        </div>
+    </div>
+
+    <div class="tg-grid tg-2e" style="margin-top:14px">
+        <div class="tg-card">
+            <h3>Reversals need no trigger</h3>
+            <p class="tg-note">
+                The Rikitake two-disk dynamo: three ordinary differential equations, the minimal system
+                that self-excites and then reverses. Nothing is forcing it.
+            </p>
+            <canvas id="tg-rikitake-chart" height="200"></canvas>
+            <div class="tg-stats">
+                <div class="tg-stat"><div class="v hot" id="tg-rev-count">—</div><div class="k">polarity reversals</div></div>
+                <div class="tg-stat"><div class="v" id="tg-rev-mean">—</div><div class="k">mean chron</div></div>
+                <div class="tg-stat"><div class="v" id="tg-rev-range">—</div><div class="k">shortest / longest</div></div>
+                <div class="tg-stat"><div class="v" id="tg-rev-irreg">—</div><div class="k">irregularity</div></div>
+            </div>
+            <div class="tg-callout">
+                Chron lengths spread by a factor of several with no periodicity. Reversal is what a
+                nonlinear dynamo does unprompted — a statement about dynamos, <strong>not a forecast</strong>.
+                This page does not predict reversals and nothing here could.
+                <br><br>
+                It is also chaotic, so the exact reversal count is not portable between integrators. The
+                statistics are; the count is not, and quoting one to four digits would be quoting an
+                artefact of a solver.
+            </div>
+        </div>
+
+        <div class="tg-card">
+            <h3>Nothing down there is a magnet</h3>
+            <p class="tg-note">Layer structure, conductivity, and the temperatures that settle the question.</p>
+            <table class="tg-table" id="tg-layers-table">
+                <thead><tr><th>Layer</th><th class="num">depth (km)</th><th class="num">σ (S/m)</th><th>state</th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <div class="tg-callout">
+                Curie temperatures are 858 K for magnetite, 948 K for hematite, 1043 K for iron. The core
+                runs at 5000–6000 K and the lower mantle above 2000 K. <strong>Every deep layer is far
+                above its Curie point</strong>, so the field is carried entirely by electric currents —
+                roughly 10⁹ A — and not by magnetised rock. The only magnetised rock on Earth is the thin
+                cold crust, which is precisely why the Lowes spectrum flattens above degree 13.
+                <br><br>
+                And the field's <em>shape</em> is not electromagnetic at all: Coriolis → columnar flow →
+                helicity of opposite sign per hemisphere → antisymmetric α → dipole family. The magnetism
+                is electromagnetic; <strong>the shape is rotational</strong>.
+            </div>
+        </div>
+    </div>
+</section>
+
+</div><!-- /tg-panels -->
+
+<div class="tg-foot">
+    <h4>What this is, said precisely</h4>
+    TIGA is a sequential Bayesian state estimator: a Kalman filter whose state is the degree-1 external
+    Gauss coefficients (q₁⁰, q₁¹, s₁¹) plus their rates, updated each minute from whichever observatories
+    reported. It is <em>not</em> a simulation — nothing is integrated forward physically; the model is an
+    integrated random walk, which is a statistical prior, not dynamics. It is <em>not</em> a forecast —
+    zero lead time. It does not compete with L1-driven forecast models; it is what you have when L1 is
+    unavailable.
+
+    <h4>Falsified predictions, kept in the record</h4>
+    Two pre-registered predictions did not survive. Excluding all eleven canonical stations was predicted
+    to hurt badly and did not (three parameters are already over-determined by 64 stations). And the
+    sector-loss penalty was predicted to decay with time as Earth's rotation carried surviving stations
+    through the vacated local time — it does decay, but a <em>memoryless control</em> decays identically,
+    so the decay is the storm, not the memory. Both are recorded rather than quietly dropped, because they
+    were the most informative results.
+
+    <h4>Data and licensing</h4>
+    Live observatory data: <a href="https://geomag.usgs.gov/" rel="noopener">USGS Geomagnetism Program</a>,
+    a work of the US federal government. USGS is used rather than the fuller INTERMAGNET network for
+    licensing reasons — INTERMAGNET is CC BY-NC 4.0 and SuperMAG prohibits redistribution. A USGS-only fit
+    is a <em>harder</em> problem, with worse longitude coverage. The data passes through; the product is
+    the estimate and its posterior. IGRF-14 coefficients are the published international reference model.
+
+    <h4>Reproducibility</h4>
+    Kernels are pure ES modules under <code>js/geomag/</code> with Node gates under <code>tests/</code>:
+    <code>geomag-igrf.mjs</code>, <code>geomag-tiga.mjs</code>, <code>geomag-core-model.mjs</code>,
+    <code>geomag-dynamo.mjs</code>, <code>geomag-osse.mjs</code>, plus the browser gate
+    <code>tiga-smoke.spec.js</code>. Every number quoted above is computed by the same code that runs
+    this page, and the αΩ growth rates are cross-checked against an independent dense eigensolver.
+</div>
+
+</main>
+
+<script type="module">
+import {
+    coeffsAt, fieldGrid, fieldGeodetic, dipole, dipoleFraction, lowesSpectrum, findSAA, NMAX, R_CMB_KM,
+} from './js/geomag/igrf.js';
+import { COASTLINES } from './js/geomag/coastlines.js';
+import { dipoleTiltDay, dipoleTilt, toDipole, dipoleBasisForYear, decimalYear, smLongitudeAt, mltFromSmLongitude } from './js/geomag/dipole.js';
+import { classicalIndex, aliasAmplitude } from './js/geomag/tiga.js';
+import { KYOTO_TABLE1, SYMH6_TYPICAL, SYMH6_BALANCED, DST4 } from './js/geomag/observatories.js';
+import {
+    LAYERS, CURIE_K, dimensionlessNumbers, freeDecayTable, freeDecayTime,
+    mantleScreening, halfAttenuationPeriodYears, YEAR_S,
+} from './js/geomag/core-model.js';
+import { runRikitake, alphaOmegaParity, dipoleWindow } from './js/geomag/dynamo.js';
+import {
+    makeNetwork, stormTruth, observe, trueSymH, zonalTruth, definitionFloor, runOsse, makeRng,
+} from './js/geomag/osse.js';
+import {
+    fetchObservatories, prepareStations, buildEpochs, runNowcast, coverageDiagnostics,
+} from './js/geomag/ingest.js';
+
+const $ = (id) => document.getElementById(id);
+const DEG = Math.PI / 180;
+const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+
+// ── Canvas helpers ───────────────────────────────────────────────────────────
+// Deliberately small and local: three chart types, no dependency, and a device
+// -pixel-ratio pass so nothing renders soft on a retina display.
+function prepare(canvas) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = canvas.clientWidth || 600;
+    const h = Number(canvas.getAttribute('height')) || 200;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.height = `${h}px`;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    return { ctx, w, h };
+}
+
+function axes(ctx, box, { xLabel = '', yLabel = '', xTicks = [], yTicks = [] }) {
+    ctx.strokeStyle = 'rgba(90,110,160,.28)';
+    ctx.fillStyle = '#6d7691';
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(box.x, box.y); ctx.lineTo(box.x, box.y + box.h); ctx.lineTo(box.x + box.w, box.y + box.h);
+    ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (const t of xTicks) {
+        ctx.strokeStyle = 'rgba(90,110,160,.14)';
+        ctx.beginPath(); ctx.moveTo(t.px, box.y); ctx.lineTo(t.px, box.y + box.h); ctx.stroke();
+        ctx.fillText(t.label, t.px, box.y + box.h + 4);
+    }
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (const t of yTicks) {
+        ctx.strokeStyle = 'rgba(90,110,160,.14)';
+        ctx.beginPath(); ctx.moveTo(box.x, t.py); ctx.lineTo(box.x + box.w, t.py); ctx.stroke();
+        ctx.fillText(t.label, box.x - 5, t.py);
+    }
+    if (xLabel) { ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText(xLabel, box.x + box.w / 2, box.y + box.h + 26); }
+    if (yLabel) {
+        ctx.save(); ctx.translate(11, box.y + box.h / 2); ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(yLabel, 0, 0); ctx.restore();
+    }
+}
+
+function linePath(ctx, pts, color, width = 1.6) {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.stroke();
+}
+
+const scale = (v, lo, hi, a, b) => a + ((v - lo) / (hi - lo || 1)) * (b - a);
+
+function niceTicks(lo, hi, n = 5) {
+    const span = hi - lo || 1;
+    const step = Math.pow(10, Math.floor(Math.log10(span / n)));
+    const err = (span / n) / step;
+    const mult = err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1;
+    const s = step * mult;
+    const out = [];
+    for (let v = Math.ceil(lo / s) * s; v <= hi + 1e-9; v += s) out.push(v);
+    return out;
+}
+
+// ── Layer switching ──────────────────────────────────────────────────────────
+const layerButtons = [...document.querySelectorAll('.tg-layer')];
+const rendered = new Set();
+function showLayer(name) {
+    layerButtons.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.layer === name)));
+    document.querySelectorAll('.tg-panels > section').forEach((s) => {
+        s.classList.toggle('tg-on', s.id === `tg-panel-${name}`);
+    });
+    // Charts are laid out from clientWidth, which is 0 while the panel is
+    // display:none — so a panel is drawn the first time it becomes visible,
+    // not at boot. Drawing all three up front produced 1-pixel-wide canvases.
+    if (!rendered.has(name)) { rendered.add(name); renderLayer(name); }
+    else if (name === 'field') drawFieldMap();
+    try { history.replaceState(null, '', `#${name}`); } catch (_) {}
+}
+layerButtons.forEach((b) => b.addEventListener('click', () => showLayer(b.dataset.layer)));
+
+// ══════════════════════════ EXTERNAL LAYER ═══════════════════════════════════
+
+const CANON_KEYS = Object.keys(KYOTO_TABLE1);
+const ALIAS_SETS = {
+    dst4: { label: 'Dst 4-station', keys: DST4 },
+    symh6: { label: 'SYM-H 6, all-northern', keys: SYMH6_TYPICAL },
+    symh6b: { label: 'SYM-H 6, balanced', keys: SYMH6_BALANCED },
+    pool11: { label: 'Full 11 pool', keys: CANON_KEYS },
+};
+
+function drawAlias(setId) {
+    const { keys } = ALIAS_SETS[setId];
+    const lat = keys.map((k) => KYOTO_TABLE1[k].gmLatDeg);
+    const lon = keys.map((k) => KYOTO_TABLE1[k].gmLonDeg);
+    const a = aliasAmplitude(lat, lon);
+    const ampNt = a.perUnitAsymmetry * 100;      // for a 100 nT ASY-H
+    const north = lat.filter((v) => v > 0).length;
+
+    $('tg-alias-amp').textContent = `±${fmt(ampNt, 0)} nT`;
+    $('tg-alias-balance').textContent = `${north}N / ${keys.length - north}S`;
+    $('tg-alias-phase').textContent = `${fmt(a.phaseDeg / 15, 1)} h`;
+
+    const { ctx, w, h } = prepare($('tg-alias-chart'));
+    const box = { x: 42, y: 12, w: w - 56, h: h - 44 };
+    const lim = 55;
+    axes(ctx, box, {
+        xLabel: 'UT hour', yLabel: 'index bias (nT)',
+        xTicks: [0, 6, 12, 18, 24].map((v) => ({ px: scale(v, 0, 24, box.x, box.x + box.w), label: String(v) })),
+        yTicks: [-50, -25, 0, 25, 50].map((v) => ({ py: scale(v, -lim, lim, box.y + box.h, box.y), label: String(v) })),
+    });
+    // Every set, faint, so the comparison is visible without switching tabs.
+    for (const [id, s] of Object.entries(ALIAS_SETS)) {
+        const la = s.keys.map((k) => KYOTO_TABLE1[k].gmLatDeg);
+        const lo = s.keys.map((k) => KYOTO_TABLE1[k].gmLonDeg);
+        const aa = aliasAmplitude(la, lo);
+        const pts = [];
+        for (let ut = 0; ut <= 24; ut += 0.25) {
+            const v = aa.perUnitAsymmetry * 100 * Math.cos((ut * 15 + aa.phaseDeg) * DEG);
+            pts.push([scale(ut, 0, 24, box.x, box.x + box.w), scale(v, -lim, lim, box.y + box.h, box.y)]);
+        }
+        linePath(ctx, pts, id === setId ? '#ffb454' : 'rgba(120,140,180,.28)', id === setId ? 2.2 : 1.2);
+    }
+    ctx.fillStyle = '#7c86a0';
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('for a 100 nT asymmetric ring current', box.x + 6, box.y + 4);
+}
+
+document.querySelectorAll('#tg-alias-tabs button').forEach((b) => {
+    b.addEventListener('click', () => {
+        document.querySelectorAll('#tg-alias-tabs button').forEach((o) => o.classList.toggle('active', o === b));
+        drawAlias(b.dataset.set);
+    });
+});
+
+function fillIdentityTable() {
+    const q10 = 87.3;
+    const rows = [['Dst 4-station', DST4], ['SYM-H 6 (typical)', SYMH6_TYPICAL],
+        ['SYM-H 6 (balanced)', SYMH6_BALANCED], ['Full 11 pool', CANON_KEYS]];
+    const body = $('tg-identity-table').querySelector('tbody');
+    body.innerHTML = rows.map(([name, keys]) => {
+        const lat = keys.map((k) => KYOTO_TABLE1[k].gmLatDeg);
+        // Zonal-only forward model: X = −q₁⁰ cos λ.
+        const X = lat.map((l) => -q10 * Math.cos(l * DEG));
+        const c = classicalIndex(lat, X);
+        return `<tr><td>${name}</td><td class="num">${c.toFixed(9)}</td>`
+            + `<td class="num">${(-q10).toFixed(9)}</td>`
+            + `<td class="num">${Math.abs(c + q10).toExponential(1)}</td></tr>`;
+    }).join('');
+}
+
+// ── The OSSE (offline, deterministic) ────────────────────────────────────────
+let osseCache = null;
+function runOsseOnce() {
+    if (osseCache) return osseCache;
+    // 2-minute sampling over two days: same experiment, a quarter of the work,
+    // and the definition floor is unchanged because it is a property of the
+    // station geometry and the truth field rather than of the sampling.
+    const stations = makeNetwork(75, makeRng(20260726));
+    const minutes = Float64Array.from({ length: 1440 }, (_, i) => i * 2);
+    const C = stormTruth(minutes);
+    const target = trueSymH(stations, minutes, C);
+    const zonal = zonalTruth(C, minutes.length);
+    const floor = definitionFloor(stations, minutes, C);
+    const { obs, sigma } = observe(stations, minutes, C, { rng: makeRng(11) });
+    const permitted = stations.map((s) => !s.canonical);
+
+    const base = runOsse({ stations, minutes, C, target, obs, sigma, permitted, rng: makeRng(1) });
+    const memoryless = runOsse({
+        stations, minutes, C, target, obs, sigma, permitted,
+        calib: base.calib, calibQ: base.calibQ, memoryless: true, rng: makeRng(1),
+    });
+    const curve = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95].map((p) => {
+        const r = runOsse({
+            stations, minutes, C, target, obs, sigma, permitted, dropProbability: p,
+            calib: base.calib, calibQ: base.calibQ, rng: makeRng(100 + Math.round(p * 100)),
+        });
+        return { p, n: r.meanStations, rmse: r.rmseQ10Nt, bias: r.biasQ10Nt };
+    });
+    osseCache = { minutes, target, zonal, floor, base, memoryless, curve };
+    return osseCache;
+}
+
+function drawFloorChart() {
+    const o = runOsseOnce();
+    $('tg-floor-value').textContent = `${fmt(o.floor.rmsNt, 2)} nT`;
+    $('tg-est-error').textContent = `${fmt(o.base.rmseQ10Nt, 2)} nT`;
+    $('tg-cov68').textContent = `${fmt(o.base.coverage68 * 100, 1)}%`;
+    $('tg-cov95').textContent = `${fmt(o.base.coverage95 * 100, 1)}%`;
+    const gain = ((o.memoryless.rmseQ10Nt - o.base.rmseQ10Nt) / o.memoryless.rmseQ10Nt) * 100;
+    const el = $('tg-memoryless');
+    el.textContent = `${gain >= 0 ? '+' : ''}${fmt(gain, 1)}%`;
+    el.className = `v ${gain >= 0 ? 'good' : 'warn'}`;
+
+    const { ctx, w, h } = prepare($('tg-floor-chart'));
+    const box = { x: 46, y: 12, w: w - 60, h: h - 44 };
+    const hrs = Array.from(o.minutes, (m) => m / 60);
+    const lo = -210, hi = 60;
+    axes(ctx, box, {
+        xLabel: 'hours', yLabel: 'nT',
+        xTicks: [0, 12, 24, 36, 48].map((v) => ({ px: scale(v, 0, 48, box.x, box.x + box.w), label: String(v) })),
+        yTicks: niceTicks(lo, hi, 5).map((v) => ({ py: scale(v, lo, hi, box.y + box.h, box.y), label: String(Math.round(v)) })),
+    });
+    const mk = (arr) => arr.map((v, i) => [scale(hrs[i], 0, 48, box.x, box.x + box.w), scale(v, lo, hi, box.y + box.h, box.y)]);
+    linePath(ctx, mk(Array.from(o.target)), '#4fc3f7', 1.8);
+    linePath(ctx, mk(Array.from(o.zonal)), '#7fe6c3', 1.6);
+    linePath(ctx, mk(Array.from(o.target, (v, i) => v - o.zonal[i])), '#ff8a7a', 1.3);
+}
+
+function drawDropoutChart() {
+    const o = runOsseOnce();
+    const { ctx, w, h } = prepare($('tg-dropout-chart'));
+    const box = { x: 46, y: 12, w: w - 60, h: h - 44 };
+    const maxN = Math.max(...o.curve.map((c) => c.n));
+    const hi = Math.max(o.floor.rmsNt * 1.15, ...o.curve.map((c) => c.rmse)) ;
+    const lo = Math.min(0, ...o.curve.map((c) => c.bias));
+    // Log-ish x: stations remaining, high to low, so "fewer stations" reads left → right.
+    const xOf = (n) => scale(Math.log10(Math.max(n, 0.5)), Math.log10(maxN), Math.log10(0.5), box.x, box.x + box.w);
+    axes(ctx, box, {
+        xLabel: 'stations reporting (fewer →)', yLabel: 'nT',
+        xTicks: [64, 32, 16, 8, 4, 2].filter((v) => v <= maxN).map((v) => ({ px: xOf(v), label: String(v) })),
+        yTicks: niceTicks(lo, hi, 5).map((v) => ({ py: scale(v, lo, hi, box.y + box.h, box.y), label: v.toFixed(0) })),
+    });
+    // The definition floor, drawn as the thing the estimator is measured against.
+    const fy = scale(o.floor.rmsNt, lo, hi, box.y + box.h, box.y);
+    ctx.setLineDash([5, 4]);
+    linePath(ctx, [[box.x, fy], [box.x + box.w, fy]], 'rgba(255,138,122,.6)', 1.4);
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,138,122,.85)';
+    ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText(`index definition floor  ${fmt(o.floor.rmsNt, 2)} nT`, box.x + 6, fy - 3);
+
+    linePath(ctx, o.curve.map((c) => [xOf(c.n), scale(c.rmse, lo, hi, box.y + box.h, box.y)]), '#c792ea', 2);
+    linePath(ctx, o.curve.map((c) => [xOf(c.n), scale(c.bias, lo, hi, box.y + box.h, box.y)]), '#ffb454', 1.5);
+    ctx.fillStyle = '#c792ea';
+    for (const c of o.curve) {
+        ctx.beginPath();
+        ctx.arc(xOf(c.n), scale(c.rmse, lo, hi, box.y + box.h, box.y), 2.6, 0, 7);
+        ctx.fill();
+    }
+    const first = o.curve[0], last = o.curve[o.curve.length - 1];
+    $('tg-dropout-status').textContent =
+        `${fmt(first.n, 0)} stations → ${fmt(first.rmse, 2)} nT.  `
+        + `${fmt(last.n, 1)} stations → ${fmt(last.rmse, 2)} nT.  `
+        + `Flat across a ${fmt(first.n / Math.max(last.n, 0.1), 0)}× reduction — the knee is at the parameter count, and there are three parameters.`;
+}
+
+// ── Live nowcast ─────────────────────────────────────────────────────────────
+async function loadLive() {
+    const status = $('tg-live-status');
+    try {
+        const payload = await fetchObservatories({ minutes: 240 });
+        const prep = prepareStations(payload);
+        if (!prep.stations.length) throw new Error('no ring-current stations reporting');
+        const epochs = buildEpochs(prep.stations);
+        const nc = runNowcast(epochs);
+        const cov = coverageDiagnostics(prep.stations, prep.epoch);
+
+        const f = nc.final;
+        $('tg-live-value').textContent = `${fmt(f.zonalNt, 1)} nT`;
+        $('tg-live-sigma').textContent = `± ${fmt(f.sigmaNt, 1)} nT`;
+        $('tg-live-n').textContent = String(f.stations);
+        $('tg-live-asym').textContent = `${fmt(f.asymmetryNt, 1)} nT`;
+        $('tg-live-mlt').textContent = `${fmt(f.asymmetryMlt, 1)} h`;
+        $('tg-live-gap').textContent = `${fmt(cov.largestGapHours, 1)} h`;
+
+        const body = $('tg-station-table').querySelector('tbody');
+        body.innerHTML = prep.stations.map((s) => {
+            const mlt = mltFromSmLongitude(smLongitudeAt(s.dipLonDeg, prep.epoch));
+            return `<tr><td>${s.code}</td><td class="num">${fmt(s.dipLatDeg, 1)}°</td>`
+                + `<td class="num">${fmt(mlt, 1)}</td><td class="num">${s.samples}</td></tr>`;
+        }).join('') + prep.excluded.map((s) =>
+            `<tr class="tg-dim"><td>${s.code}</td><td class="num">${fmt(s.dipLatDeg, 1)}°</td>`
+            + `<td class="num">—</td><td class="num">${s.reason}</td></tr>`).join('');
+
+        drawLiveChart(nc.series);
+        status.className = 'tg-status';
+        status.textContent = `${payload.data.returned} of ${payload.data.requested} USGS observatories returned data`
+            + `${payload.data.missing.length ? ` (silent: ${payload.data.missing.join(', ')})` : ''}`
+            + ` · ${prep.stations.length} equatorward of 50° dipole latitude · updated ${new Date(payload.data.updated).toUTCString()}`;
+    } catch (err) {
+        // A dead feed is a DROPOUT, not a broken page — the offline experiment
+        // below is the whole argument and does not depend on the network.
+        status.className = 'tg-status err';
+        status.textContent = `Live network unavailable (${err.message}). `
+            + 'The observing-system experiment below runs offline and is unaffected — '
+            + 'which is the point: nothing here is trained on a station list.';
+        $('tg-station-table').querySelector('tbody').innerHTML =
+            '<tr class="tg-dim"><td colspan="4">no live feed</td></tr>';
+        drawLiveChart(null);
+    }
+}
+
+function drawLiveChart(series) {
+    const { ctx, w, h } = prepare($('tg-live-chart'));
+    const box = { x: 48, y: 12, w: w - 62, h: h - 44 };
+    if (!series || series.length < 2) {
+        axes(ctx, box, { xLabel: 'minutes', yLabel: 'nT', xTicks: [], yTicks: [] });
+        ctx.fillStyle = '#6d7691'; ctx.font = '12px system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('no live data', box.x + box.w / 2, box.y + box.h / 2);
+        return;
+    }
+    const t0 = series[0].timeMs, t1 = series[series.length - 1].timeMs;
+    let lo = Infinity, hi = -Infinity;
+    for (const s of series) {
+        lo = Math.min(lo, s.zonalNt - s.sigmaNt);
+        hi = Math.max(hi, s.zonalNt + s.sigmaNt);
+    }
+    const pad = Math.max((hi - lo) * 0.12, 5);
+    lo -= pad; hi += pad;
+    const xOf = (t) => scale(t, t0, t1, box.x, box.x + box.w);
+    const yOf = (v) => scale(v, lo, hi, box.y + box.h, box.y);
+    const mins = (t1 - t0) / 60000;
+    axes(ctx, box, {
+        xLabel: 'minutes before now', yLabel: 'nT',
+        xTicks: [0, 0.25, 0.5, 0.75, 1].map((f) => ({
+            px: box.x + f * box.w, label: String(-Math.round(mins * (1 - f))),
+        })),
+        yTicks: niceTicks(lo, hi, 5).map((v) => ({ py: yOf(v), label: v.toFixed(0) })),
+    });
+
+    // ±1σ band. Drawing the posterior FIRST and the estimate on top of it is
+    // deliberate: the band is the product, not decoration around the line.
+    ctx.fillStyle = 'rgba(199,146,234,.22)';
+    ctx.beginPath();
+    series.forEach((s, i) => {
+        const x = xOf(s.timeMs), y = yOf(s.zonalNt + s.sigmaNt);
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    for (let i = series.length - 1; i >= 0; i--) {
+        ctx.lineTo(xOf(series[i].timeMs), yOf(series[i].zonalNt - series[i].sigmaNt));
+    }
+    ctx.closePath(); ctx.fill();
+    linePath(ctx, series.map((s) => [xOf(s.timeMs), yOf(s.zonalNt)]), '#c792ea', 2);
+
+    // Station count on its own footer strip — a gap in the feed must be
+    // visible, because a widening band without a reason looks like a bug.
+    const maxN = Math.max(...series.map((s) => s.stations), 1);
+    linePath(ctx, series.map((s) => [
+        xOf(s.timeMs), box.y + box.h - (s.stations / maxN) * 14,
+    ]), '#7fe6c3', 1.1);
+}
+
+// ══════════════════════════ FIELD LAYER ══════════════════════════════════════
+
+let fieldComp = 'f';
+const COMP_LABEL = { f: '|B| total intensity', z: 'Z (down)', x: 'X (north)', y: 'Y (east)' };
+
+function colormap(t, diverging) {
+    const u = Math.max(0, Math.min(1, t));
+    if (diverging) {
+        // blue → dark → orange, so zero is unambiguous on a signed component.
+        if (u < 0.5) { const s = u * 2; return [Math.round(40 + 30 * s), Math.round(120 + 60 * s), Math.round(220 - 60 * s)]; }
+        const s = (u - 0.5) * 2;
+        return [Math.round(70 + 185 * s), Math.round(180 - 60 * s), Math.round(160 - 120 * s)];
+    }
+    // sequential: deep indigo → cyan → warm
+    const stops = [[18, 12, 60], [40, 90, 170], [80, 190, 220], [220, 210, 150], [255, 200, 120]];
+    const p = u * (stops.length - 1);
+    const i = Math.min(Math.floor(p), stops.length - 2);
+    const s = p - i;
+    return [0, 1, 2].map((k) => Math.round(stops[i][k] + (stops[i + 1][k] - stops[i][k]) * s));
+}
+
+function drawFieldMap() {
+    const year = Number($('tg-year').value);
+    const c = coeffsAt(year);
+    const canvas = $('tg-field-map');
+    const { ctx, w, h } = prepare(canvas);
+
+    const nLat = 73, nLon = 145;
+    const g = fieldGrid(c, NMAX, { nLat, nLon });
+    const vals = g[fieldComp];
+    let lo = Infinity, hi = -Infinity;
+    for (const v of vals) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    const diverging = fieldComp !== 'f';
+    if (diverging) { const m = Math.max(Math.abs(lo), Math.abs(hi)); lo = -m; hi = m; }
+
+    const img = ctx.createImageData(nLon, nLat);
+    for (let i = 0; i < nLat; i++) {
+        for (let j = 0; j < nLon; j++) {
+            const [r, gg, b] = colormap((vals[i * nLon + j] - lo) / (hi - lo || 1), diverging);
+            const k = (i * nLon + j) * 4;
+            img.data[k] = r; img.data[k + 1] = gg; img.data[k + 2] = b; img.data[k + 3] = 255;
+        }
+    }
+    const off = document.createElement('canvas');
+    off.width = nLon; off.height = nLat;
+    off.getContext('2d').putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(off, 0, 0, w, h);
+
+    const px = (lon) => ((lon + 180) / 360) * w;
+    const py = (lat) => ((90 - lat) / 180) * h;
+
+    ctx.strokeStyle = 'rgba(255,255,255,.34)';
+    ctx.lineWidth = 1;
+    for (const seg of Object.values(COASTLINES)) {
+        ctx.beginPath();
+        seg.forEach((p, i) => (i ? ctx.lineTo(px(p[0]), py(p[1])) : ctx.moveTo(px(p[0]), py(p[1]))));
+        ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,.16)';
+    ctx.beginPath(); ctx.moveTo(0, py(0)); ctx.lineTo(w, py(0)); ctx.stroke();
+
+    // SAA and the geomagnetic pole, computed for THIS epoch.
+    const saa = findSAA(c, NMAX);
+    const d = dipole(c);
+    const mark = (lon, lat, color, label) => {
+        const x = px(lon), y = py(lat);
+        ctx.strokeStyle = color; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.arc(x, y, 5, 0, 7); ctx.stroke();
+        ctx.fillStyle = color; ctx.font = '10px system-ui, sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(label, x + 8, y);
+    };
+    mark(saa.lonDeg, saa.latDeg, '#ff8a7a', 'SAA');
+    mark(d.poleLonDeg, d.poleLatDeg, '#7fe6c3', 'pole');
+
+    $('tg-field-legend').innerHTML =
+        `<span>${COMP_LABEL[fieldComp]}</span>`
+        + `<span><i style="background:rgb(${colormap(0, diverging).join(',')})"></i>${Math.round(lo).toLocaleString()} nT</span>`
+        + `<span><i style="background:rgb(${colormap(1, diverging).join(',')})"></i>${Math.round(hi).toLocaleString()} nT</span>`;
+
+    $('tg-moment').innerHTML = `${(d.momentAm2 / 1e22).toFixed(2)} <small>×10²² A·m²</small>`;
+    $('tg-dipfrac').textContent = `${(dipoleFraction(c) * 100).toFixed(1)}%`;
+    $('tg-pole').innerHTML = `${d.poleLatDeg.toFixed(1)}°N <small>${d.poleLonDeg.toFixed(1)}°E</small>`;
+    $('tg-tilt').textContent = `${d.tiltDeg.toFixed(2)}°`;
+    $('tg-saa').innerHTML = `${Math.round(saa.fNt).toLocaleString()} <small>nT</small>`;
+    $('tg-saa-pos').innerHTML = `${saa.latDeg.toFixed(1)}° <small>${saa.lonDeg.toFixed(1)}°E</small>`;
+
+    drawSpectrum(c);
+}
+
+function drawSpectrum(c) {
+    const R = lowesSpectrum(c, NMAX);
+    const Rc = lowesSpectrum(c, NMAX, R_CMB_KM);
+    const { ctx, w, h } = prepare($('tg-spectrum'));
+    const box = { x: 44, y: 10, w: w - 56, h: h - 40 };
+    const all = [...Array.from(R).slice(1), ...Array.from(Rc).slice(1)].filter((v) => v > 0);
+    const lo = Math.log10(Math.min(...all));
+    const hi = Math.log10(Math.max(...all));
+    const bw = (box.w / NMAX) * 0.62;
+    const inset = bw / 2 + 4;
+    const xOf = (n) => scale(n, 1, NMAX, box.x + inset, box.x + box.w - inset);
+    axes(ctx, box, {
+        xLabel: 'spherical harmonic degree n', yLabel: 'log₁₀ Rₙ (nT²)',
+        xTicks: [1, 4, 7, 10, 13].map((n) => ({ px: xOf(n), label: String(n) })),
+        yTicks: niceTicks(lo, hi, 4).map((v) => ({ py: scale(v, lo, hi, box.y + box.h, box.y), label: v.toFixed(0) })),
+    });
+    for (let n = 1; n <= NMAX; n++) {
+        const x = xOf(n);
+        const y = scale(Math.log10(R[n]), lo, hi, box.y + box.h, box.y);
+        ctx.fillStyle = n === 1 ? '#4fc3f7' : 'rgba(79,195,247,.42)';
+        ctx.fillRect(x - bw / 2, y, bw, box.y + box.h - y);
+    }
+    // The CMB continuation as a line ON TOP — the flatness is the whole point,
+    // and a second bar series would hide it behind the first.
+    linePath(ctx, Array.from({ length: NMAX }, (_, i) => [
+        xOf(i + 1), scale(Math.log10(Rc[i + 1]), lo, hi, box.y + box.h, box.y),
+    ]), '#ff9a56', 2);
+}
+
+function drawTilt() {
+    const now = new Date();
+    const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const day = dipoleTiltDay(midnight);
+    const { ctx, w, h } = prepare($('tg-tilt-chart'));
+    const box = { x: 40, y: 10, w: w - 52, h: h - 40 };
+    const lim = 40;
+    axes(ctx, box, {
+        xLabel: 'UT hour', yLabel: 'ψ (deg)',
+        xTicks: [0, 6, 12, 17, 24].map((v) => ({ px: scale(v, 0, 24, box.x, box.x + box.w), label: String(v) })),
+        yTicks: [-30, -15, 0, 15, 30].map((v) => ({ py: scale(v, -lim, lim, box.y + box.h, box.y), label: String(v) })),
+    });
+    linePath(ctx, Array.from(day.tiltDeg, (v, i) => [
+        scale(day.utHours[i], 0, 24, box.x, box.x + box.w),
+        scale(v, -lim, lim, box.y + box.h, box.y),
+    ]), '#4fc3f7', 2);
+    const nowH = now.getUTCHours() + now.getUTCMinutes() / 60;
+    const nx = scale(nowH, 0, 24, box.x, box.x + box.w);
+    linePath(ctx, [[nx, box.y], [nx, box.y + box.h]], 'rgba(199,146,234,.6)', 1.2);
+
+    $('tg-tilt-range').textContent = `${fmt(day.rangeDeg, 1)}°`;
+    $('tg-tilt-utmax').textContent = `${fmt(day.utOfMax, 2)} UT`;
+    $('tg-tilt-now').textContent = `${fmt(dipoleTilt(now), 1)}°`;
+}
+
+function drawScreening() {
+    const { ctx, w, h } = prepare($('tg-screening'));
+    const box = { x: 48, y: 12, w: w - 62, h: h - 44 };
+    const lo = -3, hi = 3;   // log10 period in years
+    axes(ctx, box, {
+        xLabel: 'log₁₀ period (years)', yLabel: 'fraction reaching the surface',
+        xTicks: [-3, -2, -1, 0, 1, 2, 3].map((v) => ({ px: scale(v, lo, hi, box.x, box.x + box.w), label: String(v) })),
+        yTicks: [0, 0.25, 0.5, 0.75, 1].map((v) => ({ py: scale(v, 0, 1, box.y + box.h, box.y), label: v.toFixed(2) })),
+    });
+    const colors = { 0.1: '#7fe6c3', 1: '#4fc3f7', 10: '#c792ea' };
+    for (const sigma of [0.1, 1, 10]) {
+        const pts = [];
+        for (let L = lo; L <= hi; L += 0.02) {
+            pts.push([scale(L, lo, hi, box.x, box.x + box.w),
+                scale(mantleScreening(Math.pow(10, L), sigma), 0, 1, box.y + box.h, box.y)]);
+        }
+        linePath(ctx, pts, colors[sigma], 1.8);
+    }
+    const halfY = scale(0.5, 0, 1, box.y + box.h, box.y);
+    ctx.setLineDash([4, 4]);
+    linePath(ctx, [[box.x, halfY], [box.x + box.w, halfY]], 'rgba(150,160,190,.4)', 1);
+    ctx.setLineDash([]);
+
+    $('tg-screening-table').querySelector('tbody').innerHTML = [0.1, 1, 10].map((s) =>
+        `<tr><td>${s}</td><td class="num">${halfAttenuationPeriodYears(s).toFixed(2)} yr</td>`
+        + `<td class="num">${mantleScreening(1 / 365.25, s).toExponential(1)}</td></tr>`).join('');
+}
+
+$('tg-year').addEventListener('input', () => {
+    $('tg-year-out').textContent = $('tg-year').value;
+    drawFieldMap();
+});
+document.querySelectorAll('#tg-field-tabs button').forEach((b) => {
+    b.addEventListener('click', () => {
+        document.querySelectorAll('#tg-field-tabs button').forEach((o) => o.classList.toggle('active', o === b));
+        fieldComp = b.dataset.comp;
+        drawFieldMap();
+    });
+});
+
+// ══════════════════════════ CORE LAYER ═══════════════════════════════════════
+
+function fillCoreTables() {
+    const n = dimensionlessNumbers();
+    const rows = [
+        ['Magnetic diffusivity η', `${n.etaM2S.toFixed(2)} m²/s`, '1/(μ₀σ)'],
+        ['Magnetic Reynolds Rₘ', n.magneticReynolds.toFixed(0), 'UL/η — must exceed ~40 for dynamo action'],
+        ['Ekman E', n.ekman.toExponential(2), 'ν/2ΩL² — rotation utterly dominates viscosity'],
+        ['Rossby Ro', n.rossby.toExponential(2), 'U/2ΩL — and inertia'],
+        ['Magnetic Prandtl Pₘ', n.magneticPrandtl.toExponential(2), 'ν/η — why simulations cannot reach Earth'],
+        ['Elsasser Λ', n.elsasser.toFixed(2), 'Lorentz vs Coriolis — order 1 means magnetostrophic'],
+    ];
+    $('tg-numbers-table').querySelector('tbody').innerHTML = rows.map(([a, b, c], i) =>
+        `<tr class="${i === 1 ? 'tg-hi' : ''}"><td>${a}</td><td class="num">${b}</td><td>${c}</td></tr>`).join('');
+
+    const table = freeDecayTable();
+    $('tg-decay-table').querySelector('tbody').innerHTML = table.map((r) =>
+        `<tr class="${r.n === 1 ? 'tg-hi' : ''}"><td>${r.n}</td><td class="num">${r.kn.toFixed(4)}</td>`
+        + `<td class="num">${Math.round(r.years).toLocaleString()} yr</td>`
+        + `<td class="num">${r.ratioToDipole.toFixed(3)}</td></tr>`).join('');
+    $('tg-decay-ratio').textContent = `${(freeDecayTime(1) / freeDecayTime(13)).toFixed(1)}×`;
+
+    $('tg-layers-table').querySelector('tbody').innerHTML = LAYERS.map((L) =>
+        `<tr><td>${L.name}</td><td class="num">${Math.round(6371 - L.rOuterKm)}–${Math.round(6371 - L.rInnerKm)}</td>`
+        + `<td class="num">${L.sigma.toExponential(0)}</td><td>${L.state}</td></tr>`).join('');
+
+    const { ctx, w, h } = prepare($('tg-decay-chart'));
+    const box = { x: 48, y: 10, w: w - 60, h: h - 40 };
+    const maxYr = table[0].years;
+    axes(ctx, box, {
+        xLabel: 'degree n', yLabel: 'free-decay time (kyr)',
+        xTicks: table.map((r, i) => ({
+            px: scale(i, 0, table.length - 1,
+                box.x + (box.w / table.length) * 0.3 + 6,
+                box.x + box.w - (box.w / table.length) * 0.3 - 6),
+            label: String(r.n),
+        })),
+        yTicks: niceTicks(0, maxYr / 1000, 4).map((v) => ({ py: scale(v, 0, maxYr / 1000, box.y + box.h, box.y), label: v.toFixed(0) })),
+    });
+    const bw = (box.w / table.length) * 0.6;
+    const inset = bw / 2 + 6;          // keep bar 0 clear of the axis line
+    table.forEach((r, i) => {
+        const x = scale(i, 0, table.length - 1, box.x + inset, box.x + box.w - inset);
+        const y = scale(r.years / 1000, 0, maxYr / 1000, box.y + box.h, box.y);
+        ctx.fillStyle = r.n === 1 ? '#ff9a56' : 'rgba(255,154,86,.36)';
+        ctx.fillRect(x - bw / 2, y, bw, box.y + box.h - y);
+    });
+}
+
+function drawRikitake() {
+    // Coarser step than the reference run — this is a browser tab, and the
+    // result being demonstrated is the IRREGULARITY, which is robust.
+    const r = runRikitake({ T: 500, dt: 0.004, sample: 25 });
+    $('tg-rev-count').textContent = String(r.reversals);
+    $('tg-rev-mean').textContent = fmt(r.meanChron, 1);
+    $('tg-rev-range').textContent = `${fmt(r.minChron, 1)} / ${fmt(r.maxChron, 1)}`;
+    $('tg-rev-irreg').textContent = `${fmt(r.irregularity, 1)}×`;
+
+    const { ctx, w, h } = prepare($('tg-rikitake-chart'));
+    const box = { x: 44, y: 10, w: w - 56, h: h - 40 };
+    let lim = 0;
+    for (const v of r.x) lim = Math.max(lim, Math.abs(v));
+    axes(ctx, box, {
+        xLabel: 'dimensionless time', yLabel: 'x (field)',
+        xTicks: [0, 125, 250, 375, 500].map((v) => ({ px: scale(v, 0, 500, box.x, box.x + box.w), label: String(v) })),
+        yTicks: [-lim, 0, lim].map((v) => ({ py: scale(v, -lim, lim, box.y + box.h, box.y), label: v.toFixed(0) })),
+    });
+    linePath(ctx, Array.from(r.x, (v, i) => [
+        scale(r.t[i], 0, 500, box.x, box.x + box.w),
+        scale(v, -lim, lim, box.y + box.h, box.y),
+    ]), '#ff9a56', 0.9);
+}
+
+let paritySweep = null;
+async function runParitySweep() {
+    const btn = $('tg-run-parity');
+    const status = $('tg-parity-status');
+    const N = Number($('tg-res').value);
+    const alphaSym = $('tg-alpha').value;
+    btn.disabled = true;
+    const Ds = [60, 90, 116, 150, 180, 220, 260, 320, 460, 660, 900, 1166, 1500, 2100];
+    const out = [];
+    for (let i = 0; i < Ds.length; i++) {
+        status.textContent = `Solving |D| = ${Ds[i]} … (${i + 1}/${Ds.length})`;
+        // Yield to the event loop so the status text actually paints between
+        // solves — each one is a few hundred thousand RK4 steps.
+        await new Promise((res) => setTimeout(res, 0));
+        out.push({ D: Ds[i], ...alphaOmegaParity(-Ds[i], { N, alphaSym, tSettle: 8 }) });
+    }
+    paritySweep = { alphaSym, rows: out };
+    // Window edges by linear interpolation on the family-growth margin — for
+    // the symmetric control there are no separate families, so there is no
+    // window to report, and reporting one would be a category error.
+    if (alphaSym === 'antisymmetric') {
+        const bad = out.filter((r) => !r.converged);
+        const cross = [];
+        for (let i = 1; i < out.length; i++) {
+            const a = out[i - 1], b = out[i];
+            if (a.margin * b.margin < 0) cross.push(a.D + (b.D - a.D) * (-a.margin) / (b.margin - a.margin));
+        }
+        // Take the OUTERMOST pair. Near an eigenvalue collision inside the
+        // window a marginally-converged sample can flip sign and manufacture an
+        // extra crossing; taking cross[0] and cross[1] then reported a window
+        // ten times too narrow. The dipole-preferred region is where the margin
+        // is positive, so its edges are the first and last crossings.
+        let lo = cross.length ? cross[0] : null;
+        let hi = cross.length > 1 ? cross[cross.length - 1] : null;
+        // Linear interpolation across a coarse bracket is not accurate enough
+        // to quote: the upper edge sits between |D| = 1166 and 1500 in the
+        // sweep grid and interpolating there overshot by ~7%. Bisect the two
+        // bracketing intervals instead, which is what the edges actually are —
+        // the dynamo numbers where the two families' growth rates cross.
+        if (hi !== null) {
+            status.textContent = 'Refining the window edges…';
+            await new Promise((res) => setTimeout(res, 0));
+            const idxLo = out.findIndex((r) => r.margin > 0);
+            let idxHi = out.length - 1;
+            while (idxHi > 0 && out[idxHi].margin <= 0) idxHi--;
+            const refined = dipoleWindow({
+                N, tSettle: 8, tolerance: 2,
+                loBracket: [out[idxLo - 1].D, out[idxLo].D],
+                hiBracket: [out[idxHi].D, out[idxHi + 1].D],
+            });
+            lo = refined.lower;
+            hi = refined.upper;
+        }
+        $('tg-window-lo').textContent = lo === null ? '—' : fmt(lo, 0);
+        $('tg-window-hi').textContent = hi === null ? '—' : fmt(hi, 0);
+        $('tg-window-decades').textContent = hi === null ? '—'
+            : `${Math.log10(hi / lo).toFixed(2)} decades`;
+        status.textContent = hi === null
+            ? 'Sweep complete — no dipole window bracketed at this resolution.'
+            : `Dipole preferred for |D| between ${fmt(lo, 0)} and ${fmt(hi, 0)} — `
+              + `${Math.log10(hi / lo).toFixed(2)} decades, edges bisected on the growth-rate crossing.`
+              + (cross.length > 2 ? '  ⚠ extra sign changes inside the window; raise N.' : '')
+              + (bad.length ? `  ⚠ ${bad.length} unconverged sample(s).` : '');
+    } else {
+        $('tg-window-lo').textContent = '—';
+        $('tg-window-hi').textContent = '—';
+        $('tg-window-decades').textContent = 'none';
+        status.textContent = 'Symmetric α: the parity families do not decouple, and no dynamo number gives a clean dipole. '
+            + 'That is the control working.';
+    }
+    drawParity();
+    btn.disabled = false;
+}
+
+function drawParity() {
+    const { ctx, w, h } = prepare($('tg-parity-chart'));
+    const box = { x: 48, y: 12, w: w - 62, h: h - 44 };
+    const lo = Math.log10(50), hi = Math.log10(2500);
+    if (!paritySweep) {
+        axes(ctx, box, { xLabel: 'log₁₀ |D|', yLabel: 'growth rate', xTicks: [], yTicks: [] });
+        ctx.fillStyle = '#6d7691'; ctx.font = '12px system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('press “Run the sweep”', box.x + box.w / 2, box.y + box.h / 2);
+        return;
+    }
+    const rows = paritySweep.rows;
+    const mixed = paritySweep.alphaSym === 'symmetric';
+    const vals = mixed ? rows.map((r) => r.growth)
+        : rows.flatMap((r) => [r.dipoleGrowth, r.quadrupoleGrowth]);
+    const gLo = Math.min(0, ...vals), gHi = Math.max(...vals);
+    const xOf = (D) => scale(Math.log10(D), lo, hi, box.x, box.x + box.w);
+    const yOf = (v) => scale(v, gLo, gHi, box.y + box.h, box.y);
+
+    // Shade the region where the dipole family actually wins.
+    if (!mixed) {
+        for (let i = 1; i < rows.length; i++) {
+            if (rows[i - 1].margin > 0 && rows[i].margin > 0) {
+                ctx.fillStyle = 'rgba(127,230,195,.09)';
+                ctx.fillRect(xOf(rows[i - 1].D), box.y, xOf(rows[i].D) - xOf(rows[i - 1].D), box.h);
+            }
+        }
+    }
+    axes(ctx, box, {
+        xLabel: 'log₁₀ |D| (dynamo number)', yLabel: 'growth rate',
+        xTicks: [2, 2.5, 3].map((v) => ({ px: scale(v, lo, hi, box.x, box.x + box.w), label: v.toFixed(1) })),
+        yTicks: niceTicks(gLo, gHi, 5).map((v) => ({ py: yOf(v), label: v.toFixed(0) })),
+    });
+    if (mixed) {
+        linePath(ctx, rows.map((r) => [xOf(r.D), yOf(r.growth)]), '#4fc3f7', 2);
+        ctx.fillStyle = '#7c86a0'; ctx.font = '10px system-ui, sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.fillText('leading mode — mixed parity at every D, never a clean dipole', box.x + 6, box.y + 4);
+    } else {
+        linePath(ctx, rows.map((r) => [xOf(r.D), yOf(r.dipoleGrowth)]), '#ff9a56', 2);
+        linePath(ctx, rows.map((r) => [xOf(r.D), yOf(r.quadrupoleGrowth)]), '#4fc3f7', 2);
+    }
+}
+
+$('tg-res').addEventListener('input', () => { $('tg-res-out').textContent = $('tg-res').value; });
+$('tg-run-parity').addEventListener('click', runParitySweep);
+$('tg-alpha').addEventListener('change', () => { paritySweep = null; drawParity(); });
+
+// ══════════════════════════ Boot ═════════════════════════════════════════════
+
+function renderLayer(name) {
+    if (name === 'external') {
+        fillIdentityTable();
+        drawAlias('symh6');
+        drawFloorChart();
+        drawDropoutChart();
+        loadLive();
+    } else if (name === 'field') {
+        drawFieldMap();
+        drawTilt();
+        drawScreening();
+    } else if (name === 'core') {
+        fillCoreTables();
+        drawRikitake();
+        drawParity();
+    }
+}
+
+const initial = ['core', 'field', 'external'].includes(location.hash.slice(1))
+    ? location.hash.slice(1) : 'external';
+showLayer(initial);
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        const active = layerButtons.find((b) => b.getAttribute('aria-selected') === 'true');
+        if (active) renderLayer(active.dataset.layer);
+    }, 180);
+});
+</script>
+<script type="module">import { initNav } from "./js/nav.js?v=20260714"; initNav("tiga");</script>
+</body>
+</html>
