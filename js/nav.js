@@ -169,6 +169,7 @@ const NAV_DROPDOWNS = [
         label: 'Simulators',
         id: 'simulators',
         items: [
+            { href: 'tiga.html',              label: 'TIGA · Geomagnetic',   sub: 'Core → field → live nowcast with a posterior', tier: 'public', icon: 'dynamo', badge: 'NEW', id: 'tiga' },
             { href: 'solar-fluid.html',       label: 'Solar Fluid',          sub: 'Navier-Stokes MHD solver',        tier: 'public', icon: 'fluid' },
             { href: 'stellar-wind.html',      label: 'Stellar Wind',         sub: 'Parker spiral + wind stream',     tier: 'public', icon: 'wind' },
             { href: 'star2d.html',            label: '2D Stellar Modeler',   sub: 'HR diagram + classification',     tier: 'public', icon: 'chart' },
