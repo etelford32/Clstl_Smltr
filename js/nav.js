@@ -32,11 +32,32 @@ import { tierLevel as _cfgTierLevel, PAID_PLAN_IDS } from './tier-config.js';
 // the nav gets autocapture for free; pages without the nav (rare,
 // embedded simulators) opt-in by importing js/telemetry.js directly.
 import './telemetry.js';
+import { glyph } from './glyphs.js';
 
 // Root-absolute so the shared nav renders identically from any directory
 // depth — pages under /satellite-operator/ etc. would otherwise 404 the
 // logo and every nav link (relative paths resolve against the subdir).
-const LOGO_IMG = '/ParkersPhysics_logo2.jpg';
+// The brand mark is SVG (icons/logo-mark.svg), not the 266 KB
+// ParkersPhysics_logo2.jpg it replaced. That JPEG was being downloaded on
+// every one of the ~55 pages that mount the nav and then drawn at 30px —
+// roughly 1 % of its pixels. The vector is ~1 KB, sharp on HiDPI, and needs
+// no circular crop because it is drawn to fit rather than being a square
+// photo. The JPEG stays in the repo: it is still the og:image for social
+// cards, where a raster IS required.
+const LOGO_IMG = '/icons/logo-mark.svg';
+
+/**
+ * Render a nav item's icon.
+ *
+ * Falls back to emitting the raw value when it is not a known glyph id, so a
+ * literal character or emoji left anywhere in NAV_DROPDOWNS still renders
+ * instead of vanishing. tests/glyphs.mjs is what stops that fallback from
+ * becoming a silent hiding place for typos.
+ */
+function navIcon(icon) {
+    if (!icon) return '';
+    return glyph(icon, { size: 20 }) || icon;
+}
 
 // ── Navigation Structure ─────────────────────────────────────────────────────
 
@@ -45,14 +66,14 @@ const NAV_DROPDOWNS = [
         label: 'Earth',
         id: 'earth-menu',
         items: [
-            { href: 'earth.html',             label: 'EarthView',           sub: 'Predictive weather + magnetosphere',   tier: 'public',   icon: '🌍' },
-            { href: 'moon.html',              label: 'Moon',                sub: 'Lunar radiation environment',          tier: 'public',   icon: '🌙' },
-            { href: 'operations.html',        label: 'Operations',          sub: 'Fleet & debris analysis console',      tier: 'public',   icon: '🛰️', badge: 'PRO PREVIEW', id: 'operations' },
-            { href: 'satellites.html',        label: 'Satellites',          sub: 'Real-time orbital tracking',           tier: 'public', icon: '🛰️' },
-            { href: 'launch-planner.html',    label: 'Launch Planner',      sub: 'SpaceX/Blue Origin launches + weather', tier: 'public', icon: '🚀', id: 'launch-planner' },
-            { href: 'upper-atmosphere.html',  label: 'Upper Atmosphere',    sub: 'Thermosphere + exosphere simulator',    tier: 'public', icon: '🌡️', id: 'upper-atmosphere' },
-            { href: 'satellite-designer.html', label: 'Satellite Designer', sub: 'Build a craft · fly drag vs thrust',     tier: 'public', icon: '🛰️', badge: 'NEW', id: 'satellite-designer' },
-            { href: 'spaceship-designer.html', label: 'Space Ship Designer', sub: 'Build a rocket · fly it to orbit in 3D', tier: 'public', icon: '🚀', badge: 'NEW', id: 'spaceship-designer' },
+            { href: 'earth.html',             label: 'EarthView',           sub: 'Predictive weather + magnetosphere',   tier: 'public',   icon: 'earth' },
+            { href: 'moon.html',              label: 'Moon',                sub: 'Lunar radiation environment',          tier: 'public',   icon: 'moon' },
+            { href: 'operations.html',        label: 'Operations',          sub: 'Fleet & debris analysis console',      tier: 'public',   icon: 'operations', badge: 'PRO PREVIEW', id: 'operations' },
+            { href: 'satellites.html',        label: 'Satellites',          sub: 'Real-time orbital tracking',           tier: 'public', icon: 'satellite' },
+            { href: 'launch-planner.html',    label: 'Launch Planner',      sub: 'SpaceX/Blue Origin launches + weather', tier: 'public', icon: 'rocket', id: 'launch-planner' },
+            { href: 'upper-atmosphere.html',  label: 'Upper Atmosphere',    sub: 'Thermosphere + exosphere simulator',    tier: 'public', icon: 'atmosphere', id: 'upper-atmosphere' },
+            { href: 'satellite-designer.html', label: 'Satellite Designer', sub: 'Build a craft · fly drag vs thrust',     tier: 'public', icon: 'satellite', badge: 'NEW', id: 'satellite-designer' },
+            { href: 'spaceship-designer.html', label: 'Space Ship Designer', sub: 'Build a rocket · fly it to orbit in 3D', tier: 'public', icon: 'rocket', badge: 'NEW', id: 'spaceship-designer' },
         ],
     },
     {
@@ -60,23 +81,23 @@ const NAV_DROPDOWNS = [
         id: 'space-weather',
         items: [
             { section: 'Live space weather' },
-            { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',   tier: 'public', icon: '🌤️', id: 'weather' },
-            { href: 'auroracle.html', label: 'AurOracle', sub: 'Predict the aurora · 7-night + 30-day outlook', tier: 'public', icon: '🌌', badge: 'NEW', id: 'auroracle' },
-            { href: 'ring-current.html', label: 'Ring Current', sub: 'Live Dst digital twin · L1-driven forecast', tier: 'public', icon: '🧲', badge: 'NEW', id: 'ring-current' },
-            { href: 'shielding-lab.html', label: 'Shielding Lab', sub: 'M–I coupling · SAPS + penetration E-fields', tier: 'public', icon: '🛡️', badge: 'NEW', id: 'shielding-lab' },
-            { href: 'flux-rope.html', label: 'Flux Rope Simulator', sub: 'CME Bz forecasting · ensemble Sun→Earth', tier: 'public', icon: '🌀', badge: 'NEW', id: 'flux-rope' },
-            { href: 'far-side-watch.html', label: 'Far-Side Watch', sub: 'Regions rotating in · days-to-weeks horizon', tier: 'public', icon: '🌗', badge: 'NEW', id: 'far-side-watch' },
-            { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
+            { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',   tier: 'public', icon: 'space-weather', id: 'weather' },
+            { href: 'auroracle.html', label: 'AurOracle', sub: 'Predict the aurora · 7-night + 30-day outlook', tier: 'public', icon: 'aurora', badge: 'NEW', id: 'auroracle' },
+            { href: 'ring-current.html', label: 'Ring Current', sub: 'Live Dst digital twin · L1-driven forecast', tier: 'public', icon: 'magnet', badge: 'NEW', id: 'ring-current' },
+            { href: 'shielding-lab.html', label: 'Shielding Lab', sub: 'M–I coupling · SAPS + penetration E-fields', tier: 'public', icon: 'shield', badge: 'NEW', id: 'shielding-lab' },
+            { href: 'flux-rope.html', label: 'Flux Rope Simulator', sub: 'CME Bz forecasting · ensemble Sun→Earth', tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'flux-rope' },
+            { href: 'far-side-watch.html', label: 'Far-Side Watch', sub: 'Regions rotating in · days-to-weeks horizon', tier: 'public', icon: 'far-side', badge: 'NEW', id: 'far-side-watch' },
+            { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: 'sun' },
             { section: 'Planetary systems' },
-            { href: 'solar-system.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: '🪐', id: 'solar' },
-            { href: 'jupiter-system.html', label: 'Jupiter System', sub: 'Galilean moons · 4:2:1 Laplace resonance', tier: 'public', icon: '🪐', id: 'jupiter-system' },
-            { href: 'saturn-system.html', label: 'Saturn System', sub: 'Moon-sculpted rings · Cassini Division · live density waves', tier: 'public', icon: '🪐', badge: 'NEW', id: 'saturn-system' },
-            { href: 'uranus-system.html', label: 'Uranus System', sub: 'Tipped 98° · ε-ring shepherds · crowded moons', tier: 'public', icon: '🔷', badge: 'NEW', id: 'uranus-system' },
-            { href: 'neptune-system.html', label: 'Neptune System', sub: 'Retrograde Triton · rings & arcs · J₂ N-body', tier: 'public', icon: '🔵', badge: 'NEW', id: 'neptune-system' },
+            { href: 'solar-system.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: 'solar-system', id: 'solar' },
+            { href: 'jupiter-system.html', label: 'Jupiter System', sub: 'Galilean moons · 4:2:1 Laplace resonance', tier: 'public', icon: 'planet', id: 'jupiter-system' },
+            { href: 'saturn-system.html', label: 'Saturn System', sub: 'Moon-sculpted rings · Cassini Division · live density waves', tier: 'public', icon: 'planet', badge: 'NEW', id: 'saturn-system' },
+            { href: 'uranus-system.html', label: 'Uranus System', sub: 'Tipped 98° · ε-ring shepherds · crowded moons', tier: 'public', icon: 'planet-ice', badge: 'NEW', id: 'uranus-system' },
+            { href: 'neptune-system.html', label: 'Neptune System', sub: 'Retrograde Triton · rings & arcs · J₂ N-body', tier: 'public', icon: 'planet-ice', badge: 'NEW', id: 'neptune-system' },
             { section: 'Missions & maps' },
-            { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: '🛸', id: 'missions' },
-            { href: 'mission-planner.html', label: 'Mission Planner', sub: 'Launch rockets · plan Moon & Mars trips', tier: 'public', icon: '🎯', badge: 'NEW', id: 'mission-planner' },
-            { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',           tier: 'free',   icon: '🌌' },
+            { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: 'probe', id: 'missions' },
+            { href: 'mission-planner.html', label: 'Mission Planner', sub: 'Launch rockets · plan Moon & Mars trips', tier: 'public', icon: 'target', badge: 'NEW', id: 'mission-planner' },
+            { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',           tier: 'free',   icon: 'galaxy' },
         ],
     },
     {
@@ -95,9 +116,9 @@ const NAV_DROPDOWNS = [
         id: 'hindcast-lab',
         items: [
             { section: 'May 2024 · Gannon superstorm (G5)' },
-            { href: 'gannon-superstorm.html', label: 'Gannon Superstorm', sub: '72 h replay · MHD-corrected density vs the Ap ceiling', tier: 'public', icon: '⚡', id: 'gannon-superstorm' },
+            { href: 'gannon-superstorm.html', label: 'Gannon Superstorm', sub: '72 h replay · MHD-corrected density vs the Ap ceiling', tier: 'public', icon: 'storm', id: 'gannon-superstorm' },
             { section: "Mar 2015 · St. Patrick's Day (G4)" },
-            { href: 'st-patrick-storm.html', label: "St. Patrick's Storm", sub: 'Two-step main phase · the community benchmark', tier: 'public', icon: '🍀', badge: 'NEW', id: 'st-patrick-storm' },
+            { href: 'st-patrick-storm.html', label: "St. Patrick's Storm", sub: 'Two-step main phase · the community benchmark', tier: 'public', icon: 'storm-two-step', badge: 'NEW', id: 'st-patrick-storm' },
         ],
     },
     {
@@ -114,48 +135,48 @@ const NAV_DROPDOWNS = [
         label: 'Field Notes',
         id: 'field-notes',
         items: [
-            { href: 'blog.html', label: 'All Field Notes', sub: 'Post-mortems, hindcasts, methods', tier: 'public', icon: '📓', id: 'field-notes' },
+            { href: 'blog.html', label: 'All Field Notes', sub: 'Post-mortems, hindcasts, methods', tier: 'public', icon: 'notebook', id: 'field-notes' },
             { section: 'Latest' },
-            { href: 'blog-why-aurora-forecasts-miss.html', label: 'NOAA said G1. Earth got G3.', sub: 'July 4 2026 · the Bz gap', tier: 'public', icon: '📉', badge: 'NEW', id: 'blog-why-aurora-forecasts-miss' },
+            { href: 'blog-why-aurora-forecasts-miss.html', label: 'NOAA said G1. Earth got G3.', sub: 'July 4 2026 · the Bz gap', tier: 'public', icon: 'chart-down', badge: 'NEW', id: 'blog-why-aurora-forecasts-miss' },
             { section: 'Hindcast papers' },
-            { href: 'blog-gannon-hindcast.html', label: 'The Index That Lied', sub: 'Gannon G5 · EN/ES/FR', tier: 'public', icon: '📝', id: 'blog-gannon-hindcast' },
-            { href: 'blog-stpatrick-hindcast.html', label: 'The Storm Every Model Takes', sub: "St. Patrick's 2015 · EN/ES/FR", tier: 'public', icon: '📝', id: 'blog-stpatrick-hindcast' },
+            { href: 'blog-gannon-hindcast.html', label: 'The Index That Lied', sub: 'Gannon G5 · EN/ES/FR', tier: 'public', icon: 'paper', id: 'blog-gannon-hindcast' },
+            { href: 'blog-stpatrick-hindcast.html', label: 'The Storm Every Model Takes', sub: "St. Patrick's 2015 · EN/ES/FR", tier: 'public', icon: 'paper', id: 'blog-stpatrick-hindcast' },
         ],
     },
     {
         label: 'Stars',
         id: 'stars',
         items: [
-            { href: 'sirius.html',     label: 'Sirius Binary',    sub: 'A1V + white dwarf system',    tier: 'public', icon: '⭐' },
-            { href: 'betelgeuse.html', label: 'Betelgeuse',       sub: 'Red supergiant · M1-2 Ia',    tier: 'public', icon: '🔴' },
-            { href: 'vega.html',       label: 'Vega',             sub: 'Rapid rotator · A0V',          tier: 'public', icon: '💫' },
-            { href: 'achernar.html',   label: 'Achernar',         sub: 'Oblate Be star · B6Vep',       tier: 'public', icon: '🌀' },
-            { href: 'wr102.html',      label: 'WR-102',           sub: 'Wolf-Rayet · hottest known',   tier: 'free',   icon: '🌟' },
-            { href: 'sirius-planetary.html',     label: 'Sirius Planetary', sub: '3D stellar system simulator',  tier: 'free',   icon: '🪐' },
+            { href: 'sirius.html',     label: 'Sirius Binary',    sub: 'A1V + white dwarf system',    tier: 'public', icon: 'star-binary' },
+            { href: 'betelgeuse.html', label: 'Betelgeuse',       sub: 'Red supergiant · M1-2 Ia',    tier: 'public', icon: 'star-red' },
+            { href: 'vega.html',       label: 'Vega',             sub: 'Rapid rotator · A0V',          tier: 'public', icon: 'star-bright' },
+            { href: 'achernar.html',   label: 'Achernar',         sub: 'Oblate Be star · B6Vep',       tier: 'public', icon: 'star-oblate' },
+            { href: 'wr102.html',      label: 'WR-102',           sub: 'Wolf-Rayet · hottest known',   tier: 'free',   icon: 'star-wr' },
+            { href: 'sirius-planetary.html',     label: 'Sirius Planetary', sub: '3D stellar system simulator',  tier: 'free',   icon: 'planet' },
         ],
     },
     {
         label: 'Black Holes',
         id: 'black-holes',
         items: [
-            { href: 'ton618.html',           label: 'TON 618',             sub: 'Research observatory · 6.6×10¹⁰ M☉', tier: 'public', icon: '🕳️', id: 'ton618' },
-            { href: 'blackhole-observatory.html', label: 'Black Hole Observatory', sub: 'Three UMBH systems · one canvas · τ-synced', tier: 'public', icon: '🕳️', badge: 'NEW', id: 'blackhole-observatory' },
-            { href: 'sagittarius.html',      label: 'Sagittarius A*',      sub: 'Galactic center · live',              tier: 'public', icon: '🕳️', id: 'sagittarius' },
-            { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',          tier: 'public', icon: '🕳️' },
+            { href: 'ton618.html',           label: 'TON 618',             sub: 'Research observatory · 6.6×10¹⁰ M☉', tier: 'public', icon: 'black-hole', id: 'ton618' },
+            { href: 'blackhole-observatory.html', label: 'Black Hole Observatory', sub: 'Three UMBH systems · one canvas · τ-synced', tier: 'public', icon: 'observatory', badge: 'NEW', id: 'blackhole-observatory' },
+            { href: 'sagittarius.html',      label: 'Sagittarius A*',      sub: 'Galactic center · live',              tier: 'public', icon: 'black-hole-core', id: 'sagittarius' },
+            { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',          tier: 'public', icon: 'accretion' },
         ],
     },
     {
         label: 'Simulators',
         id: 'simulators',
         items: [
-            { href: 'solar-fluid.html',       label: 'Solar Fluid',          sub: 'Navier-Stokes MHD solver',        tier: 'public', icon: '🌊' },
-            { href: 'stellar-wind.html',      label: 'Stellar Wind',         sub: 'Parker spiral + wind stream',     tier: 'public', icon: '💨' },
-            { href: 'star2d.html',            label: '2D Stellar Modeler',   sub: 'HR diagram + classification',     tier: 'public', icon: '📊' },
-            { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
-            { href: 'gravity-lab.html',       label: 'Gravity Lab',          sub: 'Live N-body · moons & resonances', tier: 'public', icon: '🪐', badge: 'NEW', id: 'gravity-lab' },
-            { href: 'accretion-disc.html',    label: 'Accretion Disc',       sub: 'α-disc + pebble accretion + Theia → Moon', tier: 'public', icon: '🌀', badge: 'NEW', id: 'accretion-disc' },
-            { href: 'time-machine.html',      label: 'Orbital Time Machine', sub: 'N-body propagation · ±10 kyr to ±1 Myr', tier: 'public', icon: '⏳', badge: 'IN DEV', id: 'time-machine' },
-            { href: 'rust.html',              label: 'Rust/WASM Engine',     sub: 'WebAssembly compute module',      tier: 'free',   icon: '⚙️' },
+            { href: 'solar-fluid.html',       label: 'Solar Fluid',          sub: 'Navier-Stokes MHD solver',        tier: 'public', icon: 'fluid' },
+            { href: 'stellar-wind.html',      label: 'Stellar Wind',         sub: 'Parker spiral + wind stream',     tier: 'public', icon: 'wind' },
+            { href: 'star2d.html',            label: '2D Stellar Modeler',   sub: 'HR diagram + classification',     tier: 'public', icon: 'chart' },
+            { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: 'microscope' },
+            { href: 'gravity-lab.html',       label: 'Gravity Lab',          sub: 'Live N-body · moons & resonances', tier: 'public', icon: 'gravity', badge: 'NEW', id: 'gravity-lab' },
+            { href: 'accretion-disc.html',    label: 'Accretion Disc',       sub: 'α-disc + pebble accretion + Theia → Moon', tier: 'public', icon: 'accretion', badge: 'NEW', id: 'accretion-disc' },
+            { href: 'time-machine.html',      label: 'Orbital Time Machine', sub: 'N-body propagation · ±10 kyr to ±1 Myr', tier: 'public', icon: 'hourglass', badge: 'IN DEV', id: 'time-machine' },
+            { href: 'rust.html',              label: 'Rust/WASM Engine',     sub: 'WebAssembly compute module',      tier: 'free',   icon: 'engine' },
         ],
     },
 ];
@@ -335,7 +356,7 @@ export function initNav(activeId = '') {
 
             if (!hasAccess && item.tier === 'advanced') {
                 html += `<a href="/pricing.html" class="nav-drop-link" style="opacity:0.5" role="menuitem" title="Available on Advanced plan">
-                    <span class="ndl-icon">${item.icon || ''}</span>
+                    <span class="ndl-icon">${navIcon(item.icon)}</span>
                     <span class="ndl-body">
                         <span class="ndl-title">${item.label} <span class="nav-badge-pro">PRO</span></span>
                         <span class="ndl-sub">${item.sub}</span>
@@ -343,7 +364,7 @@ export function initNav(activeId = '') {
                 </a>`;
             } else if (!hasAccess) {
                 html += `<a href="/signin.html" class="nav-drop-link" style="opacity:0.4" role="menuitem" title="Sign up for free to access">
-                    <span class="ndl-icon">${item.icon || ''}</span>
+                    <span class="ndl-icon">${navIcon(item.icon)}</span>
                     <span class="ndl-body">
                         <span class="ndl-title">${item.label} <span style="font-size:.6rem;color:#665">Sign up</span></span>
                         <span class="ndl-sub">${item.sub}</span>
@@ -353,7 +374,7 @@ export function initNav(activeId = '') {
                 const _hid = item.id || item.href.replace('.html','');
                 const _isAct = _hid === activeId || _hid.startsWith(activeId) || activeId.startsWith(_hid);
                 html += `<a href="/${item.href}" class="nav-drop-link${_isAct ? ' active' : ''}" role="menuitem">
-                    <span class="ndl-icon">${item.icon || ''}</span>
+                    <span class="ndl-icon">${navIcon(item.icon)}</span>
                     <span class="ndl-body">
                         <span class="ndl-title">${item.label}${item.badge ? (
                             item.badge === 'NEW'

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="64" viewBox="0 0 300 64" role="img" aria-label="Parkers Physics">
+  <title>Parkers Physics</title>
+  <!-- width/height are REQUIRED, not redundant with viewBox: loaded as an
+       <img> an SVG with only a viewBox reports naturalWidth/Height 0, so
+       CSS `width:auto` collapses to the replaced-element default and the
+       nav logo renders as a stretched 150px box. -->
+  <!--
+    Mark + wordmark lockup. The mark is an exact copy of icons/logo-mark.svg —
+    if you change the geometry there, change it here too (they are duplicated
+    on purpose: an <use href="logo-mark.svg#..."> cross-file reference does not
+    resolve when the SVG is loaded as an <img>, which is how both are used).
+
+    CAVEAT ON THE TEXT: this uses a system font stack rather than outlined
+    paths, because there is no font toolchain in this repo to convert glyphs to
+    curves. It therefore renders with slightly different metrics per platform.
+    That is fine for the web surfaces it is used on, and NOT fine if you ever
+    send this to a printer or a third party for merchandise — convert the text
+    to paths first if so.
+
+    The nav does not use this file: there the mark is the SVG and "Parkers
+    Physics" is real HTML text, which stays selectable and accessible.
+  -->
+  <g fill="none" stroke-linecap="round">
+    <ellipse cx="36" cy="24" rx="16.5" ry="9" stroke="#22b8ff" stroke-width="5.6"
+             transform="rotate(-20 36 24)"/>
+    <ellipse cx="33.5" cy="42" rx="13.5" ry="7.4" stroke="#ff8a1f" stroke-width="5.6"
+             transform="rotate(-20 33.5 42)"/>
+    <line x1="15" y1="11" x2="15" y2="33" stroke="#22b8ff" stroke-width="5.6"/>
+    <line x1="15" y1="32" x2="15" y2="54" stroke="#ff8a1f" stroke-width="5.6"/>
+  </g>
+  <circle cx="15" cy="32.5" r="3.9" fill="#fff"/>
+
+  <text x="68" y="31" fill="currentColor"
+        font-family="'Segoe UI', system-ui, -apple-system, sans-serif"
+        font-size="21" font-weight="700" letter-spacing="-0.2">Parkers</text>
+  <text x="68" y="52" fill="currentColor" opacity=".72"
+        font-family="'Segoe UI', system-ui, -apple-system, sans-serif"
+        font-size="21" font-weight="400" letter-spacing="1.4">PHYSICS</text>
+</svg>

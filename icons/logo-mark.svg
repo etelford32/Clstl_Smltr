@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Parkers Physics">
+  <title>Parkers Physics</title>
+  <!-- width/height are REQUIRED, not redundant with viewBox: loaded as an
+       <img> an SVG with only a viewBox reports naturalWidth/Height 0, so
+       CSS `width:auto` collapses to the replaced-element default and the
+       nav logo renders as a stretched 150px box.
+
+       NOTE FOR EDITORS: this is XML, so a comment may never contain a
+       double hyphen. Writing the CSS custom properties in full (two
+       hyphens, then c-accent) makes the whole file unparseable and the
+       mark silently becomes a broken <img> on every page. Backtick the
+       token names instead, as below. -->
+  <!--
+    Vector transcription of the Parkers Physics mark
+    (ParkersPhysics_logo2.jpg / icons/icon-256x256.png): a "P" whose bowl is
+    two tilted orbital rings crossing a vertical axis stem.
+
+    The two-tone split is the product's own palette, not decoration: cyan is
+    the `c-accent` token (primary chrome), amber is `c-storm` (Storm Watch) —
+    the pairing
+    DESIGN_TOKENS.md already uses for quiet-vs-disturbed. Upper ring cool,
+    lower ring hot, bright node where the axis crosses.
+
+    TWO THINGS THAT LOOK LIKE THEY COULD BE SIMPLIFIED AND CANNOT:
+
+    1. Flat fills, not gradients. The first draft used linearGradients and the
+       stem VANISHED: a vertical <line> has a zero-width objectBoundingBox, so
+       a bbox-relative gradient is degenerate and paints nothing. Beyond that
+       bug, gradients are invisible at 16px and only cost bytes. If you want
+       the glow of the raster original, add it in CSS around the mark rather
+       than inside it.
+    2. The stem is drawn LAST, over the rings. Drawn first it reads as an "8" —
+       the rings close over the junction and the P's stem disappears into
+       them. Painting order is what makes this legible as a letter.
+
+    Geometry here is the source for js/glyphs.js: tilted ring (ellipse at
+    -20deg), vertical axis, node dot. The glyph set reuses those three
+    primitives so the icons read as the same family as the mark.
+  -->
+  <g fill="none" stroke-linecap="round">
+    <!-- upper orbital ring — cool (`c-accent`) -->
+    <ellipse cx="36" cy="24" rx="16.5" ry="9" stroke="#22b8ff" stroke-width="5.6"
+             transform="rotate(-20 36 24)"/>
+    <!-- lower orbital ring — hot (`c-storm`), smaller: the P's second lobe -->
+    <ellipse cx="33.5" cy="42" rx="13.5" ry="7.4" stroke="#ff8a1f" stroke-width="5.6"
+             transform="rotate(-20 33.5 42)"/>
+    <!-- axis stem, over the rings (see note 2) -->
+    <line x1="15" y1="11" x2="15" y2="33" stroke="#22b8ff" stroke-width="5.6"/>
+    <line x1="15" y1="32" x2="15" y2="54" stroke="#ff8a1f" stroke-width="5.6"/>
+  </g>
+  <!-- crossing node -->
+  <circle cx="15" cy="32.5" r="3.9" fill="#fff"/>
+</svg>

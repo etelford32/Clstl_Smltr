@@ -38,6 +38,11 @@
  * hand-tuned values were decoration. <lastmod> IS emitted (Google does use
  * it when it's honest) and comes from git, so it cannot drift from reality.
  *
+ * ORDERING: <lastmod> is the file's last git commit date, so ANY commit that
+ * touches a page makes this file stale by design. Run it last, after the
+ * change that touched the pages — including after scripts/build-og-cards.mjs,
+ * which rewrites meta tags across every page.
+ *
  * Usage:
  *   node scripts/build-sitemap.mjs           # rewrite sitemap.xml
  *   node scripts/build-sitemap.mjs --check   # CI: exit 1 if stale
@@ -97,6 +102,22 @@ function walk(dir, acc = []) {
   return acc;
 }
 
+/* Prefer git's index over a disk walk. Build output is gitignored but very
+ * much present on disk — test-results/ and playwright-report/ are full of
+ * Playwright's trace-viewer HTML, and a walk happily picks those up: one of
+ * them carries a <link rel="canonical" href=".../signin"> copied from a
+ * captured page, which tripped guard 1 and failed the build for anyone who
+ * had run the browser tests locally. Asking git means the source of truth
+ * for "is this a page of ours" is the same one the repo already uses. */
+function pages() {
+  try {
+    const out = execFileSync('git', ['ls-files', '-z', '*.html'], { cwd: ROOT, encoding: 'utf8' });
+    const list = out.split('\0').filter(Boolean).filter((p) => !SKIP_DIRS.has(p.split('/')[0]));
+    if (list.length) return list;
+  } catch { /* not a git checkout — fall through */ }
+  return walk(ROOT);
+}
+
 /* ── vercel.json routing tables ─────────────────────────────────────── */
 const vercel = JSON.parse(readFileSync(join(ROOT, 'vercel.json'), 'utf8'));
 const REWRITES = new Map((vercel.rewrites || []).map((r) => [r.source, r.destination]));
@@ -135,7 +156,7 @@ const warnings = [];
 const entries = [];
 const linkedAssets = new Set();
 
-for (const page of walk(ROOT).sort()) {
+for (const page of pages().sort()) {
   if (EXCLUDE.has(page)) continue;
 
   const html = readFileSync(join(ROOT, page), 'utf8');

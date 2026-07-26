@@ -125,19 +125,24 @@ jobs:
       - name: Install Playwright + Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Start dev-server (background)
-        run: |
-          PORT=8000 node dev-server.mjs > /tmp/dev-server.log 2>&1 &
-          for i in $(seq 1 30); do
-            if curl -fs "$TEST_BASE_URL" >/dev/null; then
-              echo "dev-server up after $i s"; exit 0
-            fi
-            sleep 1
-          done
-          echo "dev-server never responded"
-          cat /tmp/dev-server.log
-          exit 1
-
+      # NO manual dev-server step here. playwright.config.js owns the web
+      # server (`PORT=8000 node dev-server.mjs`, port 8000, 30s timeout) and
+      # starts it for every project.
+      #
+      # This job used to start its own on 8000 first. That was harmless until
+      # 2026-07-10, when #909 added the webServer block to playwright.config.js;
+      # from then on Playwright found 8000 occupied and — because
+      # reuseExistingServer is `!process.env.CI`, i.e. false in CI — refused to
+      # reuse it and hard-failed before running a single test:
+      #
+      #   Error: http://localhost:8000 is already used, make sure that nothing
+      #   is running on the port/url or set reuseExistingServer:true
+      #
+      # That took the job red on every run from 2026-07-14 onward. It only
+      # surfaces when someone touches this workflow's narrow path filter
+      # (dsmc/**, upper-atmosphere.html, playwright.config.js …), which is why
+      # it sat unnoticed. e2e-auth.yml never had a manual start and never broke.
+      # Do not re-add one: let the config own the server.
       - name: Run Playwright E2E
         run: npx playwright test tests/upper-atmosphere-e2e.spec.js --reporter=list
 
