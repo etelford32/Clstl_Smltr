@@ -503,6 +503,87 @@ test.describe('tiga.html', () => {
         await expect(page.locator('#tg-3d-mantle')).toBeEnabled();
     });
 
+    test('the key is mode-aware and its swatches match the real materials', async ({ page }) => {
+        test.setTimeout(180000);
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+        if (await page.locator('#tg-stage-msg').count()) test.skip(true, 'no WebGL on this runner');
+
+        const labels = () => page.locator('#tg-key-body li .tg-key-lb')
+            .evaluateAll((els) => els.map((e) => e.firstChild.textContent.trim()));
+
+        // External: observatories are on screen, core-closed field lines are not.
+        await expect(page.locator('#tg-key')).toBeVisible();
+        let l = await labels();
+        expect(l).toContain('Observatory, N');
+        expect(l).not.toContain('Field line, closes in core');
+
+        // Core: the closed lines ARE on screen, the observatories are not. A
+        // static key listing everything the scene CAN draw would be wrong in
+        // every mode, because most of it is not visible in any given one.
+        await page.click('[data-layer="core"]');
+        l = await labels();
+        expect(l).toContain('Field line, closes in core');
+        expect(l).not.toContain('Observatory, N');
+
+        // Layer structure: five shells plus the tangent cylinder, each carrying
+        // its conductivity and its dynamo verdict.
+        await page.selectOption('#tg-3d-interior', 'layers');
+        l = await labels();
+        expect(l).toEqual(['Inner core', 'Outer core', 'Lower mantle', 'Upper mantle', 'Crust',
+            'Tangent cylinder']);
+        await expect(page.locator('#tg-key-body')).toContainText('σ 1e+6 S/m · dynamo');
+
+        // THE SWATCHES MUST MATCH THE MATERIALS. A key with its own hard-coded
+        // colours is a second source of truth that drifts the moment anyone
+        // retunes a material — silently, because both still render.
+        const mismatches = await page.evaluate(() => {
+            const P = window.__tigaScene.palettes;
+            const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
+            const want = Object.fromEntries(
+                Object.entries(P.LAYER_PALETTE).map(([k, v]) => [k, hex(v.color)]));
+            want['Tangent cylinder'] = hex(P.TANGENT_CYLINDER_COLOR);
+            return [...document.querySelectorAll('#tg-key-body li')]
+                .map((li) => {
+                    const name = li.querySelector('.tg-key-lb').firstChild.textContent.trim();
+                    const got = li.querySelector('.tg-key-sw').dataset.color;
+                    return want[name] && want[name] !== got ? `${name}: ${got} vs ${want[name]}` : null;
+                })
+                .filter(Boolean);
+        });
+        expect(mismatches).toEqual([]);
+
+        // Collapsible, and it says so to a screen reader.
+        await expect(page.locator('#tg-key-toggle')).toHaveAttribute('aria-expanded', 'true');
+        await page.click('#tg-key-toggle');
+        await expect(page.locator('#tg-key-toggle')).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.locator('#tg-key-body')).toBeHidden();
+    });
+
+    test('opening the layer stack cuts deep enough to expose the inner core', async ({ page }) => {
+        test.setTimeout(180000);
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+        if (await page.locator('#tg-stage-msg').count()) test.skip(true, 'no WebGL on this runner');
+
+        await page.selectOption('#tg-3d-interior', 'layers');
+        await page.waitForTimeout(600);
+        // The clip constant must land INSIDE the inner core (0.192 R_E), or the
+        // cutaway looks open and reveals nothing — which is what a 55% default
+        // did: the plane sat at 0.56, outside the outer core entirely.
+        const constant = await page.evaluate(() => window.__tigaScene.clipPlane.constant);
+        expect(constant).toBeLessThan(0.192);
+        expect(constant).toBeGreaterThanOrEqual(0);
+    });
+
     test('every layer carries its honest label', async ({ page }) => {
         await killFeed(page);
         await page.goto(PAGE, { waitUntil: 'load' });

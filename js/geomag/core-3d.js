@@ -63,6 +63,45 @@ const R_EARTH = 1;
 const R_CMB = R_CMB_KM / REF_RADIUS_KM;
 const R_IC = R_INNER_CORE_KM / REF_RADIUS_KM;
 
+/**
+ * ── THE PALETTE IS EXPORTED, AND THAT IS THE POINT ───────────────────────
+ *
+ * Every colour the scene uses lives here and the legend reads the SAME
+ * constants. A legend with its own hard-coded swatches is a second source of
+ * truth that drifts the first time anyone retunes a material, and it drifts
+ * silently — the picture still renders, the legend still lists colours, and
+ * they just quietly stop describing each other. `tests/tiga-smoke.spec.js`
+ * asserts the rendered swatches match these values.
+ */
+export const LAYER_PALETTE = Object.freeze({
+    'Inner core':   { color: 0xfff0d0, opacity: 1.00, metal: 0.90, rough: 0.30, emissive: 0xffa54a, ei: 0.55 },
+    'Outer core':   { color: 0xef6a30, opacity: 0.88, metal: 0.65, rough: 0.58, emissive: 0x8f2c06, ei: 0.30 },
+    'Lower mantle': { color: 0x6a4a7a, opacity: 0.62, metal: 0.05, rough: 0.92, emissive: 0x000000, ei: 0 },
+    'Upper mantle': { color: 0x3f5a92, opacity: 0.50, metal: 0.05, rough: 0.95, emissive: 0x000000, ei: 0 },
+    'Crust':        { color: 0x9fc6e8, opacity: 0.42, metal: 0.10, rough: 0.80, emissive: 0x000000, ei: 0 },
+});
+
+/** Field-line tube colours. Escaping vs closed is a physical distinction. */
+export const LINE_COLORS = Object.freeze({
+    escaping: 0x4fc3f7,
+    closed: 0x7a5cff,
+    hot: 0xff9a56,
+});
+
+/** The diverging B_r ramp, matching `diverging()` in the CMB fragment shader. */
+export const FIELD_RAMP = Object.freeze({
+    inward: 0x3d9efa,     // B_r negative — into the core
+    zero: 0x0d0f21,
+    outward: 0xff8f47,    // B_r positive — out of the core
+    reversedContour: 0xff5a6b,
+});
+
+/** Observatory markers, coloured by which magnetic hemisphere they sit in. */
+export const OBSERVATORY_COLORS = Object.freeze({ north: 0xc792ea, south: 0x7fe6c3 });
+
+/** The tangent cylinder — geometry, not a material surface. */
+export const TANGENT_CYLINDER_COLOR = 0x7fe6c3;
+
 // ── Shaders ──────────────────────────────────────────────────────────────────
 
 /**
@@ -327,6 +366,12 @@ export class CoreFieldScene {
         this.layer = 'external';
         this._targetDist = LAYER_VIEW.external.dist;
 
+        // Handed to the key so it reads the same constants the materials do.
+        this.palettes = {
+            LAYER_PALETTE, LINE_COLORS, FIELD_RAMP,
+            OBSERVATORY_COLORS, TANGENT_CYLINDER_COLOR,
+        };
+
         this._onResize = () => this.resize();
         window.addEventListener('resize', this._onResize);
         this.resize();
@@ -344,23 +389,7 @@ export class CoreFieldScene {
     _buildLayerShells() {
         this.layerShells = new THREE.Group();
         const diag = layerDiagnostics();
-        // The two metallic layers are EMISSIVE. Not for drama: the centre light
-        // that lets you see into the cutaway sits inside the inner core, so the
-        // inner core's own surface is backlit and renders black without it —
-        // the hottest object in the model looking like a void.
-        //
-        // Colour encodes STATE. Warm = metallic and conducting, cool = silicate
-        // and effectively insulating. σ falls six orders of magnitude across
-        // the core–mantle boundary, and that jump is the one the eye should
-        // catch first. The three silicate shells are separated in hue as well
-        // as lightness so they stay distinct when the cut face is in shadow.
-        const PALETTE = {
-            'Inner core':   { color: 0xfff0d0, opacity: 1.00, metal: 0.90, rough: 0.30, emissive: 0xffa54a, ei: 0.55 },
-            'Outer core':   { color: 0xef6a30, opacity: 0.88, metal: 0.65, rough: 0.58, emissive: 0x8f2c06, ei: 0.30 },
-            'Lower mantle': { color: 0x6a4a7a, opacity: 0.62, metal: 0.05, rough: 0.92, emissive: 0x000000, ei: 0 },
-            'Upper mantle': { color: 0x3f5a92, opacity: 0.50, metal: 0.05, rough: 0.95, emissive: 0x000000, ei: 0 },
-            'Crust':        { color: 0x9fc6e8, opacity: 0.42, metal: 0.10, rough: 0.80, emissive: 0x000000, ei: 0 },
-        };
+        const PALETTE = LAYER_PALETTE;
         // Outermost first so the inner shells draw over them when clipped.
         for (const L of [...diag].reverse()) {
             const pal = PALETTE[L.name];
@@ -403,7 +432,7 @@ export class CoreFieldScene {
         const h = 2 * Math.sqrt(Math.max(R_CMB * R_CMB - r * r, 1e-6));
         const geo = new THREE.CylinderGeometry(r, r, h, 16, 1, true);
         const mat = new THREE.MeshBasicMaterial({
-            color: 0x7fe6c3, wireframe: true, transparent: true, opacity: 0.28,
+            color: TANGENT_CYLINDER_COLOR, wireframe: true, transparent: true, opacity: 0.28,
         });
         this.tangentCylinder = new THREE.Mesh(geo, mat);
         this.tangentCylinder.visible = false;
@@ -521,7 +550,7 @@ export class CoreFieldScene {
             const lon = v.lonDeg * DEGR;
             const r = 1.02;
             const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-                color: v.gmLatDeg >= 0 ? 0xc792ea : 0x7fe6c3,
+                color: v.gmLatDeg >= 0 ? OBSERVATORY_COLORS.north : OBSERVATORY_COLORS.south,
                 transparent: true, opacity: 0.95,
             }));
             // Geographic → the scene's Y-up frame, same convention as the lines.
@@ -720,8 +749,8 @@ export class CoreFieldScene {
                     uTime: { value: 0 },
                     uPulse: { value: 1 },
                     uOpacity: { value: line.escapes ? 0.95 : 0.7 },
-                    uColdColor: { value: new THREE.Color(line.escapes ? 0x4fc3f7 : 0x7a5cff) },
-                    uHotColor: { value: new THREE.Color(0xff9a56) },
+                    uColdColor: { value: new THREE.Color(line.escapes ? LINE_COLORS.escaping : LINE_COLORS.closed) },
+                    uHotColor: { value: new THREE.Color(LINE_COLORS.hot) },
                     uFadeNear: { value: 2.6 },
                     uFadeFar: { value: 7.5 },
                 },

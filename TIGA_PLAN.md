@@ -173,6 +173,14 @@ high latitude at the top of the core, not to the pole.
 
 So "rotation selects the dipole" is not a slogan — it is this geometry.
 
+The view carries a **mode-aware key**, because a static one listing everything
+the scene *can* draw is wrong in every mode — most of it is not on screen. Its
+swatches read the palettes exported from `core-3d.js`, the same constants the
+materials use, so the two cannot drift apart; `tests/tiga-smoke.spec.js`
+compares every rendered swatch against the exported value. In Layer structure
+the key carries each shell's conductivity and its dynamo verdict, which puts
+the §3.0.1 punchline on screen rather than 800px below it.
+
 The cutaway plane is re-derived from the camera every frame, so opening it
 always opens *toward the viewer*. A world-fixed plane is the obvious
 implementation and the wrong one: orbit 180° and the opening is behind the

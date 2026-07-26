@@ -186,6 +186,28 @@ body {
     border:1px solid rgba(90,110,160,.22);
 }
 .tg-stage canvas { display:block; }
+.tg-key {
+    position:absolute; left:12px; top:12px; z-index:2; max-width:min(58%, 300px);
+    background:rgba(4,7,20,.78); border:1px solid rgba(90,110,160,.3); border-radius:10px;
+    backdrop-filter:blur(6px); font-size:.7rem; overflow:hidden;
+}
+.tg-key-toggle {
+    display:block; width:100%; text-align:left; cursor:pointer;
+    background:none; border:0; color:#9aa4bd; font:inherit; font-weight:700;
+    letter-spacing:.08em; text-transform:uppercase; padding:7px 11px;
+}
+.tg-key-toggle::after { content:' ▾'; color:#767f9a; }
+.tg-key-toggle[aria-expanded="false"]::after { content:' ▸'; }
+.tg-key-body { list-style:none; padding:0 11px 9px; margin:0; display:grid; gap:6px; }
+.tg-key-body[hidden] { display:none; }
+.tg-key-body li { display:grid; grid-template-columns:16px 1fr; gap:8px; align-items:start; line-height:1.35; }
+.tg-key-sw { width:14px; height:14px; border-radius:4px; margin-top:1px; border:1px solid rgba(255,255,255,.16); }
+.tg-key-sw.tg-key-ring { background:none !important; border-width:2px; border-radius:50%; }
+.tg-key-sw.tg-key-line { height:4px; margin-top:6px; border-radius:2px; }
+.tg-key-lb { color:#cdd5e4; }
+.tg-key-lb i { color:#8b94ad; font-style:normal; display:block; font-size:.66rem; }
+@media (max-width:768px) { .tg-key { max-width:70%; font-size:.66rem; } }
+
 .tg-stage .tg-stage-msg {
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     font-size:.8rem; color:#767f9a; text-align:center; padding:20px;
@@ -270,6 +292,11 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
 <section class="tg-front" aria-label="Three-dimensional view">
     <div class="tg-stage" id="tg-stage">
         <div class="tg-stage-msg" id="tg-stage-msg">Building the field&hellip;</div>
+        <div class="tg-key" id="tg-key" hidden>
+            <button type="button" class="tg-key-toggle" id="tg-key-toggle" aria-expanded="true"
+                    aria-controls="tg-key-body">Key</button>
+            <ul class="tg-key-body" id="tg-key-body"></ul>
+        </div>
     </div>
     <div class="tg-stagebar">
         <div class="tg-field">
@@ -1061,7 +1088,7 @@ function showLayer(name, { focusTab = false } = {}) {
     if (!rendered.has(name)) { rendered.add(name); renderLayer(name); }
     else if (name === 'field') drawFieldMap();
     // The front-door view follows the tabs — same Earth, three framings.
-    if (scene3d) scene3d.setLayer(name);
+    if (scene3d) { scene3d.setLayer(name); drawKey(); }
     try { history.replaceState(null, '', `#${name}`); } catch (_) {}
 }
 layerButtons.forEach((b, i) => {
@@ -1728,6 +1755,82 @@ async function boot3d() {
     }
 }
 
+// ── The key ─────────────────────────────────────────────────────────────────
+// Mode-aware on purpose: a static list of everything the scene CAN draw is
+// wrong in every mode, because most of it is not on screen. The swatch colours
+// come from the same exported constants the materials use, so they cannot
+// drift apart — see the note on LAYER_PALETTE in core-3d.js.
+const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
+
+function keyEntries(layer, interior) {
+    if (!scene3d) return [];
+    const P = scene3d.palettes;
+    if (interior === 'layers') {
+        const rows = Object.entries(P.LAYER_PALETTE).map(([name, v]) => {
+            const d = (scene3d.layerDiagnostics || []).find((L) => L.name === name);
+            return {
+                color: hex(v.color),
+                label: name,
+                note: d ? `σ ${d.sigma.toExponential(0)} S/m · ${d.canSustainDynamo ? 'dynamo' : 'no dynamo'}` : '',
+            };
+        });
+        rows.push({
+            color: hex(P.TANGENT_CYLINDER_COLOR), ring: true, label: 'Tangent cylinder',
+            note: 'where the flow regime changes — not a surface',
+        });
+        return rows;
+    }
+    const atCore = layer === 'core';
+    const rows = [
+        {
+            color: hex(P.FIELD_RAMP.outward), label: 'B_r outward',
+            note: atCore ? 'at the core–mantle boundary' : 'at the surface',
+        },
+        { color: hex(P.FIELD_RAMP.inward), label: 'B_r inward' },
+        {
+            color: hex(P.FIELD_RAMP.reversedContour), ring: true, label: 'Reversed flux',
+            note: 'opposes the dipole’s own B_r there',
+        },
+        {
+            color: hex(P.LINE_COLORS.escaping), line: true, label: 'Field line, escapes',
+            note: 'threads out through the mantle',
+        },
+    ];
+    if (layer !== 'external') {
+        rows.push({
+            color: hex(P.LINE_COLORS.closed), line: true, label: 'Field line, closes in core',
+            note: 'low-latitude L-shells re-enter the CMB',
+        });
+    }
+    if (layer === 'external') {
+        rows.push({ color: hex(P.OBSERVATORY_COLORS.north), label: 'Observatory, N' });
+        rows.push({ color: hex(P.OBSERVATORY_COLORS.south), label: 'Observatory, S' });
+    }
+    return rows;
+}
+
+function drawKey() {
+    const host = $('tg-key');
+    if (!scene3d) { host.hidden = true; return; }
+    const layer = (layerButtons.find((b) => b.getAttribute('aria-selected') === 'true') || {}).dataset?.layer
+        || 'external';
+    const rows = keyEntries(layer, $('tg-3d-interior').value);
+    $('tg-key-body').innerHTML = rows.map((r) => {
+        const cls = `tg-key-sw${r.ring ? ' tg-key-ring' : ''}${r.line ? ' tg-key-line' : ''}`;
+        const style = r.ring ? `border-color:${r.color}` : `background:${r.color}`;
+        return `<li><span class="${cls}" style="${style}" data-color="${r.color}"></span>`
+            + `<span class="tg-key-lb">${r.label}${r.note ? `<i>${r.note}</i>` : ''}</span></li>`;
+    }).join('');
+    host.hidden = false;
+}
+
+$('tg-key-toggle').addEventListener('click', () => {
+    const btn = $('tg-key-toggle');
+    const open = btn.getAttribute('aria-expanded') === 'true';
+    btn.setAttribute('aria-expanded', String(!open));
+    $('tg-key-body').hidden = open;
+});
+
 function apply3d() {
     if (!scene3d) return;
     const year = Number($('tg-3d-year').value);
@@ -1744,6 +1847,7 @@ function apply3d() {
         + `at the core — that ratio is the continuation, not a stronger field. `
         + `${d.lines.closed} of ${d.lines.total} traced lines close inside the core rather than reaching `
         + `the surface, which is L-shell structure and not a drawing choice.`;
+    drawKey();
 }
 
 function applyScreening() {
@@ -1855,10 +1959,16 @@ $('tg-3d-interior').addEventListener('change', () => {
     }
     // Opening the layer stack with no cut shows only the outermost shell,
     // which is the least informative possible view of a layered body.
+    //
+    // 88%, not 55%. The clip constant is 1.25·(1−f), so 55% puts the plane at
+    // 0.56 R_E — outside the outer core and nowhere near the inner core at
+    // 0.19. It looked open and revealed nothing. 88% lands at 0.15, inside the
+    // inner core, so every shell is actually cut.
     if (layers && Number($('tg-3d-cut').value) === 0) {
-        $('tg-3d-cut').value = '55';
+        $('tg-3d-cut').value = '88';
         applyCutaway();
     }
+    drawKey();
 });
 $('tg-decay-time').addEventListener('input', drawDecayLive);
 
