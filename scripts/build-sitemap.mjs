@@ -38,6 +38,11 @@
  * hand-tuned values were decoration. <lastmod> IS emitted (Google does use
  * it when it's honest) and comes from git, so it cannot drift from reality.
  *
+ * ORDERING: <lastmod> is the file's last git commit date, so ANY commit that
+ * touches a page makes this file stale by design. Run it last, after the
+ * change that touched the pages — including after scripts/build-og-cards.mjs,
+ * which rewrites meta tags across every page.
+ *
  * Usage:
  *   node scripts/build-sitemap.mjs           # rewrite sitemap.xml
  *   node scripts/build-sitemap.mjs --check   # CI: exit 1 if stale
