@@ -122,7 +122,22 @@ async function stubSupabase(page, { tokenResult = 'success' } = {}) {
  * on a cold, contended CI runner, which the old 10s no longer masks.
  */
 const BOUNCE = /\/auth-callback\.html\?from=recovered_misland/;
-const BOUNCE_TIMEOUT = 30_000;
+/*
+ * waitUntil:'commit' HERE TOO — this is the same trap as goto(), one call
+ * deeper, and fixing only goto() left the spec still failing on WebKit:
+ *
+ *   TimeoutError: page.waitForURL: Timeout 30000ms exceeded.
+ *     waiting for navigation until "load"
+ *     navigated to ".../auth-callback.html?from=recovered_misland#error=..."
+ *
+ * The bounce had already happened and the URL was right. waitForURL ALSO
+ * defaults to waitUntil:'load', so after matching the URL it sat waiting on
+ * the destination's load event — and auth-callback.html is itself a page that
+ * consumes the hash and routes onward, so it tears down before load just like
+ * the page we bounced off. Matching the URL is the whole assertion; the
+ * destination's lifecycle is not ours to wait on.
+ */
+const BOUNCE_WAIT = { timeout: 30_000, waitUntil: 'commit' };
 
 test.describe('OAuth misland sentinel', () => {
     test.beforeEach(async ({ page }) => { await stubSupabase(page); });
@@ -131,7 +146,7 @@ test.describe('OAuth misland sentinel', () => {
         const hash = '#access_token=' + fakeJwt(USER_ID) +
             '&refresh_token=fake-refresh-token&token_type=bearer&expires_in=3600';
         await page.goto('/' + hash, { waitUntil: 'commit' });
-        await page.waitForURL(BOUNCE, { timeout: BOUNCE_TIMEOUT });
+        await page.waitForURL(BOUNCE, BOUNCE_WAIT);
         // The token payload must survive the bounce so the callback can use it.
         expect(page.url()).toContain('access_token');
     });
@@ -139,7 +154,7 @@ test.describe('OAuth misland sentinel', () => {
     test('an OAuth error landing on a normal page is forwarded too', async ({ page }) => {
         await page.goto('/space-weather.html#error=access_denied&error_description=User+cancelled',
             { waitUntil: 'commit' });
-        await page.waitForURL(BOUNCE, { timeout: BOUNCE_TIMEOUT });
+        await page.waitForURL(BOUNCE, BOUNCE_WAIT);
         expect(page.url()).toContain('error=access_denied');
     });
 
