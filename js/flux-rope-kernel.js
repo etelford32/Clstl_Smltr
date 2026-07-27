@@ -149,6 +149,17 @@ export async function loadFluxRopeKernel(source) {
         /** EFFECTIVE drag Γ [km⁻¹] of rope i (wake-reduced for a follower). */
         ropeGammaEff(i) { return x.fr_rope_gamma_eff(i); },
 
+        // ── §16 compounding-analyzer probes (read-only) ─────────────────────
+        /** Index of rope i's §16 leader (−1 = none; NaN out of range). */
+        ropeLeader(i) { return x.fr_rope_leader(i); },
+        /** Live §16 rear-compression amplitude on rope i at train time tS. */
+        rearCAt(i, tS) { return x.fr_rear_c_at(i, tS); },
+        /** Upstream flow [km/s] rope i's sheath Mach runs against at tS
+         *  (the leader's live wake for a follower, own ambient otherwise). */
+        upstreamKmsAt(i, tS) { return x.fr_upstream_kms_at(i, tS); },
+        /** Fast-magnetosonic speed V_MS [km/s] (spec §14 constant). */
+        vMsKms() { return x.fr_v_ms_kms(); },
+
         // Kinematics probes (page HUD + GLSL uniforms). t = seconds after the
         // reference epoch; index-free forms probe rope 0.
         apexKm(tS) { return x.fr_apex_km(tS); },

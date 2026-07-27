@@ -26,6 +26,8 @@ const COL = {
     thresh: 'rgba(255, 110, 90, 0.55)',
     cursor: 'rgba(255, 255, 255, 0.65)',
     text: '#aab6cf',
+    noise: 'rgba(190, 205, 230, 0.10)',
+    noiseEdge: 'rgba(190, 205, 230, 0.28)',
 };
 
 function setupCanvas(canvas) {
@@ -100,6 +102,23 @@ export function drawBzChart(canvas, o) {
         }
         ctx.fillStyle = COL.text;
         ctx.fillText(label, x - 18 * dpr, h - 8 * dpr);
+    }
+
+    // Measured-background band (±σ around zero, js/flux-rope-noise.js):
+    // the honesty layer under the fan — the engine predicts 0 nT outside
+    // ropes, and excursions INSIDE this band are indistinguishable from
+    // the ambient IMF the model deliberately does not carry.
+    if (Number.isFinite(o.noise?.sigmaNt) && o.noise.sigmaNt > 0) {
+        const s = o.noise.sigmaNt;
+        ctx.fillStyle = COL.noise;
+        ctx.fillRect(padL, Y(s), iw, Y(-s) - Y(s));
+        ctx.strokeStyle = COL.noiseEdge;
+        ctx.lineWidth = dpr;
+        ctx.setLineDash([2 * dpr, 5 * dpr]);
+        for (const v of [s, -s]) {
+            ctx.beginPath(); ctx.moveTo(padL, Y(v)); ctx.lineTo(w - padR, Y(v)); ctx.stroke();
+        }
+        ctx.setLineDash([]);
     }
 
     // Zero line + storm thresholds.
@@ -229,6 +248,10 @@ export function drawBzChart(canvas, o) {
     if (o.obs) legend.push([COL.obs, o.obsLabel || 'observed (OMNI)']);
     if (o.aux) legend.push([COL.aux, 'predicted at STEREO-A']);
     if (o.auxObs) legend.push([COL.auxObs, o.auxObsLabel || 'STEREO-A observed']);
+    if (Number.isFinite(o.noise?.sigmaNt) && o.noise.sigmaNt > 0) {
+        legend.push([COL.noiseEdge,
+            o.noise.label || `background ±${o.noise.sigmaNt.toFixed(1)} nT (measured)`]);
+    }
     let lx = padL + 8 * dpr;
     ctx.font = `${10 * dpr}px system-ui, sans-serif`;
     for (const [col, label] of legend) {

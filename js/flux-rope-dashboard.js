@@ -103,12 +103,16 @@ export async function mountFluxRopeDashboard(containerId) {
         }
         if (fc.idle) {
             cur = null;
+            // Two honest quiet states (provider reasons): an empty catalog
+            // vs a storm that already passed L1 — never "forecast" the past.
+            const quietLine = fc.reason === 'cme-train-passed'
+                ? 'the last Earth-directed CME has already passed L1 — corridor currently clear.'
+                : 'no Earth-directed CME analyses in the last 7 days.';
             panel.innerHTML = `
                 <div class="frd-title"><span class="frd-pip"></span>
                     Flux-Rope Bz Forecast · ensemble engine (beta)</div>
-                <div class="frd-quiet">☀ DONKI catalog reachable · no
-                Earth-directed CME analyses in the last 7 days. The ensemble
-                engine is idle — replay a calendar event, or explore
+                <div class="frd-quiet">☀ DONKI catalog reachable · ${quietLine}
+                The ensemble engine is idle — replay a calendar event, or explore
                 hindcasts in the
                 <a href="flux-rope.html" style="color:#4fc3f7">Flux Rope Simulator</a>.</div>`;
             return;
@@ -136,7 +140,10 @@ export async function mountFluxRopeDashboard(containerId) {
                 Flux-Rope Bz Forecast · ensemble engine (beta)</div>
             ${replayLine}
             <div class="frd-event">
-                CME ${target.timeIso.replace('T', ' ').replace(/Z?$/, 'Z')} ·
+                ${fc.train
+                    ? `⚡ Compounding train · ${fc.cmes.length} CMEs (§16 interaction on) · latest`
+                    : 'CME'}
+                ${target.timeIso.replace('T', ' ').replace(/Z?$/, 'Z')} ·
                 ${Math.round(target.speedKms)} km/s · Earth-directed
                 <small>· ${MEMBERS}-member ensemble · ${assimNote}</small>
             </div>
@@ -193,10 +200,13 @@ export async function mountFluxRopeDashboard(containerId) {
         running = true;
         let failed = false;
         try {
+            // Replay models the SELECTED catalog row verbatim — the
+            // provider's live relevance filter would (correctly) call a
+            // historical storm "passed", so replays opt out of it.
             const fc = await computeFluxRopeForecast({
                 days: 7, members: MEMBERS, seed: SEED,
                 gridDtS: GRID_DT_S, gridHours: GRID_HOURS,
-                ...(replay ? { sources: { cmes: [replay.cme] } } : {}),
+                ...(replay ? { sources: { cmes: [replay.cme] }, relevanceFilter: false } : {}),
             });
             if (replay && !fc.idle) fc.replay = { id: replay.cme.id, label: replay.label };
             replayActive = !!fc.replay;

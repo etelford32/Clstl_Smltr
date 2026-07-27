@@ -248,11 +248,18 @@ arbitrary heliocentric point (the page's GLSL view mirrors the same math
 in-shader; the kernel is the oracle); `fr_ens_run(seed, n, ...)` +
 percentile/arrival/probability getters expose §7, with
 `fr_ens_member_params_ptr` laid out member-major over
-`fr_ens_ropes_per_member()` records.
+`fr_ens_ropes_per_member()` records. §16 compounding-analyzer probes
+(read-only, 2026-07-27): `fr_rope_leader(idx)` (§16 partner, −1 = none),
+`fr_rear_c_at(idx, t)` (live rear squeeze), `fr_upstream_kms_at(idx, t)`
+(the wake flow a follower's sheath Mach runs against), `fr_v_ms_kms()` —
+the interaction state the series path already computes, exposed so pages
+can EXPLAIN the compounding without re-deriving it.
 
 ## 10. Multi-rope trains (v1.1, Phase 2)
 
-A CME **train** is a sequence of up to `MAX_ROPES = 4` ropes, each with its
+A CME **train** is a sequence of up to `MAX_ROPES = 6` ropes (raised from 4
+on 2026-07-27 — active periods put more than four Earth-relevant CMEs in
+flight at once; the GLSL view's uniform arrays move in lockstep), each with its
 own §3–§5 parameterization and a launch offset `t_launch` [s] relative to
 one reference epoch (the first rope's launch by convention). The v1 train
 model makes exactly one assumption, stated loudly:
@@ -353,6 +360,43 @@ climatological defaults with deliberately WIDE priors (tilt σ 40°,
 chirality flip probability 0.5 = "unknown"): that honest prior is the
 starting posterior the §11 filter narrows as STEREO-A / L1 data arrives.
 Ambient wind `w` is seeded from the live RTSW plasma mean when available.
+
+### §12.1 Compounding-train seeding (2026-07-27)
+
+The live pipeline seeds the WHOLE current system, not the newest cone fit
+(`selectTrainCmes` + `donkiToTrainPreset` in js/flux-rope-live.js,
+fixture-gated):
+
+- **Membership.** Earth-RELEVANT CMEs (strictly Earth-directed, or within
+  20° of the cone edge — glancing candidates that can §16-couple to an
+  aligned anchor) that either launched inside the window (default 24 h)
+  or are still plausibly at/inside 1 AU (ballistic arrival + 30 h dwell
+  margin not yet past — a relevance FILTER only; the DBM owns real
+  kinematics). At least one strictly Earth-directed ANCHOR is required —
+  partners alone are idle, and a fully-passed storm is `idle`
+  (`cme-train-passed`), never a "forecast" of the past. Over the cap the
+  oldest non-anchor drops first, then the oldest anchor.
+- **Epoch.** Rope 0 = the EARLIEST launch; every consumer probe
+  (`fr_apex_km_at(0, …)`, the Stage's rope actor) assumes it. Later
+  launches carry `t_launch` offsets.
+- **Interaction.** §16 ON with engine defaults — wake kinematics, dynamic
+  rear compression, wake-conditioned follower sheaths.
+- **Spreads.** The kernel samples ONE §7 spread set across all ropes, so
+  the per-CME cone priors merge by MAX — the honest merge of unequal
+  priors is the widest.
+- **Seed.** Fold every member identity in launch order
+  (`trainSeed = fold(eventSeed)`): a new CME joining the train is a new
+  forecast system state; the same train replays bit-identically; a 1-CME
+  train reproduces the historical single-event seed exactly.
+- **Background noise (js/flux-rope-noise.js).** The trailing observed L1
+  record is measured with robust MAD statistics — σ_bg (full background
+  about the window median) and σ_hf (successive differences / √2, never
+  across a data gap). Two formerly-fixed knobs derive from it, disclosed
+  wherever used: the §14 sheath seed `δ = clamp(σ_bg, 1, 6)` (hindcast
+  fits keep their fitted δ) and the §11 observation error
+  `σ = clamp(√(3² + σ_bg²), 3, 8)` — which reproduces the spec's 4 nT
+  default at the previously-assumed ~2.6 nT background. Unmeasured →
+  the spec constants apply and the UI says so.
 
 ## 13. STEREO-A pre-arrival conditioning (Phase 3 close-out)
 

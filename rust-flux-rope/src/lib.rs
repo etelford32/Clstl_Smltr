@@ -34,8 +34,8 @@ pub mod rope;
 
 use ensemble::{EnsembleResult, Spreads, PCTS};
 use rope::{
-    field_at_train, observer_pos, synth_series, train_dyn, Profile, RopeDyn, RopeEntry,
-    RopeParams, TrainCfg,
+    field_at_train, observer_pos, rear_c_at, synth_series, train_dyn, upstream_kms, Profile,
+    RopeDyn, RopeEntry, RopeParams, TrainCfg,
 };
 
 /// Series buffer cap: 4 channels × MAX_STEPS samples.
@@ -43,7 +43,12 @@ pub const MAX_STEPS: usize = 4096;
 /// Ensemble member cap (keeps the per-step sample matrix bounded).
 pub const MAX_MEMBERS: usize = 8192;
 /// Rope-train cap (spec §10) — page UX and uniform arrays match this.
-pub const MAX_ROPES: usize = 4;
+/// Raised 4 → 6 (2026-07-27, compounding analyzer): active periods put
+/// more than four Earth-relevant CMEs in flight at once (Gannon launched
+/// six in ~48 h; the v1.4 fit models two and reports the rest unmodeled).
+/// The GLSL view's uniform arrays (js/flux-rope/view.js MAX_VIEW_ROPES)
+/// must move in lockstep with this constant.
+pub const MAX_ROPES: usize = 6;
 
 struct Engine {
     ropes: Vec<RopeEntry>,
@@ -309,6 +314,60 @@ pub extern "C" fn fr_rope_gamma_eff(idx: u32) -> f64 {
         Some(d) => d.dbm.gamma_per_km,
         None => f64::NAN,
     }
+}
+
+// ── §16 compounding-analyzer probes (read-only — no physics changes) ─────────
+// These expose the interaction state the series/field paths already compute
+// internally, so pages can EXPLAIN the compounding instead of re-deriving it
+// (the kernel stays the one oracle). All are NaN out of range.
+
+/// Index of rope `idx`'s §16 LEADER under the current interaction config
+/// (the partner whose wake it rides), −1 = none (misaligned, first in
+/// launch order, or interaction disabled). NaN out of range.
+#[no_mangle]
+pub extern "C" fn fr_rope_leader(idx: u32) -> f64 {
+    let e = engine();
+    refresh_dyns(e);
+    match e.dyns.get(idx as usize) {
+        Some(d) => d.lead as f64,
+        None => f64::NAN,
+    }
+}
+
+/// Live §16 rear-compression amplitude on rope `idx` at train time t —
+/// the squeeze the strongest closing follower applies to this rope's rear
+/// boundary (0 with interaction off, no follower in reach, or the follower
+/// not closing super-magnetosonically; capped 0.75). NaN out of range.
+#[no_mangle]
+pub extern "C" fn fr_rear_c_at(idx: u32, t_s: f64) -> f64 {
+    let e = engine();
+    refresh_dyns(e);
+    if (idx as usize) >= e.ropes.len() {
+        return f64::NAN;
+    }
+    let Engine { ropes, cfg, dyns, .. } = &mut *e;
+    rear_c_at(ropes, dyns, cfg, idx as usize, t_s)
+}
+
+/// Upstream flow speed [km/s] rope `idx`'s sheath Mach is computed against
+/// at train time t (spec §16): the leader's LIVE wake for a follower, the
+/// rope's own ambient wind otherwise. NaN out of range.
+#[no_mangle]
+pub extern "C" fn fr_upstream_kms_at(idx: u32, t_s: f64) -> f64 {
+    let e = engine();
+    refresh_dyns(e);
+    if (idx as usize) >= e.ropes.len() {
+        return f64::NAN;
+    }
+    let Engine { ropes, dyns, .. } = &mut *e;
+    upstream_kms(ropes, dyns, idx as usize, t_s)
+}
+
+/// Fast-magnetosonic speed V_MS [km/s] (spec §14 constant) — exposed so
+/// callers state shock Mach numbers without duplicating the constant.
+#[no_mangle]
+pub extern "C" fn fr_v_ms_kms() -> f64 {
+    kinematics::V_MS_KMS
 }
 
 // ── Kinematics probes (page HUD + GLSL uniforms) ─────────────────────────────
@@ -925,6 +984,76 @@ mod abi_tests {
         };
         let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&base), bits(&off));
+        fr_init(); // leave the global engine clean for the next ABI test
+    }
+
+    /// Drive the §16 compounding-analyzer probes the way the page does.
+    #[test]
+    fn abi_analyzer_probes_end_to_end() {
+        let _guard = ABI_LOCK.lock().unwrap();
+        fr_init();
+        fr_clear_ropes();
+        let push = |v0: f64, t_launch_h: f64| {
+            fr_push_rope(
+                0.0, 0.0, 90.0, 1.0, 5.0, 24.0, 0.10, 1.64, 1.14, 21.5, v0, 0.2e-7, 400.0,
+                0.0, 3.0, 0.8, 5.0, 0.0, 0.0, 1.0, t_launch_h * 3600.0,
+            )
+        };
+        push(900.0, 0.0);
+        push(1600.0, 18.0);
+        // Interaction OFF (default): no partners, fresh upstream, no squeeze.
+        assert_eq!(fr_rope_leader(0), -1.0);
+        assert_eq!(fr_rope_leader(1), -1.0);
+        assert!(fr_rope_leader(2).is_nan(), "out-of-range leader probe is NaN");
+        assert_eq!(fr_rear_c_at(0, 40.0 * 3600.0), 0.0);
+        assert_eq!(fr_upstream_kms_at(1, 40.0 * 3600.0), 400.0);
+        assert_eq!(fr_v_ms_kms(), 70.0);
+
+        // ON: follower 1 rides leader 0 — upstream is the leader's LIVE
+        // apex speed, and the leader's rear takes a squeeze as the
+        // follower closes (bounded by the §16 cap 0.75).
+        fr_set_interaction(1.0, 0.5, 1.0, 1.5);
+        assert_eq!(fr_rope_leader(1), 0.0);
+        assert_eq!(fr_rope_leader(0), -1.0, "the leader itself has no leader");
+        let t = 40.0 * 3600.0;
+        let up = fr_upstream_kms_at(1, t);
+        assert!(
+            (up - fr_apex_v_kms_at(0, t)).abs() < 1e-9 && up > 400.0,
+            "follower upstream must be the leader's live wake, got {}",
+            up
+        );
+        assert_eq!(fr_upstream_kms_at(0, t), 400.0, "leader sees the fresh wind");
+        let max_rc = (0..200)
+            .map(|i| fr_rear_c_at(0, i as f64 * 1800.0))
+            .fold(0.0f64, f64::max);
+        assert!(
+            max_rc > 0.0 && max_rc <= 0.75,
+            "closing follower must squeeze the leader: max rear_c {}",
+            max_rc
+        );
+        assert_eq!(fr_rear_c_at(1, t), 0.0, "nobody squeezes the follower's rear");
+        // Probes are READ-ONLY: the deterministic series is bit-identical
+        // before and after hammering them.
+        let take = || -> Vec<u32> {
+            fr_series(0.0, 1800.0, 400, 0.99, 0.0, 0.0);
+            let p = fr_series_ptr();
+            (0..4 * 400).map(|i| unsafe { (*p.add(i)).to_bits() }).collect()
+        };
+        let before = take();
+        for i in 0..100 {
+            fr_rear_c_at(0, i as f64 * 3600.0);
+            fr_upstream_kms_at(1, i as f64 * 3600.0);
+            fr_rope_leader(1);
+        }
+        assert_eq!(before, take());
+
+        // The raised cap: 6 ropes accepted, the 7th push is ignored.
+        fr_clear_ropes();
+        for i in 0..7usize {
+            let n = push(900.0, i as f64);
+            assert_eq!(n as usize, (i + 1).min(MAX_ROPES));
+        }
+        assert_eq!(fr_rope_count(), MAX_ROPES as u32);
         fr_init(); // leave the global engine clean for the next ABI test
     }
 

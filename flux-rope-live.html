@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compounding Flux Rope Simulator · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/flux-rope-live.html">
+<meta name="description" content="Real-time compounding CME flux ropes: every Earth-relevant eruption of the last 24 hours modeled as ONE interacting train — wake kinematics, rear compression, wake-conditioned shocks — with the measured solar-wind background noise the forecast must beat.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/flux-rope-live.html">
+<meta property="og:title" content="Compounding Flux Rope Simulator — real-time CME trains">
+<meta property="og:description" content="Live multi-CME forecasting with CME–CME interaction physics: the last 24 hours of flux ropes as one compounding system, ensemble Bz at L1, and the measured background noise, in your browser.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/flux-rope.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Compounding Flux Rope Simulator — Parkers Physics">
+<meta name="twitter:description" content="The last 24 hours of CMEs as one interacting flux-rope train — live ensemble Bz forecasting with measured background noise.">
+<meta name="twitter:image" content="https://parkersphysics.com/static/og/flux-rope.jpg">
+
+<!-- Canonical nav: structure + styling owned by js/nav.js + js/nav-styles.css.
+     All page CSS below is frl- prefixed; there is intentionally NO nav styling
+     here (js/nav-styles.css owns it). -->
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+    min-height:100vh;
+    background:#03010e;
+    color:#cdd5e4;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    overflow-x:hidden;
+}
+
+.frl-hero { padding:26px 22px 10px; display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; }
+.frl-hero h1 {
+    font-size:1.45rem; font-weight:800;
+    background:linear-gradient(45deg,#ffb454,#c792ea);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.frl-hero .frl-sub { font-size:.85rem; color:#8b94ad; }
+.frl-badge {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:.7rem; font-weight:700; letter-spacing:.08em; color:#7fe6c3;
+    border:1px solid rgba(127,230,195,.35); border-radius:999px; padding:3px 10px;
+}
+.frl-badge::before {
+    content:''; width:7px; height:7px; border-radius:50%;
+    background:#7fe6c3; box-shadow:0 0 8px #7fe6c3;
+}
+.frl-badge.demo { color:#ffd75e; border-color:rgba(255,215,94,.4); }
+.frl-badge.demo::before { background:#ffd75e; box-shadow:0 0 8px #ffd75e; }
+.frl-mode-note { font-size:.74rem; color:#8b94ad; padding:0 22px 4px; max-width:1500px; margin:0 auto; line-height:1.5; }
+.frl-mode-note b { color:#cdd5e4; }
+.frl-mode-note a, .frl-mode-note button {
+    color:#4fc3f7; background:none; border:none; font:inherit; cursor:pointer;
+    text-decoration:underline; padding:0;
+}
+
+.frl-wrap { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr); gap:14px; padding:8px 22px 8px; max-width:1500px; margin:0 auto; }
+
+.frl-panel {
+    background:rgba(13,16,38,.72); border:1px solid rgba(90,110,160,.22);
+    border-radius:12px; padding:12px 14px;
+}
+.frl-panel h2 { font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; color:#8b94ad; margin-bottom:8px; }
+.frl-panel + .frl-panel { margin-top:12px; }
+
+.frl-stage { position:relative; height:420px; border-radius:12px; overflow:hidden; border:1px solid rgba(90,110,160,.22); background:#04021a; }
+.frl-stage canvas { position:absolute; inset:0; width:100%; height:100%; }
+#frl-overlay { pointer-events:none; }
+.frl-hud {
+    position:absolute; top:10px; left:12px; display:flex; gap:8px; flex-wrap:wrap;
+    font-size:.72rem; color:#cdd5e4;
+}
+.frl-hud span {
+    background:rgba(5,8,26,.72); border:1px solid rgba(90,110,160,.3);
+    border-radius:8px; padding:3px 9px;
+}
+.frl-hud b { color:#ffb454; font-weight:600; }
+
+.frl-scrub { display:flex; align-items:center; gap:8px; padding:10px 2px 0; flex-wrap:wrap; }
+.frl-scrub button {
+    background:rgba(255,180,84,.12); color:#ffb454; border:1px solid rgba(255,180,84,.4);
+    border-radius:8px; padding:5px 12px; font-size:.82rem; cursor:pointer;
+}
+.frl-scrub button:hover { background:rgba(255,180,84,.22); }
+.frl-scrub button.frl-live-btn { color:#7fe6c3; border-color:rgba(127,230,195,.45); background:rgba(127,230,195,.1); }
+.frl-scrub input[type=range] { flex:1; min-width:160px; accent-color:#ffb454; }
+.frl-scrub .frl-t { font-size:.76rem; color:#8b94ad; min-width:150px; text-align:right; font-variant-numeric:tabular-nums; }
+.frl-scrub select {
+    background:#0b0e26; color:#cdd5e4; border:1px solid rgba(90,110,160,.35);
+    border-radius:6px; padding:3px 6px; font-size:.75rem;
+}
+
+.frl-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:8px; margin-top:8px; }
+.frl-stat { background:rgba(5,8,26,.6); border:1px solid rgba(90,110,160,.25); border-radius:10px; padding:8px 10px; }
+.frl-stat .v { font-size:1.05rem; font-weight:700; color:#ffb454; font-variant-numeric:tabular-nums; }
+.frl-stat .v.warn { color:#ff6e5a; }
+.frl-stat .k { font-size:.64rem; color:#8b94ad; letter-spacing:.05em; text-transform:uppercase; margin-top:2px; }
+#frl-assim-status { font-size:.7rem; color:#7fe6c3; line-height:1.45; min-height:1em; margin-top:8px; }
+
+.frl-cme { border:1px solid rgba(90,110,160,.25); border-radius:10px; padding:8px 10px; margin-bottom:8px; background:rgba(5,8,26,.5); }
+.frl-cme .frl-cme-head { display:flex; justify-content:space-between; gap:8px; font-size:.76rem; color:#e4e9f5; }
+.frl-cme .frl-cme-sub { font-size:.68rem; color:#8b94ad; margin-top:2px; line-height:1.45; }
+.frl-role { font-size:.62rem; font-weight:700; letter-spacing:.06em; border-radius:6px; padding:1px 7px; white-space:nowrap; }
+.frl-role.leader { color:#4fc3f7; border:1px solid rgba(79,195,247,.4); }
+.frl-role.follower { color:#c792ea; border:1px solid rgba(199,146,234,.45); }
+.frl-role.solo { color:#8b94ad; border:1px solid rgba(90,110,160,.4); }
+
+.frl-kv { display:grid; grid-template-columns:auto 1fr; gap:3px 12px; font-size:.74rem; }
+.frl-kv .k { color:#8b94ad; }
+.frl-kv .v { color:#e4e9f5; text-align:right; font-variant-numeric:tabular-nums; }
+.frl-kv .v.on { color:#ffb454; }
+.frl-fine { font-size:.68rem; color:#68718a; line-height:1.5; margin-top:8px; }
+.frl-pair { font-size:.72rem; color:#cdd5e4; line-height:1.55; border-top:1px dashed rgba(90,110,160,.25); margin-top:8px; padding-top:8px; }
+.frl-pair b { color:#c792ea; font-weight:600; }
+
+.frl-charts { padding:6px 22px 10px; max-width:1500px; margin:0 auto; display:grid; grid-template-columns:minmax(0,2.4fr) minmax(220px,1fr); gap:14px; }
+.frl-charts canvas { width:100%; display:block; }
+#frl-bz-chart { height:280px; }
+#frl-arrival-hist { height:280px; }
+.frl-chartbar { padding:0 22px; max-width:1500px; margin:0 auto; display:flex; gap:14px; align-items:center; font-size:.72rem; color:#8b94ad; }
+.frl-chartbar label { display:flex; gap:6px; align-items:center; cursor:pointer; }
+.frl-note { font-size:.74rem; color:#68718a; padding:6px 22px 8px; max-width:1500px; margin:0 auto; line-height:1.5; }
+.frl-note b { color:#8b94ad; }
+
+.frl-info { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; padding:10px 22px 34px; max-width:1500px; margin:0 auto; }
+.frl-info h3 { font-size:.9rem; color:#e4e9f5; margin-bottom:6px; }
+.frl-info p { font-size:.8rem; color:#8b94ad; line-height:1.55; }
+.frl-info a { color:#4fc3f7; text-decoration:none; }
+.frl-info a:hover { text-decoration:underline; }
+
+@media (max-width:900px) {
+    .frl-wrap, .frl-charts { grid-template-columns:1fr; }
+    .frl-stage { height:340px; }
+}
+@media (max-width:768px) {
+    .frl-hero { padding:18px 14px 8px; }
+    .frl-wrap, .frl-charts, .frl-note, .frl-info, .frl-mode-note, .frl-chartbar { padding-left:14px; padding-right:14px; }
+    .frl-scrub .frl-t { min-width:110px; font-size:.7rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- Canonical nav SHELL: js/nav.js initNav() populates this element in
+     place — it does NOT create one, so removing this tag silently removes
+     the site navigation (that exact bug shipped twice; keep the shell). -->
+<nav></nav>
+
+<header class="frl-hero">
+    <h1>Compounding Flux Rope Simulator</h1>
+    <span class="frl-sub">Every Earth-relevant CME in flight · one interacting train · real time</span>
+    <span class="frl-badge" id="frl-mode">CONNECTING…</span>
+</header>
+<p class="frl-mode-note" id="frl-mode-note">Reaching the DONKI catalog and the L1 real-time feed…</p>
+
+<main class="frl-wrap">
+    <section>
+        <div class="frl-stage">
+            <canvas id="frl-gl"></canvas>
+            <canvas id="frl-overlay"></canvas>
+            <div class="frl-hud">
+                <span>lead apex <b id="frl-hud-r">—</b></span>
+                <span>fastest <b id="frl-hud-v">—</b></span>
+                <span id="frl-hud-status">initializing…</span>
+            </div>
+        </div>
+        <div class="frl-scrub">
+            <button id="frl-play" type="button">❚❚</button>
+            <button id="frl-now" type="button" class="frl-live-btn" title="Return the cursor to wall-clock now and follow in real time">● now</button>
+            <input id="frl-time" type="range" min="0" max="132" step="0.1" value="0" aria-label="hours after the train epoch">
+            <select id="frl-speed" aria-label="time compression τ" title="simulated time = τ × wall-clock time — the ring-simulator clock discipline">
+                <option value="1" selected>×1 real</option>
+                <option value="100">×100</option>
+                <option value="1000">×1000</option>
+                <option value="10000">×10000</option>
+            </select>
+            <span class="frl-t" id="frl-t-label">—</span>
+        </div>
+        <div class="frl-stats">
+            <div class="frl-stat"><div class="v" id="frl-s-phit">—</div><div class="k">P(Earth hit)</div></div>
+            <div class="frl-stat"><div class="v" id="frl-s-p10">—</div><div class="k">P(min Bz &lt; −10 nT)</div></div>
+            <div class="frl-stat"><div class="v" id="frl-s-p20">—</div><div class="k">P(min Bz &lt; −20 nT)</div></div>
+            <div class="frl-stat"><div class="v" id="frl-s-arr">—</div><div class="k">median arrival</div></div>
+            <div class="frl-stat"><div class="v" id="frl-s-minbz">—</div><div class="k">median min Bz</div></div>
+        </div>
+        <p id="frl-assim-status"></p>
+    </section>
+
+    <aside>
+        <div class="frl-panel">
+            <h2>Current train <span style="float:right;color:#68718a;text-transform:none;letter-spacing:0;">window
+                <select id="frl-window" aria-label="membership window">
+                    <option value="24" selected>24 h</option>
+                    <option value="48">48 h</option>
+                    <option value="72">72 h</option>
+                    <option value="168">7 d</option>
+                </select></span></h2>
+            <div id="frl-train"><p class="frl-fine">waiting for the catalog…</p></div>
+            <p class="frl-fine" id="frl-membership"></p>
+        </div>
+
+        <div class="frl-panel">
+            <h2>Compounding analyzer</h2>
+            <div id="frl-analyzer"><p class="frl-fine">waiting for the first ensemble…</p></div>
+        </div>
+
+        <div class="frl-panel">
+            <h2>Background noise</h2>
+            <div id="frl-noise"><p class="frl-fine">measuring…</p></div>
+        </div>
+    </aside>
+</main>
+
+<div class="frl-chartbar">
+    <label><input type="checkbox" id="frl-focus" style="accent-color:#ffb454;">
+        focus: most recent 24 h + forecast</label>
+    <span id="frl-ens-ms" style="margin-left:auto;"></span>
+</div>
+<section class="frl-charts">
+    <canvas id="frl-bz-chart" aria-label="forecast Bz at L1 with measured background band"></canvas>
+    <canvas id="frl-arrival-hist" aria-label="ensemble arrival distribution"></canvas>
+</section>
+<p class="frl-note">
+    <b>Reading the page:</b> the train is every Earth-relevant DONKI CME
+    launched inside the membership window plus anything still in transit,
+    modeled as ONE system with CME–CME interaction on (spec §16: followers
+    ride their leader's wake, leaders take a dynamic rear squeeze,
+    follower shocks run against the wake, not fresh wind — the physics
+    validated on the May 2024 Gannon train). The shaded band on the Bz
+    chart is the <b>measured background</b> (robust MAD σ of the trailing
+    observed L1 record): the engine deliberately models 0 nT outside
+    ropes, so excursions inside that band are ambient solar wind, not rope
+    signal. The analyzer quantifies what compounding adds by re-running
+    the identical train with interaction off — same ropes, same seed.
+    Probabilities are ensemble-derived and particle-filter conditioned on
+    observed L1 data left of the now-line.
+</p>
+
+<section class="frl-info">
+    <div class="frl-panel">
+        <h3>What this is</h3>
+        <p>CMEs rarely travel alone — active regions erupt in salvos, and
+        the worst storms (May 2024 Gannon, the 2003 Halloween storms) are
+        <b>compound events</b>: a follower rope catches its leader's wake,
+        squeezes it, and deepens the southward field beyond what either
+        eruption could do alone. This page models the CURRENT state of the
+        Sun–Earth corridor as one interacting flux-rope train, live from
+        the DONKI catalog, continuously corrected by L1 data.</p>
+    </div>
+    <div class="frl-panel">
+        <h3>Compared to the Simulator</h3>
+        <p>The <a href="flux-rope.html">Flux Rope Simulator</a> is the
+        parameter sandbox — hand-fit hindcasts, sliders, STEREO-A
+        conditioning. This page is the operational view of the same
+        Rust/WASM engine: no sliders, data decides. Physics and validation
+        pins: <a href="https://github.com/etelford32/ParkersPhysics/blob/main/FLUX_ROPE_PHYSICS_SPEC.md">spec</a> ·
+        <a href="https://github.com/etelford32/ParkersPhysics/blob/main/FLUX_ROPE_SIMULATOR_REVIEW.md">deep review</a>.</p>
+    </div>
+    <div class="frl-panel">
+        <h3>Why measure the noise</h3>
+        <p>A forecast of −6 nT means nothing if the ambient field wanders
+        ±5 nT on a quiet day. The background band is measured live
+        (median-absolute-deviation, storm-robust), shown on the chart, and
+        fed into the model where it matters: the sheath's ambient
+        variability seed and the particle filter's observation error —
+        both previously fixed constants, both now disclosed on-page.</p>
+    </div>
+</section>
+
+<script type="module">
+import { loadFluxRopeKernel, ROPE_DEFAULTS, SPREAD_DEFAULTS } from './js/flux-rope-kernel.js';
+import { GANNON_FIT } from './js/flux-rope-presets.js';
+import { HeliosphereView } from './js/flux-rope/view.js';
+import { drawBzChart, drawArrivalHist } from './js/flux-rope/charts.js';
+import { fromReplayBundle } from './js/solar-wind-driver.js';
+import { fetchDonkiCmes, fetchRtswDriver, selectTrainCmes, donkiToTrainPreset }
+    from './js/flux-rope-live.js';
+import { measureBzNoise, sheathDeltaFromNoise, assimSigmaFromNoise }
+    from './js/flux-rope-noise.js';
+import { trainSeed } from './js/flux-rope-forecast.js';
+
+const AU_KM = 1.495978707e8;
+const MEMBERS = 500;
+const $ = (id) => document.getElementById(id);
+
+const kernel = await loadFluxRopeKernel('./js/flux-rope-wasm/flux_rope_core.wasm');
+const view = new HeliosphereView($('frl-gl'), $('frl-overlay'));
+
+/** TauClock — the ring-simulator clock discipline (see flux-rope.html). */
+class TauClock {
+    constructor(tau = 1) { this.tau = tau; this.paused = false; this._aW = performance.now(); this._aS = 0; }
+    simS(now = performance.now()) { return this.paused ? this._aS : this._aS + (now - this._aW) / 1000 * this.tau; }
+    setTau(tau, now = performance.now()) { this._aS = this.simS(now); this._aW = now; this.tau = tau; }
+    scrub(simS, now = performance.now()) { this._aS = simS; this._aW = now; }
+    setPaused(p, now = performance.now()) { this._aS = this.simS(now); this._aW = now; this.paused = p; }
+}
+
+// ── State ────────────────────────────────────────────────────────────────────
+const GRID = { t0S: 0, dtS: 600, hours: 132, n: 0 };
+const state = {
+    mode: 'boot',          // 'live' | 'demo' | 'boot'
+    preset: null,          // the applied train preset
+    launchMs: null,        // epoch = rope 0 launch
+    ropes: [],
+    interaction: { enabled: false },
+    spreads: SPREAD_DEFAULTS,
+    seed: 20260727,
+    catalog: null,         // parsed DONKI rows (null = proxy unreachable)
+    rtsw: null,            // live L1 driver
+    noise: { ok: false },  // measured background (live L1 preferred)
+    noiseScope: 'live',    // 'live' | 'replay' — what the measurement covers
+    sigmaNt: 4,            // filter observation σ actually in use
+    obsDriver: null,       // observed overlay + assimilation source
+    obsAligned: null,
+    det: null, ens: null, assim: null,
+    analyzer: null,
+    tH: [],
+    cursorH: 0,
+    userTouched: false,    // a scrub/control means never yank the view
+};
+const clock = new TauClock(1);
+
+const fmtUtc = (ms) => new Date(ms).toISOString().slice(5, 16).replace('T', ' ') + 'Z';
+
+// ── Mode application ─────────────────────────────────────────────────────────
+function setGrid(lastOffsetS) {
+    GRID.hours = Math.min(600, lastOffsetS / 3600 + 132);
+    GRID.n = Math.min(kernel.maxSteps, Math.round(GRID.hours * 3600 / GRID.dtS));
+    state.tH = Array.from({ length: GRID.n }, (_, i) => (GRID.t0S + i * GRID.dtS) / 3600);
+    $('frl-time').max = GRID.hours;
+}
+
+function nowH() { return state.launchMs ? (Date.now() - state.launchMs) / 3600e3 : 0; }
+
+/** Apply a LIVE compounding train selected from the DONKI catalog. */
+function applyLiveTrain(sel, ambientWKms) {
+    const preset = donkiToTrainPreset(sel, { ambientWKms });
+    // Background-noise wiring (review F2): the sheath ambient-variability
+    // seed δ is MEASURED, not the 2.5 nT climatology — disclosed in the
+    // noise panel. Hindcast demo ropes keep their fitted δ untouched.
+    const delta = sheathDeltaFromNoise(state.noise);
+    preset.ropes = preset.ropes.map((r) => ({ ...r, sheathDeltaNt: delta }));
+    state.mode = 'live';
+    state.preset = preset;
+    state.launchMs = Date.parse(preset.launchIso);
+    state.ropes = preset.ropes;
+    state.interaction = { enabled: true };
+    state.spreads = preset.spreads;
+    state.seed = trainSeed(preset.cmes);
+    state.obsDriver = state.rtsw;
+    state.sigmaNt = assimSigmaFromNoise(state.noise);
+    setGrid(preset.ropes[preset.ropes.length - 1].launchOffsetS);
+    $('frl-mode').className = 'frl-badge';
+    $('frl-mode').textContent = `LIVE · ${preset.ropes.length} CME${preset.ropes.length > 1 ? 's' : ''} IN FLIGHT`;
+    $('frl-focus').checked = true;
+    // Real time: the cursor IS wall-clock now, advancing at τ = 1.
+    clock.scrub(Math.min(GRID.hours, Math.max(0, nowH())) * 3600);
+    clock.setTau(1);
+    clock.setPaused(false);
+    $('frl-speed').value = '1';
+    $('frl-play').textContent = '❚❚';
+    recompute();
+}
+
+/** Fall back to the validated Gannon hindcast train, clearly badged DEMO. */
+async function applyDemo(reasonHtml) {
+    const preset = {
+        id: 'demo-gannon',
+        label: 'Gannon superstorm May 2024 — validated 2-rope compounding hindcast',
+        launchIso: GANNON_FIT.launchIso,
+        bundleUrl: GANNON_FIT.bundleUrl,
+        ropes: GANNON_FIT.standoffRopes.map((r) => ({ ...ROPE_DEFAULTS, launchOffsetS: 0, ...r })),
+        spreads: SPREAD_DEFAULTS,
+        cmes: null,
+    };
+    state.mode = 'demo';
+    state.preset = preset;
+    state.launchMs = Date.parse(preset.launchIso);
+    state.ropes = preset.ropes;
+    state.interaction = { enabled: true, ...GANNON_FIT.interaction };
+    state.spreads = preset.spreads;
+    state.seed = 20260727;
+    state.sigmaNt = 4;   // the spec §11 default — the demo keeps fitted physics
+    setGrid(preset.ropes[preset.ropes.length - 1].launchOffsetS);
+    $('frl-mode').className = 'frl-badge demo';
+    $('frl-mode').textContent = 'DEMO · GANNON MAY 2024';
+    $('frl-mode-note').innerHTML = `${reasonHtml} Showing the <b>validated Gannon
+        2-rope compounding hindcast</b> (min Bz −44.3 vs −44.17 nT observed; the
+        mid-storm internal disturbance at +48.8 vs +48.7 h is rope B's wake shock
+        inside rope A — the signature compounding feature).`;
+    $('frl-focus').checked = false;
+    state.obsDriver = null;
+    try {
+        const bundle = await (await fetch(preset.bundleUrl)).json();
+        state.obsDriver = fromReplayBundle(bundle);
+        if (!state.noise.ok && state.obsDriver?.length) {
+            // No live L1 → measure the background over the replay window
+            // instead (MAD is storm-robust; labeled as replay scope).
+            const span = (state.obsDriver.tEnd - state.obsDriver.tStart) / 3600e3;
+            state.noise = measureBzNoise(state.obsDriver.samples,
+                { nowMs: state.obsDriver.tEnd, windowH: span });
+            state.noiseScope = 'replay';
+        }
+    } catch { /* offline: charts run without the observed overlay */ }
+    clock.scrub(0);
+    clock.setTau(1000);
+    clock.setPaused(false);
+    $('frl-speed').value = '1000';
+    $('frl-play').textContent = '❚❚';
+    recompute();
+}
+
+// ── Compute + analyze ────────────────────────────────────────────────────────
+function seriesMetrics(det) {
+    const dtH = GRID.dtS / 3600;
+    let minBz = 0, iMin = -1, dwellH = 0, integ = 0, overlap = 0;
+    for (let i = 0; i < GRID.n; i++) {
+        const b = det.bz[i];
+        if (b < minBz) { minBz = b; iMin = i; }
+        if (b < -5) dwellH += dtH;
+        if (b < 0) integ += b * dtH;
+        if (det.inside[i] >= 2) overlap++;
+    }
+    return { minBz, tMinH: iMin >= 0 ? state.tH[iMin] : NaN, dwellH, integ, overlap };
+}
+
+/** Follower's L1 arrival time [s] via bisection on the apex probe. */
+function ropeArrivalS(r) {
+    const target = 0.99 * AU_KM;
+    let lo = state.ropes[r].launchOffsetS || 0, hi = GRID.hours * 3600;
+    if (kernel.apexKmAt(r, hi) < target) return NaN;
+    for (let k = 0; k < 60; k++) {
+        const mid = 0.5 * (lo + hi);
+        if (kernel.apexKmAt(r, mid) < target) lo = mid; else hi = mid;
+    }
+    return 0.5 * (lo + hi);
+}
+
+/**
+ * The compounding analyzer: pair structure from the kernel's §16 probes,
+ * plus interaction ON/OFF attribution — the SAME ropes and seed re-run
+ * with the physics disabled (the pinned Gannon attribution methodology,
+ * live). Called from recompute() while the OFF ensemble is cheap.
+ */
+function analyze(detOn, ensOn) {
+    if (state.ropes.length < 2) return { single: true };
+    const on = { ...seriesMetrics(detOn), p20: ensOn.pMinBzBelow(-20), pHit: ensOn.pHit };
+
+    // Pair structure (probes are read-only; interaction is currently ON).
+    const pairs = [];
+    for (let j = 0; j < state.ropes.length; j++) {
+        const lead = kernel.ropeLeader(j);
+        if (!(lead >= 0)) continue;
+        const i = lead | 0;
+        // Leader's max rear squeeze WHILE IT STILL MATTERS AT EARTH — the
+        // scan stops once the leader's apex passes ~1.15 AU (the closing
+        // geometry keeps compressing forever downstream of Earth, which
+        // is real but irrelevant to the L1 forecast).
+        let rcMax = 0, rcT = NaN;
+        for (let s = 0; s < GRID.n; s += 2) {
+            const tS = s * GRID.dtS;
+            if (kernel.apexKmAt(i, tS) > 1.15 * AU_KM) break;
+            const rc = kernel.rearCAt(i, tS);
+            if (rc > rcMax) { rcMax = rc; rcT = tS; }
+        }
+        const tArr = ropeArrivalS(j);
+        const tRef = Number.isFinite(tArr) ? tArr : (rcMax > 0 ? rcT : GRID.hours * 3600);
+        const up = kernel.upstreamKmsAt(j, tRef);
+        const mach = (kernel.apexVKmsAt(j, tRef) - up) / kernel.vMsKms();
+        pairs.push({
+            follower: j, leader: i,
+            wEff: kernel.ropeWEffKms(j), wRaw: state.ropes[j].wKms,
+            gFrac: kernel.ropeGammaEff(j) / state.ropes[j].gammaPerKm,
+            rcMax, rcTh: Number.isFinite(rcT) ? rcT / 3600 : NaN,
+            wakeMach: mach,
+        });
+    }
+
+    // Attribution: identical train, interaction OFF, same seed.
+    kernel.setInteraction({ enabled: false });
+    const detOff = kernel.series(GRID.t0S, GRID.dtS, GRID.n);
+    const ensOff = kernel.ensembleRun(state.seed, MEMBERS, GRID.t0S, GRID.dtS, GRID.n);
+    const off = { ...seriesMetrics(detOff), p20: ensOff.pMinBzBelow(-20), pHit: ensOff.pHit };
+    // Restore the ON ensemble as the stored one (assimilation targets it).
+    kernel.setInteraction(state.interaction);
+    return { single: false, on, off, pairs };
+}
+
+function recompute() {
+    kernel.setRopes(state.ropes);
+    kernel.setInteraction(state.interaction);
+    kernel.setSpreads(state.spreads);
+    view.setRopes(state.ropes.map((r, i) => ({
+        ...r, wKms: kernel.ropeWEffKms(i), gammaPerKm: kernel.ropeGammaEff(i),
+    })));
+    state.det = kernel.series(GRID.t0S, GRID.dtS, GRID.n);
+    const t0 = performance.now();
+    // Analyzer runs the OFF ensemble mid-way; the LAST run below is the ON
+    // ensemble the particle filter conditions.
+    state.analyzer = analyze(state.det, (() => {
+        return kernel.ensembleRun(state.seed, MEMBERS, GRID.t0S, GRID.dtS, GRID.n);
+    })());
+    state.ens = kernel.ensembleRun(state.seed, MEMBERS, GRID.t0S, GRID.dtS, GRID.n);
+    $('frl-ens-ms').textContent =
+        `${MEMBERS} members ×3 (on/off/final) in ${(performance.now() - t0).toFixed(0)} ms`;
+    view.setEnsemble(state.ens);
+
+    state.obsAligned = (() => {
+        if (!state.obsDriver || !state.launchMs) return null;
+        const a = new Float32Array(GRID.n).fill(NaN);
+        for (let i = 0; i < GRID.n; i++) {
+            const t = state.launchMs + (GRID.t0S + i * GRID.dtS) * 1000;
+            if (t < state.obsDriver.tStart || t > state.obsDriver.tEnd) continue;
+            const s = state.obsDriver.at(t);
+            if (s && Number.isFinite(s.bz)) a[i] = s.bz;
+        }
+        return a;
+    })();
+    state.assim = null;
+    view.setWeights(null);
+    lastAssimI1 = -1;
+    maybeAssimilate(true);
+    renderTrain();
+    renderAnalyzer();
+    renderNoise();
+    updateStats();
+    drawCharts();
+}
+
+// ── Assimilation (spec §11): the cursor is the now-line ──────────────────────
+let lastAssimI1 = -1;
+let assimBusyUntil = 0;
+function maybeAssimilate(force = false) {
+    if (!state.obsAligned || !state.ens) {
+        $('frl-assim-status').textContent = state.mode === 'live'
+            ? 'particle filter idle — L1 feed unavailable, showing the prior fan'
+            : (state.obsAligned ? '' : 'particle filter idle — no observed record, prior fan only');
+        return;
+    }
+    const i1 = Math.max(0, Math.min(GRID.n, Math.floor(state.cursorH * 3600 / GRID.dtS)));
+    const now = performance.now();
+    if (!force && (i1 === lastAssimI1 || now < assimBusyUntil)) return;
+    lastAssimI1 = i1;
+    assimBusyUntil = now + 250;
+    let nObs = 0;
+    for (let i = 0; i < i1; i++) if (Number.isFinite(state.obsAligned[i])) nObs++;
+    if (nObs < 3) {
+        if (state.assim) { kernel.assimReset(); state.assim = null; view.setWeights(null); }
+        $('frl-assim-status').textContent =
+            'particle filter armed — conditions on observed L1 data left of the now-line';
+    } else {
+        state.assim = kernel.assimilate({
+            obsBz: state.obsAligned, i0: 0, i1, sigmaNt: state.sigmaNt,
+        });
+        view.setWeights(state.assim.weights);
+        const a = state.assim;
+        $('frl-assim-status').textContent =
+            `particle filter · ${nObs} obs · ESS ${a.ess.toFixed(0)}/${a.members}`
+            + (a.temperature < 1 ? ` · λ ${a.temperature.toFixed(3)} (tempered)` : '')
+            + ` · σ ${state.sigmaNt.toFixed(1)} nT`
+            + (state.noise.ok ? ` (bg ${state.noise.sigmaNt.toFixed(1)} measured)` : ' (spec default)');
+    }
+    updateStats();
+    drawCharts();
+}
+
+// ── Panels ───────────────────────────────────────────────────────────────────
+function renderTrain() {
+    const box = $('frl-train');
+    if (!state.ropes.length) { box.innerHTML = '<p class="frl-fine">no ropes in flight</p>'; return; }
+    const roleOf = (i) => {
+        if (state.ropes.length < 2 || !state.interaction.enabled) return ['solo', 'SOLO'];
+        if (state.analyzer?.pairs?.some((p) => p.follower === i)) return ['follower', 'FOLLOWER'];
+        if (state.analyzer?.pairs?.some((p) => p.leader === i)) return ['leader', 'LEADER'];
+        return ['solo', 'UNPAIRED'];
+    };
+    box.innerHTML = state.ropes.map((r, i) => {
+        const cme = state.preset?.cmes?.[i];
+        const [cls, role] = roleOf(i);
+        const launch = state.launchMs + (r.launchOffsetS || 0) * 1000;
+        return `<div class="frl-cme">
+            <div class="frl-cme-head">
+                <span>Rope ${i + 1} · ${fmtUtc(launch)}</span>
+                <span class="frl-role ${cls}">${role}</span>
+            </div>
+            <div class="frl-cme-sub">
+                v₀ ${Math.round(r.v0Kms)} km/s · dir ${r.lonDeg >= 0 ? '+' : ''}${Math.round(r.lonDeg)}°/${r.latDeg >= 0 ? '+' : ''}${Math.round(r.latDeg)}° ·
+                σ₁AU ${r.sigma1AuAu.toFixed(3)} AU
+                ${cme ? ` · cone ½-angle ${Math.round(cme.halfAngleDeg)}°${cme.earthDirected ? ' · Earth-directed' : ' · glancing candidate'}` : ''}
+                · apex <b class="frl-apex" data-idx="${i}">—</b>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function renderMembership(sel) {
+    const el = $('frl-membership');
+    if (state.mode !== 'live' || !state.catalog) { el.textContent = ''; return; }
+    const anchors = state.catalog.filter((c) => c.earthDirected).length;
+    const passed = anchors - sel.filter((c) => c.earthDirected).length;
+    el.innerHTML = `Catalog (7 d): ${state.catalog.length} analyses · ${anchors} Earth-directed
+        · <b>${sel.length} in the modeled train</b>${passed > 0
+            ? ` · ${passed} already past L1 (excluded — honesty, not amnesia)` : ''}.
+        Membership: launched inside the window, or still in transit.`;
+}
+
+function renderAnalyzer() {
+    const a = state.analyzer;
+    const box = $('frl-analyzer');
+    if (!a) { box.innerHTML = '<p class="frl-fine">—</p>'; return; }
+    if (a.single) {
+        box.innerHTML = `<p class="frl-fine">1 rope in flight — no compounding partners.
+            The §16 interaction physics is armed and engages automatically when a
+            second Earth-relevant CME launches.</p>`;
+        return;
+    }
+    const d = (x, f = 1) => (Number.isFinite(x) ? x.toFixed(f) : '—');
+    const row = (k, von, voff, unit = '') => `
+        <div class="k">${k}</div>
+        <div class="v"><span class="on">${von}</span> vs ${voff}${unit}</div>`;
+    const pct = (v) => `${Math.round(v * 100)}%`;
+    box.innerHTML = `
+        <p class="frl-fine" style="margin:0 0 6px;">Interaction <b style="color:#ffb454;">ON</b> vs OFF —
+        identical ropes, identical seed (the attribution methodology pinned on Gannon):</p>
+        <div class="frl-kv" id="frl-attr">
+            ${row('min Bz', `${d(a.on.minBz)}`, `${d(a.off.minBz)}`, ' nT')}
+            ${row('at', `+${d(a.on.tMinH)}`, `+${d(a.off.tMinH)}`, ' h')}
+            ${row('southward dwell (<−5 nT)', d(a.on.dwellH), d(a.off.dwellH), ' h')}
+            ${row('∫Bz₋ dt', d(a.on.integ, 0), d(a.off.integ, 0), ' nT·h')}
+            ${row('P(min Bz < −20)', pct(a.on.p20), pct(a.off.p20))}
+        </div>
+        ${a.on.overlap > 0 ? `<p class="frl-fine">⚠ rope overlap at L1 in ${a.on.overlap} steps —
+            superposition there is the model's honest weak point (spec §10).</p>` : ''}
+        ${a.pairs.map((p) => `<div class="frl-pair">
+            <b>Rope ${p.follower + 1} ← rides Rope ${p.leader + 1}'s wake</b><br>
+            wake wind ${Math.round(p.wEff)} vs ambient ${Math.round(p.wRaw)} km/s ·
+            drag ×${p.gFrac.toFixed(2)} ·
+            wake shock Mach ${d(p.wakeMach)}${p.rcMax > 0
+                ? `<br>squeezes Rope ${p.leader + 1}'s rear: max compression ${(p.rcMax * 100).toFixed(0)}%
+                   at +${d(p.rcTh)} h`
+                : '<br>not closing super-magnetosonically — no rear squeeze'}
+        </div>`).join('')}`;
+}
+
+function renderNoise() {
+    const n = state.noise;
+    const box = $('frl-noise');
+    if (!n.ok) {
+        box.innerHTML = `<p class="frl-fine">No usable L1 record in the trailing window —
+            background unmeasured. The model falls back to spec constants:
+            sheath δ 2.5 nT, filter σ 4 nT (disclosed, spec §11/§14).</p>`;
+        return;
+    }
+    const scope = state.noiseScope === 'replay'
+        ? `replay window (${n.windowH.toFixed(0)} h, storm-robust MAD)`
+        : `trailing ${n.windowH} h of live L1 (MAD, storm-robust)`;
+    box.innerHTML = `
+        <div class="frl-kv">
+            <div class="k">background σ (Bz)</div><div class="v on">${n.sigmaNt.toFixed(2)} nT</div>
+            <div class="k">high-frequency σ</div><div class="v">${Number.isFinite(n.sigmaHfNt) ? n.sigmaHfNt.toFixed(2) + ' nT' : '—'}</div>
+            <div class="k">median level</div><div class="v">${n.medianNt.toFixed(2)} nT</div>
+            <div class="k">coverage</div><div class="v">${Math.round(n.coverage * 100)}% · ${n.n} samples</div>
+            <div class="k">→ sheath δ seed</div><div class="v">${state.mode === 'live' ? sheathDeltaFromNoise(n).toFixed(1) + ' nT' : 'fitted (demo)'}</div>
+            <div class="k">→ filter σ</div><div class="v">${state.sigmaNt.toFixed(1)} nT</div>
+        </div>
+        <p class="frl-fine">Measured over the ${scope}. The engine models 0 nT outside
+        ropes — the shaded chart band is this measurement, and fan excursions inside
+        it are ambient wind, not rope signal.</p>`;
+}
+
+function updateStats() {
+    const src = state.assim ?? state.ens;
+    if (!src) return;
+    const pct = (v) => `${Math.round(v * 100)}%`;
+    $('frl-s-phit').textContent = pct(src.pHit);
+    $('frl-s-p10').textContent = pct(src.pMinBzBelow(-10));
+    $('frl-s-p20').textContent = pct(src.pMinBzBelow(-20));
+    const arr = Array.from(state.ens.arrivalH).filter(Number.isFinite).sort((a, b) => a - b);
+    $('frl-s-arr').textContent = arr.length
+        ? fmtUtc(state.launchMs + arr[arr.length >> 1] * 3600_000)
+        : 'miss';
+    const mins = Array.from(state.ens.minBz).filter(Number.isFinite).sort((a, b) => a - b);
+    const medMin = mins.length ? mins[mins.length >> 1] : NaN;
+    $('frl-s-minbz').textContent = Number.isFinite(medMin) ? `${medMin.toFixed(0)} nT` : '—';
+    $('frl-s-minbz').classList.toggle('warn', medMin < -20);
+}
+
+function chartWindow() {
+    if ($('frl-focus').checked && state.launchMs) {
+        const anchorH = state.mode === 'live' ? nowH() : state.cursorH;
+        const loH = Math.max(0, anchorH - 24);
+        const i0 = Math.max(0, Math.min(GRID.n - 2, Math.floor(loH * 3600 / GRID.dtS)));
+        return [i0, GRID.n];
+    }
+    return [0, GRID.n];
+}
+
+function drawCharts() {
+    if (!state.det) return;
+    const fanSrc = state.assim ?? state.ens;
+    const [i0, i1] = chartWindow();
+    const slice = (arr) => arr.subarray ? arr.subarray(i0, i1) : arr.slice(i0, i1);
+    const obs = (state.obsDriver && state.launchMs)
+        ? {
+            tH: state.obsDriver.samples.map((s) => (s.t - state.launchMs) / 3600_000),
+            bz: state.obsDriver.samples.map((s) => s.bz),
+        }
+        : null;
+    drawBzChart($('frl-bz-chart'), {
+        tH: state.tH.slice(i0, i1),
+        det: slice(state.det.bz),
+        fan: fanSrc ? {
+            p5: slice(fanSrc.bzPct.p5), p25: slice(fanSrc.bzPct.p25),
+            p50: slice(fanSrc.bzPct.p50), p75: slice(fanSrc.bzPct.p75),
+            p95: slice(fanSrc.bzPct.p95), hitFrac: slice(fanSrc.hitFrac),
+        } : null,
+        obs,
+        obsLabel: state.mode === 'live' ? 'observed L1 (DSCOVR/ACE)' : 'observed L1 (archive)',
+        noise: state.noise.ok ? { sigmaNt: state.noise.sigmaNt } : null,
+        launchMs: state.launchMs,
+        cursorH: state.cursorH,
+    });
+    const detArr = state.det.inside.findIndex((v) => v > 0);
+    drawArrivalHist($('frl-arrival-hist'), {
+        arrivalH: state.ens ? state.ens.arrivalH : [],
+        launchMs: state.launchMs,
+        detArrivalH: detArr >= 0 ? state.tH[detArr] : null,
+    });
+}
+
+// ── Clock + render loop ──────────────────────────────────────────────────────
+function fmtT(h) {
+    const tau = clock.paused ? '❚❚' : `×${clock.tau}`;
+    if (!state.launchMs) return `t = +${h.toFixed(1)} h · ${tau}`;
+    return `${fmtUtc(state.launchMs + h * 3600_000)} · +${h.toFixed(1)} h · ${tau}`;
+}
+
+function tick() {
+    if (!state.ropes.length) { requestAnimationFrame(tick); return; }
+    let simH = clock.simS() / 3600;
+    if (simH > GRID.hours) {
+        if (state.mode === 'demo') { clock.scrub(0); simH = 0; }
+        else { clock.scrub(GRID.hours * 3600); simH = GRID.hours; }
+    }
+    if (simH < 0) simH = 0;
+    const scrubbing = document.activeElement === $('frl-time');
+    if (!scrubbing) $('frl-time').value = simH;
+    state.cursorH = simH;
+    const tS = simH * 3600;
+    const probes = state.ropes.map((_, r) => ({
+        apexKm: kernel.apexKmAt(r, tS),
+        sigmaApexKm: kernel.sigmaApexKmAt(r, tS),
+    }));
+    view.draw(tS, probes);
+    $('frl-t-label').textContent = fmtT(simH);
+    // HUD: the train's leading edge + fastest launched member.
+    let leadKm = 0, vMax = 0;
+    state.ropes.forEach((r, i) => {
+        if (tS <= (r.launchOffsetS || 0)) return;
+        leadKm = Math.max(leadKm, probes[i].apexKm);
+        vMax = Math.max(vMax, kernel.apexVKmsAt(i, tS));
+    });
+    $('frl-hud-r').textContent = leadKm > 0 ? `${(leadKm / AU_KM).toFixed(2)} AU` : 'pre-launch';
+    $('frl-hud-v').textContent = vMax > 0 ? `${vMax.toFixed(0)} km/s` : '—';
+    for (const el of document.querySelectorAll('.frl-apex')) {
+        const i = parseInt(el.dataset.idx, 10);
+        el.textContent = tS > (state.ropes[i]?.launchOffsetS || 0)
+            ? `${(probes[i].apexKm / AU_KM).toFixed(2)} AU` : 'pre-launch';
+    }
+    const gi = Math.min(GRID.n - 1, Math.max(0, Math.round(tS / GRID.dtS)));
+    const count = state.det ? state.det.inside[gi] : 0;
+    const inSheath = state.det ? state.det.sheath[gi] > 0 : false;
+    const allPassed = state.ropes.every((rope, r) =>
+        tS > (rope.launchOffsetS || 0) && probes[r].apexKm / AU_KM > 1.05);
+    $('frl-hud-status').textContent = count > 1 ? `⚡ ${count} ropes overlap at L1`
+        : count > 0 ? '⚡ crossing L1'
+        : inSheath ? '⚡ in sheath — shock passed'
+        : allPassed ? 'train passed L1' : 'in transit';
+    if (!clock.paused || state._chartDirty) {
+        maybeAssimilate();
+        drawCharts();
+        state._chartDirty = false;
+    }
+    requestAnimationFrame(tick);
+}
+
+// ── Controls ─────────────────────────────────────────────────────────────────
+$('frl-time').addEventListener('input', () => {
+    state.userTouched = true;
+    clock.scrub(parseFloat($('frl-time').value) * 3600);
+    state.cursorH = parseFloat($('frl-time').value);
+    state._chartDirty = true;
+});
+$('frl-play').addEventListener('click', () => {
+    state.userTouched = true;
+    clock.setPaused(!clock.paused);
+    $('frl-play').textContent = clock.paused ? '▶' : '❚❚';
+});
+$('frl-now').addEventListener('click', () => {
+    if (state.mode === 'live') {
+        clock.scrub(Math.min(GRID.hours, Math.max(0, nowH())) * 3600);
+        clock.setTau(1);
+        $('frl-speed').value = '1';
+    } else {
+        clock.scrub(0);
+    }
+    clock.setPaused(false);
+    $('frl-play').textContent = '❚❚';
+    state._chartDirty = true;
+});
+$('frl-speed').addEventListener('change', () => {
+    state.userTouched = true;
+    clock.setTau(parseFloat($('frl-speed').value));
+});
+$('frl-focus').addEventListener('change', () => { state._chartDirty = true; });
+$('frl-window').addEventListener('change', () => {
+    state.userTouched = true;
+    tryLive(true);
+});
+window.addEventListener('resize', () => { state._chartDirty = true; });
+
+// ── Boot + refresh ───────────────────────────────────────────────────────────
+function liveAmbientW() {
+    let s = 0, n = 0;
+    for (const smp of state.rtsw?.samples ?? []) {
+        if (Number.isFinite(smp.v)) { s += smp.v; n++; }
+    }
+    return n ? Math.round(s / n) : 400;
+}
+
+/** Try to (re)build the live train; returns true when live mode applied. */
+function tryLive(force = false) {
+    if (!state.catalog) return false;
+    const sel = selectTrainCmes(state.catalog, {
+        nowMs: Date.now(),
+        windowH: parseInt($('frl-window').value, 10),
+        maxRopes: kernel.maxRopes,
+    });
+    if (!sel.length) {
+        if (force || state.mode === 'boot') {
+            applyDemo(`<b>Corridor quiet</b> — the DONKI catalog is reachable but no
+                Earth-directed CME is currently in flight for this window.`);
+            renderMembership([]);
+        }
+        return false;
+    }
+    if (state.mode === 'live' && !force
+        && state.preset?.cmes?.length === sel.length
+        && state.preset.cmes.every((c, i) => c.id === sel[i].id)) {
+        return true;   // same train — no churn
+    }
+    applyLiveTrain(sel, liveAmbientW());
+    const winH = parseInt($('frl-window').value, 10);
+    $('frl-mode-note').innerHTML = `<b>Live compounding watch</b> — modeling
+        ${sel.length} Earth-relevant CME${sel.length > 1 ? 's' : ''} (launched in the
+        last ${winH} h or still in transit) as one §16-interacting train, epoch
+        ${fmtUtc(state.launchMs)}. The now-line advances in real time; the ensemble
+        re-conditions on L1 data as it arrives.`;
+    renderMembership(sel);
+    return true;
+}
+
+async function boot() {
+    try { state.rtsw = await fetchRtswDriver(); } catch { state.rtsw = null; }
+    if (state.rtsw?.samples?.length) {
+        state.noise = measureBzNoise(state.rtsw.samples, { nowMs: Date.now() });
+        state.noiseScope = 'live';
+    }
+    try {
+        state.catalog = await fetchDonkiCmes({ days: 7 });
+    } catch (e) {
+        state.catalog = null;
+        console.info('flux-rope-live: DONKI unavailable', e?.message ?? e);
+    }
+    if (!state.catalog) {
+        await applyDemo(`<b>Live catalog unreachable</b> — the DONKI proxy did not
+            answer (offline or blocked network).`);
+    } else if (!tryLive(true)) {
+        /* quiet corridor → demo applied inside tryLive */
+    }
+    renderNoise();
+
+    // Refresh cadence: L1 + noise every 5 min; catalog every 15 min. A new
+    // live train only replaces the view automatically when the user hasn't
+    // taken the controls — otherwise it is offered in the mode note.
+    setInterval(async () => {
+        try {
+            const rtsw = await fetchRtswDriver();
+            if (rtsw?.samples?.length) {
+                state.rtsw = rtsw;
+                state.noise = measureBzNoise(rtsw.samples, { nowMs: Date.now() });
+                state.noiseScope = 'live';
+                if (state.mode === 'live') {
+                    state.obsDriver = rtsw;
+                    state.sigmaNt = assimSigmaFromNoise(state.noise);
+                    recompute();
+                } else renderNoise();
+            }
+        } catch { /* keep the last record */ }
+    }, 5 * 60e3);
+    setInterval(async () => {
+        try {
+            state.catalog = await fetchDonkiCmes({ days: 7 });
+            if (state.mode === 'live' || !state.userTouched) tryLive();
+            else if (selectTrainCmes(state.catalog, { nowMs: Date.now(), maxRopes: kernel.maxRopes }).length) {
+                const btn = document.createElement('button');
+                btn.textContent = 'Live train available — load it';
+                btn.addEventListener('click', () => tryLive(true));
+                $('frl-mode-note').append(' · ', btn);
+            }
+        } catch { /* keep the last catalog */ }
+    }, 15 * 60e3);
+}
+
+await boot();
+requestAnimationFrame(tick);
+</script>
+<script type="module">import { initNav } from "./js/nav.js?v=20260714"; initNav("flux-rope-live");</script>
+</body>
+</html>

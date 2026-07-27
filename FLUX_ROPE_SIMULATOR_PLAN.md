@@ -226,6 +226,33 @@ the same crate.
   cannot constrain (multi-point/§13 or a population prior resolves it;
   future work). Remaining Phase 5: momentum exchange, EEGGL/SWMF
   comparison runs, server-side API build.
+  ✅ compounding goes LIVE (2026-07-27, preceded by the deep review in
+  FLUX_ROPE_SIMULATOR_REVIEW.md — read it for the findings this closes):
+  the validated §16 train physics becomes the live product instead of a
+  hindcast-only capability. Kernel: MAX_ROPES 4 → 6 (view uniforms in
+  lockstep) + read-only §16 analyzer probes (leader / rear_c / upstream /
+  V_MS — spec §9). Seeding: spec §12.1 train conventions
+  (selectTrainCmes + donkiToTrainPreset in js/flux-rope-live.js) — the
+  last-24 h window ∪ still-in-transit Earth-relevant CMEs as ONE
+  interacting train, epoch = earliest = rope 0, MAX-merged spreads,
+  identity-folded seeds. Background noise MEASURED (js/flux-rope-noise.js,
+  robust MAD of the trailing L1 record; gate tests/flux-rope-noise.mjs)
+  and wired — disclosed — into the §14 sheath δ and the §11 filter σ; the
+  Bz chart carries the measured ±σ band. The SHARED provider
+  (js/flux-rope-forecast.js) models the train for every consumer —
+  interaction ON, per-rope driver V fix, honest `cme-train-passed` idle
+  (replays opt out via relevanceFilter: false), summary + nRopes — so the
+  dashboard panel, Stage, ring-current outlook, verdict card and aurora
+  cron inherit compounding forecasts unchanged. NEW PAGE
+  flux-rope-live.html — **Compounding Flux Rope Simulator** (nav
+  "Compounding Watch"): real-time now-line (τ ×1, filter re-conditioning
+  as L1 arrives), the compounding analyzer (pair wake/squeeze facts from
+  the new probes + live interaction ON/OFF attribution, the pinned Gannon
+  methodology), the noise panel, membership honesty line, and the
+  clearly-badged Gannon-hindcast DEMO fallback when the corridor is quiet
+  or feeds are down. Gates: tests/flux-rope-live-page.spec.js (offline
+  demo + mocked live train), extended flux-rope-live/forecast node gates;
+  flux-rope.html and every pinned number untouched.
 
 ## 5. Data inputs
 
