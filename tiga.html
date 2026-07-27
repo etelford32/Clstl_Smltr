@@ -31,6 +31,16 @@
      here (js/nav-styles.css owns it). -->
 <link rel="stylesheet" href="js/nav-styles.css">
 
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
+
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { scroll-behavior:smooth; }
@@ -72,7 +82,19 @@ body {
     color:inherit; font:inherit; transition:border-color .15s, background .15s;
 }
 .tg-layer:hover { border-color:rgba(140,170,230,.5); }
+/* Selected state needs to survive being STACKED. On mobile the three tabs
+   become three full-width cards and a border-colour change alone does not
+   read as "this one is active" — there is no neighbour in view to compare it
+   against. The inset left bar is an absolute cue rather than a relative one. */
+.tg-layer { position:relative; padding-left:18px; }
+.tg-layer::before {
+    content:''; position:absolute; left:6px; top:12px; bottom:12px; width:3px;
+    border-radius:2px; background:transparent; transition:background .15s;
+}
 .tg-layer[aria-selected="true"] { background:rgba(12,18,44,.9); }
+.tg-layer[data-layer="core"][aria-selected="true"]::before     { background:#ff9a56; }
+.tg-layer[data-layer="field"][aria-selected="true"]::before    { background:#4fc3f7; }
+.tg-layer[data-layer="external"][aria-selected="true"]::before { background:#c792ea; }
 .tg-layer[data-layer="core"][aria-selected="true"]     { border-color:rgba(255,154,86,.7); }
 .tg-layer[data-layer="field"][aria-selected="true"]    { border-color:rgba(79,195,247,.7); }
 .tg-layer[data-layer="external"][aria-selected="true"] { border-color:rgba(199,146,234,.75); }
@@ -140,11 +162,63 @@ body {
 }
 .tg-btn:disabled { opacity:.45; cursor:progress; }
 
-table.tg-table { width:100%; border-collapse:collapse; font-size:.74rem; font-variant-numeric:tabular-nums; }
+/* Wide content scrolls INSIDE its own container — the page body must never
+   scroll horizontally. Four-column numeric tables overflowed a 390px viewport
+   by 14px, which is a sideways-scrolling page on every phone.
+   tabindex makes the region reachable by keyboard: a scrollable box that only
+   a mouse or finger can pan is a WCAG 2.1.1 failure. */
+.tg-front { margin-bottom:18px; }
+.tg-stagebar {
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px 18px;
+    margin-top:12px; padding:12px 14px;
+    background:rgba(6,9,28,.72); border:1px solid rgba(90,110,160,.24); border-radius:12px;
+}
+.tg-stagebar .tg-field { margin-bottom:0; }
+/* Inert, not hidden: the control still says what it would do, and why it
+   currently does not. Hiding it would make the bar jump on every mode change. */
+.tg-field.tg-inert { opacity:.42; }
+.tg-field.tg-inert label { text-decoration:line-through; text-decoration-thickness:1px; }
+.tg-field.tg-inert input { cursor:not-allowed; }
+.tg-stagestats { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:8px; margin-top:10px; }
+.tg-stage {
+    position:relative; width:100%; height:560px; border-radius:10px; overflow:hidden;
+    background:radial-gradient(circle at 50% 45%, #0a1030 0%, #03010e 72%);
+    border:1px solid rgba(90,110,160,.22);
+}
+.tg-stage canvas { display:block; }
+.tg-key {
+    position:absolute; left:12px; top:12px; z-index:2; max-width:min(58%, 300px);
+    background:rgba(4,7,20,.78); border:1px solid rgba(90,110,160,.3); border-radius:10px;
+    backdrop-filter:blur(6px); font-size:.7rem; overflow:hidden;
+}
+.tg-key-toggle {
+    display:block; width:100%; text-align:left; cursor:pointer;
+    background:none; border:0; color:#9aa4bd; font:inherit; font-weight:700;
+    letter-spacing:.08em; text-transform:uppercase; padding:7px 11px;
+}
+.tg-key-toggle::after { content:' ▾'; color:#767f9a; }
+.tg-key-toggle[aria-expanded="false"]::after { content:' ▸'; }
+.tg-key-body { list-style:none; padding:0 11px 9px; margin:0; display:grid; gap:6px; }
+.tg-key-body[hidden] { display:none; }
+.tg-key-body li { display:grid; grid-template-columns:16px 1fr; gap:8px; align-items:start; line-height:1.35; }
+.tg-key-sw { width:14px; height:14px; border-radius:4px; margin-top:1px; border:1px solid rgba(255,255,255,.16); }
+.tg-key-sw.tg-key-ring { background:none !important; border-width:2px; border-radius:50%; }
+.tg-key-sw.tg-key-line { height:4px; margin-top:6px; border-radius:2px; }
+.tg-key-lb { color:#cdd5e4; }
+.tg-key-lb i { color:#8b94ad; font-style:normal; display:block; font-size:.66rem; }
+@media (max-width:768px) { .tg-key { max-width:70%; font-size:.66rem; } }
+
+.tg-stage .tg-stage-msg {
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:.8rem; color:#767f9a; text-align:center; padding:20px;
+}
+.tg-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+.tg-scroll:focus-visible { outline:2px solid #7fe6c3; outline-offset:2px; }
+table.tg-table { width:100%; min-width:340px; border-collapse:collapse; font-size:.74rem; font-variant-numeric:tabular-nums; }
 table.tg-table th { text-align:left; color:#7c86a0; font-weight:600; padding:4px 6px; border-bottom:1px solid rgba(90,110,160,.24); }
 table.tg-table td { padding:4px 6px; border-bottom:1px solid rgba(90,110,160,.1); }
 table.tg-table td.num, table.tg-table th.num { text-align:right; }
-table.tg-table tr.tg-dim td { color:#6d7691; }
+table.tg-table tr.tg-dim td { color:#767f9a; }
 table.tg-table tr.tg-hi td { color:#7fe6c3; }
 
 .tg-callout {
@@ -162,13 +236,39 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
 .tg-status { font-size:.72rem; color:#7c86a0; margin-top:8px; min-height:1.1em; }
 .tg-status.err { color:#ff8a7a; }
 
-.tg-foot { margin-top:26px; font-size:.72rem; color:#6d7691; line-height:1.65; }
+.tg-foot { margin-top:26px; font-size:.72rem; color:#767f9a; line-height:1.65; }
 .tg-foot a { color:#8fa6d8; }
 .tg-foot h4 { color:#9aa4bd; font-size:.74rem; margin:14px 0 4px; }
+
+:where(a, button, input, select, [tabindex]):focus-visible {
+    outline:2px solid #7fe6c3;
+    outline-offset:2px;
+    border-radius:4px;
+}
+/* Long-running compute (the αΩ sweep) must not animate for users who asked
+   not to see motion; there is nothing here that needs it. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition:none !important; animation:none !important; }
+    html { scroll-behavior:auto; }
+}
 
 @media (max-width:900px) {
     .tg-grid.tg-2 { grid-template-columns:1fr; }
     .tg-spine { grid-template-columns:1fr; }
+}
+
+@media (max-width:768px) {
+    .tg-wrap { padding:0 12px 40px; }
+    .tg-hero { padding:18px 0 8px; }
+    .tg-hero h1 { font-size:1.25rem; }
+    .tg-lede { font-size:.84rem; padding:0 0 14px; }
+    .tg-card { padding:12px 12px; }
+    /* Three stat tiles per row at 118px each did not fit a 390px viewport
+       once padding was counted; two is the honest maximum. */
+    .tg-stats { grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); }
+    .tg-field { grid-template-columns:92px 1fr 58px; gap:7px; }
+    .tg-callout { padding:9px 11px; }
+    .tg-stage { height:330px; }
 }
 </style>
 </head>
@@ -176,38 +276,108 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
-<main id="main-content" class="tg-wrap">
+<!-- Canonical nav SHELL: js/nav.js initNav() populates this element in
+     place — it does NOT create one, so removing this tag silently removes
+     the site navigation (that exact bug shipped once; keep the shell). -->
+<nav></nav>
 
-<div class="tg-hero">
+<header class="tg-wrap tg-hero">
     <h1>TIGA</h1>
     <span class="tg-badge">Temporally Integrated Geomagnetic Assimilation</span>
     <span class="tg-sub">One instrument, two planets, three timescales</span>
-</div>
+</header>
 
-<p class="tg-lede">
+<main id="main-content" class="tg-wrap">
+
+<section class="tg-front" aria-label="Three-dimensional view">
+    <div class="tg-stage" id="tg-stage">
+        <div class="tg-stage-msg" id="tg-stage-msg">Building the field&hellip;</div>
+        <div class="tg-key" id="tg-key" hidden>
+            <button type="button" class="tg-key-toggle" id="tg-key-toggle" aria-expanded="true"
+                    aria-controls="tg-key-body">Key</button>
+            <ul class="tg-key-body" id="tg-key-body"></ul>
+        </div>
+    </div>
+    <div class="tg-stagebar">
+        <div class="tg-field">
+            <label for="tg-3d-year">Epoch</label>
+            <input type="range" id="tg-3d-year" min="1900" max="2030" step="5" value="2025">
+            <output id="tg-3d-year-out">2025</output>
+        </div>
+        <div class="tg-field">
+            <label for="tg-3d-nmax">Truncation n</label>
+            <input type="range" id="tg-3d-nmax" min="1" max="13" step="1" value="10">
+            <output id="tg-3d-nmax-out">10</output>
+        </div>
+        <div class="tg-field">
+            <label for="tg-3d-mantle">Mantle</label>
+            <input type="range" id="tg-3d-mantle" min="0" max="100" step="1" value="28">
+            <output id="tg-3d-mantle-out">0.28</output>
+        </div>
+        <div class="tg-field">
+            <label for="tg-3d-period">Signal period</label>
+            <input type="range" id="tg-3d-period" min="-3" max="3" step="0.1" value="0.5">
+            <output id="tg-3d-period-out">3 yr</output>
+        </div>
+        <div class="tg-field">
+            <label for="tg-3d-cut">Cutaway</label>
+            <input type="range" id="tg-3d-cut" min="0" max="100" step="1" value="0">
+            <output id="tg-3d-cut-out">0%</output>
+        </div>
+        <div class="tg-field">
+            <label for="tg-3d-cutaz">Cut angle</label>
+            <input type="range" id="tg-3d-cutaz" min="0" max="360" step="1" value="0">
+            <output id="tg-3d-cutaz-out">0°</output>
+        </div>
+        <div class="tg-field">
+            <label for="tg-3d-interior">Interior</label>
+            <select id="tg-3d-interior">
+                <option value="field">Magnetic field</option>
+                <option value="layers">Layer structure</option>
+            </select>
+            <span aria-hidden="true"></span>
+        </div>
+    </div>
+    <div class="tg-stagestats">
+        <div class="tg-stat"><div class="v hot" id="tg-3d-peak">&mdash;</div><div class="k">peak |B_r| at CMB</div></div>
+        <div class="tg-stat"><div class="v warn" id="tg-3d-reversed">&mdash;</div><div class="k">reversed flux, CMB</div></div>
+        <div class="tg-stat"><div class="v" id="tg-3d-revsurf">&mdash;</div><div class="k">reversed flux, surface</div></div>
+        <div class="tg-stat"><div class="v" id="tg-3d-lines">&mdash;</div><div class="k">lines escaping core</div></div>
+        <div class="tg-stat"><div class="v" id="tg-3d-gain">&mdash;</div><div class="k">continuation gain at n</div></div>
+        <div class="tg-stat"><div class="v good" id="tg-3d-survival">&mdash;</div><div class="k">reaches the surface</div></div>
+    </div>
+    <div class="tg-status" id="tg-3d-status" role="status" aria-live="polite"></div>
+</section>
+
+<p class="tg-lede" style="padding-top:16px">
     A ground magnetometer records two physically separate planets at once, and each one's signal is
     the other's noise. Below about a cycle per decade the record is the <strong>geodynamo</strong> —
     currents in liquid iron 2,891&nbsp;km down. Above it, the record is the
     <strong>magnetosphere</strong>. Field modellers subtract the second to see the first; space-weather
-    modellers subtract the first to see the second. This page runs all three layers and labels each one
-    honestly: only the top layer is real-time, and it is a <strong>nowcast with zero lead time</strong>,
-    not a forecast.
+    modellers subtract the first to see the second.
+    <br><br>
+    <strong>Pick a layer below.</strong> The view above is one Earth seen three ways — the camera flies,
+    the shells cross-fade, and the panel changes with it. Only the top layer is real-time, and it is a
+    <strong>nowcast with zero lead time</strong>, not a forecast. Nothing here is a geodynamo
+    simulation: what is drawn is the <em>observed</em> field continued down to the core, field lines
+    integrated through it, and magnetic diffusion actually solved. The missing piece is the flow — and
+    that is the piece that needs a supercomputer.
 </p>
 
 <div class="tg-spine" role="tablist" aria-label="Timescale layers">
-    <button class="tg-layer" data-layer="core" role="tab" aria-selected="false" aria-controls="tg-panel-core" id="tg-tab-core">
+    <button class="tg-layer" data-layer="core" role="tab" aria-label="Core layer — reduced dynamo models, thousands to hundreds of thousands of years" aria-selected="false" aria-controls="tg-panel-core" id="tg-tab-core">
         <h2>Core</h2>
         <div class="tg-scale">10³ – 10⁵ years</div>
         <div class="tg-what">Reduced dynamo models: why there is a dipole, why it reverses, and how long it would take to die.</div>
         <span class="tg-tag model">Model</span>
     </button>
-    <button class="tg-layer" data-layer="field" role="tab" aria-selected="false" aria-controls="tg-panel-field" id="tg-tab-field">
+    <button class="tg-layer" data-layer="field" role="tab" aria-label="Field layer — IGRF-14 main field, years to a century" aria-selected="false" aria-controls="tg-panel-field" id="tg-tab-field">
         <h2>Field</h2>
         <div class="tg-scale">1 – 10² years</div>
         <div class="tg-what">IGRF-14 evaluated live to degree 13 — the observed main field and its secular variation.</div>
         <span class="tg-tag derived">Observation-derived</span>
     </button>
-    <button class="tg-layer" data-layer="external" role="tab" aria-selected="true" aria-controls="tg-panel-external" id="tg-tab-external">
+    <button class="tg-layer" data-layer="external" role="tab" aria-label="External layer — the live TIGA nowcast, minutes" aria-selected="true" aria-controls="tg-panel-external" id="tg-tab-external">
         <h2>External</h2>
         <div class="tg-scale">minutes</div>
         <div class="tg-what">The TIGA estimator: degree-1 external Gauss coefficients, updated every minute from whoever reported.</div>
@@ -218,7 +388,7 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
 <div class="tg-panels">
 
 <!-- ══════════════════════════ EXTERNAL ══════════════════════════════ -->
-<section id="tg-panel-external" class="tg-on" role="tabpanel" aria-labelledby="tg-tab-external">
+<section id="tg-panel-external" class="tg-on" role="tabpanel" tabindex="0" aria-labelledby="tg-tab-external">
 
     <div class="tg-grid tg-2">
         <div class="tg-card">
@@ -242,7 +412,7 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 <div class="tg-stat"><div class="v" id="tg-live-mlt">—</div><div class="k">peak MLT</div></div>
                 <div class="tg-stat"><div class="v" id="tg-live-gap">—</div><div class="k">largest MLT gap</div></div>
             </div>
-            <div class="tg-status" id="tg-live-status">Contacting the observatory network…</div>
+            <div class="tg-status" id="tg-live-status" role="status" aria-live="polite">Contacting the observatory network…</div>
             <div class="tg-callout warn">
                 <strong>What is provisional, precisely.</strong> Removing each station's internal field
                 and its regular daily variation properly needs a causal trailing-window S<sub>q</sub>
@@ -260,10 +430,12 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 current IGRF epoch. Stations poleward of 50° dipole latitude are cut because the auroral
                 electrojets take over there and the station stops measuring the ring current.
             </p>
-            <table class="tg-table" id="tg-station-table">
+            <div class="tg-scroll" tabindex="0" role="region" aria-label="Reporting observatories">
+                <table class="tg-table" id="tg-station-table">
                 <thead><tr><th>IAGA</th><th class="num">dip lat</th><th class="num">MLT</th><th class="num">samples</th></tr></thead>
                 <tbody><tr class="tg-dim"><td colspan="4">loading…</td></tr></tbody>
             </table>
+            </div>
             <div class="tg-callout">
                 <strong>Station count is the wrong variable.</strong> Longitudinal spread is the right one.
                 In the OSSE, dropping 23 clustered Europe/Africa stations <em>improved</em> the order-1
@@ -311,7 +483,7 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 <span><i style="background:#ffb454"></i>bias</span>
                 <span><i style="background:rgba(255,138,122,.6)"></i>index definition floor</span>
             </div>
-            <div class="tg-status" id="tg-dropout-status">Running the observing-system experiment…</div>
+            <div class="tg-status" id="tg-dropout-status" role="status" aria-live="polite">Running the observing-system experiment…</div>
             <div class="tg-callout">
                 <strong>Bias, not variance, is the dropout signature.</strong> The calibration is fitted
                 <em>once</em> and frozen. Refitting it per dropout level lets it absorb dropout-induced
@@ -329,7 +501,7 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 Earth. So the asymmetry does not enter a classical index as a constant offset — it enters
                 as a sinusoid in UT. Pick a station set:
             </p>
-            <div class="tg-tabs" id="tg-alias-tabs">
+            <div class="tg-tabs" id="tg-alias-tabs" role="group" aria-label="Station set">
                 <button data-set="dst4">Dst 4-station</button>
                 <button data-set="symh6" class="active">SYM-H 6, all-northern</button>
                 <button data-set="symh6b">SYM-H 6, balanced</button>
@@ -358,10 +530,12 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 dividing by mean cos λ — the Dst and SYM-H recipe exactly — <em>is</em> the least-squares
                 estimator of that coefficient.
             </p>
-            <table class="tg-table" id="tg-identity-table">
+            <div class="tg-scroll" tabindex="0" role="region" aria-label="Classical index versus the degree-1 zonal coefficient">
+                <table class="tg-table" id="tg-identity-table">
                 <thead><tr><th>Station set</th><th class="num">classical average</th><th class="num">−q₁⁰</th><th class="num">|difference|</th></tr></thead>
                 <tbody></tbody>
             </table>
+            </div>
             <div class="tg-callout">
                 So the distinction is not estimator-versus-index. Everything here is an estimator; they
                 differ in how many parameters they fit, how they weight stations, and whether they carry a
@@ -393,7 +567,7 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
 </section>
 
 <!-- ══════════════════════════ FIELD ═════════════════════════════════ -->
-<section id="tg-panel-field" role="tabpanel" aria-labelledby="tg-tab-field">
+<section id="tg-panel-field" role="tabpanel" tabindex="0" aria-labelledby="tg-tab-field">
     <div class="tg-grid tg-2">
         <div class="tg-card">
             <h3>IGRF-14, evaluated live to degree 13</h3>
@@ -403,7 +577,7 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 Lowes–Mauersberger spectrum flattens above it because that is where the thin magnetised
                 crust takes over from the core.
             </p>
-            <div class="tg-tabs" id="tg-field-tabs">
+            <div class="tg-tabs" id="tg-field-tabs" role="group" aria-label="Field component">
                 <button data-comp="f" class="active">|B| total</button>
                 <button data-comp="z">Z down</button>
                 <button data-comp="x">X north</button>
@@ -472,10 +646,12 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 </div>
             </div>
             <div>
-                <table class="tg-table" id="tg-screening-table">
+                <div class="tg-scroll" tabindex="0" role="region" aria-label="Mantle screening by conductivity">
+                    <table class="tg-table" id="tg-screening-table">
                     <thead><tr><th>σ (S/m)</th><th class="num">50% attenuation at</th><th class="num">a 1-day signal arrives as</th></tr></thead>
                     <tbody></tbody>
                 </table>
+                </div>
                 <div class="tg-callout">
                     At σ = 1 S/m a one-day core signal reaches the surface with <strong>3×10⁻⁹</strong> of
                     its amplitude. Daily core analysis is not a data problem; no instrument fixes it.
@@ -497,8 +673,13 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
 </section>
 
 <!-- ══════════════════════════ CORE ══════════════════════════════════ -->
-<section id="tg-panel-core" role="tabpanel" aria-labelledby="tg-tab-core">
+<section id="tg-panel-core" role="tabpanel" tabindex="0" aria-labelledby="tg-tab-core">
     <div class="tg-callout warn" style="margin-top:0;margin-bottom:14px">
+        <strong>The view above is now showing the core.</strong> Radii are true &mdash; Earth 1.0,
+        core&ndash;mantle boundary 0.546, inner core 0.192, nothing compressed. Pull the mantle down to
+        see inside, and the truncation slider down to watch the small-scale structure &mdash; and its
+        uncertainty &mdash; disappear together.
+        <br><br>
         <strong>This is not a geodynamo simulation, and nothing on this page claims to be one.</strong>
         A real 3-D MHD dynamo needs a supercomputer, and the best published runs still sit eight orders of
         magnitude from Earth's Ekman number — you can read that number off the table below. What runs here
@@ -506,14 +687,108 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
         almost all of the physics. They still answer real questions.
     </div>
 
+    <div class="tg-card" style="margin-bottom:14px">
+        <h3>Only one layer can run a dynamo &mdash; and not the one you would guess</h3>
+        <p class="tg-note">
+            Switch the view above to <em>Layer structure</em> and pull the cutaway open. Each shell
+            carries its own conductivity, its own diffusion time, and its own answer to whether a
+            dynamo could operate in it.
+        </p>
+        <div class="tg-scroll" tabindex="0" role="region" aria-label="Magnetic diagnostics by layer">
+            <table class="tg-table" id="tg-layerdiag-table">
+                <thead><tr>
+                    <th>Layer</th><th class="num">thickness</th><th class="num">&sigma; (S/m)</th>
+                    <th class="num">flow U</th><th class="num">R<sub>m</sub></th>
+                    <th class="num">&tau; diffusion</th><th>dynamo?</th>
+                </tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div class="tg-callout">
+            <strong>The inner core is exactly as conductive as the outer core.</strong> It still cannot
+            host a dynamo, because R<sub>m</sub> = UL/&eta; is a <em>product</em> &mdash; and a solid
+            layer contributes U&nbsp;=&nbsp;0 however conductive it is. The outer core is the only shell
+            that is both conducting <em>and</em> moving. Conductivity is necessary; motion is what is
+            scarce.
+            <br><br>
+            The inner core is not idle, though: field can only <em>diffuse</em> through it, on a
+            <strong id="tg-ic-tau">&mdash;</strong> timescale. That is slow enough to resist a rapid
+            reversal of the field around it, which is the basis of the published idea that the inner
+            core stabilises reversals.
+        </div>
+    </div>
+
+    <div class="tg-card" style="margin-bottom:14px">
+        <h3>The tangent cylinder <span class="tg-tag model">Geometry, not a surface</span></h3>
+        <p class="tg-note">
+            The cylinder tangent to the inner core, aligned with the spin axis. It is drawn as a
+            wireframe because it is not a material boundary &mdash; it is where the physics of the
+            flow changes.
+        </p>
+        <div class="tg-stats">
+            <div class="tg-stat"><div class="v good" id="tg-tc-lat">&mdash;</div><div class="k">meets the CMB at</div></div>
+            <div class="tg-stat"><div class="v" id="tg-tc-rossby">&mdash;</div><div class="k">Rossby number</div></div>
+            <div class="tg-stat"><div class="v" id="tg-tc-radius">&mdash;</div><div class="k">radius</div></div>
+        </div>
+        <div class="tg-callout">
+            The Taylor&ndash;Proudman theorem: when Coriolis overwhelms inertia &mdash; and at
+            Rossby&nbsp;&asymp;&nbsp;10<sup>&minus;6</sup> it overwhelmingly does &mdash; flow becomes
+            invariant along the rotation axis and organises into <em>columns</em>. A column that would
+            have to pass through the solid inner core cannot exist, so the fluid splits in two:
+            <br><br>
+            <strong>Outside</strong> the cylinder, columnar rolls, made helical by Coriolis with
+            opposite handedness in each hemisphere &mdash; which <em>is</em> the antisymmetric
+            &alpha;-effect that the controlled experiment below shows can prefer a dipole.
+            <strong>Inside</strong>, the polar regions, largely decoupled.
+            <br><br>
+            So &ldquo;rotation selects the dipole&rdquo; is not a slogan. <strong>It is this
+            geometry.</strong> Remove the rotation and you keep a magnetic field but lose the axial
+            dipole.
+        </div>
+    </div>
+
+    <div class="tg-callout warn" style="margin-bottom:14px">
+        <strong>Downward continuation is real, and it is where over-interpretation starts.</strong>
+        The expansion is valid anywhere the field is current-free, so evaluating it at the CMB is
+        legitimate &mdash; but each degree gains (a/r)<sup>n+2</sup>, about 6&times; at degree&nbsp;1 and
+        <strong>8,700&times; at degree&nbsp;13</strong>. Continuation amplifies the coefficients' own
+        error along with the signal, and past degree&nbsp;13 it would amplify the <em>crustal</em> field
+        as though it came from the core.
+    </div>
+
+    <div class="tg-card" style="margin-bottom:14px">
+        <h3>Switch the dynamo off <span class="tg-tag model">Solved, not sketched</span></h3>
+        <p class="tg-note">
+            This runs the induction equation with the flow set to zero &mdash;
+            &part;B/&part;t = &eta;&nabla;<sup>2</sup>B &mdash; as a real diffusion solve on the core,
+            spectral in angle and implicit in radius. It is checkable: the decay rates it produces match
+            the analytic eigenvalues &tau;<sub>n</sub> = &mu;<sub>0</sub>&sigma;a<sup>2</sup>/k<sub>n</sub><sup>2</sup>
+            to <strong>0.03%</strong>. Drag the clock forward and watch which multipole is left.
+        </p>
+        <div class="tg-field">
+            <label for="tg-decay-time">Years elapsed</label>
+            <input type="range" id="tg-decay-time" min="0" max="40000" step="250" value="0">
+            <output id="tg-decay-time-out">0</output>
+        </div>
+        <canvas id="tg-decay-live" height="190"></canvas>
+        <div class="tg-legend" id="tg-decay-live-legend"></div>
+        <div class="tg-callout">
+            Every degree starts at the same amplitude. Nothing selects the dipole &mdash; it is simply
+            the last one still standing, because &tau;<sub>n</sub> falls as 1/k<sub>n</sub><sup>2</sup>.
+            <strong>The dipole is what is left.</strong>
+        </div>
+    </div>
+
     <div class="tg-grid tg-2e">
         <div class="tg-card">
             <h3>Does a dynamo run at all?</h3>
             <p class="tg-note">Six numbers, computed from outer-core estimates. One of them is the whole answer.</p>
-            <table class="tg-table" id="tg-numbers-table">
+            <div class="tg-scroll" tabindex="0" role="region" aria-label="Outer-core dimensionless numbers">
+                <table class="tg-table" id="tg-numbers-table">
                 <thead><tr><th>Quantity</th><th class="num">Value</th><th>Meaning</th></tr></thead>
                 <tbody></tbody>
             </table>
+            </div>
             <div class="tg-callout">
                 <strong>R<sub>m</sub> ≈ 1135</strong> against a threshold near 40: induction beats diffusion
                 by about a thousand to one. Elsasser ≈ 10 says the field it makes is strong enough to react
@@ -528,10 +803,12 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                 τ<sub>n</sub> = μ₀σa²/k<sub>n</sub>².
             </p>
             <canvas id="tg-decay-chart" height="200"></canvas>
-            <table class="tg-table" id="tg-decay-table" style="margin-top:8px">
+            <div class="tg-scroll" tabindex="0" role="region" aria-label="Free-decay time by spherical harmonic degree">
+                <table class="tg-table" id="tg-decay-table" style="margin-top:8px">
                 <thead><tr><th>degree n</th><th class="num">first zero of j<sub>n</sub></th><th class="num">free-decay time</th><th class="num">vs dipole</th></tr></thead>
                 <tbody></tbody>
             </table>
+            </div>
             <div class="tg-callout">
                 Three reasons, in increasing order of interest. <strong>(1)</strong> ∇·B = 0 forbids a
                 monopole, so degree 1 is the lowest multipole <em>available</em> — a constraint of Maxwell's
@@ -568,7 +845,7 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                         <option value="antisymmetric">Antisymmetric (physical)</option>
                         <option value="symmetric">Symmetric (control)</option>
                     </select>
-                    <output></output>
+                    <span aria-hidden="true"></span>
                 </div>
                 <div class="tg-field">
                     <label for="tg-res">Resolution N</label>
@@ -581,7 +858,7 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                     1220 and settles toward 1167 by N = 400. Raise the resolution and watch it move;
                     that drift is the discretisation, not a disagreement.
                 </p>
-                <div class="tg-status" id="tg-parity-status"></div>
+                <div class="tg-status" id="tg-parity-status" role="status" aria-live="polite"></div>
                 <div class="tg-stats">
                     <div class="tg-stat"><div class="v good" id="tg-window-lo">—</div><div class="k">window lower |D|</div></div>
                     <div class="tg-stat"><div class="v good" id="tg-window-hi">—</div><div class="k">window upper |D|</div></div>
@@ -631,10 +908,12 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
         <div class="tg-card">
             <h3>Nothing down there is a magnet</h3>
             <p class="tg-note">Layer structure, conductivity, and the temperatures that settle the question.</p>
-            <table class="tg-table" id="tg-layers-table">
+            <div class="tg-scroll" tabindex="0" role="region" aria-label="Earth layer structure and conductivity">
+                <table class="tg-table" id="tg-layers-table">
                 <thead><tr><th>Layer</th><th class="num">depth (km)</th><th class="num">σ (S/m)</th><th>state</th></tr></thead>
                 <tbody></tbody>
             </table>
+            </div>
             <div class="tg-callout">
                 Curie temperatures are 858 K for magnetite, 948 K for hematite, 1043 K for iron. The core
                 runs at 5000–6000 K and the lower mantle above 2000 K. <strong>Every deep layer is far
@@ -697,8 +976,10 @@ import { KYOTO_TABLE1, SYMH6_TYPICAL, SYMH6_BALANCED, DST4 } from './js/geomag/o
 import {
     LAYERS, CURIE_K, dimensionlessNumbers, freeDecayTable, freeDecayTime,
     mantleScreening, halfAttenuationPeriodYears, YEAR_S,
+    layerDiagnostics, tangentCylinderLatitudeDeg, R_IC_M,
 } from './js/geomag/core-model.js';
 import { runRikitake, alphaOmegaParity, dipoleWindow } from './js/geomag/dynamo.js';
+import { freeDecayEnsemble, advanceEnsemble } from './js/geomag/diffusion.js';
 import {
     makeNetwork, stormTruth, observe, trueSymH, zonalTruth, definitionFloor, runOsse, makeRng,
 } from './js/geomag/osse.js';
@@ -713,6 +994,17 @@ const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '—');
 // ── Canvas helpers ───────────────────────────────────────────────────────────
 // Deliberately small and local: three chart types, no dependency, and a device
 // -pixel-ratio pass so nothing renders soft on a retina display.
+/**
+ * Give a canvas a text alternative. A <canvas> is an empty element to a screen
+ * reader — role="img" plus a label carrying the ACTUAL NUMBERS is the
+ * difference between "graphic" and the finding the chart exists to show.
+ * Called at the end of each draw so the label tracks the data.
+ */
+function describe(canvas, label) {
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', label);
+}
+
 function prepare(canvas) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = canvas.clientWidth || 600;
@@ -728,7 +1020,7 @@ function prepare(canvas) {
 
 function axes(ctx, box, { xLabel = '', yLabel = '', xTicks = [], yTicks = [] }) {
     ctx.strokeStyle = 'rgba(90,110,160,.28)';
-    ctx.fillStyle = '#6d7691';
+    ctx.fillStyle = '#767f9a';
     ctx.font = '10px system-ui, sans-serif';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -776,8 +1068,17 @@ function niceTicks(lo, hi, n = 5) {
 // ── Layer switching ──────────────────────────────────────────────────────────
 const layerButtons = [...document.querySelectorAll('.tg-layer')];
 const rendered = new Set();
-function showLayer(name) {
-    layerButtons.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.layer === name)));
+function showLayer(name, { focusTab = false } = {}) {
+    layerButtons.forEach((b) => {
+        const on = b.dataset.layer === name;
+        b.setAttribute('aria-selected', String(on));
+        // Roving tabindex: exactly ONE tab is in the tab order, and the arrow
+        // keys move between them. Leaving all three tabbable makes a keyboard
+        // user walk every tab to reach the panel, which is the whole reason
+        // the ARIA tabs pattern specifies this.
+        b.tabIndex = on ? 0 : -1;
+        if (on && focusTab) b.focus();
+    });
     document.querySelectorAll('.tg-panels > section').forEach((s) => {
         s.classList.toggle('tg-on', s.id === `tg-panel-${name}`);
     });
@@ -786,9 +1087,24 @@ function showLayer(name) {
     // not at boot. Drawing all three up front produced 1-pixel-wide canvases.
     if (!rendered.has(name)) { rendered.add(name); renderLayer(name); }
     else if (name === 'field') drawFieldMap();
+    // The front-door view follows the tabs — same Earth, three framings.
+    if (scene3d) { scene3d.setLayer(name); drawKey(); }
     try { history.replaceState(null, '', `#${name}`); } catch (_) {}
 }
-layerButtons.forEach((b) => b.addEventListener('click', () => showLayer(b.dataset.layer)));
+layerButtons.forEach((b, i) => {
+    b.addEventListener('click', () => showLayer(b.dataset.layer));
+    b.addEventListener('keydown', (e) => {
+        const last = layerButtons.length - 1;
+        let next = null;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = i === last ? 0 : i + 1;
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = i === 0 ? last : i - 1;
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = last;
+        if (next === null) return;
+        e.preventDefault();
+        showLayer(layerButtons[next].dataset.layer, { focusTab: true });
+    });
+});
 
 // ══════════════════════════ EXTERNAL LAYER ═══════════════════════════════════
 
@@ -836,11 +1152,20 @@ function drawAlias(setId) {
     ctx.font = '10px system-ui, sans-serif';
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText('for a 100 nT asymmetric ring current', box.x + 6, box.y + 4);
+    describe($('tg-alias-chart'),
+        `Index bias over a 24-hour UT day for the ${ALIAS_SETS[setId].label} station set: `
+        + `a sinusoid of amplitude plus or minus ${fmt(ampNt, 0)} nanotesla per 100 nanotesla of `
+        + `asymmetric ring current, peaking at ${fmt(a.phaseDeg / 15, 1)} hours UT. `
+        + `Hemispheric balance ${north} north to ${keys.length - north} south.`);
 }
 
 document.querySelectorAll('#tg-alias-tabs button').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.classList.contains('active')));
     b.addEventListener('click', () => {
-        document.querySelectorAll('#tg-alias-tabs button').forEach((o) => o.classList.toggle('active', o === b));
+        document.querySelectorAll('#tg-alias-tabs button').forEach((o) => {
+            o.classList.toggle('active', o === b);
+            o.setAttribute('aria-pressed', String(o === b));
+        });
         drawAlias(b.dataset.set);
     });
 });
@@ -917,6 +1242,11 @@ function drawFloorChart() {
     linePath(ctx, mk(Array.from(o.target)), '#4fc3f7', 1.8);
     linePath(ctx, mk(Array.from(o.zonal)), '#7fe6c3', 1.6);
     linePath(ctx, mk(Array.from(o.target, (v, i) => v - o.zonal[i])), '#ff8a7a', 1.3);
+    describe($('tg-floor-chart'),
+        `Two days of a simulated storm. Kyoto's six-station recipe reaches `
+        + `${fmt(Math.min(...o.target), 0)} nanotesla while the pure zonal coefficient reaches `
+        + `${fmt(Math.min(...o.zonal), 0)}. Their difference is the index's own definition error, `
+        + `${fmt(o.floor.rmsNt, 2)} nanotesla RMS.`);
 }
 
 function drawDropoutChart() {
@@ -951,6 +1281,11 @@ function drawDropoutChart() {
         ctx.fill();
     }
     const first = o.curve[0], last = o.curve[o.curve.length - 1];
+    describe($('tg-dropout-chart'),
+        `Estimator error against station count. From ${fmt(first.n, 0)} stations at `
+        + `${fmt(first.rmse, 2)} nanotesla down to ${fmt(last.n, 1)} stations at ${fmt(last.rmse, 2)}. `
+        + `Flat across the whole sweep, and below the ${fmt(o.floor.rmsNt, 2)} nanotesla index `
+        + `definition floor throughout.`);
     $('tg-dropout-status').textContent =
         `${fmt(first.n, 0)} stations → ${fmt(first.rmse, 2)} nT.  `
         + `${fmt(last.n, 1)} stations → ${fmt(last.rmse, 2)} nT.  `
@@ -1008,7 +1343,7 @@ function drawLiveChart(series) {
     const box = { x: 48, y: 12, w: w - 62, h: h - 44 };
     if (!series || series.length < 2) {
         axes(ctx, box, { xLabel: 'minutes', yLabel: 'nT', xTicks: [], yTicks: [] });
-        ctx.fillStyle = '#6d7691'; ctx.font = '12px system-ui, sans-serif';
+        ctx.fillStyle = '#767f9a'; ctx.font = '12px system-ui, sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText('no live data', box.x + box.w / 2, box.y + box.h / 2);
         return;
@@ -1052,6 +1387,11 @@ function drawLiveChart(series) {
     linePath(ctx, series.map((s) => [
         xOf(s.timeMs), box.y + box.h - (s.stations / maxN) * 14,
     ]), '#7fe6c3', 1.1);
+    const f = series[series.length - 1];
+    describe($('tg-live-chart'),
+        `Live estimate of the zonal coefficient over the last ${Math.round(mins)} minutes, `
+        + `currently ${fmt(f.zonalNt, 1)} plus or minus ${fmt(f.sigmaNt, 1)} nanotesla `
+        + `from ${f.stations} reporting observatories.`);
 }
 
 // ══════════════════════════ FIELD LAYER ══════════════════════════════════════
@@ -1142,6 +1482,13 @@ function drawFieldMap() {
     $('tg-saa').innerHTML = `${Math.round(saa.fNt).toLocaleString()} <small>nT</small>`;
     $('tg-saa-pos').innerHTML = `${saa.latDeg.toFixed(1)}° <small>${saa.lonDeg.toFixed(1)}°E</small>`;
 
+    describe(canvas,
+        `World map of ${COMP_LABEL[fieldComp]} from IGRF-14 at epoch ${year}, ranging `
+        + `${Math.round(lo).toLocaleString()} to ${Math.round(hi).toLocaleString()} nanotesla. `
+        + `The South Atlantic Anomaly minimum is ${Math.round(saa.fNt).toLocaleString()} nanotesla at `
+        + `${saa.latDeg.toFixed(1)} degrees latitude, ${saa.lonDeg.toFixed(1)} east; the north `
+        + `geomagnetic pole is at ${d.poleLatDeg.toFixed(1)} north, ${d.poleLonDeg.toFixed(1)} east.`);
+
     drawSpectrum(c);
 }
 
@@ -1172,6 +1519,14 @@ function drawSpectrum(c) {
     linePath(ctx, Array.from({ length: NMAX }, (_, i) => [
         xOf(i + 1), scale(Math.log10(Rc[i + 1]), lo, hi, box.y + box.h, box.y),
     ]), '#ff9a56', 2);
+    const dec = (arr) => {
+        const lg = []; for (let n = 2; n <= NMAX; n++) lg.push(Math.log10(arr[n]));
+        return Math.max(...lg) - Math.min(...lg);
+    };
+    describe($('tg-spectrum'),
+        `Power per spherical-harmonic degree. At the surface it spans ${dec(R).toFixed(1)} decades `
+        + `from degree 2 to 13; continued to the core-mantle boundary it spans only `
+        + `${dec(Rc).toFixed(2)} — near-white, which places the source at that depth.`);
 }
 
 function drawTilt() {
@@ -1197,6 +1552,10 @@ function drawTilt() {
     $('tg-tilt-range').textContent = `${fmt(day.rangeDeg, 1)}°`;
     $('tg-tilt-utmax').textContent = `${fmt(day.utOfMax, 2)} UT`;
     $('tg-tilt-now').textContent = `${fmt(dipoleTilt(now), 1)}°`;
+    describe($('tg-tilt-chart'),
+        `Dipole tilt through the UT day: ${fmt(day.minDeg, 1)} to ${fmt(day.maxDeg, 1)} degrees, `
+        + `a range of ${fmt(day.rangeDeg, 1)} degrees peaking at ${fmt(day.utOfMax, 2)} UT — `
+        + `twice the dipole's offset from the spin axis.`);
 }
 
 function drawScreening() {
@@ -1222,6 +1581,12 @@ function drawScreening() {
     linePath(ctx, [[box.x, halfY], [box.x + box.w, halfY]], 'rgba(150,160,190,.4)', 1);
     ctx.setLineDash([]);
 
+    describe($('tg-screening'),
+        'Fraction of a core signal reaching the surface against its period, for mantle '
+        + 'conductivities of 0.1, 1 and 10 siemens per metre. Half the amplitude survives at '
+        + `${halfAttenuationPeriodYears(0.1).toFixed(2)}, ${halfAttenuationPeriodYears(1).toFixed(2)} `
+        + `and ${halfAttenuationPeriodYears(10).toFixed(1)} years respectively; a one-day signal at `
+        + `1 siemens per metre arrives at ${mantleScreening(1 / 365.25, 1).toExponential(1)} of its amplitude.`);
     $('tg-screening-table').querySelector('tbody').innerHTML = [0.1, 1, 10].map((s) =>
         `<tr><td>${s}</td><td class="num">${halfAttenuationPeriodYears(s).toFixed(2)} yr</td>`
         + `<td class="num">${mantleScreening(1 / 365.25, s).toExponential(1)}</td></tr>`).join('');
@@ -1232,8 +1597,12 @@ $('tg-year').addEventListener('input', () => {
     drawFieldMap();
 });
 document.querySelectorAll('#tg-field-tabs button').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.classList.contains('active')));
     b.addEventListener('click', () => {
-        document.querySelectorAll('#tg-field-tabs button').forEach((o) => o.classList.toggle('active', o === b));
+        document.querySelectorAll('#tg-field-tabs button').forEach((o) => {
+            o.classList.toggle('active', o === b);
+            o.setAttribute('aria-pressed', String(o === b));
+        });
         fieldComp = b.dataset.comp;
         drawFieldMap();
     });
@@ -1286,6 +1655,35 @@ function fillCoreTables() {
         ctx.fillStyle = r.n === 1 ? '#ff9a56' : 'rgba(255,154,86,.36)';
         ctx.fillRect(x - bw / 2, y, bw, box.y + box.h - y);
     });
+    describe($('tg-decay-chart'),
+        `Ohmic free-decay time by degree. The dipole lasts ${Math.round(table[0].years).toLocaleString()} `
+        + `years against ${Math.round(table.find((r) => r.n === 13).years).toLocaleString()} years for `
+        + `degree 13 — ${(freeDecayTime(1) / freeDecayTime(13)).toFixed(1)} times longer.`);
+}
+
+function fillLayerDiagnostics() {
+    const diag = layerDiagnostics();
+    const fmtTau = (yr) => (yr > 1
+        ? `${Math.round(yr).toLocaleString()} yr`
+        : `${(yr * YEAR_S).toExponential(1)} s`);
+    $('tg-layerdiag-table').querySelector('tbody').innerHTML = diag.map((L) => `
+        <tr class="${L.canSustainDynamo ? 'tg-hi' : ''}">
+            <td>${L.name}</td>
+            <td class="num">${L.thicknessKm.toLocaleString()} km</td>
+            <td class="num">${L.sigma.toExponential(0)}</td>
+            <td class="num">${L.flowMs ? `${(L.flowMs * 1e3).toFixed(1)} mm/s` : '—'}</td>
+            <td class="num">${L.magneticReynolds >= 1 ? Math.round(L.magneticReynolds).toLocaleString() : '0'}</td>
+            <td class="num">${fmtTau(L.diffusionTimeYears)}</td>
+            <td>${L.canSustainDynamo ? 'YES' : 'no'}${L.permanentlyMagnetisable ? ' · magnetisable' : ''}</td>
+        </tr>`).join('');
+
+    const ic = diag.find((L) => L.name === 'Inner core');
+    $('tg-ic-tau').textContent = `${Math.round(ic.diffusionTimeYears).toLocaleString()}-year`;
+
+    const n = dimensionlessNumbers();
+    $('tg-tc-lat').textContent = `${tangentCylinderLatitudeDeg().toFixed(1)}°`;
+    $('tg-tc-rossby').textContent = n.rossby.toExponential(1);
+    $('tg-tc-radius').innerHTML = `${(R_IC_M / 1e3).toFixed(0)} <small>km</small>`;
 }
 
 function drawRikitake() {
@@ -1310,7 +1708,290 @@ function drawRikitake() {
         scale(r.t[i], 0, 500, box.x, box.x + box.w),
         scale(v, -lim, lim, box.y + box.h, box.y),
     ]), '#ff9a56', 0.9);
+    describe($('tg-rikitake-chart'),
+        `Field polarity against time for the Rikitake two-disk dynamo: ${r.reversals} reversals over `
+        + `500 dimensionless time units with no external forcing, chron lengths from `
+        + `${fmt(r.minChron, 1)} to ${fmt(r.maxChron, 1)} — irregular, with no periodicity.`);
 }
+
+// ── 3D core/mantle stage ─────────────────────────────────────────────────────
+let scene3d = null;
+let raf3d = null;
+
+async function boot3d() {
+    const host = $('tg-stage');
+    const msg = $('tg-stage-msg');
+    try {
+        // Dynamic import so a WebGL or importmap failure degrades to a message
+        // rather than taking the whole Core panel down with it. Everything else
+        // on this layer is pure computation and must survive a GPU that isn't.
+        const { CoreFieldScene } = await import('./js/geomag/core-3d.js');
+        scene3d = new CoreFieldScene(host, { year: 2025, nmax: 10 });
+        // Exposed so tests/tiga-smoke.spec.js can assert the clip plane really
+        // tracks the camera. Read-only from the page's point of view.
+        window.__tigaScene = scene3d;
+        msg.remove();
+        apply3d();
+        applyScreening();
+        applyCutaway();
+        syncStageControls();
+        const active = layerButtons.find((b) => b.getAttribute('aria-selected') === 'true');
+        scene3d.setLayer(active ? active.dataset.layer : 'external');
+
+        // Release the GL context when the page goes away. Without this every
+        // load leaks a WebGLRenderer: browsers cap live contexts (~16), and
+        // past the cap they start force-losing the oldest ones, which shows up
+        // as the view silently dying or the page stalling. A long-lived tab
+        // that navigates back and forth hits it, and so does a test suite —
+        // which is how this was found.
+        window.addEventListener('pagehide', () => {
+            try { scene3d?.dispose(); } catch (_) { /* nothing useful to do */ }
+            scene3d = null;
+            if (raf3d) cancelAnimationFrame(raf3d);
+        }, { once: true });
+
+        // If the context is lost anyway, say so instead of showing a dead box.
+        scene3d.renderer.domElement.addEventListener('webglcontextlost', (e) => {
+            e.preventDefault();
+            if (raf3d) cancelAnimationFrame(raf3d);
+            host.insertAdjacentHTML('beforeend',
+                '<div class="tg-stage-msg">3D context lost — reload to restore it. '
+                + 'Everything else on this page is pure computation and is unaffected.</div>');
+        });
+
+        // Pause GL when the panel is hidden or scrolled away — the tab is
+        // running a Kalman filter and a dynamo solver too.
+        let visible = true;
+        const io = new IntersectionObserver((e) => { visible = e[0].isIntersecting; }, { threshold: 0 });
+        io.observe(host);
+        const loop = () => {
+            raf3d = requestAnimationFrame(loop);
+            if (!visible || document.hidden) return;
+            scene3d.render();
+        };
+        loop();
+    } catch (err) {
+        msg.textContent = `3D view unavailable (${err.message}). `
+            + 'Everything else on this layer is pure computation and is unaffected.';
+    }
+}
+
+// ── The key ─────────────────────────────────────────────────────────────────
+// Mode-aware on purpose: a static list of everything the scene CAN draw is
+// wrong in every mode, because most of it is not on screen. The swatch colours
+// come from the same exported constants the materials use, so they cannot
+// drift apart — see the note on LAYER_PALETTE in core-3d.js.
+const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
+
+function keyEntries(layer, interior) {
+    if (!scene3d) return [];
+    const P = scene3d.palettes;
+    if (interior === 'layers') {
+        const rows = Object.entries(P.LAYER_PALETTE).map(([name, v]) => {
+            const d = (scene3d.layerDiagnostics || []).find((L) => L.name === name);
+            return {
+                color: hex(v.color),
+                label: name,
+                note: d ? `σ ${d.sigma.toExponential(0)} S/m · ${d.canSustainDynamo ? 'dynamo' : 'no dynamo'}` : '',
+            };
+        });
+        rows.push({
+            color: hex(P.TANGENT_CYLINDER_COLOR), ring: true, label: 'Tangent cylinder',
+            note: 'where the flow regime changes — not a surface',
+        });
+        return rows;
+    }
+    const atCore = layer === 'core';
+    const rows = [
+        {
+            color: hex(P.FIELD_RAMP.outward), label: 'B_r outward',
+            note: atCore ? 'at the core–mantle boundary' : 'at the surface',
+        },
+        { color: hex(P.FIELD_RAMP.inward), label: 'B_r inward' },
+        {
+            color: hex(P.FIELD_RAMP.reversedContour), ring: true, label: 'Reversed flux',
+            note: 'opposes the dipole’s own B_r there',
+        },
+        {
+            color: hex(P.LINE_COLORS.escaping), line: true, label: 'Field line, escapes',
+            note: 'threads out through the mantle',
+        },
+    ];
+    if (layer !== 'external') {
+        rows.push({
+            color: hex(P.LINE_COLORS.closed), line: true, label: 'Field line, closes in core',
+            note: 'low-latitude L-shells re-enter the CMB',
+        });
+    }
+    if (layer === 'external') {
+        rows.push({ color: hex(P.OBSERVATORY_COLORS.north), label: 'Observatory, N' });
+        rows.push({ color: hex(P.OBSERVATORY_COLORS.south), label: 'Observatory, S' });
+    }
+    return rows;
+}
+
+function drawKey() {
+    const host = $('tg-key');
+    if (!scene3d) { host.hidden = true; return; }
+    const layer = (layerButtons.find((b) => b.getAttribute('aria-selected') === 'true') || {}).dataset?.layer
+        || 'external';
+    const rows = keyEntries(layer, $('tg-3d-interior').value);
+    $('tg-key-body').innerHTML = rows.map((r) => {
+        const cls = `tg-key-sw${r.ring ? ' tg-key-ring' : ''}${r.line ? ' tg-key-line' : ''}`;
+        const style = r.ring ? `border-color:${r.color}` : `background:${r.color}`;
+        return `<li><span class="${cls}" style="${style}" data-color="${r.color}"></span>`
+            + `<span class="tg-key-lb">${r.label}${r.note ? `<i>${r.note}</i>` : ''}</span></li>`;
+    }).join('');
+    host.hidden = false;
+}
+
+$('tg-key-toggle').addEventListener('click', () => {
+    const btn = $('tg-key-toggle');
+    const open = btn.getAttribute('aria-expanded') === 'true';
+    btn.setAttribute('aria-expanded', String(!open));
+    $('tg-key-body').hidden = open;
+});
+
+function apply3d() {
+    if (!scene3d) return;
+    const year = Number($('tg-3d-year').value);
+    const nmax = Number($('tg-3d-nmax').value);
+    const d = scene3d.update({ year, nmax, lineCount: 24 });
+    $('tg-3d-peak').innerHTML = `${d.peakCmbFieldUt.toFixed(0)} <small>µT</small>`;
+    $('tg-3d-reversed').textContent = `${d.reversedFluxPercent.toFixed(1)}%`;
+    $('tg-3d-revsurf').textContent = `${d.surfaceReversedPercent.toFixed(1)}%`;
+    $('tg-3d-lines').textContent = `${d.lines.escaping} / ${d.lines.total}`;
+    $('tg-3d-gain').textContent = `${Math.round(d.gainDegreeMax).toLocaleString()}×`;
+    $('tg-3d-status').textContent =
+        `IGRF-14 at epoch ${year}, truncated at degree ${nmax}. Peak radial field `
+        + `${d.peakSurfaceFieldUt.toFixed(0)} µT at the surface against ${d.peakCmbFieldUt.toFixed(0)} µT `
+        + `at the core — that ratio is the continuation, not a stronger field. `
+        + `${d.lines.closed} of ${d.lines.total} traced lines close inside the core rather than reaching `
+        + `the surface, which is L-shell structure and not a drawing choice.`;
+    drawKey();
+}
+
+function applyScreening() {
+    const logP = Number($('tg-3d-period').value);
+    const period = Math.pow(10, logP);
+    const survival = mantleScreening(period, 1);
+    $('tg-3d-period-out').textContent = period < 1
+        ? `${(period * 365.25).toFixed(0)} d` : `${period.toFixed(period < 10 ? 1 : 0)} yr`;
+    $('tg-3d-survival').textContent = survival > 1e-4
+        ? `${(survival * 100).toFixed(1)}%` : survival.toExponential(0);
+    if (scene3d) scene3d.setScreeningPeriod(period, 1);
+}
+
+// ── Live free-decay ensemble ────────────────────────────────────────────────
+let decayEnsemble = null;
+function drawDecayLive() {
+    const years = Number($('tg-decay-time').value);
+    $('tg-decay-time-out').textContent = years.toLocaleString();
+    // Rebuild from t=0 each time: the slider is a scrubber, not a play button,
+    // and marching the SAME solver backwards is not a thing diffusion does.
+    const degrees = [1, 2, 3, 5, 8, 13];
+    decayEnsemble = freeDecayEnsemble({ degrees, nr: 90 });
+    const state = years > 0
+        ? advanceEnsemble(decayEnsemble, years, Math.max(8, Math.round(years / 400)))
+        : degrees.map((n) => ({ degree: n, fraction: 1 }));
+
+    const { ctx, w, h } = prepare($('tg-decay-live'));
+    const box = { x: 52, y: 12, w: w - 66, h: h - 42 };
+    axes(ctx, box, {
+        xLabel: 'spherical harmonic degree n', yLabel: 'remaining',
+        xTicks: state.map((r, i) => ({
+            px: scale(i, 0, state.length - 1, box.x + 22, box.x + box.w - 22), label: String(r.degree),
+        })),
+        yTicks: [0, 0.25, 0.5, 0.75, 1].map((v) => ({ py: scale(v, 0, 1, box.y + box.h, box.y), label: v.toFixed(2) })),
+    });
+    const bw = (box.w / state.length) * 0.55;
+    state.forEach((r, i) => {
+        const x = scale(i, 0, state.length - 1, box.x + 22, box.x + box.w - 22);
+        const y = scale(r.fraction, 0, 1, box.y + box.h, box.y);
+        ctx.fillStyle = r.degree === 1 ? '#ff9a56' : 'rgba(255,154,86,.34)';
+        ctx.fillRect(x - bw / 2, y, bw, box.y + box.h - y);
+        ctx.fillStyle = '#cdd5e4';
+        ctx.font = '10px system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        if (r.fraction > 0.02) ctx.fillText(`${(r.fraction * 100).toFixed(0)}%`, x, y - 3);
+    });
+    const dip = state[0].fraction, hi = state[state.length - 1].fraction;
+    $('tg-decay-live-legend').innerHTML =
+        `<span>after <strong style="color:#e4e9f5">${years.toLocaleString()}</strong> years: `
+        + `degree 1 at ${(dip * 100).toFixed(1)}%, degree 13 at ${(hi * 100).toFixed(1)}%</span>`;
+    describe($('tg-decay-live'),
+        `Amplitude remaining by degree after ${years} years of pure magnetic diffusion: `
+        + state.map((r) => `degree ${r.degree} at ${(r.fraction * 100).toFixed(0)} percent`).join(', ') + '.');
+    if (scene3d) scene3d.setDecay(dip);
+}
+
+$('tg-3d-year').addEventListener('input', () => { $('tg-3d-year-out').textContent = $('tg-3d-year').value; });
+$('tg-3d-year').addEventListener('change', apply3d);
+$('tg-3d-nmax').addEventListener('input', () => { $('tg-3d-nmax-out').textContent = $('tg-3d-nmax').value; });
+$('tg-3d-nmax').addEventListener('change', apply3d);
+$('tg-3d-mantle').addEventListener('input', () => {
+    const v = Number($('tg-3d-mantle').value) / 100;
+    $('tg-3d-mantle-out').textContent = v.toFixed(2);
+    if (scene3d) scene3d.setMantleOpacity(v);
+});
+$('tg-3d-period').addEventListener('input', applyScreening);
+
+function applyCutaway() {
+    const t = Number($('tg-3d-cut').value) / 100;
+    const az = Number($('tg-3d-cutaz').value);
+    $('tg-3d-cut-out').textContent = `${Math.round(t * 100)}%`;
+    $('tg-3d-cutaz-out').textContent = `${az}°`;
+    if (scene3d) scene3d.setCutaway(t, (az * Math.PI) / 180);
+}
+$('tg-3d-cut').addEventListener('input', applyCutaway);
+$('tg-3d-cutaz').addEventListener('input', applyCutaway);
+
+/**
+ * Reflect which controls actually DO anything in the current mode.
+ *
+ * The cutaway plane is attached only to the layer-shell materials, and the
+ * mantle shell is forced transparent while the layer stack is open. Both
+ * sliders therefore go inert depending on mode — and a control that looks live
+ * and does nothing reads as a broken app, not as a setting that does not apply.
+ */
+function syncStageControls() {
+    const layers = $('tg-3d-interior').value === 'layers';
+    const setEnabled = (id, on, why) => {
+        const el = $(id);
+        el.disabled = !on;
+        const row = el.closest('.tg-field');
+        row.classList.toggle('tg-inert', !on);
+        row.title = on ? '' : why;
+    };
+    setEnabled('tg-3d-cut', layers, 'Cutaway applies to the layer stack — switch Interior to “Layer structure”.');
+    setEnabled('tg-3d-cutaz', layers, 'Cut angle applies to the layer stack — switch Interior to “Layer structure”.');
+    setEnabled('tg-3d-mantle', !layers, 'The mantle is hidden while the layer stack is open.');
+}
+
+$('tg-3d-interior').addEventListener('change', () => {
+    const layers = $('tg-3d-interior').value === 'layers';
+    syncStageControls();
+    if (scene3d) {
+        scene3d.setLayerMode(layers);
+        // Re-apply the current layer so the field shells come back correctly
+        // when switching out of layer mode.
+        const active = layerButtons.find((b) => b.getAttribute('aria-selected') === 'true');
+        scene3d.setLayer(active ? active.dataset.layer : 'external');
+    }
+    // Opening the layer stack with no cut shows only the outermost shell,
+    // which is the least informative possible view of a layered body.
+    //
+    // 88%, not 55%. The clip constant is 1.25·(1−f), so 55% puts the plane at
+    // 0.56 R_E — outside the outer core and nowhere near the inner core at
+    // 0.19. It looked open and revealed nothing. 88% lands at 0.15, inside the
+    // inner core, so every shell is actually cut.
+    if (layers && Number($('tg-3d-cut').value) === 0) {
+        $('tg-3d-cut').value = '88';
+        applyCutaway();
+    }
+    drawKey();
+});
+$('tg-decay-time').addEventListener('input', drawDecayLive);
 
 let paritySweep = null;
 async function runParitySweep() {
@@ -1392,7 +2073,7 @@ function drawParity() {
     const lo = Math.log10(50), hi = Math.log10(2500);
     if (!paritySweep) {
         axes(ctx, box, { xLabel: 'log₁₀ |D|', yLabel: 'growth rate', xTicks: [], yTicks: [] });
-        ctx.fillStyle = '#6d7691'; ctx.font = '12px system-ui, sans-serif';
+        ctx.fillStyle = '#767f9a'; ctx.font = '12px system-ui, sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText('press “Run the sweep”', box.x + box.w / 2, box.y + box.h / 2);
         return;
@@ -1428,6 +2109,13 @@ function drawParity() {
         linePath(ctx, rows.map((r) => [xOf(r.D), yOf(r.dipoleGrowth)]), '#ff9a56', 2);
         linePath(ctx, rows.map((r) => [xOf(r.D), yOf(r.quadrupoleGrowth)]), '#4fc3f7', 2);
     }
+    const win = rows.filter((r) => !mixed && r.margin > 0).map((r) => r.D);
+    describe($('tg-parity-chart'), mixed
+        ? 'Growth rate against dynamo number for a symmetric alpha-effect. The leading mode is '
+          + 'mixed-parity at every dynamo number — never a clean dipole.'
+        : `Growth rate against dynamo number for the dipole and quadrupole families. The dipole `
+          + `family wins between roughly ${win.length ? Math.min(...win) : '?'} and `
+          + `${win.length ? Math.max(...win) : '?'}, and loses to the quadrupole on both sides.`);
 }
 
 $('tg-res').addEventListener('input', () => { $('tg-res-out').textContent = $('tg-res').value; });
@@ -1449,14 +2137,21 @@ function renderLayer(name) {
         drawScreening();
     } else if (name === 'core') {
         fillCoreTables();
+        fillLayerDiagnostics();
         drawRikitake();
         drawParity();
+        drawDecayLive();
     }
 }
 
 const initial = ['core', 'field', 'external'].includes(location.hash.slice(1))
     ? location.hash.slice(1) : 'external';
 showLayer(initial);
+applyScreening();
+// The 3D view is the front door now, so it boots with the page rather than
+// waiting for the Core tab. Still dynamically imported: a WebGL failure has to
+// degrade to a message, not take the page with it.
+boot3d();
 
 let resizeTimer = null;
 window.addEventListener('resize', () => {
