@@ -233,6 +233,11 @@ test.describe('EarthView verdict card', () => {
     });
 
     test('factor chips expand predictive detail graphs', async ({ page }) => {
+        // Six sequential pointer actions on a WebGL page: under software GL
+        // each click's frame-stability check can take tens of seconds, and
+        // the default 60 s budget dies mid-sequence. Slow-test multiplier
+        // (3×) instead of trimming the interaction coverage.
+        test.slow();
         await bootWithCard(page);
         const card = page.locator('#ev-verdict-card');
         await expect(card.locator('[data-ev-chip="aqi"] .ev-verdict-fval')).toHaveText('42', { timeout: 30_000 });
