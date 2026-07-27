@@ -18,7 +18,8 @@ import assert from 'node:assert/strict';
 import {
     LAYERS, CURIE_K, CORE, dimensionlessNumbers, sphericalJn, jnFirstZero,
     freeDecayTime, freeDecayTable, mantleScreening, halfAttenuationPeriodYears,
-    AMPLITUDE_LADDER_NT, YEAR_S, R_CMB_M, D_MANTLE_M,
+    AMPLITUDE_LADDER_NT, YEAR_S, R_CMB_M, R_IC_M, D_MANTLE_M,
+    layerDiagnostics, tangentCylinderLatitudeDeg, TANGENT_CYLINDER_RADIUS_M,
 } from '../js/geomag/core-model.js';
 
 let passed = 0;
@@ -178,6 +179,88 @@ const near = (a, b, tol, msg) =>
             + 'that inequality IS the argument for putting a nowcast under a field model');
     }
     ok('layers tile the radius, the core is 10⁵× more conductive than the mantle, and external signals bury the core one');
+}
+
+// ── 7. Per-layer diagnostics: only ONE layer can run a dynamo ────────────────
+{
+    const diag = layerDiagnostics();
+    assert.equal(diag.length, 5);
+    const by = Object.fromEntries(diag.map((L) => [L.name, L]));
+
+    // THE POINT OF THE TABLE. Exactly one layer clears Rm ≈ 40.
+    const dynamos = diag.filter((L) => L.canSustainDynamo);
+    assert.equal(dynamos.length, 1, `exactly one layer should host a dynamo, got ${dynamos.length}`);
+    assert.equal(dynamos[0].name, 'Outer core');
+    near(by['Outer core'].magneticReynolds, 1135, 5, 'outer-core magnetic Reynolds number');
+
+    // And NOT because it is the most conductive — the inner core is IDENTICAL.
+    // Rm is a product, and a solid layer contributes U = 0 however conductive.
+    assert.equal(by['Inner core'].sigma, by['Outer core'].sigma,
+        'the inner core is exactly as conductive as the outer core — that is the point');
+    assert.equal(by['Inner core'].flowMs, 0, 'a solid layer has no flow');
+    assert.equal(by['Inner core'].magneticReynolds, 0,
+        'zero flow must give zero Rm regardless of conductivity');
+    assert.ok(by['Outer core'].flowMs > 0, 'the outer core is the only layer that moves');
+
+    // Only the crust is below its Curie point, so only the crust can hold
+    // permanent magnetisation — 35 km of the 6,371.
+    const magnetisable = diag.filter((L) => L.permanentlyMagnetisable);
+    assert.equal(magnetisable.length, 1);
+    assert.equal(magnetisable[0].name, 'Crust');
+    assert.ok(magnetisable[0].thicknessKm < 50, 'the magnetisable layer is thin');
+
+    // The inner core's own diffusion time — slow enough to resist a rapid
+    // reversal of the field around it, which is the basis of a real published
+    // hypothesis, so the number has to be right.
+    near(by['Inner core'].diffusionTimeYears, 6020, 60, 'inner-core diffusion time');
+    assert.ok(by['Outer core'].diffusionTimeYears > by['Inner core'].diffusionTimeYears,
+        'the thicker outer core must diffuse more slowly than the inner core');
+
+    // Mantle diffusion times are SECONDS, not millennia — six orders of
+    // magnitude of σ across the CMB is the whole reason the field looks the way
+    // it does from outside.
+    assert.ok(by['Lower mantle'].diffusionTimeYears * YEAR_S < 1e8,
+        'the mantle must diffuse fast compared with the core');
+    assert.ok(by['Outer core'].sigma / by['Lower mantle'].sigma > 1e5,
+        'σ must fall by >5 orders of magnitude across the core–mantle boundary');
+    ok(`layers: 1 of 5 can host a dynamo (Rm ${Math.round(by['Outer core'].magneticReynolds)}), and the inner core is equally conductive with Rm 0`);
+}
+
+// ── 8. The tangent cylinder ──────────────────────────────────────────────────
+{
+    // By definition it is tangent to the inner core, so its radius IS the
+    // inner-core radius. If those ever diverge, the geometry is wrong.
+    assert.equal(TANGENT_CYLINDER_RADIUS_M, R_IC_M,
+        'the tangent cylinder is tangent to the inner core by definition');
+
+    // sin(colatitude) = r_IC / r_CMB ⇒ ~69.4° latitude at the top of the core.
+    const lat = tangentCylinderLatitudeDeg();
+    near(lat, 69.45, 0.1, 'latitude at which the tangent cylinder meets the CMB');
+    // It must be high-latitude but NOT the pole — a common slip.
+    assert.ok(lat > 60 && lat < 80,
+        `the tangent cylinder meets the CMB at high latitude, not at the pole (${lat.toFixed(1)}°)`);
+
+    // Closed form: 90 − asin(r_IC/r_CMB).
+    const expected = 90 - (Math.asin(R_IC_M / R_CMB_M) * 180) / Math.PI;
+    near(lat, expected, 1e-9, 'tangent-cylinder latitude vs its closed form');
+    // A LARGER inner core makes a WIDER cylinder, which therefore meets the
+    // CMB sphere further from the pole — i.e. at LOWER latitude. (Written the
+    // other way round first, which is the intuitive-sounding and wrong answer:
+    // "bigger core, bigger everything" does not survive the geometry.)
+    const bigger = tangentCylinderLatitudeDeg(R_IC_M * 1.5, R_CMB_M);
+    assert.ok(bigger < lat,
+        `a larger inner core widens the cylinder, so it meets the CMB at LOWER `
+        + `latitude: ${bigger.toFixed(1)}° vs ${lat.toFixed(1)}°`);
+    // In the limit the cylinder touches the CMB at the equator.
+    near(tangentCylinderLatitudeDeg(R_CMB_M, R_CMB_M), 0, 1e-9,
+        'an inner core filling the whole core puts the tangent cylinder at the equator');
+
+    // Rotation has to actually dominate, or the Taylor–Proudman argument the
+    // cylinder rests on does not apply.
+    const n = dimensionlessNumbers();
+    assert.ok(n.rossby < 1e-3,
+        `the tangent cylinder only means anything if Coriolis dominates inertia; Rossby = ${n.rossby}`);
+    ok(`tangent cylinder: radius = inner-core radius, meets the CMB at ${lat.toFixed(2)}°, Rossby ${n.rossby.toExponential(1)}`);
 }
 
 console.log(`\n✅ geomag-core-model — ${passed} checks passed`);

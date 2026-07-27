@@ -83,6 +83,18 @@ function violationsFor(html) {
   if (!/[\/.]js\/nav\.js/.test(html)) v.push('noNavJs');
   if (!/nav-styles/.test(html)) v.push('noNavStyles');
   if (hasGhostNavCss(html)) v.push('ghostCss');
+  // initNav() does `document.querySelector('nav')` and RETURNS EARLY when
+  // there is none — it populates a shell, it does not create one. So a page
+  // can import nav.js, load nav-styles.css, pass every other check here, and
+  // still render no navigation at all. That is a silent failure with no
+  // console error and nothing in a diff to notice, and it has now shipped
+  // twice. Importing the module is not the invariant; having a nav is.
+  //
+  // Only checked for pages that DO import nav.js. A deliberately chromeless
+  // page (auth-callback, reset-password, the token gallery) has no shell
+  // because it wants no nav, and it is already described by noNavJs — adding
+  // a second finding for the same intent would just be baseline noise.
+  if (!v.includes('noNavJs') && !/<nav[\s>]/i.test(html)) v.push('noNavShell');
   return v;
 }
 

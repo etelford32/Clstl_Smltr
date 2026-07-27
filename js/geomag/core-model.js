@@ -91,7 +91,13 @@ export function dimensionlessNumbers(core = CORE) {
 export function sphericalJn(n, x) {
     if (x === 0) return n === 0 ? 1 : 0;
     if (n === 0) return Math.sin(x) / x;
-    const start = n + 25 + Math.ceil(Math.sqrt(40 * n));
+    // The recurrence must start above BOTH n and x. Starting from n alone is
+    // fine while x ≲ n (which is where the first zeros live, so the zeros were
+    // never wrong) but loses accuracy badly for x ≫ n — the independent
+    // cross-check in tests/geomag-diffusion.mjs caught 1.8e-4 of disagreement
+    // at n=1, x=28.
+    const m = Math.max(n, Math.ceil(x));
+    const start = m + 25 + Math.ceil(Math.sqrt(40 * m));
     let jp1 = 0;
     let j = 1e-300;
     let want = 0;
@@ -165,6 +171,90 @@ export function freeDecayTable(degrees = [1, 2, 3, 4, 5, 8, 13, 20]) {
     return degrees.map((n) => {
         const t = freeDecayTime(n);
         return { n, kn: jnFirstZero(n), years: t / YEAR_S, ratioToDipole: t / t1 };
+    });
+}
+
+// ── Layer-by-layer magnetic diagnostics ──────────────────────────────────────
+
+/**
+ * Radius of the TANGENT CYLINDER — the cylinder tangent to the inner core and
+ * aligned with the rotation axis. It equals the inner-core radius by
+ * definition, and it is arguably the single most important piece of geometry
+ * in the core.
+ *
+ * ── WHY A CYLINDER, AND NOT A SPHERE ─────────────────────────────────────
+ * The Taylor–Proudman theorem: in a rapidly rotating fluid where Coriolis
+ * dominates (Rossby ≈ 10⁻⁶ here, so it does overwhelmingly), the flow becomes
+ * invariant along the rotation axis — fluid moves in columns. A column that
+ * would have to pass through the SOLID inner core cannot exist, so the fluid
+ * splits into two dynamically separate regions with the tangent cylinder as
+ * the wall between them:
+ *
+ *   • OUTSIDE it — columnar convection rolls, helical because Coriolis twists
+ *     rising fluid. Opposite handedness in the two hemispheres, which is
+ *     exactly the antisymmetric α-effect that dynamo.js shows can prefer a
+ *     dipole. This is where the dipole is made.
+ *   • INSIDE it — the polar regions, largely decoupled, with a different flow
+ *     regime and (in models and in core-flow inversions) a polar vortex.
+ *
+ * So "rotation selects the dipole" is not a slogan: it is this geometry.
+ */
+export const TANGENT_CYLINDER_RADIUS_M = R_IC_M;
+
+/**
+ * Latitude at which the tangent cylinder meets the core–mantle boundary.
+ *
+ * sin(colatitude) = r_IC / r_CMB, so it lands near 69.4° — and the boundary
+ * between the two flow regimes therefore projects to high latitude at the top
+ * of the core, not to the pole.
+ */
+export function tangentCylinderLatitudeDeg(rIcM = R_IC_M, rCmbM = R_CMB_M) {
+    return 90 - (Math.asin(Math.min(1, rIcM / rCmbM)) * 180) / Math.PI;
+}
+
+/**
+ * Per-layer magnetic diagnostics: what each shell does to a magnetic field,
+ * and whether a dynamo could operate in it at all.
+ *
+ * ── THE POINT OF THIS TABLE ──────────────────────────────────────────────
+ * Only ONE of the five layers can host a dynamo, and the reason is not that it
+ * is the most conductive — the inner core is EQUALLY conductive. It is that
+ * the outer core is the only layer that is both conductive AND moving. R_m is
+ * a product of the two, and a solid layer contributes U = 0 no matter how
+ * conductive it is. The inner core is a passive conductor that the field
+ * diffuses through; the mantle is an insulator by comparison and merely
+ * screens; the crust is the only layer that carries permanent magnetisation,
+ * and it is 35 km thick.
+ *
+ * `flowMs` is zero everywhere except the outer core, and that is the whole
+ * story of the table.
+ */
+export function layerDiagnostics(core = CORE) {
+    const eta = (sigma) => 1 / (MU0 * sigma);
+    return LAYERS.map((L) => {
+        const thicknessM = (L.rOuterKm - L.rInnerKm) * 1e3;
+        const e = eta(L.sigma);
+        // Flow exists only in the liquid outer core. Everything else is solid
+        // (inner core, mantle, crust) on the timescales that matter here.
+        const flowMs = L.name === 'Outer core' ? core.U : 0;
+        const rm = (flowMs * thicknessM) / e;
+        // Diffusion time across the layer's OWN thickness, τ ≈ μ₀σd²/π².
+        const tauS = (MU0 * L.sigma * thicknessM * thicknessM) / (Math.PI * Math.PI);
+        return {
+            ...L,
+            thicknessKm: L.rOuterKm - L.rInnerKm,
+            etaM2S: e,
+            flowMs,
+            magneticReynolds: rm,
+            diffusionTimeYears: tauS / YEAR_S,
+            // Dynamo action needs R_m above roughly 40. Conductivity alone is
+            // not enough, and this column is where that becomes obvious.
+            canSustainDynamo: rm > 40,
+            // Above its Curie point ⇒ no permanent magnetisation possible.
+            // Only the crust is cold enough, which is why the Lowes spectrum
+            // changes character above degree 13.
+            permanentlyMagnetisable: L.name === 'Crust',
+        };
     });
 }
 

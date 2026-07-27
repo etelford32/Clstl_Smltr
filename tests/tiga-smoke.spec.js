@@ -57,20 +57,44 @@ async function mockFeed(page) {
     });
 }
 
-/** Collect page errors and console errors, ignoring the mocked-route noise. */
+/**
+ * Collect page errors and console errors.
+ *
+ * Two classes are filtered, both narrowly and for a stated reason — a broad
+ * filter here would quietly swallow the import typos this check exists to catch:
+ *
+ *  1. Resource-load failures. The observatory route is deliberately mocked to
+ *     503 in most of these tests, and favicons/manifests are absent locally.
+ *  2. The shared nav's OPTIONAL Supabase client, which it lazy-imports from a
+ *     CDN. Mounting the site nav on this page (it previously had none, which
+ *     was the bug) brought that dependency with it, and the CDN is unreachable
+ *     from a sandboxed test runner. It is third-party and outside this page's
+ *     control; auth is not part of what tiga.html does. Anything else — including
+ *     any error naming a js/geomag module — still fails the test.
+ */
 function watchErrors(page) {
     const errors = [];
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
     page.on('console', (m) => {
         if (m.type() !== 'error') return;
         const t = m.text();
-        if (/Failed to load resource/i.test(t)) return;   // mocked 503s and favicons
+        if (/Failed to load resource/i.test(t)) return;
+        if (/\[Supabase\].*(cdn\.jsdelivr\.net|supabase-js)/i.test(t)) return;
         errors.push(`console: ${t}`);
     });
     return errors;
 }
 
 test.describe('tiga.html', () => {
+    // The page genuinely COMPUTES on boot — the External layer runs the full
+    // observing-system experiment before it can print the definition floor, and
+    // the Core layer solves a diffusion problem. Under parallel workers that
+    // contends with the 3D test and can exceed a 30s assertion timeout; the
+    // suite showed exactly one flake there. Raising the budget is the honest
+    // fix (the work is real and CI runners are slower than this one) rather
+    // than retrying until it passes.
+    test.slow();
+
     test('boots clean, and the External layer computes the definition floor offline', async ({ page }) => {
         const errors = watchErrors(page);
         await killFeed(page);
@@ -80,7 +104,7 @@ test.describe('tiga.html', () => {
 
         // The index definition floor is deterministic — the same 11.36 nT the
         // Node gate pins — and it must appear WITHOUT any network.
-        await expect(page.locator('#tg-floor-value')).toHaveText(/11\.3[0-9] nT/, { timeout: 30000 });
+        await expect(page.locator('#tg-floor-value')).toHaveText(/11\.3[0-9] nT/, { timeout: 60000 });
 
         // Estimation error must be materially below the floor. That separation
         // is the product argument, so a page that showed otherwise is broken.
@@ -94,7 +118,7 @@ test.describe('tiga.html', () => {
         await expect(rows.first()).toContainText('-87.300000000');
 
         // The dropout curve must have run and reported a flat result.
-        await expect(page.locator('#tg-dropout-status')).toContainText('Flat across', { timeout: 30000 });
+        await expect(page.locator('#tg-dropout-status')).toContainText('Flat across', { timeout: 60000 });
 
         expect(errors).toEqual([]);
     });
@@ -105,7 +129,7 @@ test.describe('tiga.html', () => {
         await page.goto(PAGE, { waitUntil: 'load' });
 
         const status = page.locator('#tg-live-status');
-        await expect(status).toHaveClass(/err/, { timeout: 30000 });
+        await expect(status).toHaveClass(/err/, { timeout: 60000 });
         await expect(status).toContainText('Live network unavailable');
         // …and it says WHY that is not a failure of the argument.
         await expect(status).toContainText('runs offline');
@@ -122,7 +146,7 @@ test.describe('tiga.html', () => {
         await page.goto(PAGE, { waitUntil: 'load' });
 
         // The posterior is the product — a value without a σ is not the deliverable.
-        await expect(page.locator('#tg-live-sigma')).toHaveText(/± \d+(\.\d+)? nT/, { timeout: 30000 });
+        await expect(page.locator('#tg-live-sigma')).toHaveText(/± \d+(\.\d+)? nT/, { timeout: 60000 });
         await expect(page.locator('#tg-live-value')).toHaveText(/-?\d+(\.\d+)? nT/);
         await expect(page.locator('#tg-live-n')).toHaveText('6');   // BRW cut, six kept
 
@@ -215,6 +239,349 @@ test.describe('tiga.html', () => {
         // ONE DECADE. That is the result: a dipole is not inevitable.
         await expect(page.locator('#tg-window-decades')).toHaveText(/1\.0\d decades/);
         expect(errors).toEqual([]);
+    });
+
+    test('the site navigation actually mounts', async ({ page }) => {
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+
+        // REGRESSION GATE. initNav() does `document.querySelector('nav')` and
+        // returns early when there is none — it POPULATES a shell, it does not
+        // create one. This page shipped once without the shell: no console
+        // error, nothing in the diff, and no navigation on the page at all.
+        // Asserting the <nav> tag exists is not enough, because an empty shell
+        // looks identical in the markup — assert it got FILLED.
+        await expect(page.locator('nav')).toHaveCount(1);
+        await expect(page.locator('nav a').first()).toBeVisible();
+        expect(await page.locator('nav a').count()).toBeGreaterThan(20);
+        await expect(page.locator('#nav-burger')).toHaveCount(1);
+
+        // The skip link must reach the main landmark.
+        const target = await page.locator('.skip-link').getAttribute('href');
+        expect(target).toBe('#main-content');
+        await expect(page.locator('#main-content')).toHaveCount(1);
+    });
+
+    test('the layer tabs follow the ARIA tabs keyboard pattern', async ({ page }) => {
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+
+        const tabs = page.locator('.tg-layer');
+        // Roving tabindex: exactly one tab in the tab order, not three.
+        const tabIndexes = await tabs.evaluateAll((els) => els.map((e) => e.tabIndex));
+        expect(tabIndexes.filter((t) => t === 0)).toHaveLength(1);
+
+        await page.locator('#tg-tab-external').focus();
+        await page.keyboard.press('ArrowRight');   // wraps to the first tab
+        await expect(page.locator('#tg-tab-core')).toHaveAttribute('aria-selected', 'true');
+        // Arrow keys must MOVE FOCUS as well as selection, or a keyboard user
+        // is stranded on the tab they started from.
+        expect(await page.evaluate(() => document.activeElement.dataset.layer)).toBe('core');
+
+        await page.keyboard.press('End');
+        await expect(page.locator('#tg-tab-external')).toHaveAttribute('aria-selected', 'true');
+        await page.keyboard.press('Home');
+        await expect(page.locator('#tg-tab-core')).toHaveAttribute('aria-selected', 'true');
+
+        // Panels must be focusable so focus can land inside them.
+        await expect(page.locator('#tg-panel-core')).toHaveAttribute('tabindex', '0');
+
+        // The toggle groups announce their state.
+        await expect(page.locator('#tg-field-tabs button[aria-pressed="true"]')).toHaveCount(1);
+        await expect(page.locator('#tg-alias-tabs button[aria-pressed="true"]')).toHaveCount(1);
+    });
+
+    test('charts carry text alternatives with the actual numbers in them', async ({ page }) => {
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+
+        // A <canvas> is an empty element to a screen reader. Every chart that
+        // has been drawn must carry role="img" and a label containing the
+        // finding, not just "chart".
+        const floor = page.locator('#tg-floor-chart');
+        await expect(floor).toHaveAttribute('role', 'img', { timeout: 60000 });
+        const label = await floor.getAttribute('aria-label');
+        expect(label).toMatch(/11\.3\d nanotesla/);       // the definition floor
+        expect(label.length).toBeGreaterThan(60);
+
+        await expect(page.locator('#tg-dropout-chart'))
+            .toHaveAttribute('aria-label', /stations/, { timeout: 60000 });
+
+        // Status regions must announce async results rather than changing silently.
+        await expect(page.locator('#tg-live-status')).toHaveAttribute('aria-live', 'polite');
+        await expect(page.locator('#tg-dropout-status')).toHaveAttribute('aria-live', 'polite');
+
+        // And the lazily-drawn panels label their charts too, once drawn.
+        await page.click('[data-layer="field"]');
+        await expect(page.locator('#tg-field-map'))
+            .toHaveAttribute('aria-label', /South Atlantic Anomaly/, { timeout: 60000 });
+    });
+
+    test('the page never scrolls horizontally, at any width', async ({ page }) => {
+        // The repo rule: wide content scrolls inside its own container, the
+        // body never does. Four-column numeric tables overflowed a 390px
+        // viewport by 14px — a sideways-scrolling page on every phone.
+        await killFeed(page);
+        for (const width of [390, 768, 1024]) {
+            await page.setViewportSize({ width, height: 900 });
+            await page.goto(PAGE, { waitUntil: 'load' });
+            await expect(page.locator('#tg-floor-value')).toHaveText(/nT/, { timeout: 60000 });
+            const doc = await page.evaluate(() => document.documentElement.scrollWidth);
+            expect(doc, `body scrolls horizontally at ${width}px`).toBeLessThanOrEqual(width);
+        }
+
+        // The tables that would otherwise overflow must be inside a keyboard-
+        // reachable scroll region — a box only a finger can pan fails 2.1.1.
+        const regions = page.locator('.tg-scroll');
+        expect(await regions.count()).toBeGreaterThan(0);
+        await expect(regions.first()).toHaveAttribute('tabindex', '0');
+        await expect(regions.first()).toHaveAttribute('aria-label', /.+/);
+    });
+
+    test('the 3D core view mounts and its numbers come from the kernels', async ({ page }) => {
+        test.setTimeout(180000);
+        const errors = watchErrors(page);
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.click('[data-layer="core"]');
+
+        // WebGL may be unavailable on a runner. The scene is dynamically
+        // imported so that degrades to a message rather than taking the whole
+        // Core layer down — and the layer's other content must be intact
+        // either way, since all of it is pure computation.
+        const msg = page.locator('#tg-stage-msg');
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+
+        const failed = (await msg.count()) > 0;
+        if (failed) {
+            await expect(msg).toContainText('unaffected');
+        } else {
+            await expect(page.locator('#tg-stage canvas')).toHaveCount(1);
+            // Peak |B_r| at the CMB is ~800 µT — roughly an order of magnitude
+            // above the surface field, which is the continuation doing its job.
+            const peak = parseFloat(await page.locator('#tg-3d-peak').textContent());
+            expect(peak).toBeGreaterThan(300);
+            expect(peak).toBeLessThan(2000);
+            // Reversed flux is a real, bounded quantity — an inverted sign
+            // convention showed up as ~80% and it must not come back.
+            const rev = parseFloat(await page.locator('#tg-3d-reversed').textContent());
+            expect(rev).toBeGreaterThan(2);
+            expect(rev).toBeLessThan(45);
+            // Some traced lines escape the core and some close inside it.
+            await expect(page.locator('#tg-3d-lines')).toHaveText(/\d+ \/ \d+/);
+            await expect(page.locator('#tg-3d-status')).toContainText('L-shell');
+        }
+
+        // The diffusion solve runs regardless of WebGL — it is pure JS.
+        await expect(page.locator('#tg-decay-live-legend')).toContainText('degree 1 at 100.0%');
+        await page.locator('#tg-decay-time').fill('12000');
+        await page.locator('#tg-decay-time').dispatchEvent('input');
+        // THE RESULT: the dipole survives where the high degrees do not.
+        await expect(page.locator('#tg-decay-live-legend'))
+            .toContainText(/degree 1 at [456]\d\.\d%/, { timeout: 60000 });
+        const legend = await page.locator('#tg-decay-live-legend').textContent();
+        const hi = parseFloat(legend.match(/degree 13 at ([\d.]+)%/)[1]);
+        expect(hi).toBeLessThan(2);
+
+        expect(errors).toEqual([]);
+    });
+
+    test('the layer cutaway opens toward the camera and survives orbiting', async ({ page }) => {
+        test.setTimeout(180000);
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.click('[data-layer="core"]');
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+        if (await page.locator('#tg-stage-msg').count()) test.skip(true, 'no WebGL on this runner');
+
+        // Switching to the layer stack must auto-open the cut. Showing a
+        // layered body intact is the least informative view of it there is.
+        await page.selectOption('#tg-3d-interior', 'layers');
+        await expect(page.locator('#tg-3d-cut-out')).not.toHaveText('0%');
+
+        // The cut plane is re-derived from the CAMERA every frame. A world-fixed
+        // plane means orbiting 180° puts the opening behind the body, so the
+        // control only works from one angle.
+        //
+        // Asserting the INVARIANT directly rather than dragging: the plane
+        // normal must point opposite the camera's azimuth, so
+        // normal.x = −x/√(x²+z²). A synthetic drag tests whether Playwright can
+        // reach OrbitControls, which is not the behaviour under test.
+        const check = async () => page.evaluate(() => {
+            const s = window.__tigaScene;
+            if (!s) return null;
+            const p = s.camera.position;
+            const len = Math.hypot(p.x, p.z) || 1;
+            return { nx: s.clipPlane.normal.x, want: -p.x / len, constant: s.clipPlane.constant };
+        });
+
+        const a = await check();
+        expect(a).not.toBeNull();
+        expect(Math.abs(a.nx - a.want)).toBeLessThan(0.02);
+
+        // Setting the camera position by hand does NOT work here and it is worth
+        // saying why: OrbitControls keeps its own damped spherical state and
+        // restores the camera from it on the next update, so a direct write is
+        // reverted before the clip is derived. The offset slider is the honest
+        // way to move the plane relative to the camera.
+        await page.locator('#tg-3d-cutaz').fill('90');
+        await page.locator('#tg-3d-cutaz').dispatchEvent('input');
+        await page.waitForTimeout(500);
+        const b = await check();
+        // A 90° offset must rotate the normal 90° from the camera-facing one.
+        expect(Math.abs(b.nx - a.nx)).toBeGreaterThan(0.3);
+        expect(Math.hypot(b.nx, 0)).toBeLessThanOrEqual(1.001);
+
+        await page.locator('#tg-3d-cutaz').fill('0');
+        await page.locator('#tg-3d-cutaz').dispatchEvent('input');
+        await page.waitForTimeout(500);
+        const back = await check();
+        expect(Math.abs(back.nx - back.want)).toBeLessThan(0.02);
+
+        // Opening the cut further must push the plane toward the centre.
+        await page.locator('#tg-3d-cut').fill('100');
+        await page.locator('#tg-3d-cut').dispatchEvent('input');
+        await page.waitForTimeout(400);
+        const c = await check();
+        expect(c.constant).toBeLessThan(back.constant);
+        expect(c.constant).toBeCloseTo(0, 5);   // a full hemisphere removed
+    });
+
+    test('the layer table shows exactly one dynamo-capable shell', async ({ page }) => {
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.click('[data-layer="core"]');
+
+        const rows = page.locator('#tg-layerdiag-table tbody tr');
+        await expect(rows).toHaveCount(5, { timeout: 30000 });
+        // Exactly one layer clears Rm ≈ 40 — and it is not the most conductive
+        // one, it is the only one that MOVES.
+        await expect(page.locator('#tg-layerdiag-table tbody tr.tg-hi')).toHaveCount(1);
+        await expect(page.locator('#tg-layerdiag-table tbody tr.tg-hi')).toContainText('Outer core');
+        await expect(page.locator('#tg-layerdiag-table tbody')).toContainText('magnetisable');
+
+        // The two numbers the callouts quote must be live, not hard-coded prose.
+        await expect(page.locator('#tg-ic-tau')).toHaveText(/6,0\d\d-year/);
+        await expect(page.locator('#tg-tc-lat')).toHaveText(/69\.\d°/);
+    });
+
+    test('controls that cannot act are visibly disabled, not silently inert', async ({ page }) => {
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+        if (await page.locator('#tg-stage-msg').count()) test.skip(true, 'no WebGL on this runner');
+
+        // The clip plane is attached only to the layer-shell materials, and the
+        // mantle shell is forced transparent while the layer stack is open. So
+        // each of these sliders is genuinely inert in one mode — and a control
+        // that looks live and does nothing reads as a broken app rather than as
+        // a setting that does not apply here.
+        await expect(page.locator('#tg-3d-cut')).toBeDisabled();
+        await expect(page.locator('#tg-3d-cutaz')).toBeDisabled();
+        await expect(page.locator('#tg-3d-mantle')).toBeEnabled();
+
+        await page.selectOption('#tg-3d-interior', 'layers');
+        await expect(page.locator('#tg-3d-cut')).toBeEnabled();
+        await expect(page.locator('#tg-3d-cutaz')).toBeEnabled();
+        await expect(page.locator('#tg-3d-mantle')).toBeDisabled();
+
+        // Disabled is not enough on its own — it has to say WHY.
+        const row = page.locator('#tg-3d-mantle').locator('xpath=ancestor::div[contains(@class,"tg-field")][1]');
+        await expect(row).toHaveAttribute('title', /layer stack/);
+
+        await page.selectOption('#tg-3d-interior', 'field');
+        await expect(page.locator('#tg-3d-cut')).toBeDisabled();
+        await expect(page.locator('#tg-3d-mantle')).toBeEnabled();
+    });
+
+    test('the key is mode-aware and its swatches match the real materials', async ({ page }) => {
+        test.setTimeout(180000);
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+        if (await page.locator('#tg-stage-msg').count()) test.skip(true, 'no WebGL on this runner');
+
+        const labels = () => page.locator('#tg-key-body li .tg-key-lb')
+            .evaluateAll((els) => els.map((e) => e.firstChild.textContent.trim()));
+
+        // External: observatories are on screen, core-closed field lines are not.
+        await expect(page.locator('#tg-key')).toBeVisible();
+        let l = await labels();
+        expect(l).toContain('Observatory, N');
+        expect(l).not.toContain('Field line, closes in core');
+
+        // Core: the closed lines ARE on screen, the observatories are not. A
+        // static key listing everything the scene CAN draw would be wrong in
+        // every mode, because most of it is not visible in any given one.
+        await page.click('[data-layer="core"]');
+        l = await labels();
+        expect(l).toContain('Field line, closes in core');
+        expect(l).not.toContain('Observatory, N');
+
+        // Layer structure: five shells plus the tangent cylinder, each carrying
+        // its conductivity and its dynamo verdict.
+        await page.selectOption('#tg-3d-interior', 'layers');
+        l = await labels();
+        expect(l).toEqual(['Inner core', 'Outer core', 'Lower mantle', 'Upper mantle', 'Crust',
+            'Tangent cylinder']);
+        await expect(page.locator('#tg-key-body')).toContainText('σ 1e+6 S/m · dynamo');
+
+        // THE SWATCHES MUST MATCH THE MATERIALS. A key with its own hard-coded
+        // colours is a second source of truth that drifts the moment anyone
+        // retunes a material — silently, because both still render.
+        const mismatches = await page.evaluate(() => {
+            const P = window.__tigaScene.palettes;
+            const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
+            const want = Object.fromEntries(
+                Object.entries(P.LAYER_PALETTE).map(([k, v]) => [k, hex(v.color)]));
+            want['Tangent cylinder'] = hex(P.TANGENT_CYLINDER_COLOR);
+            return [...document.querySelectorAll('#tg-key-body li')]
+                .map((li) => {
+                    const name = li.querySelector('.tg-key-lb').firstChild.textContent.trim();
+                    const got = li.querySelector('.tg-key-sw').dataset.color;
+                    return want[name] && want[name] !== got ? `${name}: ${got} vs ${want[name]}` : null;
+                })
+                .filter(Boolean);
+        });
+        expect(mismatches).toEqual([]);
+
+        // Collapsible, and it says so to a screen reader.
+        await expect(page.locator('#tg-key-toggle')).toHaveAttribute('aria-expanded', 'true');
+        await page.click('#tg-key-toggle');
+        await expect(page.locator('#tg-key-toggle')).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.locator('#tg-key-body')).toBeHidden();
+    });
+
+    test('opening the layer stack cuts deep enough to expose the inner core', async ({ page }) => {
+        test.setTimeout(180000);
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+        if (await page.locator('#tg-stage-msg').count()) test.skip(true, 'no WebGL on this runner');
+
+        await page.selectOption('#tg-3d-interior', 'layers');
+        await page.waitForTimeout(600);
+        // The clip constant must land INSIDE the inner core (0.192 R_E), or the
+        // cutaway looks open and reveals nothing — which is what a 55% default
+        // did: the plane sat at 0.56, outside the outer core entirely.
+        const constant = await page.evaluate(() => window.__tigaScene.clipPlane.constant);
+        expect(constant).toBeLessThan(0.192);
+        expect(constant).toBeGreaterThanOrEqual(0);
     });
 
     test('every layer carries its honest label', async ({ page }) => {
