@@ -1214,13 +1214,13 @@ export class VerdictCard {
             const id = chip.getAttribute('data-ev-chip');
             this._detailChip = this._detailChip === id ? null : id;
             record('chip', { chip: id, detail: this._detailChip ? 'open' : 'close' });
-            this.refresh(true);
+            this._syncDetail();
             return;
         }
         if (e.target.closest('[data-ev-detail-close]')) {
             this._detailChip = null;
             record('chip_detail_close');
-            this.refresh(true);
+            this._syncDetail();
             return;
         }
         const day = e.target.closest('[data-ev-day]');
@@ -1252,6 +1252,33 @@ export class VerdictCard {
                 record('set_location_prompt');
                 break;
             }
+        }
+    }
+
+    /**
+     * Apply a chip-detail toggle surgically — swap only the detail panel
+     * and the chip highlight, NOT the whole body. A full refresh() here
+     * would replace every body node mid-tap; on slow devices (software GL,
+     * long frames) that turns rapid chip taps into clicks on detached
+     * nodes. The regular ≥5 s refresh path still re-renders the panel via
+     * _render, which is what keeps its data current.
+     */
+    _syncDetail() {
+        if (!this._body) return;
+        for (const btn of this._body.querySelectorAll('[data-ev-chip]')) {
+            const on = btn.getAttribute('data-ev-chip') === this._detailChip;
+            btn.classList.toggle('sel', on);
+            btn.setAttribute('aria-expanded', String(on));
+        }
+        const existing = this._body.querySelector('[data-ev="detail"]');
+        if (!this._detailChip) { existing?.remove(); return; }
+        const html = this._renderFactorDetail(this._inputs || {}, this._inputs?.loc?.tz);
+        if (existing) {
+            existing.outerHTML = html;
+        } else {
+            const factors = this._body.querySelector('.ev-verdict-factors');
+            if (factors) factors.insertAdjacentHTML('afterend', html);
+            else this.refresh(true);   // unexpected body shape → full render
         }
     }
 
