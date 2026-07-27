@@ -1,9 +1,9 @@
 /**
  * air-quality-feed.js — per-location Open-Meteo snapshot for the EarthView
- * verdict card: US AQI, UV (now + today's peak), hourly temperature /
- * precip-probability / cloud cover for the next ~48 h, and a 7-day daily
- * outlook. Keyless, CORS-enabled, same upstream family the page's global
- * weather grid already uses.
+ * verdict card: US AQI (now + the hourly series), UV (now + today's peak),
+ * hourly temperature / precip-probability / cloud cover / UV for the next
+ * ~48 h, and a 7-day daily outlook. Keyless, CORS-enabled, same upstream
+ * family the page's global weather grid already uses.
  *
  * Why this module fetches weather at all (not just AQI/UV): the page's
  * existing WeatherFeed / WeatherForecastFeed singletons operate on a global
@@ -44,6 +44,7 @@ export class AirQualityFeed {
         this._state = {
             status: 'idle',          // idle | loading | live | error
             aqi: null,
+            aqiHourly: [],           // [{time(ms), aqi}] ~48 h — chip detail graph
             uvNow: null,
             uvPeak: null,
             uvPeakHour: null,        // ms
@@ -177,6 +178,12 @@ export class AirQualityFeed {
                 }
             }
             next.aqi = aqi;
+            // Keep the whole hourly series — the response already carries
+            // ~48 h and the verdict card's AQI detail graph consumes it, so
+            // retaining it costs zero extra network.
+            next.aqiHourly = times
+                .map((t, i) => ({ time: t * 1000, aqi: numOrNull(aq.us_aqi?.[i]) }))
+                .filter(r => r.aqi != null);
         }
 
         next.status = 'live';

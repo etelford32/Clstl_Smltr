@@ -232,6 +232,39 @@ test.describe('EarthView verdict card', () => {
         await expect(page.locator('#lyr-rotate')).not.toBeChecked({ timeout: 15_000 });
     });
 
+    test('factor chips expand predictive detail graphs', async ({ page }) => {
+        await bootWithCard(page);
+        const card = page.locator('#ev-verdict-card');
+        await expect(card.locator('[data-ev-chip="aqi"] .ev-verdict-fval')).toHaveText('42', { timeout: 30_000 });
+
+        // AQI chip → detail panel with an SVG graph + EPA category summary.
+        await card.locator('[data-ev-chip="aqi"]').click();
+        await expect(card.locator('[data-ev="detail"]')).toBeVisible();
+        await expect(card.locator('[data-ev="detail"]')).toContainText('Air quality');
+        await expect(card.locator('[data-ev="detail"] svg')).toHaveCount(1);
+        await expect(card.locator('[data-ev="detail"]')).toContainText('now 42 (good)');
+        await expect(card.locator('[data-ev-chip="aqi"]')).toHaveAttribute('aria-expanded', 'true');
+
+        // Switching chips swaps the graph in place.
+        await card.locator('[data-ev-chip="clouds"]').click();
+        await expect(card.locator('[data-ev="detail"]')).toContainText('Cloud cover');
+        await expect(card.locator('[data-ev-chip="clouds"]')).toHaveAttribute('aria-expanded', 'true');
+        await expect(card.locator('[data-ev-chip="aqi"]')).toHaveAttribute('aria-expanded', 'false');
+
+        // Moon needs no feed at all — pure math series.
+        await card.locator('[data-ev-chip="moon"]').click();
+        await expect(card.locator('[data-ev="detail"]')).toContainText('Moon illumination');
+
+        // Re-clicking the open chip closes the panel; ✕ also closes.
+        await card.locator('[data-ev-chip="moon"]').click();
+        await expect(card.locator('[data-ev="detail"]')).toHaveCount(0);
+        await card.locator('[data-ev-chip="uv"]').click();
+        await expect(card.locator('[data-ev="detail"]')).toBeVisible();
+        await expect(card.locator('[data-ev="detail"]')).toContainText('UV index');
+        await card.locator('[data-ev-detail-close]').click();
+        await expect(card.locator('[data-ev="detail"]')).toHaveCount(0);
+    });
+
     test('?verdict=0 disables the card', async ({ page }) => {
         await bootWithCard(page, '/earth.html?verdict=0');
         // Give the lazy-init window time to (not) fire.

@@ -36,9 +36,16 @@
  * Degradation: any dep in error state renders its chip/row as '--' with
  * muted color; one dead feed never blanks the card (see verdict-engine's
  * input contract).
+ *
+ * Chip detail graphs: tapping a factor chip toggles an inline predictive
+ * graph for that metric (verdict-engine's factorForecast — clouds/UV/AQI
+ * hourly, Kp 3-h bars from the NOAA forecast, moon nightly, sun altitude).
+ * The open chip id lives in this._detailChip, so the panel survives the
+ * ≥5 s body re-renders; a metric with no data renders an empty state, not
+ * a fabricated line.
  */
 
-import { computeVerdict, sunAltitudeDeg, issMagEstimate, fmtClock } from './verdict-engine.js';
+import { computeVerdict, sunAltitudeDeg, issMagEstimate, fmtClock, factorForecast } from './verdict-engine.js';
 import { makePanelDraggable, resetPanelPosition } from './draggable-panel.js';
 import { compass16 } from './sun-altitude.js';
 import { telemetry } from './telemetry.js';
@@ -160,6 +167,20 @@ const CSS = `
 .ev-verdict-factor.watch .ev-verdict-fval{color:#ffb340}
 .ev-verdict-factor.block .ev-verdict-fval{color:#ff3050}
 .ev-verdict-fcat{font-family:var(--font-mono,'JetBrains Mono',monospace);font-size:.5rem;color:#5f7597;margin-top:1px}
+.ev-verdict-factor.sel{border-color:rgba(143,240,255,.6);background:rgba(31,143,255,.14);
+  box-shadow:0 0 12px rgba(31,143,255,.25)}
+
+/* chip detail graph — tap a factor chip to expand its predictive series */
+.ev-verdict-detail{margin:10px 20px 0;padding:10px 12px 9px;border-radius:12px;
+  border:1px solid rgba(143,240,255,.25);background:rgba(1,8,18,.55)}
+.ev-verdict-dhead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px}
+.ev-verdict-dclose{min-width:26px;min-height:26px;border-radius:7px;border:1px solid rgba(77,219,255,.25);
+  background:rgba(1,4,9,.5);color:#8ba3c7;font-size:.7rem;line-height:1}
+.ev-verdict-dclose:hover{border-color:rgba(77,219,255,.6);color:#f0f6ff}
+.ev-verdict-detail svg{width:100%;height:112px;display:block;overflow:visible}
+.ev-verdict-dsum{margin-top:5px;font-family:var(--font-mono,'JetBrains Mono',monospace);
+  font-size:.6rem;color:#8ba3c7}
+.ev-verdict-dempty{padding:14px 4px 8px;font-size:.72rem;color:#5f7597;line-height:1.5}
 
 /* temp graph */
 .ev-verdict-tgraph{padding:12px 20px 0}
@@ -335,6 +356,7 @@ export class VerdictCard {
         this._degradedSent = new Set();
         this._iss = { key: null, at: 0, passes: null };
         this._listeners = [];
+        this._detailChip = null;     // open chip-detail graph id (session-only)
         this._collapsed = false;
         try { this._collapsed = localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { /* default open */ }
 
@@ -641,7 +663,10 @@ export class VerdictCard {
             alerts,
             iss: this._iss.passes ? { passes: this._iss.passes } : null,
             astro,
-            air: air ? { aqi: air.aqi, uvNow: air.uvNow, uvPeak: air.uvPeak, uvPeakHour: air.uvPeakHour } : null,
+            air: air ? {
+                aqi: air.aqi, uvNow: air.uvNow, uvPeak: air.uvPeak,
+                uvPeakHour: air.uvPeakHour, aqiHourly: air.aqiHourly || [],
+            } : null,
             // Flux-rope ensemble summary (Phase 4 outlook row) — the page
             // fills this asynchronously and refresh()es; null renders no row.
             fluxRope: safe(() => d.getFluxRope?.()) || null,
@@ -719,14 +744,19 @@ export class VerdictCard {
         parts.push(`
         <div class="ev-verdict-factors">
             ${model.factors.map(f => `
-            <button class="ev-verdict-factor ${f.state || ''}" data-ev-chip="${esc(f.id)}"
-                    title="${esc(f.name)}: ${esc(f.val)} (${esc(f.cat)})">
+            <button class="ev-verdict-factor ${f.state || ''}${this._detailChip === f.id ? ' sel' : ''}" data-ev-chip="${esc(f.id)}"
+                    aria-expanded="${this._detailChip === f.id}"
+                    title="${esc(f.name)}: ${esc(f.val)} (${esc(f.cat)}) — tap for forecast">
                 <div class="ev-verdict-ficon">${f.icon}</div>
                 <div class="ev-verdict-fname">${esc(f.name)}</div>
                 <div class="ev-verdict-fval">${esc(f.val)}</div>
                 <div class="ev-verdict-fcat">${esc(f.cat)}</div>
             </button>`).join('')}
         </div>`);
+
+        if (this._detailChip) {
+            parts.push(this._renderFactorDetail(inputs, tz));
+        }
 
         if (model.tempSeries.length >= 4) {
             parts.push(this._renderTempGraph(model.tempSeries, inputs, tz));
@@ -852,6 +882,162 @@ export class VerdictCard {
                 ${ticks.join('')}
             </svg>
         </div>`;
+    }
+
+    /**
+     * Chip detail popout — a per-factor predictive graph in the same visual
+     * language as the temperature graph. Series come from verdict-engine's
+     * factorForecast (pure, unit-tested); this method only draws. A metric
+     * with no data yet renders an honest empty state.
+     */
+    _renderFactorDetail(inputs, tz) {
+        const id = this._detailChip;
+        let fc = null;
+        try { fc = factorForecast(id, inputs, Date.now()); } catch { fc = null; }
+        const title = fc ? fc.title : ({
+            clouds: 'Cloud cover', sun: 'Sun altitude', activity: 'Kp forecast',
+            moon: 'Moon illumination', aqi: 'Air quality', uv: 'UV index',
+        }[id] || 'Forecast');
+        const head = `
+            <div class="ev-verdict-dhead">
+                <div class="ev-verdict-mini">${esc(title)}</div>
+                <button class="ev-verdict-dclose" data-ev-detail-close
+                        title="Close forecast graph" aria-label="Close forecast graph">✕</button>
+            </div>`;
+        if (!fc) {
+            const why = !inputs.loc && id !== 'activity' && id !== 'moon'
+                ? 'Set a location to get a per-spot forecast.'
+                : 'No forecast data yet — the feed is still loading.';
+            return `
+            <div class="ev-verdict-detail" data-ev="detail">${head}
+                <div class="ev-verdict-dempty">${esc(why)}</div>
+            </div>`;
+        }
+        return `
+        <div class="ev-verdict-detail" data-ev="detail" data-ev-detail="${esc(id)}">${head}
+            ${this._detailSvg(fc, inputs, tz)}
+            <div class="ev-verdict-dsum">${esc(fc.summary || '')}</div>
+        </div>`;
+    }
+
+    /** Generic renderer for a factorForecast chart model (line or 3-h bars). */
+    _detailSvg(fc, inputs, tz) {
+        const W = 380, H = 112, TOP = 12, BOT = 86, TICK_Y = 98;
+        const s = fc.series;
+        const { lo, hi } = fc.domain;
+        const yv = (v) => TOP + (hi - v) / Math.max(hi - lo, 1e-9) * (BOT - TOP);
+        const isBars = fc.style === 'bars';
+        const slot = fc.slotMs || 3 * HOUR_MS;
+        const t0 = s[0].t;
+        const t1 = isBars ? s[s.length - 1].t + slot : s[s.length - 1].t;
+        const xt = (t) => (t - t0) / Math.max(t1 - t0, 1) * W;
+        const clampX = (x) => Math.max(0, Math.min(x, W - 24)).toFixed(1);
+        const spanH = (t1 - t0) / HOUR_MS;
+        const fmtV = (v) => fc.unit === '%' ? `${Math.round(v)}%`
+            : fc.unit === 'Kp' ? v.toFixed(1)
+            : fc.unit === '°' ? `${Math.round(v)}°`
+            : String(Math.round(v));
+
+        // Night shading — same convention as the temperature graph.
+        let night = '';
+        if (fc.ticks === 'hour' && inputs.loc) {
+            const N = 48;
+            let runStart = null;
+            for (let i = 0; i <= N; i++) {
+                const t = t0 + (t1 - t0) * i / N;
+                const dark = i < N && sunAltitudeDeg(inputs.loc.lat, inputs.loc.lon, t) < -6;
+                if (dark && runStart == null) runStart = t;
+                if (!dark && runStart != null) {
+                    night += `<rect x="${xt(runStart).toFixed(1)}" y="6" width="${(xt(t) - xt(runStart)).toFixed(1)}" height="${BOT - 4}" fill="rgba(3,10,26,.55)"/>`;
+                    runStart = null;
+                }
+            }
+        }
+
+        const grid = [1, 2, 3].map(k => {
+            const gy = (TOP + (BOT - TOP) * k / 4).toFixed(1);
+            return `<line x1="0" y1="${gy}" x2="${W}" y2="${gy}" stroke="rgba(77,219,255,.08)"/>`;
+        }).join('');
+
+        const thr = (fc.thresholds || [])
+            .filter(th => th.v > lo && th.v < hi)
+            .map(th => `<line x1="0" y1="${yv(th.v).toFixed(1)}" x2="${W}" y2="${yv(th.v).toFixed(1)}" stroke="rgba(143,240,255,.16)" stroke-dasharray="3 4"/>
+                <text class="ev-verdict-tgaxis" x="${W - 2}" y="${(yv(th.v) - 3).toFixed(1)}" text-anchor="end">${esc(th.label)}</text>`)
+            .join('');
+
+        // Time ticks: weekday per point for day charts, ~6 hour labels
+        // otherwise (weekday-prefixed once the span exceeds a day).
+        const ticks = [];
+        if (fc.ticks === 'day') {
+            for (let i = 0; i < s.length; i++) {
+                ticks.push(`<text class="ev-verdict-tgaxis" x="${Math.min(xt(s[i].t), W - 24).toFixed(0)}" y="${TICK_Y}">${esc(i === 0 ? 'now' : fmtDay(s[i].t, tz))}</text>`);
+            }
+        } else {
+            const step = Math.max(1, Math.round(s.length / 6));
+            for (let i = 0; i < s.length; i += step) {
+                let label = fmtClock(s[i].t, tz).replace(/:\d{2}\s?/, '').replace(' ', '');
+                if (spanH > 30) label = `${fmtDay(s[i].t, tz)} ${label}`;
+                ticks.push(`<text class="ev-verdict-tgaxis" x="${Math.min(xt(s[i].t), W - (spanH > 30 ? 46 : 22)).toFixed(0)}" y="${TICK_Y}">${esc(label)}</text>`);
+            }
+        }
+
+        let iMin = 0, iMax = 0;
+        s.forEach((p, i) => { if (p.v < s[iMin].v) iMin = i; if (p.v > s[iMax].v) iMax = i; });
+
+        let mark = '', labels = '';
+        if (isBars) {
+            // Kp palette mirrors the chip-state semantics: ≥5 (G1+) is
+            // aurora-GO green, 4–5 unsettled amber, quiet is calm blue.
+            mark = s.map(p => {
+                const bx = xt(p.t), bw = Math.max(xt(p.t + slot) - bx - 2, 2);
+                const color = p.v >= 5 ? '#2eff9e' : p.v >= 4 ? '#ffb340' : '#1f8fff';
+                const by = yv(p.v);
+                return `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(BOT - by, 1.5).toFixed(1)}" rx="2"
+                    fill="${color}" fill-opacity=".5" stroke="${color}" stroke-opacity=".85"/>`;
+            }).join('');
+            labels = `<text class="ev-verdict-tglab" x="${clampX(xt(s[iMax].t + slot / 2) - 8)}" y="${Math.max(yv(s[iMax].v) - 5, 12).toFixed(1)}">${esc(fmtV(s[iMax].v))}</text>`;
+        } else {
+            const pts = s.map(p => ({ x: xt(p.t), y: yv(p.v) }));
+            const line = smoothPath(pts);
+            mark = `
+                <path d="${line}" fill="none" stroke="url(#ev-verdict-dline)" stroke-width="2.2"
+                      stroke-linecap="round" filter="drop-shadow(0 0 5px rgba(31,143,255,.55))"/>
+                <path d="${line} L${W},${BOT} L0,${BOT} Z" fill="url(#ev-verdict-dfill)"/>`;
+            if (fc.ticks === 'day') {
+                mark += pts.map(p => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.4" fill="#8ff0ff"/>`).join('');
+            }
+            labels = `<circle cx="${pts[0].x.toFixed(1)}" cy="${pts[0].y.toFixed(1)}" r="3.2" fill="#8ff0ff" filter="drop-shadow(0 0 6px #4ddbff)"/>
+                <text class="ev-verdict-tglab" x="${(pts[0].x + 6).toFixed(1)}" y="${Math.max(pts[0].y - 5, 12).toFixed(1)}">${esc(fmtV(s[0].v))}</text>`;
+            if (iMax !== 0) {
+                labels += `<circle cx="${pts[iMax].x.toFixed(1)}" cy="${pts[iMax].y.toFixed(1)}" r="2.6" fill="#2eff9e"/>
+                    <text class="ev-verdict-tgaxis" x="${clampX(pts[iMax].x - 8)}" y="${Math.max(pts[iMax].y - 6, 12).toFixed(1)}">${esc(fmtV(s[iMax].v))}</text>`;
+            }
+            if (iMin !== 0 && iMin !== iMax && (s[iMax].v - s[iMin].v) > (hi - lo) * 0.05) {
+                labels += `<circle cx="${pts[iMin].x.toFixed(1)}" cy="${pts[iMin].y.toFixed(1)}" r="2.6" fill="#1f8fff"/>
+                    <text class="ev-verdict-tgaxis" x="${clampX(pts[iMin].x - 8)}" y="${Math.min(pts[iMin].y + 13, TICK_Y - 6).toFixed(1)}">${esc(fmtV(s[iMin].v))}</text>`;
+            }
+        }
+
+        let nowMark = '';
+        const nowMs = Date.now();
+        if (nowMs >= t0 && nowMs <= t1) {
+            const nx = xt(nowMs).toFixed(1);
+            nowMark = `<line x1="${nx}" y1="6" x2="${nx}" y2="${BOT + 2}" stroke="rgba(143,240,255,.5)" stroke-dasharray="2 3"/>`;
+        }
+
+        return `
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(fc.title)}">
+            <defs>
+                <linearGradient id="ev-verdict-dfill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#1f8fff" stop-opacity=".35"/>
+                    <stop offset="100%" stop-color="#2eff9e" stop-opacity="0"/>
+                </linearGradient>
+                <linearGradient id="ev-verdict-dline" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stop-color="#4ddbff"/><stop offset="55%" stop-color="#1f8fff"/><stop offset="100%" stop-color="#2eff9e"/>
+                </linearGradient>
+            </defs>
+            ${grid}${night}${thr}${mark}${nowMark}${labels}${ticks.join('')}
+        </svg>`;
     }
 
     _renderWeek(model, tz) {
@@ -1024,7 +1210,17 @@ export class VerdictCard {
     _onBodyClick(e) {
         const chip = e.target.closest('[data-ev-chip]');
         if (chip) {
-            record('chip', { chip: chip.getAttribute('data-ev-chip') });
+            // Toggle the predictive detail graph for this factor.
+            const id = chip.getAttribute('data-ev-chip');
+            this._detailChip = this._detailChip === id ? null : id;
+            record('chip', { chip: id, detail: this._detailChip ? 'open' : 'close' });
+            this.refresh(true);
+            return;
+        }
+        if (e.target.closest('[data-ev-detail-close]')) {
+            this._detailChip = null;
+            record('chip_detail_close');
+            this.refresh(true);
             return;
         }
         const day = e.target.closest('[data-ev-day]');
