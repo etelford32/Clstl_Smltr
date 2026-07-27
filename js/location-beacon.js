@@ -20,8 +20,20 @@
  *                   on staggered phases ("electrons")
  *
  * Everything lives in a THREE.Group parented to earthMesh, so geographic
- * position automatically tracks globe rotation. tick(t) is allocation-free
- * (scratch vectors are reused) — this runs every frame.
+ * position automatically tracks globe rotation. The group's ORIGIN is the
+ * surface point with local +Y aligned to the surface normal — children are
+ * positioned in that local frame. That structure is load-bearing: it lets
+ * tick() apply ONE uniform group scale about the beacon's base for the
+ * zoom-adaptive size (below). Absolute-positioned children would slide off
+ * the globe under scaling — don't restructure back.
+ *
+ * Zoom-adaptive scale: tick(t, camera) scales the whole beacon by
+ * camera-to-beacon distance (clamped), approximating constant SCREEN size.
+ * Without it the fixed world-size beacon (~0.26 R footprint) dwarfs the
+ * view after the "Fly here" landing (camera ~0.12 R off the surface).
+ * tick(t) without a camera keeps the last scale, so cold callers degrade
+ * gracefully. tick(t) is allocation-free (scratch vectors are reused) —
+ * this runs every frame.
  *
  * Palette: EarthView brand (verdict-card tokens) — cyan #4ddbff → blue
  * #1f8fff → green #2eff9e, warm-white core #fff7d0 so the marker survives
@@ -30,7 +42,7 @@
  * Usage (earth.html):
  *   const beacon = new LocationBeacon(THREE, earthMesh);
  *   beacon.show(geoToXYZ(lat, lon).multiplyScalar(1.003));  // surface point
- *   beacon.tick(t);                                          // per frame
+ *   beacon.tick(t, camera);                                  // per frame
  *   beacon.clear();                                          // location cleared
  */
 
@@ -53,6 +65,15 @@ const GEM_ALT      = 0.085;      // gem hover height above surface (globe radii)
 const GEM_BOB      = 0.012;
 const BEAM_LEN     = 0.26;
 
+// Zoom-adaptive scale (see header). REF is the camera→beacon distance at
+// the page's default view (camera 3 R from centre, beacon on the near
+// surface → ~2 R) where scale = 1 preserves the approved look. The floor
+// keeps a graze-the-surface zoom (CAM_FLOOR ≈ 1.025 R) from collapsing the
+// beacon to nothing; the cap keeps a full zoom-out (10 R) from ballooning.
+const SCALE_REF_DIST = 2.0;
+const SCALE_MIN      = 0.05;
+const SCALE_MAX      = 1.5;
+
 export class LocationBeacon {
     /**
      * @param {object} THREE   the three.js namespace (page supplies it so
@@ -64,11 +85,9 @@ export class LocationBeacon {
         this._T = THREE;
         this._parent = parent;
         this._group = null;
+        this._cam = null;        // last camera seen by tick (used by show)
 
         // Scratch state (allocation-free tick)
-        this._normal = new THREE.Vector3();
-        this._e1 = new THREE.Vector3();
-        this._e2 = new THREE.Vector3();
         this._vTmp = new THREE.Vector3();
         this._cRing = new THREE.Color();
         this._cA = new THREE.Color(COLOR_RING_A);
@@ -87,23 +106,19 @@ export class LocationBeacon {
         this.clear();
 
         const normal = surface.clone().normalize();
-        this._normal.copy(normal);
-        // Tangent basis for the orbiters: e1 ⟂ normal (stable except at the
-        // poles, where we fall back to the X axis), e2 completes the frame.
-        this._e1.set(0, 1, 0).cross(normal);
-        if (this._e1.lengthSq() < 1e-6) this._e1.set(1, 0, 0).cross(normal);
-        this._e1.normalize();
-        this._e2.crossVectors(normal, this._e1).normalize();
 
+        // Group origin = the surface point, local +Y = the surface normal.
+        // Children below are positioned in THIS frame (see module header —
+        // required by the zoom scale).
         const g = new THREE.Group();
         this._group = g;
-        this._surface = surface.clone();
+        g.position.copy(surface);
+        g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
 
         // 1. Core dot — hard centre so the marker survives bright daylight.
         const core = new THREE.Mesh(
             new THREE.SphereGeometry(0.012, 16, 16),
             new THREE.MeshBasicMaterial({ color: COLOR_CORE }));
-        core.position.copy(surface);
         g.add(core);
 
         // 2. Glow sprite — always faces the camera; cheap "bloom".
@@ -112,29 +127,26 @@ export class LocationBeacon {
             map: this._glowTex, transparent: true, opacity: 0.9,
             depthWrite: false, blending: THREE.AdditiveBlending,
         }));
-        this._glow.position.copy(surface);
         this._glow.scale.set(0.15, 0.15, 1);
         g.add(this._glow);
 
         // 3. Floating gem + wireframe shell — the "map pin", hovering.
+        //    Local +Y is already the surface normal, so rotation.y in tick
+        //    spins it like a top and the bob rides straight up.
         const gemGeo = new THREE.OctahedronGeometry(0.024);
         this._gem = new THREE.Mesh(gemGeo, new THREE.MeshBasicMaterial({
             color: COLOR_GEM, transparent: true, opacity: 0.85,
             depthWrite: false, blending: THREE.AdditiveBlending,
         }));
-        // Orient local +Y along the surface normal so the gem spins like a
-        // top on its own axis; position handled in tick (it bobs).
-        this._gem.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
         g.add(this._gem);
         this._gemWire = new THREE.Mesh(gemGeo, new THREE.MeshBasicMaterial({
             color: COLOR_GEM_W, wireframe: true, transparent: true, opacity: 0.5,
             depthWrite: false, blending: THREE.AdditiveBlending,
         }));
         this._gemWire.scale.setScalar(1.45);
-        this._gemWire.quaternion.copy(this._gem.quaternion);
         g.add(this._gemWire);
 
-        // 4. Radar rings — tangent to the sphere, staggered phases.
+        // 4. Radar rings — flat in the local tangent (XZ) plane, staggered.
         this._rings = [];
         const ringGeo = new THREE.RingGeometry(0.022, 0.030, 48);
         for (let i = 0; i < RING_COUNT; i++) {
@@ -143,15 +155,14 @@ export class LocationBeacon {
                 side: THREE.DoubleSide, depthWrite: false,
                 blending: THREE.AdditiveBlending,
             }));
-            ring.position.copy(surface);
-            ring.lookAt(0, 0, 0);            // tangent to the sphere
+            ring.rotation.x = -Math.PI / 2;  // XY-plane geometry → tangent
             g.add(ring);
             this._rings.push(ring);
         }
 
         // 5. Light pillar — gradient + scrolling bands in a tiny shader.
-        //    Geometry translated so its base sits AT the surface and the
-        //    body extends along local +Y (then +Y is aimed out the normal).
+        //    Geometry translated so its base sits AT the origin and the
+        //    body extends along local +Y (the surface normal).
         const beamGeo = new THREE.CylinderGeometry(0.005, 0.013, BEAM_LEN, 20, 1, true);
         beamGeo.translate(0, BEAM_LEN / 2, 0);
         this._beamMat = new THREE.ShaderMaterial({
@@ -182,8 +193,6 @@ export class LocationBeacon {
                 }`,
         });
         const beam = new THREE.Mesh(beamGeo, this._beamMat);
-        beam.position.copy(surface);
-        beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
         g.add(beam);
 
         // 6. Orbiting sparks.
@@ -202,13 +211,25 @@ export class LocationBeacon {
 
         g.renderOrder = 12;
         this._parent.add(g);
-        this.tick(0);   // place animated parts before the first frame
+        this.tick(0, this._cam);   // place animated parts + zoom scale
     }
 
-    /** Per-frame animation. `t` = seconds (the page's animate clock). */
-    tick(t) {
+    /**
+     * Per-frame animation. `t` = seconds (the page's animate clock);
+     * `camera` drives the zoom-adaptive scale (optional — omitting it
+     * keeps the last applied scale).
+     */
+    tick(t, camera = null) {
         if (!this._group) return;
-        const n = this._normal, s = this._surface, v = this._vTmp;
+        if (camera) this._cam = camera;
+        const v = this._vTmp;
+
+        // Zoom-adaptive scale: ~constant screen size (see header).
+        if (this._cam) {
+            const d = this._group.getWorldPosition(v).distanceTo(this._cam.position);
+            const s = Math.min(SCALE_MAX, Math.max(SCALE_MIN, d / SCALE_REF_DIST));
+            this._group.scale.setScalar(s);
+        }
 
         // Rings: quadratic ease-out expansion, colour cyan→green over life,
         // leading ring brightest (same phase math as the old marker).
@@ -223,12 +244,11 @@ export class LocationBeacon {
             ring.material.color.copy(this._cRing);
         }
 
-        // Gem: spin about the normal + bob.
+        // Gem: spin about the normal (local +Y) + bob.
         const bob = GEM_ALT + Math.sin(t * 2.1) * GEM_BOB;
-        v.copy(s).addScaledVector(n, bob);
-        this._gem.position.copy(v);
-        this._gemWire.position.copy(v);
-        this._gem.rotation.y = t * 1.4;          // local Y == surface normal
+        this._gem.position.set(0, bob, 0);
+        this._gemWire.position.set(0, bob, 0);
+        this._gem.rotation.y = t * 1.4;
         this._gemWire.rotation.y = -t * 0.9;     // counter-rotating shell
 
         // Glow sprite breath.
@@ -240,14 +260,12 @@ export class LocationBeacon {
         // Beam bands.
         this._beamMat.uniforms.uTime.value = t;
 
-        // Sparks: tangent-plane orbit with a slight vertical wave.
+        // Sparks: tangent-plane (local XZ) orbit with a slight vertical wave.
         for (let i = 0; i < this._sparks.length; i++) {
             const a = t * (0.9 + i * 0.35) + i * (Math.PI * 2 / SPARK_COUNT);
             const alt = 0.035 + Math.sin(a * 2 + i) * 0.010;
-            v.copy(s).addScaledVector(n, alt)
-                .addScaledVector(this._e1, Math.cos(a) * SPARK_RADIUS)
-                .addScaledVector(this._e2, Math.sin(a) * SPARK_RADIUS);
-            this._sparks[i].position.copy(v);
+            this._sparks[i].position.set(
+                Math.cos(a) * SPARK_RADIUS, alt, Math.sin(a) * SPARK_RADIUS);
             this._sparks[i].material.opacity = 0.55 + 0.45 * (Math.sin(a * 3) * 0.5 + 0.5);
         }
     }
