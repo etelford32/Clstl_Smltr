@@ -12139,7 +12139,9 @@ function animate() {
     // ── User location beacon (js/location-beacon.js): radar rings,
     // floating gem, glow sprite, light pillar, orbiting sparks. Parented
     // to earthMesh so geography tracks rotation; tick is allocation-free.
-    _userBeacon?.tick(t);
+    // The camera drives the beacon's zoom-adaptive scale (≈constant
+    // screen size — without it the marker dwarfs the fly-in landing view).
+    _userBeacon?.tick(t, camera);
 
     // ── Major-city dots: twinkle clock + point-size attenuation factor
     // (drawing-buffer height over the perspective half-angle — gl_PointSize

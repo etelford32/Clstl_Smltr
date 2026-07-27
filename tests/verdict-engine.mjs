@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import {
     computeVerdict, auroraVerdict, magneticLatitude, boundaryForKp,
     aqiCategory, aqiState, uvState, moonPhase, weatherGlyph,
-    sunAltitudeDeg, issMagEstimate, stormOutlook,
+    sunAltitudeDeg, issMagEstimate, stormOutlook, factorForecast,
 } from '../js/verdict-engine.js';
 
 let n = 0;
@@ -28,12 +28,13 @@ const LOC = { lat: 38.76, lon: -121.16, name: 'Granite Bay, CA', tz: TZ };
 /** Prototype-shaped cooling curve: 90° now → 66° low at +10 h (5 AM local). */
 const TEMPS_18H = [90, 87, 85, 82, 80, 78, 76, 74, 72, 70, 66, 66, 67, 70, 74, 78, 82, 85, 88];
 
-function mkHourly({ temps = TEMPS_18H, precipProb = 0, cloudPct = 10 } = {}) {
+function mkHourly({ temps = TEMPS_18H, precipProb = 0, cloudPct = 10, uv = null } = {}) {
     return temps.map((tempF, i) => ({
         time: NOW.getTime() + i * HOUR,
         tempF,
         precipProb: Array.isArray(precipProb) ? precipProb[i] ?? 0 : precipProb,
         cloudPct: Array.isArray(cloudPct) ? cloudPct[i] ?? 10 : cloudPct,
+        ...(uv != null ? { uv: Array.isArray(uv) ? uv[i] ?? 0 : uv } : {}),
     }));
 }
 
@@ -365,6 +366,91 @@ function mkInputs(over = {}) {
     assert.equal(withFr.skyEvents[2].id, 'storm-outlook');
     assert.equal(withFr.outlook.tier, 'watch');
     ok('computeVerdict: outlook row appended, aurora/ISS indices stable');
+}
+
+// ── 14. factorForecast: per-chip predictive series ───────────────────────────
+{
+    const T0 = NOW.getTime();
+
+    // clouds — from the shared hourly rows.
+    const cl = factorForecast('clouds', mkInputs(), T0);
+    assert.equal(cl.unit, '%');
+    assert.equal(cl.style, 'line');
+    assert.equal(cl.ticks, 'hour');
+    assert.equal(cl.series.length, 19, 'fixture has 19 hourly rows inside +24h');
+    assert.deepEqual(cl.domain, { lo: 0, hi: 100 });
+    assert.ok(cl.thresholds.some(t => t.v === 70 && t.label === 'overcast'));
+    assert.match(cl.summary, /low 10% .+ high 10%/);
+    ok('factorForecast clouds: hourly % series with chip-boundary thresholds');
+
+    // uv — series present only when the hourly rows carry uv.
+    assert.equal(factorForecast('uv', mkInputs(), T0), null, 'no uv in rows → null');
+    const uvCurve = TEMPS_18H.map((_, i) => (i >= 12 ? [3, 5, 7, 9, 8, 5, 2][i - 12] ?? 0 : 0));
+    const uv = factorForecast('uv', mkInputs({
+        forecast: { hourly: mkHourly({ uv: uvCurve }), daily: [] },
+    }), T0);
+    assert.equal(uv.series.length, 19);
+    assert.match(uv.summary, /peak 9 \(very high\)/);
+    assert.match(uv.summary, /protect/);
+    assert.ok(uv.domain.hi >= 9, 'domain covers the peak');
+    assert.ok(uv.thresholds.some(t => t.v === 3 && t.label === 'moderate'));
+    ok('factorForecast uv: peak + protection window from the uv rows');
+
+    // activity — NOAA 3-day Kp forecast → 3-h bars; empty forecast → null,
+    // never a fabricated flat line.
+    assert.equal(factorForecast('activity', mkInputs(), T0), null);
+    const kpForecast = Array.from({ length: 20 }, (_, i) => ({
+        time: T0 + (i - 1) * 3 * HOUR,
+        kp: i === 6 ? 6.7 : 3 + (i % 3),
+        kind: i < 2 ? 'estimated' : 'predicted',
+    }));
+    const act = factorForecast('activity', mkInputs({ swpc: { kp: 2.3, kpForecast } }), T0);
+    assert.equal(act.style, 'bars');
+    assert.equal(act.slotMs, 3 * HOUR);
+    assert.equal(act.series.length, 18, 't0−3h … t0+48h window');
+    assert.deepEqual(act.domain, { lo: 0, hi: 9 });
+    assert.match(act.summary, /peak Kp 6\.7 \(G2 storm\)/);
+    assert.ok(act.thresholds.some(t => t.v === 5 && /G1/.test(t.label)));
+    assert.equal(act.series[0].kind, 'estimated', 'kind survives into the series');
+    ok('factorForecast activity: 3-h Kp bars, 48-h window, G-scale summary');
+
+    // moon — pure computation, needs nothing but `now`.
+    const moon = factorForecast('moon', {}, T0);
+    assert.equal(moon.series.length, 8);
+    assert.equal(moon.ticks, 'day');
+    assert.ok(moon.series.every(p => p.v >= 0 && p.v <= 100));
+    assert.match(moon.summary, /(new|full) moon (in \d+d|tonight)/);
+    ok('factorForecast moon: 8-night illumination series from moon math alone');
+
+    // aqi — needs the retained hourly series; degrades to null without it.
+    assert.equal(factorForecast('aqi', mkInputs(), T0), null);
+    const aqiHourly = Array.from({ length: 30 }, (_, i) => ({
+        time: T0 + i * HOUR, aqi: i === 5 ? 130 : 42,
+    }));
+    const aqi = factorForecast('aqi', mkInputs({
+        air: { aqi: 42, uvNow: 2, uvPeak: 9, uvPeakHour: null, aqiHourly },
+    }), T0);
+    assert.equal(aqi.series.length, 25, 'now..+24h inclusive');
+    assert.match(aqi.summary, /now 42 \(good\)/);
+    assert.match(aqi.summary, /peak 130 \(sensitive\)/);
+    assert.ok(aqi.thresholds.some(t => t.v === 150), 'unhealthy line appears when peak > 110');
+    assert.ok(aqi.domain.hi > 150, 'domain keeps the 150 line inside the plot');
+    ok('factorForecast aqi: hourly series + EPA category summary');
+
+    // sun — altitude curve; loc-less → null.
+    assert.equal(factorForecast('sun', {}, T0), null);
+    const sun = factorForecast('sun', mkInputs(), T0);
+    assert.equal(sun.series.length, 49, '30-min samples across 24h');
+    assert.ok(sun.thresholds.some(t => t.v === 0 && t.label === 'horizon'));
+    assert.match(sun.summary, /sets 8:22 PM/);
+    assert.match(sun.summary, /rises 5:48 AM/);
+    assert.ok(Math.max(...sun.series.map(p => p.v)) > 60, 'July midday altitude at 38.8°N');
+    ok('factorForecast sun: altitude curve + rise/set from astro');
+
+    // unknown id / empty inputs → null (defensive).
+    assert.equal(factorForecast('nope', mkInputs(), T0), null);
+    assert.equal(factorForecast('clouds', {}, T0), null);
+    ok('factorForecast unknown id / empty inputs → null');
 }
 
 console.log(`\nverdict-engine: ${n} checks passed`);

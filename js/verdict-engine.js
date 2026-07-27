@@ -5,7 +5,8 @@
  * NWS alerts, ISS passes, sun/moon, air quality) into one location-anchored
  * "answer": a verdict word, a temperature-first sentence, six factor chips,
  * an 18-hour temperature series, a 7-day week strip, a best-night pick and
- * tonight's sky rows (aurora + ISS).
+ * tonight's sky rows (aurora + ISS). `factorForecast` additionally builds
+ * the per-chip predictive series behind the tap-a-chip detail graphs.
  *
  * CONTRACT: every export in this file is a pure function — inputs → outputs.
  *   - No DOM. No fetch. No imports from feed modules.
@@ -18,13 +19,13 @@
  *   {
  *     swpc:     { kp, kpForecast:[{time:ms|Date, kp}] }
  *     wx:       { tempF, cloudPct }                    // current, at loc
- *     forecast: { hourly:[{time, tempF, precipProb, cloudPct}],   // ≥18 h
+ *     forecast: { hourly:[{time, tempF, precipProb, cloudPct, uv}], // ≥18 h
  *                 daily:[{date, hiF, loF, code, cloudPct, precipProbMax}] }
  *     alerts:   [{event, headline, severity}]          // pre-filtered to loc
  *     iss:      { passes:[{rise, riseAz, peakTime, peakAlt, set, setAz,
  *                          durationMin, rangeKm}] }    // from pass-predictor
  *     astro:    { sunset, sunrise, moonIllumPct }      // Dates; moon optional
- *     air:      { aqi, uvNow, uvPeak, uvPeakHour }
+ *     air:      { aqi, uvNow, uvPeak, uvPeakHour, aqiHourly:[{time, aqi}] }
  *     loc:      { lat, lon, name, tz }
  *     fluxRope: { pHit, p10, p20, arrivalP10Ms, arrivalP50Ms, arrivalP90Ms,
  *                 minBzP50 }        // flux-rope ensemble summary (Phase 4) —
@@ -645,6 +646,186 @@ function buildFactors(inputs, now, moonNow) {
             state: uvState(air.uvPeak),
         },
     ];
+}
+
+// ── Per-factor predictive series (chip detail graphs) ───────────────────────
+
+/** UV index → WHO descriptor word. */
+function uvWord(v) {
+    if (!isNum(v)) return null;
+    if (v < 3) return 'low';
+    if (v < 6) return 'moderate';
+    if (v < 8) return 'high';
+    return v < 11 ? 'very high' : 'extreme';
+}
+
+/** Index of min / max value over a [{t, v}] series. */
+function extremes(series) {
+    let iMin = 0, iMax = 0;
+    series.forEach((p, i) => {
+        if (p.v < series[iMin].v) iMin = i;
+        if (p.v > series[iMax].v) iMax = i;
+    });
+    return { iMin, iMax };
+}
+
+/**
+ * Predictive series for ONE factor chip — powers the tap-a-chip detail
+ * graph on the card. Same purity contract as the rest of this module:
+ * inputs + now → chart model, no fetch, no ambient time, never throws.
+ *
+ * Returns null when the metric has nothing forecastable yet (feed still
+ * loading, no location, empty Kp forecast) — the card renders an
+ * explain-yourself empty state, not a fabricated flat line. Otherwise:
+ *
+ *   { id, title, unit, style:'line'|'bars', ticks:'hour'|'day',
+ *     series:[{t(ms), v, kind?}], slotMs?, domain:{lo, hi},
+ *     thresholds:[{v, label}], summary }
+ *
+ * Threshold values intentionally MIRROR the chip-state boundaries above
+ * (cloudState 30/70, uvState 3/8, aqiState 50/100, Kp G-scale) so the
+ * graph explains the chip's colour instead of inventing a second scale.
+ */
+export function factorForecast(id, inputs = {}, now = Date.now()) {
+    const t0 = ms(now);
+    const tz = inputs.loc?.tz;
+
+    switch (id) {
+        case 'clouds': {
+            const rows = hourlyWindow(inputs.forecast, t0, 24).filter(r => isNum(r.cloudPct));
+            if (rows.length < 4) return null;
+            const series = rows.map(r => ({ t: ms(r.time), v: r.cloudPct }));
+            const { iMin, iMax } = extremes(series);
+            return {
+                id, title: 'Cloud cover · next 24h', unit: '%', style: 'line', ticks: 'hour',
+                series, domain: { lo: 0, hi: 100 },
+                thresholds: [{ v: 30, label: 'clear' }, { v: 70, label: 'overcast' }],
+                summary: `low ${Math.round(series[iMin].v)}% ${fmtClock(series[iMin].t, tz)} · `
+                       + `high ${Math.round(series[iMax].v)}% ${fmtClock(series[iMax].t, tz)}`,
+            };
+        }
+
+        case 'uv': {
+            const rows = hourlyWindow(inputs.forecast, t0, 24).filter(r => isNum(r.uv));
+            if (rows.length < 4) return null;
+            const series = rows.map(r => ({ t: ms(r.time), v: r.uv }));
+            const { iMax } = extremes(series);
+            const peak = series[iMax];
+            const hot = series.filter(p => p.v >= 3);
+            const guard = hot.length
+                ? `protect ${fmtClockShort(hot[0].t, tz)}–${fmtClockShort(hot[hot.length - 1].t + HOUR_MS, tz)}`
+                : 'low all day';
+            return {
+                id, title: 'UV index · next 24h', unit: 'UV', style: 'line', ticks: 'hour',
+                series, domain: { lo: 0, hi: Math.max(8.5, peak.v * 1.08) },
+                thresholds: [{ v: 3, label: 'moderate' }, { v: 8, label: 'very high' }],
+                summary: `peak ${Math.round(peak.v)} (${uvWord(peak.v)}) ${fmtClock(peak.t, tz)} · ${guard}`,
+            };
+        }
+
+        case 'activity': {
+            // NOAA 3-day Kp forecast (3-hourly slots). Honest step data →
+            // bars, not a smoothed line. Empty forecast → null; a flat line
+            // fabricated from the current Kp would read as a prediction.
+            const rows = (inputs.swpc?.kpForecast || [])
+                .filter(f => isNum(ms(f.time)) && isNum(f.kp)
+                    && ms(f.time) >= t0 - 3 * HOUR_MS && ms(f.time) <= t0 + 48 * HOUR_MS)
+                .sort((a, b) => ms(a.time) - ms(b.time))
+                .map(f => ({ t: ms(f.time), v: clamp(f.kp, 0, 9), kind: f.kind || 'predicted' }));
+            if (!rows.length) return null;
+            const { iMax } = extremes(rows);
+            const peak = rows[iMax];
+            return {
+                id, title: 'Kp forecast · next 48h', unit: 'Kp', style: 'bars', ticks: 'hour',
+                series: rows, slotMs: 3 * HOUR_MS, domain: { lo: 0, hi: 9 },
+                thresholds: [{ v: 5, label: 'G1 storm' }, { v: 7, label: 'G3' }],
+                summary: `peak Kp ${peak.v.toFixed(1)} (${kpCat(peak.v)}) · ${fmtWeekday(peak.t, tz)} ${fmtClock(peak.t, tz)}`,
+            };
+        }
+
+        case 'moon': {
+            // Pure computation — nightly illumination for the coming week.
+            const series = [];
+            for (let i = 0; i < 8; i++) {
+                const t = t0 + i * DAY_MS;
+                series.push({ t, v: moonPhase(t).illumPct });
+            }
+            const nowPhase = moonPhase(t0);
+            const dNew = (1 - nowPhase.phase) * SYNODIC_DAYS;
+            const dFull = ((0.5 - nowPhase.phase + 1) % 1) * SYNODIC_DAYS;
+            const inDays = (d, what) => (d < 0.75 ? `${what} tonight` : `${what} in ${Math.round(d)}d`);
+            return {
+                id, title: 'Moon illumination · next 7 nights', unit: '%', style: 'line', ticks: 'day',
+                series, domain: { lo: 0, hi: 100 },
+                thresholds: [{ v: 30, label: 'dark-sky' }],
+                summary: `${nowPhase.illumPct}% ${nowPhase.name} tonight · `
+                       + (dNew <= dFull ? inDays(dNew, 'new moon') : inDays(dFull, 'full moon')),
+            };
+        }
+
+        case 'aqi': {
+            const start = Math.floor(t0 / HOUR_MS) * HOUR_MS;
+            const rows = (inputs.air?.aqiHourly || [])
+                .filter(r => isNum(r.aqi) && isNum(ms(r.time))
+                    && ms(r.time) >= start && ms(r.time) <= start + 24 * HOUR_MS)
+                .sort((a, b) => ms(a.time) - ms(b.time))
+                .map(r => ({ t: ms(r.time), v: r.aqi }));
+            if (rows.length < 4) return null;
+            const { iMax } = extremes(rows);
+            const peak = rows[iMax];
+            const cur = rows[0];
+            const thresholds = [{ v: 50, label: 'good' }, { v: 100, label: 'sensitive' }];
+            // The 150 line only when the chart actually gets near it —
+            // domain 1.25× the peak keeps the line inside the plot.
+            if (peak.v > 110) thresholds.push({ v: 150, label: 'unhealthy' });
+            return {
+                id, title: 'Air quality (US AQI) · next 24h', unit: 'AQI', style: 'line', ticks: 'hour',
+                series: rows, domain: { lo: 0, hi: Math.max(110, peak.v * 1.25) },
+                thresholds,
+                summary: `now ${Math.round(cur.v)} (${aqiCategory(cur.v)}) · `
+                       + `peak ${Math.round(peak.v)} (${aqiCategory(peak.v)}) ${fmtClock(peak.t, tz)}`,
+            };
+        }
+
+        case 'sun': {
+            const lat = inputs.loc?.lat, lon = inputs.loc?.lon;
+            if (!isNum(lat) || !isNum(lon)) return null;
+            const series = [];
+            for (let m = 0; m <= 24 * 60; m += 30) {
+                const t = t0 + m * 60_000;
+                series.push({ t, v: sunAltitudeDeg(lat, lon, t) });
+            }
+            const { iMin, iMax } = extremes(series);
+            // Prefer the page-supplied precise rise/set (sun-altitude.js);
+            // fall back to this curve's own horizon crossings (±few min).
+            let setT = inputs.astro?.sunset ?? null;
+            let riseT = inputs.astro?.sunrise ?? null;
+            if (setT == null || riseT == null) {
+                for (let i = 1; i < series.length; i++) {
+                    const a = series[i - 1], b = series[i];
+                    if (setT == null && a.v >= 0 && b.v < 0) setT = b.t;
+                    if (riseT == null && a.v < 0 && b.v >= 0) riseT = b.t;
+                }
+            }
+            const bits = [];
+            if (setT != null) bits.push(`sets ${fmtClock(setT, tz)}`);
+            if (riseT != null) bits.push(`rises ${fmtClock(riseT, tz)}`);
+            bits.push(`max +${Math.round(series[iMax].v)}°`);
+            return {
+                id, title: 'Sun altitude · next 24h', unit: '°', style: 'line', ticks: 'hour',
+                series,
+                domain: {
+                    lo: Math.min(-25, Math.floor(series[iMin].v)),
+                    hi: Math.max(30, Math.ceil(series[iMax].v) + 5),
+                },
+                thresholds: [{ v: 0, label: 'horizon' }, { v: -18, label: 'astro dark' }],
+                summary: bits.join(' · '),
+            };
+        }
+
+        default:
+            return null;
+    }
 }
 
 // ── Main fusion ─────────────────────────────────────────────────────────────
