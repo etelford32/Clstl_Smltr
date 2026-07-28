@@ -33,6 +33,7 @@ test.describe('compounding flux rope simulator (flux-rope-live.html)', () => {
         await page.route('**/services.swpc.noaa.gov/**', (r) => r.abort());
         await page.route('**/api/donki/**', (r) => r.abort());
         await page.route('**/api/noaa/**', (r) => r.abort());
+        await page.route('**/api/cme/**', (r) => r.abort());
         await page.goto('/flux-rope-live.html', { waitUntil: 'domcontentloaded' });
 
         await expect(page.locator('nav a').first()).toBeVisible({ timeout: 20_000 });
@@ -54,6 +55,9 @@ test.describe('compounding flux rope simulator (flux-rope-live.html)', () => {
 
         // Background noise measured from the replay archive (storm-robust).
         await expect(page.locator('#frl-noise')).toHaveText(/background σ|unmeasured/);
+
+        // Ledger feed down → visibly broken, never quiet.
+        await expect(page.locator('#frl-ledger')).toHaveText(/Scorecard feed unavailable/);
 
         // Freeze, scrub into the storm: the filter conditions on the
         // archived record left of the now-line and reports ESS.
@@ -110,6 +114,28 @@ test.describe('compounding flux rope simulator (flux-rope-live.html)', () => {
             r.fulfill({ contentType: 'application/json', body: JSON.stringify(rows('mag')) }));
         await page.route('**/services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json', (r) =>
             r.fulfill({ contentType: 'application/json', body: JSON.stringify(rows('wind')) }));
+        // Per-flare validation ledger: one resolved flare-tagged event with
+        // the flux-rope-v1 locked row + truth, plus the model skill table.
+        await page.route('**/api/cme/skill**', (r) => r.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ data: {
+                models: [
+                    { model_id: 'flux-rope-v1', is_hindcast: false, n_scored: 3, mae_hours: 8.2 },
+                    { model_id: 'dbm-v1', is_hindcast: false, n_scored: 9, mae_hours: 10.4 },
+                ],
+                events: [{
+                    event_id: 'PP-RT-LEDGER-1',
+                    launch: iso(96),
+                    forecasts: { 'flux-rope-v1': {
+                        predicted: iso(96 - 47), early: iso(96 - 51), late: iso(96 - 41),
+                        p_hit: 0.78, p10: 0.55, p20: 0.3, min_bz_p50: -16, min_bz_p5: -31,
+                        n_train: 2,
+                        flare: { id: 'FLR-1', class: 'X1.2', region: 13999, dt_h: 0.7 },
+                    } },
+                    truth: { arrived: true, shock: iso(96 - 49), min_bz_nt: -19 },
+                }],
+            } }),
+        }));
         await page.goto('/flux-rope-live.html', { waitUntil: 'domcontentloaded' });
 
         await expect(page.locator('#frl-mode')).toHaveText(/LIVE · 2 CMEs IN FLIGHT/, { timeout: 20_000 });
@@ -133,6 +159,13 @@ test.describe('compounding flux rope simulator (flux-rope-live.html)', () => {
         await expect(page.locator('#frl-noise')).toHaveText(/background σ \(Bz\)/);
         await expect(page.locator('#frl-noise')).toHaveText(/trailing 24 h of live L1/);
         await expect(page.locator('#frl-assim-status')).toHaveText(/measured|armed|prior/, { timeout: 10_000 });
+
+        // The per-flare ledger: flare tag, locked-vs-truth error chip, skill.
+        await expect(page.locator('#frl-skill-chip')).toHaveText(/MAE 8\.2 h · n 3/);
+        await expect(page.locator('#frl-ledger')).toHaveText(/☀ X1\.2 · AR13999/);
+        await expect(page.locator('#frl-ledger')).toHaveText(/-2\.0 h/);
+        await expect(page.locator('#frl-ledger')).toHaveText(/min Bz p50 -16 nT/);
+        await expect(page.locator('#frl-ledger')).toHaveText(/truth: shock .* min Bz -19 nT \(Δ 3\)/);
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 });

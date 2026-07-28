@@ -149,6 +149,23 @@ export async function loadFluxRopeKernel(source) {
         /** EFFECTIVE drag Γ [km⁻¹] of rope i (wake-reduced for a follower). */
         ropeGammaEff(i) { return x.fr_rope_gamma_eff(i); },
 
+        // ── v1.6 train physics (spec §19–§21) — everything defaults OFF ─────
+        /** §19 momentum exchange: contact-impulse collisions with
+         *  restitution ε (0 = perfectly inelastic, 1 = elastic). */
+        setMomentum({ enabled = false, restitution = 0 } = {}) {
+            x.fr_set_momentum(enabled ? 1 : 0, restitution);
+        },
+        /** §20 evolving wake: re-freeze cadence [h]; 0 = frozen-at-launch. */
+        setWakeRefresh(hours = 0) { x.fr_set_wake_refresh(hours); },
+        /** §21 deflection: pair wake attraction (fraction of separation,
+         *  cap 20°) + east–west drag drift amplitude [deg]. */
+        setDeflection({ pairFrac = 0, ewDeg = 0 } = {}) {
+            x.fr_set_deflection(pairFrac, ewDeg);
+        },
+        /** §19 predicted contact time [s after epoch] of follower i with
+         *  its leader (NaN = none / momentum off / no leader). */
+        pairContactS(i) { return x.fr_pair_contact_s(i); },
+
         // ── §16 compounding-analyzer probes (read-only) ─────────────────────
         /** Index of rope i's §16 leader (−1 = none; NaN out of range). */
         ropeLeader(i) { return x.fr_rope_leader(i); },

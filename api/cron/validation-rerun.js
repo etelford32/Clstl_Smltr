@@ -42,6 +42,7 @@
  *                 backmap: {...}, recurrence: {...}, dur_ms }
  */
 
+import { readFile } from 'node:fs/promises';
 import { fetchWithTimeout } from '../_lib/responses.js';
 import {
     backmapRows, backmapScore, runHindcast, BACKMAP,
@@ -50,6 +51,12 @@ import {
 } from '../../js/validation-scoring.js';
 import { cmeTransit } from '../../js/ring-current-model.js';
 import { CmeEvent } from '../../js/cme-propagation.js';
+import {
+    parseDonkiFlares, fluxRopeForecastRows, arrivalQuantilesH,
+    resolveBzTruth, scoreFluxRopeEvent, aggregateFluxRopeScores,
+    FLUX_ROPE_MODEL_ID,
+} from '../../js/flux-rope-validation.js';
+import { retrievedPopulation } from '../../js/flux-rope-inversion.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -160,7 +167,11 @@ async function fetchDonkiCatalog(windowStart, windowEnd) {
         if (!res.ok) throw new Error(`DONKI ${path} ${res.status}`);
         return res.json();
     };
-    const [analyses, sims] = await Promise.all([get('CMEAnalysis'), get('WSAEnlilSimulations')]);
+    // FLR rides along for the per-flare ledger ("for each flare"); its
+    // failure never blocks the CME program — flare tags are enrichment.
+    const [analyses, sims, flrRaw] = await Promise.all([
+        get('CMEAnalysis'), get('WSAEnlilSimulations'), get('FLR').catch(() => []),
+    ]);
     // Newest Earth-arrival simulation per cme id.
     const enlilByCme = new Map();
     for (const s of Array.isArray(sims) ? sims : []) {
@@ -203,7 +214,7 @@ async function fetchDonkiCatalog(windowStart, windowEnd) {
             earthRelevant: (Number.isFinite(half) && miss <= half + 20) || sim?.isEarthGB === true,
         });
     }
-    return rows;
+    return { rows, flares: parseDonkiFlares(flrRaw) };
 }
 
 /** Study-3 verifiable predictions from the catalog (ETA inside window). */
@@ -372,6 +383,202 @@ async function lockAndResolveCme(catalog, pdynSeries, nowMs) {
     return summary;
 }
 
+async function sbPatch(path, body) {
+    const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/${path}`, {
+        method: 'PATCH', timeoutMs: 10_000,
+        headers: { ...sbHeaders, Prefer: 'return=minimal' },
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`patch ${path.split('?')[0]} ${res.status}`);
+}
+
+/* ── flux-rope-v1: per-flare compounding-train lock + Bz truth + scoring ──
+   The flux-rope engine joins the SAME issue-time-locked ledger as enlil /
+   ballistic-v1 / dbm-v1 — but as a compounding-TRAIN model with
+   probabilistic content (FLUX_ROPE_SIMULATOR_PLAN.md "daily validation"):
+     · lock: the shared provider (committed WASM, spec §12.1 train
+       selection, §16 interaction, measured-noise σ/δ) runs server-side;
+       ONE row per flare-associated CME of the modeled train, with frozen
+       replayable inputs (train ids ⇒ deterministic seed), a parametric
+       ±σ_v0 arrival window from the EFFECTIVE wake kinematics, and the
+       train-onset arrival quantiles on the first-arriving row.
+     · truth: the existing shock resolver rows are ENRICHED with
+       Bz-structure truth (min Bz + first-hour arrival speed) from
+       sw_geomag_dataset — coverage-guarded, a gap stays pending.
+     · score: arrival error + CRPS + Brier trio + min-Bz error + the §5
+       DBM inversion (retrieved Γ/w → population priors) →
+       validation_runs kind='flux-rope' (episodic — only when something
+       scored). Pure logic in js/flux-rope-validation.js, node-gated. */
+
+async function lockAndScoreFluxRope(catalog, flares, nowMs) {
+    const summary = { locked: 0, scored: 0, bzResolved: 0, idle: null };
+    const iso = ms => new Date(ms).toISOString();
+
+    // 1 ── The shared provider on the committed WASM (aurora-cron precedent).
+    const [{ computeFluxRopeForecast, trainSeed }, { rtswDriver }] = await Promise.all([
+        import('../../js/flux-rope-forecast.js'),
+        import('../../js/flux-rope-live.js'),
+    ]);
+    const wasm = await readFile(new URL('../../js/flux-rope-wasm/flux_rope_core.wasm', import.meta.url));
+    const cmes = catalog.map(c => ({
+        id: c.id,
+        timeIso: iso(c.launchMs),
+        speedKms: c.speed,
+        latDeg: c.lat,
+        lonDeg: c.lon,
+        halfAngleDeg: Number.isFinite(c.half) ? c.half : 30,
+        earthDirected: Number.isFinite(c.half) && Math.hypot(c.lat, c.lon) <= c.half,
+    }));
+    let rtsw = null;
+    try {
+        const get = async (url) => {
+            const r = await fetchWithTimeout(url, { timeoutMs: 12_000 });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        };
+        const [mag, wind] = await Promise.all([
+            get('https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json'),
+            get('https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json'),
+        ]);
+        rtsw = rtswDriver(mag, wind);
+    } catch { /* prior-only lock is honest */ }
+    const fc = await computeFluxRopeForecast({ sources: { cmes, rtsw, wasm }, nowMs });
+
+    // 2 ── Lock the per-flare rows (INSERT-only, needsNewIssue gating).
+    if (fc.idle) {
+        summary.idle = fc.reason;
+    } else {
+        const eff = fc.preset.ropes.map((_, i) => ({
+            wEffKms: fc.kernel.ropeWEffKms(i),
+            gammaEffPerKm: fc.kernel.ropeGammaEff(i),
+        }));
+        const rows = fluxRopeForecastRows({
+            eventIdFor: (id) => rtEventId(id),
+            cmes: fc.cmes,
+            ropes: fc.preset.ropes,
+            eff,
+            sigV0Kms: fc.preset.spreads?.sigV0Kms ?? 100,
+            launchMs: fc.launchMs,
+            seed: trainSeed(fc.cmes),
+            summary: fc.summary,
+            arrivalQH: arrivalQuantilesH(fc.prior.arrivalH),
+            sigmaNt: fc.sigmaNt,
+            sheathDeltaNt: fc.sheathDeltaNt,
+            noiseSigmaNt: fc.noise?.ok ? fc.noise.sigmaNt : null,
+            flares,
+        });
+        if (rows.length) {
+            const ids = rows.map(r => r.event_id);
+            const inList = `in.(${ids.map(encodeURIComponent).join(',')})`;
+            const existing = await sbGet(
+                `cme_arrival_forecasts?event_id=${inList}&model_id=eq.${FLUX_ROPE_MODEL_ID}` +
+                '&select=event_id,predicted_arrival_utc&order=issued_at.desc');
+            const latest = new Map();
+            for (const r of existing) {
+                if (!latest.has(r.event_id)) latest.set(r.event_id, Date.parse(r.predicted_arrival_utc));
+            }
+            const toInsert = rows.filter(r =>
+                needsNewIssue(latest.get(r.event_id) ?? null, Date.parse(r.predicted_arrival_utc)));
+            await sbInsert('cme_arrival_forecasts', toInsert);
+            summary.locked = toInsert.length;
+        }
+    }
+
+    // 3 ── Bz-structure truth enrichment + per-flare probabilistic scoring
+    //      over the trailing 20 days of locked flux-rope rows.
+    const since = iso(nowMs - 20 * DAY);
+    const frRows = await sbGet(
+        `cme_arrival_forecasts?model_id=eq.${FLUX_ROPE_MODEL_ID}` +
+        `&issued_at=gte.${encodeURIComponent(since)}` +
+        '&select=event_id,predicted_arrival_utc,predicted_hit,inputs,issued_at&order=issued_at.desc');
+    if (!frRows.length) return summary;
+    const latestByEvent = new Map();
+    for (const r of frRows) {
+        if (!latestByEvent.has(r.event_id)) latestByEvent.set(r.event_id, r);
+    }
+    const evIn = `in.(${[...latestByEvent.keys()].map(encodeURIComponent).join(',')})`;
+    const [obs, events] = await Promise.all([
+        sbGet(`cme_l1_observations?event_id=${evIn}` +
+              '&select=event_id,arrived,shock_arrival_utc,observed_bz_min_nt,observed_speed_kms'),
+        sbGet(`cme_events?event_id=${evIn}&select=event_id,launch_time_utc`),
+    ]);
+    const launchByEvent = new Map(events.map(e => [e.event_id, e.launch_time_utc]));
+    const scores = [];
+    for (const o of obs) {
+        const locked = latestByEvent.get(o.event_id);
+        if (!locked) continue;
+        const truth = {
+            arrived: o.arrived === true,
+            shockMs: o.shock_arrival_utc ? Date.parse(o.shock_arrival_utc) : NaN,
+            minBzNt: Number.isFinite(o.observed_bz_min_nt) ? o.observed_bz_min_nt : NaN,
+            vAtShockKms: Number.isFinite(o.observed_speed_kms) ? o.observed_speed_kms : NaN,
+        };
+        if (truth.arrived && Number.isFinite(truth.shockMs) && !Number.isFinite(truth.minBzNt)) {
+            // One-time enrichment from the minute dataset; a coverage gap
+            // stays pending and the next run retries.
+            try {
+                const t0 = iso(truth.shockMs - 60e3);
+                const t1 = iso(truth.shockMs + 48 * 3.6e6);
+                const ds = await sbGet(
+                    `sw_geomag_dataset?t=gte.${encodeURIComponent(t0)}&t=lte.${encodeURIComponent(t1)}` +
+                    '&select=t,sw_bz_nt,sw_v_km_s,sw_flag&order=t.asc&limit=3000');
+                const bt = resolveBzTruth({
+                    rows: ds.map(r => ({
+                        tMs: Date.parse(r.t),
+                        bz: r.sw_flag === 'gap' ? NaN : r.sw_bz_nt,
+                        v: r.sw_flag === 'ok' ? r.sw_v_km_s : NaN,
+                    })),
+                    shockMs: truth.shockMs,
+                });
+                if (bt.status === 'resolved') {
+                    truth.minBzNt = bt.minBzNt;
+                    truth.vAtShockKms = bt.vAtShockKms;
+                    await sbPatch(`cme_l1_observations?event_id=eq.${encodeURIComponent(o.event_id)}`, {
+                        observed_bz_min_nt: bt.minBzNt,
+                        observed_speed_kms: Number.isFinite(bt.vAtShockKms)
+                            ? Math.round(bt.vAtShockKms) : null,
+                    });
+                    summary.bzResolved++;
+                }
+            } catch { /* retried next run */ }
+        }
+        if ((truth.arrived && Number.isFinite(truth.shockMs)) || o.arrived === false) {
+            scores.push(scoreFluxRopeEvent({
+                forecast: locked, truth, launchIso: launchByEvent.get(o.event_id),
+            }));
+        }
+    }
+    if (scores.length) {
+        const agg = aggregateFluxRopeScores(scores);
+        await insertRun({
+            kind: 'flux-rope',
+            window_start: since,
+            window_end: iso(nowMs),
+            n_forecasts: agg.n_forecasts,
+            hits: agg.hits,
+            hit_rate: agg.n_forecasts ? agg.hits / agg.n_forecasts : null,
+            mae_days: agg.maeHours != null ? agg.maeHours / 24 : null,
+            skill: agg.n_forecasts ? agg.hits / agg.n_forecasts : null,
+            metrics: {
+                maeHours: agg.maeHours,
+                biasHours: agg.biasHours,
+                crpsArrivalH: agg.crpsArrivalH,
+                brierHit: agg.brierHit,
+                brier10: agg.brier10,
+                brier20: agg.brier20,
+                minBzMaeNt: agg.minBzMaeNt,
+                inversionN: agg.inversions.length,
+                // Retrieved-drag population — the priors the ledger says
+                // the ensemble SHOULD be using (spec §19 feedback loop).
+                population: retrievedPopulation(agg.inversions),
+            },
+            detail: { events: scores },
+        });
+        summary.scored = scores.length;
+    }
+    return summary;
+}
+
 async function insertRun(row) {
     const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/validation_runs`, {
         method: 'POST', timeoutMs: 8_000,
@@ -445,18 +652,31 @@ async function runValidation(request) {
         },
     });
 
-    // ── CME program: one DONKI catalog + one Pdyn series feed BOTH the
-    //    forecast-locking loop (Phases 2–3) and study 3's verification.
-    let catalog = [], pdynSeries = [];
+    // ── CME program: one DONKI catalog (+FLR) + one Pdyn series feed the
+    //    forecast-locking loop (Phases 2–3), study 3's verification, AND
+    //    the flux-rope per-flare ledger.
+    let catalog = [], flares = [], pdynSeries = [];
     let cmeProgram = { reason: 'not_run' };
     try {
-        [catalog, pdynSeries] = await Promise.all([
+        const [donki, pdyn] = await Promise.all([
             fetchDonkiCatalog(windowStart, windowEnd),
             fetchPdynSeries(),
         ]);
+        catalog = donki.rows;
+        flares = donki.flares;
+        pdynSeries = pdyn;
         cmeProgram = await lockAndResolveCme(catalog, pdynSeries, Date.now());
     } catch (e) {
         cmeProgram = { reason: `lock_resolve_failed: ${String(e?.message || e)}` };
+    }
+
+    // ── flux-rope-v1: per-flare compounding-train lock + Bz truth + scores.
+    let fluxRope = { reason: 'not_run' };
+    try {
+        if (catalog.length) fluxRope = await lockAndScoreFluxRope(catalog, flares, Date.now());
+        else fluxRope = { reason: 'no_catalog' };
+    } catch (e) {
+        fluxRope = { reason: `flux_rope_failed: ${String(e?.message || e)}` };
     }
 
     // ── Study 3: CME arrival verification (predicted vs actual shock) ──
@@ -506,6 +726,7 @@ async function runValidation(request) {
         },
         cme: cmeSummary,
         cmeProgram,
+        fluxRope,
         dur_ms: Date.now() - started,
     });
 }

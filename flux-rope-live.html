@@ -221,6 +221,15 @@ body {
             <h2>Background noise</h2>
             <div id="frl-noise"><p class="frl-fine">measuring…</p></div>
         </div>
+
+        <div class="frl-panel">
+            <h2>Validation ledger <span id="frl-skill-chip" style="float:right;text-transform:none;letter-spacing:0;color:#7fe6c3;"></span></h2>
+            <div id="frl-ledger"><p class="frl-fine">loading the per-flare scorecard…</p></div>
+            <p class="frl-fine">One entry per flare-associated CME: the forecast is
+            LOCKED before arrival (issue-time discipline), truth resolves from L1
+            after passage, and the same ledger scores ENLIL, ballistic and DBM on
+            identical events — skill shown, not claimed.</p>
+        </div>
     </aside>
 </main>
 
@@ -873,6 +882,67 @@ function tryLive(force = false) {
     return true;
 }
 
+// ── Per-flare validation ledger (/api/cme/skill → daily cron output) ─────────
+async function loadLedger() {
+    const box = $('frl-ledger');
+    let data;
+    try {
+        const r = await fetch('/api/cme/skill?events=12', { signal: AbortSignal.timeout(10_000) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        data = (await r.json()).data;
+    } catch {
+        box.innerHTML = `<p class="frl-fine">⚠ Scorecard feed unavailable — the daily
+            validation cron publishes the per-flare ledger here. Broken feeds look
+            broken, never quiet.</p>`;
+        return;
+    }
+    const models = (data?.models ?? []).filter((m) => m.is_hindcast === false);
+    const fr = models.find((m) => m.model_id === 'flux-rope-v1');
+    $('frl-skill-chip').textContent = fr?.mae_hours != null
+        ? `MAE ${fr.mae_hours.toFixed(1)} h · n ${fr.n_scored}` : '';
+    const evs = (data?.events ?? []).filter((e) => e.forecasts?.['flux-rope-v1']).slice(0, 6);
+    if (!evs.length) {
+        const base = models.length
+            ? ' Baselines on the shared ledger: ' + models.map((m) =>
+                `${m.model_id} ${m.mae_hours != null ? m.mae_hours.toFixed(1) + ' h' : '—'}`).join(' · ') + '.'
+            : '';
+        box.innerHTML = `<p class="frl-fine">Ledger armed — the daily 06:30 UT cron
+            locks a flux-rope train forecast for every Earth-relevant flare/CME;
+            per-flare scores land here after each storm resolves.${base}</p>`;
+        return;
+    }
+    box.innerHTML = evs.map((e) => {
+        const f = e.forecasts['flux-rope-v1'];
+        const resolved = e.truth?.arrived === true && e.truth.shock;
+        const errH = resolved ? (Date.parse(f.predicted) - Date.parse(e.truth.shock)) / 3.6e6 : null;
+        const chip = resolved
+            ? [Math.abs(errH) <= 12 ? 'leader' : 'follower',
+                `${errH >= 0 ? '+' : ''}${errH.toFixed(1)} h`]
+            : e.truth?.arrived === false
+                ? ['solo', 'NO ARRIVAL']
+                : ['solo', 'IN FLIGHT'];
+        const flare = f.flare;
+        return `<div class="frl-cme">
+            <div class="frl-cme-head">
+                <span>${flare ? `☀ ${flare.class ?? 'flare'}${flare.region ? ' · AR' + flare.region : ''}` : 'CME'}
+                    · ${fmtUtc(Date.parse(e.launch))}</span>
+                <span class="frl-role ${chip[0]}">${chip[1]}</span>
+            </div>
+            <div class="frl-cme-sub">
+                locked ${fmtUtc(Date.parse(f.predicted))}
+                (${fmtUtc(Date.parse(f.early))} – ${fmtUtc(Date.parse(f.late))})
+                ${f.n_train > 1 ? ` · train of ${f.n_train}` : ''}
+                ${Number.isFinite(f.min_bz_p50) ? ` · min Bz p50 ${f.min_bz_p50.toFixed(0)} nT` : ''}
+                ${Number.isFinite(f.p_hit) ? ` · P(hit) ${Math.round(f.p_hit * 100)}%` : ''}
+                ${resolved
+                    ? `<br>truth: shock ${fmtUtc(Date.parse(e.truth.shock))}${Number.isFinite(e.truth.min_bz_nt)
+                        ? ` · min Bz ${e.truth.min_bz_nt.toFixed(0)} nT (Δ ${(f.min_bz_p50 - e.truth.min_bz_nt).toFixed(0)})` : ''}`
+                    : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
 async function boot() {
     try { state.rtsw = await fetchRtswDriver(); } catch { state.rtsw = null; }
     if (state.rtsw?.samples?.length) {
@@ -892,6 +962,7 @@ async function boot() {
         /* quiet corridor → demo applied inside tryLive */
     }
     renderNoise();
+    loadLedger();   // fail-quiet; independent of the live/demo posture
 
     // Refresh cadence: L1 + noise every 5 min; catalog every 15 min. A new
     // live train only replaces the view automatically when the user hasn't

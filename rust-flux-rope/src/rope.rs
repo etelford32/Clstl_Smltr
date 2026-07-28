@@ -4,7 +4,7 @@
 //! ensemble layer can hammer it and the GLSL heliosphere view can mirror it.
 
 use crate::bessel::{j0, j1, J0_ZERO1};
-use crate::kinematics::{b_axis_nt, sigma_apex_km, Dbm, AU_KM, RSUN_KM};
+use crate::kinematics::{b_axis_nt, sigma_apex_km, Dbm, SegDbm, AU_KM, RSUN_KM};
 
 pub type V3 = [f64; 3];
 
@@ -267,19 +267,19 @@ fn boundary_distortion(
 /// GSE with `to_gse`. The v1 single-rope form: raw kinematics, no §16
 /// rear compression.
 pub fn field_at(params: &RopeParams, frame: &Frame, t_s: f64, p: V3) -> FieldSample {
-    field_at_dyn(params, frame, t_s, p, &params.dbm(), 0.0)
+    field_at_dyn(params, frame, t_s, p, &SegDbm::single(params.dbm()), 0.0)
 }
 
 /// §16-aware rope field: same physics as `field_at` but with EFFECTIVE
-/// kinematics (wake-modified for a follower) and a dynamic rear-compression
+/// (segmented, §19/§20-aware) kinematics and a dynamic rear-compression
 /// amplitude supplied by the train layer. `rear_c = 0` + the rope's own
-/// DBM reproduces `field_at` bit-for-bit.
+/// single-segment DBM reproduces `field_at` bit-for-bit.
 pub fn field_at_dyn(
     params: &RopeParams,
     frame: &Frame,
     t_s: f64,
     p: V3,
-    dbm: &Dbm,
+    dbm: &SegDbm,
     rear_c: f64,
 ) -> FieldSample {
     let d = dbm.apex_km(t_s);
@@ -384,19 +384,19 @@ pub fn to_gse(b: V3) -> V3 {
 /// obstacle, not in its wake). The v1 form: raw kinematics, fresh-wind
 /// upstream, no §16 rear compression.
 pub fn sheath_at(params: &RopeParams, frame: &Frame, t_s: f64, p: V3) -> bool {
-    sheath_at_dyn(params, frame, t_s, p, &params.dbm(), params.w_kms, 0.0)
+    sheath_at_dyn(params, frame, t_s, p, &SegDbm::single(params.dbm()), params.w_kms, 0.0)
 }
 
-/// §16-aware sheath test: EFFECTIVE kinematics and an explicit upstream
-/// flow speed — a follower's shock exists only while it outruns its
-/// leader's WAKE magnetosonically, not the fresh wind. The shell rides the
-/// same distorted boundary as the field.
+/// §16-aware sheath test: EFFECTIVE (segmented) kinematics and an explicit
+/// upstream flow speed — a follower's shock exists only while it outruns
+/// its leader's WAKE magnetosonically, not the fresh wind. The shell rides
+/// the same distorted boundary as the field.
 pub fn sheath_at_dyn(
     params: &RopeParams,
     frame: &Frame,
     t_s: f64,
     p: V3,
-    dbm: &Dbm,
+    dbm: &SegDbm,
     upstream_kms: f64,
     rear_c: f64,
 ) -> bool {
@@ -490,9 +490,9 @@ impl RopeEntry {
 
 // ── CME–CME interaction (spec §16) ───────────────────────────────────────────
 
-/// Engine-level interaction configuration (spec §16), shared across
-/// ensemble members (never sampled). Disabled by default — every §10
-/// non-interacting pin is bit-identical with it off.
+/// Engine-level interaction configuration (spec §16, §19–§21), shared
+/// across ensemble members (never sampled). Everything defaults OFF —
+/// every earlier-generation pin is bit-identical with the defaults.
 #[derive(Clone, Copy, Debug)]
 pub struct TrainCfg {
     pub enabled: bool,
@@ -502,35 +502,142 @@ pub struct TrainCfg {
     pub comp_c: f64,
     /// Rear-compression gap ramp reach, in units of the leader's σ̂_apex.
     pub comp_reach: f64,
+    /// §19 momentum exchange at follower→leader contact.
+    pub momentum_enabled: bool,
+    /// §19.2 restitution ε ∈ [0, 1]: 0 = perfectly inelastic (default),
+    /// 1 = elastic. The one collision calibration knob.
+    pub restitution: f64,
+    /// §20 wake re-freeze cadence [h]; 0 = frozen-at-launch legacy.
+    pub wake_refresh_h: f64,
+    /// §21 pair wake attraction ∈ [0, 1]: fraction of the follower→leader
+    /// angular separation rotated toward the leader (capped 20°). 0 = off.
+    pub defl_pair: f64,
+    /// §21 east–west drag drift amplitude [deg]: Δφ = this ·
+    /// clamp((v₀−w)/w, −1, 1). 0 = off.
+    pub defl_ew_deg: f64,
 }
 
 impl Default for TrainCfg {
     fn default() -> Self {
-        TrainCfg { enabled: false, wake_gamma_frac: 0.5, comp_c: 1.0, comp_reach: 1.5 }
+        TrainCfg {
+            enabled: false,
+            wake_gamma_frac: 0.5,
+            comp_c: 1.0,
+            comp_reach: 1.5,
+            momentum_enabled: false,
+            restitution: 0.0,
+            wake_refresh_h: 0.0,
+            defl_pair: 0.0,
+            defl_ew_deg: 0.0,
+        }
     }
 }
 
 /// Launch-direction alignment threshold for partner selection (spec §16).
 pub const ALIGN_MIN_COS: f64 = 0.5;
+/// §20: wake refreshes stop at this rope age — beyond ~1.3 AU the wake's
+/// evolution no longer matters for the L1 crossing (and it bounds the
+/// segment count).
+pub const WAKE_REFRESH_MAX_AGE_S: f64 = 96.0 * 3600.0;
+/// §19.1 contact-search horizon after both launches.
+pub const CONTACT_HORIZON_S: f64 = 10.0 * 86_400.0;
+/// §21 pair-attraction rotation cap [rad].
+const DEFL_PAIR_CAP_RAD: f64 = 20.0 * core::f64::consts::PI / 180.0;
 
-/// Per-rope effective dynamics under interaction: wake-modified kinematics
-/// plus the leader index (−1 = none). With interaction disabled every rope
-/// keeps its raw DBM and no partners exist.
+/// Per-rope effective dynamics under interaction (spec §16/§19/§20/§21):
+/// segmented wake-modified kinematics, the leader index (−1 = none), the
+/// EFFECTIVE frame (§21 deflection applied; the raw entry's frame
+/// otherwise), and the §19 contact time (s after epoch; NaN = none).
+/// With interaction disabled every rope keeps its raw single-segment DBM,
+/// its raw frame, and no partners exist.
 #[derive(Clone, Copy, Debug)]
 pub struct RopeDyn {
-    pub dbm: Dbm,
+    pub dbm: SegDbm,
     pub lead: i32,
+    pub frame: Frame,
+    pub contact_s: f64,
 }
 
-/// Resolve the train's interaction structure (spec §16): nearest-predecessor
-/// aligned partner selection + frozen-at-launch wake kinematics, processed
-/// leader-first in launch order so chains (A←B←C) see their leader's
-/// already-modified apex speed. Fills `out` (cleared) with one entry per
-/// rope, in rope order.
+#[inline]
+fn sigma_hat_km(r: &RopeEntry, d_km: f64) -> f64 {
+    sigma_apex_km(r.params.sigma_1au_au * AU_KM, d_km, r.params.n_sigma)
+}
+
+/// §19.1 contact time for follower j on leader i: first root of the
+/// nose-to-tail gap over the CURRENT segment chains. Coarse 4-h scan for
+/// the sign change, then 60-iteration bisection. None = no contact within
+/// the horizon.
+fn contact_time(ropes: &[RopeEntry], dyns: &[RopeDyn], i: usize, j: usize) -> Option<f64> {
+    let gap = |t: f64| {
+        let d_i = dyns[i].dbm.apex_km(t - ropes[i].t_launch_s);
+        let d_j = dyns[j].dbm.apex_km(t - ropes[j].t_launch_s);
+        (d_i - sigma_hat_km(&ropes[i], d_i)) - (d_j + sigma_hat_km(&ropes[j], d_j))
+    };
+    let t0 = ropes[i].t_launch_s.max(ropes[j].t_launch_s) + 60.0;
+    if gap(t0) <= 0.0 {
+        return Some(t0); // overlapping already at the later launch
+    }
+    let step = 4.0 * 3600.0;
+    let mut t_prev = t0;
+    let mut t = t0 + step;
+    while t <= t0 + CONTACT_HORIZON_S {
+        if gap(t) <= 0.0 {
+            let (mut lo, mut hi) = (t_prev, t);
+            for _ in 0..60 {
+                let mid = 0.5 * (lo + hi);
+                if gap(mid) > 0.0 {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            return Some(0.5 * (lo + hi));
+        }
+        t_prev = t;
+        t += step;
+    }
+    None
+}
+
+/// Rotate `from` toward `to` by `frac` of their separation, capped (§21).
+fn rotate_toward(from: V3, to: V3, frac: f64, cap_rad: f64) -> V3 {
+    let c = dot(from, to).clamp(-1.0, 1.0);
+    let ang = c.acos();
+    if ang < 1e-9 {
+        return from;
+    }
+    let step = (frac.clamp(0.0, 1.0) * ang).min(cap_rad);
+    // Slerp in the from–to plane.
+    let sin_ang = ang.sin();
+    let a = ((ang - step).sin()) / sin_ang;
+    let b = (step.sin()) / sin_ang;
+    let v = [
+        a * from[0] + b * to[0],
+        a * from[1] + b * to[1],
+        a * from[2] + b * to[2],
+    ];
+    let n = norm(v);
+    scale(v, 1.0 / n.max(1e-12))
+}
+
+/// Resolve the train's interaction structure (spec §16 + v1.6 §19–§21) in
+/// three passes, leader-first in launch order so chains (A←B←C) see their
+/// leader's already-modified state:
+///   0. partner selection on RAW directions + §21 effective frames;
+///   1. wake kinematics — §16 frozen w_eff at launch, then §20 refresh
+///      segments from the leader's LIVE chain, with overtake → fresh wind;
+///   2. §19 contacts in time order — bisected gap roots, momentum-conserving
+///      impulses, follower re-frozen at the leader's post-impulse speed.
+/// Fills `out` (cleared) with one entry per rope, in rope order.
 pub fn train_dyn(ropes: &[RopeEntry], cfg: &TrainCfg, out: &mut Vec<RopeDyn>) {
     out.clear();
     for r in ropes {
-        out.push(RopeDyn { dbm: r.params.dbm(), lead: -1 });
+        out.push(RopeDyn {
+            dbm: SegDbm::single(r.params.dbm()),
+            lead: -1,
+            frame: r.frame,
+            contact_s: f64::NAN,
+        });
     }
     if !cfg.enabled || ropes.len() < 2 {
         return;
@@ -544,6 +651,9 @@ pub fn train_dyn(ropes: &[RopeEntry], cfg: &TrainCfg, out: &mut Vec<RopeDyn>) {
             .unwrap()
             .then(a.cmp(&b))
     });
+
+    // Pass 0 — partners (raw directions; deflection is a small correction
+    // and must not feed back into its own pairing) + §21 effective frames.
     for oi in 1..order.len() {
         let j = order[oi];
         let lead = order[..oi]
@@ -552,16 +662,110 @@ pub fn train_dyn(ropes: &[RopeEntry], cfg: &TrainCfg, out: &mut Vec<RopeDyn>) {
             .copied()
             .find(|&i| dot(ropes[i].frame.e_dir, ropes[j].frame.e_dir) > ALIGN_MIN_COS);
         if let Some(i) = lead {
-            let dt = (ropes[j].t_launch_s - ropes[i].t_launch_s).max(0.0);
-            let w_eff = out[i].dbm.speed_kms(dt).max(ropes[j].params.w_kms);
-            out[j] = RopeDyn {
-                dbm: Dbm {
-                    w_kms: w_eff,
-                    gamma_per_km: ropes[j].params.gamma_per_km * cfg.wake_gamma_frac.max(0.0),
-                    ..out[j].dbm
-                },
-                lead: i as i32,
-            };
+            out[j].lead = i as i32;
+        }
+    }
+    if cfg.defl_pair > 0.0 || cfg.defl_ew_deg != 0.0 {
+        for k in 0..ropes.len() {
+            let mut dir = ropes[k].frame.e_dir;
+            if cfg.defl_pair > 0.0 && out[k].lead >= 0 {
+                dir = rotate_toward(
+                    dir,
+                    ropes[out[k].lead as usize].frame.e_dir,
+                    cfg.defl_pair,
+                    DEFL_PAIR_CAP_RAD,
+                );
+            }
+            let mut lon = dir[1].atan2(dir[0]).to_degrees();
+            let lat = dir[2].clamp(-1.0, 1.0).asin().to_degrees();
+            if cfg.defl_ew_deg != 0.0 {
+                let p = &ropes[k].params;
+                lon += cfg.defl_ew_deg * ((p.v0_kms - p.w_kms) / p.w_kms.max(1.0)).clamp(-1.0, 1.0);
+            }
+            out[k].frame = Frame::new(lon, lat, ropes[k].params.tilt_deg);
+        }
+    }
+
+    // Pass 1 — wake kinematics (§16 freeze + §20 refreshes), leader-first.
+    for oi in 1..order.len() {
+        let j = order[oi];
+        if out[j].lead < 0 {
+            continue;
+        }
+        let i = out[j].lead as usize;
+        let p_j = &ropes[j].params;
+        let g_eff = p_j.gamma_per_km * cfg.wake_gamma_frac.max(0.0);
+        let dt = (ropes[j].t_launch_s - ropes[i].t_launch_s).max(0.0);
+        let w_eff = out[i].dbm.speed_kms(dt).max(p_j.w_kms);
+        out[j].dbm = SegDbm::single(Dbm {
+            w_kms: w_eff,
+            gamma_per_km: g_eff,
+            ..p_j.dbm()
+        });
+        if cfg.wake_refresh_h > 0.0 {
+            let step = cfg.wake_refresh_h * 3600.0;
+            let mut age = step;
+            while age <= WAKE_REFRESH_MAX_AGE_S {
+                let t_abs = ropes[j].t_launch_s + age;
+                let age_i = t_abs - ropes[i].t_launch_s;
+                let d_j = out[j].dbm.apex_km(age);
+                let d_i = out[i].dbm.apex_km(age_i);
+                if d_j + sigma_hat_km(&ropes[j], d_j) > d_i {
+                    // Overtaken the leader's apex → fresh wind, raw drag.
+                    out[j].dbm.push_regime(age, p_j.w_kms, p_j.gamma_per_km);
+                    break;
+                }
+                let w_new = out[i].dbm.speed_kms(age_i).max(p_j.w_kms);
+                out[j].dbm.push_regime(age, w_new, g_eff);
+                age += step;
+            }
+        }
+    }
+
+    // Pass 2 — §19 contacts, earliest first (chains see post-impulse speeds).
+    if cfg.momentum_enabled {
+        loop {
+            let mut best: Option<(f64, usize)> = None;
+            for j in 0..ropes.len() {
+                if out[j].lead < 0 || !out[j].contact_s.is_nan() {
+                    continue;
+                }
+                let i = out[j].lead as usize;
+                if let Some(tc) = contact_time(ropes, out, i, j) {
+                    if best.map_or(true, |(bt, _)| tc < bt) {
+                        best = Some((tc, j));
+                    }
+                }
+            }
+            let Some((tc, j)) = best else { break };
+            let i = out[j].lead as usize;
+            let age_i = tc - ropes[i].t_launch_s;
+            let age_j = tc - ropes[j].t_launch_s;
+            let v_i = out[i].dbm.speed_kms(age_i);
+            let v_j = out[j].dbm.speed_kms(age_j);
+            out[j].contact_s = tc;
+            let u = v_j - v_i;
+            if u <= 0.0 {
+                continue; // expansion-driven touch, no closing momentum
+            }
+            // §19.2: masses ∝ σ₁AU² (fixed exponent), restitution ε.
+            let m_i = ropes[i].params.sigma_1au_au * ropes[i].params.sigma_1au_au;
+            let m_j = ropes[j].params.sigma_1au_au * ropes[j].params.sigma_1au_au;
+            let r = (m_j / m_i.max(1e-12)).max(1e-6);
+            let e = cfg.restitution.clamp(0.0, 1.0);
+            let v_i2 = v_i + (1.0 + e) * r / (1.0 + r) * u;
+            let v_j2 = v_j - (1.0 + e) / (1.0 + r) * u;
+            // Leader: keep its CURRENT flow regime, jump the speed.
+            let (w_i_cur, g_i_cur) = out[i].dbm.regime_at(age_i);
+            out[i].dbm.truncate_after(age_i);
+            out[i].dbm.push_impulse(age_i, v_i2, w_i_cur, g_i_cur);
+            // Follower: the pair is now one system — it adopts the LEADER's
+            // flow regime (merged-system approximation, spec §19.2). With
+            // ε = 0 the identical (v, w, Γ) keep the two chains EXACTLY
+            // co-moving, so the §16 rear squeeze relaxes (M_rel = 0)
+            // instead of a stale frozen wake artificially re-closing them.
+            out[j].dbm.truncate_after(age_j);
+            out[j].dbm.push_impulse(age_j, v_j2, w_i_cur, g_i_cur);
         }
     }
 }
@@ -631,7 +835,8 @@ pub fn upstream_kms(ropes: &[RopeEntry], dyns: &[RopeDyn], k: usize, t_s: f64) -
 }
 
 /// §16-aware train field: superposition with wake kinematics + dynamic rear
-/// compression. With interaction disabled this is exactly `field_at_set`.
+/// compression, evaluated in each rope's EFFECTIVE (§21-deflected) frame.
+/// With interaction disabled this is exactly `field_at_set`.
 pub fn field_at_train(
     ropes: &[RopeEntry],
     dyns: &[RopeDyn],
@@ -647,7 +852,7 @@ pub fn field_at_train(
             continue; // not launched yet — DBM is undefined for dt < 0
         }
         let rc = rear_c_at(ropes, dyns, cfg, k, t_s);
-        let fs = field_at_dyn(&r.params, &r.frame, dt, p, &dyns[k].dbm, rc);
+        let fs = field_at_dyn(&r.params, &dyns[k].frame, dt, p, &dyns[k].dbm, rc);
         if fs.inside {
             count += 1;
             b[0] += fs.b[0];
@@ -674,7 +879,7 @@ pub fn sheath_count_at_train(
             dt > 0.0
                 && sheath_at_dyn(
                     &r.params,
-                    &r.frame,
+                    &dyns[*k].frame,
                     dt,
                     p,
                     &dyns[*k].dbm,
@@ -1119,8 +1324,8 @@ mod tests {
         TrainCfg { enabled: true, ..TrainCfg::default() }
     }
 
-    /// Arrival time of an effective Dbm at radius r (bisection).
-    fn dbm_arrival_s(dbm: &Dbm, r_km: f64) -> f64 {
+    /// Arrival time of an effective (segmented) Dbm at radius r (bisection).
+    fn dbm_arrival_s(dbm: &SegDbm, r_km: f64) -> f64 {
         let (mut lo, mut hi) = (0.0, 20.0 * 86_400.0);
         for _ in 0..200 {
             let mid = 0.5 * (lo + hi);
@@ -1173,6 +1378,223 @@ mod tests {
         assert_eq!(bits(&oa), bits(&ob));
     }
 
+    // ── v1.6 (spec §19–§21): momentum exchange, evolving wake, deflection ────
+
+    /// Slow leader / fast aligned follower — the canonical §19 collision.
+    fn collision_train() -> [RopeEntry; 2] {
+        let lead = RopeParams {
+            v0_kms: 600.0, sigma_1au_au: 0.09, tilt_deg: 90.0, ..Default::default()
+        };
+        let foll = RopeParams {
+            v0_kms: 1500.0, sigma_1au_au: 0.11, tilt_deg: 90.0, ..Default::default()
+        };
+        [RopeEntry::new(lead, 0.0), RopeEntry::new(foll, 12.0 * 3600.0)]
+    }
+
+    #[test]
+    fn v16_knobs_off_are_bitwise_identical_to_v15() {
+        // momentum_enabled=false must ignore ε; wake_refresh 0 and defl 0
+        // are the legacy path — bit-for-bit.
+        let train = collision_train();
+        let n = 500;
+        let base = {
+            let mut o = vec![0.0f32; 4 * n];
+            synth_series(&train, &icfg(), 0.0, 1800.0, n, earth(), &mut o);
+            o
+        };
+        let cfg = TrainCfg {
+            restitution: 0.7, // ignored while momentum_enabled=false
+            momentum_enabled: false,
+            wake_refresh_h: 0.0,
+            defl_pair: 0.0,
+            defl_ew_deg: 0.0,
+            ..icfg()
+        };
+        let mut o = vec![0.0f32; 4 * n];
+        synth_series(&train, &cfg, 0.0, 1800.0, n, earth(), &mut o);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&base), bits(&o));
+    }
+
+    #[test]
+    fn contact_impulse_conserves_momentum_and_respects_restitution() {
+        let train = collision_train();
+        let m_i = train[0].params.sigma_1au_au.powi(2);
+        let m_j = train[1].params.sigma_1au_au.powi(2);
+
+        // Pre-contact speeds from the momentum-OFF dynamics at the SAME tc.
+        let mut off = Vec::new();
+        train_dyn(&train, &icfg(), &mut off);
+
+        for eps in [0.0, 0.5, 1.0] {
+            let cfg = TrainCfg { momentum_enabled: true, restitution: eps, ..icfg() };
+            let mut dyns = Vec::new();
+            train_dyn(&train, &cfg, &mut dyns);
+            let tc = dyns[1].contact_s;
+            assert!(tc.is_finite(), "fast follower must contact its leader");
+            // The contact sits ON the gap root of the pre-impulse chains.
+            let gap = |t: f64| {
+                let d_i = off[0].dbm.apex_km(t);
+                let d_j = off[1].dbm.apex_km(t - train[1].t_launch_s);
+                (d_i - sigma_hat_km(&train[0], d_i)) - (d_j + sigma_hat_km(&train[1], d_j))
+            };
+            assert!(gap(tc).abs() < 1.0, "gap at contact = {} km (ε {})", gap(tc), eps);
+            let v_i0 = off[0].dbm.speed_kms(tc);
+            let v_j0 = off[1].dbm.speed_kms(tc - train[1].t_launch_s);
+            let v_i1 = dyns[0].dbm.speed_kms(tc + 1.0);
+            let v_j1 = dyns[1].dbm.speed_kms(tc + 1.0 - train[1].t_launch_s);
+            assert!(
+                ((m_i * v_i0 + m_j * v_j0) - (m_i * v_i1 + m_j * v_j1)).abs() < 0.5,
+                "momentum must be conserved (ε {}): {} vs {}",
+                eps, m_i * v_i0 + m_j * v_j0, m_i * v_i1 + m_j * v_j1
+            );
+            let u0 = v_j0 - v_i0;
+            let u1 = v_j1 - v_i1;
+            assert!(
+                (u1 + eps * u0).abs() < 1.0,
+                "restitution: post-closing {} must be −ε·{} (ε {})",
+                u1, u0, eps
+            );
+        }
+
+        // Trajectory consequence: the pushed leader arrives EARLIER, the
+        // decelerated follower LATER, than without momentum exchange.
+        let cfg = TrainCfg { momentum_enabled: true, restitution: 0.0, ..icfg() };
+        let mut on = Vec::new();
+        train_dyn(&train, &cfg, &mut on);
+        let t_lead_on = dbm_arrival_s(&on[0].dbm, AU_KM);
+        let t_lead_off = dbm_arrival_s(&off[0].dbm, AU_KM);
+        assert!(
+            t_lead_on < t_lead_off - 1800.0,
+            "pushed leader must arrive earlier: {:.1} vs {:.1} h",
+            t_lead_on / 3600.0, t_lead_off / 3600.0
+        );
+        let arr_j = |d: &RopeDyn| {
+            let (mut lo, mut hi) = (0.0, 20.0 * 86_400.0);
+            for _ in 0..200 {
+                let mid = 0.5 * (lo + hi);
+                if d.dbm.apex_km(mid) < AU_KM { lo = mid; } else { hi = mid; }
+            }
+            0.5 * (lo + hi)
+        };
+        assert!(
+            arr_j(&on[1]) > arr_j(&off[1]) + 1800.0,
+            "decelerated follower must arrive later"
+        );
+    }
+
+    #[test]
+    fn rear_compression_relaxes_after_the_contact() {
+        let train = collision_train();
+        let cfg = TrainCfg { momentum_enabled: true, restitution: 0.0, ..icfg() };
+        let mut dyns = Vec::new();
+        train_dyn(&train, &cfg, &mut dyns);
+        let tc = dyns[1].contact_s;
+        assert!(tc.is_finite());
+        let before = rear_c_at(&train, &dyns, &cfg, 0, tc - 3600.0);
+        let after = rear_c_at(&train, &dyns, &cfg, 0, tc + 4.0 * 3600.0);
+        assert!(before > 0.05, "closing follower must squeeze pre-contact: {}", before);
+        assert!(
+            after < 0.02,
+            "co-moving (ε=0) pair must relax the squeeze: {} → {}",
+            before, after
+        );
+    }
+
+    #[test]
+    fn wake_refresh_decays_entrainment_and_overtake_restores_fresh_wind() {
+        let train = collision_train();
+        // Frozen legacy vs 6-h refreshes: the decelerating leader's wake
+        // weakens over time, so the refreshed follower is entrained LESS
+        // and reaches 1 AU later than the frozen-wake approximation said.
+        let mut frozen = Vec::new();
+        train_dyn(&train, &icfg(), &mut frozen);
+        let cfg = TrainCfg { wake_refresh_h: 6.0, ..icfg() };
+        let mut fresh = Vec::new();
+        train_dyn(&train, &cfg, &mut fresh);
+        assert!(fresh[1].dbm.n > 1, "refreshes must add segments");
+        // Monotone non-increasing wake ambient across refresh segments.
+        for k in 1..fresh[1].dbm.n {
+            let w_prev = fresh[1].dbm.segs[k - 1].1.w_kms;
+            let w_k = fresh[1].dbm.segs[k].1.w_kms;
+            // (until an overtake segment restores the raw ambient)
+            if (w_k - train[1].params.w_kms).abs() < 1e-9 { break; }
+            assert!(w_k <= w_prev + 1e-9, "wake must decay: seg {} {} → {}", k, w_prev, w_k);
+        }
+        let t_frozen = dbm_arrival_s(&frozen[1].dbm, AU_KM);
+        let t_refresh = dbm_arrival_s(&fresh[1].dbm, AU_KM);
+        assert!(
+            t_refresh > t_frozen,
+            "decaying wake must slow the follower vs the launch freeze: {:.1} vs {:.1} h",
+            t_refresh / 3600.0, t_frozen / 3600.0
+        );
+        // A genuinely overtaking follower re-enters fresh wind: raw regime
+        // at late age.
+        let (w_late, g_late) = fresh[1].dbm.regime_at(WAKE_REFRESH_MAX_AGE_S * 2.0);
+        if fresh[1].dbm.n > 2 && w_late == train[1].params.w_kms {
+            assert_eq!(g_late, train[1].params.gamma_per_km, "overtake restores raw drag");
+        }
+        // wake_refresh 0 stays bitwise the frozen path.
+        let n = 400;
+        let (mut oa, mut ob) = (vec![0.0f32; 4 * n], vec![0.0f32; 4 * n]);
+        synth_series(&train, &icfg(), 0.0, 1800.0, n, earth(), &mut oa);
+        let zero = TrainCfg { wake_refresh_h: 0.0, ..icfg() };
+        synth_series(&train, &zero, 0.0, 1800.0, n, earth(), &mut ob);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&oa), bits(&ob));
+    }
+
+    #[test]
+    fn deflection_rotates_the_follower_and_shifts_slow_ropes_east() {
+        // Leader on the Sun–Earth line, follower 30° west: defl_pair 0.5
+        // rotates the follower's EFFECTIVE direction 15° toward the leader
+        // (cap 20° not hit); raw entries stay untouched.
+        let lead = RopeParams { v0_kms: 900.0, ..Default::default() };
+        let foll = RopeParams { lon_deg: 30.0, v0_kms: 1300.0, ..Default::default() };
+        let train = [RopeEntry::new(lead, 0.0), RopeEntry::new(foll, 10.0 * 3600.0)];
+        let cfg = TrainCfg { defl_pair: 0.5, ..icfg() };
+        let mut dyns = Vec::new();
+        train_dyn(&train, &cfg, &mut dyns);
+        let lon_eff = dyns[1].frame.e_dir[1].atan2(dyns[1].frame.e_dir[0]).to_degrees();
+        assert!(
+            (lon_eff - 15.0).abs() < 0.5,
+            "0.5 of 30° separation → ~15°, got {:.2}°",
+            lon_eff
+        );
+        assert!(
+            (train[1].frame.e_dir[1].atan2(train[1].frame.e_dir[0]).to_degrees() - 30.0).abs()
+                < 1e-9,
+            "raw entry frames must never move"
+        );
+        // Cap: a 60°-apart pair… would not partner (cos < 0.5); verify the
+        // cap with a 35° separation and defl_pair 1.0 → 20° max rotation.
+        let far = RopeParams { lon_deg: 35.0, v0_kms: 1300.0, ..Default::default() };
+        let train2 = [RopeEntry::new(lead, 0.0), RopeEntry::new(far, 10.0 * 3600.0)];
+        let cfg2 = TrainCfg { defl_pair: 1.0, ..icfg() };
+        let mut d2 = Vec::new();
+        train_dyn(&train2, &cfg2, &mut d2);
+        let lon2 = d2[1].frame.e_dir[1].atan2(d2[1].frame.e_dir[0]).to_degrees();
+        assert!((lon2 - 15.0).abs() < 0.5, "35° − 20° cap = 15°, got {:.2}°", lon2);
+
+        // §21 east–west drift: slow rope (v0 < w) shifts EAST (negative).
+        let slow = RopeParams { v0_kms: 300.0, w_kms: 400.0, ..Default::default() };
+        let fast = RopeParams { lon_deg: 3.0, v0_kms: 1200.0, w_kms: 400.0, ..Default::default() };
+        let t3 = [RopeEntry::new(slow, 0.0), RopeEntry::new(fast, 8.0 * 3600.0)];
+        let cfg3 = TrainCfg { defl_ew_deg: 5.0, ..icfg() };
+        let mut d3 = Vec::new();
+        train_dyn(&t3, &cfg3, &mut d3);
+        let lon_slow = d3[0].frame.e_dir[1].atan2(d3[0].frame.e_dir[0]).to_degrees();
+        let lon_fast = d3[1].frame.e_dir[1].atan2(d3[1].frame.e_dir[0]).to_degrees();
+        assert!((lon_slow - (-1.25)).abs() < 0.01, "slow → east: {:.3}°", lon_slow);
+        assert!(lon_fast > 3.0, "fast → west of its raw lon: {:.3}°", lon_fast);
+
+        // Both knobs 0 → effective frames ARE the raw frames (bitwise).
+        let mut d0 = Vec::new();
+        train_dyn(&train, &icfg(), &mut d0);
+        assert_eq!(d0[1].frame.e_dir[0].to_bits(), train[1].frame.e_dir[0].to_bits());
+        assert_eq!(d0[1].frame.e_dir[1].to_bits(), train[1].frame.e_dir[1].to_bits());
+    }
+
     #[test]
     fn wake_kinematics_entrain_the_follower() {
         // Aligned follower: elevated frozen-at-launch ambient, reduced drag,
@@ -1189,15 +1611,15 @@ mod tests {
         assert_eq!(dyns[1].lead, 0);
         let w_expect = lead.dbm().speed_kms(20.0 * 3600.0);
         assert!(
-            (dyns[1].dbm.w_kms - w_expect).abs() < 1e-9 && w_expect > 600.0,
+            (dyns[1].dbm.w_kms() - w_expect).abs() < 1e-9 && w_expect > 600.0,
             "wake ambient {} must be the leader's launch-time speed {}",
-            dyns[1].dbm.w_kms,
+            dyns[1].dbm.w_kms(),
             w_expect
         );
-        assert!((dyns[1].dbm.gamma_per_km - 0.5 * foll.gamma_per_km).abs() < 1e-20);
-        assert!((dyns[0].dbm.w_kms - lead.w_kms).abs() < 1e-12, "leader untouched");
+        assert!((dyns[1].dbm.gamma_per_km() - 0.5 * foll.gamma_per_km).abs() < 1e-20);
+        assert!((dyns[0].dbm.w_kms() - lead.w_kms).abs() < 1e-12, "leader untouched");
         let t_wake = dbm_arrival_s(&dyns[1].dbm, AU_KM);
-        let t_fresh = dbm_arrival_s(&foll.dbm(), AU_KM);
+        let t_fresh = dbm_arrival_s(&SegDbm::single(foll.dbm()), AU_KM);
         assert!(
             t_wake < t_fresh - 3600.0,
             "wake must speed the follower up: {} vs {} h",
@@ -1217,7 +1639,7 @@ mod tests {
         let mut dyns = Vec::new();
         train_dyn(&train, &icfg(), &mut dyns);
         assert_eq!(dyns[1].lead, -1, "90°-apart launches must not interact");
-        assert!((dyns[1].dbm.w_kms - flank.w_kms).abs() < 1e-12);
+        assert!((dyns[1].dbm.w_kms() - flank.w_kms).abs() < 1e-12);
     }
 
     #[test]
@@ -1335,7 +1757,7 @@ mod tests {
         let (mut lo, mut hi) = (1.0, 12.0);
         for _ in 0..60 {
             let mid = 0.5 * (lo + hi);
-            if sheath_at_dyn(p, f, t, [d + mid * sigma, 0.0, 0.0], dbm, upstream, 0.0) {
+            if sheath_at_dyn(p, f, t, [d + mid * sigma, 0.0, 0.0], &SegDbm::single(*dbm), upstream, 0.0) {
                 lo = mid;
             } else {
                 hi = mid;
@@ -1403,7 +1825,7 @@ mod tests {
         let d = dbm.apex_km(t);
         let sigma = sigma_apex_km(p.sigma_1au_au * AU_KM, d, p.n_sigma);
         assert!(
-            !sheath_at_dyn(&p, &f, t, [d + 1.1 * sigma, 0.0, 0.0], &dbm, v - 50.0, 0.0),
+            !sheath_at_dyn(&p, &f, t, [d + 1.1 * sigma, 0.0, 0.0], &SegDbm::single(dbm), v - 50.0, 0.0),
             "sub-magnetosonic upstream must kill the sheath"
         );
     }

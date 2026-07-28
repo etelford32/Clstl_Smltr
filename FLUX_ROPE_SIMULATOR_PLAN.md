@@ -253,6 +253,47 @@ the same crate.
   or feeds are down. Gates: tests/flux-rope-live-page.spec.js (offline
   demo + mocked live train), extended flux-rope-live/forecast node gates;
   flux-rope.html and every pinned number untouched.
+  ✅ v1.6 + the DAILY PER-FLARE VALIDATION LOOP (2026-07-28): the engine
+  gains the remaining compounding math and joins the shipped CME
+  validation program as a scored model.
+  · KERNEL (spec §19–§21, everything default-off and bit-identical off,
+    cargo 72/72): §19.0 piecewise-DBM segment chains (SegDbm — the
+    machinery every remaining mechanism shares), §19 contact-impulse
+    MOMENTUM EXCHANGE (gap-root bisection, σ²-mass, restitution ε,
+    merged-system post-contact regime; momentum conserved to 1e-9),
+    §20 EVOLVING WAKE (6-h re-freeze + overtake → fresh wind),
+    §21 DEFLECTION (pair wake attraction + east–west drag drift, the
+    P(hit) knobs only a ledger can fit). Probes: fr_pair_contact_s +
+    setters; dyns cache added (chains made train_dyn genuinely costly).
+    HONEST HINDCAST OUTCOME, pinned as a smoke tripwire: momentum at
+    defaults on the fitted Gannon train lands the B→A contact at +53.5 h
+    (plausible) but OVERSHOOTS the min (−54.6 vs −44.17 nT) — the v1.4
+    hand fit already absorbs the approximations, so the preset keeps
+    every v1.6 knob OFF and the daily ledger fits ε/refresh/deflection
+    on fresh events (spec §19 measured value).
+  · MATH MODULES (pure, node-gated): js/forecast-verification.js (exact
+    ensemble CRPS + locked-quantile CRPS, Brier + reliability, PIT/rank
+    histograms, amplification factor; Gaussian analytic anchor pinned)
+    and js/flux-rope-inversion.js (closed-form §5 inversion — Γ from
+    transit, (Γ, w) from transit + arrival speed, honesty refusals, and
+    retrievedPopulation → the measured priors feedback loop).
+  · DAILY LOOP (CME_FORECAST_VALIDATION_PLAN.md program, model_id
+    flux-rope-v1): validation-rerun now runs the SHARED provider on the
+    committed WASM server-side, locks ONE row per FLARE-ASSOCIATED CME
+    of the modeled train (DONKI FLR association, frozen replayable
+    inputs, parametric ±σ_v0 arrival windows from the effective wake
+    kinematics, train-onset arrival quantiles on the first-arriving
+    row), enriches resolved events with Bz-structure truth from
+    sw_geomag_dataset (coverage-guarded), and scores arrival error +
+    CRPS + Brier trio + min-Bz error + the per-event drag inversion →
+    validation_runs kind='flux-rope' with the retrieved-Γ/w population.
+    Pure logic in js/flux-rope-validation.js
+    (tests/flux-rope-validation.mjs); /api/cme/skill exposes the compact
+    flux-rope subset; flux-rope-live.html renders the per-flare
+    VALIDATION LEDGER (locked vs truth, skill chips vs the baselines).
+  Remaining Phase 5: EEGGL/SWMF comparison runs, server-side API build;
+  ledger-driven fits of ε / wake_refresh_h / §21 knobs once events
+  accumulate.
 
 ## 5. Data inputs
 
