@@ -728,15 +728,23 @@
             '</ul>';
     }
     // Funnel helper — populated by js/auth-funnel.js's window-side-effect.
-    // Same fallback pattern as signin.html so a module-load failure
-    // never breaks the sign-up form.
-    const _funnel = (typeof window !== 'undefined' && window.ppFunnel) || {
-        step: () => {}, stepDeferred: () => {}, id: () => null,
+    // Resolved LAZILY on every call (same fix as signin.html): classic
+    // scripts execute BEFORE deferred module scripts, so capturing
+    // window.ppFunnel once at parse time permanently bound the no-op
+    // fallback and dropped every signup_* stage this script fires.
+    // Still guarded so a module-load failure never breaks the form.
+    const _funnel = {
+        step:         (s, p) => { try { window.ppFunnel?.step?.(s, p); } catch {} },
+        stepDeferred: (s, p) => { try { window.ppFunnel?.stepDeferred?.(s, p); } catch {} },
+        id:           ()     => { try { return window.ppFunnel?.id?.() ?? null; } catch { return null; } },
     };
     // Stable error-category mapper (js/auth-funnel.js side-effect). Passed
     // as `code` on signup_failed so a top-reasons histogram groups by a
-    // fixed key rather than the drifting free-text `reason`.
-    const _classifyErr = (typeof window !== 'undefined' && window.ppClassifyAuthError) || (() => 'unknown');
+    // fixed key rather than the drifting free-text `reason`. Same lazy
+    // resolution as _funnel above.
+    const _classifyErr = (e) => {
+        try { return window.ppClassifyAuthError?.(e) ?? 'unknown'; } catch { return 'unknown'; }
+    };
 
     function selectPlan(val) {
         document.querySelectorAll('.plan-pill').forEach(p => p.classList.remove('selected'));

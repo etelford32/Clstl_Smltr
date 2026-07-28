@@ -26,7 +26,7 @@
  *   auth.requireAuth();
  */
 
-import { getSupabase, isConfigured } from './supabase-config.js';
+import { getSupabase, getSupabaseLoadInfo, isConfigured } from './supabase-config.js';
 import {
     canUseAlerts as _cfgCanUseAlerts,
     canUseAdvancedAlerts as _cfgCanUseAdvancedAlerts,
@@ -47,6 +47,12 @@ class AuthManager {
         this._user = null;
         this._supabase = null;
         this._initialized = false;
+        // Bounded retry state for transient fetchProfile failures — see
+        // _scheduleProfileRetry(). Without it, one RLS blip / network
+        // drop at session-restore leaves a subscriber rendered as 'free'
+        // until they manually reload.
+        this._profileRetryCount = 0;
+        this._profileRetryTimer = null;
         this._initPromise = this._init();
     }
 
@@ -54,9 +60,33 @@ class AuthManager {
         if (isConfigured()) {
             try {
                 this._supabase = await getSupabase();
+                // If the client only loaded via a fallback CDN, say so on
+                // the admin "Top auth failures" card — a rising fallback
+                // rate is the early warning that the primary CDN is dying
+                // for real users even though nothing looks broken.
+                try {
+                    const li = getSupabaseLoadInfo();
+                    if (li && li.index !== 0) {
+                        telemetry.recordAuthFailure('supabase_cdn_fallback_used', {
+                            source: 'auth_init', cdn: li.cdn, attempts: li.attempts, ms: li.ms,
+                        });
+                    }
+                } catch {}
                 const { data: { session } } = await this._supabase.auth.getSession();
                 if (session?.user) {
                     this._user = this._mapSupabaseUser(session.user);
+                    // Re-hydrate profile-derived fields (role, plan,
+                    // subscription state, alerts…) from the previously
+                    // persisted mirror BEFORE the early persist below.
+                    // _mapSupabaseUser only knows user_metadata, which
+                    // carries neither role nor the real plan — persisting
+                    // the bare mapped user used to overwrite a subscriber's
+                    // stored plan with 'free' and their role with 'user',
+                    // so one transient fetchProfile failure demoted paying
+                    // users (and admins) in the UI. fetchProfile below
+                    // remains the source of truth and overwrites all of
+                    // this when it succeeds.
+                    this._mergeStoredMirror();
                     // Persist immediately so dashboard.html's localStorage
                     // fallback can read a valid session even if fetchProfile
                     // below errors out (RLS misconfig, network blip). Without
@@ -74,6 +104,17 @@ class AuthManager {
                     // restore issues; users in DevTools can flip Console
                     // verbosity to "Verbose" to see it.
                     console.debug('[Auth] Supabase session restored');
+                } else {
+                    // Client loaded fine and authoritatively reports NO
+                    // session (expired / revoked refresh token — the
+                    // returning-user-after-weeks case). Drop any stale
+                    // supabase-written pp_auth mirror: nav.js and the
+                    // dashboard gate trust that mirror directly, so
+                    // leaving it produces the half-signed-in split brain
+                    // (name in the nav, gate open, every data call 401s).
+                    // Mock/test-seeded mirrors (provider !== 'supabase')
+                    // are left alone — see _clearStaleSupabaseMirror.
+                    this._clearStaleSupabaseMirror();
                 }
 
                 // Listen for auth state changes (login, logout, token refresh)
@@ -100,25 +141,25 @@ class AuthManager {
                     }
                     if (event === 'SIGNED_OUT' || !session?.user) {
                         this._user = null;
+                        // Mirror hygiene: when Supabase itself declares the
+                        // session gone (explicit sign-out, refresh token
+                        // expired or revoked server-side), the persisted
+                        // pp_auth mirror is stale — clear it so nav.js and
+                        // the dashboard's localStorage fallback stop
+                        // rendering a dead session. Scoped to mirrors this
+                        // module wrote (provider === 'supabase'); mock/test
+                        // sessions are untouched.
+                        this._clearStaleSupabaseMirror();
+                        this._cancelProfileRetry(true);
                     } else {
                         const supaUser = session.user;
                         const mapped = this._mapSupabaseUser(supaUser);
                         // Preserve fields that come from user_profiles (role,
                         // server-side plan, seat info) across token refreshes.
-                        const preserved = this._user ? {
-                            role:                       this._user.role,
-                            plan:                       this._user.plan,
-                            display_name:               this._user.display_name,
-                            subscription_status:        this._user.subscription_status,
-                            subscription_period_end:    this._user.subscription_period_end,
-                            classroom_seats:            this._user.classroom_seats,
-                            seats_used:                 this._user.seats_used,
-                            attribution_required:       this._user.attribution_required,
-                            branding:                   this._user.branding,
-                            parent_account_id:          this._user.parent_account_id,
-                            effective_plan:             this._user.effective_plan,
-                            alerts:                     this._user.alerts,
-                        } : {};
+                        // _profileCarryover only returns keys with defined
+                        // values, so a half-populated _user can't stomp the
+                        // mapped defaults with `undefined`.
+                        const preserved = this._profileCarryover(this._user);
                         this._user = { ...mapped, ...preserved };
                         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
                             // Re-pull server state so role/plan are current.
@@ -159,6 +200,82 @@ class AuthManager {
     /** Wait for initialization to complete. */
     async ready() {
         await this._initPromise;
+    }
+
+    /**
+     * The fields on _user that are OWNED by user_profiles / fetchProfile
+     * rather than by Supabase user_metadata. _mapSupabaseUser cannot
+     * produce them (it defaults plan:'free', role:'user'), so whenever a
+     * freshly-mapped user replaces an existing one — token refresh,
+     * session restore, password sign-in — these must be carried over from
+     * the previous state or the user is silently demoted until the next
+     * successful fetchProfile. Only keys with DEFINED values are
+     * returned, so callers can spread the result without `undefined`
+     * entries clobbering mapped defaults.
+     */
+    _profileCarryover(src) {
+        if (!src) return {};
+        const out = {};
+        for (const k of [
+            'role', 'plan', 'name', 'display_name',
+            'subscription_status', 'subscription_period_end',
+            'classroom_seats', 'seats_used', 'attribution_required',
+            'branding', 'parent_account_id', 'effective_plan',
+            'alerts', 'location', 'remember',
+        ]) {
+            if (src[k] !== undefined) out[k] = src[k];
+        }
+        return out;
+    }
+
+    /**
+     * Merge profile-derived fields from the persisted pp_auth mirror into
+     * the current in-memory _user — but ONLY when the mirror belongs to
+     * the same account (id match) and was written by a real Supabase
+     * session. Used on session restore and sign-in so the "persist before
+     * fetchProfile" ordering (see _init — load-bearing, do not reorder)
+     * stops being lossy: the early persist keeps the subscriber's
+     * last-known plan/role instead of overwriting them with the mapped
+     * defaults. fetchProfile remains the source of truth afterwards.
+     */
+    _mergeStoredMirror() {
+        if (!this._user?.id) return;
+        let stored = null;
+        try { stored = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {}
+        if (!stored) {
+            try { stored = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {}
+        }
+        if (!stored || stored.id !== this._user.id || stored.provider !== 'supabase') return;
+        this._user = { ...this._user, ...this._profileCarryover(stored),
+                       // Identity fields always come from the live session.
+                       id: this._user.id, email: this._user.email };
+    }
+
+    /**
+     * Remove the persisted pp_auth mirror IF it was written by this
+     * module for a real Supabase session (provider === 'supabase').
+     * Called when Supabase authoritatively reports the session gone —
+     * restore-with-no-session and SIGNED_OUT — so nav.js and the
+     * dashboard's localStorage fallback stop trusting a dead session.
+     *
+     * Deliberately narrow: mock-mode sessions and the Playwright suites
+     * that seed pp_auth with provider:'mock' must survive a page load in
+     * which the real Supabase client finds no session. A mirror that no
+     * longer parses is removed too — corrupt JSON can't be trusted by
+     * anyone.
+     */
+    _clearStaleSupabaseMirror() {
+        for (const getStore of [() => localStorage, () => sessionStorage]) {
+            try {
+                const store = getStore();
+                const raw = store.getItem(AUTH_KEY);
+                if (!raw) continue;
+                let parsed = null;
+                let corrupt = false;
+                try { parsed = JSON.parse(raw); } catch (_) { corrupt = true; }
+                if (corrupt || parsed?.provider === 'supabase') store.removeItem(AUTH_KEY);
+            } catch (_) { /* storage blocked — nothing to clear */ }
+        }
     }
 
     /** Map Supabase user object to our app's user shape. */
@@ -315,6 +432,37 @@ class AuthManager {
         return this._effectiveRole() || 'user';
     }
 
+    /** Stop a pending profile retry; optionally reset the attempt budget
+     *  (done on success and on sign-out so the next episode starts fresh). */
+    _cancelProfileRetry(resetCount = false) {
+        if (this._profileRetryTimer) {
+            clearTimeout(this._profileRetryTimer);
+            this._profileRetryTimer = null;
+        }
+        if (resetCount) this._profileRetryCount = 0;
+    }
+
+    /**
+     * Schedule a bounded re-fetch of the profile after a transient
+     * failure (2 s, then 8 s — two attempts max per episode). The user
+     * keeps their last-known plan/role from the mirror in the meantime
+     * (see _mergeStoredMirror); this closes the loop so they don't stay
+     * on stale data until a manual reload. Guarded against stacking and
+     * against the account changing between schedule and fire.
+     */
+    _scheduleProfileRetry() {
+        if (this._profileRetryTimer || this._profileRetryCount >= 2) return;
+        const uid = this._user?.id;
+        if (!uid) return;
+        const delay = this._profileRetryCount === 0 ? 2000 : 8000;
+        this._profileRetryCount += 1;
+        this._profileRetryTimer = setTimeout(() => {
+            this._profileRetryTimer = null;
+            if (this._user?.id !== uid) return;
+            this.fetchProfile().catch(() => {});
+        }, delay);
+    }
+
     /**
      * Fetch the user's profile from the user_profiles table (includes role).
      * Call after sign-in to get the server-side role (not just user_metadata).
@@ -344,9 +492,15 @@ class AuthManager {
                     }
                 }
                 console.warn('[Auth] Profile fetch failed:', error.message);
+                // Transient (RLS blip, brief outage) — retry on a short
+                // backoff instead of leaving plan/role stale for the rest
+                // of the page's life.
+                this._scheduleProfileRetry();
                 return null;
             }
             if (data) {
+                // Fresh server truth in hand — reset the retry budget.
+                this._cancelProfileRetry(true);
                 // Merge server-side role/plan into local state
                 if (data.role) this._user.role = data.role;
                 this._user.plan = data.plan || this._user.plan;
@@ -421,6 +575,7 @@ class AuthManager {
                     message: err?.message || 'unknown',
                 });
             } catch (_) { /* fire-and-forget */ }
+            this._scheduleProfileRetry();
             return null;
         }
     }
@@ -515,6 +670,14 @@ class AuthManager {
                 if (error) return { success: false, error: error.message };
                 this._user = this._mapSupabaseUser(data.user);
                 this._user.remember = remember;
+                // Same-account re-sign-in: carry the last-known
+                // profile fields (plan, role, subscription state) over
+                // from the persisted mirror so a transient fetchProfile
+                // failure below doesn't land a subscriber on the
+                // dashboard as 'free'. fetchProfile overwrites all of it
+                // when it succeeds; a different account gets no carryover
+                // (id mismatch).
+                this._mergeStoredMirror();
                 // Fetch server-side profile (role, plan — not just user_metadata)
                 await this.fetchProfile();
                 // Always persist after sign-in so dashboard can read it
@@ -523,6 +686,29 @@ class AuthManager {
             } catch (err) {
                 return { success: false, error: err.message };
             }
+        }
+
+        // No Supabase client. Two very different situations land here:
+        //   1. Supabase isn't configured at all (true dev / CI) — mock
+        //      auth is the point, accept anything.
+        //   2. Supabase IS configured but the client failed to load
+        //      (CDN blocked — ~half of prod sessions in the 2026-07
+        //      telemetry). Accepting credentials here manufactured a
+        //      fake "signed in!" that broke every downstream page and
+        //      masked real failures from auth_failures. Refuse honestly
+        //      instead. localhost + webdriver keep mock sign-in so dev
+        //      servers and the Playwright suites behave as before.
+        if (!this._mockSignInAllowed()) {
+            try {
+                telemetry.recordAuthFailure('auth_service_unreachable', {
+                    source: 'signin_mock_blocked',
+                });
+            } catch {}
+            return {
+                success: false,
+                error: "Can't reach the sign-in service. Check your connection "
+                     + "(or an ad/content blocker on this site) and try again.",
+            };
         }
 
         // Mock mode: accept any credentials
@@ -598,13 +784,49 @@ class AuthManager {
         return this.signIn({ email, password: '', remember: true });
     }
 
+    /**
+     * True when mock-mode may ACCEPT credentials. Always true when
+     * Supabase isn't configured; when it is configured (production)
+     * mock sign-in is only allowed on localhost and under automation
+     * (Playwright sets navigator.webdriver), so a CDN failure on the
+     * live site yields an honest error instead of a fake session.
+     * Mock session RESTORE (_loadMock) is intentionally unaffected —
+     * an already-signed-in user keeps a degraded read-only session
+     * through a CDN blip.
+     */
+    _mockSignInAllowed() {
+        if (!isConfigured()) return true;
+        try {
+            const h = window.location.hostname;
+            if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '0.0.0.0') return true;
+            if (navigator.webdriver) return true;
+        } catch (_) {}
+        return false;
+    }
+
     /** Sign out — clear session and redirect. */
     async signOut(redirectUrl = 'index.html') {
         if (this._supabase) {
-            await this._supabase.auth.signOut();
+            // Local scope + guarded: the contract of signOut is "this
+            // browser is signed out", and the local clears below deliver
+            // it unconditionally. The unguarded global call used to (a)
+            // throw on network failure / already-revoked tokens, leaving
+            // the user UNABLE to sign out, and (b) revoke the user's
+            // sessions on every other device — surprising from a "sign
+            // out and switch account" button. The race caps a hung
+            // network call at 4 s so the UI never wedges on it.
+            try {
+                await Promise.race([
+                    this._supabase.auth.signOut({ scope: 'local' }),
+                    new Promise(resolve => setTimeout(resolve, 4000)),
+                ]);
+            } catch (err) {
+                console.warn('[Auth] Supabase signOut failed (clearing locally anyway):', err?.message);
+            }
         }
 
         this._user = null;
+        this._cancelProfileRetry(true);
         try { localStorage.removeItem(AUTH_KEY); } catch (_) {}
         try { sessionStorage.removeItem(AUTH_KEY); } catch (_) {}
 

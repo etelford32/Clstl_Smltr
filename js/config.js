@@ -51,7 +51,14 @@ export const NASA_KEY = 'DEMO_KEY';   // ← replace with your key for local dev
 // "provider not enabled" error.
 //
 // See OAUTH_SETUP.md for the full operator runbook.
-export const SOCIAL_PROVIDERS = Object.freeze(['google', 'apple']);
+//
+// 2026-07-28: 'apple' removed from the array — it had drifted in while
+// OAUTH_SETUP.md and CLAUDE.md still document Apple as STAGED (Apple
+// Developer + Supabase dashboard steps not completed). With the flag on,
+// the button renders on signin/signup and every click surfaces a
+// Supabase "provider not enabled" error. Re-add 'apple' only after
+// completing OAUTH_SETUP.md § Apple steps 1–4.
+export const SOCIAL_PROVIDERS = Object.freeze(['google']);
 
 // ── Plan tier constants ───────────────────────────────────────────────────────
 export const TIER = Object.freeze({

@@ -290,13 +290,16 @@ async function boot() {
         const sb = await getSupabase();
         // The Supabase client's onAuthStateChange / detectSessionInUrl
         // is racey across tabs and reload timing. Poll getSession()
-        // briefly so a slow hydration doesn't immediately bounce us
-        // back to the sign-in page.
+        // so a slow hydration doesn't immediately bounce us back to
+        // the sign-in page. ~9.5 s total (fast 250 ms polls for the
+        // first 2 s, then 600 ms): the old 3 s cap declared failure on
+        // slow mobile links while the PKCE code exchange was still in
+        // flight — the user WAS signed in, and got an error page anyway.
         let session = null;
-        for (let i = 0; i < 12; i++) {
+        for (let i = 0; i < 20; i++) {
             const { data } = await sb.auth.getSession();
             if (data?.session) { session = data.session; break; }
-            await new Promise(r => setTimeout(r, 250));
+            await new Promise(r => setTimeout(r, i < 8 ? 250 : 600));
         }
         if (!session) {
             showError("We didn't receive a session from the provider. Try signing in again.");

@@ -593,17 +593,27 @@ window.addEventListener('message', (e) => {
 </script>
 <script>
     // ── Funnel helper (window-scoped, exposed by js/auth-funnel.js) ─
-    // Module scripts above already loaded auth-funnel.js, which sets
-    // window.ppFunnel as a side-effect. The classic <script> below
-    // can't `import`, so we read it from window. Guarded so a module-
-    // load failure doesn't take the whole sign-in page down with it.
-    const _funnel = (typeof window !== 'undefined' && window.ppFunnel) || {
-        step: () => {}, stepDeferred: () => {}, id: () => null,
+    // window.ppFunnel is set by the auth-funnel MODULE — and module
+    // scripts are deferred, so they execute AFTER this classic script.
+    // Capturing window.ppFunnel once at parse time therefore bound the
+    // no-op fallback forever and silently dropped every stage this
+    // script fires (confirmed in prod telemetry: 269 signin_view rows,
+    // zero signin_submit/succeeded/failed rows, ever). Resolve LAZILY
+    // on each call instead — by the time a user can submit the form,
+    // the module has long since run. Still guarded so a module-load
+    // failure can't take the sign-in form down with it.
+    const _funnel = {
+        step:         (s, p) => { try { window.ppFunnel?.step?.(s, p); } catch {} },
+        stepDeferred: (s, p) => { try { window.ppFunnel?.stepDeferred?.(s, p); } catch {} },
+        id:           ()     => { try { return window.ppFunnel?.id?.() ?? null; } catch { return null; } },
     };
     // Stable error-category mapper (js/auth-funnel.js side-effect). Passed
     // as `code` on *_failed steps so a top-reasons histogram can group by
-    // a fixed key instead of the drifting free-text `reason`.
-    const _classifyErr = (typeof window !== 'undefined' && window.ppClassifyAuthError) || (() => 'unknown');
+    // a fixed key instead of the drifting free-text `reason`. Same lazy
+    // resolution as _funnel above (same parse-time race).
+    const _classifyErr = (e) => {
+        try { return window.ppClassifyAuthError?.(e) ?? 'unknown'; } catch { return 'unknown'; }
+    };
 
     // ── Time-to-first-interaction signal ────────────────────────────
     // Fires once on the first focus of any input on the form. Indicates

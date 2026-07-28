@@ -35,33 +35,104 @@
 export const SUPABASE_URL  = 'https://aijsboodkivnhzfstvdq.supabase.co';
 export const SUPABASE_ANON_KEY = 'sb_publishable_1cC1HAb6xTdX3ZafOM-_mg_DrftgLA5';
 
-// CDN URL for the Supabase JS client
-const SUPABASE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+// CDN sources for the Supabase JS client, tried in order.
+//
+// WHY A CHAIN: production telemetry (client_telemetry kind='auth_failure',
+// 2026-06-29 → 2026-07-26) recorded 950 "Failed to fetch dynamically
+// imported module: …jsdelivr…" events across 811 of 1,595 sessions —
+// roughly HALF of all visits could not load the auth client from the
+// single jsDelivr URL (ad blockers, corporate proxies, regional CDN
+// blocks). Each entry below serves a browser-ready ESM bundle of the
+// same package; the first one that imports wins. jsDelivr stays primary
+// (fastest, historically the canonical source).
+//
+// This is deliberately NOT a switch to a bundled/vendored import —
+// CLAUDE.md §9 reserves that decision for the author.
+const SUPABASE_CDNS = [
+    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
+    'https://esm.sh/@supabase/supabase-js@2',
+    'https://unpkg.com/@supabase/supabase-js@2?module',
+];
+
+// Per-attempt cap so one hung CDN can't stall auth init for the whole
+// chain. A raced-out import may still resolve later; we simply stop
+// waiting for it and move on.
+const CDN_ATTEMPT_TIMEOUT_MS = 8000;
+
+// sessionStorage key remembering which CDN index worked last, so later
+// page loads in the same session skip straight past a blocked primary
+// instead of re-paying the timeout on every navigation.
+const CDN_MEMO_KEY = 'pp_sb_cdn';
 
 let _client = null;
+let _loadInfo = null;   // { cdn, index, attempts, ms } for the successful load
+
+/** How the client was loaded (null until getSupabase() succeeds).
+ *  Consumed by js/auth.js to emit fallback telemetry — a rising
+ *  fallback rate is the early-warning that the primary CDN is dying. */
+export function getSupabaseLoadInfo() {
+    return _loadInfo;
+}
+
+function _importWithTimeout(url, ms) {
+    return Promise.race([
+        import(url),
+        new Promise((_, reject) => setTimeout(
+            () => reject(new Error(`CDN import timed out after ${ms}ms: ${url}`)), ms)),
+    ]);
+}
 
 /**
  * Get the Supabase client (singleton, lazily created).
+ * Tries each CDN in SUPABASE_CDNS (last-known-good first) and throws
+ * only when every source has failed — callers treat that as
+ * "auth service unreachable", not as "run without auth".
  * @returns {Promise<import('@supabase/supabase-js').SupabaseClient>}
  */
 export async function getSupabase() {
     if (_client) return _client;
 
+    // Try the CDN that worked last time first (falls back to list order).
+    let order = SUPABASE_CDNS.map((_, i) => i);
     try {
-        const { createClient } = await import(SUPABASE_CDN);
-        _client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-            auth: {
-                autoRefreshToken: true,
-                persistSession: true,
-                detectSessionInUrl: true,  // for OAuth redirects
-            },
-        });
-        console.info('[Supabase] Client initialized');
-        return _client;
-    } catch (err) {
-        console.error('[Supabase] Failed to load client:', err.message);
-        throw err;
+        const memo = +sessionStorage.getItem(CDN_MEMO_KEY);
+        if (Number.isInteger(memo) && memo > 0 && memo < SUPABASE_CDNS.length) {
+            order = [memo, ...order.filter(i => i !== memo)];
+        }
+    } catch (_) {}
+
+    const t0 = Date.now();
+    const failures = [];
+    for (let attempt = 0; attempt < order.length; attempt++) {
+        const idx = order[attempt];
+        const url = SUPABASE_CDNS[idx];
+        try {
+            const { createClient } = await _importWithTimeout(url, CDN_ATTEMPT_TIMEOUT_MS);
+            _client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                auth: {
+                    autoRefreshToken: true,
+                    persistSession: true,
+                    detectSessionInUrl: true,  // for OAuth redirects
+                },
+            });
+            _loadInfo = { cdn: url, index: idx, attempts: attempt + 1, ms: Date.now() - t0 };
+            try { sessionStorage.setItem(CDN_MEMO_KEY, String(idx)); } catch (_) {}
+            if (idx !== 0) {
+                console.warn(`[Supabase] Primary CDN unavailable — loaded client from fallback: ${url}`);
+            } else {
+                console.info('[Supabase] Client initialized');
+            }
+            return _client;
+        } catch (err) {
+            failures.push(`${url} → ${err?.message || err}`);
+            console.warn(`[Supabase] CDN attempt ${attempt + 1}/${order.length} failed:`, err?.message || err);
+        }
     }
+
+    const summary = new Error(
+        `Failed to load Supabase client from all ${order.length} CDNs: ${failures.join(' | ')}`.slice(0, 500));
+    console.error('[Supabase]', summary.message);
+    throw summary;
 }
 
 /**

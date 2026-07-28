@@ -168,3 +168,62 @@ issue.
 Everything else can wait until we have data on which gap actually
 moves the activation needle. The OAuth + email-automation triad is
 the headline activation work; the items above are polish.
+
+## 2026-07-28 robustness pass (returning users + subscribers)
+
+Telemetry-driven review of "sign-in is messed up" reports. Findings and
+fixes (branch `claude/parkers-physics-signin-robustness-5ouogw`):
+
+1. **CDN single point of failure (the headline).** 950
+   `auth_init_fallback_to_mock` failures across 811 of 1,595 sessions in
+   45 days: jsDelivr's supabase-js ESM bundle wouldn't load (blockers,
+   proxies), so auth silently fell to MOCK mode on production — where
+   sign-in "succeeds" with any credentials into a fake session.
+   * `js/supabase-config.js` now tries jsDelivr → esm.sh → unpkg with an
+     8 s cap per attempt and remembers the last working CDN per session.
+   * `auth.signIn()` refuses mock-accepting credentials when Supabase IS
+     configured but unreachable (honest "can't reach the sign-in
+     service" error instead of a fake success). localhost + webdriver
+     keep mock sign-in, so dev servers and Playwright are unaffected.
+     Mock session *restore* is untouched — an already-signed-in user
+     still keeps a degraded session through a CDN blip.
+   * Vendoring the client into the repo (no CDN at all) would be
+     stronger, but CLAUDE.md §9 reserves that call for the author.
+2. **Stale `pp_auth` split-brain for returning users.** When the
+   Supabase session died on its own (expired/revoked refresh token),
+   nothing cleared the `pp_auth` mirror, and nav.js + the dashboard gate
+   trust it → signed-in nav over a dead session. auth.js now clears
+   supabase-written mirrors (provider === 'supabase' only, so mock/test
+   seeds survive) on SIGNED_OUT and on a restore that finds no session.
+3. **Subscriber demotion on transient profile-fetch failure.** Session
+   restore/sign-in persisted the bare mapped user (plan 'free', role
+   'user') over the mirror before `fetchProfile`; one RLS/network blip
+   left a paying user rendered as free (admins demoted too). The early
+   persist now carries over profile-owned fields from the stored mirror
+   (same account only), and `fetchProfile` retries transient failures
+   (2 s / 8 s, two attempts). The §"persist before fetchProfile"
+   ordering is unchanged — it's load-bearing.
+4. **The password-side funnel was dark.** signin/signup's classic
+   scripts captured `window.ppFunnel` before the deferred modules set
+   it: 269 `signin_view` rows, zero `signin_submit`/`signin_succeeded`
+   ever. Both pages now resolve the funnel lazily per call.
+5. **Apple button rendered while Apple OAuth is unconfigured.**
+   `SOCIAL_PROVIDERS` had drifted to `['google','apple']` (in an
+   unrelated ring-current PR) while OAUTH_SETUP.md documents Apple as
+   staged; every click would error. Back to `['google']` until the
+   Apple steps are actually done.
+6. **signOut hardening.** Guarded + 4 s-capped + `scope:'local'` — a
+   network failure or already-revoked token can no longer strand the
+   user unable to sign out, and signing out one browser no longer
+   revokes every device's session.
+7. **OAuth callback poll extended 3 s → ~9.5 s** — slow PKCE exchanges
+   on mobile links were being declared failures while they completed.
+
+Known gaps left OPEN deliberately: the "Remember me" checkbox still
+doesn't change Supabase's storage (JWT always lands in localStorage —
+docs claiming sessionStorage-when-unchecked are wrong, and honoring it
+would mean a custom storage adapter; author's call). `client_telemetry.
+user_id` is null on 100% of rows — setUserToken piping deserves its own
+look. The six `oauth_redirect_misland` recoveries (latest 2026-07-23)
+mean a Supabase redirect-allow-list entry is still missing or stale —
+that's a dashboard config fix, not a code fix.
