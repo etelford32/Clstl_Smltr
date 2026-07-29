@@ -87,6 +87,117 @@ export function donkiToPreset(cme, { ambientWKms = 400 } = {}) {
     };
 }
 
+// ── Compounding trains (spec §12 — train-seeding conventions) ────────────────
+
+const AU_KM = 1.495978707e8;
+
+/** Headline lookback: "the most recent 24 hours of flux ropes". */
+export const TRAIN_WINDOW_H = 24;
+/** In-transit relevance horizon (matches the 7-day DONKI catalog window). */
+export const TRAIN_TRANSIT_LOOKBACK_H = 168;
+/** Rope-passage allowance beyond the ballistic arrival before a CME is
+ *  considered PAST L1 and dropped from the live train. */
+export const TRAIN_DWELL_MARGIN_H = 30;
+
+/**
+ * Angular-relevance test: can this CME plausibly touch Earth? Strictly
+ * Earth-directed (the proxy's cone test: angular distance ≤ halfAngle), OR
+ * within `marginDeg` of the cone edge — glancing candidates whose ensemble
+ * lon/lat spread honestly covers the hit question, and which can §16-couple
+ * to an Earth-directed partner (alignment cos > 0.5 reaches ~60°).
+ */
+export function earthRelevant(cme, marginDeg = 20) {
+    if (cme.earthDirected === true) return true;
+    const dist = Math.hypot(cme.latDeg ?? 0, cme.lonDeg ?? 0);
+    return dist <= (cme.halfAngleDeg ?? 30) + marginDeg;
+}
+
+/**
+ * Ballistic 1 AU arrival estimate [ms] — a RELEVANCE FILTER only (the
+ * engine's DBM owns real kinematics): launch + AU / cone speed.
+ */
+export function ballisticArrivalMs(cme) {
+    const v = Math.max(200, cme.speedKms || 400);
+    return Date.parse(cme.timeIso) + (AU_KM / v) * 1000;
+}
+
+/**
+ * Select the CMEs forming the CURRENT compounding train (pure,
+ * fixture-gated). Membership: Earth-relevant AND (launched within the last
+ * `windowH` OR still plausibly at/inside 1 AU — ballistic arrival +
+ * `dwellMarginH` not yet past). A train needs at least one strictly
+ * Earth-directed ANCHOR — glancing partners alone return [] (idle), and a
+ * storm that fully passed returns [] rather than "forecasting" the past.
+ * Over `maxRopes`, the oldest NON-anchor drops first, then the oldest
+ * anchor. Result is launch-ascending — index 0 is the train epoch.
+ */
+export function selectTrainCmes(cmes, {
+    nowMs = Date.now(),
+    windowH = TRAIN_WINDOW_H,
+    maxRopes = 6,
+    marginDeg = 20,
+    transitLookbackH = TRAIN_TRANSIT_LOOKBACK_H,
+    dwellMarginH = TRAIN_DWELL_MARGIN_H,
+} = {}) {
+    const keep = (Array.isArray(cmes) ? cmes : []).filter((c) => {
+        if (!c?.timeIso || !earthRelevant(c, marginDeg)) return false;
+        const launch = Date.parse(c.timeIso);
+        if (!Number.isFinite(launch) || launch > nowMs) return false;
+        const ageH = (nowMs - launch) / 3600e3;
+        if (ageH > transitLookbackH) return false;
+        return ageH <= windowH
+            || ballisticArrivalMs(c) + dwellMarginH * 3600e3 >= nowMs;
+    });
+    if (!keep.some((c) => c.earthDirected === true)) return [];
+    keep.sort((a, b) => Date.parse(a.timeIso) - Date.parse(b.timeIso));
+    while (keep.length > maxRopes) {
+        const i = keep.findIndex((c) => c.earthDirected !== true);
+        keep.splice(i >= 0 ? i : 0, 1);
+    }
+    return keep;
+}
+
+/**
+ * Seed ONE compounding-train preset from several DONKI analyses (spec §12
+ * train conventions). Epoch = the EARLIEST launch — rope 0 is the reference
+ * every consumer probes (kernel apexKmAt(0, …), the Stage's rope actor);
+ * later launches carry `launchOffsetS`. §16 interaction is ON (engine
+ * defaults): wake kinematics, dynamic rear compression, wake-conditioned
+ * follower sheaths — the compounding forward model. The ensemble spreads
+ * are the per-CME priors merged by MAX: the kernel samples ONE spread set
+ * across all ropes, and the honest merge of unequal priors is the widest.
+ */
+export function donkiToTrainPreset(cmes, { ambientWKms = 400 } = {}) {
+    if (!cmes?.length) return null;
+    const order = cmes
+        .map((c) => ({ c, p: donkiToPreset(c, { ambientWKms }), t: Date.parse(c.timeIso) }))
+        .sort((a, b) => a.t - b.t);
+    const epochMs = order[0].t;
+    const ropes = order.map(({ p, t }) => ({ ...p.rope, launchOffsetS: (t - epochMs) / 1000 }));
+    const spreads = {};
+    for (const { p } of order) {
+        for (const [k, v] of Object.entries(p.spreads)) {
+            spreads[k] = Math.max(spreads[k] ?? 0, v);
+        }
+    }
+    const newest = order[order.length - 1];
+    const n = order.length;
+    return {
+        id: `donki-train-${order[0].p.launchIso}x${n}`,
+        label: n > 1
+            ? `Live · compounding train · ${n} CMEs (latest ${newest.p.launchIso.slice(5, 16).replace('T', ' ')}Z)`
+            : `Live · ${newest.p.launchIso.slice(5, 16).replace('T', ' ')}Z · ${Math.round(newest.c.speedKms)} km/s`,
+        launchIso: order[0].p.launchIso,
+        live: true,
+        train: true,
+        cmes: order.map((o) => o.c),
+        rope: ropes[0],
+        ropes,
+        spreads,
+        interaction: { enabled: true },
+    };
+}
+
 /** NOAA fill values → NaN. */
 function noaaFill(v) {
     const x = typeof v === 'string' ? parseFloat(v) : v;
