@@ -699,5 +699,65 @@ check('gannon ensemble: observed min inside member spread',
     k.clearAuxObserver();
 }
 
+// ── v1.6 (spec §19–§21): segments, momentum, wake, deflection — WASM pins ────
+{
+    // Unit surface on the committed binary: a slow leader / fast follower
+    // pair must contact, the pushed leader must reach 1 AU earlier, and
+    // all-knobs-off must be bit-identical (cargo pins the physics; this
+    // pins the ABI + the committed build).
+    k.setRopes([
+        { lonDeg: 0, latDeg: 0, tiltDeg: 90, v0Kms: 600, sigma1AuAu: 0.09, launchOffsetS: 0 },
+        { lonDeg: 0, latDeg: 0, tiltDeg: 90, v0Kms: 1500, sigma1AuAu: 0.11, launchOffsetS: 12 * 3600 },
+    ]);
+    k.setInteraction({ enabled: true });
+    const AU = 1.495978707e8;
+    const arr0 = (() => {
+        let lo = 0, hi = 20 * 86400;
+        for (let i = 0; i < 100; i++) {
+            const mid = (lo + hi) / 2;
+            if (k.apexKmAt(0, mid) < AU) lo = mid; else hi = mid;
+        }
+        return (lo + hi) / 2;
+    });
+    const tOff = arr0();
+    check('v1.6: no contact recorded with momentum off', Number.isNaN(k.pairContactS(1)));
+    k.setMomentum({ enabled: true, restitution: 0 });
+    const tc = k.pairContactS(1);
+    check('v1.6: fast follower contacts its leader', Number.isFinite(tc) && tc > 12 * 3600,
+        `contact +${(tc / 3600).toFixed(1)} h`);
+    check('v1.6: pushed leader arrives earlier', arr0() < tOff - 1800,
+        `${(arr0() / 3600).toFixed(1)} vs ${(tOff / 3600).toFixed(1)} h`);
+    k.setMomentum({ enabled: false });
+    k.setWakeRefresh(0);
+    k.setDeflection({});
+
+    // The honest Gannon measurement (spec §19 measured value), pinned as a
+    // TRIPWIRE: momentum at defaults on the v1.4 fitted train double-counts
+    // the absorbed compression — contact ≈ +53.5 h, min OVERSHOOTS. The
+    // fitted preset keeps every v1.6 knob OFF; this pin exists so a future
+    // physics change that MOVES this measurement is noticed, not silent.
+    k.setRopes(GANNON_FIT.standoffRopes);
+    k.setInteraction({ enabled: true, ...GANNON_FIT.interaction });
+    k.setMomentum({ enabled: true, restitution: 0 });
+    const tcG = k.pairContactS(1);
+    check('v1.6 gannon tripwire: B→A contact inside the late storm (+53.5 ± 2 h)',
+        Number.isFinite(tcG) && Math.abs(tcG / 3600 - 53.5) < 2,
+        `+${(tcG / 3600).toFixed(1)} h`);
+    const gDet = k.series(gT0S, gStepS, gN);
+    let gMin = 0;
+    for (let i = 0; i < gN; i++) if (gDet.bz[i] < gMin) gMin = gDet.bz[i];
+    check('v1.6 gannon tripwire: ε=0 overshoots the pinned min (the recorded rejection)',
+        gMin < -48 && gMin > -60, `${gMin.toFixed(1)} nT (pinned fit −44.3)`);
+    k.setMomentum({ enabled: false });
+    k.setWakeRefresh(0);
+    k.setDeflection({});
+    // Knobs off again: the pinned v1.4 numbers must be back bit-for-bit.
+    const gDet2 = k.series(gT0S, gStepS, gN);
+    let gMin2 = 0;
+    for (let i = 0; i < gN; i++) if (gDet2.bz[i] < gMin2) gMin2 = gDet2.bz[i];
+    check('v1.6 gannon tripwire: knobs off restores the pinned fit',
+        Math.abs(gMin2 - -44.3) < 0.5, `${gMin2.toFixed(1)} nT`);
+}
+
 console.log(failures ? `\n${failures} failure(s)` : '\nall flux-rope kernel checks passed');
 process.exit(failures ? 1 : 0);

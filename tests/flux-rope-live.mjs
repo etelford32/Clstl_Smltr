@@ -6,6 +6,7 @@
 import {
     parseDonkiCmes, donkiToPreset, parseRtsw, rtswDriver,
     staPositionApprox, stereoBeaconDriver,
+    earthRelevant, ballisticArrivalMs, selectTrainCmes, donkiToTrainPreset,
 } from '../js/flux-rope-live.js';
 
 let failures = 0;
@@ -45,6 +46,78 @@ check('seed: live forecasts carry the sheath forward model (spec §14)',
     preset.rope.sheathDeltaNt > 0);
 check('seed: size cap respected',
     donkiToPreset({ ...cmes[1], halfAngleDeg: 90 }).rope.sigma1AuAu <= 0.2);
+
+// ── Compounding-train selection + seeding (spec §12 train conventions) ───────
+{
+    const NOW = Date.parse('2026-07-27T12:00:00Z');
+    const mk = (hAgo, over = {}) => ({
+        id: `cme-${hAgo}h`,
+        timeIso: new Date(NOW - hAgo * 3600e3).toISOString(),
+        speedKms: 900, latDeg: 0, lonDeg: 0, halfAngleDeg: 35,
+        earthDirected: true, ...over,
+    });
+
+    check('relevance: earth-directed flag always passes',
+        earthRelevant({ earthDirected: true, latDeg: 0, lonDeg: 80, halfAngleDeg: 20 }));
+    check('relevance: cone-edge margin admits glancing candidates',
+        earthRelevant({ earthDirected: false, latDeg: 0, lonDeg: 45, halfAngleDeg: 30 })
+        && !earthRelevant({ earthDirected: false, latDeg: 0, lonDeg: 75, halfAngleDeg: 30 }));
+    check('ballistic arrival: 1 AU at the cone speed',
+        Math.abs(ballisticArrivalMs(mk(0)) - (NOW + 1.495978707e8 / 900 * 1000)) < 1000);
+
+    // Window membership: recent launches in; passed storms out; in-transit in.
+    const recent = mk(6);
+    const recent2 = mk(20, { speedKms: 1400 });
+    const inTransit = mk(40, { speedKms: 700 });        // arrival ≈ +59 h > now
+    const passed = mk(140, { speedKms: 1200 });         // arrived ≈ +35 h, long gone
+    const flankPartner = mk(10, { earthDirected: false, lonDeg: 40, halfAngleDeg: 30 });
+    const farFlank = mk(5, { earthDirected: false, lonDeg: 80, halfAngleDeg: 25 });
+    const sel = selectTrainCmes([passed, recent, farFlank, inTransit, flankPartner, recent2],
+        { nowMs: NOW });
+    check('train select: recent + in-transit + glancing partner, launch-ascending',
+        sel.map((c) => c.id).join(',') === 'cme-40h,cme-20h,cme-10h,cme-6h',
+        sel.map((c) => c.id).join(','));
+    check('train select: passed storm and far flank excluded',
+        !sel.some((c) => c.id === 'cme-140h' || c.id === 'cme-5h'));
+    check('train select: partners without an anchor → idle []',
+        selectTrainCmes([flankPartner], { nowMs: NOW }).length === 0);
+    check('train select: future-dated rows dropped',
+        selectTrainCmes([mk(-2), recent], { nowMs: NOW }).length === 1);
+    // Cap: oldest NON-anchor drops first, then oldest anchor.
+    const crowd = [mk(23), mk(19), mk(15, { earthDirected: false, lonDeg: 40 }), mk(11),
+        mk(7), mk(3), mk(1)];
+    const capped = selectTrainCmes(crowd, { nowMs: NOW, maxRopes: 6 });
+    check('train select: over the cap the oldest non-anchor drops first',
+        capped.length === 6 && !capped.some((c) => c.id === 'cme-15h'),
+        capped.map((c) => c.id).join(','));
+    const capped2 = selectTrainCmes(crowd, { nowMs: NOW, maxRopes: 5 });
+    check('train select: then the oldest anchor',
+        capped2.length === 5 && !capped2.some((c) => c.id === 'cme-23h'));
+
+    // Seeding: epoch = earliest launch = rope 0, offsets forward, §16 ON.
+    const train = donkiToTrainPreset(sel, { ambientWKms: 430 });
+    check('train seed: epoch is the EARLIEST launch (rope 0 = the reference)',
+        train.launchIso === inTransit.timeIso && train.rope === train.ropes[0]);
+    check('train seed: launch offsets ascend from 0',
+        train.ropes[0].launchOffsetS === 0
+        && train.ropes.every((r, i) => i === 0 || r.launchOffsetS > train.ropes[i - 1].launchOffsetS)
+        && train.ropes[3].launchOffsetS === (40 - 6) * 3600);
+    check('train seed: every rope carries its own cone fit',
+        train.ropes[1].v0Kms === 1400 && train.ropes[2].lonDeg === 40);
+    check('train seed: §16 interaction ON', train.interaction?.enabled === true);
+    check('train seed: live forward model keeps the sheath (spec §14)',
+        train.ropes.every((r) => r.sheathDeltaNt > 0));
+    check('train seed: spreads are the per-CME priors merged by MAX',
+        train.spreads.sigV0Kms === Math.max(100, 1400 * 0.15)
+        && train.spreads.pFlip === 0.5);
+    check('train seed: ambient wind threads through', train.ropes[0].wKms === 430);
+    check('train seed: marked live + train with the member CMEs attached',
+        train.live === true && train.train === true && train.cmes.length === 4);
+    check('train seed: single-CME train degenerates cleanly',
+        donkiToTrainPreset([recent]).ropes.length === 1
+        && donkiToTrainPreset([recent]).ropes[0].launchOffsetS === 0
+        && donkiToTrainPreset([]) === null);
+}
 
 // ── RTSW merge (mag + plasma are separate products) ──────────────────────────
 const mag = [

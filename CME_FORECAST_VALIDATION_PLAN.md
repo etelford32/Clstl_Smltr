@@ -163,6 +163,51 @@ New read endpoint `api/cme/skill.js` (service role → `cme_model_skill`,
 pattern: `api/ring-current/validation.js`): per-model `n, hits_12h,
 mae_hours, bias_hours, false_alarms, misses`, split hindcast/realtime.
 
+### Phase 3.5 — flux-rope-v1 joins the ledger  ✅ SHIPPED 2026-07-28
+
+The compounding flux-rope train engine (FLUX_ROPE_SIMULATOR_PLAN.md,
+spec §12.1/§16/§19–§21) is now the fourth locked model, with
+probabilistic content the point models don't carry:
+
+- **Lock ("for each flare"):** validation-rerun runs the SHARED provider
+  (js/flux-rope-forecast.js) on the committed WASM and locks ONE
+  flux-rope-v1 row per FLARE-ASSOCIATED CME of the modeled train — DONKI
+  FLR association (peak in [−2.5 h, +0.5 h] of time21_5, nearest wins,
+  never forced), frozen replayable inputs (train ids ⇒ deterministic
+  seed), per-rope arrival + parametric ±σ_v0 window from the EFFECTIVE
+  wake kinematics, and the train-onset arrival quantiles (CRPS-scorable)
+  on the first-arriving row. needsNewIssue gating, INSERT-only, same as
+  every other model.
+- **Truth:** the existing shock resolver is unchanged; resolved events
+  are ENRICHED with Bz-structure truth (observed_bz_min_nt + first-hour
+  arrival speed → observed_speed_kms) from sw_geomag_dataset,
+  coverage-guarded (a gap stays pending, the columns existed unused).
+- **Score:** arrival error/MAE (ledger-comparable), CRPS (equals MAE for
+  a point forecast — apples to apples with enlil/ballistic/dbm), the
+  Brier trio (P(hit), P(<−10), P(<−20)) against resolved truth, min-Bz
+  error, and the §5 DBM INVERSION per event — retrieved (Γ, w) feeds
+  `metrics.population` (js/flux-rope-inversion.js retrievedPopulation),
+  the measured priors the ensemble spreads should converge to. Runs land
+  in validation_runs kind='flux-rope' (episodic, never zero-poisoned).
+- **Pure logic:** js/flux-rope-validation.js + js/forecast-verification.js
+  (node gates tests/flux-rope-validation.mjs,
+  tests/forecast-verification.mjs, tests/flux-rope-inversion.mjs).
+- **Surface:** /api/cme/skill now exposes the compact flux-rope subset
+  (probabilities, min-Bz quantiles, flare tag, Bz truth);
+  flux-rope-live.html renders the per-flare VALIDATION LEDGER.
+
+**Ops postmortem (2026-07-29).** The daily cron had run exactly ONCE in
+production (07-12) — Vercel logs showed every run since dying at the
+60 s platform kill with its response ignored (Web-style `return
+Response` on the nodejs runtime, serial ≤12 s HEK chunks blowing the
+budget, and the CME program ordered AFTER the HEK-dependent studies).
+All three fixed in api/cron/validation-rerun.js (see its header): the
+handler writes through `(req, res)`, HEK chunks fetch in parallel at
+6 s each, and the lock/resolve + flux-rope ledger now run FIRST so feed
+trouble in the studies can never starve them. Consequence: the program
+tables are EMPTY until this deploys — the ledger's clock starts at the
+first 06:30 UT run after merge.
+
 ### Phase 4 — Hindcast backtest (offline loop)
 
 `scripts/cme-hindcast.mjs` — CLI mirroring `backmap-validation.mjs` /

@@ -53,8 +53,9 @@ export default async function handler(request) {
             get('cme_events?is_hindcast=eq.false' +
                 '&select=event_id,donki_id,launch_time_utc,speed_kms_3d,' +
                 'cme_arrival_forecasts(model_id,issued_at,predicted_arrival_utc,' +
-                'arrival_window_early,arrival_window_late,predicted_kp_max),' +
-                'cme_l1_observations(arrived,shock_arrival_utc)' +
+                'arrival_window_early,arrival_window_late,predicted_kp_max,' +
+                'predicted_speed_at_l1,inputs),' +
+                'cme_l1_observations(arrived,shock_arrival_utc,observed_bz_min_nt,observed_speed_kms)' +
                 `&order=launch_time_utc.desc&limit=${nEvents}`),
         ]);
     } catch (e) {
@@ -82,10 +83,25 @@ export default async function handler(request) {
                 early: f.arrival_window_early,
                 late: f.arrival_window_late,
                 kp_max: f.predicted_kp_max,
+                v_l1: f.predicted_speed_at_l1 ?? null,
+                // flux-rope-v1 rows carry probabilistic content in the
+                // frozen inputs — expose the COMPACT subset the ledger
+                // renders (never the full replay payload).
+                ...(m === 'flux-rope-v1' && f.inputs ? {
+                    p_hit: f.inputs.p_hit ?? null,
+                    p10: f.inputs.p10 ?? null,
+                    p20: f.inputs.p20 ?? null,
+                    min_bz_p50: f.inputs.min_bz_p50 ?? null,
+                    min_bz_p5: f.inputs.min_bz_p5 ?? null,
+                    n_train: Array.isArray(f.inputs.train) ? f.inputs.train.length : 1,
+                    flare: f.inputs.flare ?? null,
+                } : {}),
             }])),
             truth: truth ? {
                 arrived: truth.arrived === true,
                 shock: truth.shock_arrival_utc ?? null,
+                min_bz_nt: truth.observed_bz_min_nt ?? null,
+                v_kms: truth.observed_speed_kms ?? null,
             } : null,
         };
     });

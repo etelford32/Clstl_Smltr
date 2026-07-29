@@ -8,8 +8,9 @@
  * camera rays as a signed distance to the axis circle minus σ(ψ). The
  * kernel's fr_field_at is the ORACLE for this shader: change the field
  * math in rust-flux-rope/src/rope.rs first, re-run the gates, then mirror
- * here. Up to MAX_VIEW_ROPES = 4 ropes (kernel cap), rendered as layered
- * translucent shells colored by local Bz (red south / blue north).
+ * here. Up to MAX_VIEW_ROPES = 6 ropes (kernel cap — moves in lockstep
+ * with rust-flux-rope MAX_ROPES), rendered as layered translucent shells
+ * colored by local Bz (red south / blue north).
  *
  * Camera: orbit (drag) + zoom (wheel) + double-click reset, z = ecliptic
  * north. The SAME camera projects the 2D overlay (ensemble member axis
@@ -32,14 +33,17 @@
 
 const AU_KM = 1.495978707e8;
 const RSUN_KM = 6.957e5;
-export const MAX_VIEW_ROPES = 4;
+export const MAX_VIEW_ROPES = 6;
 
-/** Per-rope accent for the overlay median axes (cyan, violet, amber, green). */
+/** Per-rope accent for the overlay median axes
+ *  (cyan, violet, amber, green, rose, periwinkle). */
 const ROPE_STROKES = [
     'rgba(170, 235, 255, 0.55)',
     'rgba(199, 146, 234, 0.55)',
     'rgba(255, 180, 84, 0.55)',
     'rgba(127, 230, 195, 0.55)',
+    'rgba(255, 138, 168, 0.55)',
+    'rgba(158, 186, 255, 0.55)',
 ];
 
 /** Mirror of rust rope::Frame::new (local east/north at the launch dir). */
@@ -97,15 +101,15 @@ uniform vec3  u_camUp;
 uniform vec3  u_camFwd;
 uniform float u_tanHalfFov;
 uniform int   u_ropeCount;
-uniform vec3  u_eDir[4];
-uniform vec3  u_eP[4];
-uniform vec3  u_nHat[4];
-uniform float u_dAu[4];
-uniform float u_sigApexAu[4];
-uniform float u_tPerAu[4];
-uniform float u_bAxis[4];
-uniform float u_hand[4];
-uniform float u_profile[4];
+uniform vec3  u_eDir[${MAX_VIEW_ROPES}];
+uniform vec3  u_eP[${MAX_VIEW_ROPES}];
+uniform vec3  u_nHat[${MAX_VIEW_ROPES}];
+uniform float u_dAu[${MAX_VIEW_ROPES}];
+uniform float u_sigApexAu[${MAX_VIEW_ROPES}];
+uniform float u_tPerAu[${MAX_VIEW_ROPES}];
+uniform float u_bAxis[${MAX_VIEW_ROPES}];
+uniform float u_hand[${MAX_VIEW_ROPES}];
+uniform float u_profile[${MAX_VIEW_ROPES}];
 uniform float u_bScale;
 
 float j0poly(float x) {
@@ -209,7 +213,7 @@ void main() {
         float dMin = 1e9;
         int rHit = -1;
         float psiH; float sH; float sigH;
-        for (int r = 0; r < 4; r++) {
+        for (int r = 0; r < ${MAX_VIEW_ROPES}; r++) {
             if (r >= u_ropeCount) break;
             float psi_; float s_; float sig_;
             float d = ropeSdf(r, p, psi_, s_, sig_);

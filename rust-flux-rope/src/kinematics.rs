@@ -39,6 +39,103 @@ impl Dbm {
     }
 }
 
+// ── Segmented kinematics (spec §19.0) ────────────────────────────────────────
+
+/// Segment-chain capacity: launch + ≤16 §20 wake refreshes (6 h cadence to
+/// the 96 h refresh horizon) + §19 contact impulses, with headroom.
+pub const MAX_SEGS: usize = 32;
+
+/// Piecewise-DBM apex kinematics (spec §19.0): a chain of §5 closed-form
+/// segments, each `(age_start_s, Dbm)` with the Dbm's initial conditions
+/// (d0_km, v0_kms) AT that age. Times are rope-AGE seconds (0 = launch),
+/// matching the single-Dbm call convention everywhere in the engine.
+/// A one-segment chain is bit-identical to the raw Dbm — every pre-v1.6
+/// pin holds through this type.
+#[derive(Clone, Copy, Debug)]
+pub struct SegDbm {
+    pub segs: [(f64, Dbm); MAX_SEGS],
+    pub n: usize,
+}
+
+impl SegDbm {
+    pub fn single(dbm: Dbm) -> SegDbm {
+        let mut segs = [(0.0, dbm); MAX_SEGS];
+        segs[0] = (0.0, dbm);
+        SegDbm { segs, n: 1 }
+    }
+
+    #[inline]
+    fn seg_at(&self, age_s: f64) -> usize {
+        // n ≤ MAX_SEGS and chains are short: linear scan beats binary here.
+        let mut k = 0;
+        while k + 1 < self.n && self.segs[k + 1].0 <= age_s {
+            k += 1;
+        }
+        k
+    }
+
+    pub fn speed_kms(&self, age_s: f64) -> f64 {
+        let (t0, dbm) = self.segs[self.seg_at(age_s)];
+        dbm.speed_kms(age_s - t0)
+    }
+
+    pub fn apex_km(&self, age_s: f64) -> f64 {
+        let (t0, dbm) = self.segs[self.seg_at(age_s)];
+        dbm.apex_km(age_s - t0)
+    }
+
+    /// The last segment's ambient wind [km/s] (the CURRENT flow regime).
+    pub fn w_kms(&self) -> f64 {
+        self.segs[self.n - 1].1.w_kms
+    }
+
+    /// The last segment's drag Γ [km⁻¹].
+    pub fn gamma_per_km(&self) -> f64 {
+        self.segs[self.n - 1].1.gamma_per_km
+    }
+
+    /// The (ambient wind, drag Γ) regime in force at `age_s`.
+    pub fn regime_at(&self, age_s: f64) -> (f64, f64) {
+        let d = &self.segs[self.seg_at(age_s)].1;
+        (d.w_kms, d.gamma_per_km)
+    }
+
+    /// Append a segment at `age_s` continuing the CURRENT (d, v) under a
+    /// new ambient/drag — the §20 wake-refresh operation. No-ops when the
+    /// chain is full or `age_s` does not advance.
+    pub fn push_regime(&mut self, age_s: f64, w_kms: f64, gamma_per_km: f64) {
+        if self.n >= MAX_SEGS || age_s <= self.segs[self.n - 1].0 {
+            return;
+        }
+        let d = self.apex_km(age_s);
+        let v = self.speed_kms(age_s);
+        self.segs[self.n] =
+            (age_s, Dbm { d0_km: d, v0_kms: v, w_kms, gamma_per_km });
+        self.n += 1;
+    }
+
+    /// Append a segment at `age_s` with an IMPULSIVE speed change (spec
+    /// §19.2 collision) and a new ambient/drag. Position stays continuous;
+    /// speed jumps to `v_kms`.
+    pub fn push_impulse(&mut self, age_s: f64, v_kms: f64, w_kms: f64, gamma_per_km: f64) {
+        if self.n >= MAX_SEGS || age_s <= self.segs[self.n - 1].0 {
+            return;
+        }
+        let d = self.apex_km(age_s);
+        self.segs[self.n] =
+            (age_s, Dbm { d0_km: d, v0_kms: v_kms, w_kms, gamma_per_km });
+        self.n += 1;
+    }
+
+    /// Drop every segment starting at or after `age_s` (used when an
+    /// impulse supersedes pre-built refresh segments beyond the contact).
+    pub fn truncate_after(&mut self, age_s: f64) {
+        while self.n > 1 && self.segs[self.n - 1].0 >= age_s {
+            self.n -= 1;
+        }
+    }
+}
+
 /// Axial field strength at apex distance d: B₁AU · (d/AU)^(−n_B). [nT]
 pub fn b_axis_nt(b_1au_nt: f64, d_km: f64, n_b: f64) -> f64 {
     b_1au_nt * (d_km / AU_KM).powf(-n_b)
@@ -164,6 +261,48 @@ mod tests {
         // Detachment clamp near and below M = 1.
         assert_eq!(standoff_ratio(1.01), STANDOFF_MAX);
         assert_eq!(standoff_ratio(0.5), STANDOFF_MAX);
+    }
+
+    #[test]
+    fn seg_single_is_bitwise_the_raw_dbm() {
+        let s = SegDbm::single(DBM);
+        for h in [0.0, 5.0, 20.0, 50.0, 90.0] {
+            let t = h * 3600.0;
+            assert_eq!(s.apex_km(t).to_bits(), DBM.apex_km(t).to_bits());
+            assert_eq!(s.speed_kms(t).to_bits(), DBM.speed_kms(t).to_bits());
+        }
+        assert_eq!(s.w_kms(), DBM.w_kms);
+        assert_eq!(s.gamma_per_km(), DBM.gamma_per_km);
+    }
+
+    #[test]
+    fn seg_push_regime_is_continuous_and_switches_the_ambient() {
+        let mut s = SegDbm::single(DBM);
+        let t1 = 20.0 * 3600.0;
+        let (d1, v1) = (s.apex_km(t1), s.speed_kms(t1));
+        s.push_regime(t1, 600.0, 0.1e-7);
+        assert!((s.apex_km(t1) - d1).abs() < 1e-6, "d continuous at the boundary");
+        assert!((s.speed_kms(t1) - v1).abs() < 1e-9, "v continuous for a regime push");
+        assert_eq!(s.regime_at(t1 + 1.0), (600.0, 0.1e-7));
+        assert_eq!(s.regime_at(t1 - 1.0), (DBM.w_kms, DBM.gamma_per_km));
+        // The new regime decelerates toward ITS ambient, not the old one.
+        assert!((s.speed_kms(1e8) - 600.0).abs() < 5.0);
+    }
+
+    #[test]
+    fn seg_push_impulse_jumps_speed_keeps_position() {
+        let mut s = SegDbm::single(DBM);
+        let t1 = 30.0 * 3600.0;
+        let d1 = s.apex_km(t1);
+        let v_before = s.speed_kms(t1);
+        s.push_impulse(t1, v_before + 150.0, DBM.w_kms, DBM.gamma_per_km);
+        assert!((s.apex_km(t1) - d1).abs() < 1e-6);
+        // At exactly t1 the new segment owns the evaluation: the jump is exact.
+        assert!((s.speed_kms(t1) - (v_before + 150.0)).abs() < 1e-9);
+        // truncate_after drops the impulse again.
+        s.truncate_after(t1);
+        assert_eq!(s.n, 1);
+        assert_eq!(s.speed_kms(t1 + 1.0).to_bits(), DBM.speed_kms(t1 + 1.0).to_bits());
     }
 
     #[test]

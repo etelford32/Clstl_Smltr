@@ -248,11 +248,18 @@ arbitrary heliocentric point (the page's GLSL view mirrors the same math
 in-shader; the kernel is the oracle); `fr_ens_run(seed, n, ...)` +
 percentile/arrival/probability getters expose §7, with
 `fr_ens_member_params_ptr` laid out member-major over
-`fr_ens_ropes_per_member()` records.
+`fr_ens_ropes_per_member()` records. §16 compounding-analyzer probes
+(read-only, 2026-07-27): `fr_rope_leader(idx)` (§16 partner, −1 = none),
+`fr_rear_c_at(idx, t)` (live rear squeeze), `fr_upstream_kms_at(idx, t)`
+(the wake flow a follower's sheath Mach runs against), `fr_v_ms_kms()` —
+the interaction state the series path already computes, exposed so pages
+can EXPLAIN the compounding without re-deriving it.
 
 ## 10. Multi-rope trains (v1.1, Phase 2)
 
-A CME **train** is a sequence of up to `MAX_ROPES = 4` ropes, each with its
+A CME **train** is a sequence of up to `MAX_ROPES = 6` ropes (raised from 4
+on 2026-07-27 — active periods put more than four Earth-relevant CMEs in
+flight at once; the GLSL view's uniform arrays move in lockstep), each with its
 own §3–§5 parameterization and a launch offset `t_launch` [s] relative to
 one reference epoch (the first rope's launch by convention). The v1 train
 model makes exactly one assumption, stated loudly:
@@ -353,6 +360,43 @@ climatological defaults with deliberately WIDE priors (tilt σ 40°,
 chirality flip probability 0.5 = "unknown"): that honest prior is the
 starting posterior the §11 filter narrows as STEREO-A / L1 data arrives.
 Ambient wind `w` is seeded from the live RTSW plasma mean when available.
+
+### §12.1 Compounding-train seeding (2026-07-27)
+
+The live pipeline seeds the WHOLE current system, not the newest cone fit
+(`selectTrainCmes` + `donkiToTrainPreset` in js/flux-rope-live.js,
+fixture-gated):
+
+- **Membership.** Earth-RELEVANT CMEs (strictly Earth-directed, or within
+  20° of the cone edge — glancing candidates that can §16-couple to an
+  aligned anchor) that either launched inside the window (default 24 h)
+  or are still plausibly at/inside 1 AU (ballistic arrival + 30 h dwell
+  margin not yet past — a relevance FILTER only; the DBM owns real
+  kinematics). At least one strictly Earth-directed ANCHOR is required —
+  partners alone are idle, and a fully-passed storm is `idle`
+  (`cme-train-passed`), never a "forecast" of the past. Over the cap the
+  oldest non-anchor drops first, then the oldest anchor.
+- **Epoch.** Rope 0 = the EARLIEST launch; every consumer probe
+  (`fr_apex_km_at(0, …)`, the Stage's rope actor) assumes it. Later
+  launches carry `t_launch` offsets.
+- **Interaction.** §16 ON with engine defaults — wake kinematics, dynamic
+  rear compression, wake-conditioned follower sheaths.
+- **Spreads.** The kernel samples ONE §7 spread set across all ropes, so
+  the per-CME cone priors merge by MAX — the honest merge of unequal
+  priors is the widest.
+- **Seed.** Fold every member identity in launch order
+  (`trainSeed = fold(eventSeed)`): a new CME joining the train is a new
+  forecast system state; the same train replays bit-identically; a 1-CME
+  train reproduces the historical single-event seed exactly.
+- **Background noise (js/flux-rope-noise.js).** The trailing observed L1
+  record is measured with robust MAD statistics — σ_bg (full background
+  about the window median) and σ_hf (successive differences / √2, never
+  across a data gap). Two formerly-fixed knobs derive from it, disclosed
+  wherever used: the §14 sheath seed `δ = clamp(σ_bg, 1, 6)` (hindcast
+  fits keep their fitted δ) and the §11 observation error
+  `σ = clamp(√(3² + σ_bg²), 3, 8)` — which reproduces the spec's 4 nT
+  default at the previously-assumed ~2.6 nT background. Unmeasured →
+  the spec constants apply and the UI says so.
 
 ## 13. STEREO-A pre-arrival conditioning (Phase 3 close-out)
 
@@ -708,3 +752,138 @@ lifts ensemble P(hit) 0.54 → 0.83 — the aspect is unconstrained by
 single-point data, and storm-probability calibration inherits that
 sensitivity. Resolving it needs multi-point data (the §13 machinery) or
 a population prior; both are future work, stated.
+
+## 19. Segmented kinematics + momentum exchange (v1.6)
+
+The two documented §16 approximations — the leader is squeezed but never
+PUSHED, the follower loses no momentum at contact — put an opposite-sign
+timing bias on every interacting train: leaders arrive too late,
+followers too early. Fixing either requires kinematics the single §5
+closed form cannot express, so v1.6 first generalizes the kinematics,
+then adds the physics.
+
+**§19.0 Segment chains.** A rope's apex motion becomes a chain of up to
+`MAX_SEGS = 32` DBM segments. Segment k is `(t_k, d_k, v_k, w_k, Γ_k)`,
+valid on `[t_k, t_{k+1})`, evaluated with the §5 closed form from its own
+initial conditions. `d` is continuous across boundaries; `v` is
+continuous except at impulses (§19.2 — the idealized collision). A
+one-segment chain with the rope's own `(w, Γ)` is **bit-identical to §5**
+— every pre-v1.6 pin holds through this machinery, and §16's
+frozen-at-launch wake is simply a one-segment chain with `(w_eff, Γ_eff)`.
+
+**§19.1 Contact detection.** For follower j with §16 leader i, the
+contact time `t_c` is the first root of the §16 nose-to-tail gap
+
+```
+gap(t) = (d_i(t) − σ̂_i(t)) − (d_j(t) + σ̂_j(t))
+```
+
+evaluated over the CURRENT segment chains, found by bisection (60
+iterations over [max launch, horizon]; no crossing → no contact). With
+several pairs, contacts resolve in TIME order: the earliest contact's
+impulse is applied, affected chains rebuilt, and the search repeats —
+chains (A←B←C) therefore see post-impulse speeds. **One contact per
+pair** (stated approximation: post-impulse closing speed is ≤ 0; a
+drag-driven re-approach is not re-collided).
+
+**§19.2 Momentum exchange.** At `t_c`, with pre-contact apex speeds
+`v_i⁻, v_j⁻` and closing speed `u = v_j⁻ − v_i⁻ > 0`, the 1-D two-body
+collision with restitution `ε` and mass ratio `r = m_j/m_i`:
+
+```
+v_i⁺ = v_i⁻ + (1+ε) · r/(1+r) · u
+v_j⁺ = v_j⁻ − (1+ε) · 1/(1+r) · u
+```
+
+Momentum `m_i v_i + m_j v_j` is conserved exactly (kernel-pinned);
+`ε = 0` (default) is perfectly inelastic (common post-contact speed),
+`ε = 1` elastic; the literature spans inelastic → super-elastic
+(Shen et al. 2012), so ε is the ONE calibration knob, fit per event and
+reported. **Mass proxy:** `m ∝ σ₁AU²` (cross-section area; both ropes'
+lengths scale with the same d at contact) — fixed exponent, not a knob.
+Post-contact segments: the leader keeps its CURRENT flow regime at
+`v_i⁺`; the follower ADOPTS that same regime (merged-system
+approximation) — with `ε = 0` the identical `(v, w, Γ)` keep the pair
+exactly co-moving, so the §16 rear squeeze relaxes (`M_rel = 0`) instead
+of a stale frozen wake artificially re-closing them; with `ε > 0` the
+bounce separates them under the shared ambient. Kernel-pinned.
+
+**Config + determinism.** `momentum: { enabled, restitution }` on the
+engine-level train config, shared across members; each member's contact
+times derive from its OWN sampled parameters (no new RNG stream).
+`enabled = false` (default) is bit-identical to v1.5. NOT modeled, on
+record: mass loss/merging, magnetic tension rebound, oblique-impact
+geometry (contacts are apex-line 1-D).
+
+**Validation obligation.** Kernel pins: momentum conservation to 1e-9,
+ε-limit behavior, contact time = independent gap bisection, off-path
+bitwise identity. Hindcast: the Gannon v1.4 train re-measured with
+momentum ON at defaults — accepted into the preset ONLY if it improves
+the pinned arrival/internal-disturbance metrics; otherwise the
+measurement is recorded and the preset keeps ε unfitted (the §15/§18
+accept-or-reject discipline). The daily validation ledger
+(CME_FORECAST_VALIDATION_PLAN.md) is the real referee: per-event arrival
+errors for interacting trains, flux-rope-v1 vs the non-interacting
+baseline.
+
+**Measured value (2026-07-28, pinned) — REJECTED for the fitted Gannon
+preset, mechanism recorded.** On `standoffRopes` at defaults: the B→A
+contact lands at **+53.5 h** — inside the observed late storm, the
+mechanism's timing is plausible — but ε = 0 deepens the minimum to
+−54.6 vs −44.17 nT observed (23% overshoot, Δt +6.7 h, dwell 22.2 vs
+15.9 h; shape r ticks up 0.663 → 0.681), and ε = 0.7 walks smoothly
+back to the pinned numbers. §20 refreshes alone: min −43.2, r 0.660 —
+also slightly degrading. Diagnosis, on record: the v1.4 hand fit was
+tuned UNDER the frozen-wake/no-momentum approximations, so its
+parameters (v0_B = 900 as a wake-frozen fit, the η_B = 3 pileup) already
+absorb the physics — enabling it without a re-fit double-counts the
+compression. The fitted preset therefore keeps every v1.6 knob OFF; the
+smoke test pins this measurement as a tripwire; and the per-flare daily
+ledger — where no hand fit absorbs anything — is where ε, the refresh
+cadence, and the §21 knobs get fitted against fresh events.
+
+## 20. Evolving wake (v1.6 — releasing the frozen-at-launch approximation)
+
+§16 froze a follower's ambient at its launch (`w_eff = v_i(t_launch,j)`)
+so the closed form survived. With §19.0 segments the honest
+time-dependence is affordable:
+
+- **Refresh schedule.** While a follower rides a wake, its ambient
+  re-freezes every `wake_refresh_h` hours (default 6; 0 = off, the
+  frozen-at-launch legacy — bit-identical): at refresh time `t_k`, a new
+  segment starts with `w_eff = max(w_j, v_i(t_k))` from the leader's
+  live (segmented) speed. Piecewise-constant, monotone-decaying wake —
+  the leader keeps decelerating, so late-transit followers feel less
+  entrainment than the launch freeze pretended.
+- **Overtake.** If the follower's nose passes the leader's apex
+  (`d_j + σ̂_j > d_i`, checked at refresh times), the follower re-enters
+  FRESH wind: `(w_j, Γ_j)` raw from that segment on. (After a §19
+  contact the follower is co-moving instead — contact handling wins.)
+
+`wake_refresh_h` lives on the train config, shared across members, no
+new RNG. Kernel pins: refresh monotonicity (each refresh can only lower
+w_eff toward w_j), overtake restores raw drag, 0 = bit-identical.
+
+## 21. Deflection (v1.6 — trajectory in direction space)
+
+The engine has never moved a launch direction, yet direction error is
+the dominant P(hit) error source and both deflection mechanisms are
+well-documented. Two EMPIRICAL launch-time corrections, both default 0
+(bit-identical off), both applied to the effective frame the train
+layer hands the geometry (raw entries untouched):
+
+- **Pair wake attraction** (`defl_pair ∈ [0, 1]`): a follower's launch
+  direction rotates toward its §16 leader's by the fraction `defl_pair`
+  of their angular separation (great-circle slerp of ê_dir, capped at
+  20°). Physics: the leader evacuates a low-density channel the
+  follower refracts into.
+- **East–west drag drift** (`defl_ew_deg`, degrees): longitude shift
+  `Δφ = defl_ew_deg · clamp((v₀ − w)/w, −1, 1)` — slow CMEs (v₀ < w)
+  deflect east (negative), fast CMEs west, the Parker-spiral blocking
+  asymmetry (Wang et al. 2004 lineage).
+
+Members apply the same corrections to their OWN sampled directions
+(engine-level config, no RNG). The knobs stay 0 until the daily
+validation ledger's Brier/reliability scores on P(hit) justify fitted
+values — deflection is exactly the mechanism single-event hindcasts
+cannot constrain but a per-flare ledger can.

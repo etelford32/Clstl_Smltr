@@ -9,7 +9,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { computeFluxRopeForecast, forecastDriverSamples, summarizeForecast,
-         eventSeed } from '../js/flux-rope-forecast.js';
+         eventSeed, trainSeed } from '../js/flux-rope-forecast.js';
 import { fromArrays, DRIVER_SOURCES } from '../js/solar-wind-driver.js';
 
 const wasm = await readFile(fileURLToPath(new URL('../js/flux-rope-wasm/flux_rope_core.wasm', import.meta.url)));
@@ -89,6 +89,63 @@ check('summary min-Bz percentiles ordered (p5 at least as deep as median)',
         `ESS ${fc.fan.ess.toFixed(0)}/${fc.prior.members}`);
     check('driver median follows the ASSIMILATED fan',
         fc.driver.samples.some((s, i) => s.bz !== prior.driver.samples[i].bz));
+    // Background-noise wiring (review F2): measured, disclosed, applied.
+    check('background noise measured from the injected L1 record',
+        fc.noise.ok === true && Number.isFinite(fc.noise.sigmaNt),
+        `bg σ ${fc.noise.sigmaNt?.toFixed(2)} nT over ${fc.noise.n} samples`);
+    check('filter σ derived from the measured background and disclosed',
+        fc.sigmaNt >= 3 && fc.sigmaNt <= 8 && /σ \d/.test(fc.assimNote), fc.assimNote);
+    check('sheath δ seeded from the measured background on every rope',
+        fc.sheathDeltaNt >= 1 && fc.sheathDeltaNt <= 6
+        && fc.preset.ropes.every((r) => r.sheathDeltaNt === fc.sheathDeltaNt),
+        `δ ${fc.sheathDeltaNt.toFixed(1)} nT`);
+}
+
+// ── Compounding-train path (review F1): two CMEs in flight ───────────────────
+{
+    const CME_A = { id: 'A', timeIso: '2026-07-19T06:00:00Z', speedKms: 900,
+        lonDeg: -3, latDeg: 2, halfAngleDeg: 38, earthDirected: true };   // 30 h old, in transit
+    const CME_B = { id: 'B', timeIso: '2026-07-20T00:00:00Z', speedKms: 1500,
+        lonDeg: 5, latDeg: -1, halfAngleDeg: 45, earthDirected: true };   // 12 h old (24 h window)
+    const fc = await computeFluxRopeForecast({
+        sources: { cmes: [CME_B, CME_A], rtsw: null, wasm }, nowMs: NOW_MS,
+    });
+    check('train: both in-flight CMEs modeled as one system',
+        fc.train === true && fc.cmes.length === 2 && fc.summary.nRopes === 2);
+    check('train: epoch = earliest launch (rope 0), offsets forward',
+        fc.launchMs === Date.parse(CME_A.timeIso)
+        && fc.preset.rope === fc.preset.ropes[0]
+        && fc.preset.ropes[1].launchOffsetS === 18 * 3600);
+    check('train: §16 interaction on with joint per-rope sampling',
+        fc.prior.ropesPerMember === 2 && fc.preset.interaction.enabled === true);
+    check('train: headline cme is the newest Earth-directed anchor', fc.cme.id === 'B');
+    check('train: grid extends past the last launch',
+        fc.grid.n === Math.round((120 + 18) * 3600 / fc.grid.dtS), `n=${fc.grid.n}`);
+    check('train: driver labeled as the compounding train',
+        /compounding train/.test(fc.driver.meta.label), fc.driver.meta.label);
+    const fc2 = await computeFluxRopeForecast({
+        sources: { cmes: [CME_B, CME_A], rtsw: null, wasm }, nowMs: NOW_MS,
+    });
+    check('train: bit-stable per train identity',
+        fc2.fan.bzPct.p50.every((v, i) => Object.is(v, fc.fan.bzPct.p50[i])));
+    check('train seed folds every identity (1-CME train = legacy event seed)',
+        trainSeed([CME_A, CME_B]) !== eventSeed('A') && trainSeed([CME_A]) === eventSeed('A'));
+}
+
+// ── Relevance honesty (review F3): passed storms are not "forecast" ──────────
+{
+    const OLD = { id: 'old', timeIso: '2026-07-14T00:00:00Z', speedKms: 1200,
+        lonDeg: 0, latDeg: 0, halfAngleDeg: 40, earthDirected: true };  // arrived ≈ 07-15, long gone
+    const fc = await computeFluxRopeForecast({
+        sources: { cmes: [OLD], rtsw: null, wasm }, nowMs: NOW_MS,
+    });
+    check('passed storm → idle with the honest reason',
+        fc.idle === true && fc.reason === 'cme-train-passed', fc.reason);
+    const replay = await computeFluxRopeForecast({
+        sources: { cmes: [OLD], rtsw: null, wasm }, nowMs: NOW_MS, relevanceFilter: false,
+    });
+    check('replay opt-out models the injected catalog verbatim',
+        replay.idle === false && replay.cme.id === 'old' && replay.summary.nRopes === 1);
 }
 
 // ── Pure helpers directly ────────────────────────────────────────────────────

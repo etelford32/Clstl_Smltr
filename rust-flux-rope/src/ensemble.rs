@@ -285,7 +285,7 @@ pub fn run(
                     }
                     let up = upstream_kms(&train, &dyns, r, t);
                     let rc = rear_c_at(&train, &dyns, cfg, r, t);
-                    if sheath_at_dyn(&entry.params, &entry.frame, dt_r, obs, &dyns[r].dbm, up, rc)
+                    if sheath_at_dyn(&entry.params, &dyns[r].frame, dt_r, obs, &dyns[r].dbm, up, rc)
                     {
                         let x = crate::kinematics::compression_ratio(
                             crate::kinematics::shock_mach(dyns[r].dbm.speed_kms(dt_r), up),
