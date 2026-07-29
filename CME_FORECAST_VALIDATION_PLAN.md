@@ -196,6 +196,18 @@ probabilistic content the point models don't carry:
   (probabilities, min-Bz quantiles, flare tag, Bz truth);
   flux-rope-live.html renders the per-flare VALIDATION LEDGER.
 
+**Ops postmortem (2026-07-29).** The daily cron had run exactly ONCE in
+production (07-12) — Vercel logs showed every run since dying at the
+60 s platform kill with its response ignored (Web-style `return
+Response` on the nodejs runtime, serial ≤12 s HEK chunks blowing the
+budget, and the CME program ordered AFTER the HEK-dependent studies).
+All three fixed in api/cron/validation-rerun.js (see its header): the
+handler writes through `(req, res)`, HEK chunks fetch in parallel at
+6 s each, and the lock/resolve + flux-rope ledger now run FIRST so feed
+trouble in the studies can never starve them. Consequence: the program
+tables are EMPTY until this deploys — the ledger's clock starts at the
+first 06:30 UT run after merge.
+
 ### Phase 4 — Hindcast backtest (offline loop)
 
 `scripts/cme-hindcast.mjs` — CLI mirroring `backmap-validation.mjs` /

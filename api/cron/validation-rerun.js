@@ -39,7 +39,23 @@
  * Schedule: vercel.json → 06:30 UT daily (after HEK's overnight backlog).
  *
  * Response: 200 { ok, window, buckets, holes, hekChunksFailed,
- *                 backmap: {...}, recurrence: {...}, dur_ms }
+ *                 backmap: {...}, recurrence: {...}, cmeProgram, fluxRope,
+ *                 dur_ms }
+ *
+ * OPS POSTMORTEM (2026-07-29, from Vercel runtime logs): this function ran
+ * ONCE (07-12) and then silently produced nothing for 17 days. Three
+ * compounding causes, all fixed here — do not reintroduce them:
+ *   1. `runtime: 'nodejs'` IGNORES a Web-style `return Response`
+ *      (the (req, res) signature is the contract) — every response,
+ *      including the watchdog's, was dropped and the platform killed the
+ *      invocation at 60 s. Handler now writes through `res`.
+ *   2. The HEK chunk fetches ran SERIALLY (7 × ≤12 s = 84 s worst case),
+ *      blowing the 60 s budget before the first insert on slow days.
+ *      Chunks now fetch in parallel with a 6 s per-chunk timeout.
+ *   3. The CME program ran AFTER the HEK-dependent studies, so HEK
+ *      trouble starved the record-before-predict ledger. The program +
+ *      flux-rope block now run FIRST (DONKI + Supabase only) and the
+ *      study early-outs carry their partial results instead of aborting.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -60,7 +76,7 @@ import { retrievedPopulation } from '../../js/flux-rope-inversion.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
-const WATCHDOG_MS = 57_000;
+const WATCHDOG_MS = 50_000;   // real margin under the 60 s platform kill
 const HEK_BASE = 'https://www.lmsal.com/hek/her';
 const HEK_DAYS = 21;
 const HEK_CHUNK_DAYS = 3;
@@ -70,10 +86,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABAS
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const CRON_SECRET  = process.env.CRON_SECRET || '';
 
-function isAuthorized(request) {
-    const hdr = request.headers.get('authorization') ?? '';
+// Node-runtime request: headers are a plain object, NOT a Headers map.
+function isAuthorized(req) {
+    const hdr = req.headers?.authorization ?? '';
     if (CRON_SECRET && hdr === `Bearer ${CRON_SECRET}`) return true;
-    if (request.headers.get('x-vercel-cron')) return true;
+    if (req.headers?.['x-vercel-cron']) return true;
     return false;
 }
 
@@ -96,12 +113,13 @@ async function fetchBuckets() {
         .sort((a, b) => a.t - b.t);
 }
 
-/** HEK SPoCA detections, chunked + deduped per day on a 5° grid. */
+/** HEK SPoCA detections, chunked + deduped per day on a 5° grid.
+ *  Chunks fetch IN PARALLEL with a tight per-chunk timeout — the serial
+ *  ≤12 s × 7 version could exceed the 60 s platform budget on slow HEK
+ *  days and killed the whole cron (see the header postmortem). */
 async function fetchHoles(endMs) {
-    const holes = [];
-    let failed = 0;
-    const seen = new Map();   // day_lat5_lon5 → true
-    for (let k = 0; k < Math.ceil(HEK_DAYS / HEK_CHUNK_DAYS); k++) {
+    const nChunks = Math.ceil(HEK_DAYS / HEK_CHUNK_DAYS);
+    const chunkRows = await Promise.all(Array.from({ length: nChunks }, (_, k) => (async () => {
         const c1 = new Date(endMs - (k + 1) * HEK_CHUNK_DAYS * DAY).toISOString().replace(/\.\d{3}Z$/, '');
         const c2 = new Date(endMs - k * HEK_CHUNK_DAYS * DAY).toISOString().replace(/\.\d{3}Z$/, '');
         const params = new URLSearchParams({
@@ -113,23 +131,30 @@ async function fetchHoles(endMs) {
         });
         try {
             const res = await fetchWithTimeout(`${HEK_BASE}?${params}`, {
-                timeoutMs: 12_000, headers: { Accept: 'application/json' },
+                timeoutMs: 6_000, headers: { Accept: 'application/json' },
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const raw = await res.json();
-            for (const r of raw?.result ?? []) {
-                if (!/spoca/i.test(r.frm_name ?? '')) continue;
-                const lat = parseFloat(r.hgs_y);
-                const lonCar = ((parseFloat(r.hgc_x) % 360) + 360) % 360;
-                const day = String(r.event_starttime ?? '').slice(0, 10);
-                if (!isFinite(lat) || !isFinite(lonCar) || day.length !== 10) continue;
-                const key = `${day}_${Math.round(lat / 5) * 5}_${Math.round(lonCar / 5) * 5}`;
-                if (seen.has(key)) continue;
-                seen.set(key, true);
-                holes.push({ day, lat, lonCar });
-            }
+            return raw?.result ?? [];
         } catch {
-            failed++;
+            return null;   // counted as a failed chunk; partial catalogs are reported
+        }
+    })()));
+    const holes = [];
+    let failed = 0;
+    const seen = new Map();   // day_lat5_lon5 → true (chunk order preserved)
+    for (const rows of chunkRows) {
+        if (rows === null) { failed++; continue; }
+        for (const r of rows) {
+            if (!/spoca/i.test(r.frm_name ?? '')) continue;
+            const lat = parseFloat(r.hgs_y);
+            const lonCar = ((parseFloat(r.hgc_x) % 360) + 360) % 360;
+            const day = String(r.event_starttime ?? '').slice(0, 10);
+            if (!isFinite(lat) || !isFinite(lonCar) || day.length !== 10) continue;
+            const key = `${day}_${Math.round(lat / 5) * 5}_${Math.round(lonCar / 5) * 5}`;
+            if (seen.has(key)) continue;
+            seen.set(key, true);
+            holes.push({ day, lat, lonCar });
         }
     }
     return { holes, failed };
@@ -591,25 +616,58 @@ async function insertRun(row) {
     }
 }
 
-async function runValidation(request) {
+async function runValidation(req) {
     const started = Date.now();
-    if (!isAuthorized(request)) {
-        return Response.json({ error: 'unauthorized' }, { status: 401 });
+    if (!isAuthorized(req)) {
+        return { status: 401, body: { error: 'unauthorized' } };
     }
     if (!SUPABASE_URL || !SUPABASE_KEY) {
-        return Response.json({ ok: false, reason: 'supabase_not_configured' }, { status: 503 });
+        return { status: 503, body: { ok: false, reason: 'supabase_not_configured' } };
     }
 
-    const buckets = await fetchBuckets();
+    // ── CME program + flux-rope per-flare ledger FIRST (DONKI + Supabase
+    //    only — see the header postmortem: HEK trouble or a late-run budget
+    //    kill must never starve the record-before-predict ledger).
+    const nowMs = Date.now();
+    let catalog = [], flares = [], pdynSeries = [];
+    let cmeProgram = { reason: 'not_run' };
+    try {
+        const [donki, pdyn] = await Promise.all([
+            fetchDonkiCatalog(nowMs - 16 * DAY, nowMs),
+            fetchPdynSeries(),
+        ]);
+        catalog = donki.rows;
+        flares = donki.flares;
+        pdynSeries = pdyn;
+        cmeProgram = await lockAndResolveCme(catalog, pdynSeries, nowMs);
+    } catch (e) {
+        cmeProgram = { reason: `lock_resolve_failed: ${String(e?.message || e)}` };
+    }
+    let fluxRope = { reason: 'not_run' };
+    try {
+        if (catalog.length) fluxRope = await lockAndScoreFluxRope(catalog, flares, Date.now());
+        else fluxRope = { reason: 'no_catalog' };
+    } catch (e) {
+        fluxRope = { reason: `flux_rope_failed: ${String(e?.message || e)}` };
+    }
+    const ledger = { cmeProgram, fluxRope };
+
+    // ── Studies 1–3 (wind-bucket + HEK dependent). Early-outs carry the
+    //    ledger results — partial success is success.
+    const buckets = await fetchBuckets().catch(() => []);
     if (buckets.length < 8) {
-        return Response.json({
+        return { status: 200, body: {   // 200: a thin archive, not an infra failure
             ok: false, reason: 'insufficient_wind_data', buckets: buckets.length,
-        }, { status: 200 });   // 200: not an infra failure, just a thin archive
+            ...ledger, dur_ms: Date.now() - started,
+        } };
     }
     const windowStart = buckets[0].t, windowEnd = buckets[buckets.length - 1].t;
     const { holes, failed: hekChunksFailed } = await fetchHoles(windowEnd);
     if (!holes.length) {
-        return Response.json({ ok: false, reason: 'hek_unavailable', hekChunksFailed }, { status: 502 });
+        return { status: 502, body: {
+            ok: false, reason: 'hek_unavailable', hekChunksFailed,
+            ...ledger, dur_ms: Date.now() - started,
+        } };
     }
 
     // ── Study 1: back-mapping attribution ────────────────────────────
@@ -652,34 +710,8 @@ async function runValidation(request) {
         },
     });
 
-    // ── CME program: one DONKI catalog (+FLR) + one Pdyn series feed the
-    //    forecast-locking loop (Phases 2–3), study 3's verification, AND
-    //    the flux-rope per-flare ledger.
-    let catalog = [], flares = [], pdynSeries = [];
-    let cmeProgram = { reason: 'not_run' };
-    try {
-        const [donki, pdyn] = await Promise.all([
-            fetchDonkiCatalog(windowStart, windowEnd),
-            fetchPdynSeries(),
-        ]);
-        catalog = donki.rows;
-        flares = donki.flares;
-        pdynSeries = pdyn;
-        cmeProgram = await lockAndResolveCme(catalog, pdynSeries, Date.now());
-    } catch (e) {
-        cmeProgram = { reason: `lock_resolve_failed: ${String(e?.message || e)}` };
-    }
-
-    // ── flux-rope-v1: per-flare compounding-train lock + Bz truth + scores.
-    let fluxRope = { reason: 'not_run' };
-    try {
-        if (catalog.length) fluxRope = await lockAndScoreFluxRope(catalog, flares, Date.now());
-        else fluxRope = { reason: 'no_catalog' };
-    } catch (e) {
-        fluxRope = { reason: `flux_rope_failed: ${String(e?.message || e)}` };
-    }
-
     // ── Study 3: CME arrival verification (predicted vs actual shock) ──
+    //    (catalog + pdynSeries were fetched by the ledger block above.)
     // Only inserts when there was something to verify — CMEs are episodic
     // and an empty run would poison the sparkline with zeros.
     let cmeSummary = { n: 0, reason: 'no verifiable predictions in window' };
@@ -713,7 +745,7 @@ async function runValidation(request) {
         cmeSummary = { n: 0, reason: `cme_verification_failed: ${String(e?.message || e)}` };
     }
 
-    return Response.json({
+    return { status: 200, body: {
         ok: true,
         window: { start: new Date(windowStart).toISOString(), end: new Date(windowEnd).toISOString() },
         buckets: buckets.length,
@@ -725,23 +757,27 @@ async function runValidation(request) {
             timingSkill: rc.timingSkill, independentEvents: rc.independentEvents,
         },
         cme: cmeSummary,
-        cmeProgram,
-        fluxRope,
+        ...ledger,
         dur_ms: Date.now() - started,
-    });
+    } };
 }
 
-export default async function handler(request) {
+// NODE-runtime signature (req, res): a returned Response is IGNORED here —
+// that exact mistake is how this cron 504'd silently for 17 days (header
+// postmortem). Every path writes through `res`.
+export default async function handler(req, res) {
     let timer;
     const watchdog = new Promise((resolve) => {
-        timer = setTimeout(() => resolve(Response.json(
-            { ok: false, reason: 'worker_timeout', budget_ms: WATCHDOG_MS }, { status: 504 },
-        )), WATCHDOG_MS);
+        timer = setTimeout(() => resolve({
+            status: 504,
+            body: { ok: false, reason: 'worker_timeout', budget_ms: WATCHDOG_MS },
+        }), WATCHDOG_MS);
     });
     try {
-        return await Promise.race([runValidation(request), watchdog]);
+        const out = await Promise.race([runValidation(req), watchdog]);
+        res.status(out.status ?? 200).json(out.body ?? {});
     } catch (e) {
-        return Response.json({ ok: false, reason: String(e?.message || e) }, { status: 502 });
+        res.status(502).json({ ok: false, reason: String(e?.message || e) });
     } finally {
         clearTimeout(timer);
     }
