@@ -91,6 +91,31 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 .dose-label { font-size:9px; color:#556; margin-top:4px; }
 .dose-ref { font-size:8px; color:#445; margin-top:6px; font-style:italic; }
 
+/* ─── View toggle (Surface / Interior) ──────────────────────── */
+#view-toggle {
+    position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:60;
+    display:flex; border:1px solid rgba(255,255,255,.12); border-radius:8px;
+    overflow:hidden; background:rgba(4,2,16,.8); backdrop-filter:blur(12px);
+}
+.vt-btn { border:0; background:transparent; color:#8899aa; cursor:pointer;
+    font:600 11px 'Segoe UI',system-ui,sans-serif; padding:7px 16px; letter-spacing:.03em; }
+.vt-btn.active { background:rgba(255,215,0,.14); color:#ffd77a; }
+.vt-btn:not(.active):hover { color:#ccd; }
+
+/* ─── Interior panel ────────────────────────────────────────── */
+#info-panel.interior-mode .ip-surface-only { display:none; }
+#ip-sec-interior { display:none; }
+#info-panel.interior-mode #ip-sec-interior { display:block; }
+.legend-row { display:flex; align-items:center; gap:7px; padding:3px 0; font-size:10px; color:#99a; }
+.legend-sw { width:10px; height:10px; border-radius:3px; flex:none; }
+.legend-name { color:#cdd; font-weight:600; }
+.legend-r { margin-left:auto; font-family:monospace; color:#778; font-size:9px; }
+.tide-track { position:relative; height:8px; border-radius:4px; margin:8px 0 2px;
+    background:linear-gradient(90deg, rgba(102,217,255,.30), rgba(255,255,255,.05) 25%,
+        rgba(102,217,255,.14) 50%, rgba(255,255,255,.05) 75%, rgba(102,217,255,.30)); }
+.tide-pin { position:absolute; top:-3px; width:2px; height:14px; background:#66d9ff; border-radius:1px; }
+#dyn-age { width:100%; accent-color:#8fb8ff; margin-top:6px; }
+
 /* ─── Loading ───────────────────────────────────────────────── */
 #loading {
     position:absolute; inset:0; z-index:100;
@@ -105,6 +130,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 @media (max-width:768px) {
     #info-panel { display:none; }
     #hud { top:8px; left:8px; font-size:9px; padding:8px 10px; }
+    /* keep the mode toggle clear of the HUD on narrow screens */
+    #view-toggle { top:auto; bottom:14px; }
 }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
@@ -155,6 +182,12 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         <p>Loading lunar surface textures...</p>
     </div>
 
+    <!-- View toggle -->
+    <div id="view-toggle">
+        <button id="vt-surface" class="vt-btn active">Surface</button>
+        <button id="vt-interior" class="vt-btn">Interior</button>
+    </div>
+
     <!-- HUD -->
     <div id="hud">
         <div class="hud-title">Moon — Lunar Radiation Lab</div>
@@ -164,13 +197,55 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         <span class="hk">GCR&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-gcr">—</span>
         <span class="hk">SEP&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-sep">—</span>
         <span class="hk">Dose&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-dose">—</span>
+        <span class="hk">Tide&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-tide">—</span>
     </div>
 
     <!-- Info Panel -->
     <div id="info-panel">
 
+        <!-- Interior cutaway (visible in Interior view) -->
+        <div class="ip-section" id="ip-sec-interior">
+            <div class="ip-title">Interior Structure</div>
+            <div id="ip-layer-legend" style="margin-bottom:8px"></div>
+            <div class="ip-row"><span class="ip-k">Central pressure</span><span class="ip-v" id="ip-p0">—</span></div>
+            <div class="ip-row"><span class="ip-k">Central temperature</span><span class="ip-v" id="ip-t0">—</span></div>
+            <div class="ip-row"><span class="ip-k">Surface gravity</span><span class="ip-v" id="ip-g">—</span></div>
+            <div class="ip-row"><span class="ip-k">Crust near / far side</span><span class="ip-v" id="ip-crust">—</span></div>
+
+            <div class="ip-title" style="margin-top:12px">Deep Moonquakes</div>
+            <div style="font-size:9px;color:#889;line-height:1.5">
+                Nests 700–1200 km deep fire on the tidal clock — the Moon creaks
+                loudest near perigee. The cyan markers pulse with today's rate;
+                rotate into the cutaway to find them.
+            </div>
+            <div class="tide-track"><div class="tide-pin" id="tide-pin"></div></div>
+            <div style="display:flex;justify-content:space-between;font-size:8px;color:#556"><span>Perigee</span><span>Apogee</span><span>Perigee</span></div>
+            <div class="ip-row"><span class="ip-k">Tidal phase</span><span class="ip-v" id="ip-tide-phase">—</span></div>
+            <div class="ip-row"><span class="ip-k">Relative quake rate</span><span class="ip-v" id="ip-quake-rate">—</span></div>
+            <div class="ip-row"><span class="ip-k">Next perigee (mean)</span><span class="ip-v" id="ip-next-perigee">—</span></div>
+            <label class="lyr" style="margin-top:4px"><input type="checkbox" id="lyr-quakes" checked> Moonquake nests + wavefronts</label>
+
+            <div class="ip-title" style="margin-top:12px">The Dead Dynamo</div>
+            <div style="font-size:9px;color:#889;line-height:1.5">
+                Four billion years ago the fluid core drove an Earth-strength
+                magnetic field. It weakened, died ~1 Ga ago, and today only
+                magnetized crust remains. Scrub time:
+            </div>
+            <input type="range" id="dyn-age" min="-4.42" max="0" step="0.02" value="0">
+            <div class="ip-row"><span class="ip-k" id="ip-dyn-when">Today</span><span class="ip-v" id="ip-dyn-field">0 µT</span></div>
+            <div class="ip-row"><span class="ip-k">Epoch</span><span class="ip-v" id="ip-dyn-epoch">—</span></div>
+            <label class="lyr" style="margin-top:4px"><input type="checkbox" id="lyr-anomalies" checked> Crustal anomalies (Reiner Gamma…)</label>
+
+            <div style="font-size:8px;color:#556;line-height:1.6;margin-top:10px">
+                Structure: Weber et al. 2011 (Apollo seismics) · GRAIL crust
+                (Wieczorek 2013) · quakes: Nakamura 2005 · paleofield: Weiss &amp;
+                Tikoo 2014, Mighani 2020. Layer model gated by
+                tests/moon-interior-model.mjs.
+            </div>
+        </div>
+
         <!-- Dose Rate -->
-        <div class="ip-section">
+        <div class="ip-section ip-surface-only">
             <div class="ip-title">Lunar Surface Dose Rate</div>
             <div class="dose-card">
                 <div class="dose-val" id="ip-dose-val" style="color:#4fc97f">13.2 <span class="dose-unit">cGy/yr</span></div>
@@ -196,7 +271,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         </div>
 
         <!-- Radiation Environment -->
-        <div class="ip-section">
+        <div class="ip-section ip-surface-only">
             <div class="ip-title">Radiation Environment</div>
             <div class="ip-row"><span class="ip-k">GCR Dose Rate</span><span class="ip-v" id="ip-gcr-dose">~13 cGy/yr</span></div>
             <div class="ip-row"><span class="ip-k">SEP Dose (event)</span><span class="ip-v" id="ip-sep-dose">0 cGy</span></div>
@@ -207,7 +282,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         </div>
 
         <!-- Comparison -->
-        <div class="ip-section">
+        <div class="ip-section ip-surface-only">
             <div class="ip-title">Dose Comparison</div>
             <div class="ip-row"><span class="ip-k">Lunar surface</span><span class="ip-v" style="color:#ffa040">13–38 cGy/yr</span></div>
             <div class="ip-row"><span class="ip-k">ISS (LEO)</span><span class="ip-v">~15 cGy/yr</span></div>
@@ -217,10 +292,10 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         </div>
 
         <!-- Layers -->
-        <div class="ip-section">
+        <div class="ip-section ip-surface-only">
             <div class="ip-title">Layers</div>
             <div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-radiation" checked> Radiation Overlay</label>
+                <label class="lyr"><input type="checkbox" id="lyr-radiation"> Radiation Overlay</label>
                 <label class="lyr"><input type="checkbox" id="lyr-rad-ring" checked> GCR/SEP Flux Shell</label>
                 <label class="lyr"><input type="checkbox" id="lyr-bump" checked> Terrain Relief</label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthshine" checked> Earthshine</label>
@@ -230,19 +305,19 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         </div>
 
         <!-- Artemis Program -->
-        <div class="ip-section">
+        <div class="ip-section ip-surface-only">
             <div class="ip-title">Artemis Program</div>
             <div id="ip-artemis-missions" style="font-size:10px;line-height:1.55"></div>
         </div>
 
         <!-- Artemis I findings -->
-        <div class="ip-section">
+        <div class="ip-section ip-surface-only">
             <div class="ip-title">What Artemis I Taught Us</div>
             <div id="ip-artemis-findings" style="font-size:9px;color:#99a;line-height:1.55"></div>
         </div>
 
         <!-- Landing sites (Apollo + Artemis III candidates) -->
-        <div class="ip-section">
+        <div class="ip-section ip-surface-only">
             <div class="ip-title">Landing Sites</div>
             <div class="lyr-grid" style="margin-bottom:8px">
                 <label class="lyr"><input type="checkbox" id="lyr-apollo" checked> <span style="color:#ffae44">●</span> Apollo (6 sites)</label>
@@ -252,7 +327,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         </div>
 
         <!-- Data Sources -->
-        <div class="ip-section">
+        <div class="ip-section ip-surface-only">
             <div class="ip-title">Data Sources</div>
             <div style="font-size:9px;color:#556;line-height:1.6">
                 <div>CRaTER/LRO — Cosmic Ray Telescope (NASA, 2009–present)</div>
@@ -280,6 +355,12 @@ import {
     ARTEMIS_III_CANDIDATES,
 } from './js/artemis-data.js';
 import { LandingSites } from './js/moon-landing-sites.js';
+import { MoonInterior, INTERIOR_PALETTE } from './js/moon-interior.js';
+import {
+    LAYERS as INTERIOR_LAYERS, R_MOON_KM,
+    pressureGPa, gravityMS2, selenothermK, crustThicknessKm,
+    DYNAMO_EPOCHS, ANOMALISTIC_MONTH_DAYS, REF_PERIGEE_MS,
+} from './js/moon-interior-model.js';
 
 initScaleNav('moon');
 
@@ -313,22 +394,39 @@ function onResize() {
 new ResizeObserver(onResize).observe(canvas);
 onResize();
 
-// ─── Starfield ───────────────────────────────────────────────
+// ─── Starfield — three brightness tiers with stellar colour scatter ──
 {
-    const pos = new Float32Array(4000 * 3);
-    for (let i = 0; i < 4000; i++) {
-        const r   = 25 + Math.random() * 50;
-        const th  = Math.acos(2 * Math.random() - 1);
-        const phi = Math.random() * Math.PI * 2;
-        pos[i*3]   = r * Math.sin(th) * Math.cos(phi);
-        pos[i*3+1] = r * Math.sin(th) * Math.sin(phi);
-        pos[i*3+2] = r * Math.cos(th);
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    scene.add(new THREE.Points(geo, new THREE.PointsMaterial({
-        color: 0xffffff, size: 0.04, sizeAttenuation: true
-    })));
+    // Hot blue-white → solar yellow → cool orange tints, weighted like a
+    // real naked-eye field (mostly faint, a handful of bright standouts).
+    const TINTS = [
+        [0.72, 0.80, 1.00], [0.85, 0.90, 1.00], [1.00, 1.00, 1.00],
+        [1.00, 0.95, 0.82], [1.00, 0.85, 0.66],
+    ];
+    const makeTier = (count, size, brightness) => {
+        const pos = new Float32Array(count * 3);
+        const col = new Float32Array(count * 3);
+        for (let i = 0; i < count; i++) {
+            const r   = 25 + Math.random() * 50;
+            const th  = Math.acos(2 * Math.random() - 1);
+            const phi = Math.random() * Math.PI * 2;
+            pos[i*3]   = r * Math.sin(th) * Math.cos(phi);
+            pos[i*3+1] = r * Math.sin(th) * Math.sin(phi);
+            pos[i*3+2] = r * Math.cos(th);
+            const tint = TINTS[Math.floor(Math.random() * TINTS.length)];
+            const b = brightness * (0.7 + 0.3 * Math.random());
+            col[i*3] = tint[0] * b; col[i*3+1] = tint[1] * b; col[i*3+2] = tint[2] * b;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+        scene.add(new THREE.Points(geo, new THREE.PointsMaterial({
+            size, sizeAttenuation: true, vertexColors: true,
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        })));
+    };
+    makeTier(3400, 0.035, 0.55);   // faint field
+    makeTier(1100, 0.07,  0.85);   // mid
+    makeTier(180,  0.13,  1.0);    // bright standouts
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -346,9 +444,113 @@ const moon = new MoonSkin(scene, sunDir, {
     radiation: true,
 });
 
+// ═══════════════════════════════════════════════════════════════
+//  INTERIOR CUTAWAY — crust / mantle / partial melt / fluid core
+//  (renderer: js/moon-interior.js; physics: js/moon-interior-model.js)
+// ═══════════════════════════════════════════════════════════════
+const interior = new MoonInterior(scene, sunDir);
+
+// Sync the overlay uniform to its checkbox (default OFF — the tint buries
+// the photoreal surface; the flux shell alone carries the ambient signal).
+// Uniform only: setRadiationVisible() would also hide the flux shell,
+// which has its own checkbox.
+moon.moonU.u_radiation_vis.value =
+    document.getElementById('lyr-radiation').checked ? 1 : 0;
+
 moon.loadTextures(renderer).then(() => {
+    // Share the loaded surface texture with the cutaway's crust shell —
+    // one fetch, two consumers.
+    interior.setSurfaceTexture(moon.moonU.u_surface.value);
     document.getElementById('loading').classList.add('done');
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  DISTANT EARTH + SUN GLARE — visual anchors for earthshine/sunlight.
+//  Earth sits at ~45 R_moon (true distance is ~60 R_moon; nudged in so
+//  it reads at the default zoom — a framing choice, not a measurement).
+// ═══════════════════════════════════════════════════════════════
+// Angled so Earth hangs upper-left in the default framing
+const earthDir = new THREE.Vector3(-0.55, 0.16, 0.82).normalize();
+moon.setEarthDir(earthDir);
+let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in the loop
+
+{
+    const EARTH_FRAG = `
+        precision highp float;
+        uniform vec3 u_sun_dir;
+        uniform float u_time;
+        varying vec3 vN;
+        varying vec3 vPos;
+        varying vec3 vLocal;
+        float hash13(vec3 p3) {
+            p3 = fract(p3 * 0.1031);
+            p3 += dot(p3, p3.zyx + 31.32);
+            return fract((p3.x + p3.y) * p3.z);
+        }
+        float vnoise3(vec3 p) {
+            vec3 i = floor(p), f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            float a = mix(mix(hash13(i), hash13(i+vec3(1,0,0)), f.x), mix(hash13(i+vec3(0,1,0)), hash13(i+vec3(1,1,0)), f.x), f.y);
+            float b = mix(mix(hash13(i+vec3(0,0,1)), hash13(i+vec3(1,0,1)), f.x), mix(hash13(i+vec3(0,1,1)), hash13(i+vec3(1,1,1)), f.x), f.y);
+            return mix(a, b, f.z);
+        }
+        void main() {
+            vec3 N = normalize(vN);
+            vec3 L = normalize(u_sun_dir);
+            float lit = clamp(dot(N, L), 0.0, 1.0);
+            // Ocean + continents + drifting cloud bands (procedural blue marble)
+            float cont = vnoise3(vLocal * 3.0);
+            vec3 surface = mix(vec3(0.05, 0.18, 0.42), vec3(0.10, 0.30, 0.16), smoothstep(0.52, 0.62, cont));
+            float cloud = smoothstep(0.5, 0.72, vnoise3(vLocal * 5.0 + vec3(u_time * 0.01, 0.0, 0.0)));
+            surface = mix(surface, vec3(0.9), cloud * 0.75);
+            vec3 col = surface * (0.04 + 1.1 * lit);
+            // Atmosphere rim
+            vec3 V = normalize(cameraPosition - vPos);
+            float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);
+            col += vec3(0.30, 0.55, 1.0) * rim * (0.15 + 0.85 * lit);
+            gl_FragColor = vec4(col, 1.0);
+        }`;
+    const EARTH_VERT = `
+        varying vec3 vN;
+        varying vec3 vPos;
+        varying vec3 vLocal;
+        void main() {
+            vN = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+            vPos = (modelMatrix * vec4(position, 1.0)).xyz;
+            vLocal = normalize(position);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`;
+    const earthU = { u_sun_dir: { value: sunDir.clone() }, u_time: { value: 0 } };
+    const earthMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.75, 48, 36),
+        new THREE.ShaderMaterial({ vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG, uniforms: earthU })
+    );
+    earthMesh.position.copy(earthDir).multiplyScalar(45);
+    scene.add(earthMesh);
+    _earthTimeU = earthU;   // updated in the loop
+}
+
+{
+    // Sun glare sprite — radial gradient, additive
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 256;
+    const ctx = cv.getContext('2d');
+    const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    g.addColorStop(0.0, 'rgba(255,252,240,1)');
+    g.addColorStop(0.12, 'rgba(255,244,214,0.9)');
+    g.addColorStop(0.35, 'rgba(255,214,150,0.22)');
+    g.addColorStop(1.0, 'rgba(255,190,120,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 256, 256);
+    const tex = new THREE.CanvasTexture(cv);
+    const glare = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending, opacity: 0.9,
+    }));
+    glare.position.copy(sunDir).multiplyScalar(60);
+    glare.scale.setScalar(11);
+    scene.add(glare);
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  LANDING SITES — Apollo (6) + Artemis III candidates (13)
@@ -417,6 +619,95 @@ document.getElementById('lyr-apollo')?.addEventListener('change', e => {
 });
 document.getElementById('lyr-artemis')?.addEventListener('change', e => {
     landingSites.setArtemisVisible(e.target.checked);
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  VIEW MODE — Surface ⇄ Interior cutaway
+// ═══════════════════════════════════════════════════════════════
+let viewMode = 'surface';
+
+function setViewMode(mode) {
+    viewMode = mode;
+    const surface = mode === 'surface';
+    moon.moonMesh.visible = surface;
+    if (moon._radMesh) {
+        moon._radMesh.visible = surface && document.getElementById('lyr-rad-ring').checked
+            && document.getElementById('lyr-radiation').checked;
+    }
+    gridGroup.visible = surface && document.getElementById('lyr-grid').checked;
+    interior.setVisible(!surface);
+    document.getElementById('info-panel').classList.toggle('interior-mode', !surface);
+    document.getElementById('vt-surface').classList.toggle('active', surface);
+    document.getElementById('vt-interior').classList.toggle('active', !surface);
+}
+document.getElementById('vt-surface').addEventListener('click', () => setViewMode('surface'));
+document.getElementById('vt-interior').addEventListener('click', () => setViewMode('interior'));
+
+// ── Interior panel: layer legend from the SAME palette the renderer uses ──
+(function renderInteriorPanel() {
+    const legend = document.getElementById('ip-layer-legend');
+    if (!legend) return;
+    legend.innerHTML = [...INTERIOR_LAYERS].reverse().map(l => {
+        const hex = '#' + INTERIOR_PALETTE[l.key].color.toString(16).padStart(6, '0');
+        return `
+            <div class="legend-row" title="${l.note.replace(/"/g, '&quot;')}">
+                <span class="legend-sw" style="background:${hex}"></span>
+                <span class="legend-name">${l.name}</span>
+                <span class="legend-r">${l.rInnerKm.toFixed(0)}–${l.rOuterKm.toFixed(0)} km</span>
+            </div>
+        `;
+    }).join('');
+    document.getElementById('ip-p0').textContent = `${pressureGPa(0).toFixed(1)} GPa`;
+    document.getElementById('ip-t0').textContent = `${selenothermK(0).toFixed(0)} K`;
+    document.getElementById('ip-g').textContent = `${gravityMS2(R_MOON_KM).toFixed(2)} m/s²`;
+    document.getElementById('ip-crust').textContent =
+        `${crustThicknessKm(0, 0).toFixed(0)} / ${crustThicknessKm(0, 180).toFixed(0)} km`;
+})();
+
+// ── Tidal clock panel (refreshed ~1 Hz from the loop) ────────────────────
+function updateTidePanel(nowMs) {
+    const { phase, rate } = interior.tidalState(nowMs);
+    document.getElementById('h-tide').textContent =
+        phase < 0.06 || phase > 0.94 ? 'Perigee — creaking' :
+        Math.abs(phase - 0.5) < 0.07 ? 'Apogee' : `${(phase * 100).toFixed(0)}% of cycle`;
+    const pin = document.getElementById('tide-pin');
+    if (pin) pin.style.left = `calc(${(phase * 100).toFixed(1)}% - 1px)`;
+    const phaseEl = document.getElementById('ip-tide-phase');
+    if (phaseEl) phaseEl.textContent = `${(phase * 100).toFixed(1)}%`;
+    const rateEl = document.getElementById('ip-quake-rate');
+    if (rateEl) rateEl.textContent = `${rate.toFixed(2)}× quiet`;
+    const nextEl = document.getElementById('ip-next-perigee');
+    if (nextEl) {
+        const monthMs = ANOMALISTIC_MONTH_DAYS * 86400000;
+        const n = Math.ceil((nowMs - REF_PERIGEE_MS) / monthMs);
+        const next = new Date(REF_PERIGEE_MS + n * monthMs);
+        nextEl.textContent = `≈ ${next.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+    }
+}
+
+// ── Dynamo scrubber ──────────────────────────────────────────────────────
+(function wireDynamoScrubber() {
+    const slider = document.getElementById('dyn-age');
+    if (!slider) return;
+    const apply = () => {
+        const ageGa = -parseFloat(slider.value);
+        const fieldMicroT = interior.setDynamoAge(ageGa);
+        document.getElementById('ip-dyn-when').textContent =
+            ageGa < 0.01 ? 'Today' : `${ageGa.toFixed(2)} Ga ago`;
+        document.getElementById('ip-dyn-field').textContent =
+            fieldMicroT < 0.05 ? '0 µT (dead)' : `~${fieldMicroT.toFixed(fieldMicroT < 5 ? 1 : 0)} µT`;
+        const epoch = DYNAMO_EPOCHS.find(e => ageGa <= e.fromGa && ageGa >= e.toGa);
+        document.getElementById('ip-dyn-epoch').textContent = epoch ? epoch.label : '—';
+    };
+    slider.addEventListener('input', apply);
+    apply();
+})();
+
+document.getElementById('lyr-quakes')?.addEventListener('change', e => {
+    interior.setQuakesVisible(e.target.checked);
+});
+document.getElementById('lyr-anomalies')?.addEventListener('change', e => {
+    interior.setAnomaliesVisible(e.target.checked);
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -580,26 +871,33 @@ document.getElementById('lyr-grid').addEventListener('change', e => {
 //  ANIMATION LOOP
 // ═══════════════════════════════════════════════════════════════
 const clock = new THREE.Clock();
+let _lastPanelT = -10;
 
 function animate() {
     requestAnimationFrame(animate);
     const t = clock.getElapsedTime();
 
-    // Slow Moon rotation (synchronous — same face toward Earth)
-    moon.moonMesh.rotation.y = t * 0.02;
+    // Slow Moon rotation (synchronous — same face toward Earth).
+    // The cutaway does NOT rotate — the wedge stays put and the camera orbits.
+    if (viewMode === 'surface') moon.moonMesh.rotation.y = t * 0.02;
 
     // Update shader time
     moon.update(t);
+    interior.update(t, Date.now());
+    if (_earthTimeU) _earthTimeU.u_time.value = t;
 
-    // Phase HUD
-    const lp = lunarPhase(new Date());
-    document.getElementById('h-phase').textContent = lp.phase;
-    document.getElementById('h-age').textContent = `${lp.age.toFixed(1)} days`;
-    document.getElementById('h-dist').textContent = '384,400 km';
-
-    // Earthshine varies with inverse of lunar illumination
-    // (full moon = no earthshine, new moon = max earthshine)
-    moon.setEarthshine((1 - lp.illumination) * 0.35);
+    // Panel + HUD refresh (~1 Hz — these touch the DOM)
+    if (t - _lastPanelT > 1) {
+        _lastPanelT = t;
+        const lp = lunarPhase(new Date());
+        document.getElementById('h-phase').textContent = lp.phase;
+        document.getElementById('h-age').textContent = `${lp.age.toFixed(1)} days`;
+        document.getElementById('h-dist').textContent = '384,400 km';
+        // Earthshine varies with inverse of lunar illumination
+        // (full moon = no earthshine, new moon = max earthshine)
+        moon.setEarthshine((1 - lp.illumination) * 0.35);
+        updateTidePanel(Date.now());
+    }
 
     controls.update();
     renderer.render(scene, camera);
