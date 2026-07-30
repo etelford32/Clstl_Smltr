@@ -125,11 +125,17 @@ body {
 .frl-fine { font-size:.68rem; color:#68718a; line-height:1.5; margin-top:8px; }
 .frl-pair { font-size:.72rem; color:#cdd5e4; line-height:1.55; border-top:1px dashed rgba(90,110,160,.25); margin-top:8px; padding-top:8px; }
 .frl-pair b { color:#c792ea; font-weight:600; }
+/* nowrap + x-scroll keeps each card's height CONSTANT as the live numbers
+   change width — the aside must not reflow every clock tick. */
+#frl-eq .frl-eqp { font-size:.66rem; font-family:ui-monospace,'SF Mono',Menlo,monospace; color:#8b94ad; line-height:1.75; border-top:1px dashed rgba(90,110,160,.25); margin-top:8px; padding-top:8px; overflow-x:auto; white-space:nowrap; }
+#frl-eq .frl-eqp b { color:#c792ea; }
+#frl-eq .frl-eqp em { color:#ffb454; font-style:normal; font-weight:600; }
 
 .frl-charts { padding:6px 22px 10px; max-width:1500px; margin:0 auto; display:grid; grid-template-columns:minmax(0,2.4fr) minmax(220px,1fr); gap:14px; }
 .frl-charts canvas { width:100%; display:block; }
 #frl-bz-chart { height:280px; }
 #frl-arrival-hist { height:280px; }
+#frl-train-map { height:230px; grid-column:1 / -1; }
 .frl-chartbar { padding:0 22px; max-width:1500px; margin:0 auto; display:flex; gap:14px; align-items:center; font-size:.72rem; color:#8b94ad; }
 .frl-chartbar label { display:flex; gap:6px; align-items:center; cursor:pointer; }
 .frl-note { font-size:.74rem; color:#68718a; padding:6px 22px 8px; max-width:1500px; margin:0 auto; line-height:1.5; }
@@ -215,6 +221,7 @@ body {
         <div class="frl-panel">
             <h2>Compounding analyzer</h2>
             <div id="frl-analyzer"><p class="frl-fine">waiting for the first ensemble…</p></div>
+            <div id="frl-eq"></div>
         </div>
 
         <div class="frl-panel">
@@ -241,6 +248,7 @@ body {
 <section class="frl-charts">
     <canvas id="frl-bz-chart" aria-label="forecast Bz at L1 with measured background band"></canvas>
     <canvas id="frl-arrival-hist" aria-label="ensemble arrival distribution"></canvas>
+    <canvas id="frl-train-map" aria-label="interaction map: heliocentric distance vs time per rope, with rear-squeeze and contact markers"></canvas>
 </section>
 <p class="frl-note">
     <b>Reading the page:</b> the train is every Earth-relevant DONKI CME
@@ -290,10 +298,10 @@ body {
 </section>
 
 <script type="module">
-import { loadFluxRopeKernel, ROPE_DEFAULTS, SPREAD_DEFAULTS } from './js/flux-rope-kernel.js';
+import { loadFluxRopeKernel, ROPE_DEFAULTS, SPREAD_DEFAULTS, INTERACTION_DEFAULTS } from './js/flux-rope-kernel.js';
 import { GANNON_FIT } from './js/flux-rope-presets.js';
 import { HeliosphereView } from './js/flux-rope/view.js';
-import { drawBzChart, drawArrivalHist } from './js/flux-rope/charts.js';
+import { drawBzChart, drawArrivalHist, drawTrainMap } from './js/flux-rope/charts.js';
 import { fromReplayBundle } from './js/solar-wind-driver.js';
 import { fetchDonkiCmes, fetchRtswDriver, selectTrainCmes, donkiToTrainPreset }
     from './js/flux-rope-live.js';
@@ -508,6 +516,51 @@ function analyze(detOn, ensOn) {
     return { single: false, on, off, pairs };
 }
 
+/**
+ * The interaction map's data: per-rope nose→tail ribbons, per-leader §16
+ * squeeze intensity, and each pair's first nose-to-tail touch (the §19
+ * contact geometry) — all read from kernel probes on a decimated grid, so
+ * the chart itself stays pure. Call with interaction config RESTORED (the
+ * analyzer flips it off mid-run).
+ */
+function buildTrainMap() {
+    if (!state.ropes.length) return null;
+    const step = Math.max(1, Math.ceil(GRID.n / 260));
+    const tH = [];
+    const ropes = state.ropes.map(() => ({ apexAu: [], noseAu: [], tailAu: [] }));
+    const leaders = state.ropes.map((_, j) => {
+        const l = kernel.ropeLeader(j);
+        return Number.isFinite(l) && l >= 0 ? l | 0 : -1;
+    });
+    const squeezes = [...new Set(leaders.filter((l) => l >= 0))]
+        .map((l) => ({ leader: l, rearC: [] }));
+    const contacts = [];
+    const touched = new Set();
+    for (let i = 0; i < GRID.n; i += step) {
+        const tS = GRID.t0S + i * GRID.dtS;
+        tH.push(tS / 3600);
+        state.ropes.forEach((rope, r) => {
+            const launched = tS > (rope.launchOffsetS || 0);
+            const d = launched ? kernel.apexKmAt(r, tS) / AU_KM : NaN;
+            const sig = launched ? kernel.sigmaApexKmAt(r, tS) / AU_KM : NaN;
+            ropes[r].apexAu.push(d);
+            ropes[r].noseAu.push(d + sig);
+            ropes[r].tailAu.push(d - sig);
+        });
+        for (const sq of squeezes) sq.rearC.push(kernel.rearCAt(sq.leader, tS));
+        leaders.forEach((ld, j) => {
+            if (ld < 0 || touched.has(j)) return;
+            const k = tH.length - 1;
+            const gap = ropes[ld].tailAu[k] - ropes[j].noseAu[k];
+            if (Number.isFinite(gap) && gap <= 0) {
+                touched.add(j);
+                contacts.push({ tH: tH[k], rAu: ropes[ld].tailAu[k], leader: ld, follower: j });
+            }
+        });
+    }
+    return { tH, ropes, squeezes, contacts, l1Au: 0.99 };
+}
+
 function recompute() {
     kernel.setRopes(state.ropes);
     kernel.setInteraction(state.interaction);
@@ -526,6 +579,7 @@ function recompute() {
     $('frl-ens-ms').textContent =
         `${MEMBERS} members ×3 (on/off/final) in ${(performance.now() - t0).toFixed(0)} ms`;
     view.setEnsemble(state.ens);
+    state.trainMap = buildTrainMap();
 
     state.obsAligned = (() => {
         if (!state.obsDriver || !state.launchMs) return null;
@@ -544,6 +598,8 @@ function recompute() {
     maybeAssimilate(true);
     renderTrain();
     renderAnalyzer();
+    state._eqKey = null;
+    renderLiveEq(state.cursorH * 3600);
     renderNoise();
     updateStats();
     drawCharts();
@@ -664,6 +720,58 @@ function renderAnalyzer() {
         </div>`).join('')}`;
 }
 
+/**
+ * The spec §16 equations with the CURSOR-TIME numbers substituted in — the
+ * "plug real data into the math" panel. Every quantity is a kernel probe or
+ * a config constant; the composed pieces (gap, q, M_rel, X) explain the
+ * rear_c the kernel reports. Cheap, but only re-renders when the cursor
+ * crosses a grid step.
+ */
+function renderLiveEq(tS) {
+    const el = $('frl-eq');
+    if (!el) return;
+    const pairs = state.analyzer?.pairs;
+    const key = pairs?.length && state.interaction.enabled
+        ? String(Math.round(tS / GRID.dtS)) : 'off';
+    if (key === state._eqKey) return;
+    state._eqKey = key;
+    if (key === 'off') { el.innerHTML = ''; return; }
+    const vms = kernel.vMsKms();
+    const cfg = { ...INTERACTION_DEFAULTS, ...state.interaction };
+    const f = (v, n = 2) => (Number.isFinite(v) ? v.toFixed(n) : '—');
+    el.innerHTML = `<p class="frl-fine" style="margin:6px 0 0;">Spec §16 evaluated
+        at the cursor — the live numbers inside the live equations:</p>`
+        + pairs.map((p) => {
+            const i = p.leader, j = p.follower;
+            // Pre-launch probes report the follower's launch state (kernel
+            // convention) — render the SAME card shape so the panel height
+            // never oscillates as the demo clock loops past the launch.
+            const preLaunch = tS <= (state.ropes[j].launchOffsetS || 0);
+            const dI = kernel.apexKmAt(i, tS) / AU_KM, dJ = kernel.apexKmAt(j, tS) / AU_KM;
+            const sI = kernel.sigmaApexKmAt(i, tS) / AU_KM, sJ = kernel.sigmaApexKmAt(j, tS) / AU_KM;
+            const vI = kernel.apexVKmsAt(i, tS), vJ = kernel.apexVKmsAt(j, tS);
+            const gap = (dI - sI) - (dJ + sJ);
+            const q = Math.min(1, Math.max(0, 1 - gap / (cfg.compReach * sI)));
+            const mRel = Math.max(0, (vJ - vI) / vms);
+            const x = kernel.compressionX(mRel);
+            const rc = kernel.rearCAt(i, tS);
+            const vUp = kernel.upstreamKmsAt(j, tS);
+            const mSh = (vJ - vUp) / vms;
+            return `<div class="frl-eqp">
+                <b>R${j + 1}→R${i + 1}</b> (follower→leader)${preLaunch
+                    ? ' · pre-launch — values frozen at the launch state' : ''}<br>
+                gap = (d_L−σ̂_L)−(d_F+σ̂_F) = (${f(dI)}−${f(sI)})−(${f(dJ)}+${f(sJ)}) = <em>${f(gap)} AU</em><br>
+                q = clamp(1 − gap/(${f(cfg.compReach, 1)}·σ̂_L)) = <em>${f(q)}</em> ·
+                M_rel = (${f(vJ, 0)}−${f(vI, 0)})/${vms} = <em>${f(mRel, 2)}</em> ·
+                X(M_rel) = <em>${f(x, 2)}</em><br>
+                rear_c = ${f(cfg.compC, 1)}·(1−1/X)·q = <em>${f(rc, 2)}</em>${rc > 0
+                    ? ' ← squeezing the leader’s rear' : ' (no squeeze now)'}<br>
+                wake shock M = (v_F−v_up)/${vms} = (${f(vJ, 0)}−${f(vUp, 0)})/${vms} = <em>${f(mSh, 2)}</em>${mSh > 1
+                    ? ` → sheath, X ${f(kernel.compressionX(mSh), 2)}` : ' → no shock in the wake'}
+            </div>`;
+        }).join('');
+}
+
 function renderNoise() {
     const n = state.noise;
     const box = $('frl-noise');
@@ -748,6 +856,11 @@ function drawCharts() {
         launchMs: state.launchMs,
         detArrivalH: detArr >= 0 ? state.tH[detArr] : null,
     });
+    if (state.trainMap) {
+        drawTrainMap($('frl-train-map'), {
+            ...state.trainMap, cursorH: state.cursorH, launchMs: state.launchMs,
+        });
+    }
 }
 
 // ── Clock + render loop ──────────────────────────────────────────────────────
@@ -769,9 +882,15 @@ function tick() {
     if (!scrubbing) $('frl-time').value = simH;
     state.cursorH = simH;
     const tS = simH * 3600;
+    // Kernel-truth probes per rope: position/size plus the LIVE §16
+    // interaction state (rear squeeze + wake-conditioned shock inputs) —
+    // this is what makes the ropes visibly COMPOUND in the 3D view.
     const probes = state.ropes.map((_, r) => ({
         apexKm: kernel.apexKmAt(r, tS),
         sigmaApexKm: kernel.sigmaApexKmAt(r, tS),
+        rearC: kernel.rearCAt(r, tS),
+        apexVKms: kernel.apexVKmsAt(r, tS),
+        upstreamKms: kernel.upstreamKmsAt(r, tS),
     }));
     view.draw(tS, probes);
     $('frl-t-label').textContent = fmtT(simH);
@@ -780,7 +899,7 @@ function tick() {
     state.ropes.forEach((r, i) => {
         if (tS <= (r.launchOffsetS || 0)) return;
         leadKm = Math.max(leadKm, probes[i].apexKm);
-        vMax = Math.max(vMax, kernel.apexVKmsAt(i, tS));
+        vMax = Math.max(vMax, probes[i].apexVKms);
     });
     $('frl-hud-r').textContent = leadKm > 0 ? `${(leadKm / AU_KM).toFixed(2)} AU` : 'pre-launch';
     $('frl-hud-v').textContent = vMax > 0 ? `${vMax.toFixed(0)} km/s` : '—';
@@ -798,6 +917,7 @@ function tick() {
         : count > 0 ? '⚡ crossing L1'
         : inSheath ? '⚡ in sheath — shock passed'
         : allPassed ? 'train passed L1' : 'in transit';
+    renderLiveEq(tS);
     if (!clock.paused || state._chartDirty) {
         maybeAssimilate();
         drawCharts();
