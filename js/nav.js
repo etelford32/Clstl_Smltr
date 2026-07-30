@@ -32,6 +32,12 @@ import { tierLevel as _cfgTierLevel, PAID_PLAN_IDS } from './tier-config.js';
 // the nav gets autocapture for free; pages without the nav (rare,
 // embedded simulators) opt-in by importing js/telemetry.js directly.
 import './telemetry.js';
+// Side-effect import: site-wide visitor-flow instrumentation (enter/exit
+// per pageview on the consent-exempt operational pipeline). Riding nav.js
+// gives every page that mounts the nav full-population flow/bounce/
+// engagement measurement for free — the consent-gated analytics pipeline
+// only ever sees the ~2% of visitors who accept the cookie banner.
+import './page-flow.js';
 import { glyph } from './glyphs.js';
 
 // Root-absolute so the shared nav renders identically from any directory
