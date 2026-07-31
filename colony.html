@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Lunar Colony — Space-Weather Strategy Game · Parkers Physics App</title>
+<link rel="canonical" href="https://parkersphysics.com/colony.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/colony.html">
+<meta property="og:title" content="Lunar Colony — Space-Weather Strategy Game — Parkers Physics">
+<meta property="og:description" content="Build a south-pole lunar base and survive the real Sun. Live NOAA space weather drives the storms; the physics drives everything else.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Lunar Colony — Space-Weather Strategy Game — Parkers Physics">
+<meta name="twitter:description" content="Build a south-pole lunar base and survive the real Sun. Live NOAA space weather drives the storms.">
+<meta name="description" content="A lunar colony real-time strategy game with live space weather. Mine ice, build habitats, shelter your crew when the real Sun throws a proton event.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#ddd;
+    font-family:'Segoe UI',system-ui,sans-serif; }
+
+#app { position:relative; width:100%; height:calc(100vh - 50px); overflow:hidden; background:#050508; }
+#world { display:block; width:100%; height:100%; cursor:crosshair; }
+
+/* ─── Top resource bar ──────────────────────────────────────── */
+#res-bar {
+    position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:40;
+    display:flex; gap:14px; align-items:center; padding:7px 14px;
+    background:rgba(4,2,16,.85); backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.10); border-radius:10px;
+    font-family:'Courier New',monospace; font-size:11px; white-space:nowrap;
+}
+.res { display:flex; gap:5px; align-items:center; color:#aabbcc; }
+.res b { color:#ddeeff; font-weight:700; }
+.res .cap { color:#667; }
+.res-warn { color:#ffcc44 !important; }
+.res-bad  { color:#ff7766 !important; animation:blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity:.45 } }
+
+/* ─── Clock + speed ─────────────────────────────────────────── */
+#clock-box {
+    position:absolute; top:10px; left:12px; z-index:40;
+    background:rgba(4,2,16,.85); backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.10); border-radius:10px;
+    padding:8px 12px; font-family:'Courier New',monospace; font-size:11px; color:#8899aa;
+}
+#clock-box .big { font-size:13px; color:#ddeeff; font-weight:700; }
+.spd { display:flex; gap:4px; margin-top:6px; }
+.spd button {
+    border:1px solid rgba(255,255,255,.14); background:transparent; color:#8899aa;
+    font:700 10px 'Courier New',monospace; padding:3px 8px; border-radius:5px; cursor:pointer;
+}
+.spd button.on { background:rgba(255,215,0,.16); color:#ffd77a; border-color:rgba(255,215,0,.4); }
+
+/* ─── Storm banner ──────────────────────────────────────────── */
+#storm-banner {
+    position:absolute; top:58px; left:50%; transform:translateX(-50%); z-index:40;
+    padding:6px 16px; border-radius:8px; font:700 12px 'Segoe UI',system-ui,sans-serif;
+    display:none; letter-spacing:.03em;
+}
+#storm-banner.warn { display:block; background:rgba(255,170,0,.14); border:1px solid rgba(255,170,0,.5); color:#ffcc55; }
+#storm-banner.active { display:block; background:rgba(255,40,20,.16); border:1px solid rgba(255,80,60,.6); color:#ff8877; animation:blink 1.2s steps(2) infinite; }
+#feed-badge {
+    position:absolute; top:12px; right:12px; z-index:40; padding:4px 10px; border-radius:6px;
+    font:700 9px 'Courier New',monospace; letter-spacing:.06em; display:none;
+}
+#feed-badge.live  { display:block; background:rgba(80,255,140,.10); border:1px solid rgba(80,255,140,.4); color:#7fe6a3; }
+#feed-badge.stale { display:block; background:rgba(255,170,0,.12); border:1px solid rgba(255,170,0,.45); color:#ffcc55; }
+#feed-badge.drill { display:block; background:rgba(120,160,255,.12); border:1px solid rgba(120,160,255,.45); color:#a8c0ff; }
+
+/* ─── Event log ─────────────────────────────────────────────── */
+#ev-log {
+    position:absolute; left:12px; bottom:12px; z-index:40; width:340px; max-height:150px;
+    overflow:hidden; display:flex; flex-direction:column-reverse; gap:2px;
+    font:11px 'Courier New',monospace; pointer-events:none;
+}
+#ev-log div { padding:3px 8px; border-radius:6px; background:rgba(4,2,16,.72); }
+.ev-info { color:#8899aa; } .ev-good { color:#7fe6a3; } .ev-bad { color:#ff8877; }
+
+/* ─── Build menu ────────────────────────────────────────────── */
+#build-menu {
+    position:absolute; right:12px; bottom:12px; z-index:40; display:flex; flex-direction:column; gap:6px;
+    background:rgba(4,2,16,.85); backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.10); border-radius:10px; padding:10px;
+    width:190px;
+}
+#build-menu h3 { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:#dde; margin-bottom:2px; }
+.bm-btn {
+    display:flex; justify-content:space-between; align-items:center; gap:6px;
+    border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.03); color:#aabbcc;
+    font:600 11px 'Segoe UI',system-ui,sans-serif; padding:6px 9px; border-radius:7px; cursor:pointer;
+    text-align:left;
+}
+.bm-btn:hover { background:rgba(255,255,255,.08); color:#dde; }
+.bm-btn.on { background:rgba(80,200,255,.14); border-color:rgba(80,200,255,.5); color:#aee2ff; }
+.bm-btn.cant { opacity:.45; cursor:not-allowed; }
+.bm-cost { font:700 10px 'Courier New',monospace; color:#889; }
+#shelter-all {
+    border:1px solid rgba(255,120,80,.5); background:rgba(255,60,30,.12); color:#ffab99;
+    font:700 11px 'Segoe UI',system-ui,sans-serif; padding:7px 9px; border-radius:7px; cursor:pointer;
+}
+#shelter-all:hover { background:rgba(255,60,30,.22); }
+
+/* ─── Selection panel ───────────────────────────────────────── */
+#sel-panel {
+    position:absolute; bottom:12px; left:50%; transform:translateX(-50%); z-index:40;
+    background:rgba(4,2,16,.85); backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.10); border-radius:10px; padding:8px 14px;
+    font-size:11px; color:#8899aa; max-width:520px; display:none;
+}
+#sel-panel .sel-title { color:#ddeeff; font-weight:700; margin-bottom:3px; }
+#sel-panel .hint { font-size:9px; color:#667; margin-top:4px; }
+
+/* ─── Start / end overlays ──────────────────────────────────── */
+.overlay {
+    position:absolute; inset:0; z-index:80; background:rgba(2,1,8,.90); backdrop-filter:blur(6px);
+    display:flex; align-items:center; justify-content:center; overflow-y:auto; padding:20px;
+}
+.ov-card { max-width:760px; width:100%; }
+.ov-card h1 { font-size:24px; color:#ddeeff; letter-spacing:.02em; margin-bottom:4px; }
+.ov-card .sub { font-size:12px; color:#8899aa; margin-bottom:16px; line-height:1.5; }
+.mode-row { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+.mode-btn {
+    flex:1; min-width:150px; border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.03);
+    color:#aabbcc; border-radius:9px; padding:10px 12px; cursor:pointer; text-align:left;
+    font:600 12px 'Segoe UI',system-ui,sans-serif;
+}
+.mode-btn small { display:block; font-weight:400; font-size:10px; color:#778; margin-top:3px; }
+.mode-btn.on { background:rgba(255,215,0,.10); border-color:rgba(255,215,0,.45); color:#ffd77a; }
+.site-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:8px; max-height:300px; overflow-y:auto; padding-right:4px; }
+.site-card {
+    border:1px solid rgba(255,255,255,.10); background:rgba(255,255,255,.03); border-radius:9px;
+    padding:9px 11px; cursor:pointer; font-size:11px; color:#99a;
+}
+.site-card:hover { background:rgba(80,200,255,.07); border-color:rgba(80,200,255,.35); }
+.site-card.on { background:rgba(80,200,255,.12); border-color:rgba(80,200,255,.6); }
+.site-card b { color:#dde; font-size:12px; }
+.site-stat { display:flex; justify-content:space-between; font-family:'Courier New',monospace; font-size:10px; padding:1px 0; }
+.site-stat span:first-child { color:#667; }
+.ov-actions { display:flex; gap:10px; margin-top:16px; align-items:center; }
+.btn-primary {
+    border:1px solid rgba(255,215,0,.5); background:rgba(255,215,0,.14); color:#ffd77a;
+    font:700 13px 'Segoe UI',system-ui,sans-serif; padding:10px 22px; border-radius:9px; cursor:pointer;
+}
+.btn-primary:disabled { opacity:.4; cursor:not-allowed; }
+.btn-ghost {
+    border:1px solid rgba(255,255,255,.16); background:transparent; color:#aabbcc;
+    font:600 12px 'Segoe UI',system-ui,sans-serif; padding:10px 16px; border-radius:9px; cursor:pointer;
+}
+.desktop-note { font-size:10px; color:#667; margin-left:auto; }
+#end-overlay { display:none; }
+#end-overlay .ov-card { text-align:center; max-width:480px; }
+#end-overlay h1 { font-size:28px; }
+#end-stats { font:12px 'Courier New',monospace; color:#aabbcc; margin:14px 0; line-height:1.8; }
+
+@media (max-width:768px) {
+    #build-menu { width:150px; }
+    #ev-log { width:230px; }
+    #res-bar { font-size:9px; gap:8px; padding:6px 8px; }
+}
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://parkersphysics.com/colony.html#app",
+  "name": "Lunar Colony — Space-Weather Strategy Game",
+  "description": "A lunar colony real-time strategy game with live space weather. Mine ice, build habitats, shelter your crew when the real Sun throws a proton event.",
+  "url": "https://parkersphysics.com/colony.html",
+  "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
+  "applicationCategory": "GameApplication",
+  "applicationSubCategory": "Strategy simulation",
+  "operatingSystem": "Web Browser",
+  "browserRequirements": "Requires JavaScript",
+  "isAccessibleForFree": true,
+  "publisher": { "@id": "https://parkersphysics.com/#org" },
+  "inLanguage": "en-US"
+}
+</script>
+</head>
+<body>
+<h1 data-seo-h1 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">Lunar Colony — Space-Weather Strategy Game</h1>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("colony");</script>
+
+<div id="app">
+    <canvas id="world"></canvas>
+
+    <!-- Clock + speed -->
+    <div id="clock-box">
+        <div class="big" id="clk-sol">Sol 1</div>
+        <div id="clk-sun">☀ daylight</div>
+        <div class="spd">
+            <button data-spd="0">⏸</button>
+            <button data-spd="1" class="on">1×</button>
+            <button data-spd="4">4×</button>
+            <button data-spd="16">16×</button>
+        </div>
+    </div>
+
+    <!-- Resources -->
+    <div id="res-bar">
+        <span class="res" title="Power: generation − draw · battery charge">⚡ <b id="r-pow">—</b> <span class="cap" id="r-batt">—</span></span>
+        <span class="res" title="Water store (kg)">💧 <b id="r-water">—</b></span>
+        <span class="res" title="Oxygen store (kg)">O₂ <b id="r-o2">—</b></span>
+        <span class="res" title="Materials (kg regolith-derived)">⛏ <b id="r-mat">—</b></span>
+        <span class="res" title="Crew alive / capacity · worst career dose">👥 <b id="r-crew">—</b> <span class="cap" id="r-dose">—</span></span>
+    </div>
+
+    <div id="storm-banner"></div>
+    <div id="feed-badge"></div>
+
+    <!-- Event log -->
+    <div id="ev-log"></div>
+
+    <!-- Selection panel -->
+    <div id="sel-panel"></div>
+
+    <!-- Build menu -->
+    <div id="build-menu">
+        <h3>Construct <span style="color:#556;text-transform:none;letter-spacing:0">(then click the map)</span></h3>
+        <!-- buttons injected from BUILD_CATALOG -->
+        <div id="bm-list"></div>
+        <button id="shelter-all" title="Order every astronaut to the best available shelter">☢ Shelter all crew</button>
+    </div>
+
+    <!-- Start overlay -->
+    <div class="overlay" id="start-overlay">
+        <div class="ov-card">
+            <h1>Lunar Colony</h1>
+            <div class="sub">
+                A strategy game where the antagonist is the <b>real Sun</b>. Mine ice and
+                regolith, build power and habitats, and when NOAA reports an actual proton
+                event, get your crew underground. Every mechanic is a real engineering
+                constraint — sources in the plan doc.
+            </div>
+            <div class="mode-row" id="mode-row">
+                <button class="mode-btn on" data-mode="live">☀ Live Sun<small>Storms arrive when the real Sun sends them (NOAA SWPC feed). Quiet Sun = logistics; active Sun = drama.</small></button>
+                <button class="mode-btn" data-mode="drill">☢ Storm drill<small>A scripted S3 proton event hits late in sol 1, then every sol. Guaranteed practice.</small></button>
+                <button class="mode-btn" data-mode="quiet">◌ Quiet<small>No radiation storms. Learn the economy and the long polar night.</small></button>
+            </div>
+            <div style="font-size:11px;color:#8899aa;margin-bottom:8px">Choose a landing site — the Artemis III candidate regions, scored for strategy:</div>
+            <div class="site-grid" id="site-grid"></div>
+            <div class="ov-actions">
+                <button class="btn-primary" id="btn-start" disabled>Land the crew</button>
+                <button class="btn-ghost" id="btn-continue" style="display:none">Continue saved colony</button>
+                <span class="desktop-note">Mouse + keyboard recommended · WASD pan · wheel zoom</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- End overlay -->
+    <div class="overlay" id="end-overlay">
+        <div class="ov-card">
+            <h1 id="end-title">—</h1>
+            <div id="end-stats"></div>
+            <div class="ov-actions" style="justify-content:center">
+                <button class="btn-primary" id="btn-again">New colony</button>
+                <button class="btn-ghost" id="btn-sandbox" style="display:none">Keep playing</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+import {
+    SOL_HOURS, WIN_SOLS, WIN_CREW, DOSE, BUILD_CATALOG, UNIT_CATALOG, LANDER,
+    siteProfiles, createGame, tick, issueOrder, placeBlueprint, rehydrate,
+    sunFactor, crewSummary, MAP_W, MAP_H, log as elog,
+} from './js/colony-engine.js';
+import { SpaceWeatherFeed } from './js/swpc-feed.js';
+import { initScaleNav } from './js/scale-nav.js';
+
+initScaleNav('colony');
+
+const SAVE_KEY = 'pp_colony_save_v1';
+
+// ═══════════════════════════════════════════════════════════════
+//  ENVIRONMENT — live feed, drill script, or quiet
+// ═══════════════════════════════════════════════════════════════
+let mode = 'live';
+const live = { sepFlux: 0, sLevel: 0, lastUpdate: 0 };
+const swFeed = new SpaceWeatherFeed();
+swFeed.start();
+window.addEventListener('swpc-update', e => {
+    const sw = e.detail ?? {};
+    live.lastUpdate = Date.now();
+    const sepLevel = sw.sep_storm_level ?? 0;
+    live.sepFlux = Math.min(1, sepLevel / 5);
+    const xray = sw.derived?.xray_intensity ?? 0;
+    if (xray > 0.5) live.sepFlux = Math.max(live.sepFlux, xray * 0.8);
+    live.sLevel = Math.ceil(live.sepFlux * 5);
+});
+
+// Same solar-cycle GCR modulation the Moon page uses (SC25 max ≈ mid-2025).
+function gcrFluxFromSolarCycle() {
+    const diffYr = (Date.now() - new Date('2025-07-01').getTime()) / (365.25 * 86400000);
+    return 0.50 + 0.22 * Math.cos(diffYr / 11.0 * 2 * Math.PI);
+}
+
+const FEED_STALE_MS = 10 * 60 * 1000;
+function feedStale() { return mode === 'live' && Date.now() - live.lastUpdate > FEED_STALE_MS; }
+
+// Drill: warning 10 h before an S3 that runs 12 h, first landing late sol 1.
+function drillStorm(tH) {
+    const period = SOL_HOURS, start = 560, len = 12, warnLead = 10;
+    const p = ((tH % period) + period) % period;
+    if (p >= start && p < start + len) return { sepFlux: 0.6, sLevel: 3, etaH: 0 };
+    let eta = start - p; if (eta < 0) eta += period;
+    return { sepFlux: 0, sLevel: 0, etaH: eta <= warnLead ? eta : null };
+}
+
+function currentEnv(tH) {
+    const gcr = gcrFluxFromSolarCycle();
+    if (mode === 'quiet') return { gcrFlux: gcr, sepFlux: 0, sLevel: 0, stormEtaH: null };
+    if (mode === 'drill') {
+        const d = drillStorm(tH);
+        return { gcrFlux: gcr, sepFlux: d.sepFlux, sLevel: d.sLevel, stormEtaH: d.etaH };
+    }
+    if (feedStale()) return { gcrFlux: gcr, sepFlux: 0, sLevel: 0, stormEtaH: null };
+    return { gcrFlux: gcr, sepFlux: live.sepFlux, sLevel: live.sLevel, stormEtaH: null };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GAME STATE + PERSISTENCE
+// ═══════════════════════════════════════════════════════════════
+let game = null;
+let speed = 1;               // sim hours per real second
+let selected = [];           // unit ids
+let selectedBuilding = null; // building id
+let ghost = null;            // {kind} while placing
+let endShown = false;
+
+function save() {
+    if (!game) return;
+    try {
+        localStorage.setItem(SAVE_KEY, JSON.stringify({
+            mode, cam, state: JSON.parse(JSON.stringify(game, (k, v) => (k === '_rng' ? undefined : v))),
+        }));
+    } catch { /* storage full/blocked — non-fatal */ }
+}
+function loadSave() {
+    try {
+        const raw = localStorage.getItem(SAVE_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch { return null; }
+}
+setInterval(save, 30000);
+window.addEventListener('beforeunload', save);
+
+// ═══════════════════════════════════════════════════════════════
+//  CAMERA + CANVAS
+// ═══════════════════════════════════════════════════════════════
+const canvas = document.getElementById('world');
+const ctx = canvas.getContext('2d');
+const DPR = Math.min(devicePixelRatio || 1, 2);
+const cam = { x: MAP_W * 0.45, y: MAP_H * 0.5, zoom: 0.55 };
+
+function resize() {
+    canvas.width = canvas.clientWidth * DPR;
+    canvas.height = canvas.clientHeight * DPR;
+}
+new ResizeObserver(resize).observe(canvas);
+resize();
+
+const W2S = (x, y) => [
+    (x - cam.x) * cam.zoom * DPR + canvas.width / 2,
+    (y - cam.y) * cam.zoom * DPR + canvas.height / 2,
+];
+const S2W = (sx, sy) => [
+    (sx * DPR - canvas.width / 2) / (cam.zoom * DPR) + cam.x,
+    (sy * DPR - canvas.height / 2) / (cam.zoom * DPR) + cam.y,
+];
+
+// ── Terrain (baked once per game, seeded look) ─────────────────
+let terrain = null;
+function bakeTerrain() {
+    terrain = document.createElement('canvas');
+    terrain.width = MAP_W / 2; terrain.height = MAP_H / 2;
+    const t = terrain.getContext('2d');
+    // Daylight regolith is BRIGHT gray — the night overlay darkens from here.
+    t.fillStyle = '#55525c';
+    t.fillRect(0, 0, terrain.width, terrain.height);
+    // regolith mottle
+    let s = 12345 ^ (game ? game.seed : 1);
+    const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    for (let i = 0; i < 2600; i++) {
+        const g = 70 + rnd() * 40;
+        t.fillStyle = `rgba(${g + 8},${g + 4},${g + 12},${0.25 + rnd() * 0.3})`;
+        const r = 1 + rnd() * 3.2;
+        t.beginPath(); t.arc(rnd() * terrain.width, rnd() * terrain.height, r, 0, 7); t.fill();
+    }
+    // craters
+    for (let i = 0; i < 46; i++) {
+        const cx = rnd() * terrain.width, cy = rnd() * terrain.height, cr = 5 + rnd() * 26;
+        const grad = t.createRadialGradient(cx - cr * 0.25, cy - cr * 0.25, cr * 0.2, cx, cy, cr);
+        grad.addColorStop(0, 'rgba(0,0,0,0.42)');
+        grad.addColorStop(0.75, 'rgba(0,0,0,0.16)');
+        grad.addColorStop(0.86, 'rgba(200,200,215,0.10)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        t.fillStyle = grad;
+        t.beginPath(); t.arc(cx, cy, cr, 0, 7); t.fill();
+    }
+    // PSR — the cold trap
+    const p = game.psr;
+    const pg = t.createRadialGradient(p.x / 2, p.y / 2, 10, p.x / 2, p.y / 2, p.rx / 2 + 40);
+    pg.addColorStop(0, 'rgba(6,10,26,0.92)');
+    pg.addColorStop(0.8, 'rgba(6,10,26,0.75)');
+    pg.addColorStop(1, 'rgba(6,10,26,0)');
+    t.fillStyle = pg;
+    t.save(); t.translate(p.x / 2, p.y / 2); t.scale(1, p.ry / p.rx);
+    t.beginPath(); t.arc(0, 0, p.rx / 2 + 40, 0, 7); t.fill(); t.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DRAWING
+// ═══════════════════════════════════════════════════════════════
+function draw(nowS) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#050508';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!game) return;
+
+    const [ox, oy] = W2S(0, 0);
+    const scl = cam.zoom * DPR * 2;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(terrain, ox, oy, terrain.width * scl, terrain.height * scl);
+
+    // map edge
+    ctx.strokeStyle = 'rgba(120,140,180,0.25)';
+    ctx.lineWidth = 1.5;
+    const [ex, ey] = W2S(MAP_W, MAP_H);
+    ctx.strokeRect(ox, oy, ex - ox, ey - oy);
+
+    drawNodes();
+    for (const b of game.buildings) drawBuilding(b, nowS);
+    for (const u of game.units) if (u.hp > 0 && !u.inside) drawUnit(u, nowS);
+    drawOrderMarkers(nowS);
+    if (ghost) drawGhost();
+
+    // night + storm atmosphere
+    const sun = game.power.sun;
+    if (sun < 0.5) {
+        ctx.fillStyle = `rgba(4,8,26,${Math.min(0.82, (0.5 - sun) * 1.6)})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    const sep = game.storm.sepFlux;
+    if (sep > 0.03) {
+        drawStormParticles(nowS, sep);
+        const vg = ctx.createRadialGradient(canvas.width / 2, canvas.height / 2, canvas.height * 0.3,
+            canvas.width / 2, canvas.height / 2, canvas.height * 0.75);
+        vg.addColorStop(0, 'rgba(255,40,20,0)');
+        vg.addColorStop(1, `rgba(255,40,20,${0.10 + sep * 0.12})`);
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    if (boxSel) {
+        ctx.strokeStyle = 'rgba(120,255,170,0.9)'; ctx.lineWidth = 1;
+        ctx.strokeRect(boxSel.x0, boxSel.y0, boxSel.x1 - boxSel.x0, boxSel.y1 - boxSel.y0);
+        ctx.fillStyle = 'rgba(120,255,170,0.06)';
+        ctx.fillRect(boxSel.x0, boxSel.y0, boxSel.x1 - boxSel.x0, boxSel.y1 - boxSel.y0);
+    }
+}
+
+function drawNodes() {
+    for (const n of game.nodes) {
+        const [x, y] = W2S(n.x, n.y);
+        const r = cam.zoom * DPR;
+        if (n.kind === 'ice') {
+            if (n.reserveKg <= 0) { drawDepleted(x, y, r); continue; }
+            ctx.save(); ctx.translate(x, y);
+            const size = (10 + Math.min(8, n.reserveKg / 1500)) * r;
+            for (let i = 0; i < 5; i++) {
+                const a = i * 1.257 + 0.4;
+                ctx.fillStyle = i % 2 ? 'rgba(140,225,255,0.85)' : 'rgba(90,180,240,0.85)';
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(Math.cos(a) * size, Math.sin(a) * size * 0.8 - size * 0.25);
+                ctx.lineTo(Math.cos(a + 0.5) * size * 0.6, Math.sin(a + 0.5) * size * 0.5);
+                ctx.closePath(); ctx.fill();
+            }
+            ctx.fillStyle = 'rgba(200,240,255,0.9)';
+            ctx.beginPath(); ctx.arc(0, -size * 0.2, size * 0.22, 0, 7); ctx.fill();
+            ctx.restore();
+        } else {
+            ctx.save(); ctx.translate(x, y);
+            const size = 12 * r;
+            ctx.fillStyle = '#2e2a34';
+            ctx.beginPath();
+            ctx.moveTo(-size, size * 0.5); ctx.quadraticCurveTo(0, -size, size, size * 0.5);
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#78707e';
+            ctx.beginPath();
+            ctx.moveTo(-size * 0.55, size * 0.42); ctx.quadraticCurveTo(0, -size * 0.5, size * 0.55, size * 0.42);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = 'rgba(230,225,240,0.5)'; ctx.lineWidth = 1.2 * r;
+            ctx.beginPath(); ctx.moveTo(-size * 0.5, size * 0.36); ctx.quadraticCurveTo(0, -size * 0.42, size * 0.5, size * 0.36); ctx.stroke();
+            ctx.restore();
+        }
+        // discoverability label
+        if (cam.zoom > 0.42) {
+            const [lx, ly] = W2S(n.x, n.y);
+            ctx.fillStyle = n.kind === 'ice' ? 'rgba(150,220,255,0.75)' : 'rgba(210,200,220,0.6)';
+            ctx.font = `700 ${9 * cam.zoom * DPR + 4}px Courier New`;
+            ctx.textAlign = 'center';
+            ctx.fillText(n.kind === 'ice' ? (n.reserveKg > 0 ? `ICE ${(n.reserveKg / 1000).toFixed(1)}t` : 'DEPLETED') : 'REGOLITH', lx, ly + 24 * cam.zoom * DPR);
+        }
+    }
+}
+function drawDepleted(x, y, r) {
+    ctx.strokeStyle = 'rgba(120,150,170,0.4)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(x, y, 6 * r, 0, 7); ctx.stroke();
+}
+
+function drawBuilding(b, nowS) {
+    const [x, y] = W2S(b.x, b.y);
+    const r = cam.zoom * DPR;
+    const R = (b.kind === 'lander' ? LANDER.radius : BUILD_CATALOG[b.kind].radius) * r;
+    ctx.save(); ctx.translate(x, y);
+
+    const ghosted = b.built < 1;
+    ctx.globalAlpha = ghosted ? 0.55 : 1;
+
+    switch (b.kind) {
+        case 'lander': {
+            ctx.fillStyle = '#8a7a4a';
+            ctx.beginPath();
+            for (let i = 0; i < 8; i++) {
+                const a = i / 8 * Math.PI * 2 + 0.39;
+                ctx[i ? 'lineTo' : 'moveTo'](Math.cos(a) * R * 0.7, Math.sin(a) * R * 0.7);
+            }
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#c9b878';
+            ctx.beginPath(); ctx.arc(0, 0, R * 0.42, 0, 7); ctx.fill();
+            ctx.strokeStyle = '#5a5038'; ctx.lineWidth = 2 * r;
+            for (let i = 0; i < 4; i++) {
+                const a = i / 4 * Math.PI * 2 + 0.785;
+                ctx.beginPath(); ctx.moveTo(Math.cos(a) * R * 0.6, Math.sin(a) * R * 0.6);
+                ctx.lineTo(Math.cos(a) * R * 1.05, Math.sin(a) * R * 1.05); ctx.stroke();
+            }
+            break;
+        }
+        case 'solar': {
+            ctx.fillStyle = '#2c3038';
+            ctx.fillRect(-R, -R * 0.16, R * 2, R * 0.32);
+            const glint = 0.55 + game.power.sun * 0.45;
+            for (let i = -1; i <= 1; i++) {
+                ctx.fillStyle = `rgba(60,110,220,${glint})`;
+                ctx.fillRect(i * R * 0.68 - R * 0.3, -R * 0.62, R * 0.6, R * 0.5);
+                ctx.fillStyle = `rgba(120,180,255,${glint * 0.5})`;
+                ctx.fillRect(i * R * 0.68 - R * 0.3, -R * 0.62, R * 0.6, R * 0.12);
+            }
+            break;
+        }
+        case 'battery': {
+            ctx.fillStyle = '#28303a';
+            ctx.fillRect(-R * 0.8, -R * 0.55, R * 1.6, R * 1.1);
+            const frac = game.power.capKWh > 0 ? game.resources.energyKWh / game.power.capKWh : 0;
+            ctx.fillStyle = frac > 0.3 ? '#57d98a' : '#ffb347';
+            ctx.fillRect(-R * 0.62, R * 0.32 - frac * R * 0.74, R * 1.24, frac * R * 0.74);
+            ctx.strokeStyle = '#4a5a6a'; ctx.lineWidth = 1.5 * r;
+            ctx.strokeRect(-R * 0.8, -R * 0.55, R * 1.6, R * 1.1);
+            break;
+        }
+        case 'habitat': {
+            const grad = ctx.createRadialGradient(-R * 0.25, -R * 0.35, R * 0.1, 0, 0, R);
+            grad.addColorStop(0, '#e8e4dc'); grad.addColorStop(1, '#8a8880');
+            ctx.fillStyle = grad;
+            ctx.beginPath(); ctx.arc(0, 0, R * 0.85, Math.PI, 0); ctx.lineTo(R * 0.85, R * 0.3);
+            ctx.lineTo(-R * 0.85, R * 0.3); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = 'rgba(90,180,240,0.8)';
+            ctx.beginPath(); ctx.arc(0, -R * 0.15, R * 0.2, 0, 7); ctx.fill();
+            break;
+        }
+        case 'electrolyzer': {
+            ctx.fillStyle = '#3a4a52';
+            ctx.fillRect(-R * 0.75, -R * 0.5, R * 1.5, R);
+            ctx.fillStyle = '#7ecbdd';
+            ctx.beginPath(); ctx.arc(-R * 0.3, 0, R * 0.28, 0, 7); ctx.fill();
+            ctx.fillStyle = '#dd8a66';
+            ctx.beginPath(); ctx.arc(R * 0.3, 0, R * 0.28, 0, 7); ctx.fill();
+            if (b.enabled && b.built >= 1 && !game.power.brownout && game.resources.water > 0) {
+                for (let i = 0; i < 3; i++) {
+                    const ph = (nowS * 0.7 + i * 0.33) % 1;
+                    ctx.fillStyle = `rgba(180,230,255,${0.7 * (1 - ph)})`;
+                    ctx.beginPath(); ctx.arc(-R * 0.3 + i * R * 0.1, -R * 0.5 - ph * R * 0.5, 2 * r, 0, 7); ctx.fill();
+                }
+            }
+            break;
+        }
+        case 'shelter': {
+            ctx.fillStyle = '#4a4038';
+            ctx.beginPath();
+            ctx.moveTo(-R, R * 0.4); ctx.quadraticCurveTo(0, -R * 0.75, R, R * 0.4);
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#2a2420';
+            ctx.beginPath();
+            ctx.moveTo(-R * 0.3, R * 0.4); ctx.quadraticCurveTo(0, -R * 0.1, R * 0.3, R * 0.4);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = 'rgba(160,150,140,0.5)'; ctx.lineWidth = 1.2 * r;
+            ctx.beginPath(); ctx.moveTo(-R * 0.8, R * 0.18); ctx.quadraticCurveTo(0, -R * 0.5, R * 0.8, R * 0.18); ctx.stroke();
+            break;
+        }
+    }
+    ctx.globalAlpha = 1;
+
+    // blueprint / progress
+    if (ghosted) {
+        ctx.strokeStyle = 'rgba(120,220,255,0.8)'; ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.arc(0, 0, R + 4 * r, 0, 7); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = '#7fe6a3'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(0, 0, R + 4 * r, -Math.PI / 2, -Math.PI / 2 + b.built * Math.PI * 2); ctx.stroke();
+    }
+    // hp bar when hurt
+    if (b.hp < b.hpMax && b.built >= 1) {
+        const w = R * 1.6;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-w / 2, -R - 9 * r, w, 4 * r);
+        ctx.fillStyle = b.hp / b.hpMax > 0.5 ? '#7fe6a3' : '#ff8866';
+        ctx.fillRect(-w / 2, -R - 9 * r, w * (b.hp / b.hpMax), 4 * r);
+    }
+    if (selectedBuilding === b.id) {
+        ctx.strokeStyle = 'rgba(120,255,170,0.9)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(0, R * 0.55, R * 1.15, R * 0.5, 0, 0, 7); ctx.stroke();
+    }
+    ctx.restore();
+}
+
+function drawUnit(u, nowS) {
+    const [x, y] = W2S(u.x, u.y);
+    const r = cam.zoom * DPR;
+    ctx.save(); ctx.translate(x, y);
+    if (selected.includes(u.id)) {
+        ctx.strokeStyle = u.grounded ? 'rgba(255,180,80,0.95)' : 'rgba(120,255,170,0.95)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(0, 7 * r, 12 * r, 5.5 * r, 0, 0, 7); ctx.stroke();
+    }
+    if (u.kind === 'rover') {
+        ctx.fillStyle = '#20242c';
+        for (const wx of [-7, 7]) for (const wy of [-5, 5]) {
+            ctx.beginPath(); ctx.arc(wx * r, wy * r, 2.6 * r, 0, 7); ctx.fill();
+        }
+        ctx.fillStyle = '#9aa4b4';
+        ctx.beginPath(); ctx.roundRect(-8 * r, -5 * r, 16 * r, 10 * r, 2.5 * r); ctx.fill();
+        if (u.carrying > 0) {
+            ctx.fillStyle = u.carryKind === 'ice' ? '#8fe0ff' : '#6a6272';
+            ctx.fillRect(-4 * r, -3 * r, 8 * r, 6 * r);
+        }
+    } else {
+        const bounce = Math.sin(nowS * 9 + u.id) * (u.order.type === 'idle' || u.order.type === 'sheltered' ? 0 : 1) * r;
+        ctx.fillStyle = u.grounded ? '#d8c8a8' : '#e8e8f0';
+        ctx.beginPath(); ctx.arc(0, -2 * r + bounce, 5 * r, 0, 7); ctx.fill();
+        ctx.fillStyle = '#1a2432';
+        ctx.beginPath(); ctx.arc(1.2 * r, -3 * r + bounce, 2.2 * r, 0, 7); ctx.fill();
+        ctx.fillStyle = '#c8c8d0';
+        ctx.fillRect(-3.4 * r, 2.4 * r + bounce, 2.6 * r, 4.5 * r);
+        ctx.fillRect(0.8 * r, 2.4 * r + bounce, 2.6 * r, 4.5 * r);
+        if (u.carrying > 0) {
+            ctx.fillStyle = u.carryKind === 'ice' ? '#8fe0ff' : '#6a6272';
+            ctx.fillRect(-6.5 * r, -1 * r + bounce, 3.4 * r, 3.4 * r);
+        }
+        // dose pips
+        const frac = Math.min(1, u.doseMSv / DOSE.careerMSv);
+        if (frac > 0.15) {
+            ctx.fillStyle = frac > 0.8 ? '#ff7766' : frac > 0.5 ? '#ffcc44' : '#8fa8c0';
+            ctx.fillRect(-6 * r, -10 * r, 12 * r * frac, 1.6 * r);
+        }
+    }
+    ctx.restore();
+}
+
+const orderFx = [];   // {x,y,t0} right-click ping
+function drawOrderMarkers(nowS) {
+    for (let i = orderFx.length - 1; i >= 0; i--) {
+        const f = orderFx[i];
+        const age = nowS - f.t0;
+        if (age > 0.7) { orderFx.splice(i, 1); continue; }
+        const [x, y] = W2S(f.x, f.y);
+        ctx.strokeStyle = `rgba(120,255,170,${1 - age / 0.7})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(x, y, (14 - age * 12) * cam.zoom * DPR, (7 - age * 6) * cam.zoom * DPR, 0, 0, 7); ctx.stroke();
+    }
+}
+
+function drawGhost() {
+    const cat = BUILD_CATALOG[ghost.kind];
+    const [x, y] = W2S(ghost.x ?? cam.x, ghost.y ?? cam.y);
+    const R = cat.radius * cam.zoom * DPR;
+    const valid = ghostValid();
+    ctx.save(); ctx.translate(x, y);
+    ctx.strokeStyle = valid ? 'rgba(120,255,170,0.9)' : 'rgba(255,90,70,0.9)';
+    ctx.fillStyle = valid ? 'rgba(120,255,170,0.10)' : 'rgba(255,90,70,0.10)';
+    ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = valid ? '#aee2ff' : '#ff9988';
+    ctx.font = `${Math.max(10, 11 * cam.zoom * DPR)}px Segoe UI`;
+    ctx.textAlign = 'center';
+    ctx.fillText(cat.name, 0, -R - 8);
+    ctx.restore();
+}
+function ghostValid() {
+    if (!ghost || ghost.x == null) return false;
+    if (game.resources.materials < BUILD_CATALOG[ghost.kind].materials) return false;
+    if (ghost.x < 40 || ghost.y < 40 || ghost.x > MAP_W - 40 || ghost.y > MAP_H - 40) return false;
+    for (const b of game.buildings) {
+        const br = (b.kind === 'lander' ? LANDER.radius : BUILD_CATALOG[b.kind].radius);
+        if (Math.hypot(b.x - ghost.x, b.y - ghost.y) < br + BUILD_CATALOG[ghost.kind].radius + 8) return false;
+    }
+    return true;
+}
+
+// storm particle streaks (SEP protons, schematically from the upper-left sun)
+const stormP = Array.from({ length: 90 }, () => ({ x: Math.random(), y: Math.random(), v: 0.5 + Math.random() }));
+function drawStormParticles(nowS, sep) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(0.8, sep + 0.2);
+    for (const p of stormP) {
+        const px = ((p.x + nowS * p.v * 0.13) % 1.1) * canvas.width;
+        const py = ((p.y + nowS * p.v * 0.19) % 1.1) * canvas.height;
+        ctx.strokeStyle = 'rgba(255,120,90,0.5)';
+        ctx.lineWidth = DPR;
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - 14 * DPR * p.v, py - 20 * DPR * p.v); ctx.stroke();
+    }
+    ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  INPUT
+// ═══════════════════════════════════════════════════════════════
+let boxSel = null;
+const keys = {};
+addEventListener('keydown', e => {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === 'Escape') { ghost = null; selected = []; selectedBuilding = null; refreshSelPanel(); refreshBuildMenu(); }
+    if (e.key === ' ') { e.preventDefault(); setSpeed(speed === 0 ? 1 : 0); }
+});
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const f = e.deltaY > 0 ? 0.88 : 1.14;
+    cam.zoom = Math.min(1.8, Math.max(0.22, cam.zoom * f));
+}, { passive: false });
+
+canvas.addEventListener('mousedown', e => {
+    if (!game) return;
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    if (e.button === 0) {
+        if (ghost) { tryPlaceGhost(); return; }
+        boxSel = { x0: sx * DPR, y0: sy * DPR, x1: sx * DPR, y1: sy * DPR };
+    } else if (e.button === 2) {
+        if (ghost) { ghost = null; refreshBuildMenu(); return; }
+        rightClickOrder(sx, sy);
+    }
+});
+canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    if (ghost) { const [wx, wy] = S2W(sx, sy); ghost.x = wx; ghost.y = wy; }
+    if (boxSel) { boxSel.x1 = sx * DPR; boxSel.y1 = sy * DPR; }
+});
+addEventListener('mouseup', e => {
+    if (e.button !== 0 || !boxSel || !game) return;
+    const b = boxSel; boxSel = null;
+    const w = Math.abs(b.x1 - b.x0), h = Math.abs(b.y1 - b.y0);
+    const additive = keys['shift'];
+    if (!additive) { selected = []; selectedBuilding = null; }
+    if (w < 6 && h < 6) {
+        // click select: nearest unit within grab range, else building
+        const [wx, wy] = S2W(b.x0 / DPR, b.y0 / DPR);
+        let best = null, bestD = 30 / cam.zoom;
+        for (const u of game.units) {
+            if (u.hp <= 0 || u.inside) continue;
+            const d = Math.hypot(u.x - wx, u.y - wy);
+            if (d < bestD) { best = u; bestD = d; }
+        }
+        if (best) selected.push(best.id);
+        else {
+            for (const bd of game.buildings) {
+                const br = bd.kind === 'lander' ? LANDER.radius : BUILD_CATALOG[bd.kind].radius;
+                if (Math.hypot(bd.x - wx, bd.y - wy) < br + 12) { selectedBuilding = bd.id; break; }
+            }
+        }
+    } else {
+        const [x0, y0] = S2W(Math.min(b.x0, b.x1) / DPR, Math.min(b.y0, b.y1) / DPR);
+        const [x1, y1] = S2W(Math.max(b.x0, b.x1) / DPR, Math.max(b.y0, b.y1) / DPR);
+        for (const u of game.units) {
+            if (u.hp <= 0 || u.inside) continue;
+            if (u.x >= x0 && u.x <= x1 && u.y >= y0 && u.y <= y1 && !selected.includes(u.id)) selected.push(u.id);
+        }
+    }
+    refreshSelPanel();
+});
+
+function rightClickOrder(sx, sy) {
+    if (!selected.length) return;
+    const [wx, wy] = S2W(sx, sy);
+    // node?
+    for (const n of game.nodes) {
+        if (Math.hypot(n.x - wx, n.y - wy) < 40 && n.reserveKg > 0) {
+            issueOrder(game, selected, { type: 'harvest', nodeId: n.id });
+            orderFxPush(n.x, n.y);
+            return;
+        }
+    }
+    // building?
+    for (const b of game.buildings) {
+        const br = b.kind === 'lander' ? LANDER.radius : BUILD_CATALOG[b.kind].radius;
+        if (Math.hypot(b.x - wx, b.y - wy) < br + 14) {
+            if (b.built < 1) issueOrder(game, selected, { type: 'build', buildingId: b.id });
+            else if (b.hp < b.hpMax) issueOrder(game, selected, { type: 'repair', buildingId: b.id });
+            else if (['shelter', 'lander', 'habitat'].includes(b.kind)) issueOrder(game, selected, { type: 'shelter' });
+            orderFxPush(b.x, b.y);
+            return;
+        }
+    }
+    issueOrder(game, selected, { type: 'move', x: wx, y: wy });
+    orderFxPush(wx, wy);
+}
+let clockS = 0;
+function orderFxPush(x, y) { orderFx.push({ x, y, t0: clockS }); }
+
+function tryPlaceGhost() {
+    if (!ghostValid()) return;
+    const res = placeBlueprint(game, ghost.kind, ghost.x, ghost.y);
+    if (res.ok) {
+        // nearest selected (or any) worker starts building — the SC flow
+        const workers = selected.length ? selected : game.units.filter(u => u.hp > 0).map(u => u.id);
+        if (workers.length) issueOrder(game, [workers[0]], { type: 'build', buildingId: res.id });
+        if (!keys['shift']) { ghost = null; refreshBuildMenu(); }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UI PANELS
+// ═══════════════════════════════════════════════════════════════
+function refreshBuildMenu() {
+    const host = document.getElementById('bm-list');
+    host.innerHTML = Object.entries(BUILD_CATALOG).map(([k, c]) => {
+        const cant = game && game.resources.materials < c.materials;
+        return `<button class="bm-btn ${ghost?.kind === k ? 'on' : ''} ${cant ? 'cant' : ''}" data-b="${k}" title="${c.desc}">
+            <span>${c.name}</span><span class="bm-cost">⛏${c.materials}</span></button>`;
+    }).join('');
+    host.querySelectorAll('.bm-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const k = btn.dataset.b;
+            if (!game || game.resources.materials < BUILD_CATALOG[k].materials) return;
+            ghost = ghost?.kind === k ? null : { kind: k, x: null, y: null };
+            refreshBuildMenu();
+        });
+    });
+}
+
+document.getElementById('shelter-all').addEventListener('click', () => {
+    if (!game) return;
+    const crew = game.units.filter(u => u.kind === 'astronaut' && u.hp > 0).map(u => u.id);
+    issueOrder(game, crew, { type: 'shelter' });
+    elog(game, 'All crew ordered to shelter.', 'info');
+});
+
+function refreshSelPanel() {
+    const el = document.getElementById('sel-panel');
+    if (selected.length) {
+        const units = selected.map(id => game.units.find(u => u.id === id)).filter(u => u && u.hp > 0);
+        const ast = units.filter(u => u.kind === 'astronaut').length;
+        const rov = units.length - ast;
+        const worst = units.reduce((m, u) => Math.max(m, u.doseMSv), 0);
+        el.style.display = 'block';
+        el.innerHTML = `
+            <div class="sel-title">${ast ? `${ast} astronaut${ast > 1 ? 's' : ''}` : ''}${ast && rov ? ' + ' : ''}${rov ? `${rov} rover${rov > 1 ? 's' : ''}` : ''}</div>
+            ${ast ? `<div>Worst career dose: <b style="color:${worst > 400 ? '#ff8866' : '#aabbcc'}">${worst.toFixed(0)} mSv</b> / ${DOSE.careerMSv}</div>` : ''}
+            <div class="hint">Right-click: move · mine a node · build/repair a site · enter shelter. Shift-click box adds to selection.</div>`;
+    } else if (selectedBuilding != null) {
+        const b = game.buildings.find(x => x.id === selectedBuilding);
+        if (!b) { el.style.display = 'none'; return; }
+        const cat = b.kind === 'lander' ? LANDER : BUILD_CATALOG[b.kind];
+        const occupants = game.units.filter(u => u.inside === b.id).length;
+        el.style.display = 'block';
+        el.innerHTML = `
+            <div class="sel-title">${cat.name} ${b.built < 1 ? `— under construction ${(b.built * 100).toFixed(0)}%` : ''}</div>
+            <div>HP ${Math.round(b.hp)}/${b.hpMax}${occupants ? ` · ${occupants} crew inside` : ''}${b.kind === 'electrolyzer' ? ` · <button id="b-toggle" class="btn-ghost" style="padding:2px 8px;font-size:10px">${b.enabled ? 'Pause' : 'Resume'}</button>` : ''}</div>
+            <div class="hint">${cat.desc ?? 'Home base: drop-off point, 4 crew capacity, fuel-cell trickle power.'}</div>`;
+        document.getElementById('b-toggle')?.addEventListener('click', () => { b.enabled = !b.enabled; refreshSelPanel(); });
+    } else {
+        el.style.display = 'none';
+    }
+}
+
+function refreshHud() {
+    if (!game) return;
+    const r = game.resources, p = game.power;
+    const pow = document.getElementById('r-pow');
+    pow.textContent = `${p.netKW >= 0 ? '+' : ''}${p.netKW.toFixed(1)} kW`;
+    pow.className = p.brownout ? 'res-bad' : p.netKW < 0 ? 'res-warn' : '';
+    document.getElementById('r-batt').textContent = `${r.energyKWh.toFixed(0)}/${p.capKWh.toFixed(0)} kWh`;
+    const wEl = document.getElementById('r-water');
+    wEl.textContent = `${r.water.toFixed(0)} kg`;
+    wEl.className = r.water < 30 ? 'res-bad' : r.water < 80 ? 'res-warn' : '';
+    const oEl = document.getElementById('r-o2');
+    oEl.textContent = `${r.oxygen.toFixed(0)} kg`;
+    oEl.className = r.oxygen < 20 ? 'res-bad' : r.oxygen < 50 ? 'res-warn' : '';
+    document.getElementById('r-mat').textContent = `${r.materials.toFixed(0)} kg`;
+    const cs = crewSummary(game);
+    document.getElementById('r-crew').textContent = `${cs.alive}/${cs.capacity}`;
+    const dEl = document.getElementById('r-dose');
+    dEl.textContent = `${cs.worstDoseMSv.toFixed(0)} mSv`;
+    dEl.className = 'cap ' + (cs.worstDoseMSv > 400 ? 'res-bad' : cs.worstDoseMSv > DOSE.warnMSv ? 'res-warn' : '');
+
+    const sol = Math.floor(game.t / SOL_HOURS) + 1;
+    const pct = ((game.t % SOL_HOURS) / SOL_HOURS * 100).toFixed(0);
+    document.getElementById('clk-sol').textContent = `Sol ${sol} · ${pct}%`;
+    document.getElementById('clk-sun').textContent =
+        game.power.sun > 0 ? `☀ sun up (${(game.power.sun * 100).toFixed(0)}%)` : '● the long night';
+
+    // storm banner
+    const sb = document.getElementById('storm-banner');
+    const st = game.storm;
+    if (st.sepFlux > 0.03) {
+        sb.className = 'active';
+        sb.textContent = `☢ S${st.sLevel} PROTON EVENT IN PROGRESS — surface dose ×${(1 + st.sepFlux * st.sepFlux * 100).toFixed(0)} · shelter your crew`;
+    } else if (st.etaH != null && st.etaH < 12) {
+        sb.className = 'warn';
+        sb.textContent = `⚠ Proton event forecast — arrival in ~${st.etaH.toFixed(1)} h`;
+    } else {
+        sb.className = ''; sb.textContent = '';
+    }
+
+    // feed badge
+    const fb = document.getElementById('feed-badge');
+    if (mode === 'live') {
+        if (feedStale()) { fb.className = 'stale'; fb.textContent = 'SWPC FEED STALE — STORM EVENTS PAUSED'; }
+        else { fb.className = 'live'; fb.textContent = '☀ LIVE SUN — NOAA SWPC'; }
+    } else if (mode === 'drill') { fb.className = 'drill'; fb.textContent = 'STORM DRILL SCENARIO'; }
+    else { fb.className = ''; fb.textContent = ''; }
+
+    // log
+    const lg = document.getElementById('ev-log');
+    const items = game.log.slice(-7).reverse();
+    lg.innerHTML = items.map(l =>
+        `<div class="ev-${l.kind}">[sol ${Math.floor(l.t / SOL_HOURS) + 1} ${(l.t % SOL_HOURS).toFixed(0)}h] ${l.msg}</div>`).join('');
+}
+
+// speed
+function setSpeed(s) {
+    speed = s;
+    document.querySelectorAll('.spd button').forEach(b =>
+        b.classList.toggle('on', Number(b.dataset.spd) === s));
+}
+document.querySelectorAll('.spd button').forEach(b =>
+    b.addEventListener('click', () => setSpeed(Number(b.dataset.spd))));
+
+// ═══════════════════════════════════════════════════════════════
+//  START / END FLOW
+// ═══════════════════════════════════════════════════════════════
+let chosenSite = null;
+(function initStart() {
+    const grid = document.getElementById('site-grid');
+    const sites = siteProfiles();
+    grid.innerHTML = sites.map(s => `
+        <div class="site-card" data-site="${s.id}">
+            <b>${s.name}</b>
+            <div class="site-stat"><span>Strategy score</span><span style="color:#ffd77a">${s.score}</span></div>
+            <div class="site-stat"><span>Illumination</span><span>${(s.illum * 100).toFixed(0)}%</span></div>
+            <div class="site-stat"><span>Ice range</span><span>${s.iceDistM} m</span></div>
+            <div class="site-stat"><span>Ice richness</span><span>${'▮'.repeat(Math.round(s.iceRich * 5)) || '▯'}</span></div>
+            <div class="site-stat"><span>Quake exposure</span><span>${'▮'.repeat(Math.round(s.quakeRisk * 5)) || '▯'}</span></div>
+        </div>`).join('');
+    grid.querySelectorAll('.site-card').forEach(card => {
+        card.addEventListener('click', () => {
+            grid.querySelectorAll('.site-card').forEach(c => c.classList.remove('on'));
+            card.classList.add('on');
+            chosenSite = card.dataset.site;
+            document.getElementById('btn-start').disabled = false;
+        });
+    });
+    document.getElementById('mode-row').querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('on'));
+            btn.classList.add('on');
+            mode = btn.dataset.mode;
+        });
+    });
+    document.getElementById('btn-start').addEventListener('click', () => {
+        localStorage.removeItem(SAVE_KEY);
+        startGame(createGame(chosenSite, { seed: (Math.random() * 2 ** 31) | 0 }));
+    });
+    const saved = loadSave();
+    if (saved?.state) {
+        const btn = document.getElementById('btn-continue');
+        btn.style.display = '';
+        btn.addEventListener('click', () => {
+            mode = saved.mode ?? 'live';
+            Object.assign(cam, saved.cam ?? {});
+            startGame(rehydrate(saved.state));
+        });
+    }
+})();
+
+function startGame(state) {
+    game = state;
+    endShown = false;
+    selected = []; selectedBuilding = null; ghost = null;
+    // Interacting with the start overlay can scroll-into-view. The BODY is
+    // the actual scroll container here (overflow-x:hidden makes its
+    // overflow-y auto, and the injected consent banner adds below-the-fold
+    // height) — reset every candidate scroller or the canvas sits offset
+    // and every click lands 300px off.
+    for (const el of [document.getElementById('app'), document.body, document.documentElement]) {
+        el.scrollTop = 0; el.scrollLeft = 0;
+    }
+    bakeTerrain();
+    refreshBuildMenu();
+    document.getElementById('start-overlay').style.display = 'none';
+    document.getElementById('end-overlay').style.display = 'none';
+    setSpeed(1);
+}
+
+function showEnd() {
+    endShown = true;
+    const ov = document.getElementById('end-overlay');
+    const cs = crewSummary(game);
+    const sols = (game.t / SOL_HOURS).toFixed(2);
+    document.getElementById('end-title').textContent =
+        game.victory ? '★ Foothold Established' : 'The Base Goes Quiet';
+    document.getElementById('end-title').style.color = game.victory ? '#7fe6a3' : '#ff8877';
+    document.getElementById('end-stats').innerHTML = `
+        Site: ${game.site.name}<br>
+        Survived: ${sols} lunar days (${(game.t / 24).toFixed(0)} Earth days)<br>
+        Crew: ${cs.alive} alive · worst dose ${cs.worstDoseMSv.toFixed(0)} mSv<br>
+        Moonquakes weathered: ${game.stats.quakes}<br>
+        Water mined: ${game.ledger.minedWater.toFixed(0)} kg · Materials: ${game.ledger.minedMaterials.toFixed(0)} kg`;
+    document.getElementById('btn-sandbox').style.display = game.victory ? '' : 'none';
+    ov.style.display = 'flex';
+    if (!game.alive) localStorage.removeItem(SAVE_KEY);
+}
+document.getElementById('btn-again').addEventListener('click', () => {
+    localStorage.removeItem(SAVE_KEY);
+    game = null;
+    document.getElementById('end-overlay').style.display = 'none';
+    document.getElementById('start-overlay').style.display = 'flex';
+});
+document.getElementById('btn-sandbox').addEventListener('click', () => {
+    document.getElementById('end-overlay').style.display = 'none';
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  MAIN LOOP — fixed-step sim, decoupled render
+// ═══════════════════════════════════════════════════════════════
+let lastMs = performance.now();
+let hudCooldown = 0;
+function frame(nowMs) {
+    requestAnimationFrame(frame);
+    const dtS = Math.min(0.1, (nowMs - lastMs) / 1000);
+    lastMs = nowMs;
+    clockS = nowMs / 1000;
+
+    // The body is a scroll container (see startGame note) and browser
+    // scroll-into-view can drift it mid-game, which shoves the whole HUD
+    // off-viewport. While a game is up, pin it.
+    if (game && (document.body.scrollLeft || document.body.scrollTop)) {
+        document.body.scrollLeft = 0; document.body.scrollTop = 0;
+    }
+
+    // camera pan
+    const panPx = 420 * dtS / cam.zoom;
+    if (keys['w'] || keys['arrowup']) cam.y -= panPx;
+    if (keys['s'] || keys['arrowdown']) cam.y += panPx;
+    if (keys['a'] || keys['arrowleft']) cam.x -= panPx;
+    if (keys['d'] || keys['arrowright']) cam.x += panPx;
+    cam.x = Math.max(0, Math.min(MAP_W, cam.x));
+    cam.y = Math.max(0, Math.min(MAP_H, cam.y));
+
+    if (game && game.alive && speed > 0) {
+        tick(game, dtS * speed, currentEnv(game.t));
+    }
+    if (game && !endShown && (!game.alive || (game.victory && !game._victoryShown))) {
+        if (game.victory) game._victoryShown = true;
+        showEnd();
+        save();
+    }
+
+    hudCooldown -= dtS;
+    if (game && hudCooldown <= 0) { hudCooldown = 0.25; refreshHud(); }
+    draw(clockS);
+}
+requestAnimationFrame(frame);
+</script>
+<script type="module">
+import './js/analytics.js';
+import { userState } from './js/user-state.js';
+import { recordVisit } from './js/greeting.js';
+recordVisit('colony');
+userState.trackPage('colony');
+</script>
+</body>
+</html>
