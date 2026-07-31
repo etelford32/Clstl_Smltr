@@ -759,5 +759,23 @@ check('gannon ensemble: observed min inside member spread',
         Math.abs(gMin2 - -44.3) < 0.5, `${gMin2.toFixed(1)} nT`);
 }
 
+// ── View shock mirrors vs the kernel probes (spec §14/§17) ───────────────────
+// js/flux-rope/view.js renders the sheath shell + squeeze from its OWN pure
+// mirrors of X(M), FR(M) and V_MS so the shader stays kernel-call-free. This
+// section pins those mirrors against the WASM oracle — if the kernel formulas
+// move, this fails until view.js is re-synced (the stage-model.mjs contract).
+{
+    const { V_MS_KMS, compressionX, standoffFr } = await import('../js/flux-rope/view.js');
+    check('view mirror: V_MS matches fr_v_ms_kms', V_MS_KMS === k.vMsKms(),
+        `${V_MS_KMS} vs ${k.vMsKms()}`);
+    let worstX = 0, worstFr = 0;
+    for (const m of [0, 0.5, 1, 1.001, 1.5, 2, 3, 5, 8, 20, 100]) {
+        worstX = Math.max(worstX, Math.abs(compressionX(m) - k.compressionX(m)));
+        worstFr = Math.max(worstFr, Math.abs(standoffFr(m) - k.standoffFr(m)));
+    }
+    check('view mirror: X(M) matches fr_compression_x', worstX < 1e-12, `worst |Δ| ${worstX}`);
+    check('view mirror: FR(M) matches fr_standoff_fr', worstFr < 1e-12, `worst |Δ| ${worstFr}`);
+}
+
 console.log(failures ? `\n${failures} failure(s)` : '\nall flux-rope kernel checks passed');
 process.exit(failures ? 1 : 0);

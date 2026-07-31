@@ -770,9 +770,15 @@ function tick() {
     if (!scrubbing) $('fr-time').value = simH;
     state.cursorH = simH;
     const tS = simH * 3600;
+    // Position/size plus the LIVE §16 interaction state (rear squeeze +
+    // wake-conditioned shock inputs) — the view renders the sheath shells
+    // and compression lobes from these kernel-truth probes each frame.
     const probes = state.ropes.map((_, r) => ({
         apexKm: kernel.apexKmAt(r, tS),
         sigmaApexKm: kernel.sigmaApexKmAt(r, tS),
+        rearC: kernel.rearCAt(r, tS),
+        apexVKms: kernel.apexVKmsAt(r, tS),
+        upstreamKms: kernel.upstreamKmsAt(r, tS),
     }));
     view.draw(tS, probes);
     $('fr-t-label').textContent = fmtT(simH);

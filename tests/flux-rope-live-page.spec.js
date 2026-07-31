@@ -27,6 +27,16 @@ test.describe('compounding flux rope simulator (flux-rope-live.html)', () => {
             if (m.type() === 'error' && !ENV_NOISE.test(m.text())) errors.push(m.text());
         });
         page.on('pageerror', (e) => errors.push(String(e)));
+        // Pre-seed cookie consent so the fixed-bottom banner never mounts —
+        // the scrub bar sits within a few px of its top edge, and the click
+        // hit-test flakes between the banner and the sticky nav without this
+        // (the sun-smoke / space-weather-compose idiom).
+        await page.addInitScript(() => {
+            try {
+                localStorage.setItem('pp_consent_v1', JSON.stringify(
+                    { strict: true, functional: true, analytics: false, ts: Date.now(), version: 1 }));
+            } catch (e) { /* ignore */ }
+        });
     });
 
     test('offline boot: DEMO Gannon train, analyzer + roles + filter', async ({ page }) => {

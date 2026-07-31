@@ -253,7 +253,11 @@ percentile/arrival/probability getters expose §7, with
 `fr_rear_c_at(idx, t)` (live rear squeeze), `fr_upstream_kms_at(idx, t)`
 (the wake flow a follower's sheath Mach runs against), `fr_v_ms_kms()` —
 the interaction state the series path already computes, exposed so pages
-can EXPLAIN the compounding without re-deriving it.
+can EXPLAIN the compounding without re-deriving it. Pure-function probes
+(2026-07-30): `fr_compression_x(M)` (§14 X) and `fr_standoff_fr(M)`
+(§17 FR) — the GLSL view and pages render shock compression
+oracle-direct; the view's JS mirrors of X/FR/V_MS are pinned against
+these by the kernel smoke gate.
 
 ## 10. Multi-rope trains (v1.1, Phase 2)
 
