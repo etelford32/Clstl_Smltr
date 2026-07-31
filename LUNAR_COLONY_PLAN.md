@@ -1,10 +1,14 @@
 # LUNAR_COLONY_PLAN.md — a lunar colony sim (and yes, a game) on moon.html
 
-> Status: **PLANNED — Phase 0 not started.** This document is the design
-> record; read it before building any phase. Companion surfaces already
-> shipped: the moon.html Surface/Interior views, `js/moon-interior-model.js`
-> (the interior kernel this game will reuse for quake + shielding physics),
-> and the live SEP/GCR radiation model on the same page.
+> Status: **Phases 0+1 SHIPPED (2026-07-31) as an RTS MVP** — `colony.html`
+> + `js/colony-engine.js` (gated by `tests/colony-engine.mjs`; browser gate
+> `tests/colony-smoke.spec.js`). Author call 2026-07-31: the game is a
+> **strategy game with StarCraft verbs** (select / box-select workers,
+> right-click orders, ghost-placed construction, two-resource economy),
+> not the turn-based management sim earlier drafts implied — §6's phases
+> are updated to match. Companion surfaces already shipped: the moon.html
+> Surface/Interior views, `js/moon-interior-model.js` (the interior kernel
+> the quake events reuse), and the live SEP/GCR radiation model.
 
 ---
 
@@ -129,20 +133,27 @@ swpc-feed (existing) ──swpc-update──▶ page adapter ──env──▶ 
 
 ## 6. Phases
 
-**Phase 0 — Site Survey (moon.html layer, small).**
-South-pole site picker on the existing globe: for each Artemis III
-candidate region show illumination %, ice proximity class, quake exposure,
-comms line-of-sight to Earth. Pick a site → stored in localStorage → seeds
-Phase 1. Ships with `tests/colony-sites.mjs` for the site-scoring table.
+**Phase 0 — Site Survey. ✅ SHIPPED 2026-07-31** (folded into colony.html's
+start overlay rather than a moon.html layer): every Artemis III candidate
+region scored for illumination, ice range/richness, and quake exposure via
+`siteProfiles()` in the engine — marquee sites hand-tuned from the
+literature, the rest stable-seeded. Gated inside `tests/colony-engine.mjs`
+(no separate colony-sites test needed).
 
-**Phase 1 — The tick engine + one screen (the real MVP).**
-`js/colony-engine.js` (state, resources, crew, dose ledger, build queue,
-seeded RNG) + `colony.html` with a 2-D schematic base view (SVG/canvas,
-no three.js needed yet), resource bars, event log. Live SEP gating wired.
-Win condition: survive 3 lunar days; score = crew-sols × dose margin.
-Gates: `tests/colony-engine.mjs` (conservation laws: mass/power/water
-balance closed each tick; dose monotone; determinism under fixed seed) +
-a Playwright smoke.
+**Phase 1 — The RTS MVP. ✅ SHIPPED 2026-07-31.**
+`js/colony-engine.js`: pure seeded tick engine — two-resource economy
+(ice→water, regolith→materials), worker-loop harvesting, ghost/blueprint
+construction, power/battery/brownout model with the long polar night,
+electrolyzer stoichiometry, per-astronaut dose ledger with NASA career
+grounding, engine-internal seeded moonquakes, conservation ledgers.
+`colony.html`: canvas RTS (box-select, right-click context orders, build
+ghosts, storm banner + SEP particle weather, event log, site picker, three
+env modes — Live Sun / Storm drill / Quiet — feed-stale disclosure,
+localStorage save/continue, 0–16× speed). Win: 3 lunar days + 6 crew.
+Gates: `tests/colony-engine.mjs` (8 groups) + `tests/colony-smoke.spec.js`.
+Known v1 limits, deliberately deferred: no pathfinding (straight-line
+movement), no fog of war, no minimap, no touch controls, crew arrivals
+ignore capacity, no per-feature telemetry yet.
 
 **Phase 2 — Depth.** Tech tree (FSP reactor, mass driver, greenhouse),
 crew specialties/morale, moonquake damage model from the kernel, thermal
@@ -180,9 +191,8 @@ deferred: pretty comes after playable.
 1. Tone: hard-hat NASA realism, or a little warmth/whimsy in crew events?
    (Design assumes "realism with heart" — Oregon Trail, not dwarf
    fortress.)
-2. Should Phase 0 ship inside moon.html's Interior/Surface toggle as a
-   third "Colony" mode, or as its own panel section? (Assumed: third
-   toggle state, it's cheap and discoverable.)
+2. ~~Where does Phase 0 live?~~ RESOLVED 2026-07-31: its own page,
+   `colony.html`, nav'd under Earth — the RTS needed a full canvas.
 3. Is a public leaderboard worth the moderation surface, or do we keep
    scores share-card-only until there's demand?
 

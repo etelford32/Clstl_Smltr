@@ -68,6 +68,7 @@ const NAV_DROPDOWNS = [
         items: [
             { href: 'earth.html',             label: 'EarthView',           sub: 'Predictive weather + magnetosphere',   tier: 'public',   icon: 'earth' },
             { href: 'moon.html',              label: 'Moon',                sub: 'Lunar radiation environment',          tier: 'public',   icon: 'moon' },
+            { href: 'colony.html',            label: 'Lunar Colony',        sub: 'Strategy game · the real Sun attacks', tier: 'public',   icon: 'moon', badge: 'NEW', id: 'colony' },
             { href: 'operations.html',        label: 'Operations',          sub: 'Fleet & debris analysis console',      tier: 'public',   icon: 'operations', badge: 'PRO PREVIEW', id: 'operations' },
             { href: 'satellites.html',        label: 'Satellites',          sub: 'Real-time orbital tracking',           tier: 'public', icon: 'satellite' },
             { href: 'launch-planner.html',    label: 'Launch Planner',      sub: 'SpaceX/Blue Origin launches + weather', tier: 'public', icon: 'rocket', id: 'launch-planner' },
