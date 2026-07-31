@@ -22,9 +22,24 @@
  * train, member params (+ optional weights), per-rope kinematic probes,
  * and the scrub time.
  *
- * Documented display-only omissions (the kernel remains the oracle): the
- * shader renders neither the §14 sheath shell nor the §15/§16/§18
- * boundary distortions (lobes + pancaking — sections draw circular). §16 wake KINEMATICS are honored — the page passes each
+ * COMPOUNDING IS RENDERED (2026-07-30): the shader mirrors the kernel's
+ * §15/§16 two-lobe boundary distortion f(θ) + §18 pancaking g(θ) (rope.rs
+ * boundary_distortion — compressed boundary σ_eff = σ·g·f, reference
+ * mapping ŝ = s/(g·f), flux-conservation boost 1/f), and the §14/§17
+ * front-side sheath shell (fixed-k or Farris–Russell standoff, shaded by
+ * the Rankine–Hugoniot X(M)). The LIVE inputs ride the probes argument of
+ * draw(): per-rope rearC comes from the kernel's fr_rear_c_at each frame
+ * (oracle-direct — the follower's squeeze on its leader is never
+ * re-derived here), apexVKms/upstreamKms feed the wake-conditioned shock
+ * Mach. X(M)/FR(M)/V_MS are pure mirrors below, pinned against the
+ * kernel's fr_compression_x / fr_standoff_fr / fr_v_ms_kms probes by
+ * tests/flux-rope-kernel-smoke.mjs — if the kernel formulas move, that
+ * gate fails until this file is re-synced.
+ *
+ * Remaining display-only omissions: per-member lobes in the overlay
+ * spaghetti (axis circles only), and the sheath's OU Bz texture (the
+ * shell is drawn as compressed-pileup glow, not a field realization).
+ * §16 wake KINEMATICS are honored — the page passes each
  * rope's EFFECTIVE w/Γ from the kernel getters (fr_rope_w_eff_kms /
  * fr_rope_gamma_eff), so follower positions match the kernel; member
  * spaghetti uses the fit-level effective w with each member's own v0/Γ —
@@ -84,6 +99,26 @@ export function sigmaApexKm(sigma1AuAu, dKm, nSigma) {
     return sigma1AuAu * AU_KM * Math.pow(dKm / AU_KM, nSigma);
 }
 
+// ── Shock mirrors (spec §14/§17 — pinned against fr_compression_x /
+//    fr_standoff_fr / fr_v_ms_kms by tests/flux-rope-kernel-smoke.mjs) ────────
+
+/** Fast-magnetosonic speed [km/s] (kinematics::V_MS_KMS mirror). */
+export const V_MS_KMS = 70;
+
+/** Rankine–Hugoniot compression X(M), γ = 5/3, → 1 at M ≤ 1, capped at 4. */
+export function compressionX(mach) {
+    if (!(mach > 1)) return 1;
+    const m2 = mach * mach;
+    return Math.min((8 / 3) * m2 / ((2 / 3) * m2 + 2), 4);
+}
+
+/** Farris–Russell standoff ratio FR(M), γ = 5/3, capped at 3 toward M → 1⁺. */
+export function standoffFr(mach) {
+    if (!(mach > 1)) return 3;
+    const m2 = mach * mach;
+    return Math.min(((2 / 3) * m2 + 2) / ((8 / 3) * (m2 - 1)), 3);
+}
+
 const VERT = `#version 300 es
 in vec2 a_pos;
 void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
@@ -111,6 +146,14 @@ uniform float u_bAxis[${MAX_VIEW_ROPES}];
 uniform float u_hand[${MAX_VIEW_ROPES}];
 uniform float u_profile[${MAX_VIEW_ROPES}];
 uniform float u_bScale;
+// §15/§16/§18 boundary distortion + §14/§17 sheath, per rope (JS-cooked
+// per frame from kernel probes; all zeros/ones = the legacy circular view).
+uniform float u_frontC[${MAX_VIEW_ROPES}];   // static §15 lobe [0, 0.6]
+uniform float u_rearC[${MAX_VIEW_ROPES}];    // LIVE §16 squeeze via fr_rear_c_at [0, 0.75]
+uniform float u_pancakeA[${MAX_VIEW_ROPES}]; // §18 aspect (1 = circular)
+uniform float u_shK[${MAX_VIEW_ROPES}];      // §14 fixed-k thickness (0 = off/η mode)
+uniform float u_shEta[${MAX_VIEW_ROPES}];    // §17 η·FR(M), precooked (0 = off/k mode)
+uniform float u_shX[${MAX_VIEW_ROPES}];      // §14 X(M) compression — sheath brightness
 
 float j0poly(float x) {
     float y = (x / 3.0) * (x / 3.0);
@@ -121,11 +164,21 @@ float j1poly(float x) {
     return x * (0.5 + y*(-0.56249985 + y*(0.21093573 + y*(-0.03954289 + y*(0.00443319 + y*(-0.00031761 + y*0.00001109))))));
 }
 
-// Signed distance to rope r at world point p (negative = inside), plus the
-// local (psi, s, sig) needed for the field sample.
-float ropeSdf(int r, vec3 p, out float psi, out float s, out float sig) {
+// Signed distance to rope r's outermost renderable boundary at world point
+// p (negative = inside it), plus the local (psi, s, sig) for the field
+// sample and the distortion/sheath state. Mirrors rope.rs
+// boundary_distortion + sheath_at_dyn (kernel = oracle):
+//   f(θ) = 1 − frontC·(1+cosθ)/2 − rearC·(1−cosθ)/2   (odd lobes)
+//   g(θ) = 1/√(A·cos²θ + sin²θ/A)                      (§18, even)
+//   σ_eff = σ·g·f, field maps via ŝ = s/(g·f), boost 1/f
+//   shell: σ_eff ≤ s < outer, FRONT side only (|p| > |axis point|), where
+//   outer = σ_eff·(1+k)  or  σ_eff + η·FR(M)·√(σ_eff·d/2).
+// shape/boost feed the field sample; shellFrac ∈ (0,1] is the fractional
+// depth into the sheath (1 = at the shock front), 0 = not in the shell.
+float ropeSdf(int r, vec3 p, out float psi, out float s, out float sig,
+              out float shape, out float boost, out float shellFrac) {
     float dAu = u_dAu[r];
-    psi = 0.0; s = 1e9; sig = 0.0;
+    psi = 0.0; s = 1e9; sig = 0.0; shape = 1.0; boost = 1.0; shellFrac = 0.0;
     if (dAu <= 0.0) return 1e9;
     float halfD = 0.5 * dAu;
     float u = dot(p, u_eDir[r]);
@@ -139,12 +192,55 @@ float ropeSdf(int r, vec3 p, out float psi, out float s, out float sig) {
     s = length(vec2(rho - halfD, h));
     float sinHalf = sin(0.5 * psi);
     sig = u_sigApexAu[r] * sinHalf * sinHalf;
-    return s - sig;
+
+    vec3 tHat = sin(psi) * u_eDir[r] + cos(psi) * u_eP[r];
+    vec3 nPt = u_eDir[r] * (halfD + halfD * qu / rho) + u_eP[r] * (halfD * w / rho);
+
+    if ((u_frontC[r] > 0.0 || u_rearC[r] > 0.0 || u_pancakeA[r] > 1.0) && s > 1e-6) {
+        float nn = length(nPt);
+        if (nn > 1e-6) {
+            vec3 uHat = nPt / nn;
+            vec3 o = uHat - dot(uHat, tHat) * tHat;
+            float on = length(o);
+            if (on > 1e-6) {
+                float cosTh = dot((p - nPt) / s, o / on);
+                float f = 1.0 - u_frontC[r] * (1.0 + cosTh) * 0.5
+                              - u_rearC[r] * (1.0 - cosTh) * 0.5;
+                f = max(f, 0.05);
+                float g = 1.0;
+                if (u_pancakeA[r] > 1.0) {
+                    float c2 = cosTh * cosTh;
+                    g = inversesqrt(u_pancakeA[r] * c2 + (1.0 - c2) / u_pancakeA[r]);
+                }
+                shape = g * f;
+                boost = 1.0 / f;
+            }
+        }
+    }
+    float sigEff = sig * shape;
+
+    // Sheath shell (shock on: k or η·FR precooked non-zero), front side only.
+    float outer = sigEff;
+    if (u_shK[r] > 0.0) {
+        outer = sigEff * (1.0 + u_shK[r]);
+    } else if (u_shEta[r] > 0.0) {
+        outer = sigEff + u_shEta[r] * sqrt(max(sigEff, 0.0) * halfD);
+    }
+    if (outer > sigEff && dot(p, p) > dot(nPt, nPt)) {
+        if (s >= sigEff && s < outer) {
+            shellFrac = (s - sigEff) / max(outer - sigEff, 1e-9);
+        }
+        return s - outer;
+    }
+    return s - sigEff;
 }
 
 // Local Bz (world-z component of the rope field) at p for rope r — the
-// color driver. Mirrors rope.rs field_at.
-float ropeBz(int r, vec3 p, float psi, float s, float sig) {
+// color driver. Mirrors rope.rs field_at_dyn: the distorted boundary maps
+// onto the reference profile via ŝ = s/shape with a 1/f flux-conservation
+// boost (a §16-squeezed rear visibly strengthens — compression is field).
+float ropeBz(int r, vec3 p, float psi, float s, float sig,
+             float shape, float boost) {
     float dAu = u_dAu[r];
     float halfD = 0.5 * dAu;
     float u = dot(p, u_eDir[r]);
@@ -155,16 +251,18 @@ float ropeBz(int r, vec3 p, float psi, float s, float sig) {
     vec3 nPt = u_eDir[r] * (halfD + halfD * qu / rho) + u_eP[r] * (halfD * w / rho);
     vec3 rHat = (p - nPt) / max(s, 1e-9);
     vec3 phiHat = cross(tHat, rHat);
+    float sRef = s / max(shape, 1e-6);
+    float bAx = u_bAxis[r] * boost;
     float bAxial; float bPol;
     if (u_profile[r] < 0.5) {
-        float ts = u_tPerAu[r] * s;
+        float ts = u_tPerAu[r] * sRef;
         float denom = 1.0 + ts * ts;
-        bAxial = u_bAxis[r] / denom;
-        bPol = u_hand[r] * u_bAxis[r] * ts / denom;
+        bAxial = bAx / denom;
+        bPol = u_hand[r] * bAx * ts / denom;
     } else {
         float alpha = 2.4048255 / max(sig, 1e-6);
-        bAxial = u_bAxis[r] * j0poly(alpha * s);
-        bPol = u_hand[r] * u_bAxis[r] * j1poly(alpha * s);
+        bAxial = bAx * j0poly(alpha * sRef);
+        bPol = u_hand[r] * bAx * j1poly(alpha * sRef);
     }
     return bAxial * tHat.z + bPol * phiHat.z;
 }
@@ -201,40 +299,63 @@ void main() {
         }
     }
 
-    // Raymarch the train: translucent shells, up to 3 composited hits.
+    // Raymarch the train: translucent shells, up to 4 composited hits
+    // (a shocked rope is TWO surfaces now — sheath, then the rope inside).
     float t = 0.02;
     float alpha = 0.0;
     vec3 acc = vec3(0.0);
     int hits = 0;
     float firstHitT = 1e9;
     for (int i = 0; i < 96; i++) {
-        if (t > 6.0 || hits >= 3 || alpha > 0.85) break;
+        if (t > 6.0 || hits >= 4 || alpha > 0.85) break;
         vec3 p = ro + rd * t;
         float dMin = 1e9;
         int rHit = -1;
-        float psiH; float sH; float sigH;
+        float psiH; float sH; float sigH; float shapeH; float boostH; float shellH;
         for (int r = 0; r < ${MAX_VIEW_ROPES}; r++) {
             if (r >= u_ropeCount) break;
-            float psi_; float s_; float sig_;
-            float d = ropeSdf(r, p, psi_, s_, sig_);
-            if (d < dMin) { dMin = d; rHit = r; psiH = psi_; sH = s_; sigH = sig_; }
+            float psi_; float s_; float sig_; float shp_; float bst_; float shl_;
+            float d = ropeSdf(r, p, psi_, s_, sig_, shp_, bst_, shl_);
+            if (d < dMin) {
+                dMin = d; rHit = r; psiH = psi_; sH = s_; sigH = sig_;
+                shapeH = shp_; boostH = bst_; shellH = shl_;
+            }
         }
         if (dMin < 0.002) {
             firstHitT = min(firstHitT, t);
-            float bz = ropeBz(rHit, p, psiH, sH, max(sigH, 1e-6));
-            float mag = clamp(abs(bz) / max(u_bScale, 1e-6), 0.0, 1.2);
-            vec3 south = vec3(0.95, 0.30, 0.18);
-            vec3 north = vec3(0.15, 0.65, 0.95);
-            vec3 fieldCol = (bz < 0.0 ? south : north) * (0.30 + 0.70 * mag);
-            // Rim brightening from the SDF gradient magnitude proxy.
-            float rim = smoothstep(0.85, 1.0, sH / max(sigH, 1e-6));
-            fieldCol += vec3(0.55, 0.7, 0.9) * rim * 0.35;
-            float a = 0.42 * (1.0 - alpha);
-            acc += fieldCol * a;
-            alpha += a;
-            hits++;
-            // Step THROUGH the shell to catch the far side / next rope.
-            t += max(0.06, sigH * 0.7);
+            float sigEff = max(sigH * shapeH, 1e-6);
+            if (sH >= sigEff) {
+                // §14/§17 SHEATH: the SHOCK FRONT is the bright surface (rim
+                // at the outer edge, brightness ∝ X(M)); the shell interior
+                // stays faint so the rope's field colors read through it.
+                float xn = clamp((u_shX[rHit] - 1.0) / 3.0, 0.0, 1.0);
+                float rim = smoothstep(0.60, 0.97, shellH);
+                vec3 shCol = mix(vec3(0.75, 0.48, 0.28), vec3(1.0, 0.93, 0.78), rim)
+                    * (0.30 + 0.70 * xn);
+                float a = (0.045 + 0.075 * xn + 0.24 * rim) * (1.0 - alpha);
+                acc += shCol * a;
+                alpha += a;
+                hits++;
+                // Step through the shell toward the rope surface beneath.
+                t += max(0.02, (sH - sigEff) * 0.9);
+            } else {
+                float bz = ropeBz(rHit, p, psiH, sH, max(sigH, 1e-6), shapeH, boostH);
+                float mag = clamp(abs(bz) / max(u_bScale, 1e-6), 0.0, 1.2);
+                vec3 south = vec3(0.95, 0.30, 0.18);
+                vec3 north = vec3(0.15, 0.65, 0.95);
+                vec3 fieldCol = (bz < 0.0 ? south : north) * (0.30 + 0.70 * mag);
+                // Rim brightening against the DISTORTED boundary, plus a warm
+                // squeeze glow where a lobe is actively compressing (boost>1).
+                float rim = smoothstep(0.85, 1.0, sH / sigEff);
+                fieldCol += vec3(0.55, 0.7, 0.9) * rim * 0.35;
+                fieldCol += vec3(1.0, 0.62, 0.25) * clamp(boostH - 1.0, 0.0, 1.5) * 0.30;
+                float a = 0.42 * (1.0 - alpha);
+                acc += fieldCol * a;
+                alpha += a;
+                hits++;
+                // Step THROUGH the rope to catch the far side / next rope.
+                t += max(0.06, sigEff * 0.7);
+            }
         } else {
             t += max(dMin * 0.8, 0.004);
         }
@@ -315,7 +436,8 @@ export class HeliosphereView {
         for (const name of ['u_res', 'u_camPos', 'u_camRight', 'u_camUp', 'u_camFwd',
             'u_tanHalfFov', 'u_ropeCount', 'u_bScale',
             'u_eDir', 'u_eP', 'u_nHat', 'u_dAu', 'u_sigApexAu', 'u_tPerAu',
-            'u_bAxis', 'u_hand', 'u_profile']) {
+            'u_bAxis', 'u_hand', 'u_profile',
+            'u_frontC', 'u_rearC', 'u_pancakeA', 'u_shK', 'u_shEta', 'u_shX']) {
             this.u[name] = gl.getUniformLocation(prog, name);
         }
     }
@@ -416,7 +538,11 @@ export class HeliosphereView {
 
     /**
      * Render at t seconds after the reference epoch. `probes` carries kernel
-     * truth PER ROPE: [{ apexKm, sigmaApexKm }] aligned with setRopes order.
+     * truth PER ROPE, aligned with setRopes order:
+     *   { apexKm, sigmaApexKm,          — position + size (required)
+     *     rearC?,                       — LIVE §16 squeeze (fr_rear_c_at)
+     *     apexVKms?, upstreamKms? }     — wake-conditioned shock Mach inputs
+     * The optional fields default to the legacy circular, sheathless view.
      */
     draw(tS, probes) {
         this.resize();
@@ -428,6 +554,9 @@ export class HeliosphereView {
             const eDir = new Float32Array(3 * N), eP = new Float32Array(3 * N), nHat = new Float32Array(3 * N);
             const dAu = new Float32Array(N), sig = new Float32Array(N), tPer = new Float32Array(N);
             const bAx = new Float32Array(N), hand = new Float32Array(N), prof = new Float32Array(N);
+            const frontC = new Float32Array(N), rearC = new Float32Array(N);
+            const pancake = new Float32Array(N).fill(1), shX = new Float32Array(N).fill(1);
+            const shK = new Float32Array(N), shEta = new Float32Array(N);
             let bScale = 1;
             this.ropes.forEach((rope, r) => {
                 const pr = probes[r] || { apexKm: 0, sigmaApexKm: 0 };
@@ -443,6 +572,20 @@ export class HeliosphereView {
                 hand[r] = rope.handedness;
                 prof[r] = rope.profile === 'lundquist' ? 1 : 0;
                 if (d > 0) bScale = Math.max(bScale, bAx[r]);
+                // §15/§16/§18 boundary distortion (clamps mirror the kernel's).
+                frontC[r] = Math.min(Math.max(rope.frontC ?? 0, 0), 0.6);
+                rearC[r] = launched ? Math.min(Math.max(pr.rearC ?? 0, 0), 0.75) : 0;
+                pancake[r] = Math.max(rope.pancakeA ?? 1, 1);
+                // §14/§17 sheath: exists only with δ > 0, a thickness model,
+                // and a super-magnetosonic apex against its (wake) upstream.
+                const deltaNt = rope.sheathDeltaNt ?? 0;
+                const mach = launched && Number.isFinite(pr.apexVKms) && Number.isFinite(pr.upstreamKms)
+                    ? (pr.apexVKms - pr.upstreamKms) / V_MS_KMS : 0;
+                if (deltaNt > 0 && mach > 1) {
+                    if ((rope.sheathEta ?? 0) > 0) shEta[r] = rope.sheathEta * standoffFr(mach);
+                    else if ((rope.sheathK ?? 0) > 0) shK[r] = rope.sheathK;
+                    if (shEta[r] > 0 || shK[r] > 0) shX[r] = compressionX(mach);
+                }
             });
             gl.uniform2f(this.u.u_res, this.glCanvas.width, this.glCanvas.height);
             gl.uniform3fv(this.u.u_camPos, cam.pos);
@@ -461,6 +604,12 @@ export class HeliosphereView {
             gl.uniform1fv(this.u.u_bAxis, bAx);
             gl.uniform1fv(this.u.u_hand, hand);
             gl.uniform1fv(this.u.u_profile, prof);
+            gl.uniform1fv(this.u.u_frontC, frontC);
+            gl.uniform1fv(this.u.u_rearC, rearC);
+            gl.uniform1fv(this.u.u_pancakeA, pancake);
+            gl.uniform1fv(this.u.u_shK, shK);
+            gl.uniform1fv(this.u.u_shEta, shEta);
+            gl.uniform1fv(this.u.u_shX, shX);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
         }
         this._drawOverlay(tS, cam);

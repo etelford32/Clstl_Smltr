@@ -176,6 +176,10 @@ export async function loadFluxRopeKernel(source) {
         upstreamKmsAt(i, tS) { return x.fr_upstream_kms_at(i, tS); },
         /** Fast-magnetosonic speed V_MS [km/s] (spec §14 constant). */
         vMsKms() { return x.fr_v_ms_kms(); },
+        /** Rankine–Hugoniot compression X(M) (spec §14) — pure probe. */
+        compressionX(mach) { return x.fr_compression_x(mach); },
+        /** Farris–Russell standoff ratio FR(M) (spec §17) — pure probe. */
+        standoffFr(mach) { return x.fr_standoff_fr(mach); },
 
         // Kinematics probes (page HUD + GLSL uniforms). t = seconds after the
         // reference epoch; index-free forms probe rope 0.

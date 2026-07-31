@@ -291,6 +291,28 @@ the same crate.
     (tests/flux-rope-validation.mjs); /api/cme/skill exposes the compact
     flux-rope subset; flux-rope-live.html renders the per-flare
     VALIDATION LEDGER (locked vs truth, skill chips vs the baselines).
+  ✅ compounding made VISIBLE (2026-07-30): the GLSL heliosphere view
+  renders the interaction physics it previously listed as display-only
+  omissions — the §15/§16 two-lobe boundary distortion + §18 pancaking
+  (verbatim mirror of rope.rs boundary_distortion: σ_eff = σ·g·f,
+  ŝ = s/(g·f), 1/f boost, with the LIVE rear_c(t) squeeze arriving
+  through fr_rear_c_at every frame) and the §14/§17 front-side sheath
+  shell (fixed-k or η·FR(M) standoff; the shock front draws as a hot rim
+  shaded by X(M), the shell interior stays faint so the rope's Bz colors
+  read through). Both pages feed the wake-conditioned Mach inputs
+  (rearC/apexVKms/upstreamKms) via the probes argument — the view stays
+  kernel-call-free, and its X/FR/V_MS mirrors are pinned against the new
+  pure ABI probes fr_compression_x / fr_standoff_fr by the kernel smoke.
+  flux-rope-live.html additionally gains the INTERACTION MAP
+  (drawTrainMap in js/flux-rope/charts.js: heliocentric distance vs time,
+  nose→tail ribbons per rope, §16 rear-squeeze glow on the leader's tail,
+  first nose-to-tail contact markers, now-line) and the LIVE §16 EQUATION
+  readout (gap/q/M_rel/X(M_rel)/rear_c and the wake-shock Mach evaluated
+  at the cursor — the real numbers inside the real equations, re-rendered
+  as the clock runs; equation cards are nowrap so the panel height never
+  oscillates mid-playback). The live-page browser gate now pre-seeds
+  cookie consent (the sun-smoke idiom) — the scrub bar sits within px of
+  the banner's edge and the click hit-test flaked without it.
   Remaining Phase 5: EEGGL/SWMF comparison runs, server-side API build;
   ledger-driven fits of ε / wake_refresh_h / §21 knobs once events
   accumulate.
