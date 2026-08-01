@@ -26,7 +26,7 @@ This is **parkersphysics.com** — a physics-first space weather forecasting pla
 │    ...           │   │                                            │
 └──────────────────┼───┼────────────────────────────────────────────┘
                    │   │
-                   │   └──── Supabase JS client (CDN) ──┐
+                   │   └── Supabase JS (self-hosted) ───┐
                    │                                     │
                    ▼                                     ▼
 ┌──────────────────────────────┐    ┌────────────────────────────────┐
@@ -223,7 +223,7 @@ Always ask before:
 - Consolidating the three `redeem_invite` overloads.
 - Disabling `SECURITY DEFINER` on any function called from a signed-out page.
 - Changing the `*.html`-at-root layout to a folder structure.
-- Switching from CDN-loaded Supabase JS to a bundled import.
+- Switching from CDN-loaded Supabase JS to a bundled import. *(Resolved 2026-08-01 with the author's approval: the client is now self-hosted — unmodified official UMD build in `js/vendor/supabase-js-<v>-umd.js`, jsdelivr CDN retained as fallback. See `js/vendor/README-supabase-js.md`. Still ask before changing the loading strategy again.)*
 - Moving the `http` extension out of `public`.
 - Deleting any file under `swmf/` or `dsmc/` — these are physics pipeline assets that took weeks to wire up.
 - Adding a JS framework or bundler.
