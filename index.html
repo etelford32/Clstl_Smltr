@@ -290,23 +290,25 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
 
 <!-- ── S1 · SKY CONSOLE — the answer layer ────────────────────────────────
      2026-08 redesign: the hero IS the product now. js/home-sky-console.js
-     renders a personal space-weather risk console (My Sky / Aurora / Risk
-     board / Sun / Satellites) over the cinematic live-magnetosphere canvas
-     (js/hero-space-weather.js, kept from the 2026-07 hero as the backdrop).
-     Both are driven by the page's single SpaceWeatherFeed — see the wiring
-     module at the bottom of <body>. The H1 is the 2026-07 home_headline
-     experiment WINNER — do not reword it without a new experiment. -->
-<section id="hero" aria-label="Your sky's space weather, live">
+     renders a personal conditions console — Air quality (default) / Major
+     events / Temperature / Space weather / Aurora (secondary by design) —
+     over the cinematic live-magnetosphere canvas (js/hero-space-weather.js,
+     kept from the 2026-07 hero as the backdrop). Space data comes from the
+     page's single SpaceWeatherFeed; Earth data from js/home-conditions.js
+     (per-location Open-Meteo). See the wiring module at the bottom of
+     <body>. The H1 is the 2026-07 home_headline experiment WINNER — do not
+     reword it without a new experiment. -->
+<section id="hero" aria-label="Your sky, live: air, temperature, major events">
   <canvas id="hero-canvas" aria-hidden="true"></canvas>
   <div class="hero-inner">
     <div class="hero-top">
       <div class="hero-badge" role="status" aria-live="polite">Live NASA &amp; NOAA Data — Updated Every 60 Seconds</div>
       <h1 class="hero-h1">Watch space weather happen. Live.</h1>
-      <p class="hero-sub">This is what the Sun is doing to <em>your</em> sky right now — aurora odds for your exact
-        location, the NOAA storm scales, satellite drag and GPS risk — from the same physics engine we validated
-        against the May 2024 G5 superstorm.</p>
+      <p class="hero-sub">One console for <em>your</em> sky: the air you're breathing right now, where your temperature
+        is heading and why, and the major events coming your way this week — thunderstorms and heat spikes to inbound
+        solar storms — from the same physics engine we validated against the May 2024 G5 superstorm.</p>
     </div>
-    <div id="sky-console-host" aria-label="Personal space weather console"></div>
+    <div id="sky-console-host" aria-label="Personal sky conditions console"></div>
     <div class="hero-cta" role="group" aria-label="Primary actions">
       <a href="space-weather.html" class="btn-primary" data-funnel-cta="hero_magnetosphere" aria-label="Open the full space weather dashboard">Open the full dashboard <span aria-hidden="true">→</span></a>
       <a href="#aurora" class="btn-secondary" data-funnel-cta="hero_alerts" aria-label="Get free aurora alerts">Get free aurora alerts <span aria-hidden="true">↓</span></a>
