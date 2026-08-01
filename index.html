@@ -98,6 +98,23 @@ img{display:block}
 .hero-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(1.5rem,4vw,2.5rem);letter-spacing:.04em;line-height:1.14;margin-bottom:12px;text-transform:uppercase;background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 16px rgba(60,160,255,.4))}
 .hero-sub{font-size:clamp(.88rem,2vw,1rem);color:var(--fg-3);line-height:1.65;max-width:640px;margin:0 auto}
 .hero-sub em{font-style:normal;color:var(--fg-1)}
+.hero-values{display:flex;flex-wrap:wrap;gap:8px 10px;justify-content:center;margin:14px auto 0;max-width:720px}
+.hero-values span{display:inline-flex;align-items:center;gap:8px;font-size:.78rem;color:var(--fg-2);
+  padding:6px 14px;border-radius:999px;background:rgba(13,6,38,.6);border:1px solid rgba(154,133,255,.2)}
+.hero-values span::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--dot,#9d3aff);flex-shrink:0}
+
+/* ── LIVE DEMO EMBEDS (EarthView + flux-rope stage) ──────────────────────── */
+.demo-frame{position:relative;max-width:960px;margin:0 auto;aspect-ratio:16/9;border-radius:14px;overflow:hidden;
+  border:1px solid rgba(0,198,255,.25);background:#05030f}
+.demo-frame iframe{position:absolute;left:0;width:100%;border:0;opacity:0;transition:opacity 1.2s ease;pointer-events:none}
+.demo-frame .demo-open{position:absolute;right:14px;bottom:14px;z-index:2;display:inline-flex;align-items:center;gap:8px;
+  padding:9px 18px;border-radius:999px;background:rgba(2,0,10,.75);border:1px solid rgba(143,240,255,.45);
+  color:#8ff0ff;font-size:.8rem;font-weight:650;backdrop-filter:blur(6px);transition:background .2s,transform .15s}
+.demo-frame .demo-open:hover{background:rgba(2,0,10,.95);transform:translateY(-2px)}
+.demo-live-tag{position:absolute;left:14px;top:12px;z-index:2;display:inline-flex;align-items:center;gap:7px;
+  font-family:var(--font-mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:rgba(245,240,255,.75);
+  background:rgba(2,0,10,.6);padding:4px 10px;border-radius:4px;border:1px solid rgba(154,133,255,.25);backdrop-filter:blur(4px)}
+.demo-live-tag::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 6px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite}
 #sky-console-host{min-height:540px}
 .hero-cta{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:24px}
 .btn-primary{padding:13px 30px;background:var(--grad-uv-pink);border-radius:8px;color:#fff;font-family:var(--font-display);font-weight:700;font-size:.88rem;letter-spacing:.12em;text-transform:uppercase;transition:filter .2s,transform .15s,box-shadow .25s;border:none;cursor:pointer;box-shadow:var(--glow-uv-md)}
@@ -148,8 +165,8 @@ img{display:block}
 .catalog-strip .all{color:var(--uv-300);font-weight:600;border-bottom:1px solid rgba(183,101,255,.35);padding-bottom:1px}
 .catalog-strip .all::before{display:none}
 
-/* ── ATTRACT EMBED ────────────────────────────────────────────────────────── */
-.sw-attract-section{padding:56px 20px 64px;text-align:center;background:#03010e}
+/* ── ATTRACT EMBED + DEMO SECTIONS ────────────────────────────────────────── */
+.sw-attract-section,.demo-section{padding:56px 20px 64px;text-align:center;background:#03010e}
 
 /* ── VALIDATION — one compact credibility band ────────────────────────────── */
 #validation{background:linear-gradient(180deg,rgba(91,30,255,.04),rgba(255,31,156,.03));border-top:1px solid rgba(157,58,255,.18);border-bottom:1px solid rgba(157,58,255,.18);padding:44px 24px}
@@ -304,9 +321,13 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
     <div class="hero-top">
       <div class="hero-badge" role="status" aria-live="polite">Live NASA &amp; NOAA Data — Updated Every 60 Seconds</div>
       <h1 class="hero-h1">Watch space weather happen. Live.</h1>
-      <p class="hero-sub">One console for <em>your</em> sky: the air you're breathing right now, where your temperature
-        is heading and why, and the major events coming your way this week — thunderstorms and heat spikes to inbound
-        solar storms — from the same physics engine we validated against the May 2024 G5 superstorm.</p>
+      <p class="hero-sub">One console for <em>your</em> sky — live, local, and physics all the way down.</p>
+      <div class="hero-values" aria-label="What you get">
+        <span style="--dot:#2eff9e">Breathe or stay in — AQI now + week ahead</span>
+        <span style="--dot:#ff5cb8">Major events 7 days out, storms to solar</span>
+        <span style="--dot:#ff8c5a">Why your temperature does what it does</span>
+        <span style="--dot:#8ff0ff">Forecasts validated on the May 2024 G5</span>
+      </div>
     </div>
     <div id="sky-console-host" aria-label="Personal sky conditions console"></div>
     <div class="hero-cta" role="group" aria-label="Primary actions">
@@ -322,7 +343,61 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
      "real pipelines, real cadence." No CTA. -->
 <div class="sw-ticker" data-sw-ticker></div>
 
-<!-- ── S3 · AURORACLE CAPTURE — the consumer conversion ───────────────────
+<!-- ── S3 · EARTHVIEW DEMO — see the storms as they happen ────────────────
+     The real earth.html in a lazy, cropped, non-interactive iframe (52px
+     top crop hides the embedded nav; earth.html requests geolocation only
+     on user action, so embedding never triggers a permission prompt). Not
+     a video, not a poster — the live page on live data. -->
+<section id="earth-demo" class="demo-section" aria-label="EarthView live demo">
+  <h2 style="font-size:clamp(1.3rem,3.4vw,2rem);color:#e8f4ff;margin-bottom:10px">
+    See the storms as they happen</h2>
+  <p style="max-width:620px;margin:0 auto 26px;color:#8b94ad;font-size:.95rem;line-height:1.7">
+    This is <b style="color:#cdd8f0">EarthView</b> — live radar, hurricane tracks, NWS severe alerts and tonight's
+    aurora on one 3D globe. It's not a video. It's the actual page, running on live data, right now.</p>
+  <div class="demo-frame">
+    <span class="demo-live-tag">Live · earth.html</span>
+    <iframe src="/earth.html" loading="lazy" title="EarthView live globe" tabindex="-1"
+        style="top:-52px;height:calc(100% + 52px)" onload="this.style.opacity=1"></iframe>
+    <a class="demo-open" href="earth.html" data-funnel-cta="earth_demo_open">Fly to your sky <span aria-hidden="true">→</span></a>
+  </div>
+</section>
+
+<!-- ── S4 · FLUX-ROPE BRAG (attract loop, S3/D4 plan decision #6) ─────────
+     The Stage's cinematic — live CME trains from the validated flux-rope
+     engine — doubles as the operator-credibility section. Lazy iframe;
+     fades in on the preview's 'preview-ready' post. Keep the
+     .sw-attract-section / iframe.sw-attract-frame / request-access
+     contract (tests/space-weather-attract.spec.js pins it). -->
+<section class="sw-attract-section" aria-label="Live flux-rope CME analyzer">
+  <div class="section-label" style="text-align:center">For the storm nerds — and the people who fly things</div>
+  <h2 style="font-size:clamp(1.3rem,3.4vw,2rem);color:#e8f4ff;margin-bottom:10px">
+    A flux-rope analyzer, running in public</h2>
+  <p style="max-width:660px;margin:0 auto 26px;color:#8b94ad;font-size:.95rem;line-height:1.7">
+    Every Earth-directed CME becomes a live physics ensemble: magnetic flux ropes launched from real NASA DONKI
+    events, CME-on-CME interaction modeled in transit, arrival time and Bz forecast with uncertainty drawn as
+    geometry — not error bars. Hindcast-validated on the 2015 St.&nbsp;Patrick's and 2024 Gannon superstorms, and
+    re-scored against L1 truth after every event. Where will it be when it reaches you?</p>
+  <div class="demo-frame">
+    <span class="demo-live-tag">Live · flux-rope ensemble</span>
+    <iframe class="sw-attract-frame" src="/space-weather.html?preview=1" loading="lazy"
+        title="Live Sun-to-Earth corridor" tabindex="-1"
+        style="top:0;height:100%"></iframe>
+    <a class="demo-open" href="flux-rope-live.html" data-funnel-cta="attract_fluxrope">Watch it live <span aria-hidden="true">→</span></a>
+  </div>
+  <div style="margin-top:20px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+    <a href="flux-rope-live.html" class="btn-primary" data-funnel-cta="attract_dashboard">Open the Compounding Watch →</a>
+    <a href="request-access.html" class="btn-secondary" data-funnel-cta="attract_access">Request operator access</a>
+  </div>
+</section>
+<script>
+window.addEventListener('message', (e) => {
+    if (e.data?.type === 'preview-ready') {
+        document.querySelectorAll('.sw-attract-frame').forEach((f) => { f.style.opacity = '1'; });
+    }
+});
+</script>
+
+<!-- ── S5 · AURORACLE CAPTURE — the consumer conversion ───────────────────
      Anonymous, zero-friction email capture. Band styles are injected by
      js/aurora-capture.js; keep the [data-aurora-capture] form contract and
      data-source="home" (funnel continuity). See AURORA_ALERT_CAPTURE_SPEC.md. -->
@@ -349,7 +424,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
   initAuroraCapture();
 </script>
 
-<!-- ── S4 · DEPTH LADDER — the strategic core, compressed ─────────────────
+<!-- ── S6 · DEPTH LADDER — the strategic core, compressed ─────────────────
      One engine, widening apertures — same ladder as before the console
      redesign, now one readable row per step (thumbs and live previews
      retired for compression; the console above IS the live preview). -->
@@ -421,34 +496,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
   </div>
 </section>
 
-<!-- ── S5 · ATTRACT LOOP (S3/D4, plan decision #6): the Stage's cinematic,
-     live, at current conditions. Lazy iframe; fades in on the preview's
-     'preview-ready' post. -->
-<section class="sw-attract-section" aria-label="Live Sun-to-Earth stage preview">
-  <h2 style="font-size:clamp(1.3rem,3.4vw,2rem);color:#e8f4ff;margin-bottom:10px">
-    The storm, on one stage</h2>
-  <p style="max-width:620px;margin:0 auto 26px;color:#8b94ad;font-size:.95rem;line-height:1.7">
-    The live Sun→Earth corridor: real CME forecasts from our validated flux-rope engine,
-    uncertainty drawn as geometry — not error bars. Where will it be when it reaches you?</p>
-  <div style="position:relative;max-width:960px;margin:0 auto;aspect-ratio:16/9;border-radius:14px;overflow:hidden;border:1px solid rgba(0,198,255,.25);background:#05030f">
-    <iframe class="sw-attract-frame" src="/space-weather.html?preview=1" loading="lazy"
-        title="Live Sun-to-Earth corridor" tabindex="-1"
-        style="position:absolute;inset:0;width:100%;height:100%;border:0;opacity:0;transition:opacity 1.4s ease"></iframe>
-  </div>
-  <div style="margin-top:20px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
-    <a href="space-weather.html" class="btn-primary" data-funnel-cta="attract_dashboard">Open the dashboard →</a>
-    <a href="request-access.html" class="btn-secondary" data-funnel-cta="attract_access">Request access</a>
-  </div>
-</section>
-<script>
-window.addEventListener('message', (e) => {
-    if (e.data?.type === 'preview-ready') {
-        document.querySelectorAll('.sw-attract-frame').forEach((f) => { f.style.opacity = '1'; });
-    }
-});
-</script>
-
-<!-- ── S6 · VALIDATION — the numbers behind the engine, one band ──────────── -->
+<!-- ── S7 · VALIDATION — the numbers behind the engine, one band ──────────── -->
 <section id="validation" aria-labelledby="validation-heading">
   <div class="section-inner">
     <h2 class="section-h2 fade-in" id="validation-heading" style="text-align:center;margin-bottom:24px">The numbers behind the engine</h2>
