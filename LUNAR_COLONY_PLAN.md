@@ -150,8 +150,22 @@ grounding, engine-internal seeded moonquakes, conservation ledgers.
 ghosts, storm banner + SEP particle weather, event log, site picker, three
 env modes — Live Sun / Storm drill / Quiet — feed-stale disclosure,
 localStorage save/continue, 0–16× speed). Win: 3 lunar days + 6 crew.
-Gates: `tests/colony-engine.mjs` (8 groups) + `tests/colony-smoke.spec.js`.
-Known v1 limits, deliberately deferred: no pathfinding (straight-line
+Gates: `tests/colony-engine.mjs` (11 groups) + `tests/colony-smoke.spec.js`.
+
+**v1.1 (same day): real ISRU resources + worker AI.**
+The ilmenite chain — FeTiO₃ outcrop nodes → rover haul → Smelter building
+hydrogen-reduces ore into metal (36.8%), oxygen (10.5%), and TiO₂ slag
+(52.7% → materials); the three fractions are exact mass splits and the
+gate closes the balance. Machines now cost materials + METAL (shelters
+stay pure regolith — buildable even when the smelter chain is down).
+Helium-3 patches (sunlit, in-place gram-rate extraction, GAMEPLAY-scaled
+from the real ~10 ppb) fund supply capsules: 50 g → +2 crew, +1 rover,
++150 kg metal after 24 h. Worker AI: auto-retarget to the nearest
+same-kind deposit on depletion, storm auto-shelter with order stash +
+resume on clearance (toggleable; player orders override), idle-worker
+alert chip with cycle-select, golden-angle arrival spread. Save key
+bumped to v2 (v1 previews orphaned).
+Known limits, deliberately deferred: no pathfinding (straight-line
 movement), no fog of war, no minimap, no touch controls, crew arrivals
 ignore capacity, no per-feature telemetry yet.
 

@@ -20,7 +20,8 @@
 import assert from 'node:assert/strict';
 import {
     SOL_HOURS, DOSE, BUILD_CATALOG, UNIT_CATALOG, LANDER, ELECTROLYZER,
-    siteProfiles, createGame, tick, issueOrder, placeBlueprint,
+    SMELTER, HE3,
+    siteProfiles, createGame, tick, issueOrder, placeBlueprint, requestSupply,
     sunFactor, crewSummary, MAP_W, MAP_H,
 } from '../js/colony-engine.js';
 
@@ -91,11 +92,16 @@ function snapshot(state) {
     const carriedIce = s.units.reduce((k, u) => k + (u.carryKind === 'ice' ? u.carrying : 0), 0);
     near(startWater + L.minedWater - L.usedWater - L.electrolyzedWater, r.water, 1e-6,
         'water ledger closes');
-    // Oxygen: start + made − used = store
-    near(startO2 + L.madeOxygen - L.usedOxygen, r.oxygen, 1e-6, 'oxygen ledger closes');
-    // Materials: start + mined − spent = store (carried mass excluded)
+    // Oxygen: start + electrolyzer + smelter − used = store
+    near(startO2 + L.madeOxygen + L.smelterOxygen - L.usedOxygen, r.oxygen, 1e-6, 'oxygen ledger closes');
+    // Materials: start + mined + smelter slag − spent = store (carried mass excluded)
     const carriedReg = s.units.reduce((k, u) => k + (u.carryKind === 'regolith' ? u.carrying : 0), 0);
-    near(startMat + L.minedMaterials - L.usedMaterials, r.materials, 1e-6, 'materials ledger closes');
+    near(startMat + L.minedMaterials + L.madeSlag - L.usedMaterials, r.materials, 1e-6, 'materials ledger closes');
+    // Metal: start + smelted + capsules − spent = store
+    near(300 + L.madeMetal + L.supplyMetal - L.usedMetal, r.metal, 1e-6, 'metal ledger closes');
+    // Ilmenite ore: mined − smelted = stockpile (carried mass excluded)
+    const carriedOre = s.units.reduce((k, u) => k + (u.carryKind === 'ilmenite' ? u.carrying : 0), 0);
+    near(L.minedIlmenite - L.smeltedOre, r.ilmenite, 1e-6, 'ore ledger closes');
     // Energy: start + generated − drawn − wasted = battery
     near(startE + L.genKWh - L.drawKWh - L.wasteKWh, r.energyKWh, 1e-3, 'energy ledger closes');
     // And the loop actually moved mass
@@ -108,10 +114,11 @@ function snapshot(state) {
 // ── 4. Build loop ────────────────────────────────────────────────────────────
 {
     const s = createGame(siteProfiles()[0].id, { seed: 3 });
-    const matBefore = s.resources.materials;
+    const matBefore = s.resources.materials, metBefore = s.resources.metal;
     const bp = placeBlueprint(s, 'solar', s.buildings[0].x + 150, s.buildings[0].y);
     assert.ok(bp.ok);
     assert.equal(s.resources.materials, matBefore - BUILD_CATALOG.solar.materials, 'materials deducted at stake');
+    assert.equal(s.resources.metal, metBefore - BUILD_CATALOG.solar.metal, 'metal deducted at stake');
     const ast = s.units.find(u => u.kind === 'astronaut');
     issueOrder(s, [ast.id], { type: 'build', buildingId: bp.id });
     for (let h = 0; h < 6; h++) tick(s, 1, QUIET);
@@ -125,12 +132,18 @@ function snapshot(state) {
     const poor = createGame(siteProfiles()[0].id, { seed: 3 });
     poor.resources.materials = 10;
     assert.equal(placeBlueprint(poor, 'habitat', 500, 500).ok, false, 'unaffordable refused');
-    ok('build verbs: stake, construct, refuse bad placements');
+    const noMetal = createGame(siteProfiles()[0].id, { seed: 3 });
+    noMetal.resources.metal = 0;
+    noMetal.resources.materials = 1000;   // enough regolith for the shelter check
+    assert.equal(placeBlueprint(noMetal, 'solar', 500, 500).ok, false, 'metal-poor solar refused');
+    assert.equal(placeBlueprint(noMetal, 'shelter', 500, 500).ok, true, 'shelter is pure regolith — no metal needed');
+    ok('build verbs: stake, construct, dual costs, refuse bad placements');
 }
 
 // ── 5. Storm dose: shelter works, career limit grounds ───────────────────────
 {
     const s = createGame(siteProfiles()[0].id, { seed: 5 });
+    s.autoShelter = false;   // this group measures deliberate exposure
     const [a1, a2] = s.units.filter(u => u.kind === 'astronaut');
     // a1 stays outside in the storm; a2 goes to the lander (0.6) — build a
     // shelter for the real factor test below.
@@ -141,6 +154,7 @@ function snapshot(state) {
 
     // Proper shelter: 20× shield factor
     const s2 = createGame(siteProfiles()[0].id, { seed: 5 });
+    s2.autoShelter = false;
     s2.resources.materials = 5000;
     const bp = placeBlueprint(s2, 'shelter', s2.buildings[0].x + 150, s2.buildings[0].y + 120);
     const crew = s2.units.filter(u => u.kind === 'astronaut');
@@ -157,6 +171,7 @@ function snapshot(state) {
 
     // Career limit grounds
     const s3 = createGame(siteProfiles()[0].id, { seed: 5 });
+    s3.autoShelter = false;
     const a = s3.units.find(u => u.kind === 'astronaut');
     issueOrder(s3, [a.id], { type: 'move', x: a.x + 900, y: a.y });
     for (let h = 0; h < 80 && !a.grounded; h++) tick(s3, 1, { ...STORM, sepFlux: 1, sLevel: 5 });
@@ -221,6 +236,119 @@ function snapshot(state) {
     assert.equal(s.alive, false, 'colony dies without life support');
     assert.ok(s.log.some(l => l.kind === 'bad'), 'the log says why');
     ok('loss: life-support collapse ends the run, legibly');
+}
+
+// ── 9. The ilmenite chain: mine → smelt → metal + O₂ + slag ─────────────────
+{
+    // The stoichiometry itself: fractions are exact FeTiO₃ mass splits
+    near(SMELTER.metalFraction + SMELTER.o2Fraction + SMELTER.slagFraction, 1, 1e-12,
+        'smelter fractions sum to exactly 1 — no mass minted or lost');
+
+    const s = createGame(siteProfiles()[0].id, { seed: 17 });
+    s.resources.materials = 5000; s.resources.metal = 2000;
+    const hq = s.buildings[0];
+    // Power first (smelter draws 8 kW), then the smelter
+    const sp1 = placeBlueprint(s, 'solar', hq.x + 150, hq.y - 120);
+    const sp2 = placeBlueprint(s, 'solar', hq.x - 150, hq.y - 120);
+    const sm = placeBlueprint(s, 'smelter', hq.x + 160, hq.y + 110);
+    const crew = s.units.filter(u => u.kind === 'astronaut');
+    issueOrder(s, [crew[0].id], { type: 'build', buildingId: sp1.id });
+    issueOrder(s, [crew[1].id], { type: 'build', buildingId: sp2.id });
+    issueOrder(s, [crew[2].id], { type: 'build', buildingId: sm.id });
+    const ore = s.nodes.find(n => n.kind === 'ilmenite');
+    assert.ok(ore, 'ilmenite outcrop exists');
+    const rovers = s.units.filter(u => u.kind === 'rover').map(u => u.id);
+    issueOrder(s, rovers, { type: 'harvest', nodeId: ore.id });
+
+    for (let h = 0; h < 60; h++) tick(s, 1, QUIET);
+    const L = s.ledger;
+    assert.ok(L.minedIlmenite > 0, 'ore hauled home');
+    assert.ok(L.smeltedOre > 0, 'smelter ran');
+    assert.ok(L.madeMetal > 0, 'metal produced');
+    // Mass balance through the smelter, exactly
+    near(L.madeMetal, L.smeltedOre * SMELTER.metalFraction, 1e-9, 'Fe fraction exact');
+    near(L.smelterOxygen, L.smeltedOre * SMELTER.o2Fraction, 1e-9, 'O₂ fraction exact');
+    near(L.madeSlag, L.smeltedOre * SMELTER.slagFraction, 1e-9, 'slag fraction exact');
+    ok('ilmenite chain: FeTiO₃ mass balance closes through the smelter');
+}
+
+// ── 10. Helium-3 + the supply capsule ────────────────────────────────────────
+{
+    const s = createGame(siteProfiles()[0].id, { seed: 19 });
+    const he3 = s.nodes.find(n => n.kind === 'helium3');
+    assert.ok(he3 && he3.reserveG > 0, '³He patch exists with gram reserves');
+    const rover = s.units.find(u => u.kind === 'rover');
+    issueOrder(s, [rover.id], { type: 'harvest', nodeId: he3.id });
+    const g0 = he3.reserveG;
+    for (let h = 0; h < 15; h++) tick(s, 1, QUIET);   // ~28 g — below the 50 g capsule cost
+    assert.ok(s.resources.helium3 > 0, '³He accrues in-place');
+    near(s.resources.helium3, g0 - he3.reserveG, 1e-9, 'grams mined = grams gone from the patch');
+    near(s.ledger.minedHe3G, s.resources.helium3, 1e-9, 'ledger tracks it');
+
+    // Supply capsule: refuse poor, accept funded, deliver after ETA
+    assert.equal(requestSupply(s).ok, false, 'underfunded request refused');
+    s.resources.helium3 = HE3.supplyCostG + 5;
+    const crewBefore = s.units.filter(u => u.kind === 'astronaut').length;
+    const roversBefore = s.units.filter(u => u.kind === 'rover').length;
+    const metalBefore = s.resources.metal;
+    assert.equal(requestSupply(s).ok, true, 'funded request accepted');
+    near(s.resources.helium3, 5, 1e-9, 'cost deducted');
+    assert.equal(requestSupply(s).ok, false, 'second capsule refused while one is inbound');
+    for (let h = 0; h < HE3.supplyEtaH + 1; h++) tick(s, 1, QUIET);
+    assert.equal(s.units.filter(u => u.kind === 'astronaut').length, crewBefore + HE3.supplyCrew, 'crew landed');
+    assert.equal(s.units.filter(u => u.kind === 'rover').length, roversBefore + HE3.supplyRovers, 'rover landed');
+    assert.ok(s.resources.metal > metalBefore, 'metal cargo delivered');
+    assert.equal(s.stats.capsules, 1, 'capsule counted');
+    ok('helium-3: in-place extraction, supply capsule loop');
+}
+
+// ── 11. Worker AI: auto-retarget + auto-shelter with resume ──────────────────
+{
+    // Auto-retarget: drain a node, the worker moves to the next of its kind
+    const s = createGame(siteProfiles()[0].id, { seed: 23 });
+    const iceNodes = s.nodes.filter(n => n.kind === 'ice');
+    assert.ok(iceNodes.length >= 2, 'multiple ice nodes to retarget across');
+    iceNodes[0].reserveKg = 25;   // one rover load
+    const rover = s.units.find(u => u.kind === 'rover');
+    issueOrder(s, [rover.id], { type: 'harvest', nodeId: iceNodes[0].id });
+    for (let h = 0; h < 40; h++) tick(s, 1, QUIET);
+    assert.equal(rover.order.type, 'harvest', 'still harvesting after the first node died');
+    assert.notEqual(rover.order.nodeId, iceNodes[0].id, 'retargeted to a different node');
+    assert.equal(s.nodes.find(n => n.id === rover.order.nodeId).kind, 'ice', 'same resource kind');
+
+    // Auto-shelter: storm stashes the order, clearance restores it
+    const s2 = createGame(siteProfiles()[0].id, { seed: 23 });
+    const a = s2.units.find(u => u.kind === 'astronaut');
+    const reg = s2.nodes.find(n => n.kind === 'regolith');
+    issueOrder(s2, [a.id], { type: 'harvest', nodeId: reg.id });
+    for (let h = 0; h < 3; h++) tick(s2, 1, QUIET);
+    for (let h = 0; h < 8; h++) tick(s2, 1, STORM);
+    assert.ok(['shelter', 'sheltered'].includes(a.order.type), 'astronaut auto-sheltered in the storm');
+    assert.ok(a.autoSheltered, 'flagged as auto (not player) shelter');
+    const roverStill = s2.units.find(u => u.kind === 'rover');
+    assert.notEqual(roverStill.order.type, 'shelter', 'rovers are not auto-sheltered');
+    for (let h = 0; h < 4; h++) tick(s2, 1, QUIET);
+    assert.equal(a.order.type, 'harvest', 'order resumed after the storm cleared');
+    assert.equal(a.order.nodeId, reg.id, 'same assignment resumed');
+
+    // Player agency: manual order during a storm clears the stash
+    const s3 = createGame(siteProfiles()[0].id, { seed: 23 });
+    const a3 = s3.units.find(u => u.kind === 'astronaut');
+    tick(s3, 1, STORM);
+    assert.ok(a3.autoSheltered, 'auto-sheltered at onset');
+    issueOrder(s3, [a3.id], { type: 'move', x: a3.x + 200, y: a3.y });
+    assert.ok(!a3.autoSheltered && a3.resume === null, 'player override clears the stash');
+    for (let h = 0; h < 3; h++) tick(s3, 1, QUIET);
+    assert.equal(a3.order.type, 'idle', 'no phantom resume after override');
+
+    // autoShelter=false leaves the crew on task
+    const s4 = createGame(siteProfiles()[0].id, { seed: 23 });
+    s4.autoShelter = false;
+    const a4 = s4.units.find(u => u.kind === 'astronaut');
+    issueOrder(s4, [a4.id], { type: 'harvest', nodeId: reg.id });
+    for (let h = 0; h < 4; h++) tick(s4, 1, STORM);
+    assert.equal(a4.order.type, 'harvest', 'auto-shelter OFF respects the player');
+    ok('worker AI: retarget on depletion, storm shelter + resume, player override');
 }
 
 console.log(`\ncolony-engine: ${passed} groups passed`);

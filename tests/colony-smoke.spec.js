@@ -35,15 +35,27 @@ test('colony RTS boots, lands crew, selects and orders units, saves', async ({ p
     await page.click('#btn-start');
     await expect(page.locator('#start-overlay')).toBeHidden();
 
-    // HUD populates from the engine
+    // HUD populates from the engine — including the v1.1 economy chips
     await expect(page.locator('#r-water')).not.toHaveText('—');
+    await expect(page.locator('#r-metal')).toContainText('kg');
+    await expect(page.locator('#r-he3')).toContainText('g');
     await expect(page.locator('#r-crew')).toHaveText(/4\/4/);
     await expect(page.locator('#clk-sol')).toContainText('Sol 1');
     // Touchdown log line present
     await expect(page.locator('#ev-log')).toContainText('Touchdown');
 
-    // Build menu: one button per catalog entry; ghost toggles
-    expect(await page.locator('.bm-btn').count()).toBe(5);
+    // Idle-worker chip: everyone starts idle; clicking selects one
+    await expect(page.locator('#idle-chip')).toBeVisible();
+    await expect(page.locator('#idle-chip')).toContainText('6 idle');
+    await page.click('#idle-chip');
+    await expect(page.locator('#sel-panel')).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    // Supply capsule button exists and is unaffordable at start
+    await expect(page.locator('#btn-supply')).toHaveClass(/cant/);
+
+    // Build menu: one button per catalog entry (6 with the smelter); ghost toggles
+    expect(await page.locator('#bm-list .bm-btn').count()).toBe(6);
     await page.locator('.bm-btn[data-b="solar"]').click();
     await expect(page.locator('.bm-btn[data-b="solar"]')).toHaveClass(/on/);
     await page.keyboard.press('Escape');

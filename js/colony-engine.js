@@ -63,34 +63,66 @@ export const ELECTROLYZER = Object.freeze({
     kgWaterPerH: 2, kWhPerKg: 5, o2Fraction: 8 / 9,
 });
 
+// ── Ilmenite smelting (hydrogen reduction) ───────────────────────────────────
+// SOURCE: FeTiO₃ + H₂ → Fe + TiO₂ + H₂O, then the water is electrolyzed to
+// recover the H₂ and bank the O₂. Per kg of ilmenite (M = 151.7 g/mol):
+// Fe 55.8/151.7 = 0.368 kg metal, releasable O 16/151.7 = 0.105 kg, TiO₂
+// 79.9/151.7 = 0.527 kg slag — which IS a usable construction aggregate.
+// The three fractions sum to exactly 1: the node test closes this mass
+// balance. Processing rate/power are GAMEPLAY-scaled.
+export const SMELTER = Object.freeze({
+    kgOrePerH: 6,
+    metalFraction: 55.8 / 151.7,
+    o2Fraction: 16 / 151.7,
+    slagFraction: 79.9 / 151.7,
+});
+
+// ── Helium-3 ─────────────────────────────────────────────────────────────────
+// SOURCE: solar-wind-implanted ³He in mature sunlit regolith, ~5–15 ppb —
+// real extraction means baking thousands of tonnes. GAMEPLAY: an extractor
+// unit parked on a deposit accrues grams/hour directly (the haul mass is
+// negligible); the deposit's reserveG abstracts the mineable patch.
+export const HE3 = Object.freeze({
+    supplyCostG: 50,      // one resupply capsule, paid in ³He export value
+    supplyEtaH: 24,
+    supplyCrew: 2, supplyRovers: 1, supplyMetalKg: 150,
+});
+
 // ── Build catalog ────────────────────────────────────────────────────────────
 // Costs/times GAMEPLAY-scaled (real ISRU construction is months); power and
-// storage numbers are small-outpost order of magnitude.
+// storage numbers are small-outpost order of magnitude. Two construction
+// inputs: `materials` (bulk regolith/slag aggregate) and `metal` (refined
+// Fe from the ilmenite chain — machines need it, berms don't).
 export const BUILD_CATALOG = Object.freeze({
     solar: Object.freeze({
-        name: 'Solar array', materials: 200, buildH: 2, hp: 100,
+        name: 'Solar array', materials: 120, metal: 80, buildH: 2, hp: 100,
         genKW: 10, radius: 26,
         desc: '10 kW peak. Dies with the sun — pair with batteries.',
     }),
     battery: Object.freeze({
-        name: 'Battery bank', materials: 150, buildH: 2, hp: 120,
+        name: 'Battery bank', materials: 90, metal: 60, buildH: 2, hp: 120,
         storeKWh: 50, radius: 18,
         desc: '50 kWh buffer for night and storm downtime.',
     }),
     habitat: Object.freeze({
-        name: 'Habitat', materials: 800, buildH: 8, hp: 200,
+        name: 'Habitat', materials: 500, metal: 200, buildH: 8, hp: 200,
         crew: 4, drawKW: 4, radius: 34,
         desc: '+4 crew capacity. 4 kW life-support draw. New crew lands 24 h after completion.',
     }),
     electrolyzer: Object.freeze({
-        name: 'Electrolyzer', materials: 300, buildH: 3, hp: 120,
+        name: 'Electrolyzer', materials: 160, metal: 90, buildH: 3, hp: 120,
         drawKW: 10, radius: 22,
         desc: 'Splits mined water into oxygen (8/9 by mass). 10 kW while running.',
     }),
+    smelter: Object.freeze({
+        name: 'Smelter', materials: 220, metal: 120, buildH: 4, hp: 150,
+        drawKW: 8, radius: 26,
+        desc: 'Hydrogen-reduces ilmenite ore: 37% iron, 10% oxygen, 53% slag→materials. 8 kW while running.',
+    }),
     shelter: Object.freeze({
-        name: 'Storm shelter', materials: 600, buildH: 6, hp: 300,
+        name: 'Storm shelter', materials: 600, metal: 0, buildH: 6, hp: 300,
         capacity: 8, drawKW: 1, radius: 30,
-        desc: 'Regolith-buried. 20× dose reduction — the answer to an SEP event.',
+        desc: 'Regolith-buried, no metal needed. 20× dose reduction — the answer to an SEP event.',
     }),
 });
 
@@ -98,11 +130,11 @@ export const BUILD_CATALOG = Object.freeze({
 export const UNIT_CATALOG = Object.freeze({
     astronaut: Object.freeze({
         name: 'Astronaut', speedMH: 4000, mineKgH: 10, carryKg: 20,
-        buildRate: 1, hp: 100, takesDose: true, radius: 6,
+        he3GH: 0.8, buildRate: 1, hp: 100, takesDose: true, radius: 6,
     }),
     rover: Object.freeze({
         name: 'Rover', speedMH: 9000, mineKgH: 30, carryKg: 60,
-        buildRate: 0.5, hp: 150, takesDose: false, radius: 9,
+        he3GH: 2, buildRate: 0.5, hp: 150, takesDose: false, radius: 9,
     }),
 });
 
@@ -171,24 +203,33 @@ export function createGame(siteId, { seed = 1 } = {}) {
     const rng = makeRng((seed ^ hashStr(site.id)) >>> 0);
 
     const state = {
-        v: 1, seed, rngState: null, siteId: site.id, site,
+        v: 2, seed, rngState: null, siteId: site.id, site,
         t: 0,                         // hours since landing
         alive: true, victory: false,
-        resources: { energyKWh: LANDER.storeKWh, water: 200, oxygen: 120, materials: 400 },
+        // metal starts nonzero — lander structural scrap — so the first
+        // machines are buildable before the smelter chain exists.
+        resources: {
+            energyKWh: LANDER.storeKWh, water: 200, oxygen: 120,
+            materials: 400, metal: 300, ilmenite: 0, helium3: 0,
+        },
         power: { genKW: 0, drawKW: 0, netKW: 0, capKWh: LANDER.storeKWh, sun: 0 },
         units: [], buildings: [], nodes: [],
         storm: { sepFlux: 0, sLevel: 0, etaH: null },
+        autoShelter: true, _stormActive: false,
+        supplyEtaH: null,
         quakeCooldownH: 0,
         nextId: 1,
         log: [],
         // Conservation ledgers — the node test closes these every run.
         ledger: {
             genKWh: 0, drawKWh: 0, wasteKWh: 0,
-            minedWater: 0, minedMaterials: 0,
-            usedWater: 0, usedMaterials: 0, electrolyzedWater: 0,
+            minedWater: 0, minedMaterials: 0, minedIlmenite: 0, minedHe3G: 0,
+            usedWater: 0, usedMaterials: 0, usedMetal: 0, electrolyzedWater: 0,
             madeOxygen: 0, usedOxygen: 0,
+            smeltedOre: 0, madeMetal: 0, madeSlag: 0, smelterOxygen: 0,
+            he3SpentG: 0, supplyMetal: 0,
         },
-        stats: { doseWorstMSv: 0, quakes: 0, stormsSurvived: 0 },
+        stats: { doseWorstMSv: 0, quakes: 0, stormsSurvived: 0, capsules: 0 },
     };
     const id = () => state.nextId++;
 
@@ -225,6 +266,26 @@ export function createGame(siteId, { seed = 1 } = {}) {
             reserveKg: Infinity,
         });
     }
+    // Ilmenite outcrops — the metal chain. SOURCE: FeTiO₃ is real mare-basalt
+    // ore; siting one in south-pole highlands is GAMEPLAY (call it a
+    // basaltic impact-melt deposit).
+    for (let i = 0; i < 2; i++) {
+        state.nodes.push({
+            id: id(), kind: 'ilmenite',
+            x: lander.x + 350 + rng() * 500,
+            y: lander.y + (i === 0 ? 1 : -1) * (250 + rng() * 350),
+            reserveKg: Math.round(3000 + rng() * 3000),
+        });
+    }
+    // Helium-3 patches — mature sunlit regolith, far from the PSR shadow.
+    for (let i = 0; i < 2; i++) {
+        state.nodes.push({
+            id: id(), kind: 'helium3',
+            x: MAP_W * (0.12 + rng() * 0.15),
+            y: MAP_H * (0.25 + rng() * 0.5),
+            reserveG: Math.round(180 + rng() * 220),
+        });
+    }
 
     // Starting roster: 4 astronauts, 2 rovers, parked by the lander.
     for (let i = 0; i < 4; i++) {
@@ -247,6 +308,7 @@ function _mkUnit(id, kind, x, y) {
         doseMSv: 0, grounded: false,
         carrying: 0, carryKind: null,
         order: { type: 'idle' }, inside: null,   // building id when sheltered
+        autoSheltered: false, resume: null,      // storm auto-shelter stash
     };
 }
 
@@ -255,6 +317,17 @@ export function rehydrate(state) {
     if (typeof state._rng !== 'function') {
         state._rng = makeRng((hashStr(state.siteId) ^ state.seed ^ Math.floor(state.t * 1e3)) >>> 0);
     }
+    // Defensive defaults for saves from older engine versions.
+    const r = state.resources;
+    r.metal ??= 0; r.ilmenite ??= 0; r.helium3 ??= 0;
+    state.autoShelter ??= true;
+    state._stormActive ??= false;
+    state.supplyEtaH ??= null;
+    for (const k of ['minedIlmenite', 'minedHe3G', 'usedMetal', 'smeltedOre',
+        'madeMetal', 'madeSlag', 'smelterOxygen', 'he3SpentG', 'supplyMetal']) {
+        state.ledger[k] ??= 0;
+    }
+    state.stats.capsules ??= 0;
     return state;
 }
 
@@ -272,6 +345,8 @@ export function issueOrder(state, unitIds, order) {
         if (!u || u.hp <= 0) continue;
         if (u.grounded && order.type !== 'shelter' && order.type !== 'move') continue;
         u.inside = null;
+        // A player order overrides any auto-shelter stash — their agency wins.
+        u.autoSheltered = false; u.resume = null;
         u.order = { ...order };
         if (order.type === 'harvest') u.order.phase = 'toNode';
         if (order.type === 'build' || order.type === 'repair') u.order.phase = 'toSite';
@@ -279,11 +354,25 @@ export function issueOrder(state, unitIds, order) {
     }
 }
 
-/** Validate + place a blueprint. Deducts materials immediately. */
+/** Spend banked ³He export value on a resupply capsule (crew + rover + metal). */
+export function requestSupply(state) {
+    if (state.supplyEtaH != null) return { ok: false, reason: 'capsule already inbound' };
+    if (state.resources.helium3 < HE3.supplyCostG) {
+        return { ok: false, reason: `need ${HE3.supplyCostG} g ³He` };
+    }
+    state.resources.helium3 -= HE3.supplyCostG;
+    state.ledger.he3SpentG += HE3.supplyCostG;
+    state.supplyEtaH = HE3.supplyEtaH;
+    log(state, `🚀 Supply capsule purchased (${HE3.supplyCostG} g ³He) — landing in ${HE3.supplyEtaH} h.`, 'good');
+    return { ok: true };
+}
+
+/** Validate + place a blueprint. Deducts materials + metal immediately. */
 export function placeBlueprint(state, kind, x, y) {
     const cat = BUILD_CATALOG[kind];
     if (!cat) return { ok: false, reason: 'unknown building' };
     if (state.resources.materials < cat.materials) return { ok: false, reason: 'not enough materials' };
+    if (state.resources.metal < (cat.metal || 0)) return { ok: false, reason: 'not enough metal' };
     if (x < 40 || y < 40 || x > MAP_W - 40 || y > MAP_H - 40) return { ok: false, reason: 'out of bounds' };
     for (const b of state.buildings) {
         const br = _bRadius(b);
@@ -291,13 +380,15 @@ export function placeBlueprint(state, kind, x, y) {
     }
     state.resources.materials -= cat.materials;
     state.ledger.usedMaterials += cat.materials;
+    state.resources.metal -= (cat.metal || 0);
+    state.ledger.usedMetal += (cat.metal || 0);
     const b = {
         id: state.nextId++, kind, x, y,
         built: 0, hp: cat.hp * 0.1, hpMax: cat.hp, enabled: true,
         crewEtaH: null,
     };
     state.buildings.push(b);
-    log(state, `${cat.name} site staked (${cat.materials} kg materials).`);
+    log(state, `${cat.name} site staked (⛏${cat.materials}${cat.metal ? ` + 🔩${cat.metal}` : ''} kg).`);
     return { ok: true, id: b.id };
 }
 
@@ -391,6 +482,39 @@ function _step(state, dt, env) {
             state.ledger.electrolyzedWater += kg;
             state.ledger.madeOxygen += kg * ELECTROLYZER.o2Fraction;
         }
+        // Smelter: FeTiO₃ + H₂ → Fe + TiO₂(slag→materials) + O₂ recovered
+        for (const b of state.buildings) {
+            if (b.kind !== 'smelter' || b.built < 1 || !b.enabled || b.hp <= 0) continue;
+            const kg = Math.min(SMELTER.kgOrePerH * dt, r.ilmenite);
+            if (kg <= 0) continue;
+            r.ilmenite -= kg;
+            r.metal += kg * SMELTER.metalFraction;
+            r.oxygen += kg * SMELTER.o2Fraction;
+            r.materials += kg * SMELTER.slagFraction;
+            state.ledger.smeltedOre += kg;
+            state.ledger.madeMetal += kg * SMELTER.metalFraction;
+            state.ledger.smelterOxygen += kg * SMELTER.o2Fraction;
+            state.ledger.madeSlag += kg * SMELTER.slagFraction;
+        }
+    }
+
+    // ── Supply capsule ───────────────────────────────────────────────────
+    if (state.supplyEtaH != null) {
+        state.supplyEtaH -= dt;
+        if (state.supplyEtaH <= 0) {
+            state.supplyEtaH = null;
+            const hq = _dropoff(state) || state.buildings[0];
+            for (let i = 0; i < HE3.supplyCrew; i++) {
+                state.units.push(_mkUnit(state.nextId++, 'astronaut', hq.x - 60 - i * 16, hq.y + 40));
+            }
+            for (let i = 0; i < HE3.supplyRovers; i++) {
+                state.units.push(_mkUnit(state.nextId++, 'rover', hq.x - 60 - i * 24, hq.y - 40));
+            }
+            r.metal += HE3.supplyMetalKg;
+            state.ledger.supplyMetal += HE3.supplyMetalKg;
+            state.stats.capsules++;
+            log(state, `🚀 Supply capsule down: +${HE3.supplyCrew} crew, +${HE3.supplyRovers} rover, +${HE3.supplyMetalKg} kg metal.`, 'good');
+        }
     }
 
     // ── Crew life support ────────────────────────────────────────────────
@@ -428,6 +552,42 @@ function _step(state, dt, env) {
             log(state, `${_uname(u)} hit the ${DOSE.careerMSv} mSv career limit — grounded to shelter duty.`, 'bad');
         }
         if (u.doseMSv >= DOSE.acuteLethalMSv) _hurtUnit(state, u, 1e9, 'acute radiation exposure');
+    }
+
+    // ── Auto-shelter: storm onset stashes orders, storm end restores ─────
+    const sepNow = env.sepFlux ?? 0;
+    if (!state._stormActive && sepNow >= 0.05) {
+        state._stormActive = true;
+        if (state.autoShelter) {
+            let sent = 0;
+            for (const u of state.units) {
+                if (u.kind !== 'astronaut' || u.hp <= 0 || u.inside) continue;
+                u.resume = u.order;
+                u.autoSheltered = true;
+                u.order = { type: 'shelter', phase: 'toShelter' };
+                sent++;
+            }
+            if (sent) log(state, `☢ Storm onset — auto-shelter sent ${sent} astronaut${sent > 1 ? 's' : ''} underground (rovers keep working).`, 'bad');
+        } else {
+            log(state, '☢ Storm onset — auto-shelter is OFF; your crew is where you left them.', 'bad');
+        }
+    } else if (state._stormActive && sepNow < 0.02) {
+        state._stormActive = false;
+        state.stats.stormsSurvived++;
+        let resumed = 0;
+        for (const u of state.units) {
+            if (!u.autoSheltered || u.hp <= 0) continue;
+            u.autoSheltered = false;
+            u.inside = null;
+            u.order = u.resume && u.resume.type !== 'sheltered' ? u.resume : { type: 'idle' };
+            u.resume = null;
+            // Re-normalize the phase — the unit is at the shelter now, not
+            // wherever the stashed order left off.
+            if (u.order.type === 'harvest') u.order.phase = u.carrying > 0 ? 'return' : 'toNode';
+            if (u.order.type === 'build' || u.order.type === 'repair') u.order.phase = 'toSite';
+            if (u.order.type !== 'idle') resumed++;
+        }
+        log(state, `Storm cleared.${resumed ? ` ${resumed} crew back to work.` : ''}`, 'good');
     }
 
     // ── Moonquakes — the Moon's own clock (seeded, engine-internal) ──────
@@ -495,6 +655,16 @@ function _uname(u) { return `${UNIT_CATALOG[u.kind].name} #${u.id}`; }
 function _bname(b) { return b.kind === 'lander' ? 'Lander' : BUILD_CATALOG[b.kind].name; }
 
 // ── Order FSM ────────────────────────────────────────────────────────────────
+/**
+ * Deterministic per-unit arrival offset (golden-angle spread) so workers
+ * fan out around a shared target instead of stacking on one pixel.
+ */
+function _jitter(unitId, radius) {
+    const a = unitId * 2.399963229728653;   // golden angle
+    const r = radius * (0.5 + ((unitId * 40503) % 977) / 1954);
+    return [Math.cos(a) * r, Math.sin(a) * r];
+}
+
 function _moveToward(u, tx, ty, dt) {
     const speed = UNIT_CATALOG[u.kind].speedMH;
     const dx = tx - u.x, dy = ty - u.y;
@@ -519,24 +689,52 @@ function _runOrder(state, u, dt, powered) {
             return;
         }
         case 'harvest': {
-            const node = state.nodes.find(n => n.id === o.nodeId);
-            if (!node || node.reserveKg <= 0) {
-                if (u.carrying > 0) { o.phase = 'return'; } else { u.order = { type: 'idle' }; return; }
+            let node = state.nodes.find(n => n.id === o.nodeId);
+            const empty = (n) => !n || (n.kind === 'helium3' ? n.reserveG <= 0 : n.reserveKg <= 0);
+            if (empty(node)) {
+                if (u.carrying > 0) {
+                    o.phase = 'return';
+                } else {
+                    // Auto-retarget: nearest same-kind node with reserves —
+                    // the worker keeps working instead of standing down.
+                    const kind = node?.kind ?? o.nodeKind;
+                    const next = state.nodes
+                        .filter(n => n.kind === kind && !empty(n))
+                        .sort((a, b) => Math.hypot(a.x - u.x, a.y - u.y) - Math.hypot(b.x - u.x, b.y - u.y))[0];
+                    if (next) {
+                        o.nodeId = next.id; o.phase = 'toNode'; node = next;
+                        log(state, `${_uname(u)} moved on to the next ${kind} deposit.`, 'info');
+                    } else { u.order = { type: 'idle' }; return; }
+                }
             }
+            o.nodeKind = node?.kind ?? o.nodeKind;
             if (o.phase === 'toNode') {
-                if (_moveToward(u, node.x, node.y, dt)) o.phase = 'mine';
+                const [jx, jy] = _jitter(u.id, 16);
+                if (_moveToward(u, node.x + jx, node.y + jy, dt)) o.phase = 'mine';
             } else if (o.phase === 'mine') {
+                if (node.kind === 'helium3') {
+                    // In-place volatile extraction — grams accrue directly
+                    // (GAMEPLAY: the haul mass is negligible; see HE3 note).
+                    const g = Math.min(cat.he3GH * dt, node.reserveG);
+                    state.resources.helium3 += g;
+                    state.ledger.minedHe3G += g;
+                    node.reserveG -= g;
+                    if (node.reserveG <= 0) log(state, '³He patch worked out.', 'info');
+                    return;
+                }
                 const kg = Math.min(cat.mineKgH * dt, cat.carryKg - u.carrying, node.reserveKg);
                 u.carrying += kg;
                 u.carryKind = node.kind;
                 node.reserveKg -= kg;
                 if (u.carrying >= cat.carryKg - 1e-9 || node.reserveKg <= 0) o.phase = 'return';
-                if (node.reserveKg <= 0 && node.kind === 'ice') log(state, 'Ice node exhausted.', 'info');
+                if (node.reserveKg <= 0 && node.kind !== 'regolith') log(state, `${node.kind === 'ice' ? 'Ice' : 'Ilmenite'} node exhausted.`, 'info');
             } else { // return
                 const d = _dropoff(state);
                 if (!d) { u.order = { type: 'idle' }; return; }
-                if (_moveToward(u, d.x, d.y + 40, dt)) {
+                const [jx, jy] = _jitter(u.id, 22);
+                if (_moveToward(u, d.x + jx, d.y + 42 + jy, dt)) {
                     if (u.carryKind === 'ice') { state.resources.water += u.carrying; state.ledger.minedWater += u.carrying; }
+                    else if (u.carryKind === 'ilmenite') { state.resources.ilmenite += u.carrying; state.ledger.minedIlmenite += u.carrying; }
                     else { state.resources.materials += u.carrying; state.ledger.minedMaterials += u.carrying; }
                     u.carrying = 0; u.carryKind = null;
                     o.phase = 'toNode';

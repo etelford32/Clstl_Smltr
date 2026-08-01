@@ -205,6 +205,9 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
             <button data-spd="4">4×</button>
             <button data-spd="16">16×</button>
         </div>
+        <button id="idle-chip" style="display:none;margin-top:6px;width:100%;border:1px solid rgba(255,204,68,.45);
+            background:rgba(255,204,68,.10);color:#ffcc44;font:700 10px 'Courier New',monospace;
+            padding:4px 8px;border-radius:5px;cursor:pointer" title="Click to select and center the next idle worker">—</button>
     </div>
 
     <!-- Resources -->
@@ -212,7 +215,9 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         <span class="res" title="Power: generation − draw · battery charge">⚡ <b id="r-pow">—</b> <span class="cap" id="r-batt">—</span></span>
         <span class="res" title="Water store (kg)">💧 <b id="r-water">—</b></span>
         <span class="res" title="Oxygen store (kg)">O₂ <b id="r-o2">—</b></span>
-        <span class="res" title="Materials (kg regolith-derived)">⛏ <b id="r-mat">—</b></span>
+        <span class="res" title="Materials (kg regolith + smelter slag)">⛏ <b id="r-mat">—</b></span>
+        <span class="res" title="Refined metal (kg) — from the ilmenite smelter chain">🔩 <b id="r-metal">—</b></span>
+        <span class="res" title="Helium-3 (grams) — export value; funds supply capsules">³He <b id="r-he3">—</b></span>
         <span class="res" title="Crew alive / capacity · worst career dose">👥 <b id="r-crew">—</b> <span class="cap" id="r-dose">—</span></span>
     </div>
 
@@ -230,7 +235,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         <h3>Construct <span style="color:#556;text-transform:none;letter-spacing:0">(then click the map)</span></h3>
         <!-- buttons injected from BUILD_CATALOG -->
         <div id="bm-list"></div>
+        <button id="btn-supply" class="bm-btn" title="Spend banked ³He export value: capsule lands in 24 h with +2 crew, +1 rover, +150 kg metal">🚀 Supply capsule <span class="bm-cost">³He 50g</span></button>
         <button id="shelter-all" title="Order every astronaut to the best available shelter">☢ Shelter all crew</button>
+        <label class="lyr" style="display:flex;gap:6px;align-items:center;font-size:10px;color:#8899aa;cursor:pointer">
+            <input type="checkbox" id="auto-shelter" checked style="accent-color:#ffd700"> Auto-shelter on storm onset
+        </label>
     </div>
 
     <!-- Start overlay -->
@@ -274,15 +283,17 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 <script type="module">
 import {
     SOL_HOURS, WIN_SOLS, WIN_CREW, DOSE, BUILD_CATALOG, UNIT_CATALOG, LANDER,
+    HE3,
     siteProfiles, createGame, tick, issueOrder, placeBlueprint, rehydrate,
-    sunFactor, crewSummary, MAP_W, MAP_H, log as elog,
+    requestSupply, sunFactor, crewSummary, MAP_W, MAP_H, log as elog,
 } from './js/colony-engine.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { initScaleNav } from './js/scale-nav.js';
 
 initScaleNav('colony');
 
-const SAVE_KEY = 'pp_colony_save_v1';
+// v2: metal/ilmenite/³He economy — v1 saves are incompatible and orphaned.
+const SAVE_KEY = 'pp_colony_save_v2';
 
 // ═══════════════════════════════════════════════════════════════
 //  ENVIRONMENT — live feed, drill script, or quiet
@@ -492,7 +503,7 @@ function drawNodes() {
             ctx.fillStyle = 'rgba(200,240,255,0.9)';
             ctx.beginPath(); ctx.arc(0, -size * 0.2, size * 0.22, 0, 7); ctx.fill();
             ctx.restore();
-        } else {
+        } else if (n.kind === 'regolith') {
             ctx.save(); ctx.translate(x, y);
             const size = 12 * r;
             ctx.fillStyle = '#2e2a34';
@@ -506,14 +517,62 @@ function drawNodes() {
             ctx.strokeStyle = 'rgba(230,225,240,0.5)'; ctx.lineWidth = 1.2 * r;
             ctx.beginPath(); ctx.moveTo(-size * 0.5, size * 0.36); ctx.quadraticCurveTo(0, -size * 0.42, size * 0.5, size * 0.36); ctx.stroke();
             ctx.restore();
+        } else if (n.kind === 'ilmenite') {
+            if (n.reserveKg <= 0) { drawDepleted(x, y, r); }
+            else {
+                // dark basalt outcrop with metallic glint stripes
+                ctx.save(); ctx.translate(x, y);
+                const size = 12 * r;
+                ctx.fillStyle = '#181820';
+                for (const [dx, dy, s2] of [[-6, 2, 0.9], [5, -1, 1.1], [0, 5, 0.7]]) {
+                    ctx.beginPath();
+                    ctx.moveTo((dx - 7 * s2) * r, (dy + 4 * s2) * r);
+                    ctx.lineTo((dx + 1 * s2) * r, (dy - 8 * s2) * r);
+                    ctx.lineTo((dx + 8 * s2) * r, (dy + 3 * s2) * r);
+                    ctx.closePath(); ctx.fill();
+                }
+                ctx.strokeStyle = 'rgba(190,200,225,0.85)'; ctx.lineWidth = 1.4 * r;
+                ctx.beginPath(); ctx.moveTo(-6 * r, -1 * r); ctx.lineTo(-1 * r, -5 * r); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(3 * r, 1 * r); ctx.lineTo(7 * r, -2 * r); ctx.stroke();
+                ctx.restore();
+            }
+        } else if (n.kind === 'helium3') {
+            if (n.reserveG > 0) {
+                // shimmering solar-wind-soaked patch
+                const pulse = 0.55 + 0.25 * Math.sin(performance.now() / 700 + n.id);
+                const rad = 26 * r;
+                const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+                g.addColorStop(0, `rgba(255,215,130,${0.34 * pulse})`);
+                g.addColorStop(0.7, `rgba(255,190,90,${0.14 * pulse})`);
+                g.addColorStop(1, 'rgba(255,190,90,0)');
+                ctx.fillStyle = g;
+                ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
+                ctx.fillStyle = `rgba(255,230,160,${0.75 * pulse})`;
+                for (let i = 0; i < 5; i++) {
+                    const a = i * 1.257 + n.id;
+                    ctx.beginPath();
+                    ctx.arc(x + Math.cos(a) * 12 * r, y + Math.sin(a) * 9 * r, 1.6 * r, 0, 7);
+                    ctx.fill();
+                }
+            } else drawDepleted(x, y, r);
         }
         // discoverability label
         if (cam.zoom > 0.42) {
             const [lx, ly] = W2S(n.x, n.y);
-            ctx.fillStyle = n.kind === 'ice' ? 'rgba(150,220,255,0.75)' : 'rgba(210,200,220,0.6)';
+            const LABELS = {
+                ice: n.reserveKg > 0 ? `ICE ${(n.reserveKg / 1000).toFixed(1)}t` : 'DEPLETED',
+                regolith: 'REGOLITH',
+                ilmenite: n.reserveKg > 0 ? `ILMENITE ${(n.reserveKg / 1000).toFixed(1)}t` : 'WORKED OUT',
+                helium3: n.reserveG > 0 ? `HELIUM-3 ${n.reserveG.toFixed(0)}g` : 'WORKED OUT',
+            };
+            const COLORS = {
+                ice: 'rgba(150,220,255,0.75)', regolith: 'rgba(210,200,220,0.6)',
+                ilmenite: 'rgba(185,195,225,0.8)', helium3: 'rgba(255,215,130,0.85)',
+            };
+            ctx.fillStyle = COLORS[n.kind];
             ctx.font = `700 ${9 * cam.zoom * DPR + 4}px Courier New`;
             ctx.textAlign = 'center';
-            ctx.fillText(n.kind === 'ice' ? (n.reserveKg > 0 ? `ICE ${(n.reserveKg / 1000).toFixed(1)}t` : 'DEPLETED') : 'REGOLITH', lx, ly + 24 * cam.zoom * DPR);
+            ctx.fillText(LABELS[n.kind], lx, ly + 24 * cam.zoom * DPR);
         }
     }
 }
@@ -598,6 +657,30 @@ function drawBuilding(b, nowS) {
             }
             break;
         }
+        case 'smelter': {
+            // furnace block + chimney + slag pile; glows while processing
+            const running = b.enabled && b.built >= 1 && !game.power.brownout && game.resources.ilmenite > 0;
+            ctx.fillStyle = '#3c3640';
+            ctx.fillRect(-R * 0.8, -R * 0.35, R * 1.6, R * 0.85);
+            ctx.fillStyle = '#565060';
+            ctx.fillRect(R * 0.25, -R * 0.85, R * 0.28, R * 0.55);   // chimney
+            ctx.fillStyle = running ? `rgba(255,${140 + 60 * Math.sin(nowS * 4)},40,0.95)` : '#241f28';
+            ctx.fillRect(-R * 0.55, -R * 0.1, R * 0.6, R * 0.42);    // furnace mouth
+            ctx.fillStyle = '#6a6272';                                // slag pile
+            ctx.beginPath();
+            ctx.moveTo(R * 0.9, R * 0.5); ctx.quadraticCurveTo(R * 1.15, R * 0.05, R * 1.4, R * 0.5);
+            ctx.closePath(); ctx.fill();
+            if (running) {
+                for (let i = 0; i < 3; i++) {
+                    const ph = (nowS * 0.5 + i * 0.33) % 1;
+                    ctx.fillStyle = `rgba(200,200,215,${0.5 * (1 - ph)})`;
+                    ctx.beginPath();
+                    ctx.arc(R * 0.39 + ph * R * 0.2, -R * 0.9 - ph * R * 0.7, (2 + ph * 3) * r, 0, 7);
+                    ctx.fill();
+                }
+            }
+            break;
+        }
         case 'shelter': {
             ctx.fillStyle = '#4a4038';
             ctx.beginPath();
@@ -654,7 +737,7 @@ function drawUnit(u, nowS) {
         ctx.fillStyle = '#9aa4b4';
         ctx.beginPath(); ctx.roundRect(-8 * r, -5 * r, 16 * r, 10 * r, 2.5 * r); ctx.fill();
         if (u.carrying > 0) {
-            ctx.fillStyle = u.carryKind === 'ice' ? '#8fe0ff' : '#6a6272';
+            ctx.fillStyle = u.carryKind === 'ice' ? '#8fe0ff' : u.carryKind === 'ilmenite' ? '#20202c' : '#6a6272';
             ctx.fillRect(-4 * r, -3 * r, 8 * r, 6 * r);
         }
     } else {
@@ -667,7 +750,7 @@ function drawUnit(u, nowS) {
         ctx.fillRect(-3.4 * r, 2.4 * r + bounce, 2.6 * r, 4.5 * r);
         ctx.fillRect(0.8 * r, 2.4 * r + bounce, 2.6 * r, 4.5 * r);
         if (u.carrying > 0) {
-            ctx.fillStyle = u.carryKind === 'ice' ? '#8fe0ff' : '#6a6272';
+            ctx.fillStyle = u.carryKind === 'ice' ? '#8fe0ff' : u.carryKind === 'ilmenite' ? '#20202c' : '#6a6272';
             ctx.fillRect(-6.5 * r, -1 * r + bounce, 3.4 * r, 3.4 * r);
         }
         // dose pips
@@ -712,7 +795,7 @@ function drawGhost() {
 }
 function ghostValid() {
     if (!ghost || ghost.x == null) return false;
-    if (game.resources.materials < BUILD_CATALOG[ghost.kind].materials) return false;
+    if (!canAfford(BUILD_CATALOG[ghost.kind])) return false;
     if (ghost.x < 40 || ghost.y < 40 || ghost.x > MAP_W - 40 || ghost.y > MAP_H - 40) return false;
     for (const b of game.buildings) {
         const br = (b.kind === 'lander' ? LANDER.radius : BUILD_CATALOG[b.kind].radius);
@@ -811,7 +894,8 @@ function rightClickOrder(sx, sy) {
     const [wx, wy] = S2W(sx, sy);
     // node?
     for (const n of game.nodes) {
-        if (Math.hypot(n.x - wx, n.y - wy) < 40 && n.reserveKg > 0) {
+        const reserve = n.kind === 'helium3' ? n.reserveG : n.reserveKg;
+        if (Math.hypot(n.x - wx, n.y - wy) < 40 && reserve > 0) {
             issueOrder(game, selected, { type: 'harvest', nodeId: n.id });
             orderFxPush(n.x, n.y);
             return;
@@ -848,22 +932,50 @@ function tryPlaceGhost() {
 // ═══════════════════════════════════════════════════════════════
 //  UI PANELS
 // ═══════════════════════════════════════════════════════════════
+const canAfford = (c) => game
+    && game.resources.materials >= c.materials
+    && game.resources.metal >= (c.metal || 0);
+
 function refreshBuildMenu() {
     const host = document.getElementById('bm-list');
     host.innerHTML = Object.entries(BUILD_CATALOG).map(([k, c]) => {
-        const cant = game && game.resources.materials < c.materials;
+        const cant = !canAfford(c);
+        const cost = `⛏${c.materials}${c.metal ? ` 🔩${c.metal}` : ''}`;
         return `<button class="bm-btn ${ghost?.kind === k ? 'on' : ''} ${cant ? 'cant' : ''}" data-b="${k}" title="${c.desc}">
-            <span>${c.name}</span><span class="bm-cost">⛏${c.materials}</span></button>`;
+            <span>${c.name}</span><span class="bm-cost">${cost}</span></button>`;
     }).join('');
     host.querySelectorAll('.bm-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const k = btn.dataset.b;
-            if (!game || game.resources.materials < BUILD_CATALOG[k].materials) return;
+            if (!canAfford(BUILD_CATALOG[k])) return;
             ghost = ghost?.kind === k ? null : { kind: k, x: null, y: null };
             refreshBuildMenu();
         });
     });
 }
+
+document.getElementById('btn-supply').addEventListener('click', () => {
+    if (!game) return;
+    const res = requestSupply(game);
+    if (!res.ok) elog(game, `Supply request refused — ${res.reason}.`, 'info');
+});
+
+document.getElementById('auto-shelter').addEventListener('change', e => {
+    if (game) game.autoShelter = e.target.checked;
+});
+
+// Idle-worker chip: SC-style cycle through workers standing around
+let _idleCycle = 0;
+document.getElementById('idle-chip').addEventListener('click', () => {
+    if (!game) return;
+    const idle = game.units.filter(u =>
+        u.hp > 0 && !u.inside && !u.grounded && u.order.type === 'idle');
+    if (!idle.length) return;
+    const u = idle[_idleCycle++ % idle.length];
+    selected = [u.id]; selectedBuilding = null;
+    cam.x = u.x; cam.y = u.y;
+    refreshSelPanel();
+});
 
 document.getElementById('shelter-all').addEventListener('click', () => {
     if (!game) return;
@@ -892,7 +1004,7 @@ function refreshSelPanel() {
         el.style.display = 'block';
         el.innerHTML = `
             <div class="sel-title">${cat.name} ${b.built < 1 ? `— under construction ${(b.built * 100).toFixed(0)}%` : ''}</div>
-            <div>HP ${Math.round(b.hp)}/${b.hpMax}${occupants ? ` · ${occupants} crew inside` : ''}${b.kind === 'electrolyzer' ? ` · <button id="b-toggle" class="btn-ghost" style="padding:2px 8px;font-size:10px">${b.enabled ? 'Pause' : 'Resume'}</button>` : ''}</div>
+            <div>HP ${Math.round(b.hp)}/${b.hpMax}${occupants ? ` · ${occupants} crew inside` : ''}${['electrolyzer', 'smelter'].includes(b.kind) ? ` · <button id="b-toggle" class="btn-ghost" style="padding:2px 8px;font-size:10px">${b.enabled ? 'Pause' : 'Resume'}</button>` : ''}</div>
             <div class="hint">${cat.desc ?? 'Home base: drop-off point, 4 crew capacity, fuel-cell trickle power.'}</div>`;
         document.getElementById('b-toggle')?.addEventListener('click', () => { b.enabled = !b.enabled; refreshSelPanel(); });
     } else {
@@ -914,6 +1026,8 @@ function refreshHud() {
     oEl.textContent = `${r.oxygen.toFixed(0)} kg`;
     oEl.className = r.oxygen < 20 ? 'res-bad' : r.oxygen < 50 ? 'res-warn' : '';
     document.getElementById('r-mat').textContent = `${r.materials.toFixed(0)} kg`;
+    document.getElementById('r-metal').textContent = `${r.metal.toFixed(0)} kg`;
+    document.getElementById('r-he3').textContent = `${r.helium3.toFixed(1)} g`;
     const cs = crewSummary(game);
     document.getElementById('r-crew').textContent = `${cs.alive}/${cs.capacity}`;
     const dEl = document.getElementById('r-dose');
@@ -946,6 +1060,33 @@ function refreshHud() {
         else { fb.className = 'live'; fb.textContent = '☀ LIVE SUN — NOAA SWPC'; }
     } else if (mode === 'drill') { fb.className = 'drill'; fb.textContent = 'STORM DRILL SCENARIO'; }
     else { fb.className = ''; fb.textContent = ''; }
+
+    // supply button state
+    const sup = document.getElementById('btn-supply');
+    if (game.supplyEtaH != null) {
+        sup.classList.add('cant');
+        sup.innerHTML = `🚀 Capsule inbound <span class="bm-cost">${game.supplyEtaH.toFixed(0)} h</span>`;
+    } else {
+        sup.classList.toggle('cant', r.helium3 < HE3.supplyCostG);
+        sup.innerHTML = `🚀 Supply capsule <span class="bm-cost">³He ${HE3.supplyCostG}g</span>`;
+    }
+
+    // auto-shelter checkbox reflects engine state (saves restore it)
+    document.getElementById('auto-shelter').checked = !!game.autoShelter;
+
+    // idle-worker chip
+    const idleN = game.units.filter(u =>
+        u.hp > 0 && !u.inside && !u.grounded && u.order.type === 'idle').length;
+    const chip = document.getElementById('idle-chip');
+    chip.style.display = idleN ? 'block' : 'none';
+    chip.textContent = `⚠ ${idleN} idle worker${idleN > 1 ? 's' : ''}`;
+
+    // build menu affordability tints (without rebuilding while placing)
+    if (!ghost) {
+        document.querySelectorAll('#bm-list .bm-btn').forEach(btn => {
+            btn.classList.toggle('cant', !canAfford(BUILD_CATALOG[btn.dataset.b]));
+        });
+    }
 
     // log
     const lg = document.getElementById('ev-log');
