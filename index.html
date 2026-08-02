@@ -26,16 +26,16 @@
 <meta property="og:image:alt" content="Parkers Physics — live space weather simulations">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Parkers Physics — Watch Space Weather Happen. Live.">
-<meta name="twitter:description" content="Real-time simulations of Earth's magnetosphere, the upper atmosphere, and the Sun — driven by live NASA and NOAA satellite data. 40+ simulations, 12 live feeds. Free to start.">
+<meta name="twitter:description" content="Your sky's space-weather risks, live: aurora odds for your location, NOAA storm scales, satellite drag and GPS impact — driven by live NASA and NOAA satellite data. Free to start.">
 <meta name="twitter:image" content="https://parkersphysics.com/static/og/index.jpg">
 
-<meta name="description" content="Real-time simulations of Earth's magnetosphere, the upper atmosphere, and the Sun — driven by live NASA and NOAA satellite data, rendered in your browser. 40+ simulations, validated against the May 2024 Gannon G5 superstorm.">
+<meta name="description" content="Your sky's space-weather risks, live: aurora odds for your exact location, NOAA storm scales, satellite drag and GPS impact — driven by live NASA and NOAA satellite data, validated against the May 2024 Gannon G5 superstorm.">
 <meta name="theme-color" content="#03010e">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Parkers Physics">
 <meta property="og:title" content="Parkers Physics — Watch Space Weather Happen. Live.">
-<meta property="og:description" content="Real-time simulations of Earth's magnetosphere, the upper atmosphere, and the Sun — driven by live NASA and NOAA satellite data. 40+ simulations, 12 live feeds. Free to start.">
+<meta property="og:description" content="Your sky's space-weather risks, live: aurora odds for your location, NOAA storm scales, satellite drag and GPS impact — driven by live NASA and NOAA satellite data. Free to start.">
 <meta property="og:image" content="https://parkersphysics.com/static/og/index.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -69,161 +69,152 @@
   --grad-uv-pink:linear-gradient(135deg,#9d3aff,#ff1f9c);
   --grad-spectrum:linear-gradient(135deg,#3b1eff,#9d3aff,#ff1f9c);
   --grad-headline:linear-gradient(135deg,#f5f8ff,#c5b8ff 45%,#ff1f9c);
-  --grad-arc:linear-gradient(135deg,#8ff0ff,#6a48ff);
   /* Glows */
   --glow-uv-sm:0 0 10px rgba(157,58,255,.4);
   --glow-uv-md:0 0 22px rgba(157,58,255,.55),0 0 50px rgba(91,30,255,.35);
   --glow-uv-lg:0 0 36px rgba(157,58,255,.7),0 0 90px rgba(91,30,255,.5);
-  --glow-pink-sm:0 0 10px rgba(255,31,156,.45);
-  --glow-pink-md:0 0 22px rgba(255,31,156,.55),0 0 50px rgba(230,0,136,.35);
-  --glow-arc-sm:0 0 10px rgba(143,240,255,.45);
-  --glow-arc-md:0 0 22px rgba(77,219,255,.5),0 0 50px rgba(31,143,255,.3);
 }
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 html{overflow-y:auto;scroll-behavior:smooth}
 body{min-height:100vh;overflow-x:hidden;background:#03010e;color:var(--fg-2);font-family:var(--font-sans)}
-.eyebrow{display:inline-block;font-family:var(--font-display);font-weight:700;font-size:.72rem;text-transform:uppercase;letter-spacing:var(--tracking-cyber);color:var(--uv-400);text-shadow:var(--glow-uv-sm)}
-.lightning{color:var(--lightning-bolt);text-shadow:0 0 6px rgba(143,240,255,.65),0 0 18px rgba(31,143,255,.4)}
 a{text-decoration:none;color:inherit}
 img{display:block}
 .skip-link{position:absolute;left:-9999px;top:0;background:#ffd700;color:#000;padding:8px 16px;font-weight:700;border-radius:0 0 6px 6px;z-index:9999}
 .skip-link:focus{left:16px}
 
-/* ── HERO ─────────────────────────────────────────────────────────────────── */
-/* Blue radial backdrop matches the magnetosphere scene's clear color and
-   doubles as the reduced-motion / WebGL-fallback background. */
-#hero{position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;background:radial-gradient(ellipse at 50% 40%,#071026 0%,#03010e 70%)}
+/* ── HERO / SKY CONSOLE ──────────────────────────────────────────────────
+   The cinematic magnetosphere canvas stays as the section backdrop
+   (js/hero-space-weather.js — self-handles WebGL failure / reduced motion);
+   the console floats above it on opaque surfaces so the data stays
+   readable no matter how hot the bloom runs. */
+#hero{position:relative;overflow:hidden;background:radial-gradient(ellipse at 50% 30%,#071026 0%,#03010e 70%);padding:38px 16px 46px}
 #hero-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
-/* Legibility scrim: a gentle dim behind the headline block so the bloomed
-   scene can run hot without washing out the text. Sits above the canvas
-   (later in paint order), below .hero-content (z-index 1). */
-#hero::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 56% 48% at 50% 46%,rgba(2,0,10,.34),transparent 72%)}
-.hero-content{position:relative;z-index:1;max-width:740px;padding:80px 24px 100px;text-align:center}
-.hero-content [data-hero-hud]{margin-top:40px}
-.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;background:rgba(157,58,255,.10);border:1px solid rgba(183,101,255,.35);border-radius:20px;font-family:var(--font-display);font-size:.7rem;color:var(--uv-300);letter-spacing:var(--tracking-cyber);text-transform:uppercase;margin-bottom:28px;box-shadow:var(--glow-uv-sm)}
+#hero::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 70% 60% at 50% 40%,rgba(2,0,10,.5),rgba(2,0,10,.15) 75%)}
+.hero-inner{position:relative;z-index:1;max-width:1000px;margin:0 auto}
+.hero-top{text-align:center;margin-bottom:22px}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;background:rgba(157,58,255,.10);border:1px solid rgba(183,101,255,.35);border-radius:20px;font-family:var(--font-display);font-size:.64rem;color:var(--uv-300);letter-spacing:var(--tracking-cyber);text-transform:uppercase;margin-bottom:18px;box-shadow:var(--glow-uv-sm)}
 .hero-badge::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 8px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite;flex-shrink:0}
 @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
-/* Blue outline + halo: text-shadows render behind the gradient-clipped
-   transparent fill, giving the gradient text a crisp blue stroke and
-   ambient glow without overriding the fill. */
-.hero-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(2rem,5.6vw,3.6rem);letter-spacing:.04em;line-height:1.12;margin-bottom:22px;text-transform:uppercase;background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 18px rgba(60,160,255,.45));text-shadow:-2px -2px 0 #1e90ff,2px -2px 0 #1e90ff,-2px 2px 0 #1e90ff,2px 2px 0 #1e90ff,-2px 0 0 #1e90ff,2px 0 0 #1e90ff,0 -2px 0 #1e90ff,0 2px 0 #1e90ff,0 0 22px rgba(30,144,255,.7),0 0 40px rgba(30,144,255,.35)}
-.hero-sub{font-family:var(--font-sans);font-size:clamp(.95rem,2.2vw,1.15rem);color:var(--fg-3);line-height:1.75;max-width:580px;margin:0 auto 36px}
-.hero-cta{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}
-.btn-primary{padding:14px 32px;background:var(--grad-uv-pink);border-radius:8px;color:#fff;font-family:var(--font-display);font-weight:700;font-size:.95rem;letter-spacing:.12em;text-transform:uppercase;transition:filter .2s,transform .15s,box-shadow .25s;border:none;cursor:pointer;box-shadow:var(--glow-uv-md)}
+.hero-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(1.5rem,4vw,2.5rem);letter-spacing:.04em;line-height:1.14;margin-bottom:12px;text-transform:uppercase;background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 16px rgba(60,160,255,.4))}
+.hero-sub{font-size:clamp(.88rem,2vw,1rem);color:var(--fg-3);line-height:1.65;max-width:640px;margin:0 auto}
+.hero-sub em{font-style:normal;color:var(--fg-1)}
+.hero-values{display:flex;flex-wrap:wrap;gap:8px 10px;justify-content:center;margin:14px auto 0;max-width:720px}
+.hero-values span{display:inline-flex;align-items:center;gap:8px;font-size:.78rem;color:var(--fg-2);
+  padding:6px 14px;border-radius:999px;background:rgba(13,6,38,.6);border:1px solid rgba(154,133,255,.2)}
+.hero-values span::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--dot,#9d3aff);flex-shrink:0}
+
+/* ── LIVE DEMO EMBEDS (EarthView + flux-rope stage) ──────────────────────── */
+.demo-frame{position:relative;max-width:960px;margin:0 auto;aspect-ratio:16/9;border-radius:14px;overflow:hidden;
+  border:1px solid rgba(0,198,255,.25);background:#05030f}
+.demo-frame iframe{position:absolute;left:0;width:100%;border:0;opacity:0;transition:opacity 1.2s ease;pointer-events:none}
+.demo-frame .demo-open{position:absolute;right:14px;bottom:14px;z-index:2;display:inline-flex;align-items:center;gap:8px;
+  padding:9px 18px;border-radius:999px;background:rgba(2,0,10,.75);border:1px solid rgba(143,240,255,.45);
+  color:#8ff0ff;font-size:.8rem;font-weight:650;backdrop-filter:blur(6px);transition:background .2s,transform .15s}
+.demo-frame .demo-open:hover{background:rgba(2,0,10,.95);transform:translateY(-2px)}
+.demo-live-tag{position:absolute;left:14px;top:12px;z-index:2;display:inline-flex;align-items:center;gap:7px;
+  font-family:var(--font-mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:rgba(245,240,255,.75);
+  background:rgba(2,0,10,.6);padding:4px 10px;border-radius:4px;border:1px solid rgba(154,133,255,.25);backdrop-filter:blur(4px)}
+.demo-live-tag::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 6px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite}
+#sky-console-host{min-height:540px}
+.hero-cta{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:24px}
+.btn-primary{padding:13px 30px;background:var(--grad-uv-pink);border-radius:8px;color:#fff;font-family:var(--font-display);font-weight:700;font-size:.88rem;letter-spacing:.12em;text-transform:uppercase;transition:filter .2s,transform .15s,box-shadow .25s;border:none;cursor:pointer;box-shadow:var(--glow-uv-md)}
 .btn-primary:hover{filter:brightness(1.12);transform:translateY(-2px);box-shadow:var(--glow-uv-lg)}
-.btn-secondary{padding:14px 32px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:8px;color:#ddd;font-size:1rem;font-weight:600;transition:background .2s,border-color .2s,transform .15s}
+.btn-secondary{padding:13px 30px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:8px;color:#ddd;font-size:.95rem;font-weight:600;transition:background .2s,border-color .2s,transform .15s}
 .btn-secondary:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.5);color:#fff;transform:translateY(-2px)}
 
 /* ── LIVE TICKER (styles injected by js/home-ticker.js) ──────────────────── */
 .sw-ticker{min-height:44px}
 
-/* ── SHARED SECTION CHROME ────────────────────────────────────────────────── */
-.section{padding:88px 24px}
-.section-inner{max-width:1160px;margin:0 auto}
-.section-label{font-family:var(--font-display);font-size:.72rem;text-transform:uppercase;letter-spacing:var(--tracking-cyber);color:var(--uv-400);font-weight:700;margin-bottom:14px;text-shadow:var(--glow-uv-sm)}
-.section-h2{font-family:var(--font-display);font-size:clamp(1.5rem,3.6vw,2.4rem);font-weight:800;letter-spacing:.02em;color:var(--fg-1);line-height:1.18;margin-bottom:16px;text-transform:uppercase}
-.section-sub{font-size:1rem;color:var(--fg-3);line-height:1.7;max-width:640px;margin-bottom:52px}
-.fade-in{opacity:0;transform:translateY(28px);transition:opacity .65s ease,transform .65s ease}
+/* ── SHARED SECTION CHROME — tighter rhythm than the pre-console page ───── */
+.section{padding:56px 24px}
+.section-inner{max-width:1060px;margin:0 auto}
+.section-label{font-family:var(--font-display);font-size:.68rem;text-transform:uppercase;letter-spacing:var(--tracking-cyber);color:var(--uv-400);font-weight:700;margin-bottom:10px;text-shadow:var(--glow-uv-sm)}
+.section-h2{font-family:var(--font-display);font-size:clamp(1.25rem,3vw,1.9rem);font-weight:800;letter-spacing:.02em;color:var(--fg-1);line-height:1.2;margin-bottom:12px;text-transform:uppercase}
+.section-sub{font-size:.92rem;color:var(--fg-3);line-height:1.65;max-width:640px;margin-bottom:30px}
+.fade-in{opacity:0;transform:translateY(24px);transition:opacity .6s ease,transform .6s ease}
 .fade-in.visible{opacity:1;transform:none}
 
 /* ── AURORACLE CAPTURE (band styles injected by js/aurora-capture.js) ─────── */
-#aurora{padding:56px 24px 40px}
+#aurora{padding:48px 24px 36px}
 .aurora-capture-band .aurora-trust{flex-basis:100%;font-size:.78rem;color:var(--fg-4);margin:6px 0 0;max-width:none}
 
-/* ── DEPTH CONTINUUM ──────────────────────────────────────────────────────── */
-/* Five steps, each visibly heavier than the last. All mass scales off the
-   per-step --d custom property (1…5): padding, border weight, glow, background
-   opacity, thumb size, title size — step 5 reads as the deepest slab. */
+/* ── DEPTH LADDER — compressed: no thumbs, one readable row per step ─────── */
 #depth{background:linear-gradient(180deg,#03010e,#040113)}
-.depth-ladder{list-style:none;display:flex;flex-direction:column;gap:14px;max-width:980px}
-.depth-step{display:grid;grid-template-columns:minmax(110px,calc(96px + var(--d)*14px)) 1fr auto;gap:20px;align-items:center;background:linear-gradient(180deg,rgba(13,6,38,calc(.30 + var(--d)*.09)),rgba(7,2,26,.85));border:1px solid rgba(154,133,255,calc(.10 + var(--d)*.06));border-left:calc(2px + var(--d)*1px) solid var(--step-accent,#9d3aff);border-radius:14px;padding:calc(12px + var(--d)*4px) 22px;box-shadow:0 0 calc(var(--d)*9px) rgba(157,58,255,calc(var(--d)*.07));transition:transform .25s ease,border-color .25s}
+.depth-ladder{list-style:none;display:flex;flex-direction:column;gap:10px;max-width:900px}
+.depth-step{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:16px;align-items:center;
+  background:linear-gradient(180deg,rgba(13,6,38,.5),rgba(7,2,26,.85));border:1px solid rgba(154,133,255,.14);
+  border-left:calc(2px + var(--d)*1px) solid var(--step-accent,#9d3aff);border-radius:12px;
+  padding:12px 18px;transition:transform .2s ease,border-color .2s}
 .depth-step:hover{transform:translateX(4px);border-color:var(--step-accent,#9d3aff)}
-.depth-thumb{height:calc(64px + var(--d)*10px);margin-bottom:0;font-size:0}
-.depth-body{min-width:0}
-.depth-kicker{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-.depth-num{font-family:var(--font-mono);color:var(--fg-4);font-size:.7rem;letter-spacing:.2em}
-.depth-title{font-family:var(--font-display);text-transform:uppercase;color:var(--fg-1);font-size:calc(.86rem + var(--d)*.045rem);letter-spacing:.05em;margin-bottom:4px}
-.depth-desc{font-size:.84rem;color:var(--fg-3);line-height:1.6}
-.depth-links{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
-@media(max-width:768px){.depth-step{grid-template-columns:1fr;padding:16px}.depth-thumb{height:110px}.depth-links{flex-direction:row;flex-wrap:wrap;align-items:center}}
-
-/* ── SIMULATIONS GRID ─────────────────────────────────────────────────────── */
-#simulations{background:#03010e}
-.sim-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
-.sim-card{background:linear-gradient(180deg,rgba(13,6,38,.55),rgba(7,2,26,.85));border:1px solid rgba(154,133,255,.14);border-radius:14px;padding:26px 24px 22px;position:relative;overflow:hidden;transition:transform .25s var(--ease,ease),border-color .25s,box-shadow .25s;cursor:pointer;backdrop-filter:blur(6px)}
-.sim-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--accent,#9d3aff),#ff1f9c)}
-.sim-card:hover{transform:translateY(-5px);box-shadow:0 14px 50px rgba(0,0,0,.55),var(--glow-uv-md);border-color:rgba(183,101,255,.45)}
-.sim-thumb{width:100%;height:170px;border-radius:10px;margin-bottom:18px;overflow:hidden;background:var(--thumb-bg,rgba(255,255,255,.05));border:1px solid rgba(154,133,255,.16);display:flex;align-items:center;justify-content:center;font-size:3.5rem;position:relative;box-shadow:inset 0 0 30px rgba(91,30,255,.18)}
-.sim-thumb-label{position:absolute;bottom:8px;right:10px;font-family:var(--font-mono);font-size:.58rem;color:rgba(245,240,255,.55);letter-spacing:.12em;text-transform:uppercase;background:rgba(2,0,10,.6);padding:3px 7px;border-radius:3px;border:1px solid rgba(154,133,255,.2);backdrop-filter:blur(4px);z-index:2;pointer-events:none}
-.sim-thumb-label::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 6px var(--status-ok);margin-right:6px;vertical-align:middle;animation:pulse-dot 1.8s ease-in-out infinite}
-.sim-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px}
-.sim-card-title{font-family:var(--font-display);font-size:.98rem;font-weight:700;color:var(--fg-1);letter-spacing:.06em;text-transform:uppercase}
-.sim-tier{font-family:var(--font-display);font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:var(--tracking-cyber);padding:3px 9px;border-radius:999px;flex-shrink:0}
+.depth-num{font-family:var(--font-mono);color:var(--fg-4);font-size:.68rem;letter-spacing:.2em}
+.depth-title{font-family:var(--font-display);text-transform:uppercase;color:var(--fg-1);font-size:.82rem;letter-spacing:.05em;margin-bottom:2px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.depth-desc{font-size:.8rem;color:var(--fg-3);line-height:1.55}
+.depth-links{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+@media(max-width:700px){.depth-step{grid-template-columns:1fr}.depth-links{flex-direction:row;flex-wrap:wrap;align-items:center}}
+.sim-tier{font-family:var(--font-display);font-size:.56rem;font-weight:700;text-transform:uppercase;letter-spacing:var(--tracking-cyber);padding:3px 9px;border-radius:999px;flex-shrink:0}
 .sim-tier.free{background:rgba(46,255,158,.10);color:var(--status-ok);border:1px solid rgba(46,255,158,.30)}
-.sim-tier.basic{background:rgba(77,219,255,.10);color:var(--lightning-spark);border:1px solid rgba(77,219,255,.30)}
 .sim-tier.advanced{background:rgba(183,101,255,.12);color:var(--uv-300);border:1px solid rgba(183,101,255,.30)}
 .sim-tier.ops{background:rgba(255,31,156,.10);color:var(--pink-400);border:1px solid rgba(255,31,156,.30)}
 .sim-tier.gold{background:rgba(255,215,0,.10);color:#ffd23f;border:1px solid rgba(255,215,0,.30)}
-.sim-card-desc{font-size:.84rem;color:var(--fg-3);line-height:1.65;margin-bottom:18px}
-.sim-link{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-display);font-size:.74rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent,var(--uv-300));transition:gap .15s,text-shadow .2s}
-.sim-link:hover{gap:12px;text-shadow:0 0 8px currentColor}
-.sims-browse-all{text-align:center;margin-top:36px;font-size:.92rem}
-.sims-browse-all a{font-family:var(--font-display);font-size:.8rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--uv-300);border-bottom:1px solid rgba(183,101,255,.35);padding-bottom:2px;transition:color .2s,border-color .2s,text-shadow .2s}
-.sims-browse-all a:hover{color:var(--uv-400);border-color:var(--uv-400);text-shadow:0 0 8px currentColor}
+.sim-link{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-display);font-size:.7rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent,var(--uv-300));transition:gap .15s,text-shadow .2s;white-space:nowrap}
+.sim-link:hover{gap:11px;text-shadow:0 0 8px currentColor}
+.catalog-strip{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:26px;align-items:center;font-size:.82rem}
+.catalog-strip a{color:var(--fg-3);display:inline-flex;align-items:center;gap:7px;transition:color .2s}
+.catalog-strip a::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--dot,#9d3aff)}
+.catalog-strip a:hover{color:var(--fg-1)}
+.catalog-strip .all{color:var(--uv-300);font-weight:600;border-bottom:1px solid rgba(183,101,255,.35);padding-bottom:1px}
+.catalog-strip .all::before{display:none}
 
-/* ── VALIDATION ───────────────────────────────────────────────────────────── */
-#validation{background:linear-gradient(180deg,rgba(91,30,255,.04),rgba(255,31,156,.03));border-top:1px solid rgba(157,58,255,.18);border-bottom:1px solid rgba(157,58,255,.18);padding:72px 24px}
-.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:24px 16px;text-align:center;margin-bottom:48px}
-.stat-item{}
-.stat-num{display:block;font-family:var(--font-display);font-size:2.6rem;font-weight:800;background:var(--grad-uv-pink);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1;margin-bottom:8px;letter-spacing:.02em;filter:drop-shadow(0 0 16px rgba(157,58,255,.3))}
-.stat-desc{font-family:var(--font-display);font-size:.7rem;color:var(--fg-4);line-height:1.5;text-transform:uppercase;letter-spacing:var(--tracking-cyber)}
-.stat-sub{display:block;font-family:var(--font-mono);font-size:.6rem;color:var(--fg-5);margin-top:4px;text-transform:none;letter-spacing:.05em}
-.validation-line{text-align:center;font-size:.98rem;color:var(--fg-2);line-height:1.8;max-width:720px;margin:0 auto 10px}
+/* ── ATTRACT EMBED + DEMO SECTIONS ────────────────────────────────────────── */
+.sw-attract-section,.demo-section{padding:56px 20px 64px;text-align:center;background:#03010e}
+
+/* ── VALIDATION — one compact credibility band ────────────────────────────── */
+#validation{background:linear-gradient(180deg,rgba(91,30,255,.04),rgba(255,31,156,.03));border-top:1px solid rgba(157,58,255,.18);border-bottom:1px solid rgba(157,58,255,.18);padding:44px 24px}
+.stats-row{display:flex;flex-wrap:wrap;gap:8px 28px;justify-content:center;margin-bottom:22px}
+.stat-item{display:flex;align-items:baseline;gap:8px}
+.stat-num{font-family:var(--font-display);font-size:1.5rem;font-weight:800;background:var(--grad-uv-pink);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:.02em}
+.stat-desc{font-family:var(--font-display);font-size:.6rem;color:var(--fg-4);text-transform:uppercase;letter-spacing:var(--tracking-cyber)}
+.validation-line{text-align:center;font-size:.9rem;color:var(--fg-2);line-height:1.7;max-width:720px;margin:0 auto 6px}
 .validation-line a{color:var(--uv-300);border-bottom:1px solid rgba(183,101,255,.35);transition:color .2s,border-color .2s}
 .validation-line a:hover{color:var(--uv-400);border-color:var(--uv-400)}
-.validation-lineage{text-align:center;font-size:.82rem;color:var(--fg-4);max-width:720px;margin:0 auto 44px}
-.sources-grid{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:center}
-.source-chip{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;background:rgba(13,6,38,.55);border:1px solid rgba(154,133,255,.18);border-radius:999px;font-family:var(--font-mono);font-size:.78rem;transition:border-color .2s,background .2s,box-shadow .2s}
-.source-chip:hover{background:rgba(13,6,38,.85);border-color:rgba(183,101,255,.45);box-shadow:var(--glow-uv-sm)}
+.validation-lineage{text-align:center;font-size:.78rem;color:var(--fg-4);max-width:720px;margin:0 auto 24px}
+.sources-grid{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
+.source-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;background:rgba(13,6,38,.55);border:1px solid rgba(154,133,255,.18);border-radius:999px;font-family:var(--font-mono);font-size:.72rem;transition:border-color .2s}
+.source-chip:hover{border-color:rgba(183,101,255,.45)}
 .source-chip-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;animation:pulse-dot 2.2s ease-in-out infinite}
 .source-chip span{color:var(--fg-4)}
 .source-chip strong{color:var(--fg-1);font-weight:600}
-.source-freq{font-size:.65rem;color:var(--fg-5);margin-left:4px}
+.source-freq{font-size:.62rem;color:var(--fg-5);margin-left:4px}
 
-/* ── PRICING ──────────────────────────────────────────────────────────────── */
+/* ── PRICING — compact strip ─────────────────────────────────────────────── */
 #pricing{background:rgba(0,0,10,.6)}
-.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-bottom:28px}
-.price-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:16px;padding:32px 28px;position:relative;transition:transform .2s,border-color .2s}
+.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-bottom:20px}
+.price-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:22px 22px 20px;position:relative;transition:transform .2s,border-color .2s}
 .price-card:hover{transform:translateY(-3px)}
 .price-card.popular{border-color:rgba(255,200,0,.35);background:rgba(255,180,0,.05)}
-.price-popular-badge{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#ff8c00,#ffd700);color:#000;font-size:.65rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;padding:4px 14px;border-radius:20px;white-space:nowrap}
-.price-name{font-family:var(--font-display);font-size:.88rem;text-transform:uppercase;letter-spacing:.1em;color:var(--fg-2);font-weight:700;margin-bottom:4px}
-.price-alias{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:#667;margin-bottom:14px}
-.price-amount{font-size:2.8rem;font-weight:800;color:#e8f4ff;line-height:1;margin-bottom:6px}
-.price-amount span{font-size:1rem;font-weight:400;color:#778}
-.price-tagline{font-size:.82rem;color:#778;margin-bottom:24px;line-height:1.5}
-.price-features{list-style:none;margin-bottom:28px;display:flex;flex-direction:column;gap:8px}
-.price-features li{font-size:.83rem;color:#99aabb;display:flex;align-items:flex-start;gap:8px}
-.price-features li::before{content:'✓';color:#00e874;font-weight:700;flex-shrink:0;margin-top:1px}
-.price-btn{display:block;text-align:center;padding:12px;border-radius:8px;font-weight:700;font-size:.9rem;transition:filter .2s,transform .15s}
+.price-popular-badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#ff8c00,#ffd700);color:#000;font-size:.6rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;padding:3px 12px;border-radius:20px;white-space:nowrap}
+.price-name{font-family:var(--font-display);font-size:.8rem;text-transform:uppercase;letter-spacing:.1em;color:var(--fg-2);font-weight:700}
+.price-alias{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:#667;margin-bottom:10px}
+.price-amount{font-size:1.9rem;font-weight:800;color:#e8f4ff;line-height:1;margin-bottom:8px}
+.price-amount span{font-size:.85rem;font-weight:400;color:#778}
+.price-tagline{font-size:.78rem;color:#8a94a8;margin-bottom:16px;line-height:1.5}
+.price-btn{display:block;text-align:center;padding:10px;border-radius:8px;font-weight:700;font-size:.84rem;transition:filter .2s,transform .15s}
 .price-btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
 .price-btn.free-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#cdd}
 .price-btn.basic-btn{background:linear-gradient(135deg,#ff8c00,#ffd700);color:#000}
 .price-btn.adv-btn{background:linear-gradient(135deg,#7b2ff7,#00c6ff);color:#fff}
-.pricing-compare-link{text-align:center;font-size:.88rem;color:#778}
+.pricing-compare-link{text-align:center;font-size:.84rem;color:#778}
 .pricing-compare-link a{color:#ffb830;font-weight:600;border-bottom:1px solid rgba(255,180,60,.3);transition:color .2s,border-color .2s}
 .pricing-compare-link a:hover{color:#ffd700;border-color:#ffd700}
 
-/* ── AGENCIES DOOR ────────────────────────────────────────────────────────── */
-/* Deliberately quiet — thin border, no gradient fireworks. The deepest
-   aperture speaks in a lower register than the consumer sections above. */
+/* ── AGENCIES DOOR — deliberately quiet ──────────────────────────────────── */
 #agencies{background:#020108;border-top:1px solid rgba(154,133,255,.12);text-align:center}
-#agencies .section-sub{margin:0 auto 32px}
+#agencies .section-sub{margin:0 auto 26px}
 
 /* ── FOOTER ───────────────────────────────────────────────────────────────── */
-footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60px 24px 32px}
-.footer-inner{max-width:1160px;margin:0 auto}
-.footer-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px;margin-bottom:48px}
+footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52px 24px 32px}
+.footer-inner{max-width:1060px;margin:0 auto}
+.footer-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px;margin-bottom:40px}
 @media(max-width:768px){.footer-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:480px){.footer-grid{grid-template-columns:1fr}}
 .footer-brand-logo{height:36px;width:auto;border-radius:50%;margin-bottom:12px}
@@ -241,7 +232,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 @media(max-width:640px){
   .hero-cta{flex-direction:column;align-items:center}
   .btn-primary,.btn-secondary{width:100%;max-width:320px;text-align:center}
-  .section{padding:60px 16px}
+  .section{padding:44px 16px}
 }
 </style>
 <script type="application/ld+json">
@@ -264,7 +255,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
       "@id": "https://parkersphysics.com/#website",
       "name": "Parkers Physics",
       "url": "https://parkersphysics.com/",
-      "description": "Real-time simulations of Earth's magnetosphere, the upper atmosphere, and the Sun — driven by live NASA and NOAA satellite data, rendered in your browser.",
+      "description": "Your sky's space-weather risks, live — aurora odds, NOAA storm scales, satellite drag — driven by live NASA and NOAA satellite data, rendered in your browser.",
       "publisher": {
         "@id": "https://parkersphysics.com/#org"
       },
@@ -314,46 +305,88 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 
 <main id="main-content">
 
-<!-- ── S1 · HERO — the spectacle layer ────────────────────────────────────
-     The hero IS the demo: js/hero-space-weather.js renders the cinematic
-     Earth + live magnetosphere (shader Earth, bow-shock-deflected solar
-     wind, bloom, CME cue) into #hero-canvas, and js/hero-live-hud.js
-     renders the live readout chips below the CTAs — both driven by the
-     page's single SpaceWeatherFeed (see the module at the bottom of
-     <body>). The H1 is the 2026-07 home_headline experiment WINNER — do
-     not reword it without a new experiment. -->
-<section id="hero" aria-label="Live magnetosphere">
+<!-- ── S1 · SKY CONSOLE — the answer layer ────────────────────────────────
+     2026-08 redesign: the hero IS the product now. js/home-sky-console.js
+     renders a personal conditions console — Air quality (default) / Major
+     events / Temperature / Space weather / Aurora (secondary by design) —
+     over the cinematic live-magnetosphere canvas (js/hero-space-weather.js,
+     kept from the 2026-07 hero as the backdrop). Space data comes from the
+     page's single SpaceWeatherFeed; Earth data from js/home-conditions.js
+     (per-location Open-Meteo). See the wiring module at the bottom of
+     <body>. The H1 is the 2026-07 home_headline experiment WINNER — do not
+     reword it without a new experiment. -->
+<section id="hero" aria-label="Your sky, live: air, temperature, major events">
   <canvas id="hero-canvas" aria-hidden="true"></canvas>
-  <div class="hero-content">
-    <div class="hero-badge" role="status" aria-live="polite">Live NASA &amp; NOAA Data — Updated Every 60 Seconds</div>
-    <h1 class="hero-h1">Watch space weather happen. Live.</h1>
-    <p class="hero-sub">This is Earth's magnetic shield, right now — bow shock, radiation belts, and aurora rendered from live NASA and NOAA satellite telemetry. The same physics engine we validated against the May 2024 G5 superstorm, running in your browser.</p>
-    <div class="hero-cta" role="group" aria-label="Primary actions">
-      <a href="space-weather.html" class="btn-primary" data-funnel-cta="hero_magnetosphere" aria-label="See Earth's magnetosphere live">See Earth's magnetosphere live <span aria-hidden="true">→</span></a>
-      <a href="#depth" class="btn-secondary" data-funnel-cta="hero_depth" aria-label="Scroll to the depth continuum">How deep does it go? <span aria-hidden="true">↓</span></a>
+  <div class="hero-inner">
+    <div class="hero-top">
+      <div class="hero-badge" role="status" aria-live="polite">Live NASA &amp; NOAA Data — Updated Every 60 Seconds</div>
+      <h1 class="hero-h1">Watch space weather happen. Live.</h1>
+      <p class="hero-sub">One console for <em>your</em> sky — live, local, and physics all the way down.</p>
+      <div class="hero-values" aria-label="What you get">
+        <span style="--dot:#2eff9e">Breathe or stay in — AQI now + week ahead</span>
+        <span style="--dot:#ff5cb8">Major events 7 days out, storms to solar</span>
+        <span style="--dot:#ff8c5a">Why your temperature does what it does</span>
+        <span style="--dot:#8ff0ff">Forecasts validated on the May 2024 G5</span>
+      </div>
     </div>
-    <div data-hero-hud></div>
+    <div id="sky-console-host" aria-label="Personal sky conditions console"></div>
+    <div class="hero-cta" role="group" aria-label="Primary actions">
+      <a href="space-weather.html" class="btn-primary" data-funnel-cta="hero_magnetosphere" aria-label="Open the full space weather dashboard">Open the full dashboard <span aria-hidden="true">→</span></a>
+      <a href="#aurora" class="btn-secondary" data-funnel-cta="hero_alerts" aria-label="Get free aurora alerts">Get free aurora alerts <span aria-hidden="true">↓</span></a>
+    </div>
   </div>
 </section>
 
-<!-- ── ATTRACT LOOP (S3/D4, plan decision #6): the Stage's cinematic,
-     live, at current conditions — the hook image on the landing page.
-     Lazy iframe; fades in on the preview's 'preview-ready' post. -->
-<section class="sw-attract-section" aria-label="Live Sun-to-Earth stage preview"
-    style="padding:64px 20px 72px;text-align:center;background:#03010e">
+<!-- ── S2 · LIVE TICKER — the proof strip ─────────────────────────────────
+     Rendered by js/home-ticker.js from the same swpc-update event the
+     console consumes. Its job while scrolling the marketing below:
+     "real pipelines, real cadence." No CTA. -->
+<div class="sw-ticker" data-sw-ticker></div>
+
+<!-- ── S3 · EARTHVIEW DEMO — see the storms as they happen ────────────────
+     The real earth.html in a lazy, cropped, non-interactive iframe (52px
+     top crop hides the embedded nav; earth.html requests geolocation only
+     on user action, so embedding never triggers a permission prompt). Not
+     a video, not a poster — the live page on live data. -->
+<section id="earth-demo" class="demo-section" aria-label="EarthView live demo">
   <h2 style="font-size:clamp(1.3rem,3.4vw,2rem);color:#e8f4ff;margin-bottom:10px">
-    The storm, on one stage</h2>
+    See the storms as they happen</h2>
   <p style="max-width:620px;margin:0 auto 26px;color:#8b94ad;font-size:.95rem;line-height:1.7">
-    The live Sun→Earth corridor: real CME forecasts from our validated flux-rope engine,
-    uncertainty drawn as geometry — not error bars. Where will it be when it reaches you?</p>
-  <div style="position:relative;max-width:960px;margin:0 auto;aspect-ratio:16/9;border-radius:14px;overflow:hidden;border:1px solid rgba(0,198,255,.25);background:#05030f">
+    This is <b style="color:#cdd8f0">EarthView</b> — live radar, hurricane tracks, NWS severe alerts and tonight's
+    aurora on one 3D globe. It's not a video. It's the actual page, running on live data, right now.</p>
+  <div class="demo-frame">
+    <span class="demo-live-tag">Live · earth.html</span>
+    <iframe src="/earth.html" loading="lazy" title="EarthView live globe" tabindex="-1"
+        style="top:-52px;height:calc(100% + 52px)" onload="this.style.opacity=1"></iframe>
+    <a class="demo-open" href="earth.html" data-funnel-cta="earth_demo_open">Fly to your sky <span aria-hidden="true">→</span></a>
+  </div>
+</section>
+
+<!-- ── S4 · FLUX-ROPE BRAG (attract loop, S3/D4 plan decision #6) ─────────
+     The Stage's cinematic — live CME trains from the validated flux-rope
+     engine — doubles as the operator-credibility section. Lazy iframe;
+     fades in on the preview's 'preview-ready' post. Keep the
+     .sw-attract-section / iframe.sw-attract-frame / request-access
+     contract (tests/space-weather-attract.spec.js pins it). -->
+<section class="sw-attract-section" aria-label="Live flux-rope CME analyzer">
+  <div class="section-label" style="text-align:center">For the storm nerds — and the people who fly things</div>
+  <h2 style="font-size:clamp(1.3rem,3.4vw,2rem);color:#e8f4ff;margin-bottom:10px">
+    A flux-rope analyzer, running in public</h2>
+  <p style="max-width:660px;margin:0 auto 26px;color:#8b94ad;font-size:.95rem;line-height:1.7">
+    Every Earth-directed CME becomes a live physics ensemble: magnetic flux ropes launched from real NASA DONKI
+    events, CME-on-CME interaction modeled in transit, arrival time and Bz forecast with uncertainty drawn as
+    geometry — not error bars. Hindcast-validated on the 2015 St.&nbsp;Patrick's and 2024 Gannon superstorms, and
+    re-scored against L1 truth after every event. Where will it be when it reaches you?</p>
+  <div class="demo-frame">
+    <span class="demo-live-tag">Live · flux-rope ensemble</span>
     <iframe class="sw-attract-frame" src="/space-weather.html?preview=1" loading="lazy"
         title="Live Sun-to-Earth corridor" tabindex="-1"
-        style="position:absolute;inset:0;width:100%;height:100%;border:0;opacity:0;transition:opacity 1.4s ease"></iframe>
+        style="top:0;height:100%"></iframe>
+    <a class="demo-open" href="flux-rope-live.html" data-funnel-cta="attract_fluxrope">Watch it live <span aria-hidden="true">→</span></a>
   </div>
   <div style="margin-top:20px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
-    <a href="space-weather.html" class="btn-primary" data-funnel-cta="attract_dashboard">Open the dashboard →</a>
-    <a href="request-access.html" class="btn-secondary" data-funnel-cta="attract_access">Request access</a>
+    <a href="flux-rope-live.html" class="btn-primary" data-funnel-cta="attract_dashboard">Open the Compounding Watch →</a>
+    <a href="request-access.html" class="btn-secondary" data-funnel-cta="attract_access">Request operator access</a>
   </div>
 </section>
 <script>
@@ -364,13 +397,7 @@ window.addEventListener('message', (e) => {
 });
 </script>
 
-<!-- ── S2 · LIVE TICKER — the proof strip ─────────────────────────────────
-     Rendered by js/home-ticker.js from the same swpc-update event the hero
-     consumes. Consumers read "is tonight the night?"; technical visitors
-     read "real pipelines, real cadence." No CTA — its job is credibility. -->
-<div class="sw-ticker" data-sw-ticker></div>
-
-<!-- ── S3 · AURORACLE CAPTURE — the consumer conversion ───────────────────
+<!-- ── S5 · AURORACLE CAPTURE — the consumer conversion ───────────────────
      Anonymous, zero-friction email capture. Band styles are injected by
      js/aurora-capture.js; keep the [data-aurora-capture] form contract and
      data-source="home" (funnel continuity). See AURORA_ALERT_CAPTURE_SPEC.md. -->
@@ -397,10 +424,10 @@ window.addEventListener('message', (e) => {
   initAuroraCapture();
 </script>
 
-<!-- ── S4 · DEPTH CONTINUUM — the strategic core ──────────────────────────
-     One engine, widening apertures: aurora alerts at the surface, the
-     agencies door at the bottom of the same gradient. Steps get visibly
-     heavier via the per-step --d custom property. -->
+<!-- ── S6 · DEPTH LADDER — the strategic core, compressed ─────────────────
+     One engine, widening apertures — same ladder as before the console
+     redesign, now one readable row per step (thumbs and live previews
+     retired for compression; the console above IS the live preview). -->
 <section id="depth" class="section" aria-labelledby="depth-heading">
   <div class="section-inner">
     <div class="section-label fade-in">One Engine</div>
@@ -409,50 +436,45 @@ window.addEventListener('message', (e) => {
     <ol class="depth-ladder">
 
       <li class="depth-step fade-in" style="--d:1;--step-accent:#2eff9e">
-        <div class="depth-thumb sim-thumb" data-preview="aurora" aria-hidden="true"></div>
-        <div class="depth-body">
-          <div class="depth-kicker"><span class="depth-num">01</span><span class="sim-tier free">Free</span></div>
-          <h3 class="depth-title">Aurora alerts</h3>
+        <span class="depth-num">01</span>
+        <div>
+          <h3 class="depth-title">Aurora alerts <span class="sim-tier free">Free</span></h3>
           <p class="depth-desc">Know when the sky lights up — an email the night the aurora comes within reach of you.</p>
         </div>
         <div class="depth-links"><a class="sim-link" href="auroracle.html" data-funnel-cta="depth_alerts" style="--accent:#2eff9e">Get alerts <span aria-hidden="true">→</span></a></div>
       </li>
 
       <li class="depth-step fade-in" style="--d:2;--step-accent:#ffd23f">
-        <div class="depth-thumb sim-thumb" data-preview="auroracle" aria-hidden="true"></div>
-        <div class="depth-body">
-          <div class="depth-kicker"><span class="depth-num">02</span><span class="sim-tier gold">AurOracle</span></div>
-          <h3 class="depth-title">7-night + 30-day forecasts</h3>
+        <span class="depth-num">02</span>
+        <div>
+          <h3 class="depth-title">7-night + 30-day forecasts <span class="sim-tier gold">AurOracle</span></h3>
           <p class="depth-desc">Plan around the Sun — aurora probability for your exact location, a week to a month out.</p>
         </div>
         <div class="depth-links"><a class="sim-link" href="auroracle.html#week" data-funnel-cta="depth_forecasts" style="--accent:#ffd23f">See the outlook <span aria-hidden="true">→</span></a></div>
       </li>
 
       <li class="depth-step fade-in" style="--d:3;--step-accent:#4ddc99">
-        <div class="depth-thumb sim-thumb" data-preview="upper-atmosphere" aria-hidden="true"></div>
-        <div class="depth-body">
-          <div class="depth-kicker"><span class="depth-num">03</span><span class="sim-tier advanced">Advanced</span></div>
-          <h3 class="depth-title">Upper atmosphere &amp; satellite drag</h3>
+        <span class="depth-num">03</span>
+        <div>
+          <h3 class="depth-title">Upper atmosphere &amp; satellite drag <span class="sim-tier advanced">Advanced</span></h3>
           <p class="depth-desc">The density profile that decides launch windows and orbit decay — 80 to 2,000&nbsp;km, under any storm.</p>
         </div>
         <div class="depth-links"><a class="sim-link" href="upper-atmosphere.html" data-funnel-cta="depth_upper_atmo" style="--accent:#4ddc99">Open the simulator <span aria-hidden="true">→</span></a></div>
       </li>
 
       <li class="depth-step fade-in" style="--d:4;--step-accent:#9d3aff">
-        <div class="depth-thumb sim-thumb" data-preview="space-weather" aria-hidden="true"></div>
-        <div class="depth-body">
-          <div class="depth-kicker"><span class="depth-num">04</span><span class="sim-tier advanced">Advanced</span></div>
-          <h3 class="depth-title">Full magnetosphere MHD</h3>
+        <span class="depth-num">04</span>
+        <div>
+          <h3 class="depth-title">Full magnetosphere MHD <span class="sim-tier advanced">Advanced</span></h3>
           <p class="depth-desc">Global BATS-R-US-lineage simulation with coupled ionosphere, driven live by L1 solar-wind data.</p>
         </div>
         <div class="depth-links"><a class="sim-link" href="space-weather.html" data-funnel-cta="depth_mhd" style="--accent:#9d3aff">Run it live <span aria-hidden="true">→</span></a></div>
       </li>
 
       <li class="depth-step fade-in" style="--d:5;--step-accent:#ff1f9c">
-        <div class="depth-thumb sim-thumb" data-preview="gannon" aria-hidden="true"></div>
-        <div class="depth-body">
-          <div class="depth-kicker"><span class="depth-num">05</span><span class="sim-tier ops">Agencies</span></div>
-          <h3 class="depth-title">Custom hindcasts &amp; operational forecasting</h3>
+        <span class="depth-num">05</span>
+        <div>
+          <h3 class="depth-title">Custom hindcasts &amp; operational forecasting <span class="sim-tier ops">Agencies</span></h3>
           <p class="depth-desc">The Gannon superstorm, reconstructed. Your event next.</p>
         </div>
         <div class="depth-links">
@@ -462,92 +484,28 @@ window.addEventListener('message', (e) => {
       </li>
 
     </ol>
-  </div>
-</section>
-
-<!-- ── S5 · FEATURED SIMULATIONS ──────────────────────────────────────────── -->
-<section id="simulations" class="section" aria-labelledby="sims-heading">
-  <div class="section-inner">
-    <div class="section-label fade-in">Featured Simulations</div>
-    <h2 class="section-h2 fade-in" id="sims-heading">Six live windows. One engine.</h2>
-    <p class="section-sub fade-in">Each simulation runs published physics on live satellite feeds. What you see is what's actually happening — right now.</p>
-    <div class="sim-grid">
-
-      <article class="sim-card fade-in" style="--accent:#00c6ff;--thumb-bg:linear-gradient(135deg,#001830 0%,#003860 50%,#002040 100%)">
-        <div class="sim-thumb" data-preview="earth" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
-        <div class="sim-card-header">
-          <h3 class="sim-card-title">Earth Weather</h3>
-          <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
-        </div>
-        <p class="sim-card-desc">Tonight's weather and tonight's aurora on one 3D globe. Live NEXRAD precipitation, NWS severe alerts, hurricane tracks, magnetopause distance, and Kp / IMF&nbsp;Bz — with a forecast-skill matrix that shows where the models are confident and where the storms outrun them.</p>
-        <a href="earth.html" class="sim-link" aria-label="Explore Earth Weather simulation" style="--accent:#00c6ff">Explore simulation <span aria-hidden="true">→</span></a>
-      </article>
-
-      <article class="sim-card fade-in" style="--accent:#4ddc99;--thumb-bg:linear-gradient(135deg,#001a14 0%,#003c2e 50%,#001a14 100%)">
-        <div class="sim-thumb" data-preview="upper-atmosphere" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
-        <div class="sim-card-header">
-          <h3 class="sim-card-title">Upper Atmosphere</h3>
-          <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
-        </div>
-        <p class="sim-card-desc">The drag profile that decides launch windows, satellite phasing, and reentry timing. Thermosphere and exosphere from 80&nbsp;km to 2,000&nbsp;km — density, temperature, and per-species composition under any F10.7 / Ap state. Replays Starlink Feb&nbsp;2022, Gannon May&nbsp;2024, and AR3842 storm presets in seconds.</p>
-        <a href="upper-atmosphere.html" class="sim-link" aria-label="Explore Upper Atmosphere simulation" style="--accent:#4ddc99">Explore simulation <span aria-hidden="true">→</span></a>
-      </article>
-
-      <article class="sim-card fade-in" style="--accent:#ffb830;--thumb-bg:linear-gradient(135deg,#1a0800 0%,#3d1500 50%,#1a0800 100%)">
-        <div class="sim-thumb" data-preview="sun" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
-        <div class="sim-card-header">
-          <h3 class="sim-card-title">Solar Physics Engine</h3>
-          <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
-        </div>
-        <p class="sim-card-desc">See the flare before its CME arrives. Parker-spiral solar wind, coronal heating, active-region tracking, and real-time GOES X-ray flux — with CME events pulled from NASA DONKI and impact-time estimates.</p>
-        <a href="sun.html" class="sim-link" aria-label="Explore Solar Physics simulation" style="--accent:#ffb830">Explore simulation <span aria-hidden="true">→</span></a>
-      </article>
-
-      <article class="sim-card fade-in" style="--accent:#c080ff;--thumb-bg:linear-gradient(135deg,#0d0020 0%,#200040 50%,#0d0020 100%)">
-        <div class="sim-thumb" data-preview="space-weather" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
-        <div class="sim-card-header">
-          <h3 class="sim-card-title">Space Weather Dashboard</h3>
-          <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
-        </div>
-        <p class="sim-card-desc">The control room for a solar storm. Full NOAA/SWPC dashboard with heliosphere 3D visualization, storm alerts, aurora forecast, and solar flare history.</p>
-        <a href="space-weather.html" class="sim-link" aria-label="Explore Space Weather Dashboard" style="--accent:#c080ff">Explore simulation <span aria-hidden="true">→</span></a>
-      </article>
-
-      <article class="sim-card fade-in" style="--accent:#ffd700;--thumb-bg:linear-gradient(135deg,#080808 0%,#1a1400 50%,#080808 100%)">
-        <div class="sim-thumb" data-preview="stars" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
-        <div class="sim-card-header">
-          <h3 class="sim-card-title">Stellar Physics Simulator</h3>
-          <span class="sim-tier basic" aria-label="Available on Basic tier">Basic</span>
-        </div>
-        <p class="sim-card-desc">Fly through real star systems — Sirius binary orbital mechanics, Betelgeuse convection, Vega rapid rotation, WR&nbsp;102 Wolf-Rayet winds. Kepler integration with real stellar parameters.</p>
-        <a href="sirius-planetary.html" class="sim-link" aria-label="Explore Stellar Physics Simulator" style="--accent:#ffd700">Explore simulation <span aria-hidden="true">→</span></a>
-      </article>
-
-      <article class="sim-card fade-in" style="--accent:#7b2ff7;--thumb-bg:linear-gradient(135deg,#050010 0%,#140030 50%,#050010 100%)">
-        <div class="sim-thumb" data-preview="galaxy" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
-        <div class="sim-card-header">
-          <h3 class="sim-card-title">Galactic Map</h3>
-          <span class="sim-tier basic" aria-label="Available on Basic tier">Basic</span>
-        </div>
-        <p class="sim-card-desc">Find your place in the galaxy. Navigate the Milky Way's spiral arms and stellar populations — positions calculated from VSOP87 ephemeris and parallax-corrected Hipparcos catalog data.</p>
-        <a href="galactic-map.html" class="sim-link" aria-label="Explore Galactic Map simulation" style="--accent:#7b2ff7">Explore simulation <span aria-hidden="true">→</span></a>
-      </article>
-
+    <div class="catalog-strip fade-in" aria-label="Featured simulations">
+      <a href="earth.html" style="--dot:#00c6ff">Earth Weather</a>
+      <a href="upper-atmosphere.html" style="--dot:#4ddc99">Upper Atmosphere</a>
+      <a href="sun.html" style="--dot:#ffb830">Solar Engine</a>
+      <a href="space-weather.html" style="--dot:#c080ff">Space Weather Dashboard</a>
+      <a href="flux-rope-live.html" style="--dot:#ff5cb8">CME Compounding Watch</a>
+      <a href="galactic-map.html" style="--dot:#7b2ff7">Galactic Map</a>
+      <a class="all" href="simulations.html" data-funnel-cta="sims_browse_all">Browse all 40+ simulations →</a>
     </div>
-    <p class="sims-browse-all fade-in"><a href="simulations.html" data-funnel-cta="sims_browse_all" aria-label="Browse the full simulation catalog">Browse all 40+ simulations <span aria-hidden="true">→</span></a></p>
   </div>
 </section>
 
-<!-- ── S6 · VALIDATION — the numbers behind the engine ────────────────────── -->
+<!-- ── S7 · VALIDATION — the numbers behind the engine, one band ──────────── -->
 <section id="validation" aria-labelledby="validation-heading">
   <div class="section-inner">
-    <h2 class="section-h2 fade-in" id="validation-heading" style="text-align:center;margin-bottom:44px">The numbers behind the engine</h2>
-    <div class="stats-grid">
-      <div class="stat-item fade-in"><span class="stat-num">40+</span><span class="stat-desc">Scientific<br>simulations</span></div>
-      <div class="stat-item fade-in"><span class="stat-num">12</span><span class="stat-desc">Live data<br>feeds</span></div>
-      <div class="stat-item fade-in"><span class="stat-num">60s</span><span class="stat-desc">Data cadence<span class="stat-sub">20s in storm mode</span></span></div>
-      <div class="stat-item fade-in"><span class="stat-num">50,000</span><span class="stat-desc">GPU particles<br>per scene</span></div>
-      <div class="stat-item fade-in"><span class="stat-num">12+</span><span class="stat-desc">Physics models<br>implemented</span></div>
+    <h2 class="section-h2 fade-in" id="validation-heading" style="text-align:center;margin-bottom:24px">The numbers behind the engine</h2>
+    <div class="stats-row fade-in">
+      <span class="stat-item"><span class="stat-num">40+</span><span class="stat-desc">simulations</span></span>
+      <span class="stat-item"><span class="stat-num">12</span><span class="stat-desc">live feeds</span></span>
+      <span class="stat-item"><span class="stat-num">60s</span><span class="stat-desc">cadence · 20s in storms</span></span>
+      <span class="stat-item"><span class="stat-num">50,000</span><span class="stat-desc">GPU particles</span></span>
+      <span class="stat-item"><span class="stat-num">12+</span><span class="stat-desc">physics models</span></span>
     </div>
     <p class="validation-line fade-in">Validated against the <a href="gannon-superstorm.html">May 2024 Gannon G5 superstorm</a> and the October 2024 X9.0 flare.</p>
     <p class="validation-lineage fade-in">Built on the Space Weather Modeling Framework heritage used by national forecasting centers.</p>
@@ -562,7 +520,7 @@ window.addEventListener('message', (e) => {
   </div>
 </section>
 
-<!-- ── S7 · PRICING — aperture-named tiers ────────────────────────────────
+<!-- ── S7 · PRICING — aperture-named tiers, compact ───────────────────────
      Display names only: Observer/Forecaster/Researcher map onto the real
      free/basic/advanced plans (js/tier-config.js, pricing.html, signup.html
      keep the canonical names — do not rename those without a platform-wide
@@ -571,20 +529,14 @@ window.addEventListener('message', (e) => {
   <div class="section-inner">
     <div class="section-label fade-in" style="text-align:center">Pricing</div>
     <h2 class="section-h2 fade-in" id="pricing-heading" style="text-align:center">Start free. Go as deep as you need.</h2>
-    <p class="section-sub fade-in" style="text-align:center;margin:0 auto 52px">Every tier runs the same engine. You're choosing how far in you go.</p>
+    <p class="section-sub fade-in" style="text-align:center;margin:0 auto 34px">Every tier runs the same engine. You're choosing how far in you go.</p>
     <div class="pricing-grid">
 
       <div class="price-card fade-in">
         <div class="price-name">Observer</div>
         <div class="price-alias">The Free plan</div>
         <div class="price-amount">$0<span> / forever</span></div>
-        <p class="price-tagline">See what the engine sees — free, forever. No credit card.</p>
-        <ul class="price-features" aria-label="Observer tier features">
-          <li>Core simulations — Sun, Earth, space weather</li>
-          <li>Live NOAA solar wind &amp; Kp data</li>
-          <li>AurOracle aurora alerts</li>
-          <li>Community access</li>
-        </ul>
+        <p class="price-tagline">Core simulations, live NOAA data, and AurOracle alerts — free, forever. No credit card.</p>
         <a href="signup.html?plan=free" class="price-btn free-btn" data-funnel-cta="pricing_free" aria-label="Get started with the free Observer tier">Get Started Free</a>
       </div>
 
@@ -593,14 +545,7 @@ window.addEventListener('message', (e) => {
         <div class="price-name">Forecaster</div>
         <div class="price-alias">The Basic plan</div>
         <div class="price-amount">$9.99<span> / month</span></div>
-        <p class="price-tagline">Plan around the Sun with full forecast depth.</p>
-        <ul class="price-features" aria-label="Forecaster tier features">
-          <li>All 40+ simulations unlocked</li>
-          <li>AurOracle 7-night + 30-day outlooks</li>
-          <li>Real-time storm alerts</li>
-          <li>Live NASA DONKI + NOAA feeds</li>
-          <li>Email support</li>
-        </ul>
+        <p class="price-tagline">All 40+ simulations, 7-night + 30-day aurora outlooks, and real-time storm alerts.</p>
         <a href="signup.html?plan=basic" class="price-btn basic-btn" data-funnel-cta="pricing_basic" aria-label="Start the Forecaster tier for $9.99 per month">Start Forecaster — $9.99/mo</a>
       </div>
 
@@ -608,14 +553,7 @@ window.addEventListener('message', (e) => {
         <div class="price-name">Researcher</div>
         <div class="price-alias">The Advanced plan</div>
         <div class="price-amount">$100<span> / month</span></div>
-        <p class="price-tagline">Full parameter access for teams that operate in orbit.</p>
-        <ul class="price-features" aria-label="Researcher tier features">
-          <li>Everything in Forecaster</li>
-          <li>Upper-atmosphere density &amp; drag suite</li>
-          <li>Rust/WASM high-performance engine</li>
-          <li>REST API + CSV/JSON export</li>
-          <li>Priority &amp; dedicated support</li>
-        </ul>
+        <p class="price-tagline">The drag suite, Rust/WASM engine, REST API + export — for teams that operate in orbit.</p>
         <a href="signup.html?plan=advanced" class="price-btn adv-btn" data-funnel-cta="pricing_advanced" aria-label="Start the Researcher tier for $100 per month">Start Researcher — $100/mo</a>
       </div>
 
@@ -693,15 +631,16 @@ window.addEventListener('message', (e) => {
 </footer>
 
 <!-- ── PAGE WIRING ─────────────────────────────────────────────────────────
-     One SpaceWeatherFeed for the whole page. The hero (HeroSpaceWeather),
-     the hero readout (initHeroLiveHud) and the ticker (initHomeTicker) all
-     consume the window 'swpc-update' event — NONE constructs a feed. The
-     feed starts LAST so every listener is attached before the first
-     dispatch. Do not import page modules that start their own feed. -->
+     One SpaceWeatherFeed for the whole page. The sky console
+     (initSkyConsole), the ticker (initHomeTicker) and the hero backdrop
+     (HeroSpaceWeather) all consume the window 'swpc-update' event — NONE
+     constructs a feed. The feed starts LAST so every listener is attached
+     before the first dispatch. Do not import page modules that start their
+     own feed. -->
 <script type="module">
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { initHomeTicker } from './js/home-ticker.js';
-import { initHeroLiveHud } from './js/hero-live-hud.js';
+import { initSkyConsole } from './js/home-sky-console.js';
 
 /* Intersection-observer fade-ins */
 (function(){
@@ -719,20 +658,22 @@ import { initHeroLiveHud } from './js/hero-live-hud.js';
   els.forEach(el => obs.observe(el));
 })();
 
-/* Live ticker + hero readout — swpc-update listeners attach before the
-   feed starts. The HUD works even when WebGL/reduced-motion kills the
-   canvas: the numbers are the proof either way. */
+/* Ticker + sky console — swpc-update listeners attach before the feed
+   starts. The console works even when WebGL/reduced-motion kills the
+   backdrop canvas: the numbers are the product either way. A console boot
+   failure must never take the ticker (or the feed) down with it. */
 initHomeTicker(document.querySelector('[data-sw-ticker]'));
-initHeroLiveHud(document.querySelector('[data-hero-hud]'));
+try {
+  await initSkyConsole(document.getElementById('sky-console-host'));
+} catch (err) {
+  console.warn('[home] sky console failed to boot:', err);
+}
 
-/* Card posters + live previews (featured grid + depth ladder thumbs). */
-import('./js/card-previews.js').then(m => m.initCardPreviews()).catch(() => {});
-
-/* Hero: live magnetosphere. Skipped under prefers-reduced-motion — the CSS
-   gradient backdrop remains and the ticker stays live. WebGL failure
-   self-handles (the module hides its canvas). The import is awaited with a
-   cap so the hero's swpc-update listener attaches before the first feed
-   dispatch, but a hung network can never stall the ticker below. */
+/* Hero backdrop: live magnetosphere. Skipped under prefers-reduced-motion —
+   the CSS gradient backdrop remains and the console stays live. WebGL
+   failure self-handles (the module hides its canvas). The import is awaited
+   with a cap so the hero's swpc-update listener attaches before the first
+   feed dispatch, but a hung network can never stall the console. */
 const heroCanvas = document.getElementById('hero-canvas');
 if (heroCanvas && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
   const heroReady = import('./js/hero-space-weather.js')

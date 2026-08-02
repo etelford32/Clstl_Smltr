@@ -316,3 +316,139 @@ export function drawArrivalHist(canvas, o) {
     ctx.fillStyle = COL.median;
     ctx.fillText(`median arrival ${fmt(med)} (P${Math.round(100 * arr.length / o.arrivalH.length)} hit)`, padL, padT - 3 * dpr);
 }
+
+/** Per-rope accents for the train map — matches the view's overlay palette
+ *  (cyan, violet, amber, green, rose, periwinkle) so a rope keeps its color
+ *  across the 3D stage and this chart. */
+const TRAIN_STROKES = ['#aaebff', '#c792ea', '#ffb454', '#7fe6c3', '#ff8aa8', '#9ebaff'];
+const SQUEEZE = 'rgba(255, 120, 60, 1)';
+
+/**
+ * drawTrainMap — WHERE the interactions happen: heliocentric distance vs
+ * time for the whole train. Each rope is a nose→tail ribbon around its apex
+ * line (all from kernel probes, computed by the caller); the §16 rear
+ * squeeze glows on the LEADER's tail edge with intensity ∝ rear_c(t); a
+ * marker flags the first nose-to-tail touch of each pair (the §19 contact
+ * geometry). Pure rendering — the caller passes plain arrays.
+ *
+ *   o = { tH,                        // sample times [h], shared grid
+ *         ropes: [{ apexAu, noseAu, tailAu }],   // NaN = pre-launch
+ *         squeezes: [{ leader, follower, rearC }], // rearC aligned with tH
+ *         contacts: [{ tH, rAu, leader, follower }],
+ *         l1Au, cursorH, launchMs? }
+ */
+export function drawTrainMap(canvas, o) {
+    const { ctx, w, h, dpr } = setupCanvas(canvas);
+    ctx.font = `${10 * dpr}px system-ui, sans-serif`;
+    if (!o.ropes?.length || !o.tH?.length) {
+        ctx.fillStyle = COL.text;
+        ctx.fillText('no ropes in flight', 12 * dpr, h / 2);
+        return;
+    }
+    const t0 = o.tH[0], t1 = o.tH[o.tH.length - 1];
+    let rMax = 1.15;
+    for (const r of o.ropes) for (const v of r.noseAu) if (Number.isFinite(v)) rMax = Math.max(rMax, v);
+    rMax = Math.min(rMax * 1.04, 2.2);
+    const padL = 34 * dpr, padR = 8 * dpr, padT = 16 * dpr, padB = 18 * dpr;
+    const X = (tH) => padL + (tH - t0) / (t1 - t0) * (w - padL - padR);
+    const Y = (au) => h - padB - (au / rMax) * (h - padT - padB);
+
+    // AU grid + the L1 line.
+    ctx.fillStyle = COL.text;
+    for (let au = 0.25; au < rMax; au += 0.25) {
+        ctx.strokeStyle = COL.grid;
+        ctx.lineWidth = dpr;
+        ctx.beginPath(); ctx.moveTo(padL, Y(au)); ctx.lineTo(w - padR, Y(au)); ctx.stroke();
+        ctx.fillText(au.toFixed(2), 4 * dpr, Y(au) + 3 * dpr);
+    }
+    ctx.strokeStyle = 'rgba(79, 195, 247, 0.55)';
+    ctx.setLineDash([4 * dpr, 3 * dpr]);
+    ctx.beginPath(); ctx.moveTo(padL, Y(o.l1Au ?? 0.99)); ctx.lineTo(w - padR, Y(o.l1Au ?? 0.99)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(79, 195, 247, 0.8)';
+    ctx.fillText('L1', w - padR - 14 * dpr, Y(o.l1Au ?? 0.99) - 4 * dpr);
+
+    const path = (arr, close = false) => {
+        let pen = false;
+        for (let i = 0; i < o.tH.length; i++) {
+            const v = arr[i];
+            if (!Number.isFinite(v)) { pen = false; continue; }
+            const x = X(o.tH[i]), y = Y(v);
+            if (!pen) { if (!close) ctx.moveTo(x, y); else ctx.lineTo(x, y); pen = true; }
+            else ctx.lineTo(x, y);
+        }
+    };
+
+    // Ropes leave the AU range late in a long grid — clip to the plot area.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(padL, padT, w - padL - padR, h - padT - padB);
+    ctx.clip();
+
+    // Nose→tail ribbons + apex lines, one accent per rope.
+    o.ropes.forEach((r, i) => {
+        const c = TRAIN_STROKES[i % TRAIN_STROKES.length];
+        ctx.beginPath();
+        path(r.noseAu);
+        for (let j = o.tH.length - 1; j >= 0; j--) {
+            if (!Number.isFinite(r.tailAu[j])) continue;
+            ctx.lineTo(X(o.tH[j]), Y(r.tailAu[j]));
+        }
+        ctx.closePath();
+        ctx.fillStyle = c + '1f';   // ~12% alpha ribbon
+        ctx.fill();
+        ctx.strokeStyle = c;
+        ctx.lineWidth = 1.5 * dpr;
+        ctx.beginPath(); path(r.apexAu); ctx.stroke();
+    });
+
+    // §16 squeeze: the follower compresses its LEADER's rear — glow the
+    // leader's tail edge where rear_c > 0, alpha ∝ intensity.
+    for (const sq of o.squeezes || []) {
+        const tail = o.ropes[sq.leader]?.tailAu;
+        if (!tail) continue;
+        ctx.lineWidth = 3 * dpr;
+        for (let i = 1; i < o.tH.length; i++) {
+            const rc = Math.max(sq.rearC[i - 1] || 0, sq.rearC[i] || 0);
+            if (rc <= 0 || !Number.isFinite(tail[i - 1]) || !Number.isFinite(tail[i])) continue;
+            ctx.strokeStyle = SQUEEZE.replace(', 1)', `, ${Math.min(0.9, 0.25 + rc).toFixed(2)})`);
+            ctx.beginPath();
+            ctx.moveTo(X(o.tH[i - 1]), Y(tail[i - 1]));
+            ctx.lineTo(X(o.tH[i]), Y(tail[i]));
+            ctx.stroke();
+        }
+    }
+
+    // First nose-to-tail touch per pair (the §19 contact geometry).
+    for (const c of o.contacts || []) {
+        const x = X(c.tH), y = Y(c.rAu);
+        ctx.fillStyle = '#ffd27f';
+        ctx.beginPath(); ctx.arc(x, y, 3.5 * dpr, 0, 2 * Math.PI); ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 210, 127, 0.5)';
+        ctx.lineWidth = dpr;
+        ctx.beginPath(); ctx.arc(x, y, 7 * dpr, 0, 2 * Math.PI); ctx.stroke();
+        ctx.fillStyle = '#ffd27f';
+        const lbl = `R${c.follower + 1}→R${c.leader + 1} contact +${c.tH.toFixed(0)}h`;
+        const lx = Math.min(x + 9 * dpr, w - padR - ctx.measureText(lbl).width);
+        ctx.fillText(lbl, lx, y - 6 * dpr);
+    }
+    ctx.restore();
+
+    // Now-line cursor + time axis.
+    if (Number.isFinite(o.cursorH) && o.cursorH >= t0 && o.cursorH <= t1) {
+        ctx.strokeStyle = COL.cursor;
+        ctx.lineWidth = dpr;
+        ctx.beginPath(); ctx.moveTo(X(o.cursorH), padT); ctx.lineTo(X(o.cursorH), h - padB); ctx.stroke();
+    }
+    ctx.fillStyle = COL.text;
+    const fmt = (tH) => {
+        if (!o.launchMs) return `+${tH.toFixed(0)}h`;
+        const d = new Date(o.launchMs + tH * 3600_000);
+        return `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}:00`;
+    };
+    ctx.fillText(fmt(t0), padL, h - 5 * dpr);
+    const end = fmt(t1);
+    ctx.fillText(end, w - padR - ctx.measureText(end).width, h - 5 * dpr);
+    ctx.fillStyle = COL.text;
+    ctx.fillText('heliocentric distance [AU] · ribbons nose→tail · tail glow = §16 rear squeeze', padL, padT - 4 * dpr);
+}

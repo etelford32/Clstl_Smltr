@@ -432,6 +432,22 @@ pub extern "C" fn fr_v_ms_kms() -> f64 {
     kinematics::V_MS_KMS
 }
 
+/// Rankine–Hugoniot compression ratio X(M) (spec §14) — pure function
+/// probe so pages and the GLSL view render shock compression oracle-direct
+/// instead of re-deriving the γ = 5/3 formula.
+#[no_mangle]
+pub extern "C" fn fr_compression_x(mach: f64) -> f64 {
+    kinematics::compression_ratio(mach)
+}
+
+/// Farris–Russell standoff ratio FR(M) (spec §17) — pure function probe,
+/// same rationale as fr_compression_x. Returns the STANDOFF_MAX cap at
+/// M ≤ 1 (callers gate shock existence on M > 1 themselves).
+#[no_mangle]
+pub extern "C" fn fr_standoff_fr(mach: f64) -> f64 {
+    kinematics::standoff_ratio(mach)
+}
+
 // ── Kinematics probes (page HUD + GLSL uniforms) ─────────────────────────────
 // The _at variants take a rope index into the train; the index-free forms
 // probe rope 0 (v1 back-compat). A rope not yet launched (t < t_launch)
@@ -937,6 +953,15 @@ mod abi_tests {
         let fp = fr_field_at(t_mid, fr_apex_km(t_mid) * 0.98, 0.0, 0.0);
         let inside = unsafe { *fp.add(3) };
         assert!(inside == 1.0, "apex-adjacent probe should be inside");
+
+        // Pure-function shock probes match the kinematics module exactly
+        // (these are what the GLSL view's sheath shell renders against).
+        assert_eq!(fr_compression_x(2.0), kinematics::compression_ratio(2.0));
+        assert_eq!(fr_compression_x(0.5), 1.0);
+        assert!((fr_compression_x(1e9) - 4.0).abs() < 1e-9, "strong-shock cap");
+        assert_eq!(fr_standoff_fr(3.0), kinematics::standoff_ratio(3.0));
+        assert!((fr_standoff_fr(1e6) - 0.25).abs() < 1e-3, "strong-shock standoff → 1/4");
+        assert_eq!(fr_standoff_fr(0.5), kinematics::STANDOFF_MAX);
     }
 
     /// Drive the TRAIN surface the way the multi-rope page does.
