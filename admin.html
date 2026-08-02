@@ -714,6 +714,7 @@
         <div class="card" style="margin-bottom:18px">
             <h3>Visitor Flow
                 <span style="font-size:.72rem;color:#666;font-weight:400;margin-left:6px">how visitors move through the app — anon &amp; signed-in</span>
+                <span id="flow-source-badge" style="font-size:.68rem;color:#889;font-weight:600;margin-left:8px;padding:2px 8px;border:1px solid rgba(255,255,255,.12);border-radius:10px;vertical-align:1px">…</span>
                 <span style="float:right;display:flex;gap:6px;align-items:center;font-size:.72rem;color:#888;font-weight:400">
                     <select id="flow-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
                         <option value="1">last 24h</option>
@@ -733,6 +734,8 @@
                 <div class="kpi"><div class="kpi-val kpi-loading" id="flow-anon">--</div><div class="kpi-label">Anonymous</div></div>
                 <div class="kpi"><div class="kpi-val kpi-loading" id="flow-signed">--</div><div class="kpi-label">Signed-in</div></div>
                 <div class="kpi"><div class="kpi-val kpi-loading" id="flow-converted">--</div><div class="kpi-label">Anon → Identified</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="flow-visitors">--</div><div class="kpi-label">Visitors</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="flow-hard-bounce">--</div><div class="kpi-label">Hard Bounce</div></div>
             </div>
 
             <div class="row2" style="margin-bottom:14px">
@@ -747,8 +750,13 @@
             </div>
 
             <div style="margin-bottom:14px">
-                <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Top Page-to-Page Transitions <span style="color:#445;font-weight:400;text-transform:none">— most common next-step navigation</span></div>
+                <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Top Page-to-Page Transitions <span style="color:#445;font-weight:400;text-transform:none">— most common next-step navigation · (exit) = left the site · ↻ = reload loop</span></div>
                 <div id="flow-transitions-list"><div class="empty">Loading…</div></div>
+            </div>
+
+            <div style="margin-bottom:14px">
+                <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Bounce Hotspots &amp; Engagement Depth <span style="color:#445;font-weight:400;text-transform:none">— per page: where landings die vs where visitors dig in (full population)</span></div>
+                <div id="flow-engagement-list"><div class="empty">Waiting for page_flow data — populates once supabase-page-flow-migration.sql has run and the instrumented pages have traffic.</div></div>
             </div>
 
             <div class="row2">
@@ -757,7 +765,7 @@
                     <div id="flow-referrer-list"><div class="empty">Loading…</div></div>
                 </div>
                 <div>
-                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Where Entries Go Next <span style="color:#445;font-weight:400;text-transform:none">— anon vs signed-in second-step</span></div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Where Entries Go Next <span style="color:#445;font-weight:400;text-transform:none">— anon vs signed-in second-step · consented sample only</span></div>
                     <div id="flow-entry-dest-list"><div class="empty">Loading…</div></div>
                 </div>
             </div>
@@ -1106,7 +1114,7 @@ import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
 import { EXPERIMENTS, EXPERIMENT_GOALS } from './js/experiments.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchSyntheticJourneys, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchAuthFunnelSummary, fetchAuthFunnelTopDrops, fetchFunnelVisitorSummary, fetchFunnelFailureCodes, fetchFunnelDimensionConversion, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, fetchDailyRetentionCurve, fetchStickiness, fetchFeatureReturnRates, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchSyntheticJourneys, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchAuthFunnelDropoffs, fetchAuthFunnelSummary, fetchAuthFunnelTopDrops, fetchFunnelVisitorSummary, fetchFunnelFailureCodes, fetchFunnelDimensionConversion, fetchNewVsReturning, fetchVisitorFlow, fetchPageFlow, fetchEntryDestinations, fetchAcquisition, fetchAccumulatorStats, fetchExperimentAB, fetchExperimentGoals, fetchExperimentRetention, fetchDailyRetentionCurve, fetchStickiness, fetchFeatureReturnRates, wilsonCI95, twoProportionZ, fetchPerfSummary, fetchTopErrors, fetchTop404s, fetchTopAuthFailures, fetchConsentOptinRate, fetchStripeMetrics } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 import { HEARTBEAT_PIPELINES } from './js/pipeline-registry.js';
 
@@ -3972,10 +3980,36 @@ function _flowBarRow(label, count, share, totalLabel) {
 
 async function loadVisitorFlow() {
     const days = parseInt(document.getElementById('flow-window').value, 10) || 7;
-    const [flowRes, destRes] = await Promise.all([
+    // Prefer the full-population page_flow pipeline (consent-exempt
+    // operational telemetry — sees every pageview). Fall back to the
+    // consent-gated analytics_events computation when the migration
+    // hasn't run or page_flow has no rows yet: the cookie banner
+    // converts at ~2%, so the fallback is a thin, biased sample and
+    // the source badge says so.
+    const [fullRes, legacyRes, destRes] = await Promise.all([
+        fetchPageFlow(days),
         fetchVisitorFlow(days),
         fetchEntryDestinations(days, 5),
     ]);
+    const useFull = fullRes.ok && fullRes.data.pageviews > 0;
+    const flowRes = useFull ? fullRes : legacyRes;
+
+    const badge = document.getElementById('flow-source-badge');
+    if (badge) {
+        if (useFull) {
+            badge.textContent = 'full population';
+            badge.style.color = '#9ad36f';
+            badge.style.borderColor = 'rgba(154,211,111,.4)';
+            badge.title = 'Consent-exempt operational telemetry (client_telemetry.page_flow) — every pageview, not just cookie-consented visitors.';
+        } else {
+            badge.textContent = 'consented sample (~2%)';
+            badge.style.color = '#e5c46d';
+            badge.style.borderColor = 'rgba(229,196,109,.4)';
+            badge.title = fullRes.missing
+                ? 'page_flow RPCs not found — run supabase-page-flow-migration.sql. Showing the consent-gated analytics_events sample instead.'
+                : 'No page_flow rows in this window yet — showing the consent-gated analytics_events sample instead.';
+        }
+    }
 
     const setKpi = (id, val, cls) => {
         const el = document.getElementById(id);
@@ -4003,6 +4037,15 @@ async function loadVisitorFlow() {
     setKpi('flow-anon',      d.anonSessions, 'purple');
     setKpi('flow-signed',    d.signedSessions, 'green');
     setKpi('flow-converted', d.anonConverted, d.anonConverted > 0 ? 'gold' : 'white');
+    // Full-population-only KPIs — the consented-sample source can't
+    // compute them, so they read "—" on fallback rather than lying.
+    setKpi('flow-visitors', useFull ? d.visitors : '—', 'blue');
+    if (useFull) {
+        setKpi('flow-hard-bounce', (d.hardBounceRate * 100).toFixed(1) + '%',
+            d.hardBounceRate < 0.3 ? 'green' : d.hardBounceRate < 0.55 ? 'gold' : 'red');
+    } else {
+        setKpi('flow-hard-bounce', '—', 'white');
+    }
 
     // Entry / Exit lists
     const entryEl = document.getElementById('flow-entry-list');
@@ -4023,16 +4066,67 @@ async function loadVisitorFlow() {
         const maxC = d.transitions[0].count;
         transEl.innerHTML = d.transitions.map(t => {
             const pct = Math.max(3, (t.count / maxC) * 100);
+            const isExit   = t.to === '(exit)';
+            const isReload = t.from === t.to;
+            const toColor  = isExit ? '#ff8080' : '#4fc3f7';
+            const barGrad  = isExit
+                ? 'linear-gradient(90deg,#9ad36f,#ff8080)'
+                : 'linear-gradient(90deg,#9ad36f,#4fc3f7)';
+            const flag = isReload
+                ? ' <span style="color:#e5c46d" title="Same page to same page — a reload loop. On a gated page this is a drop-off signal.">↻ reload</span>'
+                : '';
             return `<div style="margin-bottom:7px">
                 <div style="display:flex;justify-content:space-between;font-size:.8rem;margin-bottom:3px">
-                    <span style="color:#cdd"><span style="color:#9ad36f">${_esc(t.from)}</span> <span style="color:#556">→</span> <span style="color:#4fc3f7">${_esc(t.to)}</span></span>
+                    <span style="color:#cdd"><span style="color:#9ad36f">${_esc(t.from)}</span> <span style="color:#556">→</span> <span style="color:${toColor}">${_esc(t.to)}</span>${flag}</span>
                     <span style="color:#778">${t.count.toLocaleString()} transitions</span>
                 </div>
                 <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden">
-                    <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#9ad36f,#4fc3f7);border-radius:2px"></div>
+                    <div style="height:100%;width:${pct}%;background:${barGrad};border-radius:2px"></div>
                 </div>
             </div>`;
         }).join('');
+    }
+
+    // Bounce hotspots & engagement depth — full-population only.
+    const engEl = document.getElementById('flow-engagement-list');
+    if (engEl) {
+        if (!useFull || !Array.isArray(d.pages) || !d.pages.length) {
+            engEl.innerHTML = `<div class="empty">${useFull
+                ? 'No per-page engagement rows in this window yet.'
+                : 'Needs the page_flow pipeline — run supabase-page-flow-migration.sql, then give the instrumented pages a session or two of traffic.'}</div>`;
+        } else {
+            const fmtS = (s) => s == null ? '—' : (s >= 60 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : s + 's');
+            // Rank: bounce-heavy landing pages first (that's what needs
+            // fixing), then by raw entries for the long tail.
+            const rows = [...d.pages].sort((a, b) =>
+                (b.landings >= 3 ? b.hardBounceRate : -1) - (a.landings >= 3 ? a.hardBounceRate : -1)
+                || b.entries - a.entries);
+            engEl.innerHTML = `<div style="overflow-x:auto"><table style="font-size:.76rem;width:100%">
+                <thead><tr style="text-align:right;color:#778">
+                    <th style="text-align:left">Page</th><th>Views</th><th>Landings</th>
+                    <th title="Landings that were the session's only pageview and never engaged (dwell < 15s, zero clicks, or the tab died before an exit event)">Hard bounce</th>
+                    <th title="Median wall-clock time on page (best exit per pageview)">Med dwell</th>
+                    <th title="Median input-derived engaged time — gaps between interactions under 10s. Passive watching counts toward dwell, not here.">Med active</th>
+                    <th>Scroll</th><th>Clicks</th><th>Exits</th>
+                </tr></thead><tbody>${rows.map(r => {
+                    const hb = r.landings >= 3 ? Math.round(r.hardBounceRate * 100) + '%' : '—';
+                    const hbColor = r.landings < 3 ? '#556'
+                        : r.hardBounceRate > 0.55 ? '#ff8080'
+                        : r.hardBounceRate > 0.3 ? '#e5c46d' : '#9ad36f';
+                    return `<tr style="text-align:right;border-top:1px solid rgba(255,255,255,.04)">
+                        <td style="text-align:left;color:#cdd">${_esc(r.page)}</td>
+                        <td style="color:#aab">${r.entries.toLocaleString()}</td>
+                        <td style="color:#aab">${r.landings.toLocaleString()}</td>
+                        <td style="color:${hbColor};font-weight:600">${hb}</td>
+                        <td style="color:#aab">${fmtS(r.medDwellS)}</td>
+                        <td style="color:#4fc3f7">${fmtS(r.medActiveS)}</td>
+                        <td style="color:#aab">${r.avgScrollPct == null ? '—' : Math.round(r.avgScrollPct) + '%'}</td>
+                        <td style="color:#aab">${r.avgClicks == null ? '—' : r.avgClicks}</td>
+                        <td style="color:#aab">${r.exits.toLocaleString()}</td>
+                    </tr>`;
+                }).join('')}</tbody></table></div>
+                <div style="font-size:.68rem;color:#667;margin-top:6px">Hard-bounce % needs ≥ 3 landings to show. Ranked bounce-worst-first so the pages that leak visitors sit on top.</div>`;
+        }
     }
 
     // Referrers (origins). "(none)" or null = direct/typed-in.
