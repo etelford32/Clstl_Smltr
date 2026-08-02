@@ -368,6 +368,48 @@ class Telemetry {
     }
 
     /**
+     * Record a site-wide visitor-flow event (page enter / exit).
+     *
+     * 100% sampled and consent-exempt like recordFunnel: the payload
+     * carries no PII, no fingerprint, no IP — pathname-only pages,
+     * origin-only external referrers, and engagement summaries (dwell /
+     * active seconds / scroll depth / click count). This is the pipeline
+     * that answers "where do visitors bounce" for the FULL population;
+     * the consent-gated analytics_events stream sees ~2% of it. See
+     * ANALYTICS.md §5 for the posture and the rollback lever.
+     *
+     * Requires the 'page_flow' kind — added to client_telemetry's kind
+     * CHECK + the log_client_telemetry whitelist by
+     * supabase-page-flow-migration.sql. Events sent before that
+     * migration runs are silently skipped by the RPC (by design).
+     *
+     * @param {string} phase  'enter' | 'exit'.
+     * @param {object} [meta] Payload built by js/page-flow-core.js.
+     */
+    recordFlow(phase, meta = {}) {
+        if (phase !== 'enter' && phase !== 'exit') return;
+        const payload = { phase, ...meta };
+        try {
+            // Same size guard as recordFunnel: never let a fat payload get
+            // RPC-truncated into a shape that loses the phase field.
+            const s = JSON.stringify(payload);
+            if (s.length > 1500) {
+                this._enqueue({
+                    kind:     'page_flow',
+                    severity: 'info',
+                    metadata: { phase, truncated: true, original_size: s.length },
+                });
+                return;
+            }
+        } catch { /* fall through with raw payload */ }
+        this._enqueue({
+            kind:     'page_flow',
+            severity: 'info',
+            metadata: payload,
+        });
+    }
+
+    /**
      * Record a cookie-consent prompt impression or decision.
      *
      * Anonymous-safe and 100% sampled, exactly like recordFunnel: the

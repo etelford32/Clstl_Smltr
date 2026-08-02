@@ -1400,6 +1400,104 @@ export async function fetchVisitorFlow(days = 7) {
 }
 
 /**
+ * Full-population visitor flow — reads the consent-exempt page_flow
+ * pipeline (client_telemetry, kind='page_flow') through the three RPCs
+ * shipped by supabase-page-flow-migration.sql. This is the population
+ * the consent-gated fetchVisitorFlow() above structurally cannot see:
+ * the cookie banner converts at ~2%, so analytics_events describes a
+ * sliver of traffic while page_flow sees every pageview.
+ *
+ * Returns the same top-level shape fetchVisitorFlow produces (so the
+ * admin card renders either source), PLUS:
+ *   visitors            — distinct persistent visitor_ids
+ *   landings            — external/direct entries
+ *   hardBounceRate      — landings-only sessions that never engaged
+ *   medPageDwellS / medActiveS / avgScrollPct
+ *   pages               — per-page engagement rows (bounce hotspots)
+ *
+ * When the migration hasn't been applied yet the RPCs don't exist;
+ * that returns { ok:false, missing:true } so the caller can fall back
+ * to the consented-sample computation instead of showing an error.
+ */
+export async function fetchPageFlow(days = 7) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    try {
+        const [k, p, t] = await Promise.all([
+            client.rpc('telemetry_page_flow_kpis',  { p_days: days }),
+            client.rpc('telemetry_page_flow_pages', { p_days: days, p_limit: 30 }),
+            client.rpc('telemetry_page_transitions',{ p_days: days, p_limit: 25 }),
+        ]);
+        const missing = [k, p, t].find(r => r.error
+            && /could not find|does not exist|schema cache|PGRST202|42883/i.test(r.error.message || ''));
+        if (missing) return { ok: false, missing: true, error: 'page_flow RPCs not migrated yet' };
+        if (k.error) throw k.error;
+        if (p.error) throw p.error;
+        if (t.error) throw t.error;
+
+        const kpis  = (Array.isArray(k.data) ? k.data[0] : k.data) || {};
+        const pages = Array.isArray(p.data) ? p.data : [];
+        const sessions = Number(kpis.sessions) || 0;
+        const landings = Number(kpis.landings) || 0;
+
+        const share = (n, denom) => denom ? +(n / denom).toFixed(3) : 0;
+        const entryPages = pages
+            .filter(r => Number(r.land_n) > 0)
+            .sort((a, b) => b.land_n - a.land_n).slice(0, 10)
+            .map(r => ({ name: r.page, count: Number(r.land_n), share: share(Number(r.land_n), landings) }));
+        const exitPages = pages
+            .filter(r => Number(r.exits_n) > 0)
+            .sort((a, b) => b.exits_n - a.exits_n).slice(0, 10)
+            .map(r => ({ name: r.page, count: Number(r.exits_n), share: share(Number(r.exits_n), sessions) }));
+        const transitions = (Array.isArray(t.data) ? t.data : [])
+            .map(r => ({ from: r.from_page, to: r.to_page, count: Number(r.n) }));
+
+        const identified = Number(kpis.identified_sessions) || 0;
+        return {
+            ok: true,
+            source: 'page_flow',
+            data: {
+                windowDays:            days,
+                sessions,
+                visitors:              Number(kpis.visitors) || 0,
+                landings,
+                anonSessions:          Math.max(0, sessions - identified),
+                signedSessions:        identified,
+                anonConverted:         Number(kpis.anon_converted) || 0,
+                pageviews:             Number(kpis.pageviews) || 0,
+                avgPagesPerSession:    sessions ? +((Number(kpis.pageviews) || 0) / sessions).toFixed(2) : 0,
+                bounceRate:            share(Number(kpis.bounce_sessions) || 0, sessions),
+                hardBounceRate:        share(Number(kpis.hard_bounce_sessions) || 0, sessions),
+                avgSessionDurationSec: Math.round(Number(kpis.med_session_dwell_s) || 0),
+                medPageDwellS:         Math.round(Number(kpis.med_page_dwell_s) || 0),
+                medActiveS:            Math.round(Number(kpis.med_active_s) || 0),
+                avgScrollPct:          Number(kpis.avg_scroll_pct) || 0,
+                entryPages,
+                exitPages,
+                transitions,
+                pages: pages.map(r => ({
+                    page:         r.page,
+                    entries:      Number(r.entries) || 0,
+                    landings:     Number(r.land_n) || 0,
+                    exits:        Number(r.exits_n) || 0,
+                    hardBounces:  Number(r.hard_bounce_n) || 0,
+                    hardBounceRate: Number(r.land_n) ? +(Number(r.hard_bounce_n) / Number(r.land_n)).toFixed(3) : 0,
+                    medDwellS:    r.med_dwell_s == null ? null : Math.round(Number(r.med_dwell_s)),
+                    medActiveS:   r.med_active_s == null ? null : Math.round(Number(r.med_active_s)),
+                    avgScrollPct: r.avg_scroll_pct == null ? null : Number(r.avg_scroll_pct),
+                    avgClicks:    r.avg_clicks == null ? null : Number(r.avg_clicks),
+                })),
+                truncated: false,
+            },
+        };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+/**
  * First-touch acquisition breakdown — slices new sessions by the attribution
  * snapshot emitted by analytics.js (`session_start` event) on the page where
  * each session was minted. One round trip, capped at 30k rows; aggregation

@@ -298,3 +298,68 @@ select metadata->'failed' as failed, count(*)
    and created_at > now() - interval '7 days'
  group by 1 order by 2 desc limit 20;
 ```
+
+## 5. Site-wide visitor flow — `client_telemetry.kind = 'page_flow'`
+
+**What it answers:** "Where do visitors go, where do they bounce, and how
+deeply do they engage — for the FULL population, on every page?"
+
+**Why it exists:** the consent-gated analytics_events pipeline (§3)
+structurally cannot answer this. Measured July 2026: 1,722 consent
+prompts shown → 29 decisions (17 accept / 12 reject). ~98% of visitors
+never touch the banner, so §3 describes roughly 2% of traffic — heavily
+biased toward the author and power users. In the same 30 days the
+consent-exempt funnel stream saw 1,104 distinct landing visitors.
+
+**Where it lives:** `client_telemetry`, `kind = 'page_flow'`. Emitted by
+`js/page-flow.js` (loaded via `js/nav.js` on every page that mounts the
+nav — all ~72), logic in `js/page-flow-core.js` (pure; tested by
+`tests/page-flow.mjs`), transported by `telemetry.recordFlow()`. 100%
+sampled. Migration: `supabase-page-flow-migration.sql` (kind CHECK + RPC
+whitelist move together — same drift guard as the funnel).
+
+**Exactly two events per pageview:**
+
+| phase | when | metadata |
+|---|---|---|
+| `enter` | page load | `pv` (per-pageview join id), `ref` (internal pathname OR external origin), `landing` 0/1, `device`, `visitor_id` |
+| `exit`  | pagehide / first tab-hide | `pv`, `dwell_s` (wall), `visible_s`, `active_s` (input-gap engaged time), `clicks`, `scroll_pct`, `exit_to`, `visitor_id` |
+
+Notes that matter when reading the data:
+
+- **A pageview can ship MORE THAN ONE exit** — a tab that re-engages
+  after the first hide refreshes its exit (same `pv`). Readers must take
+  the max-dwell exit per `pv`; the RPCs do.
+- **Transitions come from `enter.ref`, not session ordering.** An
+  internal referrer pathname IS the from→to edge, and it survives tab
+  boundaries / `target=_blank`, which per-tab session ordering does not.
+- **`active_s` vs `dwell_s`:** active is the sum of inter-input gaps
+  under 10 s while visible — passively watching a simulation counts
+  toward `visible_s` but not `active_s`. A background tab counts toward
+  neither. Bots that execute JS typically show dwell with zero active —
+  which is why "hard bounce" requires zero clicks AND < 15 s dwell.
+- **Privacy floor (same as the funnel, §1):** no PII, no fingerprint, no
+  IP, pathname-only pages, origin-only external referrers (queries
+  stripped — see `classifyRef`), first-party only, 90-day retention via
+  the existing telemetry cron. This is a deliberate extension of the
+  Phase-3 posture ("softened for measurement, defensible because no
+  PII"): CNIL-style first-party audience measurement. Rollback lever: if
+  the threat model tightens, remove the `import './page-flow.js'` line
+  from nav.js — the pipeline stops instantly, the tables just stop
+  filling, and the admin card falls back to the consented sample.
+
+**Reading it — three superadmin RPCs:**
+
+- `telemetry_page_flow_kpis(days)` — sitewide sessions / visitors /
+  pageviews / landings / bounce + hard-bounce counts / identified split /
+  median dwell / median active / avg scroll.
+- `telemetry_page_flow_pages(days, limit)` — per-page entries, landings,
+  exits, hard bounces, median dwell/active, avg scroll/clicks. Powers the
+  admin "Bounce Hotspots & Engagement Depth" table.
+- `telemetry_page_transitions(days, limit)` — from→to edges including
+  `(exit)` rows; a from = to row is a reload loop (the admin flags it —
+  a reload loop on a gated page is a drop-off signal, not noise).
+
+The admin Visitor Flow card prefers this source (badge: **full
+population**) and falls back to the §3 consented-sample computation with
+an amber badge when the migration hasn't run or the window has no rows.
