@@ -239,12 +239,22 @@ export const SHALLOW_QUAKE_FACTS = Object.freeze({
 });
 
 // ── The dead dynamo ──────────────────────────────────────────────────────────
+// `mechanism` — the leading proposed power source for each epoch. The
+// high-field epoch is the famous puzzle: thermal convection alone struggles
+// to reach Earth-like intensities in so small a core, hence the precession
+// (Dwyer et al. 2011, Nature 479:212) and basal-magma-ocean (Scheinberg
+// et al. 2018) proposals. The kernel reports the candidates, not a verdict.
 export const DYNAMO_EPOCHS = Object.freeze([
-    Object.freeze({ fromGa: 4.42, toGa: 4.25, label: 'Onset', fieldMicroT: [0, 20] }),
-    Object.freeze({ fromGa: 4.25, toGa: 3.56, label: 'High-field epoch', fieldMicroT: [20, 110] }),
-    Object.freeze({ fromGa: 3.56, toGa: 1.9, label: 'Weak-field decline', fieldMicroT: [3, 20] }),
-    Object.freeze({ fromGa: 1.9, toGa: 0.8, label: 'Dying', fieldMicroT: [0, 3] }),
-    Object.freeze({ fromGa: 0.8, toGa: 0, label: 'Dead — crustal remanence only', fieldMicroT: [0, 0] }),
+    Object.freeze({ fromGa: 4.42, toGa: 4.25, label: 'Onset', fieldMicroT: [0, 20],
+        mechanism: 'Thermal convection — a young, superheated core stirring itself as it cools.' }),
+    Object.freeze({ fromGa: 4.25, toGa: 3.56, label: 'High-field epoch', fieldMicroT: [20, 110],
+        mechanism: 'Too strong for thermal convection alone: leading candidates are mechanical stirring by mantle precession (the Moon orbited far closer; Dwyer 2011) or a basal magma ocean.' }),
+    Object.freeze({ fromGa: 3.56, toGa: 1.9, label: 'Weak-field decline', fieldMicroT: [3, 20],
+        mechanism: 'Precession power fades as the Moon recedes; thermochemical convection carries a weakening field.' }),
+    Object.freeze({ fromGa: 1.9, toGa: 0.8, label: 'Dying', fieldMicroT: [0, 3],
+        mechanism: 'Inner-core crystallization — compositional buoyancy from freezing iron, the last trickle of power (Mighani 2020).' }),
+    Object.freeze({ fromGa: 0.8, toGa: 0, label: 'Dead — crustal remanence only', fieldMicroT: [0, 0],
+        mechanism: 'The fluid shell survives, but convects too feebly to regenerate a field. Only magnetized crust remembers.' }),
 ]);
 
 /**
@@ -265,6 +275,20 @@ export function dynamoSurfaceFieldMicroT(ageGa) {
     if (a <= 4.25) return 50;
     if (a <= 4.42) return 50 * (4.42 - a) / (4.42 - 4.25);
     return 0;
+}
+
+/**
+ * Outer-core convective vigour for the scrubbed age, normalized 0–1, for
+ * the cutaway's swirl animation. SCHEMATIC mapping, disclosed: dynamo
+ * scaling laws run the other way (B ∝ power^~1/3, so power ∝ B³ would
+ * make weak epochs invisibly still); the 0.75 exponent is a VISIBILITY
+ * choice so the dying dynamo still visibly stirs. The physics content is
+ * the endpoints: exactly 0 today (no regenerating convection), 1 at the
+ * high-field plateau, monotone with the paleofield in between.
+ */
+export function coreConvectionVigor(ageGa) {
+    const f = dynamoSurfaceFieldMicroT(ageGa) / 50;
+    return Math.min(1, Math.pow(Math.max(0, f), 0.75));
 }
 
 /** Named crustal magnetic anomalies — what remains of the field today. */
