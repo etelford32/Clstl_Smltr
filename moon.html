@@ -104,8 +104,26 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 
 /* ─── Interior panel ────────────────────────────────────────── */
 #info-panel.interior-mode .ip-surface-only { display:none; }
-#ip-sec-interior { display:none; }
-#info-panel.interior-mode #ip-sec-interior { display:block; }
+.ip-interior-only { display:none; }
+#info-panel.interior-mode .ip-interior-only { display:block; }
+
+/* ─── Collapsible sections + HUD minimize ───────────────────── */
+#info-panel .ip-section > .ip-title:first-child {
+    cursor:pointer; user-select:none; position:relative; padding-right:16px; }
+#info-panel .ip-section > .ip-title:first-child::after {
+    content:'−'; position:absolute; right:2px; top:0; color:#556; font-weight:400; }
+#info-panel .ip-section.collapsed > .ip-title:first-child::after { content:'+'; }
+#info-panel .ip-section.collapsed > .ip-title:first-child {
+    margin-bottom:0; border-bottom:0; }
+#info-panel .ip-section.collapsed > *:not(:first-child) { display:none !important; }
+#ip-collapse-all { text-align:right; font-size:8px; color:#667; cursor:pointer;
+    user-select:none; margin-bottom:8px; letter-spacing:.06em; text-transform:uppercase; }
+#ip-collapse-all:hover { color:#ccd; }
+#hud-min { pointer-events:auto; background:none; border:0; color:#667;
+    cursor:pointer; font:700 12px monospace; margin-left:8px; padding:0 3px; }
+#hud-min:hover { color:#ccd; }
+#hud.hud-collapsed { min-width:0; }
+#hud.hud-collapsed .hk, #hud.hud-collapsed .hv { display:none; }
 .legend-row { display:flex; align-items:center; gap:7px; padding:3px 0; font-size:10px; color:#99a; }
 .legend-sw { width:10px; height:10px; border-radius:3px; flex:none; }
 .legend-name { color:#cdd; font-weight:600; }
@@ -215,7 +233,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 
     <!-- HUD -->
     <div id="hud">
-        <div class="hud-title">Moon — Lunar Radiation Lab</div>
+        <div class="hud-title">Moon — Lunar Radiation Lab<button id="hud-min" title="Minimize HUD">−</button></div>
         <span class="hk">Phase&nbsp;&nbsp;</span><span class="hv" id="h-phase">—</span>
         <span class="hk">Age&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-age">—</span>
         <span class="hk">Dist&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-dist">—</span>
@@ -231,17 +249,20 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 
     <!-- Info Panel -->
     <div id="info-panel">
+        <div id="ip-collapse-all">− collapse all</div>
 
-        <!-- Interior cutaway (visible in Interior view) -->
-        <div class="ip-section" id="ip-sec-interior">
+        <!-- Interior cutaway (visible in Interior view; three collapsible sections) -->
+        <div class="ip-section ip-interior-only" id="ip-sec-interior">
             <div class="ip-title">Interior Structure</div>
             <div id="ip-layer-legend" style="margin-bottom:8px"></div>
             <div class="ip-row"><span class="ip-k">Central pressure</span><span class="ip-v" id="ip-p0">—</span></div>
             <div class="ip-row"><span class="ip-k">Central temperature</span><span class="ip-v" id="ip-t0">—</span></div>
             <div class="ip-row"><span class="ip-k">Surface gravity</span><span class="ip-v" id="ip-g">—</span></div>
             <div class="ip-row"><span class="ip-k">Crust near / far side</span><span class="ip-v" id="ip-crust">—</span></div>
+        </div>
 
-            <div class="ip-title" style="margin-top:12px">Deep Moonquakes</div>
+        <div class="ip-section ip-interior-only">
+            <div class="ip-title">Deep Moonquakes</div>
             <div style="font-size:9px;color:#889;line-height:1.5">
                 Nests 700–1200 km deep fire on the tidal clock — the Moon creaks
                 loudest near perigee. The cyan markers pulse with today's rate;
@@ -253,8 +274,10 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
             <div class="ip-row"><span class="ip-k">Relative quake rate</span><span class="ip-v" id="ip-quake-rate">—</span></div>
             <div class="ip-row"><span class="ip-k">Next perigee (mean)</span><span class="ip-v" id="ip-next-perigee">—</span></div>
             <label class="lyr" style="margin-top:4px"><input type="checkbox" id="lyr-quakes" checked> Moonquake nests + wavefronts</label>
+        </div>
 
-            <div class="ip-title" style="margin-top:12px">The Dead Dynamo</div>
+        <div class="ip-section ip-interior-only">
+            <div class="ip-title">The Dead Dynamo</div>
             <div style="font-size:9px;color:#889;line-height:1.5">
                 Four billion years ago the fluid core drove an Earth-strength
                 magnetic field. It weakened, died ~1 Ga ago, and today only
@@ -310,6 +333,64 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
                 most months miss. Times are UTC, greatest eclipse, ±minutes.
                 Solar ground paths are beyond this theory — check a local
                 source before travelling. Gated by tests/moon-ephemeris.mjs.
+            </div>
+        </div>
+
+        <!-- Orbit & precession — derived from the ephemeris rates -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Orbit &amp; Precession</div>
+            <div style="font-size:9px;color:#889;line-height:1.5;margin-bottom:6px">
+                Four different "months", two slow precessions — every number
+                below is <em>derived</em> from the rates inside the ephemeris
+                theory, not quoted.
+            </div>
+            <div class="ip-row"><span class="ip-k">Synodic (phase clock)</span><span class="ip-v" id="op-syn">—</span></div>
+            <div class="ip-row"><span class="ip-k">Sidereal (star clock)</span><span class="ip-v" id="op-sid">—</span></div>
+            <div class="ip-row"><span class="ip-k">Anomalistic (perigee)</span><span class="ip-v" id="op-anom">—</span></div>
+            <div class="ip-row"><span class="ip-k">Draconic (node/eclipse)</span><span class="ip-v" id="op-drac">—</span></div>
+            <div style="font-size:8px;color:#667;line-height:1.5;margin:4px 0 8px">
+                The anomalistic month is the Interior view's moonquake clock;
+                the draconic month is the eclipse clock. They differ because
+                the orbit itself is slowly turning:
+            </div>
+            <div class="ip-row"><span class="ip-k">Node Ω today</span><span class="ip-v" id="op-node">—</span></div>
+            <div class="ip-row"><span class="ip-k">Node regression</span><span class="ip-v" id="op-node-per">—</span></div>
+            <div class="ip-row"><span class="ip-k">Perigee Π today</span><span class="ip-v" id="op-peri">—</span></div>
+            <div class="ip-row"><span class="ip-k">Perigee advance</span><span class="ip-v" id="op-peri-per">—</span></div>
+            <div class="ip-row"><span class="ip-k">Eclipse year</span><span class="ip-v" id="op-ecl-yr">—</span></div>
+            <div class="ip-row"><span class="ip-k">Max declination now</span><span class="ip-v" id="op-decl">—</span></div>
+            <div class="ip-row"><span class="ip-k">Next standstill</span><span class="ip-v" id="op-standstill">—</span></div>
+            <div id="op-saros" style="font-size:8px;color:#889;line-height:1.6;margin-top:8px"></div>
+        </div>
+
+        <!-- Orbital evolution — deep time -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Orbital Evolution — Deep Time</div>
+            <div style="font-size:9px;color:#889;line-height:1.5;margin-bottom:6px">
+                The Moon is spiralling away at 3.83 cm/yr (laser-ranged off
+                the Apollo reflectors), and Earth's spin pays for it. Scrub
+                4.5 billion years — distance follows the geological record
+                (tidal rhythmites), and <em>everything else is derived</em>:
+                the day length falls out of angular-momentum conservation
+                and lands on the measured paleo-days on its own. Watch
+                Earth loom in the scene as you go back.
+            </div>
+            <input type="range" id="oe-age" min="-4.5" max="1" step="0.01" value="0" style="width:100%;accent-color:#ffb45c">
+            <div style="display:flex;justify-content:space-between;font-size:8px;color:#556;margin-bottom:6px"><span>4.5 Ga ago</span><span>Today</span><span>+1 Gyr</span></div>
+            <div class="ip-row"><span class="ip-k" id="oe-when">Today</span><span class="ip-v" id="oe-dist">—</span></div>
+            <div class="ip-row"><span class="ip-k">Day length</span><span class="ip-v" id="oe-day">—</span></div>
+            <div class="ip-row"><span class="ip-k">Days per year</span><span class="ip-v" id="oe-year">—</span></div>
+            <div class="ip-row"><span class="ip-k">Days per lunar month</span><span class="ip-v" id="oe-month">—</span></div>
+            <div class="ip-row"><span class="ip-k">Moon in the sky</span><span class="ip-v" id="oe-size">—</span></div>
+            <div class="ip-row"><span class="ip-k">Lunar tides</span><span class="ip-v" id="oe-tide">—</span></div>
+            <div id="oe-evidence" style="font-size:8px;line-height:1.5;margin-top:6px"></div>
+            <div id="oe-note" style="font-size:9px;color:#8a94b8;line-height:1.5;margin-top:4px"></div>
+            <div style="font-size:8px;color:#556;line-height:1.6;margin-top:8px">
+                Anchors: LLR · Elatina rhythmites (Williams 2000) · Xiamaling
+                (Meyers &amp; Malinverno 2018) · Joffre BIF (Lantink 2022).
+                Day length = pure L conservation (solar-tide leak ~few %,
+                ignored). Future side is a constant-rate ceiling. Gated by
+                tests/moon-orbit-evolution.mjs.
             </div>
         </div>
 
@@ -455,6 +536,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
                 <div>Smith et al. (1999) — the Leonid-storm sodium tail spike</div>
                 <div>IAU Gazetteer of Planetary Nomenclature — landmark positions</div>
                 <div>Meeus — Astronomical Algorithms (truncated ELP-2000/82; eclipse series)</div>
+                <div>Williams (2000), Meyers &amp; Malinverno (2018), Lantink et al. (2022) — paleo Earth–Moon distance from tidal rhythmites</div>
+                <div>Dwyer et al. (2011) — precession-driven lunar dynamo window</div>
             </div>
         </div>
     </div>
@@ -477,7 +560,15 @@ import {
     moonPhase, distanceKm, apparentDiameterArcmin,
     subEarthPoint, subSolarPoint, upcomingEclipses,
     SYNODIC_MONTH_DAYS as EPH_SYNODIC_DAYS, MEAN_DISTANCE_KM,
+    MONTHS, PRECESSION, nodeLongitudeDeg, perigeeLongitudeDeg,
+    maxMonthlyDeclinationDeg, nextStandstill,
 } from './js/moon-ephemeris.js';
+import {
+    distanceREAt, dayLengthHoursAt, localDaysPerYearAt, localDaysPerMonthAt,
+    apparentSizeFactorAt, tideFactorAt, evidenceAt,
+    totalEclipseEndGyr, precessionDynamoEndGa,
+    TODAY_DISTANCE_RE, EARTH_RADIUS_KM, PRECESSION_DYNAMO_MAX_RE,
+} from './js/moon-orbit-evolution.js';
 import { LandingSites } from './js/moon-landing-sites.js';
 import { MoonInterior, INTERIOR_PALETTE } from './js/moon-interior.js';
 import {
@@ -605,6 +696,7 @@ moon.loadTextures(renderer).then(() => {
 const earthDir = new THREE.Vector3(-0.55, 0.16, 0.82).normalize();
 moon.setEarthDir(earthDir);
 let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in the loop
+let _earthMesh = null;    // repositioned by the deep-time scrubber
 
 {
     const EARTH_FRAG = `
@@ -614,6 +706,7 @@ let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in t
         varying vec3 vN;
         varying vec3 vPos;
         varying vec3 vLocal;
+        uniform float u_ancient;   // 0 = blue marble, 1 = Hadean magma ocean
         float hash13(vec3 p3) {
             p3 = fract(p3 * 0.1031);
             p3 += dot(p3, p3.zyx + 31.32);
@@ -635,11 +728,16 @@ let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in t
             vec3 surface = mix(vec3(0.05, 0.18, 0.42), vec3(0.10, 0.30, 0.16), smoothstep(0.52, 0.62, cont));
             float cloud = smoothstep(0.5, 0.72, vnoise3(vLocal * 5.0 + vec3(u_time * 0.01, 0.0, 0.0)));
             surface = mix(surface, vec3(0.9), cloud * 0.75);
-            vec3 col = surface * (0.04 + 1.1 * lit);
-            // Atmosphere rim
+            // Deep-time scrubber: Hadean magma-ocean Earth (self-luminous)
+            vec3 magma = mix(vec3(0.22, 0.03, 0.01), vec3(1.0, 0.45, 0.08),
+                smoothstep(0.35, 0.8, vnoise3(vLocal * 6.0 + vec3(0.0, u_time * 0.006, 0.0))));
+            surface = mix(surface, magma, u_ancient);
+            vec3 col = surface * (0.04 + 1.1 * lit) + magma * u_ancient * 0.45;
+            // Atmosphere rim — blue air today, incandescent rock-vapor haze then
             vec3 V = normalize(cameraPosition - vPos);
             float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);
-            col += vec3(0.30, 0.55, 1.0) * rim * (0.15 + 0.85 * lit);
+            vec3 rimCol = mix(vec3(0.30, 0.55, 1.0), vec3(1.0, 0.4, 0.12), u_ancient);
+            col += rimCol * rim * (0.15 + 0.85 * max(lit, u_ancient * 0.6));
             gl_FragColor = vec4(col, 1.0);
         }`;
     const EARTH_VERT = `
@@ -652,7 +750,7 @@ let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in t
             vLocal = normalize(position);
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }`;
-    const earthU = { u_sun_dir: { value: sunDir.clone() }, u_time: { value: 0 } };
+    const earthU = { u_sun_dir: { value: sunDir.clone() }, u_time: { value: 0 }, u_ancient: { value: 0 } };
     const earthMesh = new THREE.Mesh(
         new THREE.SphereGeometry(0.75, 48, 36),
         new THREE.ShaderMaterial({ vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG, uniforms: earthU })
@@ -660,6 +758,7 @@ let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in t
     earthMesh.position.copy(earthDir).multiplyScalar(45);
     scene.add(earthMesh);
     _earthTimeU = earthU;   // updated in the loop
+    _earthMesh = earthMesh;
 }
 
 let _glareSprite = null;   // repositioned when sky mode moves the sun
@@ -1001,6 +1100,173 @@ document.getElementById('tm-play')?.addEventListener('click', () => {
                 <div style="font-size:8px;color:#667">${detail}</div>
             </div>`;
     }).join('');
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  ORBIT & PRECESSION — every number derived from the theory rates
+// ═══════════════════════════════════════════════════════════════
+(function renderOrbitPrecession() {
+    const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    set('op-syn', `${MONTHS.synodicDays.toFixed(4)} d`);
+    set('op-sid', `${MONTHS.siderealDays.toFixed(4)} d`);
+    set('op-anom', `${MONTHS.anomalisticDays.toFixed(4)} d`);
+    set('op-drac', `${MONTHS.draconicDays.toFixed(4)} d`);
+    const now = Date.now();
+    set('op-node', `${nodeLongitudeDeg(now).toFixed(1)}° ↺`);
+    set('op-node-per', `360° / ${PRECESSION.nodalPeriodYr.toFixed(2)} yr`);
+    set('op-peri', `${perigeeLongitudeDeg(now).toFixed(1)}° ↻`);
+    set('op-peri-per', `360° / ${PRECESSION.apsidalPeriodYr.toFixed(2)} yr`);
+    set('op-ecl-yr', `${PRECESSION.eclipseYearDays.toFixed(2)} d`);
+    set('op-decl', `±${maxMonthlyDeclinationDeg(now).toFixed(1)}°`);
+    const st = nextStandstill(now);
+    set('op-standstill', `${st.kind} · ${new Date(st.ms).getUTCFullYear()} (±${st.maxDeclinationDeg.toFixed(1)}°)`);
+    const saros = document.getElementById('op-saros');
+    if (saros) saros.innerHTML =
+        `<b style="color:#dde">The Saros, closing before your eyes:</b> ` +
+        `223 synodic = ${PRECESSION.sarosSynodicDays.toFixed(2)} d · ` +
+        `242 draconic = ${PRECESSION.sarosDraconicDays.toFixed(2)} d · ` +
+        `239 anomalistic = ${PRECESSION.sarosAnomalisticDays.toFixed(2)} d. ` +
+        `Same phase, same node distance, same perigee distance — so every ` +
+        `eclipse returns 18 yr 11 d 8 h later, one Saros on. The node ` +
+        `regression is also why 2024–25 was a <b>major lunar standstill</b>: ` +
+        `moonrise swept its widest range since 2006.`;
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  ORBITAL EVOLUTION — deep-time scrubber (kernel: moon-orbit-evolution)
+//  The distant Earth flies closer as you scrub back — same compression
+//  factor as today's framing, so its ANGULAR size stays honest — and
+//  goes magma past ~3.8 Ga (u_ancient).
+// ═══════════════════════════════════════════════════════════════
+(function wireOrbitEvolution() {
+    const slider = document.getElementById('oe-age');
+    if (!slider) return;
+    const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    const eclipseEnd = totalEclipseEndGyr();
+    const dynamoEnd = precessionDynamoEndGa();
+    const KIND_COLOR = { measured: '#4fc97f', inferred: '#ffcc44', model: '#8a94b8' };
+    // Camera-space bearing (upper-left, ahead) used to keep the close-in
+    // Earth inside the default frame — the same kind of framing choice as
+    // the Earth's 45-unit placement today, and equally disclosed: distance
+    // (hence angular size) is the honest quantity, bearing is composition.
+    const EARTH_BEARING = new THREE.Vector3(-0.38, 0.22, -1).normalize();
+    const apply = () => {
+        const ageGa = -parseFloat(slider.value);
+        const aRE = distanceREAt(ageGa);
+        // Scene: Earth distance scaled by the same factor as today's framing
+        if (_earthMesh) {
+            const d = 45 * aRE / TODAY_DISTANCE_RE;
+            const canonical = earthDir.clone();
+            // Steer toward the in-frame bearing as the Earth closes in
+            const w = Math.min(1, Math.max(0, (40 - aRE) / 15));
+            if (w > 0) {
+                const rWorld = EARTH_BEARING.clone().applyQuaternion(camera.quaternion);
+                const cd = camera.position.dot(rWorld);
+                const disc = cd * cd - camera.position.lengthSq() + d * d;
+                if (disc > 0) {
+                    const s = -cd + Math.sqrt(disc);
+                    const steer = camera.position.clone().addScaledVector(rWorld, s).normalize();
+                    canonical.lerp(steer, w).normalize();
+                }
+            }
+            _earthMesh.position.copy(canonical).multiplyScalar(d);
+        }
+        if (_earthTimeU) _earthTimeU.u_ancient.value = Math.min(1, Math.max(0, (ageGa - 3.8) / 0.55));
+        set('oe-when', ageGa > 0.005 ? `${ageGa.toFixed(2)} Ga ago`
+            : ageGa < -0.005 ? `+${(-ageGa).toFixed(2)} Gyr from now` : 'Today');
+        set('oe-dist', `${aRE.toFixed(1)} R⊕ · ${Math.round(aRE * EARTH_RADIUS_KM).toLocaleString('en-US')} km`);
+        set('oe-day', `${dayLengthHoursAt(ageGa).toFixed(1)} h`);
+        set('oe-year', `${localDaysPerYearAt(ageGa).toFixed(0)} local days`);
+        set('oe-month', `${localDaysPerMonthAt(ageGa).toFixed(1)} local days`);
+        const sz = apparentSizeFactorAt(ageGa);
+        set('oe-size', `×${sz.toFixed(sz >= 10 ? 0 : 2)} today's width`);
+        const tf = tideFactorAt(ageGa);
+        set('oe-tide', `×${tf >= 100 ? tf.toFixed(0) : tf.toFixed(2)} today's`);
+        const ev = evidenceAt(ageGa);
+        const evEl = document.getElementById('oe-evidence');
+        if (evEl) evEl.innerHTML = ev.extrapolated
+            ? `<span style="color:#8a94b8">constant-rate extrapolation — a ceiling; ocean dissipation will slow it</span>`
+            : `<span style="color:${KIND_COLOR[ev.kind]}">${ev.kind}</span> · nearest anchor: ${ev.label}`;
+        const note = document.getElementById('oe-note');
+        if (note) {
+            note.textContent =
+                ageGa > 4.3 ? 'A newborn, magma-ocean Earth fills the lunar sky — and km-scale rock tides knead the Moon.' :
+                (ageGa > 0.8 && aRE < PRECESSION_DYNAMO_MAX_RE)
+                    ? `Moon inside ${PRECESSION_DYNAMO_MAX_RE} R⊕ — close enough for mantle precession to stir the core dynamo (Dwyer 2011). It crosses out ~${dynamoEnd.toFixed(1)} Ga, during the dynamo's decline.` :
+                -ageGa > eclipseEnd
+                    ? `Total solar eclipses are OVER — the receding Moon can no longer cover the Sun (last one ≈ +${eclipseEnd.toFixed(1)} Gyr).` :
+                ageGa < -0.005
+                    ? `Still ${(eclipseEnd + ageGa).toFixed(2)} Gyr of total solar eclipses left.` : '';
+        }
+    };
+    slider.addEventListener('input', apply);
+    apply();
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  COLLAPSIBLE UI — every panel section + the HUD minimize to a
+//  header line; state persists per visitor in localStorage.
+// ═══════════════════════════════════════════════════════════════
+(function makeUICollapsible() {
+    const KEY = 'moon-sections-collapsed';
+    let stored = {};
+    try { stored = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* fresh */ }
+    const save = () => { try { localStorage.setItem(KEY, JSON.stringify(stored)); } catch { /* private mode */ } };
+    // Long-tail reference sections start collapsed; live/physics sections open
+    const DEFAULT_COLLAPSED = new Set([
+        'dose-comparison', 'artemis-program', 'what-artemis-i-taught-us',
+        'landing-sites', 'data-sources',
+    ]);
+    const sections = [...document.querySelectorAll('#info-panel .ip-section')];
+    const entries = [];
+    for (const sec of sections) {
+        const title = sec.querySelector(':scope > .ip-title');
+        if (!title) continue;
+        const slug = title.textContent.trim().toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        sec.classList.toggle('collapsed', slug in stored ? !!stored[slug] : DEFAULT_COLLAPSED.has(slug));
+        title.addEventListener('click', () => {
+            stored[slug] = sec.classList.toggle('collapsed');
+            save();
+        });
+        entries.push({ sec, slug });
+    }
+    // Collapse all / expand all
+    const allBtn = document.getElementById('ip-collapse-all');
+    const refreshAllBtn = () => {
+        if (!allBtn) return;
+        const anyOpen = entries.some(e => !e.sec.classList.contains('collapsed'));
+        allBtn.textContent = anyOpen ? '− collapse all' : '+ expand all';
+    };
+    allBtn?.addEventListener('click', () => {
+        const anyOpen = entries.some(e => !e.sec.classList.contains('collapsed'));
+        for (const e of entries) {
+            e.sec.classList.toggle('collapsed', anyOpen);
+            stored[e.slug] = anyOpen;
+        }
+        save();
+        refreshAllBtn();
+    });
+    for (const e of entries) e.sec.querySelector(':scope > .ip-title')
+        .addEventListener('click', refreshAllBtn);
+    refreshAllBtn();
+
+    // HUD minimize
+    const HUD_KEY = 'moon-hud-collapsed';
+    const hud = document.getElementById('hud');
+    const hudBtn = document.getElementById('hud-min');
+    const applyHud = (min) => {
+        hud.classList.toggle('hud-collapsed', min);
+        if (hudBtn) hudBtn.textContent = min ? '+' : '−';
+    };
+    let hudMin = false;
+    try { hudMin = localStorage.getItem(HUD_KEY) === '1'; } catch { /* fresh */ }
+    applyHud(hudMin);
+    hudBtn?.addEventListener('click', () => {
+        hudMin = !hudMin;
+        applyHud(hudMin);
+        try { localStorage.setItem(HUD_KEY, hudMin ? '1' : '0'); } catch { /* private mode */ }
+    });
 })();
 
 // ═══════════════════════════════════════════════════════════════

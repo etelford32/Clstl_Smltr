@@ -240,6 +240,90 @@ export function subSolarPoint(ms) {
     return _selenographic(lam, bet, F, Om);
 }
 
+// ── Orbit & precession — everything DERIVED from the theory's own rates ─────
+// The five lunar months and both precession periods are not quoted numbers:
+// they fall out of the linear rates in the fundamental arguments above
+// (360° / rate). The tests pin them against the textbook values AND against
+// the interior kernel's ANOMALISTIC_MONTH_DAYS — the moonquake tidal clock
+// and this ephemeris must be the same clock.
+const _DEG_PER_CY = {
+    Lp: 481267.88123421,    // mean longitude        → sidereal month
+    D: 445267.1114034,     // elongation            → synodic month
+    Mp: 477198.8675055,     // mean anomaly          → anomalistic month
+    F: 483202.0175233,     // argument of latitude  → draconic month
+    Om: -1934.1362891,       // node                  → nodal precession
+    sun: 36000.76983,        // solar mean longitude
+    Pi: 4069.0137287,       // mean perigee          → apsidal precession
+};
+const _CY_DAYS = 36525;
+const _period = (rateDegPerCy) => 360 / Math.abs(rateDegPerCy) * _CY_DAYS;
+
+export const MONTHS = Object.freeze({
+    synodicDays: _period(_DEG_PER_CY.D),                    // 29.5306 — the phase clock
+    siderealDays: _period(_DEG_PER_CY.Lp),                   // 27.3217 — return to the stars
+    anomalisticDays: _period(_DEG_PER_CY.Mp),                // 27.5546 — perigee-to-perigee
+    draconicDays: _period(_DEG_PER_CY.F),                    // 27.2122 — node-to-node
+});
+
+export const PRECESSION = Object.freeze({
+    /** The node regresses once around in 18.61 yr — standstills, eclipse seasons. */
+    nodalPeriodYr: _period(_DEG_PER_CY.Om) / 365.25,
+    /** The perigee advances once around in 8.85 yr — the supermoon clock. */
+    apsidalPeriodYr: _period(_DEG_PER_CY.Pi) / 365.25,
+    /** Sun returns to the same node every 346.62 d — the eclipse year. */
+    eclipseYearDays: 360 / (_DEG_PER_CY.sun - _DEG_PER_CY.Om) * _CY_DAYS,
+    /**
+     * The Saros: 223 synodic ≈ 242 draconic ≈ 239 anomalistic months all
+     * land within hours of 6585.3 d — same phase, same node distance,
+     * same perigee distance — so each eclipse returns 18 yr 11 d later.
+     */
+    sarosSynodicDays: 223 * _period(_DEG_PER_CY.D),
+    sarosDraconicDays: 242 * _period(_DEG_PER_CY.F),
+    sarosAnomalisticDays: 239 * _period(_DEG_PER_CY.Mp),
+});
+
+/** Longitude of the ascending node Ω (deg) — regressing 19.34°/yr. */
+export function nodeLongitudeDeg(ms) {
+    return _moonFundamentals(_msToT(ms)).Om;
+}
+
+/** Longitude of the mean perigee Π (deg) — advancing 40.7°/yr. */
+export function perigeeLongitudeDeg(ms) {
+    const T = _msToT(ms);
+    return _norm360(83.3532465 + 4069.0137287 * T - 0.0103200 * T * T - T * T * T / 80053);
+}
+
+/**
+ * The Moon's maximum monthly declination (deg) — the STANDSTILL state.
+ * The lunar orbit's tilt to the EQUATOR swings between ε−i (18.3°) and
+ * ε+i (28.6°) as the node regresses: cos i_eq = cos i cos ε − sin i sin ε cos Ω.
+ * Major standstill (Ω≈0): moonrise sweeps its widest range in 18.6 years.
+ */
+export const LUNAR_INCLINATION_DEG = 5.145;
+export function maxMonthlyDeclinationDeg(ms) {
+    const T = _msToT(ms);
+    const eps = (23.4393 - 0.0130 * T) * D2R;
+    const i = LUNAR_INCLINATION_DEG * D2R;
+    const Om = _moonFundamentals(T).Om * D2R;
+    return Math.acos(Math.cos(i) * Math.cos(eps) - Math.sin(i) * Math.sin(eps) * Math.cos(Om)) / D2R;
+}
+
+/** Next lunar standstill after ms: node at Ω=0 (major) or Ω=180 (minor). */
+export function nextStandstill(ms) {
+    const T = _msToT(ms);
+    const Om = _moonFundamentals(T).Om;                       // deg, decreasing
+    const rateDegPerMs = _DEG_PER_CY.Om / (_CY_DAYS * 86400000);
+    const yearsTo = (target) => {
+        let d = _norm360(Om - target);                        // Ω regresses toward target
+        if (d < 1e-9) d = 360;
+        return d / Math.abs(rateDegPerMs) / (365.25 * 86400000);
+    };
+    const toMajor = yearsTo(0), toMinor = yearsTo(180);
+    return toMajor < toMinor
+        ? { kind: 'major', ms: ms + toMajor * 365.25 * 86400000, maxDeclinationDeg: 23.44 + LUNAR_INCLINATION_DEG }
+        : { kind: 'minor', ms: ms + toMinor * 365.25 * 86400000, maxDeclinationDeg: 23.44 - LUNAR_INCLINATION_DEG };
+}
+
 // ── Syzygies — Meeus ch. 49 ─────────────────────────────────────────────────
 // k integer → new moon, k + 0.5 → full moon.
 function _syzygyFundamentals(k) {

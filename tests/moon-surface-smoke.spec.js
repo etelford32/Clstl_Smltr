@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { LANDMARKS, LANDMARK_CATEGORIES } from '../js/moon-landmarks-data.js';
 import { SPECIES } from '../js/moon-exosphere-model.js';
-import { moonPhase, upcomingEclipses } from '../js/moon-ephemeris.js';
+import { moonPhase, upcomingEclipses, nextStandstill } from '../js/moon-ephemeris.js';
+import { dayLengthHoursAt } from '../js/moon-orbit-evolution.js';
 
 /**
  * moon-surface-smoke.spec.js — the Moon page's exosphere + landmarks +
@@ -76,6 +77,49 @@ test('moon exosphere, landmarks, and dynamo mechanisms boot and respond', async 
     await page.locator('#tm-sky').uncheck();   // legacy fixed-sun mode
     await page.waitForTimeout(300);
     await page.locator('#tm-sky').check();
+
+    // ── Orbit & Precession: derived months + standstill agree with kernel ──
+    await expect(page.locator('#op-syn')).toContainText('29.53');
+    await expect(page.locator('#op-drac')).toContainText('27.21');
+    await expect(page.locator('#op-node-per')).toContainText('18.61');
+    await expect(page.locator('#op-peri-per')).toContainText('8.85');
+    const kernelStandstill = nextStandstill(Date.now());
+    await expect(page.locator('#op-standstill')).toContainText(kernelStandstill.kind);
+    await expect(page.locator('#op-saros')).toContainText('223 synodic');
+
+    // ── Deep-time scrubber: page numbers must be the kernel's numbers ──
+    await page.locator('#oe-age').fill('-2.46');   // Lantink's banded iron epoch
+    await expect(page.locator('#oe-day')).toHaveText(`${dayLengthHoursAt(2.46).toFixed(1)} h`);
+    await expect(page.locator('#oe-evidence')).toContainText('Lantink');
+    await expect(page.locator('#oe-evidence')).toContainText('measured');
+    await page.locator('#oe-age').fill('-4.5');    // formation: magma Earth looms
+    await expect(page.locator('#oe-note')).toContainText('magma');
+    await page.locator('#oe-age').fill('0');
+    await expect(page.locator('#oe-day')).toHaveText('24.0 h');
+    await expect(page.locator('#oe-when')).toHaveText('Today');
+
+    // ── Collapsible UI ──
+    // Long-tail sections start collapsed…
+    await expect(page.locator('#ip-artemis-missions')).toBeHidden();
+    // …live sections start open and toggle via their title
+    const doseSection = page.locator('.ip-section').filter({ has: page.locator('#ip-dose-val') });
+    await expect(page.locator('#ip-dose-val')).toBeVisible();
+    await doseSection.locator('.ip-title').first().click();
+    await expect(page.locator('#ip-dose-val')).toBeHidden();
+    await doseSection.locator('.ip-title').first().click();
+    await expect(page.locator('#ip-dose-val')).toBeVisible();
+    // Collapse-all / expand-all
+    await page.click('#ip-collapse-all');
+    await expect(page.locator('#ip-exo-species')).toBeHidden();
+    await expect(page.locator('#ip-collapse-all')).toHaveText('+ expand all');
+    await page.click('#ip-collapse-all');
+    await expect(page.locator('#ip-exo-species')).toBeVisible();
+    // HUD minimizes to its title line
+    await expect(page.locator('#h-phase')).toBeVisible();
+    await page.click('#hud-min');
+    await expect(page.locator('#h-phase')).toBeHidden();
+    await page.click('#hud-min');
+    await expect(page.locator('#h-phase')).toBeVisible();
 
     // ── Exosphere panel: species table from the kernel ──
     await expect(page.locator('#ip-exo-species .exo-row')).toHaveCount(SPECIES.length);

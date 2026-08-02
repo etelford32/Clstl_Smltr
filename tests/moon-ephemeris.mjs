@@ -20,11 +20,13 @@
  */
 
 import assert from 'node:assert/strict';
-import { REF_PERIGEE_MS } from '../js/moon-interior-model.js';
+import { REF_PERIGEE_MS, ANOMALISTIC_MONTH_DAYS } from '../js/moon-interior-model.js';
 import {
     moonEcliptic, sunEcliptic, moonPhase, distanceKm, apparentDiameterArcmin,
     subEarthPoint, subSolarPoint,
     SYNODIC_MONTH_DAYS, MEAN_DISTANCE_KM,
+    MONTHS, PRECESSION, nodeLongitudeDeg, perigeeLongitudeDeg,
+    maxMonthlyDeclinationDeg, nextStandstill, LUNAR_INCLINATION_DEG,
     eclipseAtSyzygy, upcomingEclipses,
 } from '../js/moon-ephemeris.js';
 
@@ -172,6 +174,55 @@ const DAY = 86400000;
     // Every entry sits near a node — the geometry lesson the panel teaches
     for (const e of list) assert.ok(e.nodeDistanceDeg < 21.1, 'all eclipses near a node');
     ok(`next six from 2026-08-02: ${list.map(e => `${utc(e)} ${e.type} ${e.kind}`).join('; ')}`);
+}
+
+// ── 9. The five months + two precessions, DERIVED from the theory ────────────
+{
+    near(MONTHS.synodicDays, 29.53059, 1e-4, 'synodic month from the D rate');
+    near(MONTHS.siderealDays, 27.32166, 1e-4, 'sidereal month from the L′ rate');
+    near(MONTHS.anomalisticDays, 27.55455, 1e-4, 'anomalistic month from the M′ rate');
+    near(MONTHS.draconicDays, 27.21222, 1e-4, 'draconic month from the F rate');
+    // The interior kernel's moonquake tidal clock IS this clock
+    near(MONTHS.anomalisticDays, ANOMALISTIC_MONTH_DAYS, 2e-4,
+        'anomalistic month matches the interior kernel tidal clock');
+    near(PRECESSION.nodalPeriodYr, 18.61, 0.03, 'node regresses in 18.61 yr');
+    near(PRECESSION.apsidalPeriodYr, 8.85, 0.02, 'perigee advances in 8.85 yr');
+    near(PRECESSION.eclipseYearDays, 346.62, 0.1, 'eclipse year 346.62 d');
+    // The Saros triple near-commensurability — why eclipses repeat
+    near(PRECESSION.sarosSynodicDays, 6585.32, 0.05, '223 synodic ≈ 6585.32 d');
+    assert.ok(Math.abs(PRECESSION.sarosSynodicDays - PRECESSION.sarosDraconicDays) < 0.06,
+        'saros: 223 synodic ≈ 242 draconic within ~1.5 h');
+    assert.ok(Math.abs(PRECESSION.sarosSynodicDays - PRECESSION.sarosAnomalisticDays) < 0.3,
+        'saros: ≈ 239 anomalistic within hours');
+    ok('months + precessions derived from the argument rates; saros closes');
+}
+
+// ── 10. Standstills: the 18.6-yr declination swing ───────────────────────────
+{
+    // 2025 was a MAJOR standstill: Ω crossed 0 → max declination ≈ 28.6°
+    const decl2025 = maxMonthlyDeclinationDeg(Date.UTC(2025, 2, 1));
+    near(decl2025, 23.44 + LUNAR_INCLINATION_DEG, 0.3, 'major standstill declination in 2025');
+    // Range over a full node cycle stays inside [ε−i, ε+i]
+    let lo = 90, hi = 0;
+    for (let y = 0; y < 19 * 12; y++) {
+        const d = maxMonthlyDeclinationDeg(Date.UTC(2020, y, 1));
+        lo = Math.min(lo, d); hi = Math.max(hi, d);
+    }
+    near(lo, 23.44 - LUNAR_INCLINATION_DEG, 0.3, 'minimum ≈ ε − i (minor standstill)');
+    near(hi, 23.44 + LUNAR_INCLINATION_DEG, 0.3, 'maximum ≈ ε + i (major standstill)');
+    // From mid-2026 the NEXT standstill is the ~2034 minor one
+    const next = nextStandstill(Date.UTC(2026, 7, 2));
+    assert.equal(next.kind, 'minor', 'next standstill from 2026 is minor');
+    const yr = new Date(next.ms).getUTCFullYear();
+    assert.ok(yr >= 2033 && yr <= 2035, `minor standstill ~2034 (got ${yr})`);
+    // Node longitude regresses; perigee longitude advances
+    const om0 = nodeLongitudeDeg(Date.UTC(2026, 0, 1));
+    const om1 = nodeLongitudeDeg(Date.UTC(2026, 3, 1));
+    assert.ok(((om0 - om1 + 360) % 360) < 10 && om0 !== om1, 'node regresses (westward)');
+    const pi0 = perigeeLongitudeDeg(Date.UTC(2026, 0, 1));
+    const pi1 = perigeeLongitudeDeg(Date.UTC(2026, 3, 1));
+    assert.ok(((pi1 - pi0 + 360) % 360) < 15, 'perigee advances (eastward)');
+    ok(`standstills: 2025 major pinned; next is minor ${yr}; node ↺, perigee ↻`);
 }
 
 console.log(`\nmoon-ephemeris: ${passed} groups passed`);
