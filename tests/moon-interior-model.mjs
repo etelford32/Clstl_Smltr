@@ -23,7 +23,7 @@ import {
     selenothermK, solidusK, meltFraction, crustThicknessKm,
     ANOMALISTIC_MONTH_DAYS, REF_PERIGEE_MS, anomalisticPhase, deepMoonquakeRate,
     DEEP_NESTS, SHALLOW_QUAKE_FACTS,
-    DYNAMO_EPOCHS, dynamoSurfaceFieldMicroT, CRUSTAL_ANOMALIES,
+    DYNAMO_EPOCHS, dynamoSurfaceFieldMicroT, coreConvectionVigor, CRUSTAL_ANOMALIES,
 } from '../js/moon-interior-model.js';
 
 let passed = 0;
@@ -168,6 +168,34 @@ const near = (a, b, tol, msg) =>
     assert.equal(DYNAMO_EPOCHS[DYNAMO_EPOCHS.length - 1].toGa, 0, 'epochs reach the present');
     assert.ok(CRUSTAL_ANOMALIES.some(a => a.name === 'Reiner Gamma'), 'Reiner Gamma present');
     ok('dynamo: Earth-like at 4 Ga, monotone decline, exactly zero today');
+}
+
+// ── 9. Dynamo mechanisms + convective vigour ─────────────────────────────────
+{
+    for (const e of DYNAMO_EPOCHS) {
+        assert.ok(typeof e.mechanism === 'string' && e.mechanism.length > 20,
+            `${e.label} carries a mechanism story`);
+    }
+    const high = DYNAMO_EPOCHS.find(e => e.label === 'High-field epoch');
+    assert.ok(/precession/i.test(high.mechanism), 'high-field epoch names the precession candidate');
+    const dying = DYNAMO_EPOCHS.find(e => e.label === 'Dying');
+    assert.ok(/crystalliz/i.test(dying.mechanism), 'dying epoch names core crystallization');
+
+    // Vigour endpoints: exactly zero today, full at the plateau, monotone with field
+    assert.equal(coreConvectionVigor(0), 0, 'no regenerating convection today');
+    assert.equal(coreConvectionVigor(0.5), 0, 'dead epoch: still zero');
+    near(coreConvectionVigor(4.0), 1, 1e-9, 'full vigour at the high-field plateau');
+    assert.ok(coreConvectionVigor(1.0) > 0 && coreConvectionVigor(1.0) < 0.2,
+        'dying dynamo stirs faintly but visibly');
+    for (let a = 0.9; a < 4.0; a += 0.1) {
+        assert.ok(coreConvectionVigor(a + 0.1) >= coreConvectionVigor(a) - 1e-9,
+            `vigour non-decreasing with age at ${a.toFixed(1)} Ga`);
+    }
+    for (let a = 0; a <= 4.42; a += 0.02) {
+        const v = coreConvectionVigor(a);
+        assert.ok(v >= 0 && v <= 1, `vigour in [0,1] at ${a.toFixed(2)} Ga`);
+    }
+    ok('mechanisms per epoch; vigour 0 today → 1 at the plateau, monotone');
 }
 
 console.log(`\nmoon-interior-model: ${passed} groups passed`);

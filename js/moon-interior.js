@@ -38,7 +38,7 @@ import {
     R_MOON_KM, LAYERS,
     selenothermK, meltFraction,
     anomalisticPhase, deepMoonquakeRate, DEEP_NESTS,
-    dynamoSurfaceFieldMicroT, CRUSTAL_ANOMALIES,
+    dynamoSurfaceFieldMicroT, coreConvectionVigor, CRUSTAL_ANOMALIES,
 } from './moon-interior-model.js';
 import { latLonToXYZ } from './artemis-data.js';
 
@@ -171,6 +171,7 @@ void main() {
 const OUTER_CORE_FRAG = /* glsl */`
 precision highp float;
 uniform float u_time;
+uniform float u_dynamo;   // kernel coreConvectionVigor(age): 0 today → 1 at the plateau
 varying vec3 vN;
 varying vec3 vPos;
 varying vec3 vLocal;
@@ -187,15 +188,18 @@ float vnoise3(vec3 p) {
     return mix(a, b, f.z);
 }
 void main() {
-    // Slow convective cells — schematic (the FLUID state is the physics)
-    vec3 p = vLocal * 5.0;
-    float t = u_time * 0.08;
+    // Slow convective cells — schematic (the FLUID state is the physics).
+    // When the dynamo scrubber revives the field, the kernel's vigour spins
+    // the cells up and stretches them along the rotation axis — the Busse-
+    // column organization of rotating convection, as a visual hint.
+    vec3 p = vLocal * vec3(5.0, mix(5.0, 2.2, u_dynamo), 5.0);
+    float t = u_time * (0.08 + 0.45 * u_dynamo);
     float n = vnoise3(p + vec3(t, -t * 0.7, t * 0.4));
     n = 0.6 * n + 0.4 * vnoise3(p * 2.3 - vec3(t * 0.6));
     n = smoothstep(0.25, 0.75, n);            // punchier cell contrast
     vec3 hot  = vec3(1.0, 0.62, 0.16);
     vec3 cool = vec3(0.45, 0.08, 0.02);
-    vec3 col = mix(cool, hot, n) * 1.25;
+    vec3 col = mix(cool, hot, n) * (1.25 + 0.35 * u_dynamo);
     // Limb darkening → reads as a glowing ball, not a flat disc
     vec3 V = normalize(cameraPosition - vPos);
     float mu = clamp(dot(normalize(vN), V), 0.0, 1.0);
@@ -384,7 +388,7 @@ export class MoonInterior {
         }
 
         // The core — full spheres exactly plugging the faces' annulus hole
-        this._coreU = { u_time: { value: 0 } };
+        this._coreU = { u_time: { value: 0 }, u_dynamo: { value: 0 } };
         const ocMat = track(new THREE.ShaderMaterial({
             vertexShader: CORE_VERT, fragmentShader: OUTER_CORE_FRAG,
             uniforms: this._coreU, transparent: true,
@@ -470,6 +474,7 @@ export class MoonInterior {
 
         this._quakeRate = 1;
         this._dynamoAgeGa = 0;
+        this._dynamoVigor = 0;
     }
 
     /** Share the already-loaded MoonSkin surface texture (no second fetch). */
@@ -488,6 +493,10 @@ export class MoonInterior {
         this._fieldMat.opacity = norm * 0.85;
         this._fieldGroup.visible = norm > 0.005;
         for (const m of this._anomalyMats) m.opacity = (1 - norm) * 0.85;
+        // Kernel vigour drives the outer-core swirl (speed, columnarity,
+        // brightness) and the field-line wobble in update().
+        this._dynamoVigor = coreConvectionVigor(ageGa);
+        this._coreU.u_dynamo.value = this._dynamoVigor;
         return fieldMicroT;
     }
 
@@ -500,6 +509,17 @@ export class MoonInterior {
     update(t, nowMs) {
         this._faceU.u_time.value = t;
         this._coreU.u_time.value = t;
+
+        // Living-dynamo field lines wobble gently — a nod to the precession
+        // stirring of the high-field epoch. Exactly still when dead (vigor 0).
+        const vig = this._dynamoVigor ?? 0;
+        if (this._fieldGroup.visible && vig > 0) {
+            this._fieldGroup.rotation.z = 0.07 * vig * Math.sin(t * 0.25);
+            this._fieldGroup.rotation.x = 0.04 * vig * Math.sin(t * 0.17 + 1.3);
+        } else {
+            this._fieldGroup.rotation.z = 0;
+            this._fieldGroup.rotation.x = 0;
+        }
 
         // Nest pulse on the real tidal clock
         const { rate } = this.tidalState(nowMs);

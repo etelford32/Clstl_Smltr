@@ -24,7 +24,7 @@
 <meta name="twitter:description" content="Lunar surface simulator with live galactic-cosmic-ray and solar-particle-event flux. Plan EVA exposure for Artemis-class missions.">
 <meta name="twitter:image" content="https://parkersphysics.com/static/og/moon.jpg">
 
-<meta name="description" content="Interactive 3D Moon simulation with real-time radiation environment modeling. GCR flux, SEP events, and dose rate measurements from CRaTER/LRO and Chang'E-4 LND.">
+<meta name="description" content="Interactive 3D Moon simulation with real-time radiation environment modeling, the collisionless lunar exosphere with its live sodium tail, the interior cutaway with the dead core dynamo, and an IAU landmark map of craters, maria, and basins.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -116,6 +116,31 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 .tide-pin { position:absolute; top:-3px; width:2px; height:14px; background:#66d9ff; border-radius:1px; }
 #dyn-age { width:100%; accent-color:#8fb8ff; margin-top:6px; }
 
+/* ─── Landmark tooltip + list ───────────────────────────────── */
+#lm-tip {
+    position:absolute; z-index:80; pointer-events:none; display:none;
+    max-width:240px; background:rgba(6,4,20,.92); backdrop-filter:blur(10px);
+    border:1px solid rgba(255,255,255,.14); border-radius:8px;
+    padding:8px 10px; font-size:10px; color:#aab;
+    box-shadow:0 6px 24px rgba(0,0,0,.6);
+}
+#lm-tip .lt-name { font-weight:700; color:#eef; font-size:11px; }
+#lm-tip .lt-meta { color:#778; font-size:9px; margin:2px 0 4px; }
+#lm-tip .lt-note { color:#99a; line-height:1.45; }
+.lm-row { display:flex; align-items:center; gap:6px; padding:2px 0; cursor:pointer; font-size:9px; }
+.lm-row:hover .lm-name { color:#eef; }
+.lm-dot { width:7px; height:7px; border-radius:50%; flex:none; }
+.lm-name { color:#bcd; }
+.lm-size { margin-left:auto; font-family:monospace; color:#667; font-size:8px; }
+.lm-cat-head { font-weight:700; font-size:8px; text-transform:uppercase; letter-spacing:.08em; margin:8px 0 3px; }
+
+/* ─── Exosphere species table ───────────────────────────────── */
+.exo-row { display:grid; grid-template-columns:1fr auto auto; gap:0 8px;
+    padding:2px 0; font-size:9px; align-items:baseline; }
+.exo-name { color:#bcd; font-weight:600; }
+.exo-n { font-family:monospace; color:#889; font-size:8px; }
+.exo-fate { grid-column:1/-1; font-size:8px; color:#667; padding-left:2px; }
+
 /* ─── Loading ───────────────────────────────────────────────── */
 #loading {
     position:absolute; inset:0; z-index:100;
@@ -197,8 +222,12 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         <span class="hk">GCR&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-gcr">—</span>
         <span class="hk">SEP&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-sep">—</span>
         <span class="hk">Dose&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-dose">—</span>
+        <span class="hk">Exo&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-exo">—</span>
         <span class="hk">Tide&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-tide">—</span>
     </div>
+
+    <!-- Landmark hover tooltip (positioned by the raycaster) -->
+    <div id="lm-tip"></div>
 
     <!-- Info Panel -->
     <div id="info-panel">
@@ -234,6 +263,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
             <input type="range" id="dyn-age" min="-4.42" max="0" step="0.02" value="0">
             <div class="ip-row"><span class="ip-k" id="ip-dyn-when">Today</span><span class="ip-v" id="ip-dyn-field">0 µT</span></div>
             <div class="ip-row"><span class="ip-k">Epoch</span><span class="ip-v" id="ip-dyn-epoch">—</span></div>
+            <div id="ip-dyn-mech" style="font-size:9px;color:#8a94b8;line-height:1.5;margin-top:4px"></div>
             <label class="lyr" style="margin-top:4px"><input type="checkbox" id="lyr-anomalies" checked> Crustal anomalies (Reiner Gamma…)</label>
 
             <div style="font-size:8px;color:#556;line-height:1.6;margin-top:10px">
@@ -281,6 +311,47 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
             <div class="ip-row"><span class="ip-k">Annual limit (NASA)</span><span class="ip-v" style="color:#ffcc44">50 cGy/yr career</span></div>
         </div>
 
+        <!-- Atmosphere — the surface-boundary exosphere -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Atmosphere — a Collisionless Exosphere</div>
+            <div style="font-size:9px;color:#889;line-height:1.5;margin-bottom:8px">
+                The Moon's entire atmosphere weighs a few <em>tonnes</em> —
+                atoms hop ballistically and essentially never collide.
+                Non-condensable gas pools on the cold night side; argon
+                freezes out overnight and returns in a pre-dawn bulge;
+                sodium glows sunward and streams into a tail. Drawing it at
+                all is the exaggeration — to the eye it is invisible.
+            </div>
+            <div id="ip-exo-species" style="margin-bottom:10px"></div>
+
+            <div class="ip-title" style="margin-top:12px">Live Sodium Weather</div>
+            <div class="ip-row"><span class="ip-k">UV desorption (PSD)</span><span class="ip-v" id="ip-exo-psd">—</span></div>
+            <div class="ip-row"><span class="ip-k">Solar-wind sputtering</span><span class="ip-v" id="ip-exo-sput">—</span></div>
+            <div class="ip-row"><span class="ip-k">Impact vapor</span><span class="ip-v" id="ip-exo-imp">—</span></div>
+            <div class="ip-row"><span class="ip-k">Total Na source</span><span class="ip-v" id="ip-exo-total">—</span></div>
+            <div class="ip-row"><span class="ip-k">Nearest shower</span><span class="ip-v" id="ip-exo-shower">—</span></div>
+            <div style="font-size:8px;color:#556;line-height:1.6;margin-top:8px">
+                Sources scale with live GOES X-ray (PSD proxy) and Kp
+                (solar-wind proxy); the magnetotail crossing shuts the
+                sputtering channel — watch the glow dim around full moon.
+                The drawn tail compresses a structure observed streaming
+                hundreds of moon-radii anti-sunward. Model gated by
+                tests/moon-exosphere-model.mjs.
+            </div>
+        </div>
+
+        <!-- Landmarks -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Landmarks</div>
+            <div class="lyr-grid" id="ip-landmark-toggles" style="margin-bottom:8px"></div>
+            <div id="ip-landmarks" style="max-height:180px;overflow-y:auto;padding-right:4px"></div>
+            <div style="font-size:8px;color:#556;line-height:1.6;margin-top:6px">
+                Rings trace each feature's true extent on the globe —
+                hover a marker for its story, click a row to flash it.
+                IAU Gazetteer positions, gated by tests/moon-landmarks.mjs.
+            </div>
+        </div>
+
         <!-- Comparison -->
         <div class="ip-section ip-surface-only">
             <div class="ip-title">Dose Comparison</div>
@@ -297,6 +368,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
             <div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-radiation"> Radiation Overlay</label>
                 <label class="lyr"><input type="checkbox" id="lyr-rad-ring" checked> GCR/SEP Flux Shell</label>
+                <label class="lyr"><input type="checkbox" id="lyr-exo" checked> Exosphere Glow</label>
+                <label class="lyr"><input type="checkbox" id="lyr-natail" checked> Sodium Tail</label>
                 <label class="lyr"><input type="checkbox" id="lyr-bump" checked> Terrain Relief</label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthshine" checked> Earthshine</label>
                 <label class="lyr"><input type="checkbox" id="lyr-grid"> Lat/Lon Grid</label>
@@ -337,6 +410,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
                 <div>Schwadron et al. (2018) — GCR dose rate model</div>
                 <div>MARE — Matroshka AstroRad Radiation Experiment (DLR/NASA, Artemis I 2022)</div>
                 <div>NASA Artemis III candidate regions (August 2022 announcement)</div>
+                <div>LACE/Apollo 17 — Lunar Atmospheric Composition Experiment (1972–75)</div>
+                <div>LADEE — NMS + UVS exosphere composition (NASA, 2013–14)</div>
+                <div>Stern (1999) — The lunar atmosphere, Rev. Geophys. 37</div>
+                <div>Smith et al. (1999) — the Leonid-storm sodium tail spike</div>
+                <div>IAU Gazetteer of Planetary Nomenclature — landmark positions</div>
             </div>
         </div>
     </div>
@@ -361,6 +439,14 @@ import {
     pressureGPa, gravityMS2, selenothermK, crustThicknessKm,
     DYNAMO_EPOCHS, ANOMALISTIC_MONTH_DAYS, REF_PERIGEE_MS,
 } from './js/moon-interior-model.js';
+import { MoonExosphere } from './js/moon-exosphere.js';
+import {
+    SPECIES, speciesProfile, totalMassKg,
+    sodiumSources, QUIET_SODIUM_FRACTIONS,
+    inMagnetotail, impactVaporBoost, activeShower,
+} from './js/moon-exosphere-model.js';
+import { MoonLandmarks } from './js/moon-landmarks.js';
+import { LANDMARKS, LANDMARK_CATEGORIES } from './js/moon-landmarks-data.js';
 
 initScaleNav('moon');
 
@@ -558,6 +644,23 @@ let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in t
 // ═══════════════════════════════════════════════════════════════
 const landingSites = new LandingSites(moon.moonMesh);
 
+// ═══════════════════════════════════════════════════════════════
+//  EXOSPHERE — glow shell + sodium tail (scene-mounted: the gas
+//  envelope is organized by the Sun, not by the rotating surface)
+// ═══════════════════════════════════════════════════════════════
+const exosphere = new MoonExosphere(scene, sunDir);
+
+// ═══════════════════════════════════════════════════════════════
+//  LANDMARKS — craters / maria / basins / relief / swirls
+//  Mounted on moon.moonMesh so rings + markers rotate with the body.
+// ═══════════════════════════════════════════════════════════════
+const landmarks = new MoonLandmarks(moon.moonMesh);
+
+// Browser-gate hook (tests/moon-surface-smoke.spec.js) — the spec projects
+// a marker to screen space and hovers it deterministically. Same pattern
+// as window.__swSync / window.__swStage on the dashboard pages.
+try { window.__moonLab = { camera, renderer, landmarks }; } catch {}
+
 // ── Info-panel population ────────────────────────────────────────
 (function renderArtemisPanel() {
     const host = document.getElementById('ip-artemis-missions');
@@ -622,6 +725,111 @@ document.getElementById('lyr-artemis')?.addEventListener('change', e => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+//  EXOSPHERE PANEL — species table straight from the kernel
+// ═══════════════════════════════════════════════════════════════
+(function renderExoSpecies() {
+    const host = document.getElementById('ip-exo-species');
+    if (!host) return;
+    const rows = SPECIES.map(s => {
+        const p = speciesProfile(s.key);
+        const fate =
+            p.regime === 'escapes in days' ? '<span style="color:#ff9a6a">escapes in days</span>' :
+            p.regime.startsWith('partial') ? '<span style="color:#ffd75c">partial escape → tail</span>' :
+            '<span style="color:#7db8ff">bound · dies by ionization</span>';
+        const dens = s.condensable
+            ? `${s.nightCm3.toExponential(0)}→${s.sunriseCm3.toExponential(0)}/cm³ dawn`
+            : `${s.dayCm3.toExponential(0)}·d / ${s.nightCm3.toExponential(0)}·n /cm³`;
+        return `
+            <div class="exo-row" title="${s.source.replace(/"/g, '&quot;')}">
+                <span class="exo-name">${s.name}</span>
+                <span class="exo-n">${dens}</span>
+                <span class="exo-n">H≈${p.scaleHeightDayKm.toFixed(0)} km</span>
+                <div class="exo-fate">${fate} · ${s.source}</div>
+            </div>`;
+    }).join('');
+    host.innerHTML = rows + `
+        <div style="font-size:8px;color:#556;margin-top:5px">
+            Whole atmosphere aloft ≈ ${(totalMassKg() / 1e3).toFixed(1)} t (model's own
+            column integral). Scale heights + escape derived from the interior
+            kernel's gravity.
+        </div>`;
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  LANDMARKS PANEL — toggles + list from the data module
+// ═══════════════════════════════════════════════════════════════
+(function renderLandmarksPanel() {
+    const togglesHost = document.getElementById('ip-landmark-toggles');
+    const listHost = document.getElementById('ip-landmarks');
+    if (!togglesHost || !listHost) return;
+
+    const hex = (c) => '#' + c.toString(16).padStart(6, '0');
+    togglesHost.innerHTML = Object.entries(LANDMARK_CATEGORIES).map(([key, cat]) => {
+        const n = LANDMARKS.filter(l => l.category === key).length;
+        return `<label class="lyr"><input type="checkbox" data-lm-cat="${key}" checked>
+            <span style="color:${hex(cat.color)}">●</span> ${cat.label} (${n})</label>`;
+    }).join('');
+    togglesHost.querySelectorAll('input[data-lm-cat]').forEach(cb => {
+        cb.addEventListener('change', () => landmarks.setCategoryVisible(cb.dataset.lmCat, cb.checked));
+    });
+
+    listHost.innerHTML = Object.entries(LANDMARK_CATEGORIES).map(([key, cat]) => {
+        const items = LANDMARKS.filter(l => l.category === key).map(l => `
+            <div class="lm-row" data-lm-name="${l.name.replace(/"/g, '&quot;')}" title="${l.note.replace(/"/g, '&quot;')}">
+                <span class="lm-dot" style="background:${hex(cat.color)}"></span>
+                <span class="lm-name">${l.name}</span>
+                <span class="lm-size">${l.diameterKm} km</span>
+            </div>`).join('');
+        return `<div class="lm-cat-head" style="color:${hex(cat.color)}">${cat.label}</div>${items}`;
+    }).join('');
+    listHost.querySelectorAll('.lm-row').forEach(row => {
+        row.addEventListener('click', () => landmarks.pulse(row.dataset.lmName));
+    });
+})();
+
+// ── Landmark hover tooltip (raycast against the invisible hit spheres) ──
+const _lmRaycaster = new THREE.Raycaster();
+const _lmPointer = new THREE.Vector2();
+const _lmTip = document.getElementById('lm-tip');
+
+renderer.domElement.addEventListener('pointermove', (ev) => {
+    if (viewMode !== 'surface' || !_lmTip) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    _lmPointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    _lmPointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    _lmRaycaster.setFromCamera(_lmPointer, camera);
+    // The raycaster tests invisible hit meshes too (by design); filter to
+    // shown categories, and to the NEAR hemisphere — a hit farther away
+    // than the Moon's centre is on the back of the globe.
+    const distToCenter = camera.position.length();
+    const hit = _lmRaycaster.intersectObjects(landmarks.hitTargets, false)
+        .find(h => h.distance < distToCenter &&
+            landmarks.isLandmarkVisible(h.object.userData.landmark));
+    if (hit) {
+        const lm = hit.object.userData.landmark;
+        const cat = LANDMARK_CATEGORIES[lm.category];
+        _lmTip.innerHTML = `
+            <div class="lt-name">${lm.name}</div>
+            <div class="lt-meta">${cat.label} · ${lm.diameterKm} km ·
+                ${Math.abs(lm.latDeg).toFixed(1)}°${lm.latDeg >= 0 ? 'N' : 'S'},
+                ${Math.abs(lm.lonDeg).toFixed(1)}°${lm.lonDeg >= 0 ? 'E' : 'W'}</div>
+            <div class="lt-note">${lm.note}</div>`;
+        const appRect = document.getElementById('app').getBoundingClientRect();
+        _lmTip.style.left = Math.min(ev.clientX - appRect.left + 14, appRect.width - 250) + 'px';
+        _lmTip.style.top = (ev.clientY - appRect.top + 14) + 'px';
+        _lmTip.style.display = 'block';
+        renderer.domElement.style.cursor = 'pointer';
+    } else {
+        _lmTip.style.display = 'none';
+        renderer.domElement.style.cursor = '';
+    }
+});
+renderer.domElement.addEventListener('pointerleave', () => {
+    if (_lmTip) _lmTip.style.display = 'none';
+    renderer.domElement.style.cursor = '';
+});
+
+// ═══════════════════════════════════════════════════════════════
 //  VIEW MODE — Surface ⇄ Interior cutaway
 // ═══════════════════════════════════════════════════════════════
 let viewMode = 'surface';
@@ -635,6 +843,8 @@ function setViewMode(mode) {
             && document.getElementById('lyr-radiation').checked;
     }
     gridGroup.visible = surface && document.getElementById('lyr-grid').checked;
+    exosphere.setVisible(surface);
+    if (!surface && _lmTip) _lmTip.style.display = 'none';
     interior.setVisible(!surface);
     document.getElementById('info-panel').classList.toggle('interior-mode', !surface);
     document.getElementById('vt-surface').classList.toggle('active', surface);
@@ -698,6 +908,9 @@ function updateTidePanel(nowMs) {
             fieldMicroT < 0.05 ? '0 µT (dead)' : `~${fieldMicroT.toFixed(fieldMicroT < 5 ? 1 : 0)} µT`;
         const epoch = DYNAMO_EPOCHS.find(e => ageGa <= e.fromGa && ageGa >= e.toGa);
         document.getElementById('ip-dyn-epoch').textContent = epoch ? epoch.label : '—';
+        // What was stirring the core then — the kernel's mechanism story.
+        // The cutaway's swirl speed/columnarity follows coreConvectionVigor.
+        document.getElementById('ip-dyn-mech').textContent = epoch ? epoch.mechanism : '';
     };
     slider.addEventListener('input', apply);
     apply();
@@ -769,9 +982,58 @@ window.addEventListener('swpc-update', e => {
 
     moon.setRadiation({ gcrFlux: gcrFluxFromSolarCycle(), sepFlux: _sepFlux, kp: _kp });
 
-    // Update radiation panel
+    // Update radiation panel + the sodium weather that shares these drivers
     _updateRadPanel();
+    _updateExoPanel();
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  EXOSPHERE — live sodium weather from the kernel
+//  Drivers are PROXIES, disclosed in the panel: GOES X-ray intensity
+//  stands in for the solar UV that powers PSD; Kp stands in for
+//  solar-wind flux at the Moon. The magnetotail window and the
+//  meteor-shower calendar come straight from the kernel.
+// ═══════════════════════════════════════════════════════════════
+function _updateExoPanel() {
+    const now = Date.now();
+    const lp = lunarPhase(new Date(now));
+    const inTail = inMagnetotail(lp.age);
+    const showerBoost = impactVaporBoost(now);
+    const src = sodiumSources({
+        uvFactor: 1 + 2 * _xrayIntensity,
+        swFactor: 1 + 1.2 * (_kp / 9),
+        inTail,
+        showerBoost,
+    });
+    exosphere.setActivity(src.total);
+
+    const F = QUIET_SODIUM_FRACTIONS;
+    const x = (v) => `×${v.toFixed(2)}`;
+    const set = (id, txt, color) => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = txt; if (color) el.style.color = color; }
+    };
+    set('ip-exo-psd', x(src.psd / F.psd));
+    set('ip-exo-sput', inTail ? 'shielded (magnetotail)' : x(src.sputter / F.sputter),
+        inTail ? '#ffaa20' : '#aabbcc');
+    set('ip-exo-imp', x(src.impact / F.impact),
+        showerBoost > 1.2 ? '#ffd75c' : '#aabbcc');
+    set('ip-exo-total', x(src.total),
+        src.total > 1.25 ? '#ffd75c' : src.total < 0.95 ? '#7db8ff' : '#4fc97f');
+
+    const shower = activeShower(now);
+    set('ip-exo-shower', shower
+        ? `${shower.name} (${shower.daysAway < 1.5 ? 'peaking' : `${shower.daysAway.toFixed(0)} d away`})`
+        : '—');
+
+    // HUD one-liner
+    const hudEl = document.getElementById('h-exo');
+    if (hudEl) {
+        hudEl.textContent = inTail ? `Na ${x(src.total)} (tail)` :
+            showerBoost > 1.2 ? `Na ${x(src.total)} (${shower.name})` :
+            `Na ${x(src.total)}`;
+    }
+}
 
 function _updateRadPanel() {
     const gcr = gcrFluxFromSolarCycle();
@@ -803,9 +1065,10 @@ function _updateRadPanel() {
     document.getElementById('ip-gcr-dose').textContent = `~${gcrDose.toFixed(0)} cGy/yr`;
     document.getElementById('ip-sep-dose').textContent = sepDose > 0.1 ? `~${sepDose.toFixed(1)} cGy` : '0 cGy';
 
-    // Magnetotail (Moon is in tail ~4 days around full moon)
+    // Magnetotail (~4 days centred on full moon — window from the
+    // exosphere kernel, the SAME one that shuts the Na sputtering channel)
     const lp = lunarPhase(new Date());
-    const inTail = lp.age > 13.5 && lp.age < 17.5;
+    const inTail = inMagnetotail(lp.age);
     document.getElementById('ip-tail').textContent = inTail ? 'Inside (particle sheet)' : 'Outside';
     document.getElementById('ip-tail').style.color = inTail ? '#ffaa20' : '#8899aa';
 }
@@ -824,6 +1087,12 @@ document.getElementById('lyr-bump').addEventListener('change', e => {
 });
 document.getElementById('lyr-earthshine').addEventListener('change', e => {
     moon.setEarthshine(e.target.checked ? 0.3 : 0.0);
+});
+document.getElementById('lyr-exo').addEventListener('change', e => {
+    exosphere.setGlowVisible(e.target.checked);
+});
+document.getElementById('lyr-natail').addEventListener('change', e => {
+    exosphere.setTailVisible(e.target.checked);
 });
 document.getElementById('lyr-rotate').addEventListener('change', e => {
     controls.autoRotate = e.target.checked;
@@ -872,10 +1141,13 @@ document.getElementById('lyr-grid').addEventListener('change', e => {
 // ═══════════════════════════════════════════════════════════════
 const clock = new THREE.Clock();
 let _lastPanelT = -10;
+let _lastT = 0;
 
 function animate() {
     requestAnimationFrame(animate);
     const t = clock.getElapsedTime();
+    const dt = Math.min(0.1, t - _lastT);
+    _lastT = t;
 
     // Slow Moon rotation (synchronous — same face toward Earth).
     // The cutaway does NOT rotate — the wedge stays put and the camera orbits.
@@ -884,6 +1156,8 @@ function animate() {
     // Update shader time
     moon.update(t);
     interior.update(t, Date.now());
+    exosphere.update(t);
+    landmarks.update(dt);
     if (_earthTimeU) _earthTimeU.u_time.value = t;
 
     // Panel + HUD refresh (~1 Hz — these touch the DOM)
@@ -897,14 +1171,16 @@ function animate() {
         // (full moon = no earthshine, new moon = max earthshine)
         moon.setEarthshine((1 - lp.illumination) * 0.35);
         updateTidePanel(Date.now());
+        _updateExoPanel();
     }
 
     controls.update();
     renderer.render(scene, camera);
 }
 
-// Initial radiation update
+// Initial radiation + exosphere paint
 _updateRadPanel();
+_updateExoPanel();
 animate();
 </script>
 <script type="module">
