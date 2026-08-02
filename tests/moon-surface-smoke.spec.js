@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { LANDMARKS, LANDMARK_CATEGORIES } from '../js/moon-landmarks-data.js';
 import { SPECIES } from '../js/moon-exosphere-model.js';
+import { moonPhase, upcomingEclipses } from '../js/moon-ephemeris.js';
 
 /**
  * moon-surface-smoke.spec.js — the Moon page's exosphere + landmarks +
@@ -48,6 +49,34 @@ test('moon exosphere, landmarks, and dynamo mechanisms boot and respond', async 
     expect(pageErrors, `page errors: ${pageErrors.join('\n')}`).toHaveLength(0);
     expect(shaderErrors, `shader errors: ${shaderErrors.join('\n')}`).toHaveLength(0);
 
+    // ── Tonight's Moon: the page and the kernel must tell the same sky ──
+    const kernelPhase = moonPhase(Date.now());
+    await expect(page.locator('#tm-phase')).toHaveText(kernelPhase.phaseName);
+    const illumText = await page.locator('#tm-illum').textContent();
+    expect(Math.abs(parseFloat(illumText) - kernelPhase.illuminatedFraction * 100),
+        `page illumination ${illumText} vs kernel`).toBeLessThan(1.5);
+    await expect(page.locator('#tm-dist')).toContainText('km');
+    await expect(page.locator('#tm-lib-lon')).toContainText('limb');
+    await expect(page.locator('#tm-lib-lat')).toContainText('°');
+
+    // ── Eclipse calendar: six kernel-computed entries, first date agrees ──
+    const eclipses = upcomingEclipses(Date.now(), 6);
+    const firstDate = new Date(eclipses[0].tMs)
+        .toLocaleDateString('en-US', { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' });
+    await expect(page.locator('#ip-eclipses > div')).toHaveCount(6);
+    await expect(page.locator('#ip-eclipses')).toContainText(firstDate);
+    await expect(page.locator('#ip-eclipses')).toContainText('from node');
+
+    // ── Month playback + sky-mode toggle survive without errors ──
+    await page.click('#tm-play');
+    await page.waitForTimeout(600);   // a few playback frames
+    await expect(page.locator('#tm-date')).toContainText('replay');
+    await page.click('#tm-play');     // stop → back to now
+    await expect(page.locator('#tm-date')).not.toContainText('replay');
+    await page.locator('#tm-sky').uncheck();   // legacy fixed-sun mode
+    await page.waitForTimeout(300);
+    await page.locator('#tm-sky').check();
+
     // ── Exosphere panel: species table from the kernel ──
     await expect(page.locator('#ip-exo-species .exo-row')).toHaveCount(SPECIES.length);
     await expect(page.locator('#ip-exo-species')).toContainText('Sodium');
@@ -78,11 +107,13 @@ test('moon exosphere, landmarks, and dynamo mechanisms boot and respond', async 
             const wp = h.getWorldPosition(new h.position.constructor());
             if (wp.clone().normalize().dot(camN) < 0.55) continue;   // near hemisphere only
             const p = wp.project(camera);
-            return {
-                x: rect.left + (p.x * 0.5 + 0.5) * rect.width,
-                y: rect.top + (-p.y * 0.5 + 0.5) * rect.height,
-                name: lm.name,
-            };
+            const x = rect.left + (p.x * 0.5 + 0.5) * rect.width;
+            const y = rect.top + (-p.y * 0.5 + 0.5) * rect.height;
+            // Only accept markers in the unobstructed central region — the
+            // HUD (top-left), info-panel (right), view toggle (top-center)
+            // and cookie banner (bottom) all swallow pointer events.
+            if (x < 420 || x > rect.width - 350 || y < 140 || y > rect.height - 170) continue;
+            return { x, y, name: lm.name };
         }
         return null;
     });

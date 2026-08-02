@@ -219,6 +219,20 @@ export class MoonExosphere {
         this._tailPoints.visible = this._mode && this._tailOn;
     }
 
+    /**
+     * Live sun direction (sky mode drives this from the ephemeris kernel).
+     * Re-derives the dawn limb and re-aims the tail anti-sunward.
+     */
+    setSunDir(v) {
+        this._glowU.u_sun_dir.value.copy(v);
+        this._glowU.u_dawn_dir.value
+            .crossVectors(v, new THREE.Vector3(0, 1, 0)).normalize();
+        this._tailPoints.quaternion.setFromUnitVectors(
+            new THREE.Vector3(1, 0, 0),
+            v.clone().multiplyScalar(-1).normalize()
+        );
+    }
+
     /** Master gate — false in the interior cutaway view. */
     setVisible(v) { this._mode = !!v; this._applyVisibility(); }
     setGlowVisible(v) { this._glowOn = !!v; this._applyVisibility(); }

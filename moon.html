@@ -274,6 +274,45 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
             </div>
         </div>
 
+        <!-- Tonight's Moon — true ephemeris -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Tonight's Moon</div>
+            <div class="ip-row"><span class="ip-k">As of</span><span class="ip-v" id="tm-date">—</span></div>
+            <div class="ip-row"><span class="ip-k">Phase</span><span class="ip-v" id="tm-phase">—</span></div>
+            <div class="ip-row"><span class="ip-k">Illuminated</span><span class="ip-v" id="tm-illum">—</span></div>
+            <div class="ip-row"><span class="ip-k">Distance</span><span class="ip-v" id="tm-dist">—</span></div>
+            <div class="ip-row"><span class="ip-k">Apparent size</span><span class="ip-v" id="tm-size">—</span></div>
+            <div class="ip-row"><span class="ip-k">Libration lon</span><span class="ip-v" id="tm-lib-lon">—</span></div>
+            <div class="ip-row"><span class="ip-k">Libration lat</span><span class="ip-v" id="tm-lib-lat">—</span></div>
+            <div style="font-size:9px;color:#889;line-height:1.5;margin:6px 0">
+                The globe is oriented and lit from a real ephemeris — the
+                terminator matches the sky right now, and the <em>libration</em>
+                readout is the Moon's monthly wobble: up to ±8°, which is how
+                we've mapped 59% of the surface from home. Play a month and
+                watch Mare Crisium slide around the limb. And note the phase
+                is sunlight geometry, not Earth's shadow — orbit the camera
+                and see it.
+            </div>
+            <button id="tm-play" style="width:100%;border:1px solid rgba(255,255,255,.14);border-radius:6px;
+                background:rgba(255,215,0,.10);color:#ffd77a;cursor:pointer;
+                font:600 10px 'Segoe UI',system-ui,sans-serif;padding:6px 0;margin-bottom:6px">▶ Play one month</button>
+            <label class="lyr"><input type="checkbox" id="tm-sky" checked> Sky mode — true orientation &amp; lighting</label>
+        </div>
+
+        <!-- Eclipse calendar — computed from the node geometry -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Eclipse Calendar</div>
+            <div id="ip-eclipses" style="font-size:10px"></div>
+            <div style="font-size:8px;color:#556;line-height:1.6;margin-top:8px">
+                Computed from the node geometry (Meeus ch. 54), not a list:
+                the Moon's orbit is tilted 5.1°, so an eclipse needs a new or
+                full moon <em>while</em> the Moon is within ~21° of a node —
+                most months miss. Times are UTC, greatest eclipse, ±minutes.
+                Solar ground paths are beyond this theory — check a local
+                source before travelling. Gated by tests/moon-ephemeris.mjs.
+            </div>
+        </div>
+
         <!-- Dose Rate -->
         <div class="ip-section ip-surface-only">
             <div class="ip-title">Lunar Surface Dose Rate</div>
@@ -415,6 +454,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
                 <div>Stern (1999) — The lunar atmosphere, Rev. Geophys. 37</div>
                 <div>Smith et al. (1999) — the Leonid-storm sodium tail spike</div>
                 <div>IAU Gazetteer of Planetary Nomenclature — landmark positions</div>
+                <div>Meeus — Astronomical Algorithms (truncated ELP-2000/82; eclipse series)</div>
             </div>
         </div>
     </div>
@@ -431,7 +471,13 @@ import {
     ARTEMIS_I_FINDINGS,
     APOLLO_SITES,
     ARTEMIS_III_CANDIDATES,
+    latLonToXYZ,
 } from './js/artemis-data.js';
+import {
+    moonPhase, distanceKm, apparentDiameterArcmin,
+    subEarthPoint, subSolarPoint, upcomingEclipses,
+    SYNODIC_MONTH_DAYS as EPH_SYNODIC_DAYS, MEAN_DISTANCE_KM,
+} from './js/moon-ephemeris.js';
 import { LandingSites } from './js/moon-landing-sites.js';
 import { MoonInterior, INTERIOR_PALETTE } from './js/moon-interior.js';
 import {
@@ -616,6 +662,7 @@ let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in t
     _earthTimeU = earthU;   // updated in the loop
 }
 
+let _glareSprite = null;   // repositioned when sky mode moves the sun
 {
     // Sun glare sprite — radial gradient, additive
     const cv = document.createElement('canvas');
@@ -636,6 +683,7 @@ let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in t
     glare.position.copy(sunDir).multiplyScalar(60);
     glare.scale.setScalar(11);
     scene.add(glare);
+    _glareSprite = glare;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -830,6 +878,132 @@ renderer.domElement.addEventListener('pointerleave', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+//  SKY MODE — orient + light the globe from the ephemeris kernel
+//  The body point facing earthDir is the kernel's sub-Earth point
+//  (the libration), rolled so lunar north is up (atlas convention —
+//  the sky view tilts with your latitude; disclosed in the panel).
+//  The world sun direction is the kernel's sub-solar point carried
+//  through the same rotation, so the terminator IS tonight's.
+// ═══════════════════════════════════════════════════════════════
+const SUN_FIXED = sunDir.clone();      // legacy framing when sky mode is off
+let _skyMode = true;
+let _timeOffsetMs = 0;                 // month-playback scrub
+let _monthPlay = false;
+const _MONTH_MS = EPH_SYNODIC_DAYS * 86400000;
+const _MONTH_PLAY_RATE = _MONTH_MS / 24000;   // one synodic month in ~24 s
+
+function simNow() { return Date.now() + _timeOffsetMs; }
+
+function _setSceneSun(v) {
+    sunDir.copy(v);
+    moon.setSunDir(v);
+    interior.setSunDir(v);
+    exosphere.setSunDir(v);
+    if (_earthTimeU) _earthTimeU.u_sun_dir.value.copy(v);
+    if (_glareSprite) _glareSprite.position.copy(v).multiplyScalar(60);
+}
+
+const _qEph = new THREE.Quaternion();
+function applyEphemeris() {
+    const ms = simNow();
+    const se = subEarthPoint(ms);
+    const ss = subSolarPoint(ms);
+    const e = latLonToXYZ(se.latDeg, se.lonDeg, 1);
+    const vE = new THREE.Vector3(e.x, e.y, e.z).normalize();
+    _qEph.setFromUnitVectors(vE, earthDir);
+    // Roll about earthDir so body north projects to scene-up
+    const nW = new THREE.Vector3(0, 1, 0).applyQuaternion(_qEph);
+    const nP = nW.addScaledVector(earthDir, -nW.dot(earthDir));
+    const yP = new THREE.Vector3(0, 1, 0).addScaledVector(earthDir, -earthDir.y);
+    if (nP.lengthSq() > 1e-8 && yP.lengthSq() > 1e-8) {
+        nP.normalize(); yP.normalize();
+        const ang = Math.atan2(new THREE.Vector3().crossVectors(nP, yP).dot(earthDir), nP.dot(yP));
+        _qEph.premultiply(new THREE.Quaternion().setFromAxisAngle(earthDir, ang));
+    }
+    moon.moonMesh.quaternion.copy(_qEph);
+    const s = latLonToXYZ(ss.latDeg, ss.lonDeg, 1);
+    _setSceneSun(new THREE.Vector3(s.x, s.y, s.z).applyQuaternion(_qEph).normalize());
+}
+
+function _updateTonightPanel() {
+    const ms = simNow();
+    const p = moonPhase(ms);
+    const se = subEarthPoint(ms);
+    const d = distanceKm(ms);
+    const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    const dt = new Date(ms);
+    set('tm-date', _monthPlay || _timeOffsetMs !== 0
+        ? dt.toISOString().slice(0, 10) + ' (replay)'
+        : dt.toISOString().slice(0, 16).replace('T', ' ') + ' UT');
+    set('tm-phase', p.phaseName);
+    set('tm-illum', `${(p.illuminatedFraction * 100).toFixed(1)} %`);
+    set('tm-dist', `${Math.round(d).toLocaleString('en-US')} km`);
+    const arcmin = apparentDiameterArcmin(ms);
+    const vs = (d / MEAN_DISTANCE_KM - 1) * 100;
+    set('tm-size', `${arcmin.toFixed(1)}′ (${vs >= 0 ? '+' : ''}${vs.toFixed(1)}% vs mean)`);
+    set('tm-lib-lon', `${Math.abs(se.lonDeg).toFixed(2)}° ${se.lonDeg >= 0 ? 'E — east limb exposed' : 'W — west limb exposed'}`);
+    set('tm-lib-lat', `${Math.abs(se.latDeg).toFixed(2)}° ${se.latDeg >= 0 ? 'N — over the north pole' : 'S — under the south pole'}`);
+    // HUD mirrors the same clock
+    document.getElementById('h-phase').textContent = p.phaseName;
+    document.getElementById('h-age').textContent = `${p.ageDays.toFixed(1)} days`;
+    document.getElementById('h-dist').textContent = `${Math.round(d).toLocaleString('en-US')} km`;
+    moon.setEarthshine((1 - p.illuminatedFraction) * 0.35);
+}
+
+document.getElementById('tm-sky')?.addEventListener('change', e => {
+    _skyMode = e.target.checked;
+    if (_skyMode) {
+        applyEphemeris();
+    } else {
+        _monthPlay = false; _timeOffsetMs = 0;
+        _setSceneSun(SUN_FIXED);
+        const btn = document.getElementById('tm-play');
+        if (btn) btn.textContent = '▶ Play one month';
+    }
+});
+document.getElementById('tm-play')?.addEventListener('click', () => {
+    if (!_skyMode) document.getElementById('tm-sky')?.click();   // playback implies sky mode
+    _monthPlay = !_monthPlay;
+    if (!_monthPlay) { _timeOffsetMs = 0; applyEphemeris(); _updateTonightPanel(); }
+    document.getElementById('tm-play').textContent =
+        _monthPlay ? '■ Stop (back to now)' : '▶ Play one month';
+});
+
+// ── Eclipse calendar — computed once at boot from the kernel ──
+(function renderEclipseCalendar() {
+    const host = document.getElementById('ip-eclipses');
+    if (!host) return;
+    const now = Date.now();
+    const list = upcomingEclipses(now, 6);
+    const KIND = {
+        solar: { glyph: '☉', color: '#ffd75c' },
+        lunar: { glyph: '☾', color: '#ff8a70' },
+    };
+    host.innerHTML = list.map(e => {
+        const k = KIND[e.kind];
+        const d = new Date(e.tMs);
+        const when = d.toLocaleDateString('en-US', { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' });
+        const time = d.toISOString().slice(11, 16);
+        const days = Math.round((e.tMs - now) / 86400000);
+        const typeLabel = e.type[0].toUpperCase() + e.type.slice(1);
+        const detail = e.kind === 'lunar'
+            ? (e.type === 'penumbral'
+                ? `penumbral mag ${e.penumbralMagnitude.toFixed(2)} — subtle shading`
+                : `umbral mag ${e.magnitude.toFixed(2)} — visible from Earth's whole night side`)
+            : `γ ${e.gamma.toFixed(2)} — narrow ground path`;
+        return `
+            <div style="margin-bottom:7px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.04)">
+                <div style="display:flex;justify-content:space-between;align-items:baseline">
+                    <span style="font-weight:700;color:${k.color}">${k.glyph} ${typeLabel} ${e.kind}</span>
+                    <span style="font-size:9px;color:#778">in ${days} d</span>
+                </div>
+                <div style="font-size:9px;color:#aab">${when} · ${time} UT · ${e.nodeDistanceDeg.toFixed(1)}° from node</div>
+                <div style="font-size:8px;color:#667">${detail}</div>
+            </div>`;
+    }).join('');
+})();
+
+// ═══════════════════════════════════════════════════════════════
 //  VIEW MODE — Surface ⇄ Interior cutaway
 // ═══════════════════════════════════════════════════════════════
 let viewMode = 'surface';
@@ -924,27 +1098,9 @@ document.getElementById('lyr-anomalies')?.addEventListener('change', e => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-//  LUNAR PHASE + RADIATION MODEL
+//  RADIATION MODEL
+//  (Lunar phase/age now comes from the ephemeris kernel — one clock.)
 // ═══════════════════════════════════════════════════════════════
-// Lunar phase calculation (simplified — synodic month = 29.53 days)
-function lunarPhase(date) {
-    const SYNODIC = 29.53058867;
-    // Known new moon: Jan 6, 2000 18:14 UTC
-    const ref = new Date('2000-01-06T18:14:00Z').getTime();
-    const diff = (date.getTime() - ref) / 86400000;
-    const age = ((diff % SYNODIC) + SYNODIC) % SYNODIC;
-    const illumination = 0.5 * (1 - Math.cos(2 * Math.PI * age / SYNODIC));
-    const phase = age < 1.85 ? 'New Moon'
-        : age < 7.38  ? 'Waxing Crescent'
-        : age < 9.23  ? 'First Quarter'
-        : age < 13.77 ? 'Waxing Gibbous'
-        : age < 15.77 ? 'Full Moon'
-        : age < 22.15 ? 'Waning Gibbous'
-        : age < 23.99 ? 'Last Quarter'
-        :                'Waning Crescent';
-    return { age, illumination, phase };
-}
-
 // GCR flux varies inversely with solar activity (Schwadron model)
 // Solar max → low GCR (~0.28), solar min → high GCR (~0.72)
 function gcrFluxFromSolarCycle() {
@@ -995,9 +1151,8 @@ window.addEventListener('swpc-update', e => {
 //  meteor-shower calendar come straight from the kernel.
 // ═══════════════════════════════════════════════════════════════
 function _updateExoPanel() {
-    const now = Date.now();
-    const lp = lunarPhase(new Date(now));
-    const inTail = inMagnetotail(lp.age);
+    const now = simNow();   // follows the month playback, so the tail dims on replayed full moons too
+    const inTail = inMagnetotail(moonPhase(now).ageDays);
     const showerBoost = impactVaporBoost(now);
     const src = sodiumSources({
         uvFactor: 1 + 2 * _xrayIntensity,
@@ -1066,9 +1221,9 @@ function _updateRadPanel() {
     document.getElementById('ip-sep-dose').textContent = sepDose > 0.1 ? `~${sepDose.toFixed(1)} cGy` : '0 cGy';
 
     // Magnetotail (~4 days centred on full moon — window from the
-    // exosphere kernel, the SAME one that shuts the Na sputtering channel)
-    const lp = lunarPhase(new Date());
-    const inTail = inMagnetotail(lp.age);
+    // exosphere kernel, the SAME one that shuts the Na sputtering channel;
+    // age from the ephemeris kernel so all clocks agree)
+    const inTail = inMagnetotail(moonPhase(simNow()).ageDays);
     document.getElementById('ip-tail').textContent = inTail ? 'Inside (particle sheet)' : 'Outside';
     document.getElementById('ip-tail').style.color = inTail ? '#ffaa20' : '#8899aa';
 }
@@ -1149,9 +1304,27 @@ function animate() {
     const dt = Math.min(0.1, t - _lastT);
     _lastT = t;
 
-    // Slow Moon rotation (synchronous — same face toward Earth).
-    // The cutaway does NOT rotate — the wedge stays put and the camera orbits.
-    if (viewMode === 'surface') moon.moonMesh.rotation.y = t * 0.02;
+    // Decorative slow spin ONLY when sky mode is off — in sky mode the
+    // orientation is the ephemeris quaternion (applyEphemeris), which is
+    // the honest one: synchronous rotation IS the libration wobble.
+    if (viewMode === 'surface' && !_skyMode) moon.moonMesh.rotation.y = t * 0.02;
+
+    // Month playback: sweep one synodic month in ~24 s, then snap back
+    if (_monthPlay) {
+        _timeOffsetMs += dt * 1000 * _MONTH_PLAY_RATE;
+        if (_timeOffsetMs >= _MONTH_MS) {
+            _monthPlay = false;
+            _timeOffsetMs = 0;
+            const btn = document.getElementById('tm-play');
+            if (btn) btn.textContent = '▶ Play one month';
+        }
+        applyEphemeris();
+        if (t - _lastPanelT > 0.12) {   // ~8 Hz readouts during playback
+            _lastPanelT = t;
+            _updateTonightPanel();
+            _updateExoPanel();
+        }
+    }
 
     // Update shader time
     moon.update(t);
@@ -1161,15 +1334,10 @@ function animate() {
     if (_earthTimeU) _earthTimeU.u_time.value = t;
 
     // Panel + HUD refresh (~1 Hz — these touch the DOM)
-    if (t - _lastPanelT > 1) {
+    if (!_monthPlay && t - _lastPanelT > 1) {
         _lastPanelT = t;
-        const lp = lunarPhase(new Date());
-        document.getElementById('h-phase').textContent = lp.phase;
-        document.getElementById('h-age').textContent = `${lp.age.toFixed(1)} days`;
-        document.getElementById('h-dist').textContent = '384,400 km';
-        // Earthshine varies with inverse of lunar illumination
-        // (full moon = no earthshine, new moon = max earthshine)
-        moon.setEarthshine((1 - lp.illumination) * 0.35);
+        if (_skyMode) applyEphemeris();
+        _updateTonightPanel();
         updateTidePanel(Date.now());
         _updateExoPanel();
     }
@@ -1178,7 +1346,9 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-// Initial radiation + exosphere paint
+// Initial paint: ephemeris orientation, then the panels
+applyEphemeris();
+_updateTonightPanel();
 _updateRadPanel();
 _updateExoPanel();
 animate();
