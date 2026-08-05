@@ -9,10 +9,18 @@
  * Endpoint:  GET https://api.weather.gov/alerts/active
  *              ?status=actual
  *              &message_type=alert
- *              &severity=Extreme,Severe,Moderate,Minor
+ *   The full severity range is fetched once. Unknown-severity non-tsunami
+ *   products are filtered locally so the existing storm layer keeps its old
+ *   scope while tsunami Information Statements are retained.
  *
  * Output:  CustomEvent 'nws-alerts-update' on document
- *   detail: { alerts: Alert[], meta: AlertMeta, error?: string }
+ *   detail: {
+ *     alerts: Alert[],            // existing severe-weather stream
+ *     tsunamiAlerts: Alert[],     // authoritative NWS tsunami products
+ *     meta: AlertMeta,
+ *     tsunamiMeta: AlertMeta,
+ *     error?: string
+ *   }
  *
  *   Alert = {
  *     id, event, headline, severity, urgency,
@@ -69,7 +77,7 @@ export const ALERT_PULSE_FREQ = {
 // lightning, flood, etc.) on the globe instead of a generic dot.
 export const ALERT_KINDS = [
     'tornado', 'hurricane', 'thunder', 'flood', 'wind',
-    'winter', 'heat', 'fire', 'fog', 'marine', 'generic',
+    'winter', 'heat', 'fire', 'fog', 'marine', 'tsunami', 'generic',
 ];
 
 /** Classify an NWS event string into one of ALERT_KINDS. */
@@ -79,11 +87,12 @@ export function classifyAlertEvent(event) {
     // Order matters — check most specific first
     if (/\btornado\b|\bfunnel\b/.test(e))                                       return 'tornado';
     if (/\bhurricane\b|\btropical\s*(storm|depression|cyclone)\b|\btyphoon\b/.test(e)) return 'hurricane';
+    if (/\btsunami\b/.test(e))                                                  return 'tsunami';
     if (/\bblizzard\b|\bice\s*storm\b|\bwinter\s*(storm|weather)\b|\bfreezing\b|\bsnow\b|\bsleet\b|\bfrost\b|\bfreeze\b/.test(e)) return 'winter';
     if (/\bthunderstorm\b|\bthunder\b|\blightning\b|\bhail\b/.test(e))          return 'thunder';
     if (/\bfire\b|\bred\s*flag\b|\bsmoke\b/.test(e))                            return 'fire';
     if (/\bheat\b|\bhigh\s*temperature\b|\bexcessive\s*heat\b/.test(e))         return 'heat';
-    if (/\bflood\b|\brain\b|\btsunami\b|\bstorm\s*surge\b/.test(e))             return 'flood';
+    if (/\bflood\b|\brain\b|\bstorm\s*surge\b/.test(e))                         return 'flood';
     if (/\bwind\b|\bdust\s*storm\b/.test(e))                                    return 'wind';
     if (/\bfog\b|\bdense\s*smoke\b/.test(e))                                    return 'fog';
     if (/\bmarine\b|\bsmall\s*craft\b|\brip\s*current\b|\bsurf\b/.test(e))      return 'marine';
@@ -94,13 +103,20 @@ export function classifyAlertEvent(event) {
 // ─────────────────────────────────────────────────────────────────────────────
 export class NWSAlerts {
     constructor() {
-        this._alerts = [];
-        this._timer  = null;
-        this._meta   = {
+        this._alerts        = [];
+        this._tsunamiAlerts = [];
+        this._timer         = null;
+        this._meta          = {
             count:       0,
             bySeverity:  {},
             fetchTime:   null,
             source:      'NWS api.weather.gov',
+        };
+        this._tsunamiMeta = {
+            count:       0,
+            bySeverity:  {},
+            fetchTime:   null,
+            source:      'NWS api.weather.gov · tsunami products',
         };
     }
 
@@ -110,7 +126,9 @@ export class NWSAlerts {
     refresh() { this._fetchAndProcess(); }
 
     get alerts() { return this._alerts; }
+    get tsunamiAlerts() { return this._tsunamiAlerts; }
     get meta()   { return this._meta; }
+    get tsunamiMeta() { return this._tsunamiMeta; }
 
     // ── Fetch ────────────────────────────────────────────────────────────────
     async _fetchAndProcess() {
@@ -119,7 +137,6 @@ export class NWSAlerts {
             const params = new URLSearchParams({
                 status:       'actual',
                 message_type: 'alert',
-                severity:     'Extreme,Severe,Moderate,Minor',
             });
             const res = await fetch(`${NWS_API}?${params}`, {
                 headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/geo+json' },
@@ -132,41 +149,71 @@ export class NWSAlerts {
             console.warn('[NWSAlerts] Fetch failed:', err.message);
             // Keep previous alerts; surface the error via event
             this._dispatch('nws-alerts-update', {
-                alerts: this._alerts, meta: this._meta, error: err.message,
+                alerts: this._alerts,
+                tsunamiAlerts: this._tsunamiAlerts,
+                meta: this._meta,
+                tsunamiMeta: this._tsunamiMeta,
+                error: err.message,
             });
             return;
         }
-        this._dispatch('nws-alerts-update', { alerts: this._alerts, meta: this._meta });
+        this._dispatch('nws-alerts-update', {
+            alerts: this._alerts,
+            tsunamiAlerts: this._tsunamiAlerts,
+            meta: this._meta,
+            tsunamiMeta: this._tsunamiMeta,
+        });
     }
 
     // ── Parse GeoJSON feature array ──────────────────────────────────────────
     _process(features) {
-        const bySeverity = {};
-        const alerts     = [];
+        const bySeverity        = {};
+        const tsunamiBySeverity = {};
+        const alerts            = [];
+        const tsunamiAlerts     = [];
 
         for (const feat of features) {
             const p = feat.properties;
             if (p.status !== 'Actual') continue;
 
+            const isTsunami = /\btsunami\b/i.test(String(p.event ?? ''));
             const severity = SEVERITY_ORDER.includes(p.severity) ? p.severity : 'Unknown';
+            // The old request asked NWS to exclude Unknown severity. We now
+            // request the complete active feed so informational tsunami
+            // products are not lost, then preserve the old storm-alert scope
+            // here. This expands tsunami coverage without flooding the
+            // existing Storm Alerts layer with unrelated statements.
+            if (!isTsunami && severity === 'Unknown') continue;
             const centroid = this._centroid(feat);
-            if (!centroid) continue;   // no geographic anchor → skip
+            if (!centroid && !isTsunami) continue;   // existing storm behavior
 
-            alerts.push({
+            const alert = {
                 id:        p.id,
                 event:     p.event,
                 kind:      classifyAlertEvent(p.event),
                 headline:  p.headline ?? p.description?.slice(0, 120) ?? p.event,
+                description: p.description ?? null,
+                instruction: p.instruction ?? null,
                 severity,
                 urgency:   p.urgency ?? 'Unknown',
+                certainty: p.certainty ?? 'Unknown',
                 area:      p.areaDesc ?? '—',
+                sent:      p.sent ?? null,
                 effective: p.effective,
                 expires:   p.expires,
-                lat:       centroid.lat,
-                lon:       centroid.lon,
-                areaKm2:   centroid.areaKm2 ?? 0,    // spherical polygon area (0 for Point / state-fallback anchors)
-            });
-            bySeverity[severity] = (bySeverity[severity] ?? 0) + 1;
+                lat:       centroid?.lat ?? null,
+                lon:       centroid?.lon ?? null,
+                areaKm2:   centroid?.areaKm2 ?? 0,    // spherical polygon area (0 for Point / state-fallback anchors)
+                mappable:  Boolean(centroid),
+                sourceUrl: p['@id'] ?? p.id ?? null,
+            };
+            if (isTsunami) {
+                tsunamiAlerts.push(alert);
+                tsunamiBySeverity[severity] = (tsunamiBySeverity[severity] ?? 0) + 1;
+            } else {
+                alerts.push(alert);
+                bySeverity[severity] = (bySeverity[severity] ?? 0) + 1;
+            }
         }
 
         // Sort: most severe first, then alphabetically by event
@@ -174,13 +221,26 @@ export class NWSAlerts {
             const si = SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity);
             return si !== 0 ? si : a.event.localeCompare(b.event);
         });
+        tsunamiAlerts.sort((a, b) => {
+            const si = SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity);
+            if (si !== 0) return si;
+            return Date.parse(b.sent ?? b.effective ?? 0) - Date.parse(a.sent ?? a.effective ?? 0);
+        });
 
-        this._alerts  = alerts;
-        this._meta    = {
+        const fetchTime = new Date();
+        this._alerts        = alerts;
+        this._tsunamiAlerts = tsunamiAlerts;
+        this._meta          = {
             count:      alerts.length,
             bySeverity,
-            fetchTime:  new Date(),
+            fetchTime,
             source:     'NWS api.weather.gov',
+        };
+        this._tsunamiMeta = {
+            count:      tsunamiAlerts.length,
+            bySeverity: tsunamiBySeverity,
+            fetchTime,
+            source:     'NWS api.weather.gov · tsunami products',
         };
     }
 

@@ -82,6 +82,10 @@ const CSS = `
 /* head = drag handle (stable element; body re-renders under it) */
 .ev-verdict-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
   padding:14px 14px 0 20px;cursor:grab;user-select:none;-webkit-user-select:none}
+.ev-verdict-brand{display:flex;align-items:center;gap:10px;min-width:0}
+.ev-verdict-logo{width:46px;height:46px;flex:0 0 46px;border-radius:11px;object-fit:cover;
+  border:1px solid rgba(77,219,255,.32);box-shadow:0 0 15px rgba(31,143,255,.24);
+  background:#000}
 .ev-verdict-loc{font-family:var(--font-display,'Orbitron',system-ui,sans-serif);font-size:.78rem;font-weight:700;
   letter-spacing:.1em;text-transform:uppercase;color:#f0f6ff;line-height:1.3}
 .ev-verdict-loc small{display:block;font-family:var(--font-mono,'JetBrains Mono',ui-monospace,monospace);
@@ -265,6 +269,8 @@ const CSS = `
 .ev-verdict-pill{display:none;align-self:flex-start;align-items:center;gap:8px;min-height:44px;padding:10px 16px;border-radius:999px;
   border:1px solid rgba(77,219,255,.35);background:linear-gradient(180deg,rgba(7,27,48,.9),rgba(4,16,30,.96));
   color:#c2d4ee;font-size:.8rem;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.4)}
+.ev-verdict-pill-logo{width:28px;height:28px;flex:0 0 28px;border-radius:8px;object-fit:cover;background:#000;
+  border:1px solid rgba(77,219,255,.4);box-shadow:0 0 11px rgba(31,143,255,.28)}
 .ev-verdict-pill b{font-family:var(--font-display,'Orbitron',sans-serif);font-weight:800;letter-spacing:.04em;
   text-transform:uppercase;font-size:.72rem;
   background:linear-gradient(100deg,#4ddbff 0%,#1f8fff 34%,#bfe3ff 52%,#2eff9e 80%,#a8e63c 100%);
@@ -382,8 +388,12 @@ export class VerdictCard {
         card.setAttribute('aria-label', 'EarthView verdict for your location');
         card.innerHTML = `
             <div class="ev-verdict-head panel-header">
-                <div class="ev-verdict-loc" data-ev="loc-title" title="Edit location">📍 <span data-ev="loc-name">EarthView</span>
-                    <small data-ev="loc-coords">set a location to personalise</small>
+                <div class="ev-verdict-brand">
+                    <img class="ev-verdict-logo" src="./Earthview_Logo.jpg"
+                         width="46" height="46" alt="EarthView logo">
+                    <div class="ev-verdict-loc" data-ev="loc-title" title="Edit location">📍 <span data-ev="loc-name">EarthView</span>
+                        <small data-ev="loc-coords">set a location to personalise</small>
+                    </div>
                 </div>
                 <div class="ev-verdict-headright">
                     <div class="ev-verdict-time" data-ev="time">—</div>
@@ -408,7 +418,9 @@ export class VerdictCard {
             </div>
             <div class="ev-verdict-scroll" data-ev="body"></div>
             <button class="ev-verdict-pill" data-ev="pill" title="Open EarthView card — drag to move">
-                🌍 <b>EarthView</b> <span data-ev="pill-word">—</span> ▸
+                <img class="ev-verdict-pill-logo" src="./Earthview_Logo.jpg"
+                     width="28" height="28" alt="">
+                <b>EarthView</b> <span data-ev="pill-word">—</span> ▸
             </button>`;
         this._host.appendChild(card);
         this._card = card;

@@ -2,7 +2,7 @@
  * alert-icons.js — Procedural canvas textures for weather-alert markers.
  *
  * Each ALERT_KIND ('tornado' | 'hurricane' | 'thunder' | 'flood' | 'wind' |
- * 'winter' | 'heat' | 'fire' | 'fog' | 'marine' | 'generic') is drawn on a
+ * 'winter' | 'heat' | 'fire' | 'fog' | 'marine' | 'tsunami' | 'generic') is drawn on a
  * 256×256 canvas as a white emblem on transparent black, then handed to
  * Three.js as a cached texture. Sprite material .color tints them to the
  * alert's severity at render time, so one texture serves every alert of
@@ -327,6 +327,41 @@ function drawMarine(ctx) {
     ctx.stroke();
 }
 
+function drawTsunami(ctx) {
+    _drawGlow(ctx, 118, 0.48);
+
+    // Three accelerating wave fronts. The rising crests distinguish this
+    // authoritative hazard product from the flatter Flood icon while still
+    // reading clearly when the globe marker is only a few pixels wide.
+    _setStroke(ctx, 0.98, 14);
+    const waves = [
+        { y: 88,  amp: 34, x0: 44, x1: 212 },
+        { y: 136, amp: 26, x0: 52, x1: 204 },
+        { y: 180, amp: 19, x0: 64, x1: 192 },
+    ];
+    for (const { y, amp, x0, x1 } of waves) {
+        const mid = (x0 + x1) / 2;
+        ctx.beginPath();
+        ctx.moveTo(x0, y + amp * 0.35);
+        ctx.bezierCurveTo(x0 + 30, y - amp, mid - 18, y - amp, mid, y);
+        ctx.bezierCurveTo(mid + 22, y + amp, x1 - 30, y + amp * 0.6, x1, y - amp * 0.15);
+        ctx.stroke();
+    }
+
+    // Small upward arrow: coastal water-level rise / take-action cue.
+    _setFill(ctx, 0.98);
+    ctx.beginPath();
+    ctx.moveTo(CENTER, 28);
+    ctx.lineTo(CENTER + 24, 58);
+    ctx.lineTo(CENTER + 9, 58);
+    ctx.lineTo(CENTER + 9, 83);
+    ctx.lineTo(CENTER - 9, 83);
+    ctx.lineTo(CENTER - 9, 58);
+    ctx.lineTo(CENTER - 24, 58);
+    ctx.closePath();
+    ctx.fill();
+}
+
 function drawGeneric(ctx) {
     _drawGlow(ctx, 100, 0.45);
 
@@ -362,6 +397,7 @@ const DRAWERS = {
     fire:      drawFire,
     fog:       drawFog,
     marine:    drawMarine,
+    tsunami:   drawTsunami,
     generic:   drawGeneric,
 };
 
