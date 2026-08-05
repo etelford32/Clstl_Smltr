@@ -311,6 +311,16 @@ export function makePanelResizable(panel, { id, persist = true, debounceMs = 250
     let timer = null;
     const ro = new ResizeObserver(entries => {
         for (const entry of entries) {
+            // Responsive sheet layouts and minimized headers change the
+            // element's measured box without a user resize. Persisting those
+            // transient dimensions corrupts the next desktop expansion (for
+            // example, a 390 px mobile sheet or a 57 px minimized header).
+            // Only save while the panel is expanded and CSS resize is active.
+            clearTimeout(timer);
+            if (panel.classList.contains('panel-minimized')
+                || getComputedStyle(panel).resize === 'none') {
+                continue;
+            }
             // contentBoxSize is preferred; fall back to contentRect for
             // older Safari. Both are in CSS pixels.
             let w, h;
@@ -327,8 +337,11 @@ export function makePanelResizable(panel, { id, persist = true, debounceMs = 250
             // implies under box-sizing:border-box).
             w = panel.offsetWidth;
             h = panel.offsetHeight;
-            clearTimeout(timer);
-            timer = setTimeout(() => _writeSize(storageId, w, h), debounceMs);
+            timer = setTimeout(() => {
+                if (panel.classList.contains('panel-minimized')
+                    || getComputedStyle(panel).resize === 'none') return;
+                _writeSize(storageId, w, h);
+            }, debounceMs);
         }
     });
     ro.observe(panel);

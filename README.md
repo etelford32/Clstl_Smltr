@@ -15,7 +15,7 @@ A static-HTML + Vercel-serverless web app that delivers MHD-grounded space weath
 - **Backend:** Vercel serverless functions under `api/` (Node). Cron jobs in `vercel.json`.
 - **Database / Auth:** Supabase (Postgres 17, email+password + Google OAuth, JWT in localStorage with a `pp_auth` legacy mirror). See `AUTH_FLOW_REVIEW.md`.
 - **Heavy compute:** Rust + WebAssembly. Crates under `crates/`, `rust-*/`, built via `build-wasm.sh`. SGP4 propagation, stellar MHD, sunfield, sirius solver.
-- **Data sources:** NOAA SWPC, NASA DONKI/HEK, CelesTrak, NWS, plus the Gannon May-2024 G5 hindcast and INTERMAGNET (Step-1 GSA pipeline, validation-only).
+- **Data sources:** NOAA SWPC, NOAA CO-OPS tides, NOAA NDBC buoys/DART tsunameters, NASA DONKI/HEK/GIBS, CelesTrak, NWS, Open-Meteo weather/marine, plus the Gannon May-2024 G5 hindcast and INTERMAGNET (Step-1 GSA pipeline, validation-only).
 - **Payments:** Stripe (under `api/stripe/`).
 
 **Deployed via:** Vercel. Cron schedules and build command live in `vercel.json`. The `build-wasm.sh` script compiles the Rust crates to wasm at deploy time.
