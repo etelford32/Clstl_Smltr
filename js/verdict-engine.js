@@ -25,7 +25,10 @@
  *     iss:      { passes:[{rise, riseAz, peakTime, peakAlt, set, setAz,
  *                          durationMin, rangeKm}] }    // from pass-predictor
  *     astro:    { sunset, sunrise, moonIllumPct }      // Dates; moon optional
- *     air:      { aqi, uvNow, uvPeak, uvPeakHour, aqiHourly:[{time, aqi}] }
+ *     air:      { aqi, uvNow, uvPeak, uvPeakHour, aqiHourly:[{time, aqi}],
+ *                 pollutants:{pm25,pm10,ozone,nitrogenDioxide,sulphurDioxide,
+ *                             carbonMonoxide,aerosolOpticalDepth,dust},
+ *                 pollutionUnits, airSource }
  *     loc:      { lat, lon, name, tz }
  *     fluxRope: { pHit, p10, p20, arrivalP10Ms, arrivalP50Ms, arrivalP90Ms,
  *                 minBzP50 }        // flux-rope ensemble summary (Phase 4) —

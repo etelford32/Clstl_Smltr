@@ -185,6 +185,14 @@ const CSS = `
 .ev-verdict-dsum{margin-top:5px;font-family:var(--font-mono,'JetBrains Mono',monospace);
   font-size:.6rem;color:#8ba3c7}
 .ev-verdict-dempty{padding:14px 4px 8px;font-size:.72rem;color:#5f7597;line-height:1.5}
+.ev-verdict-pollution{margin-top:9px;padding-top:9px;border-top:1px solid rgba(77,219,255,.12)}
+.ev-verdict-pollution-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:7px}
+.ev-verdict-pollutant{padding:6px 5px;border-radius:7px;background:rgba(31,143,255,.07);
+  border:1px solid rgba(77,219,255,.1);text-align:center;min-width:0}
+.ev-verdict-pollutant b{display:block;font-family:var(--font-mono,'JetBrains Mono',monospace);
+  font-size:.62rem;color:#f0f6ff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev-verdict-pollutant span{display:block;margin-top:2px;font-size:.48rem;color:#5f7597;white-space:nowrap}
+.ev-verdict-pollution-note{margin-top:7px;font-size:.56rem;line-height:1.45;color:#ffb340}
 
 /* temp graph */
 .ev-verdict-tgraph{padding:12px 20px 0}
@@ -678,6 +686,9 @@ export class VerdictCard {
             air: air ? {
                 aqi: air.aqi, uvNow: air.uvNow, uvPeak: air.uvPeak,
                 uvPeakHour: air.uvPeakHour, aqiHourly: air.aqiHourly || [],
+                pollutants: air.pollutants || null,
+                pollutionUnits: air.pollutionUnits || {},
+                airSource: air.airSource || null,
             } : null,
             // Flux-rope ensemble summary (Phase 4 outlook row) — the page
             // fills this asynchronously and refresh()es; null renders no row.
@@ -929,6 +940,34 @@ export class VerdictCard {
         <div class="ev-verdict-detail" data-ev="detail" data-ev-detail="${esc(id)}">${head}
             ${this._detailSvg(fc, inputs, tz)}
             <div class="ev-verdict-dsum">${esc(fc.summary || '')}</div>
+            ${id === 'aqi' ? this._renderPollutionSnapshot(inputs.air) : ''}
+        </div>`;
+    }
+
+    /** Current CAMS pollutant fields retained by the existing AQ feed. */
+    _renderPollutionSnapshot(air) {
+        const p = air?.pollutants;
+        if (!p) return '';
+        const units = air.pollutionUnits || {};
+        const defs = [
+            ['PM2.5', 'pm25', 1], ['PM10', 'pm10', 1],
+            ['O₃', 'ozone', 1], ['NO₂', 'nitrogenDioxide', 1],
+            ['SO₂', 'sulphurDioxide', 1], ['CO', 'carbonMonoxide', 0],
+            ['AOD', 'aerosolOpticalDepth', 3], ['Dust', 'dust', 1],
+        ];
+        const rows = defs.filter(([, key]) => Number.isFinite(p[key]));
+        if (!rows.length) return '';
+        const cells = rows.map(([label, key, decimals]) => {
+            const unit = units[key] || (key === 'aerosolOpticalDepth' ? 'unitless' : 'µg/m³');
+            return `<div class="ev-verdict-pollutant" data-ev-pollutant="${esc(key)}">
+                <b>${esc(p[key].toFixed(decimals))}</b><span>${esc(label)} · ${esc(unit || 'unitless')}</span>
+            </div>`;
+        }).join('');
+        const label = air.airSource?.label || 'modeled air quality';
+        return `<div class="ev-verdict-pollution" data-ev="pollution-breakdown">
+            <div class="ev-verdict-mini">Pollution components · current model hour</div>
+            <div class="ev-verdict-pollution-grid">${cells}</div>
+            <div class="ev-verdict-pollution-note">${esc(label)} · not a ground-monitor observation</div>
         </div>`;
     }
 
@@ -1181,7 +1220,7 @@ export class VerdictCard {
         const agoTxt = ago === '—' ? 'awaiting data'
             : ago < 90 ? `updated ${ago}s ago`
             : `updated ${Math.round(ago / 60)}m ago`;
-        return `NOAA SWPC · NWS · Open-Meteo AQ · Celestrak · ${agoTxt} · validated on the May 2024 G5 superstorm`;
+        return `NOAA SWPC · NWS · Open-Meteo / CAMS modeled AQ · Celestrak · ${agoTxt} · validated on the May 2024 G5 superstorm`;
     }
 
     _tickClock() {

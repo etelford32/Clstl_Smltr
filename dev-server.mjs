@@ -121,6 +121,8 @@ const API_ROUTES = {
     '/api/launches/upcoming':      'api/launches/upcoming.js',
     '/api/weather/grid':           'api/weather/grid.js',
     '/api/weather/forecast':       'api/weather/forecast.js',
+    '/api/air-quality/grid':       'api/air-quality/grid.js',
+    '/api/air-quality/stations':   'api/air-quality/stations.js',
     '/api/aurora/outlook':         'api/aurora/outlook.js',
     '/api/aurora/skill':           'api/aurora/skill.js',
     '/api/ring-current/skill':     'api/ring-current/skill.js',

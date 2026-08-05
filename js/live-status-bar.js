@@ -11,6 +11,7 @@
  *   import './js/live-status-bar.js';
  */
 import { SpaceWeatherFeed } from './swpc-feed.js';
+import { buildSpaceWeatherHeadline } from './hero-live-hud.js';
 
 const BAR_ID   = 'lsb-bar';
 const STYLE_ID = 'lsb-styles';
@@ -40,6 +41,12 @@ const CSS = `
     backdrop-filter: blur(10px);
     transition: border-color .5s, background .5s;
     box-shadow: 0 2px 12px rgba(0,0,0,.4);
+}
+.lsb-source,
+.lsb-metrics {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
 }
 #lsb-bar.lsb-storm {
     border-bottom-color: rgba(255,80,80,.55);
@@ -123,6 +130,48 @@ const CSS = `
 }
 @keyframes lsb-cmechip { 0%,100%{opacity:1} 50%{opacity:.45} }
 
+/* ── Plain-language conditions headline ── */
+.lsb-summary {
+    --lsb-summary-color: #70d8ff;
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 210px;
+    justify-content: center;
+    padding: 3px 11px;
+    color: var(--lsb-summary-color);
+    background: color-mix(in srgb, var(--lsb-summary-color) 9%, rgba(4,7,18,.92));
+    border: 1px solid color-mix(in srgb, var(--lsb-summary-color) 34%, transparent);
+    border-radius: 999px;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: .66rem;
+    letter-spacing: .025em;
+    box-shadow: 0 0 14px color-mix(in srgb, var(--lsb-summary-color) 10%, transparent);
+    transition: color .45s, border-color .45s, background .45s, box-shadow .45s;
+}
+.lsb-summary-mark {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: currentColor;
+    box-shadow: 0 0 7px currentColor;
+}
+.lsb-summary-kicker {
+    color: rgba(255,255,255,.35);
+    font: 700 .54rem/1 'Courier New', monospace;
+    letter-spacing: .11em;
+}
+.lsb-summary strong { font-weight: 700; }
+.lsb-summary[data-tone="quiet"]      { --lsb-summary-color: #38e89a; }
+.lsb-summary[data-tone="active"]     { --lsb-summary-color: #ffd24c; }
+.lsb-summary[data-tone="warning"]    { --lsb-summary-color: #ff9c42; }
+.lsb-summary[data-tone="severe"]     { --lsb-summary-color: #ff5368; }
+.lsb-summary[data-tone="offline"]    { --lsb-summary-color: #ff6b6b; }
+.lsb-summary[data-tone="connecting"] { --lsb-summary-color: #70d8ff; }
+
 /* ── Right side ── */
 .lsb-right {
     margin-left: auto;
@@ -148,6 +197,30 @@ const CSS = `
 .lsb-sw-link:hover  { color: #00c6ff; border-color: rgba(0,198,255,.5); }
 .lsb-sw-link.hidden { display: none; }
 
+/* Preserve exact centering on laptop-sized viewports by reclaiming the two
+   decorative separators and a few pixels of chip spacing. */
+@media (max-width: 1120px) and (min-width: 901px) {
+    .lsb-sep { display: none; }
+    .lsb-chip { gap: 3px; margin-right: 6px; }
+    .lsb-updated { display: none; }
+}
+
+/* On genuinely narrow screens, keep the summary prominent and readable
+   before the raw metrics in the horizontal flow. */
+@media (max-width: 900px) {
+    #lsb-bar { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .lsb-source  { order: 0; }
+    .lsb-summary {
+        position: static; order: 1;
+        transform: none;
+        margin: 0 12px 0 auto;
+    }
+    .lsb-metrics { order: 2; }
+    .lsb-right   { order: 3; margin-left: 10px; }
+    .lsb-sep     { display: none; }
+    .lsb-updated { display: none; }
+}
+
 /* ── Mobile scroll ── */
 @media (max-width: 640px) {
     #lsb-bar {
@@ -158,6 +231,8 @@ const CSS = `
     }
     .lsb-sep { display: none; }
     .lsb-updated { display: none; }
+    .lsb-summary { min-width: auto; padding: 3px 9px; margin-right: 10px; }
+    .lsb-summary-kicker { display: none; }
 }
 `;
 
@@ -166,40 +241,52 @@ const onSW = window.location.pathname.endsWith('space-weather.html');
 
 const HTML = `
 <div id="${BAR_ID}">
-  <span class="lsb-dot" id="lsb-dot"></span>
-  <span class="lsb-brand">☉&nbsp;NOAA&nbsp;SWPC</span>
-  <div class="lsb-sep"></div>
+  <div class="lsb-source">
+    <span class="lsb-dot" id="lsb-dot"></span>
+    <span class="lsb-brand">☉&nbsp;NOAA&nbsp;SWPC</span>
+  </div>
 
-  <span class="lsb-chip">
-    <span class="lsb-lbl">Wind</span>
-    <span class="lsb-val" id="lsb-wind">—</span>
-    <span class="lsb-lbl">km/s</span>
-  </span>
+  <div class="lsb-metrics">
+    <div class="lsb-sep"></div>
 
-  <span class="lsb-chip">
-    <span class="lsb-lbl">Bz</span>
-    <span class="lsb-val" id="lsb-bz">—</span>
-    <span class="lsb-lbl">nT</span>
-  </span>
+    <span class="lsb-chip">
+      <span class="lsb-lbl">Wind</span>
+      <span class="lsb-val" id="lsb-wind">—</span>
+      <span class="lsb-lbl">km/s</span>
+    </span>
 
-  <div class="lsb-sep"></div>
+    <span class="lsb-chip">
+      <span class="lsb-lbl">Bz</span>
+      <span class="lsb-val" id="lsb-bz">—</span>
+      <span class="lsb-lbl">nT</span>
+    </span>
 
-  <span class="lsb-chip">
-    <span class="lsb-lbl">Kp</span>
-    <span class="lsb-val" id="lsb-kp">—</span>
-  </span>
+    <div class="lsb-sep"></div>
 
-  <span class="lsb-chip">
-    <span class="lsb-lbl">X-ray</span>
-    <span class="lsb-val" id="lsb-xray">—</span>
-  </span>
+    <span class="lsb-chip">
+      <span class="lsb-lbl">Kp</span>
+      <span class="lsb-val" id="lsb-kp">—</span>
+    </span>
 
-  <span class="lsb-chip" id="lsb-flare-chip" style="display:none">
-    <span class="lsb-lbl">Flare</span>
-    <span class="lsb-val" id="lsb-flare">—</span>
-  </span>
+    <span class="lsb-chip">
+      <span class="lsb-lbl">X-ray</span>
+      <span class="lsb-val" id="lsb-xray">—</span>
+    </span>
 
-  <span class="lsb-cme-chip" id="lsb-cme" style="display:none">⚡ CME</span>
+    <span class="lsb-chip" id="lsb-flare-chip" style="display:none">
+      <span class="lsb-lbl">Flare</span>
+      <span class="lsb-val" id="lsb-flare">—</span>
+    </span>
+
+    <span class="lsb-cme-chip" id="lsb-cme" style="display:none">⚡ CME</span>
+  </div>
+
+  <div class="lsb-summary" id="lsb-summary" role="status" aria-live="polite"
+       aria-atomic="true" data-tone="connecting" title="Connecting to NOAA SWPC">
+    <span class="lsb-summary-mark" aria-hidden="true"></span>
+    <span class="lsb-summary-kicker">NOW</span>
+    <strong id="lsb-summary-text">Connecting…</strong>
+  </div>
 
   <div class="lsb-right">
     <span class="lsb-updated" id="lsb-updated">connecting…</span>
@@ -236,6 +323,8 @@ const flareEl      = document.getElementById('lsb-flare');
 const flareChipEl  = document.getElementById('lsb-flare-chip');
 const cmeEl        = document.getElementById('lsb-cme');
 const updatedEl    = document.getElementById('lsb-updated');
+const summaryEl    = document.getElementById('lsb-summary');
+const summaryTextEl = document.getElementById('lsb-summary-text');
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
 const windCls = s  => s > 700 ? 'lsb-x' : s > 550 ? 'lsb-a' : s > 400 ? 'lsb-w' : 'lsb-g';
@@ -251,6 +340,12 @@ function updateBar(d) {
 
     // Connection dot
     dotEl.className = `lsb-dot ${st}`;
+
+    // Plain-language summary — pure interpretation of this same event.
+    const headline = buildSpaceWeatherHeadline(d);
+    summaryTextEl.textContent = headline.label;
+    summaryEl.dataset.tone = headline.tone;
+    summaryEl.title = headline.detail;
 
     // Solar wind speed
     const spd = sw.speed ?? null;
