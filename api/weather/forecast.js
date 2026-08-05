@@ -31,7 +31,8 @@
  *                convective indices, cloud-layer decomposition, freezing
  *                level. Feeds the launch-planner scorer.
  *     hourly   — 24-48h surface hourly strip, lighter than `launch`.
- *     marine   — 5-day wave/swell/ocean-current. Recovery-zone scoring.
+ *     marine   — 5-day wave/swell/current/SST/sea-level. Recovery scoring
+ *                and the EarthView Marine Conditions layer.
  *     archive  — N days of historical daily highs/lows for the local
  *                ridge-regression model in temp-forecast.js.
  *     ensemble — multi-model NWP fan-out (GFS + ECMWF + ICON + GEM) plus
@@ -497,13 +498,19 @@ function buildMarineParams(lat, lon, days) {
             'wave_height', 'wave_direction', 'wave_period',
             'wind_wave_height', 'wind_wave_period',
             'swell_wave_height', 'swell_wave_period', 'swell_wave_direction',
-            'ocean_current_velocity',
+            'sea_surface_temperature',
+            'ocean_current_velocity', 'ocean_current_direction',
+            'sea_level_height_msl',
         ].join(','),
         hourly: [
             'wave_height', 'wave_direction', 'wave_period',
             'wind_wave_height', 'wind_wave_direction', 'wind_wave_period',
             'swell_wave_height', 'swell_wave_direction', 'swell_wave_period',
+            'sea_surface_temperature',
+            'ocean_current_velocity', 'ocean_current_direction',
+            'sea_level_height_msl',
         ].join(','),
+        wind_speed_unit: 'ms',
         timezone:      'auto',
         forecast_days: String(days),
     });

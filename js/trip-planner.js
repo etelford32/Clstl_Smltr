@@ -243,7 +243,8 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
  * coordinates, which we detect and surface so the scorer can skip the
  * recovery-wave rules gracefully instead of flagging them as unavailable.
  *
- * Units: meters for heights, seconds for periods, degrees for directions.
+ * Units: meters for heights, seconds for periods, degrees for directions,
+ * °C for SST, and m/s for current velocity.
  */
 export async function fetchMarineForecast(lat, lon, { forecastDays = 5 } = {}) {
     if (!Number.isFinite(+lat) || !Number.isFinite(+lon)) return null;
@@ -280,7 +281,10 @@ export async function fetchMarineForecast(lat, lon, { forecastDays = 5 } = {}) {
                 swell_h_m:         data.current?.swell_wave_height,
                 swell_period_s:    data.current?.swell_wave_period,
                 swell_dir_deg:     data.current?.swell_wave_direction,
+                sst_c:             data.current?.sea_surface_temperature,
                 current_vel_ms:    data.current?.ocean_current_velocity,
+                current_dir_deg:   data.current?.ocean_current_direction,
+                sea_level_msl_m:   data.current?.sea_level_height_msl,
             },
             hourly: {
                 time:                 data.hourly?.time ?? [],
@@ -293,7 +297,12 @@ export async function fetchMarineForecast(lat, lon, { forecastDays = 5 } = {}) {
                 swell_h_m:            data.hourly?.swell_wave_height ?? [],
                 swell_dir_deg:        data.hourly?.swell_wave_direction ?? [],
                 swell_period_s:       data.hourly?.swell_wave_period ?? [],
+                sst_c:                 data.hourly?.sea_surface_temperature ?? [],
+                current_vel_ms:        data.hourly?.ocean_current_velocity ?? [],
+                current_dir_deg:       data.hourly?.ocean_current_direction ?? [],
+                sea_level_msl_m:       data.hourly?.sea_level_height_msl ?? [],
             },
+            units:          data.current_units ?? {},
             fetched_at:     Date.now(),
             forecast_days:  forecastDays,
             horizon_end_ms: Date.now() + forecastDays * 86_400_000,

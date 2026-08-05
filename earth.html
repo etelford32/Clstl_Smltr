@@ -318,7 +318,13 @@ nav {
 
 /* ─── App shell ──────────────────────────────────────────────── */
 #app { position:relative; width:100%; height:calc(100vh - 50px); overflow:hidden; }
-@media (max-width: 768px) { #app { height: 78svh; } }
+@media (max-width: 768px) {
+    /* `hidden` still permits focus/automation-driven programmatic scrolling,
+       which can drag absolutely-positioned bottom sheets above the viewport.
+       `clip` keeps the globe stage stationary; each panel body owns its own
+       intentional scrolling. */
+    #app { height: 78svh; overflow:hidden; overflow:clip; }
+}
 #canvas-wrap { position:absolute; inset:0; background:#000; }
 #canvas-wrap, #canvas-wrap canvas { touch-action: none; }
 #canvas-wrap canvas { display:block; width:100% !important; height:100% !important; }
@@ -365,16 +371,17 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 #coord-tip.show { opacity:1; }
 
 /* ─── City hover tooltip (major-city dots) ───────────────────── */
-#city-tip {
+#city-tip, #ocean-tip {
     position:fixed; z-index:56; display:none; pointer-events:none;
     background:rgba(2,10,20,.9); border:1px solid rgba(77,219,255,.45);
     border-radius:8px; padding:7px 11px; white-space:nowrap;
     box-shadow:0 4px 18px rgba(0,0,0,.5);
     backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
 }
-#city-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
-#city-tip .cty-sub  { color:#8ff0ff; font-size:10px; margin-top:1px; }
-#city-tip .cty-hint { color:#5f7597; font-size:9px;  margin-top:3px; }
+#ocean-tip { border-color:rgba(255,204,68,.5); }
+#city-tip .cty-name, #ocean-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
+#city-tip .cty-sub,  #ocean-tip .cty-sub  { color:#8ff0ff; font-size:10px; margin-top:1px; }
+#city-tip .cty-hint, #ocean-tip .cty-hint { color:#5f7597; font-size:9px;  margin-top:3px; }
 #coord-tip .ct-title { color: var(--c-accent); font-size:9px; text-transform:uppercase;
     letter-spacing:.6px; margin-bottom:2px; }
 #coord-tip .ct-val { color:#a0d8f0; font-weight:600; }
@@ -448,18 +455,141 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
     backdrop-filter: var(--blur-glass);
     -webkit-backdrop-filter: var(--blur-glass);
     border:1px solid var(--c-accent-border); border-radius: var(--r-xl);
-    padding: var(--sp-6) var(--sp-7); width:190px; font-size:12px;
-    max-height:calc(100vh - 80px); overflow-y:auto;
+    padding: var(--sp-6) var(--sp-7); width:230px; max-width:calc(100vw - 20px); font-size:12px;
+    /* #layer-panel is positioned inside #app, below the two site headers.
+       Reserve that 92 px top offset plus a 10 px floor so the panel never
+       extends beneath the viewport and hides its last controls. */
+    max-height:calc(100vh - 102px);
+    max-height:calc(100dvh - 102px);
+    overflow:hidden;
+    display:flex; flex-direction:column;
     box-shadow: var(--shadow-panel);
 }
-#layer-panel::-webkit-scrollbar { width:3px; }
-#layer-panel::-webkit-scrollbar-thumb {
-    background: rgba(var(--c-accent-rgb), .20); border-radius:2px;
+#layer-panel > .panel-header { flex:0 0 auto; }
+#layer-panel > .panel-body {
+    flex:1 1 auto; min-height:0;
+    overflow-y:auto; overflow-x:hidden;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+    touch-action:pan-y;
+    scrollbar-width:thin;
+    scrollbar-color:rgba(var(--c-accent-rgb), .38) transparent;
+    scrollbar-gutter:stable;
+    padding-right:4px;
 }
+#layer-panel > .panel-body::-webkit-scrollbar { width:7px; }
+#layer-panel > .panel-body::-webkit-scrollbar-thumb {
+    background: rgba(var(--c-accent-rgb), .38);
+    border:2px solid transparent; border-radius:999px;
+    background-clip:padding-box;
+}
+#layer-panel > .panel-body::-webkit-scrollbar-track { background:transparent; }
 #layer-panel h3 { color: var(--c-accent); font-size:10px; text-transform:uppercase;
     letter-spacing:.8px; margin-bottom: var(--sp-5); }
-.lyr { display:flex; align-items:center; gap:8px; margin-bottom:7px; cursor:pointer; }
+.lyr { display:flex; align-items:center; gap:8px; min-height:26px; margin-bottom:3px; padding:2px 0; cursor:pointer; }
 .lyr label { color:#b0c8d8; font-size:11px; cursor:pointer; user-select:none; line-height:1.3; }
+.lyr > label:not(.lyr-rd) { flex:1; min-width:0; }
+.lyr, .lyr-featured-row {
+    border:1px solid transparent;
+}
+.lyr.is-active, .lyr-featured-row.is-active {
+    background:rgba(var(--c-accent-rgb), .085);
+    border-color:rgba(var(--c-accent-rgb), .16);
+}
+.lyr.is-active > label:not(.lyr-rd),
+.lyr-featured-row.is-active .lyr-featured-name {
+    color:#e1f8ff;
+}
+.lyr.is-fallback, .lyr-featured-row.is-fallback {
+    background:rgba(255,179,71,.085);
+    border-color:rgba(255,179,71,.24);
+}
+.lyr.has-error, .lyr-featured-row.has-error {
+    border-color:rgba(255,80,80,.28);
+}
+.lyr-count {
+    margin-left:auto; flex-shrink:0;
+    min-width:24px; padding:2px 4px;
+    border:1px solid var(--c-border-soft); border-radius:4px;
+    color:var(--c-text-muted); background:rgba(255,255,255,.035);
+    font:8px/1.1 ui-monospace, Menlo, Consolas, monospace;
+    text-align:center;
+}
+.lyr-count.live { color:var(--c-status-live); border-color:rgba(61,214,140,.25); }
+.lyr-count.fallback { color:#ffb347; border-color:rgba(255,179,71,.30); }
+.lyr-count.error { color:var(--c-status-error); border-color:rgba(255,80,80,.28); }
+
+/* Search and section controls stay at the top of the independently
+   scrollable layer list. The panel title and close/minimise buttons live
+   outside this scroll area, so they remain reachable at every depth. */
+.layer-tools {
+    position:sticky; top:0; z-index:4;
+    margin:0 0 var(--sp-3); padding:1px 0 var(--sp-3);
+    background:#060a16;
+    box-shadow:0 8px 10px rgba(2,4,12,.72);
+}
+html.theme-light .layer-tools,
+body.theme-light .layer-tools {
+    background:#f8fafe;
+    box-shadow:0 8px 10px rgba(40,60,90,.12);
+}
+.layer-search-wrap {
+    display:flex; align-items:center; gap:6px;
+    height:30px; padding:0 8px;
+    background:rgba(255,255,255,.055);
+    border:1px solid var(--c-border-soft); border-radius:6px;
+    color:var(--c-text-muted);
+}
+.layer-search-wrap:focus-within {
+    border-color:var(--c-accent-border-hi);
+    box-shadow:0 0 0 2px rgba(var(--c-accent-rgb), .10);
+}
+.layer-search-wrap span { font-size:14px; line-height:1; }
+#layer-search {
+    width:100%; min-width:0; border:0; outline:0; background:transparent;
+    color:var(--c-text-primary); font:inherit; font-size:11px;
+}
+#layer-search::placeholder { color:var(--c-text-muted); opacity:.8; }
+.layer-tools-row {
+    display:flex; align-items:center; justify-content:space-between; gap:6px;
+    min-height:22px; margin-top:5px;
+}
+.layer-tools-actions { display:flex; gap:4px; }
+.layer-tool-btn {
+    border:1px solid var(--c-border-soft); border-radius:4px;
+    background:rgba(255,255,255,.04); color:var(--c-text-muted);
+    padding:3px 6px; font-size:9px; line-height:1.2; cursor:pointer;
+    touch-action:manipulation;
+}
+.layer-tool-btn:hover, .layer-tool-btn:focus-visible {
+    color:var(--c-accent); border-color:var(--c-accent-border-hi);
+    background:var(--c-accent-soft); outline:none;
+}
+#layer-search-status {
+    color:var(--c-text-muted); font-size:9px; white-space:nowrap;
+}
+#layer-feedback {
+    display:none; position:sticky; top:58px; z-index:3;
+    margin:0 0 var(--sp-3); padding:7px 24px 7px 9px;
+    border:1px solid rgba(255,179,71,.30); border-radius:6px;
+    background:#2a1b0c; color:#ffd59a;
+    font-size:9px; line-height:1.4;
+}
+#layer-feedback.show { display:block; }
+#layer-feedback[data-kind="error"] {
+    border-color:rgba(255,80,80,.32); background:#2b0d13; color:#ffb2b2;
+}
+html.theme-light #layer-feedback,
+body.theme-light #layer-feedback { background:#fff5e4; color:#70430c; }
+html.theme-light #layer-feedback[data-kind="error"],
+body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:#8a1f2b; }
+#layer-feedback-close {
+    position:absolute; top:3px; right:4px;
+    width:18px; height:18px; border:0; background:transparent;
+    color:inherit; cursor:pointer; opacity:.72;
+}
+.layer-search-hidden { display:none !important; }
+#layer-panel.layer-search-active .lyr-section-hdr { cursor:default; }
 
 /* ─── 3D pill-toggle switch (replaces stock <input type=checkbox>) ────────
    Visible affordance > a 13 px square. We hide the native checkbox
@@ -622,6 +752,10 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 .lyr-status.st-error {
     background: var(--c-status-error);
     box-shadow: 0 0 4px var(--c-status-error-glow);
+}
+.lyr-status.st-fallback {
+    background:#ffb347;
+    box-shadow:0 0 4px rgba(255,179,71,.55);
 }
 @keyframes lyrStatusPulse { 0%,100% { opacity:.55; } 50% { opacity:1; } }
 
@@ -1238,6 +1372,11 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 #wx-panel.panel-minimized {
     resize:none;
     max-height:none;
+    /* Native resize persists an inline height. Override it only while
+       minimized so the panel becomes its header instead of a tall empty
+       rectangle; removing the class restores the user's saved open size. */
+    height:auto !important;
+    min-height:0 !important;
 }
 #wx-panel.panel-minimized .panel-body {
     max-height:0; padding:0; overflow:hidden;
@@ -1266,7 +1405,7 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 #wx-panel:hover::after { opacity:.95; }
 #wx-panel.panel-minimized::after { display:none; }
 #wx-panel h3 { color: var(--c-accent); font-size:10px; text-transform:uppercase;
-    letter-spacing:.8px; margin-bottom:9px; }
+    letter-spacing:.8px; margin:0; }
 #wx-status-dot { width:7px; height:7px; border-radius:50%; background:#888;
     display:inline-block; margin-right:5px; flex-shrink:0; }
 #wx-status-dot.live    { background:#4dff80; box-shadow:0 0 5px #4dff80; }
@@ -1277,7 +1416,44 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
    so a silently failing pg_cron is visible to visitors on reload. */
 #wx-age[data-staleness="warn"]  { color:#ffaa44; }
 #wx-age[data-staleness="stale"] { color:#ff6b6b; font-weight:600; }
-.wx-row { display:flex; justify-content:space-between; margin-bottom:5px; }
+.wx-row {
+    display:flex; justify-content:space-between; align-items:baseline;
+    gap:12px; margin-bottom:6px; line-height:1.35;
+}
+.wx-row .wx-k { flex:0 0 auto; }
+.wx-row .wx-v { min-width:0; text-align:right; overflow-wrap:anywhere; }
+
+/* Feed provenance is the first answer in Weather Analysis: what is driving
+   the picture, how fresh is it, and at what resolution? Give those fields a
+   bounded card instead of letting a long fallback source dominate the list. */
+.wx-feed-card {
+    margin:0 0 10px; padding:9px 10px 8px;
+    border:1px solid rgba(var(--c-accent-rgb), .18); border-radius:8px;
+    background:rgba(var(--c-accent-rgb), .045);
+}
+.wx-feed-card-title {
+    margin:0 0 7px; color:#4f7896;
+    font-size:8.5px; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+}
+.wx-feed-card .wx-source-row {
+    display:block; margin:0 0 8px; padding:0 0 8px;
+    border-bottom:1px solid rgba(255,255,255,.055);
+}
+.wx-feed-card .wx-source-row .wx-k {
+    display:block; margin-bottom:3px; color:#55758d;
+    font-size:8.5px; letter-spacing:.08em; text-transform:uppercase;
+}
+.wx-feed-card .wx-source-row .wx-v {
+    display:block; text-align:left; color:#b7eaff; font-size:10.5px; line-height:1.4;
+}
+.wx-feed-card .wx-row:not(.wx-source-row) { font-size:10px; margin-bottom:4px; }
+.wx-feed-card .wx-row:not(.wx-source-row):last-child { margin-bottom:0; }
+.wx-section-title {
+    margin:10px 0 7px; padding-top:7px;
+    border-top:1px solid rgba(255,255,255,.055);
+    color:#336a8a; font-size:9px; font-weight:700;
+    letter-spacing:.1em; text-transform:uppercase;
+}
 
 /* Forecast skill matrix — fixed grid (channel rows × horizon cols).
    Lives in #wx-panel under the isobar / centers section. Empty cells
@@ -1573,11 +1749,48 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 }
 #event-detail .ed-upsell:hover { text-decoration: underline; }
 
+/* NOAA tide/buoy and Open-Meteo marine point detail. */
+#ocean-detail {
+    position:absolute; z-index:96; pointer-events:auto; display:none;
+    min-width:220px; max-width:280px; padding:12px 14px 10px;
+    background:rgba(4,13,24,.95); backdrop-filter:blur(12px);
+    border:1px solid rgba(0,212,255,.38); border-radius:10px;
+    box-shadow:0 6px 24px rgba(0,0,0,.62); font-size:11px; line-height:1.5;
+}
+#ocean-detail.show { display:block; }
+#ocean-detail .od-close {
+    position:absolute; top:5px; right:7px; padding:3px 6px;
+    border:0; background:none; color:#668; cursor:pointer; font-size:15px;
+}
+#ocean-detail .od-kicker { color:#00d4ff; font-size:9px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+#ocean-detail .od-title { color:#eff9ff; font-size:13px; font-weight:700; margin:4px 20px 6px 0; }
+#ocean-detail .od-row { display:flex; justify-content:space-between; gap:12px; padding:2px 0; border-bottom:1px solid rgba(255,255,255,.04); }
+#ocean-detail .od-label { color:#6f8298; }
+#ocean-detail .od-value { color:#d9f6ff; text-align:right; font-variant-numeric:tabular-nums; }
+#ocean-detail .od-source { color:#53677e; font-size:9px; margin-top:7px; }
+#ocean-mode-hint {
+    position:absolute; z-index:66; left:50%; bottom:82px;
+    display:none; align-items:center; gap:8px;
+    transform:translateX(-50%);
+    padding:7px 12px; border-radius:999px;
+    border:1px solid rgba(0,212,255,.48);
+    background:rgba(3,13,25,.94); color:#d9f8ff;
+    box-shadow:0 5px 18px rgba(0,0,0,.48), 0 0 12px rgba(0,212,255,.12);
+    font-size:10px; font-weight:600; pointer-events:none; white-space:nowrap;
+}
+#ocean-mode-hint.show { display:flex; }
+#ocean-mode-hint strong { color:#00d4ff; letter-spacing:.04em; }
+#c.ocean-query-active { cursor:crosshair; }
+
+@media (max-width:1024px) {
+    #ocean-mode-hint { bottom:132px; }
+}
+
 /* ── Touch optimisations for the pinned event card ─────────────────── */
 /* Devices without hover (phones, tablets) don't show the hover tooltips —
    the click-to-pin card is the only surface, which avoids flashing on tap. */
 @media (hover: none) {
-    #alert-tip, #eq-popup { display: none !important; }
+    #alert-tip, #eq-popup, #ocean-tip { display: none !important; }
 }
 /* Coarse pointer (touch) → larger tap targets, bigger close button. */
 @media (pointer: coarse) {
@@ -1593,6 +1806,10 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
         left: 10px !important; right: 10px !important; bottom: 14px !important;
         top: auto !important; max-width: none; width: auto;
         transform: translateY(0);
+    }
+    #ocean-detail.show {
+        left:10px !important; right:10px !important; bottom:14px !important;
+        top:auto !important; max-width:none; width:auto;
     }
 }
 
@@ -1989,6 +2206,42 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
         transition: transform .3s cubic-bezier(.4,0,.2,1);
         box-shadow: 0 -8px 40px rgba(0,0,0,.6);
     }
+    #layer-panel {
+        display:flex; flex-direction:column;
+        /* The panel is positioned inside #app, whose mobile height is
+           intentionally shorter than the document viewport. Size the sheet
+           against that containing block so its header/search can never be
+           pushed above the visible globe by a tall phone viewport. */
+        left:0 !important; right:0 !important;
+        top:auto !important; bottom:56px !important;
+        width:100% !important; max-width:100% !important;
+        height:calc(100% - 56px) !important;
+        max-height:calc(100% - 56px) !important;
+        overflow:hidden;
+    }
+    /* Desktop resizing persists an inline width on Weather Analysis. The
+       mobile presentation is a sheet, so that saved desktop width must not
+       shrink it into a narrow floating column or crowd its header buttons. */
+    #wx-panel {
+        width:100% !important;
+        min-width:0 !important;
+        max-width:100% !important;
+        resize:none;
+    }
+    /* The generic mobile close button is absolutely positioned for panels
+       that lack a header action row. Weather Analysis has both minimize and
+       close controls, so keep them in normal flex flow instead of stacking
+       the close target on top of minimize. */
+    #wx-panel .panel-close {
+        position:static;
+        display:flex;
+    }
+    #layer-panel > .panel-header { flex:0 0 auto; }
+    #layer-panel > .panel-body {
+        flex:1 1 auto; min-height:0; max-height:none;
+        overflow-y:auto; overflow-x:hidden;
+        padding-right:3px;
+    }
     #layer-panel.panel-open,
     #info-panel.panel-open,
     #wx-panel.panel-open,
@@ -2013,8 +2266,11 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
     }
 
     /* Touch-friendly checkbox rows */
-    .lyr { margin-bottom: 4px; }
+    .lyr { min-height:38px; margin-bottom:2px; padding:5px 1px; }
     .lyr label { font-size: 12px; }
+    .layer-search-wrap { height:38px; }
+    .layer-tool-btn { min-height:30px; padding:5px 8px; }
+    #layer-feedback { top:82px; }
 
     /* Info panel: remove hard max-height (sheet already scrolls) */
     #info-panel { max-height: 72vh; }
@@ -2464,6 +2720,12 @@ import './js/telemetry.js';
         <div class="cty-hint">click to set as my location</div>
     </div>
 
+    <div id="ocean-tip">
+        <div class="cty-name" id="ocean-tip-name">—</div>
+        <div class="cty-sub" id="ocean-tip-sub">—</div>
+        <div class="cty-hint">click for current conditions</div>
+    </div>
+
     <!-- Layer controls -->
     <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="bottom:16px;right:12px;">⚡ Weather</a>
 
@@ -2477,13 +2739,33 @@ import './js/telemetry.js';
         </div>
         <div class="panel-body">
 
+        <div class="layer-tools" role="search" aria-label="Filter EarthView layers">
+            <label class="layer-search-wrap" for="layer-search">
+                <span aria-hidden="true">⌕</span>
+                <input id="layer-search" type="search" placeholder="Find a layer…"
+                       autocomplete="off" spellcheck="false" aria-describedby="layer-search-status">
+            </label>
+            <div class="layer-tools-row">
+                <div class="layer-tools-actions">
+                    <button class="layer-tool-btn" id="layer-expand-all" type="button">Expand all</button>
+                    <button class="layer-tool-btn" id="layer-collapse-all" type="button">Collapse all</button>
+                </div>
+                <span id="layer-search-status" aria-live="polite"></span>
+            </div>
+        </div>
+
+        <div id="layer-feedback" role="status" aria-live="polite">
+            <span id="layer-feedback-text"></span>
+            <button id="layer-feedback-close" type="button" aria-label="Dismiss layer warning">×</button>
+        </div>
+
         <!-- ── FEATURED HIGHLIGHTS ──────────────────────────────────────
              Discoverability layer for first-time visitors. Each row is a
              *mirror* of a canonical toggle in the deep sections below
              (different id prefix `feat-` to avoid duplicate ids). The
              change handler keeps the two surfaces in sync, so flipping
              either one drives the same underlying visual state. -->
-        <div class="lyr-section featured" data-lyr-section="featured">
+        <div class="lyr-section featured collapsed" data-lyr-section="featured">
             <div class="lyr-section-hdr">
                 <span>✨ Featured Highlights</span>
                 <span class="lyr-chevron">▾</span>
@@ -2619,22 +2901,39 @@ import './js/telemetry.js';
         </div>
 
         <!-- ── Surface & Atmosphere ── -->
-        <div class="lyr-section" data-lyr-section="surface">
+        <div class="lyr-section collapsed" data-lyr-section="surface">
             <div class="lyr-section-hdr"><span>SURFACE &amp; ATMOSPHERE</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
                 <div class="lyr"><input type="checkbox" id="lyr-clouds" checked><span class="lyr-status" data-layer="clouds" title="waiting"></span><label for="lyr-clouds">Cloud Cover</label><label class="lyr-rd" for="rd-clouds" title="Show cloud cover (%) on cursor hover"><input type="checkbox" id="rd-clouds"><span class="lyr-rd-badge">#</span></label></div>
-                <label class="lyr" title="Disable procedural fill — show only measured cloud cover, with hatched no-data regions where the satellite mosaic didn't see (poles, between-disc gaps)."><input type="checkbox" id="lyr-research-mode"><label for="lyr-research-mode">Research Mode (measured-only)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-atm"><label for="lyr-atm">Atmosphere</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-aurora"><span class="lyr-status" data-layer="aurora" title="waiting for SWPC"></span><label for="lyr-aurora">Aurora</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-lights"><label for="lyr-lights">City Lights</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-grid"><label for="lyr-grid">Lat/Lon Grid</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-tropic"><label for="lyr-tropic">Tropics</label></label>
-                <label class="lyr" title="Debug: marker at the sub-solar point"><input type="checkbox" id="lyr-subsolar"><label for="lyr-subsolar">Subsolar pt</label></label>
+                <div class="lyr" title="Disable procedural fill — show only measured cloud cover, with hatched no-data regions where the satellite mosaic didn't see (poles, between-disc gaps)."><input type="checkbox" id="lyr-research-mode"><label for="lyr-research-mode">Research Mode (measured-only)</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-atm"><label for="lyr-atm">Atmosphere</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-aurora"><span class="lyr-status" data-layer="aurora" title="waiting for SWPC"></span><label for="lyr-aurora">Aurora</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-lights"><label for="lyr-lights">City Lights</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-grid"><label for="lyr-grid">Lat/Lon Grid</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-tropic"><label for="lyr-tropic">Tropics</label></div>
+                <div class="lyr" title="Debug: marker at the sub-solar point"><input type="checkbox" id="lyr-subsolar"><label for="lyr-subsolar">Subsolar pt</label></div>
             </div></div>
         </div>
 
+        <!-- ── Ocean & Tides ── -->
+        <div class="lyr-section" data-lyr-section="ocean">
+            <div class="lyr-section-hdr"><span>OCEAN &amp; TIDES</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body">
+                <div class="lyr-grid">
+                    <div class="lyr" title="Official active NOAA/NWS tsunami Warning, Advisory, Watch, and Information Statement products. Live-only: the markers hide when the timeline is away from now so current warnings are never shown as historical."><input type="checkbox" id="lyr-tsunami-alerts"><span class="lyr-status" data-layer="tsunami-alerts" title="waiting for the shared NWS feed"></span><label for="lyr-tsunami-alerts">Tsunami Alerts</label><span class="lyr-count" id="tsunami-alerts-count">off</span></div>
+                    <div class="lyr" title="NOAA NDBC Deep-ocean Assessment and Reporting of Tsunamis stations. Click a magenta marker for water-column observations centered on the EarthView timeline time. Sensor activity is not itself a tsunami warning."><input type="checkbox" id="lyr-dart"><span class="lyr-status" data-layer="ocean-dart" title="off — enable to load"></span><label for="lyr-dart">DART Tsunameters</label><span class="lyr-count" id="ocean-dart-count">off</span></div>
+                    <div class="lyr" title="NASA/JPL MUR daily sea-surface temperature observation."><input type="checkbox" id="lyr-obs-sst" checked><span class="lyr-status" data-layer="sst" title="waiting"></span><label for="lyr-obs-sst">Sea Surface Temperature</label></div>
+                    <div class="lyr" title="Animated major-current climatology; this is a reference field, not a live current observation."><input type="checkbox" id="lyr-ocean-currents"><span class="lyr-status" data-layer="ocean-currents" title="climatological surface currents"></span><label for="lyr-ocean-currents">Ocean Currents</label></div>
+                    <div class="lyr" title="NOAA CO-OPS U.S. tidal water-level stations. Toggle on, then click a cyan marker for observed water level, predicted tide, residual, and next high/low."><input type="checkbox" id="lyr-tide-gauges"><span class="lyr-status" data-layer="ocean-tides" title="off — enable to load"></span><label for="lyr-tide-gauges">Tide Gauges (U.S.)</label><span class="lyr-count" id="ocean-tides-count">off</span></div>
+                    <div class="lyr" title="NOAA NDBC stations reporting live wave, water-temperature, or tide measurements. Toggle on, then click a gold marker for current observations."><input type="checkbox" id="lyr-ocean-buoys"><span class="lyr-status" data-layer="ocean-buoys" title="off — enable to load"></span><label for="lyr-ocean-buoys">Ocean Buoys</label><span class="lyr-count" id="ocean-buoys-count">off</span></div>
+                    <div class="lyr" title="Open-Meteo marine model at a selected ocean point: waves, swell, SST, current, and sea-level height. Toggle on, then click the globe."><input type="checkbox" id="lyr-ocean-model"><span class="lyr-status" data-layer="ocean-model" title="off — enable, then click the ocean"></span><label for="lyr-ocean-model">Marine Conditions</label><span class="lyr-count" id="ocean-model-state">off</span></div>
+                </div>
+                <div style="margin-top:6px;font-size:9px;color:#53677e;line-height:1.45"><span style="color:#ff4d9d">▲</span> DART tsunameter &nbsp; <span style="color:#00d4ff">●</span> CO-OPS tide gauge &nbsp; <span style="color:#ffcc44">◆</span> NDBC buoy<br>Warnings are official NOAA/NWS products; sensors are observations only · Not for navigation</div>
+            </div>
+        </div>
+
         <!-- ── Weather ── -->
-        <div class="lyr-section" data-lyr-section="weather">
+        <div class="lyr-section collapsed" data-lyr-section="weather">
             <div class="lyr-section-hdr"><span>WEATHER</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
                 <div class="lyr"><input type="checkbox" id="lyr-weather"><span class="lyr-status" data-layer="weather-temp" title="waiting"></span><label for="lyr-weather">Weather (temp)</label><label class="lyr-rd" for="rd-temp" title="Show temperature (°C) on cursor hover"><input type="checkbox" id="rd-temp"><span class="lyr-rd-badge">#</span></label></div>
@@ -2652,9 +2951,9 @@ import './js/telemetry.js';
                 <div class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label><label class="lyr-rd" for="rd-pressure" title="Show surface pressure (hPa) on cursor hover"><input type="checkbox" id="rd-pressure"><span class="lyr-rd-badge">#</span></label></div>
                 <div class="lyr" title="Synoptic fronts detected from the temperature gradient and wind. Blue = cold front (cold air advancing into warm), red = warm front (warm air advancing into cold), grey = stationary. Mid-latitudes only (|lat| < 75°)."><input type="checkbox" id="lyr-fronts"><span class="lyr-status" data-layer="fronts" title="waiting"></span><label for="lyr-fronts">Fronts</label></div>
                 <div class="lyr" title="Column probe — click anywhere on the globe to pin a vertical-profile card for that point: wind at 10 m / 850 / 500 / 250 hPa, temperatures, cloud decks + estimated cloud-top height (IR), CAPE, and 850→500 shear. Every value is assembled from buffers already on this page (no new fetches), with per-source data ages in the footer."><input type="checkbox" id="lyr-probe"><label for="lyr-probe">Column Probe (click globe)</label></div>
-                <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
-                <label class="lyr" title="5-day kinematic extrapolation cone for every active tropical cyclone. NOT NHC's official forecast — this is a great-circle projection of current motion with NHC's published average track-error radii applied for the cone width. Click a storm card to focus its cone."><input type="checkbox" id="lyr-storm-tracks"><span class="lyr-status" data-layer="storm-tracks" title="waiting"></span><label for="lyr-storm-tracks">Storm Tracks (5-day)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
+                <div class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></div>
+                <div class="lyr" title="5-day kinematic extrapolation cone for every active tropical cyclone. NOT NHC's official forecast — this is a great-circle projection of current motion with NHC's published average track-error radii applied for the cone width. Click a storm card to focus its cone."><input type="checkbox" id="lyr-storm-tracks"><span class="lyr-status" data-layer="storm-tracks" title="waiting"></span><label for="lyr-storm-tracks">Storm Tracks (5-day)</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></div>
             </div>
             <!-- Atmospheric profile sub-group: derived overlays that share
                  the existing weather DataTextures (no new fetches). Keeping
@@ -2738,17 +3037,17 @@ import './js/telemetry.js';
         <div class="lyr-section collapsed" data-lyr-section="magneto">
             <div class="lyr-section-hdr"><span>MAGNETOSPHERE</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-magnetopause"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetopause">Magnetopause</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-bowshock"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-bowshock">Bow Shock</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-magnetosheath"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetosheath">Magnetosheath</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-reconnection"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-reconnection">X-line Reconnect</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-cusps"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-cusps">Polar Cusps</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-belts"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-belts">Rad. Belts</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-plasma"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-plasma">Plasmasphere</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-exosphere"><label for="lyr-exosphere">Exosphere</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-geocorona"><label for="lyr-geocorona">Geocorona</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-chex"><label for="lyr-chex">Charge Exchange</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-cme"><label for="lyr-cme">CME Shockfront</label></label>
+                <div class="lyr"><input type="checkbox" id="lyr-magnetopause"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetopause">Magnetopause</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-bowshock"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-bowshock">Bow Shock</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-magnetosheath"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetosheath">Magnetosheath</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-reconnection"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-reconnection">X-line Reconnect</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-cusps"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-cusps">Polar Cusps</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-belts"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-belts">Rad. Belts</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-plasma"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-plasma">Plasmasphere</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-exosphere"><label for="lyr-exosphere">Exosphere</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-geocorona"><label for="lyr-geocorona">Geocorona</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-chex"><label for="lyr-chex">Charge Exchange</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-cme"><label for="lyr-cme">CME Shockfront</label></div>
             </div></div>
         </div>
 
@@ -2756,14 +3055,12 @@ import './js/telemetry.js';
         <div class="lyr-section collapsed" data-lyr-section="nasa-obs">
             <div class="lyr-section-hdr"><span>NASA EARTH OBSERVATIONS</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><span class="lyr-status" data-layer="precip-rate"     title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-sst"><span class="lyr-status" data-layer="sst"             title="waiting"></span><label for="lyr-obs-sst">Sea Surface Temp</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-ocean-currents"><span class="lyr-status" data-layer="ocean-currents" title="climatological surface currents"></span><label for="lyr-ocean-currents">Ocean Currents</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD, off by default — chunky 1° L3 grid)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness (analytic, off by default)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-fires"><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-snow"><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></label>
-                <label class="lyr" title="NASA Blue Marble shaded relief with bathymetry — continental elevation + ocean-floor topography rendered as a hypsometric tint."><input type="checkbox" id="lyr-obs-topo-relief"><span class="lyr-status" data-layer="topo-relief" title="waiting"></span><label for="lyr-obs-topo-relief">Terrain &amp; Bathymetry</label></label>
+                <div class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><span class="lyr-status" data-layer="precip-rate"     title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-obs-aod"><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD, off by default — chunky 1° L3 grid)</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness (analytic, off by default)</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-obs-fires"><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-obs-snow"><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></div>
+                <div class="lyr" title="NASA Blue Marble shaded relief with bathymetry — continental elevation + ocean-floor topography rendered as a hypsometric tint."><input type="checkbox" id="lyr-obs-topo-relief"><span class="lyr-status" data-layer="topo-relief" title="waiting"></span><label for="lyr-obs-topo-relief">Terrain &amp; Bathymetry</label></div>
             </div></div>
         </div>
 
@@ -2772,10 +3069,10 @@ import './js/telemetry.js';
             <div class="lyr-section-hdr"><span>SATELLITE TRACKING</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body">
             <div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-sat-stations"><span class="lyr-status" data-layer="sat-stations" title="waiting"></span><label for="lyr-sat-stations">Space Stations</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-sat-starlink"><span class="lyr-status" data-layer="sat-starlink" title="waiting"></span><label for="lyr-sat-starlink">Starlink</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-sat-weather"><span class="lyr-status" data-layer="sat-weather" title="waiting"></span><label for="lyr-sat-weather">Weather Sats</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-sat-gps"><span class="lyr-status" data-layer="sat-gps" title="waiting"></span><label for="lyr-sat-gps">GPS/GNSS</label></label>
+                <div class="lyr"><input type="checkbox" id="lyr-sat-stations"><span class="lyr-status" data-layer="sat-stations" title="waiting"></span><label for="lyr-sat-stations">Space Stations</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-sat-starlink"><span class="lyr-status" data-layer="sat-starlink" title="waiting"></span><label for="lyr-sat-starlink">Starlink</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-sat-weather"><span class="lyr-status" data-layer="sat-weather" title="waiting"></span><label for="lyr-sat-weather">Weather Sats</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-sat-gps"><span class="lyr-status" data-layer="sat-gps" title="waiting"></span><label for="lyr-sat-gps">GPS/GNSS</label></div>
             </div>
             <div style="display:flex;gap:4px;margin-top:6px;align-items:center">
                 <input id="sat-norad-input" type="text" placeholder="NORAD ID (e.g. 25544)" maxlength="8"
@@ -2788,12 +3085,12 @@ import './js/telemetry.js';
         </div>
 
         <!-- ── Misc ── -->
-        <div class="lyr-section" data-lyr-section="misc">
+        <div class="lyr-section collapsed" data-lyr-section="misc">
             <div class="lyr-section-hdr"><span>DISPLAY</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-iss"><label for="lyr-iss">ISS Tracker</label></label>
-                <label class="lyr" title="~270 major world cities as glowing, clickable dots. Click one to set it as your location."><input type="checkbox" id="lyr-cities" checked><label for="lyr-cities">Major Cities</label></label>
+                <div class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-iss"><label for="lyr-iss">ISS Tracker</label></div>
+                <div class="lyr" title="~270 major world cities as glowing, clickable dots. Click one to set it as your location."><input type="checkbox" id="lyr-cities" checked><label for="lyr-cities">Major Cities</label></div>
             </div></div>
         </div>
     </div>
@@ -3153,23 +3450,27 @@ import './js/telemetry.js';
         <div class="panel-header" data-minimize="wx-panel">
             <h3><span id="wx-status-dot" class="offline"></span>Weather Analysis</h3>
             <div class="panel-actions">
-                <button class="panel-btn" data-minimize-btn="wx-panel" title="Minimise">▾</button>
+                <button class="panel-btn" data-minimize-btn="wx-panel" title="Minimise"
+                        aria-label="Minimise Weather Analysis" aria-expanded="true">▾</button>
                 <button class="panel-btn panel-close" data-close="wx-panel" title="Close">✕</button>
             </div>
         </div>
         <div class="panel-body">
-        <div class="wx-row"><span class="wx-k">Source</span>   <span class="wx-v" id="wx-src">procedural</span></div>
+        <div class="wx-feed-card">
+        <div class="wx-feed-card-title">Active feed</div>
+        <div class="wx-row wx-source-row"><span class="wx-k">Source</span>   <span class="wx-v" id="wx-src">procedural</span></div>
         <div class="wx-row"><span class="wx-k">Updated</span>  <span class="wx-v" id="wx-upd">—</span></div>
         <div class="wx-row"><span class="wx-k">Data age</span> <span class="wx-v" id="wx-age">—</span></div>
         <div class="wx-row" title="Coarse-grid resolution from the cron pull. Lower number = finer grid (5° is current; 10° was the legacy)."><span class="wx-k">Grid</span>     <span class="wx-v" id="wx-grid">—</span></div>
-        <div class="wx-row" title="Live satellite imagery layer feeding the cloud mosaic. Geostationary mosaic = ~10-min cadence, no orbiter swath gaps in the tropics."><span class="wx-k">Satellite</span><span class="wx-v" id="wx-sat">—</span></div>
+        <div class="wx-row wx-source-row" title="Live satellite imagery layer feeding the cloud mosaic. Geostationary mosaic = ~10-min cadence, no orbiter swath gaps in the tropics."><span class="wx-k">Satellite mosaic</span><span class="wx-v" id="wx-sat">—</span></div>
         <!-- Per-level / per-product provenance rows (Phase 4.4): one "data
              age · source" line per ACTIVE pressure level, plus cloud-top
              height and forecast-verification rows when those products are
              live. Populated by _refreshProvRows(); empty divs collapse. -->
         <div id="wx-prov-levels"></div>
         <div class="wx-row" id="wx-research-row" style="display:none;color:#6cf;font-weight:600"><span class="wx-k">Mode</span>     <span class="wx-v">Research (measured-only)</span></div>
-        <hr class="ir-sep">
+        </div>
+        <div class="wx-section-title">Surface snapshot</div>
         <div class="wx-row"><span class="wx-k">T° min</span>   <span class="wx-v" id="wx-tmin">—</span></div>
         <div class="wx-row"><span class="wx-k">T° max</span>   <span class="wx-v" id="wx-tmax">—</span></div>
         <div class="wx-row"><span class="wx-k">T° mean</span>  <span class="wx-v" id="wx-tmean">—</span></div>
@@ -3194,7 +3495,7 @@ import './js/telemetry.js';
                 <span style="position:absolute;right:0;">50 °C</span>
             </div>
         </div>
-        <hr class="ir-sep">
+        <div class="wx-section-title">Pressure &amp; wind</div>
         <div class="wx-row"><span class="wx-k">P low</span>    <span class="wx-v" id="wx-pmin">—</span></div>
         <div class="wx-row"><span class="wx-k">P high</span>   <span class="wx-v" id="wx-pmax">—</span></div>
         <hr class="ir-sep">
@@ -3268,7 +3569,7 @@ import './js/telemetry.js';
                 <span>model too dry</span><span>0</span><span>too wet</span>
             </div>
         </div>
-        <hr class="ir-sep">
+        <div class="wx-section-title">Synoptic analysis</div>
         <!-- Isobar / pressure analysis -->
         <div class="wx-row" style="align-items:flex-start;margin-bottom:2px;">
             <span class="wx-k">Isobars</span>
@@ -3542,6 +3843,18 @@ import './js/telemetry.js';
         <div class="ed-msg" id="ed-msg"></div>
     </div>
 
+    <div id="ocean-detail" role="dialog" aria-label="Ocean station details">
+        <button class="od-close" id="od-close" aria-label="Close">×</button>
+        <div class="od-kicker" id="od-kicker">Ocean data</div>
+        <div class="od-title" id="od-title">—</div>
+        <div id="od-body"></div>
+        <div class="od-source" id="od-source"></div>
+    </div>
+
+    <div id="ocean-mode-hint" role="status" aria-live="polite">
+        🌊 <strong>Marine query active</strong><span>Click any ocean point</span>
+    </div>
+
     <!-- Space weather bar -->
     <div id="sw-bar">
         <div id="sw-dot"></div>
@@ -3663,9 +3976,10 @@ import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius,
 import { CmePropagator } from './js/cme-propagation.js';
 import { OceanCurrentsOverlay } from './js/ocean-currents-overlay.js';
 import { oceanCurrentsMeta } from './js/ocean-currents-feed.js';
+import { OceanStationsLayer } from './js/ocean-stations-layer.js';
 import { auth } from './js/auth.js';
 import { addLocation, listLocations, locationLimit, PLAN_LIMITS } from './js/saved-locations.js';
-import { parseTripParam, greatCirclePath, greatCircleDistanceKm, initialBearingDeg } from './js/trip-planner.js';
+import { parseTripParam, greatCirclePath, greatCircleDistanceKm, initialBearingDeg, fetchMarineForecast } from './js/trip-planner.js';
 import { geo } from './js/geo/coords.js';
 import { GEO_GLSL } from './js/geo/coords.glsl.js';
 import { SatelliteTracker } from './js/satellite-tracker.js';
@@ -7571,6 +7885,303 @@ queueMicrotask(() => {
         `${m.source} · climatology`);
 });
 
+// ── NOAA ocean station layers + point-detail card ───────────────────
+// Tide gauges and buoys load lazily when their Layers-panel toggles are
+// enabled. Both render as one InstancedMesh, so hundreds of stations cost
+// one draw call per layer rather than one draw call per marker.
+const oceanStationsLayer = new OceanStationsLayer(THREE, earthMesh, {
+    geoToXYZ,
+    // Local-only visual QA switch. Production can never force fallback;
+    // localhost?ocean_fallback=1 lets the fallback markers/warnings be
+    // inspected in the real Layers panel without taking NOAA offline.
+    forceFallback: /^(localhost|127\.0\.0\.1)$/.test(location.hostname)
+        && new URLSearchParams(location.search).get('ocean_fallback') === '1',
+    onStatus(kind, state, detail = {}) {
+        const id = kind === 'tides' ? 'ocean-tides' : kind === 'buoys' ? 'ocean-buoys' : 'ocean-dart';
+        const label = kind === 'tides' ? 'CO-OPS tide gauges'
+            : kind === 'buoys' ? 'NDBC marine stations' : 'NDBC DART tsunameters';
+        const count = document.getElementById(`${id}-count`);
+        if (count) {
+            count.textContent = state === 'fetching' ? '…'
+                : state === 'loaded' ? String(detail.count ?? 0)
+                : state === 'fallback' ? 'default'
+                : state === 'error' ? 'error' : 'off';
+            count.classList.toggle('live', state === 'loaded');
+            count.classList.toggle('fallback', state === 'fallback');
+            count.classList.toggle('error', state === 'error');
+        }
+        _setLayerPipById(id, state,
+            state === 'fetching' ? `loading ${label}…`
+            : state === 'loaded' ? `${detail.count ?? 0} ${label} loaded`
+            : state === 'fallback' ? `NOAA unavailable — showing ${detail.count ?? 0} default reference markers`
+            : `${label} error: ${detail.error ?? 'unknown'}`);
+    },
+});
+window.__oceanStationsLayer = oceanStationsLayer;
+
+document.getElementById('lyr-tide-gauges')?.addEventListener('change', e => {
+    oceanStationsLayer.setTidesVisible(e.target.checked);
+});
+document.getElementById('lyr-ocean-buoys')?.addEventListener('change', e => {
+    oceanStationsLayer.setBuoysVisible(e.target.checked);
+});
+document.getElementById('lyr-dart')?.addEventListener('change', e => {
+    oceanStationsLayer.setDartVisible(e.target.checked);
+});
+
+const _oceanModelToggle = document.getElementById('lyr-ocean-model');
+const _oceanModelState  = document.getElementById('ocean-model-state');
+const _oceanModeHint    = document.getElementById('ocean-mode-hint');
+function _syncOceanModelMode(active) {
+    renderer.domElement.classList.toggle('ocean-query-active', active);
+    _oceanModeHint?.classList.toggle('show', active);
+    if (_oceanModelState) {
+        _oceanModelState.textContent = active ? 'armed' : 'off';
+        _oceanModelState.classList.toggle('live', active);
+    }
+    _setLayerPipById('ocean-model', active ? 'loaded' : 'idle',
+        active ? 'armed — click any ocean point' : 'off — enable, then click the ocean');
+}
+_syncOceanModelMode(_oceanModelToggle?.checked ?? false);
+_oceanModelToggle?.addEventListener('change', e => _syncOceanModelMode(e.target.checked));
+
+const _od = {
+    card: document.getElementById('ocean-detail'),
+    kicker: document.getElementById('od-kicker'),
+    title: document.getElementById('od-title'),
+    body: document.getElementById('od-body'),
+    source: document.getElementById('od-source'),
+};
+let _odRequest = 0;
+
+function _oceanFmt(value, unit, decimals = 1) {
+    return Number.isFinite(value) ? `${value.toFixed(decimals)} ${unit}` : '—';
+}
+function _oceanTime(value) {
+    if (!value || !Number.isFinite(Date.parse(value))) return '—';
+    return new Date(value).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+}
+function _setOceanRows(rows) {
+    _od.body.replaceChildren();
+    for (const [label, value] of rows) {
+        const row = document.createElement('div');
+        row.className = 'od-row';
+        const k = document.createElement('span');
+        k.className = 'od-label';
+        k.textContent = label;
+        const v = document.createElement('span');
+        v.className = 'od-value';
+        v.textContent = value;
+        row.append(k, v);
+        _od.body.appendChild(row);
+    }
+}
+function _positionOceanDetail(clientX, clientY) {
+    const r = renderer.domElement.getBoundingClientRect();
+    const w = _od.card.offsetWidth || 250;
+    const h = _od.card.offsetHeight || 220;
+    _od.card.style.left = `${Math.min(Math.max(clientX - r.left + 14, 8), r.width - w - 8)}px`;
+    _od.card.style.top = `${Math.min(Math.max(clientY - r.top - 20, 8), r.height - h - 8)}px`;
+}
+function _openOceanDetail(kicker, title, clientX, clientY) {
+    _od.kicker.textContent = kicker;
+    _od.title.textContent = title;
+    _positionOceanDetail(clientX, clientY);
+    _od.card.classList.add('show');
+    _hideEventDetail?.();
+}
+function _hideOceanDetail() {
+    _odRequest++;
+    _od.card.classList.remove('show');
+}
+document.getElementById('od-close')?.addEventListener('click', _hideOceanDetail);
+
+async function _showOceanStationDetail(hit, clientX, clientY) {
+    const requestId = ++_odRequest;
+    const { kind, data } = hit;
+    if (data.fallback) {
+        _openOceanDetail('DEFAULT VIEW · LIVE FEED UNAVAILABLE', data.name, clientX, clientY);
+        _setOceanRows([
+            ['Reference location', `${Math.abs(data.lat).toFixed(1)}°${data.lat >= 0 ? 'N' : 'S'} · ${Math.abs(data.lon).toFixed(1)}°${data.lon >= 0 ? 'E' : 'W'}`],
+            ['Live observation', 'Unavailable'],
+        ]);
+        const fallbackSource = kind === 'tide' ? 'CO-OPS tide'
+            : kind === 'buoy' ? 'NDBC buoy' : 'NDBC DART';
+        _od.source.textContent = `${fallbackSource} fallback geometry · illustrative location only · not for navigation`;
+        return;
+    }
+    if (kind === 'dart') {
+        const requestedTime = Number.isFinite(simTimeMs) ? simTimeMs : Date.now();
+        const offsetMs = requestedTime - Date.now();
+        const timeLabel = Math.abs(offsetMs) < 15 * 60_000
+            ? 'live timeline window'
+            : `timeline: ${new Date(requestedTime).toLocaleString([], { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' })}`;
+        _openOceanDetail('NOAA NDBC DART · observed water column', `Station ${data.id}`, clientX, clientY);
+        _setOceanRows([
+            ['Timeline time', timeLabel],
+            ['Status', 'Loading DART observations…'],
+        ]);
+        _od.source.textContent = 'Observation only · DART activity is not an official warning';
+        try {
+            const params = new URLSearchParams({
+                station: data.id,
+                at: new Date(requestedTime).toISOString(),
+                hours: '24',
+            });
+            const response = await fetch(`/api/ocean/dart?${params}`, { signal: AbortSignal.timeout(14000) });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const dart = await response.json();
+            if (_odRequest !== requestId) return;
+            if (!dart.available) {
+                const reason = dart.reason === 'observations_not_forecasts'
+                    ? 'DART has no future observations'
+                    : 'No samples in this 24-hour window';
+                _setOceanRows([
+                    ['Timeline time', timeLabel],
+                    ['Status', reason],
+                ]);
+                _od.source.textContent = 'NOAA NDBC DART archive · observations only · no synthetic sample';
+                return;
+            }
+            const latest = dart.latest;
+            const mode = latest?.measurement_type === 3 ? 'event · 15-second'
+                : latest?.measurement_type === 2 ? 'event · 1-minute'
+                : latest?.measurement_type === 1 ? 'standard · 15-minute' : 'unknown';
+            _setOceanRows([
+                ['Timeline time', timeLabel],
+                ['Water column', _oceanFmt(latest?.water_column_height_m, 'm', 3)],
+                ['Reporting mode', mode],
+                ['Window samples', String(dart.readings?.length ?? 0)],
+                ['Window range', dart.range_m ? `${dart.range_m.min.toFixed(3)}–${dart.range_m.max.toFixed(3)} m` : '—'],
+                ['Latest sample', _oceanTime(latest?.time)],
+            ]);
+            _od.source.textContent = 'NOAA NDBC DART · historical window follows EarthView time · not an official warning · not for navigation';
+        } catch (error) {
+            if (_odRequest !== requestId) return;
+            _setOceanRows([
+                ['Timeline time', timeLabel],
+                ['Status', `Unavailable: ${error.message}`],
+            ]);
+        }
+        return;
+    }
+    if (kind === 'buoy') {
+        _openOceanDetail('NOAA NDBC · live observation', `Station ${data.id}`, clientX, clientY);
+        _setOceanRows([
+            ['Wave height', _oceanFmt(data.wave_height_m, 'm')],
+            ['Dominant period', _oceanFmt(data.dominant_period_s, 's', 0)],
+            ['Wave direction', _oceanFmt(data.mean_wave_direction_deg, '°', 0)],
+            ['Water temperature', _oceanFmt(data.water_temp_c, '°C')],
+            ['Wind', Number.isFinite(data.wind_speed_ms) ? `${data.wind_speed_ms.toFixed(1)} m/s · ${_oceanFmt(data.wind_direction_deg, '°', 0)}` : '—'],
+            ['Pressure', _oceanFmt(data.pressure_hpa, 'hPa')],
+            ['Observed', _oceanTime(data.observed_at)],
+        ]);
+        _od.source.textContent = 'NOAA National Data Buoy Center · not for navigation';
+        return;
+    }
+
+    _openOceanDetail('NOAA CO-OPS · tide gauge', data.name, clientX, clientY);
+    _setOceanRows([['Status', 'Loading observed and predicted tide…']]);
+    _od.source.textContent = 'NOAA Center for Operational Oceanographic Products and Services';
+    try {
+        const params = new URLSearchParams({ lat: data.lat, lon: data.lon, hours: '72' });
+        const response = await fetch(`/api/ocean/tides?${params}`, { signal: AbortSignal.timeout(12000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const tide = await response.json();
+        if (_odRequest !== requestId) return;
+        if (!tide.available) throw new Error('No current tide record');
+        const nextExtreme = tide.extremes?.find(item => Date.parse(item.time) >= Date.now());
+        _setOceanRows([
+            ['Water level (MLLW)', _oceanFmt(tide.observed?.height_m, 'm', 2)],
+            ['Predicted now', _oceanFmt(tide.predicted_now_m, 'm', 2)],
+            ['Residual', Number.isFinite(tide.residual_m) ? `${tide.residual_m >= 0 ? '+' : ''}${tide.residual_m.toFixed(2)} m` : '—'],
+            [nextExtreme ? `Next ${nextExtreme.type}` : 'Next high / low', nextExtreme ? `${_oceanFmt(nextExtreme.height_m, 'm', 2)} · ${_oceanTime(nextExtreme.time)}` : '—'],
+            ['Observed', _oceanTime(tide.observed?.time)],
+        ]);
+        _od.source.textContent = 'NOAA CO-OPS · MLLW datum · residual = observed − predicted · not for navigation';
+    } catch (error) {
+        if (_odRequest !== requestId) return;
+        _setOceanRows([['Status', `Unavailable: ${error.message}`]]);
+    }
+}
+
+async function _showMarinePointDetail(lat, lon, clientX, clientY) {
+    _oceanModeHint?.classList.remove('show');
+    const requestId = ++_odRequest;
+    _openOceanDetail('Open-Meteo · marine model', `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}  ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`, clientX, clientY);
+    _setOceanRows([['Status', 'Loading marine conditions…']]);
+    _od.source.textContent = 'Modeled conditions · not for navigation';
+    let marine = null;
+    let marineError = '';
+    try {
+        if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)
+            && new URLSearchParams(location.search).get('ocean_fallback') === '1') {
+            throw new Error('locally forced fallback verification');
+        }
+        marine = await fetchMarineForecast(lat, lon, { forecastDays: 5 });
+    } catch (error) {
+        marineError = error?.message ?? 'request failed';
+    }
+    if (_odRequest !== requestId) return;
+    if (marine?.inland) {
+        _setOceanRows([['Status', 'No marine model at this point — select open water']]);
+        return;
+    }
+    if (!marine) {
+        const baselineSst = Math.max(-1.5, Math.min(28, 28 - Math.abs(lat) * 0.32));
+        _od.kicker.textContent = 'DEFAULT VIEW · MARINE FEED UNAVAILABLE';
+        _setOceanRows([
+            ['Wave', '1.5 m · 8 s reference'],
+            ['Swell', '1.0 m · 10 s reference'],
+            ['Sea-surface temp', `${baselineSst.toFixed(1)} °C latitude baseline`],
+            ['Ocean current', '0.25 m/s reference'],
+            ['Sea level (MSL)', '0.00 m reference'],
+            ['Live model', 'Unavailable'],
+        ]);
+        _od.source.textContent = `Illustrative fallback values · ${marineError || 'no model response'} · not observed · not for navigation`;
+        _setLayerPipById('ocean-model', 'fallback', 'marine feed unavailable — showing clearly labeled reference values');
+        _showLayerFeedback('Marine feed unavailable — showing a labeled reference view, not live conditions.', 'warning');
+        return;
+    }
+    const current = marine.current ?? {};
+    _setOceanRows([
+        ['Wave', Number.isFinite(current.wave_height_m) ? `${current.wave_height_m.toFixed(1)} m · ${_oceanFmt(current.wave_period_s, 's')}` : '—'],
+        ['Swell', Number.isFinite(current.swell_h_m) ? `${current.swell_h_m.toFixed(1)} m · ${_oceanFmt(current.swell_period_s, 's')}` : '—'],
+        ['Sea-surface temp', _oceanFmt(current.sst_c, '°C')],
+        ['Ocean current', Number.isFinite(current.current_vel_ms) ? `${current.current_vel_ms.toFixed(2)} m/s · ${_oceanFmt(current.current_dir_deg, '°', 0)}` : '—'],
+        ['Sea level (MSL)', _oceanFmt(current.sea_level_msl_m, 'm', 2)],
+        ['Model time', _oceanTime(current.time)],
+    ]);
+    _od.source.textContent = 'Open-Meteo Marine API · modeled, not observed · not for navigation';
+    _setLayerPipById('ocean-model', 'loaded', 'marine model response loaded — click another ocean point to update');
+}
+
+let _oceanHoverKey = '';
+function _setOceanHover(hit, clientX, clientY) {
+    const tip = document.getElementById('ocean-tip');
+    if (!hit) {
+        if (_oceanHoverKey) {
+            _oceanHoverKey = '';
+            tip.style.display = 'none';
+        }
+        return;
+    }
+    const { kind, data } = hit;
+    const key = `${kind}:${data.id}`;
+    if (key !== _oceanHoverKey) {
+        _oceanHoverKey = key;
+        document.getElementById('ocean-tip-name').textContent = kind === 'tide' ? data.name : `NDBC ${data.id}`;
+        document.getElementById('ocean-tip-sub').textContent = kind === 'tide'
+            ? `NOAA tide gauge${data.state ? ` · ${data.state}` : ''}`
+            : kind === 'dart'
+                ? 'DART tsunameter · click for timeline observations'
+                : `${Number.isFinite(data.wave_height_m) ? `${data.wave_height_m.toFixed(1)} m wave · ` : ''}${Number.isFinite(data.water_temp_c) ? `${data.water_temp_c.toFixed(1)} °C water` : 'marine observation'}`;
+        tip.style.display = 'block';
+    }
+    tip.style.left = Math.min(clientX + 14, window.innerWidth - 190) + 'px';
+    tip.style.top = Math.min(clientY + 12, window.innerHeight - 70) + 'px';
+}
+
 // Format the "Jet peak" readout. "228 km/h · 42.0°N 75.0°W" when the
 // pressure-level feed has delivered a 250 hPa frame; em-dash before the
 // first fetch (the feed is lazy — enabling any pressure-level layer
@@ -7594,6 +8205,7 @@ const _dataRecency = {
     satellite: null,   // { source, goesTime, modisDate, updated }
     storms:    null,   // { count, updated }
     alerts:    null,   // { count, updated }
+    tsunami:   null,   // { count, updated }
 };
 
 function _timeAgo(date) {
@@ -7610,6 +8222,7 @@ function _updateLayerTooltips() {
     const sat = _dataRecency.satellite;
     const st = _dataRecency.storms;
     const al = _dataRecency.alerts;
+    const tsu = _dataRecency.tsunami;
 
     const wxTip = wx
         ? `Source: ${wx.source}\nUpdated: ${_timeAgo(wx.fetchTime)}\nRefreshes every 10 min`
@@ -7632,6 +8245,9 @@ function _updateLayerTooltips() {
     const alertTip = al
         ? `${al.count} active alert${al.count !== 1 ? 's' : ''}\nUpdated: ${_timeAgo(al.updated)}\nRefreshes every 5 min`
         : 'Alert data not yet loaded';
+    const tsunamiTip = tsu
+        ? `${tsu.count} active official tsunami product${tsu.count !== 1 ? 's' : ''}\nUpdated: ${_timeAgo(tsu.updated)}\nLive markers hide outside the current timeline window`
+        : 'Official tsunami products not yet loaded';
 
     const tips = {
         'lyr-clouds':  `Cloud Cover\n${satTip}\n\nCloud fractions: ${wxTip}`,
@@ -7640,6 +8256,7 @@ function _updateLayerTooltips() {
         'lyr-isobars': `Isobars\n${isoTip}`,
         'lyr-fronts':  `Synoptic Fronts (cold / warm / stationary)\n${isoTip}`,
         'lyr-alerts':  `Storm Alerts\n${alertTip}\n\nTropical storms: ${stormTip}`,
+        'lyr-tsunami-alerts': `Tsunami Alerts\n${tsunamiTip}`,
     };
     for (const [id, tip] of Object.entries(tips)) {
         const el = document.getElementById(id);
@@ -9009,6 +9626,32 @@ function _createObsOverlay(layerId) {
     return _obsOverlays[layerId];
 }
 
+// Shared, deliberately non-scientific no-data texture. If NASA GIBS is down,
+// an enabled observation layer paints a faint amber hatch instead of silently
+// rendering nothing. The adjacent warning explicitly says this is a fallback;
+// the hatch encodes availability only and never impersonates measurements.
+let _obsNoDataTexture = null;
+function _getObsNoDataTexture() {
+    if (_obsNoDataTexture) return _obsNoDataTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = 'rgba(255,179,71,.62)';
+    ctx.lineWidth = 2;
+    for (let x = -canvas.height; x < canvas.width; x += 28) {
+        ctx.beginPath();
+        ctx.moveTo(x, canvas.height);
+        ctx.lineTo(x + canvas.height, 0);
+        ctx.stroke();
+    }
+    _obsNoDataTexture = new THREE.CanvasTexture(canvas);
+    _obsNoDataTexture.colorSpace = THREE.SRGBColorSpace;
+    _obsNoDataTexture.wrapS = THREE.RepeatWrapping;
+    _obsNoDataTexture.needsUpdate = true;
+    return _obsNoDataTexture;
+}
+
 // Layer toggle handlers — drive both mesh visibility AND the feed's
 // per-layer poll. Layers with `defaultOn:false` (AOD, cloud-thickness,
 // AMSR2 precip) aren't autoloaded by EarthObsFeed.start(); without the
@@ -9053,9 +9696,19 @@ window.addEventListener('earth-obs-update', e => {
 // the feed; hover reveals the failure reason when something's red.
 window.addEventListener('earth-obs-status', (e) => {
     const d = e.detail ?? {};
+    const forceObsFallback = /^(localhost|127\.0\.0\.1)$/.test(location.hostname)
+        && new URLSearchParams(location.search).get('obs_fallback') === '1';
+    if (d.state === 'error' || (forceObsFallback && d.state === 'loaded')) {
+        const overlay = _obsOverlays[d.layerId] ?? _createObsOverlay(d.layerId);
+        overlay.mat.uniforms.u_tex.value = _getObsNoDataTexture();
+        overlay.mat.uniforms.u_has_tex.value = 1;
+        overlay.mat.needsUpdate = true;
+        _setLayerPipById(d.layerId, 'fallback',
+            'NASA data unavailable — showing a no-data hatch, not observations');
+        return;
+    }
     _setLayerPipById(d.layerId, d.state, d.state === 'loaded'   ? `loaded · ${_agoStr(d.updated)} · ${d.source ?? '—'}`
                                          : d.state === 'fetching' ? 'fetching from NASA GIBS…'
-                                         : d.state === 'error'    ? `error: ${d.error ?? 'unknown'}`
                                          :                          'waiting for first fetch');
 });
 
@@ -9079,11 +9732,33 @@ function _setLayerPipById(dataLayer, state, title) {
     // data-layer may match multiple rows (e.g. "swpc" drives every
     // magnetosphere row) so loop instead of querySelector single.
     document.querySelectorAll(`.lyr-status[data-layer="${dataLayer}"]`).forEach(pill => {
-        pill.classList.remove('st-idle', 'st-fetching', 'st-loaded', 'st-error');
+        pill.classList.remove('st-idle', 'st-fetching', 'st-loaded', 'st-error', 'st-fallback');
         pill.classList.add(`st-${state}`);
         if (title) pill.title = title;
+        const row = pill.closest('.lyr, .lyr-featured-row');
+        row?.classList.toggle('is-fallback', state === 'fallback');
+        row?.classList.toggle('has-error', state === 'error');
+        const checkbox = row?.querySelector(':scope > input[type="checkbox"]');
+        if (checkbox?.checked && (state === 'fallback' || state === 'error')) {
+            const label = row.querySelector('label[for]')?.textContent?.trim()
+                || row.querySelector('.lyr-featured-name')?.textContent?.trim()
+                || dataLayer;
+            _showLayerFeedback(`${label}: ${title || (state === 'fallback' ? 'showing a default view' : 'data unavailable')}`, state === 'error' ? 'error' : 'warning');
+        }
     });
 }
+
+function _showLayerFeedback(message, kind = 'warning') {
+    const box = document.getElementById('layer-feedback');
+    const text = document.getElementById('layer-feedback-text');
+    if (!box || !text || !message) return;
+    text.textContent = `${kind === 'error' ? '⚠' : '◇'} ${message}`;
+    box.dataset.kind = kind;
+    box.classList.add('show');
+}
+document.getElementById('layer-feedback-close')?.addEventListener('click', () => {
+    document.getElementById('layer-feedback')?.classList.remove('show');
+});
 
 // Shorthand: set many rows at once (weather feed drives four panels,
 // alerts + storms share one, SWPC drives the whole magnetosphere set).
@@ -9116,8 +9791,8 @@ document.addEventListener('weather-update', (e) => {
         // production see the upstream error code without having to open
         // DevTools.
         const srcStr = meta.source ?? 'procedural';
-        _setLayerPipGroup(_WEATHER_PIPS, 'error',
-            `upstream down — falling back to synthetic data (source: ${srcStr})`);
+        _setLayerPipGroup(_WEATHER_PIPS, 'fallback',
+            'live weather unavailable — showing synthetic circulation');
         _setFeedBanner(
             `Weather grid feed down — cloud, wind, isobar, and jet layers are showing ${meta.demo ? 'synthetic' : 'stale'} data. Reason: ${srcStr}.`
         );
@@ -9157,15 +9832,19 @@ document.getElementById('feed-error-banner')?.querySelector('.feb-close')
 document.addEventListener('nws-status', (e) => {
     if (e.detail?.status === 'fetching') {
         _setLayerPipById('alerts', 'fetching', 'fetching NWS alerts…');
+        _setLayerPipById('tsunami-alerts', 'fetching', 'fetching authoritative NWS tsunami products…');
     }
 });
 document.addEventListener('nws-alerts-update', (e) => {
     const d = e.detail ?? {};
     if (d.error) {
         _setLayerPipById('alerts', 'error', `NWS error: ${d.error}`);
+        _setLayerPipById('tsunami-alerts', 'error', `Official NWS tsunami feed unavailable: ${d.error}`);
     } else {
         _setLayerPipById('alerts', 'loaded',
             `${d.meta?.count ?? 0} alerts · ${_agoStr(d.meta?.fetchTime)}`);
+        _setLayerPipById('tsunami-alerts', 'loaded',
+            `${d.tsunamiMeta?.count ?? 0} official tsunami products · ${_agoStr(d.tsunamiMeta?.fetchTime)}`);
     }
 });
 window.addEventListener('storm-update', (e) => {
@@ -9652,6 +10331,7 @@ const ALERT_KIND_BASE_SIZE = {
     fire:      0.045,
     fog:       0.040,
     marine:    0.040,
+    tsunami:   0.060,
     generic:   0.038,
 };
 
@@ -9813,6 +10493,8 @@ class AlertMarkers {
         }
     }
 
+    isVisible() { return this._visible; }
+
     /** Replace all markers from a fresh alert array. */
     rebuild(alerts) {
         // Dispose existing sprite materials
@@ -9825,6 +10507,7 @@ class AlertMarkers {
         this._items = [];
 
         for (const alert of alerts) {
+            if (!Number.isFinite(alert?.lat) || !Number.isFinite(alert?.lon)) continue;
             const kind    = alert.kind ?? classifyAlertEvent(alert.event);
             const hexCol  = ALERT_COLORS[alert.severity] ?? ALERT_COLORS.Unknown;
             // Same geoToXYZ that trip pins, user location, and satellite
@@ -9912,6 +10595,11 @@ class AlertMarkers {
 }
 
 const alertMarkers = new AlertMarkers(earthMesh);
+// Same renderer and icon cache as Storm Alerts; only the data partition and
+// visibility toggle differ. This avoids a second marker implementation while
+// keeping official tsunami products independently controllable.
+const tsunamiAlertMarkers = new AlertMarkers(earthMesh);
+tsunamiAlertMarkers.setVisible(false);
 
 // ═══════════════════════════════════════════════════════════════
 //  TRIP ROUTE OVERLAY — activated by ?trip=lat,lon,label;lat,lon,label
@@ -10798,6 +11486,7 @@ function _pinEvent(kind, data, cx, cy) {
     // Proactively hide hover tips so they don't compete
     hideAlertTip();
     _hideEqPopup();
+    _hideOceanDetail();
 }
 
 function _hideEventDetail() {
@@ -10883,6 +11572,13 @@ document.addEventListener('click', (e) => {
     if (_ed.card.contains(e.target))      return;  // clicks inside card ignore
     if (e.target === renderer.domElement) return;  // globe click handler (below) decides
     _hideEventDetail();
+}, true);
+
+document.addEventListener('click', (e) => {
+    if (!_od.card.classList.contains('show')) return;
+    if (_od.card.contains(e.target)) return;
+    if (e.target === renderer.domElement) return;
+    _hideOceanDetail();
 }, true);
 
 // ═══════════════════════════════════════════════════════════════
@@ -11355,20 +12051,71 @@ function updateMagnetospherePanel() {
 const nwsAlerts = new NWSAlerts();
 nwsAlerts.start();
 
+let _tsunamiTimelineIsLive = true;
+let _latestTsunamiMeta = { count: 0, fetchTime: null };
+let _latestTsunamiError = null;
+
+function _syncTsunamiAlertVisibility() {
+    const toggle = document.getElementById('lyr-tsunami-alerts');
+    const count = document.getElementById('tsunami-alerts-count');
+    const enabled = Boolean(toggle?.checked);
+    tsunamiAlertMarkers.setVisible(enabled && _tsunamiTimelineIsLive);
+    if (count) {
+        count.classList.remove('live', 'fallback', 'error');
+        if (!enabled) {
+            count.textContent = 'off';
+        } else if (!_tsunamiTimelineIsLive) {
+            count.textContent = 'live only';
+        } else if (_latestTsunamiError) {
+            count.textContent = 'error';
+            count.classList.add('error');
+        } else if ((_latestTsunamiMeta.count ?? 0) > 0) {
+            count.textContent = String(_latestTsunamiMeta.count);
+            count.classList.add('live');
+        } else {
+            count.textContent = 'clear';
+            count.classList.add('live');
+        }
+    }
+    if (enabled && !_tsunamiTimelineIsLive) {
+        _setLayerPipById('tsunami-alerts', 'idle',
+            'live warning markers hidden while the EarthView timeline is away from now');
+    } else if (enabled && _latestTsunamiError) {
+        _setLayerPipById('tsunami-alerts', 'error',
+            `Official NWS tsunami feed unavailable: ${_latestTsunamiError}`);
+    } else if (enabled && _latestTsunamiMeta.fetchTime) {
+        _setLayerPipById('tsunami-alerts', 'loaded',
+            `${_latestTsunamiMeta.count ?? 0} official tsunami products · ${_agoStr(_latestTsunamiMeta.fetchTime)}`);
+    }
+}
+
+timeBus.subscribe((snap) => {
+    const next = Math.abs(snap.simTimeMs - snap.nowMs) <= 15 * 60_000;
+    if (next === _tsunamiTimelineIsLive) return;
+    _tsunamiTimelineIsLive = next;
+    _syncTsunamiAlertVisibility();
+});
+
 document.addEventListener('nws-status', e => {
     if (e.detail.status === 'fetching')
         document.getElementById('nws-dot').style.background = '#ffaa44';
 });
 
 document.addEventListener('nws-alerts-update', e => {
-    const { alerts, meta, error } = e.detail;
+    const { alerts, tsunamiAlerts = [], meta, tsunamiMeta = {}, error } = e.detail;
 
     // Track alert recency for layer tooltips
     _dataRecency.alerts = { count: meta.count ?? 0, updated: new Date() };
+    _dataRecency.tsunami = { count: tsunamiMeta.count ?? 0, updated: new Date() };
     _updateLayerTooltips();
 
-    // Update 3-D markers
+    // The single NWS fetch is partitioned into two independently controlled
+    // render layers. No duplicate alert poll or second parser is involved.
     alertMarkers.rebuild(alerts);
+    tsunamiAlertMarkers.rebuild(tsunamiAlerts);
+    _latestTsunamiMeta = tsunamiMeta;
+    _latestTsunamiError = error ?? null;
+    _syncTsunamiAlertVisibility();
 
     // Status dot: live=green, error=red, 0 alerts=dim
     const dot = document.getElementById('nws-dot');
@@ -11409,6 +12156,7 @@ document.addEventListener('nws-alerts-update', e => {
 document.getElementById('lyr-alerts').addEventListener('change', e => {
     alertMarkers.setVisible(e.target.checked);
 });
+document.getElementById('lyr-tsunami-alerts')?.addEventListener('change', _syncTsunamiAlertVisibility);
 
 // Extend mousemove to detect alert marker hovers
 renderer.domElement.addEventListener('mousemove', e => {
@@ -11423,6 +12171,7 @@ renderer.domElement.addEventListener('mousemove', e => {
     if (eqHovered) {
         _showEqPopup(eqHovered, e.clientX, e.clientY);
         hideAlertTip();
+        _setOceanHover(null);
         _setCityHover(null);
         return;
     } else {
@@ -11430,18 +12179,32 @@ renderer.domElement.addEventListener('mousemove', e => {
     }
 
     // Intersect alert dots (must account for earthMesh rotation)
-    const hovered = alertMarkers.getHovered(alertRay);
+    const hovered = tsunamiAlertMarkers.getHovered(alertRay)
+        ?? alertMarkers.getHovered(alertRay);
     if (hovered) {
         showAlertTip(hovered, e.clientX, e.clientY);
+        _setOceanHover(null);
         _setCityHover(null);
     } else {
         hideAlertTip();
-        // City dots take the lowest hover priority — event markers
-        // (quakes, alerts) always win the cursor.
-        _setCityHover(cityMarkers.getHovered(alertRay), e.clientX, e.clientY);
+        const oceanHovered = oceanStationsLayer.getHovered(alertRay);
+        if (oceanHovered) {
+            _setOceanHover(oceanHovered, e.clientX, e.clientY);
+            _setCityHover(null);
+        } else {
+            _setOceanHover(null);
+            // City dots take the lowest hover priority — event and ocean
+            // station markers always win the cursor.
+            _setCityHover(cityMarkers.getHovered(alertRay), e.clientX, e.clientY);
+        }
     }
 });
-renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hideEqPopup(); _setCityHover(null); });
+renderer.domElement.addEventListener('mouseleave', () => {
+    hideAlertTip();
+    _hideEqPopup();
+    _setOceanHover(null);
+    _setCityHover(null);
+});
 
 // ── City-dot hover: tooltip + dot highlight + pointer cursor ────────────────
 // hit = { city, index } | null from cityMarkers.getHovered. State is
@@ -11500,14 +12263,32 @@ function _setCityHover(hit, cx, cy) {
         const q = eqMarkers.getHovered(ray);
         if (q) { _pinEvent('quake', q, clientX, clientY); return true; }
 
-        const a = alertMarkers.getHovered(ray);
+        const a = tsunamiAlertMarkers.getHovered(ray)
+            ?? alertMarkers.getHovered(ray);
         if (a) { _pinEvent('alert', a, clientX, clientY); return true; }
+
+        const oceanStation = oceanStationsLayer.getHovered(ray);
+        if (oceanStation) {
+            _showOceanStationDetail(oceanStation, clientX, clientY);
+            return true;
+        }
 
         // City dots: tap → select as "my location". Same pipeline as the
         // EarthView card's search box (saveUserLocation → card + beacon +
         // saved list), so every location surface stays in sync.
         const cty = cityMarkers.getHovered(ray);
         if (cty) { _selectCity(cty.city); return true; }
+
+        // Marine model point-query mode. It sits below discrete markers
+        // but above the atmospheric column probe when both are armed.
+        if (document.getElementById('lyr-ocean-model')?.checked) {
+            const hit = ray.intersectObject(earthMesh)[0];
+            if (hit?.uv) {
+                const ll = geo.deg.uvToLatLon(hit.uv.x, hit.uv.y);
+                _showMarinePointDetail(ll.lat, ll.lon, clientX, clientY);
+                return true;
+            }
+        }
 
         // Column probe (Phase 4.1): with the probe layer armed, a bare-
         // globe tap pins the vertical-profile card for that point instead
@@ -11524,6 +12305,7 @@ function _setCityHover(hit, cx, cy) {
 
         // Empty globe — dismiss any pinned card
         if (_ed.card.classList.contains('show')) _hideEventDetail();
+        if (_od.card.classList.contains('show')) _hideOceanDetail();
         return false;
     }
 
@@ -12112,6 +12894,7 @@ function animate() {
 
     // ── Alert marker pulse (per-type emergency icons with zoom adaptation)
     alertMarkers.tick(t, camera.position.length());
+    tsunamiAlertMarkers.tick(t, camera.position.length());
 
     // ── Trip route overlay (only if ?trip= was parsed)
     tripRoute.tick(t);
@@ -12913,6 +13696,11 @@ const _backdrop = document.getElementById('panel-backdrop');
 let   _openPanel = null;
 
 function _openMobilePanel(id) {
+    // A focused control can programmatically scroll an overflow-hidden #app
+    // in some browsers. Reset that non-user scroll before positioning the
+    // bottom sheet so its title and search controls cannot land off-screen.
+    const app = document.getElementById('app');
+    if (app) app.scrollTop = 0;
     if (_openPanel) {
         document.getElementById(_openPanel)?.classList.remove('panel-open');
         document.querySelector(`.mtb-btn[data-panel="${_openPanel}"]`)?.classList.remove('active');
@@ -12980,7 +13768,9 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     'lyr-clouds', 'lyr-atm', 'lyr-aurora', 'lyr-lights', 'lyr-grid',
     'lyr-tropic', 'lyr-subsolar', 'lyr-weather', 'lyr-wind', 'lyr-jet',
     'lyr-isobars', 'lyr-fronts', 'lyr-alerts', 'lyr-earthquakes', 'lyr-iss',
-    'lyr-rotate', 'lyr-cities',
+    'lyr-rotate', 'lyr-cities', 'lyr-tsunami-alerts', 'lyr-dart',
+    'lyr-tide-gauges', 'lyr-ocean-buoys',
+    'lyr-ocean-model',
     // Derived weather overlays (humidity / precip-rate / mist) — share
     // the existing weather DataTextures, so they need the same synthetic
     // change-event dispatch on first render to align mesh visibility
@@ -13027,6 +13817,9 @@ document.addEventListener('click', e => {
     if (!panel) return;
     const minimized = panel.classList.toggle('panel-minimized');
     btn.textContent = minimized ? '▸' : '▾';
+    btn.title = minimized ? 'Expand' : 'Minimise';
+    btn.setAttribute('aria-expanded', String(!minimized));
+    btn.setAttribute('aria-label', `${minimized ? 'Expand' : 'Minimise'} ${panel.querySelector('h3')?.textContent?.trim() || 'panel'}`);
     try { localStorage.setItem('earth-panel-min-' + id, minimized ? '1' : '0'); } catch {}
 });
 
@@ -13085,7 +13878,12 @@ attachExtremesSection(stormWatchPanel.element, {
         else                     minimized = panel.classList.contains('panel-minimized');
         panel.classList.toggle('panel-minimized', minimized);
         const btn = panel.querySelector('[data-minimize-btn]');
-        if (btn) btn.textContent = minimized ? '▸' : '▾';
+        if (btn) {
+            btn.textContent = minimized ? '▸' : '▾';
+            btn.title = minimized ? 'Expand' : 'Minimise';
+            btn.setAttribute('aria-expanded', String(!minimized));
+            btn.setAttribute('aria-label', `${minimized ? 'Expand' : 'Minimise'} ${panel.querySelector('h3')?.textContent?.trim() || 'panel'}`);
+        }
     } catch {}
 });
 
@@ -13133,6 +13931,11 @@ document.querySelectorAll('.panel-header').forEach(hdr => {
 document.querySelectorAll('.lyr-section-hdr').forEach(hdr => {
     hdr.addEventListener('click', () => {
         const section = hdr.parentElement;
+        // Search temporarily expands matching sections. Keep those results
+        // stable until the user clears the query instead of letting a header
+        // click hide the result set beneath them.
+        const search = document.getElementById('layer-search');
+        if (search && search.value.trim()) return;
         const key = section.dataset.lyrSection;
         const collapsed = section.classList.toggle('collapsed');
         try { localStorage.setItem('earth-lyr-sec-' + key, collapsed ? '1' : '0'); } catch {}
@@ -13148,6 +13951,140 @@ document.querySelectorAll('.lyr-section[data-lyr-section]').forEach(sec => {
         else if (stored === '0') sec.classList.remove('collapsed');
     } catch {}
 });
+
+// Layers panel usability: filter its long catalogue without changing any
+// layer state, and provide one-click section expansion/collapse. A search
+// temporarily opens matching sections, then restores the exact pre-search
+// collapsed state when cleared.
+(function setupLayerPanelTools() {
+    const panel      = document.getElementById('layer-panel');
+    const search     = document.getElementById('layer-search');
+    const status     = document.getElementById('layer-search-status');
+    const expandAll  = document.getElementById('layer-expand-all');
+    const collapseAll = document.getElementById('layer-collapse-all');
+    if (!panel || !search || !status || !expandAll || !collapseAll) return;
+
+    const sections = Array.from(panel.querySelectorAll('.lyr-section[data-lyr-section]'));
+    const collapsedBeforeSearch = new Map();
+    let searchActive = false;
+
+    function searchableText(el) {
+        return [el.textContent, el.getAttribute('title') || '']
+            .join(' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    function restoreSearchState() {
+        sections.forEach(section => {
+            section.classList.remove('layer-search-hidden');
+            section.querySelectorAll('.lyr, .lyr-featured-row').forEach(row => {
+                row.classList.remove('layer-search-hidden');
+            });
+            if (collapsedBeforeSearch.has(section)) {
+                section.classList.toggle('collapsed', collapsedBeforeSearch.get(section));
+            }
+        });
+        collapsedBeforeSearch.clear();
+        searchActive = false;
+        panel.classList.remove('layer-search-active');
+        status.textContent = '';
+    }
+
+    function applySearch() {
+        const query = search.value.trim().toLowerCase();
+        if (!query) {
+            restoreSearchState();
+            return;
+        }
+
+        if (!searchActive) {
+            sections.forEach(section => {
+                collapsedBeforeSearch.set(section, section.classList.contains('collapsed'));
+            });
+            searchActive = true;
+            panel.classList.add('layer-search-active');
+        }
+
+        let matches = 0;
+        sections.forEach(section => {
+            const header = section.querySelector('.lyr-section-hdr');
+            const sectionMatches = header && searchableText(header).includes(query);
+            const rows = Array.from(section.querySelectorAll('.lyr, .lyr-featured-row'));
+            let sectionRowMatches = 0;
+
+            rows.forEach(row => {
+                const rowMatches = sectionMatches || searchableText(row).includes(query);
+                row.classList.toggle('layer-search-hidden', !rowMatches);
+                if (rowMatches) sectionRowMatches++;
+            });
+
+            const showSection = Boolean(sectionMatches || sectionRowMatches);
+            section.classList.toggle('layer-search-hidden', !showSection);
+            if (showSection) section.classList.remove('collapsed');
+            matches += sectionRowMatches || (sectionMatches ? 1 : 0);
+        });
+
+        status.textContent = matches === 1 ? '1 result' : `${matches} results`;
+    }
+
+    function clearSearch() {
+        if (!search.value && !searchActive) return;
+        search.value = '';
+        restoreSearchState();
+    }
+
+    function setAllSections(collapsed) {
+        clearSearch();
+        sections.forEach(section => {
+            if (section.classList.contains('collapsed') === collapsed) return;
+            const header = section.querySelector('.lyr-section-hdr');
+            if (header) header.click();
+        });
+    }
+
+    search.addEventListener('input', applySearch);
+    search.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        clearSearch();
+        search.blur();
+    });
+    expandAll.addEventListener('click', () => setAllSections(false));
+    collapseAll.addEventListener('click', () => setAllSections(true));
+})();
+
+// Make the panel itself acknowledge every toggle immediately. Previously the
+// tiny pill changed, but the surrounding row looked identical—easy to miss on
+// a busy globe. DIV-based rows also gain a full-row click target; native LABEL
+// rows keep their existing browser behavior so clicks never double-toggle.
+(function setupLayerRowInteraction() {
+    const panel = document.getElementById('layer-panel');
+    if (!panel) return;
+
+    function syncRow(input) {
+        const row = input.closest('.lyr, .lyr-featured-row');
+        row?.classList.toggle('is-active', input.checked);
+        if (input.checked && (row?.classList.contains('is-fallback') || row?.classList.contains('has-error'))) {
+            const pip = row.querySelector('.lyr-status');
+            const label = row.querySelector('label[for]')?.textContent?.trim()
+                || row.querySelector('.lyr-featured-name')?.textContent?.trim()
+                || 'Layer';
+            _showLayerFeedback(`${label}: ${pip?.title || 'data unavailable'}`,
+                row.classList.contains('has-error') ? 'error' : 'warning');
+        }
+    }
+
+    panel.querySelectorAll('.lyr > input[type="checkbox"], .lyr-featured-row > input[type="checkbox"]')
+        .forEach(input => {
+            syncRow(input);
+            input.addEventListener('change', () => syncRow(input));
+        });
+
+    panel.addEventListener('click', event => {
+        const row = event.target.closest('div.lyr');
+        if (!row || !panel.contains(row)) return;
+        if (event.target.closest('input, label, select, button, a, .lyr-rd')) return;
+        row.querySelector(':scope > input[type="checkbox"]')?.click();
+    });
+})();
 
 // ── Forecast Models panel: lazy-mount on first expand ──
 // The panel makes a network call to /api/forecast/models; deferring
@@ -13325,6 +14262,16 @@ const _layerRegistry = {
                                    ?? document.getElementById('lyr-obs-precip-rate')?.checked ?? false,
     'lyr-obs-sst':             () => _obsOverlays['sst']?.mesh?.visible
                                    ?? document.getElementById('lyr-obs-sst')?.checked ?? false,
+    // Tsunami warnings deliberately disappear outside the live window even
+    // when their checkbox remains selected. In that case the checkbox is the
+    // intended state, not mesh drift, so the debug registry must not flag it.
+    'lyr-tsunami-alerts':      () => _tsunamiTimelineIsLive
+                                   ? tsunamiAlertMarkers.isVisible()
+                                   : document.getElementById('lyr-tsunami-alerts')?.checked ?? false,
+    'lyr-dart':                () => oceanStationsLayer.isDartVisible(),
+    'lyr-tide-gauges':         () => oceanStationsLayer.isTidesVisible(),
+    'lyr-ocean-buoys':         () => oceanStationsLayer.isBuoysVisible(),
+    'lyr-ocean-model':         () => document.getElementById('lyr-ocean-model')?.checked ?? false,
     'lyr-obs-aod':             () => _obsOverlays['aod']?.mesh?.visible
                                    ?? document.getElementById('lyr-obs-aod')?.checked ?? false,
     'lyr-obs-cloud-thickness': () => _obsOverlays['cloud-thickness']?.mesh?.visible
