@@ -86,7 +86,7 @@ const EXCLUDE = new Map([
 
 /* Directories deploy.yml copies into build/web. Anything else is not in
  * production. Keep in sync with the "Copy all static HTML/JS/CSS" step. */
-const DEPLOYED_DIRS = new Set(['js', 'data', 'api', 'icons', 'static']);
+const DEPLOYED_DIRS = new Set(['js', 'data', 'api', 'icons', 'static', 'assets']);
 
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'rust', 'swmf', 'dsmc', 'docs',
   'tests', 'scripts', 'tools', 'pipelines', 'supabase', 'crates', 'pi', 'js', 'data', 'api']);
@@ -111,8 +111,16 @@ function walk(dir, acc = []) {
  * for "is this a page of ours" is the same one the repo already uses. */
 function pages() {
   try {
-    const out = execFileSync('git', ['ls-files', '-z', '*.html'], { cwd: ROOT, encoding: 'utf8' });
-    const list = out.split('\0').filter(Boolean).filter((p) => !SKIP_DIRS.has(p.split('/')[0]));
+    const tracked = execFileSync('git', ['ls-files', '-z', '*.html'], { cwd: ROOT, encoding: 'utf8' });
+    // Include new, not-yet-staged pages too. This lets a page and its sitemap
+    // entry be prepared in the same change without first mutating Git's index;
+    // --exclude-standard still omits ignored Playwright/build output.
+    const untracked = execFileSync(
+      'git', ['ls-files', '--others', '--exclude-standard', '-z', '*.html'],
+      { cwd: ROOT, encoding: 'utf8' },
+    );
+    const list = [...new Set(`${tracked}${untracked}`.split('\0').filter(Boolean))]
+      .filter((p) => !SKIP_DIRS.has(p.split('/')[0]));
     if (list.length) return list;
   } catch { /* not a git checkout — fall through */ }
   return walk(ROOT);

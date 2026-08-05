@@ -66,8 +66,9 @@ jobs:
           # /icons/apple-touch-icon.png from <head>; without this they 404
           # in production while resolving fine against the repo root in
           # local dev. static/ holds the og:image art referenced by the
-          # hindcast pages. Found 2026-07-25 while auditing the sitemap.
-          for d in icons static; do
+          # hindcast pages. assets/ holds page-scoped source imagery such as
+          # the NASA/JPL Viking and MOLA textures used by mars.html.
+          for d in icons static assets; do
             if [ -d "$d" ]; then
               cp -r "$d" "build/web/$d" && echo "Copied $d/"
             fi
