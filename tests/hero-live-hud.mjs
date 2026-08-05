@@ -3,7 +3,8 @@
  *
  *   node tests/hero-live-hud.mjs
  *
- * Covers buildHudModel() (pure view-model) and the inlined Shue standoff,
+ * Covers buildHudModel() (pure view-model), its shared conditions headline,
+ * and the inlined Shue standoff,
  * which MIRRORS computeShue() in js/magnetosphere-engine.js — if the physics
  * there changes, the pins here must move with it.
  */
@@ -35,6 +36,8 @@ import { buildHudModel, shueStandoffRe } from '../js/hero-live-hud.js';
     });
     assert.equal(m.status.label, 'Quiet');
     assert.equal(m.status.tone, 'quiet');
+    assert.equal(m.headline.label, 'Space Weather Calm');
+    assert.equal(m.headline.tone, 'quiet');
     assert.equal(m.kp.text, '2.3');
     assert.equal(m.wind.text, '420');
     assert.equal(m.bz.text, '+1.2');
@@ -55,12 +58,56 @@ import { buildHudModel, shueStandoffRe } from '../js/hero-live-hud.js';
     });
     assert.equal(m.status.label, 'G3 · Strong storm');
     assert.equal(m.status.tone, 'severe');
+    assert.equal(m.headline.label, 'G3 Strong Geomagnetic Storm');
+    assert.equal(m.headline.tone, 'severe');
     assert.equal(m.bz.color, '#ff3050', 'strongly southward Bz shows danger color');
     assert.equal(m.xray.hot, true, 'X-class flags hot');
     assert.ok(m.cme, 'CME chip present');
     assert.equal(m.cme.text, '~22 h');
     assert.equal(m.cme.urgent, true, '<36 h is urgent');
     assert.ok(parseFloat(m.standoff.text) < 9, 'storm standoff chip visibly compressed');
+}
+
+// ── Headline uses current conditions, not misleading "flare incoming" copy ──
+{
+    const flare = buildHudModel({
+        status: 'live',
+        solar_wind: { speed: 410, bz: 0.6 },
+        kp: 1.2,
+        xray_class: 'M2.3',
+    });
+    assert.equal(flare.headline.label, 'M2.3 M-Class Solar Flare');
+    assert.match(flare.headline.detail, /X-ray M2\.3/);
+
+    const cme = buildHudModel({
+        status: 'live',
+        solar_wind: { speed: 411, bz: 0.6 },
+        kp: 0,
+        xray_class: 'B3.6',
+        earth_directed_cme: { hoursUntil: 22.4 },
+        cme_eta_hours: 22.4,
+    });
+    assert.equal(cme.headline.label, 'CME Inbound · ~22 h');
+    assert.equal(cme.headline.tone, 'active');
+}
+
+// ── Fast, southward wind is surfaced before it becomes a Kp storm ────────────
+{
+    const m = buildHudModel({
+        status: 'live',
+        solar_wind: { speed: 620, bz: -8 },
+        kp: 2.4,
+        xray_class: 'B2.0',
+    });
+    assert.equal(m.headline.label, 'Solar Wind Disturbance');
+    assert.equal(m.headline.tone, 'active');
+}
+
+// ── Feed honesty: missing/stale data never reads as calm ─────────────────────
+{
+    assert.equal(buildHudModel({ status: 'offline' }).headline.label, 'SWPC Data Offline');
+    assert.equal(buildHudModel({ status: 'stale', kp: 1 }).headline.label, 'SWPC Data Stale');
+    assert.equal(buildHudModel({}).headline.label, 'Awaiting Space Weather Data');
 }
 
 // ── storm_level fallback derived from Kp when derived{} is absent ────────────

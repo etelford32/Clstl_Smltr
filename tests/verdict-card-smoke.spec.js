@@ -62,12 +62,25 @@ function wxFixture(nowMs) {
 /** Open-Meteo air-quality fixture: 48 h of a fixed AQI. */
 function aqFixture(nowMs) {
     const start = Math.floor(nowMs / HOUR) * HOUR;
-    const time = [], us_aqi = [];
+    const time = [], us_aqi = [], pm2_5 = [], pm10 = [], ozone = [];
+    const nitrogen_dioxide = [], sulphur_dioxide = [], carbon_monoxide = [];
+    const aerosol_optical_depth = [], dust = [];
     for (let i = 0; i < 48; i++) {
         time.push((start + i * HOUR) / 1000);
         us_aqi.push(42);
+        pm2_5.push(8.4); pm10.push(17.2); ozone.push(71.5);
+        nitrogen_dioxide.push(12.3); sulphur_dioxide.push(2.1); carbon_monoxide.push(184);
+        aerosol_optical_depth.push(0.086); dust.push(4.7);
     }
-    return { hourly: { time, us_aqi } };
+    return {
+        hourly_units: {
+            pm2_5: 'µg/m³', pm10: 'µg/m³', ozone: 'µg/m³',
+            nitrogen_dioxide: 'µg/m³', sulphur_dioxide: 'µg/m³',
+            carbon_monoxide: 'µg/m³', aerosol_optical_depth: '', dust: 'µg/m³',
+        },
+        hourly: { time, us_aqi, pm2_5, pm10, ozone, nitrogen_dioxide,
+            sulphur_dioxide, carbon_monoxide, aerosol_optical_depth, dust },
+    };
 }
 
 async function bootWithCard(page, url = '/earth.html') {
@@ -248,6 +261,10 @@ test.describe('EarthView verdict card', () => {
         await expect(card.locator('[data-ev="detail"]')).toContainText('Air quality');
         await expect(card.locator('[data-ev="detail"] svg')).toHaveCount(1);
         await expect(card.locator('[data-ev="detail"]')).toContainText('now 42 (good)');
+        await expect(card.locator('[data-ev="pollution-breakdown"]')).toBeVisible();
+        await expect(card.locator('[data-ev-pollutant="pm25"]')).toContainText('8.4');
+        await expect(card.locator('[data-ev-pollutant="aerosolOpticalDepth"]')).toContainText('0.086');
+        await expect(card.locator('[data-ev="pollution-breakdown"]')).toContainText('not a ground-monitor observation');
         await expect(card.locator('[data-ev-chip="aqi"]')).toHaveAttribute('aria-expanded', 'true');
 
         // Switching chips swaps the graph in place.
