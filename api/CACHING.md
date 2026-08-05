@@ -17,6 +17,8 @@ is governed by separate client-side code.
 | NWS alerts  | 180 s    | 120 s | nws/convective                         |
 | daily       | 3600 s   | 1800 s | F10.7 radio flux                      |
 | archive     | 86400 s  | 43200 s | weather/forecast type=archive         |
+| AQ model    | 900 s    | 120 s | air-quality/grid live, replay, forecast |
+| AQ monitors | 300 s live / 86400 s replay | 120 s / 43200 s | air-quality/stations |
 | error       | 60 s     | —    | all upstream errors                    |
 | rate-limit  | 120 s    | —    | Open-Meteo 429                         |
 
@@ -51,6 +53,13 @@ Examples:
   date >30 days old doesn't change until the next reanalysis release
   (months later). 24h is just a convenience number; we could go to
   7 days safely.
+
+- **AQ frames** — CAMS cells use the T3 model window. AirNow's newest
+  preliminary hourly file uses the T2 window; once its timestamp is in
+  replay, that immutable source object moves to the archive window. The
+  client persists only observation frames in IndexedDB and keeps modeled
+  analysis/forecast frames in memory, so a forecast cannot survive a reload
+  and masquerade as an observation.
 
 - **error (60s)** — long enough to protect a struggling upstream from
   retry storms, short enough that recovery is visible within one

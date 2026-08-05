@@ -1,9 +1,9 @@
 /**
  * air-quality-feed.js — per-location Open-Meteo snapshot for the EarthView
- * verdict card: US AQI (now + the hourly series), UV (now + today's peak),
- * hourly temperature / precip-probability / cloud cover / UV for the next
- * ~48 h, and a 7-day daily outlook. Keyless, CORS-enabled, same upstream
- * family the page's global weather grid already uses.
+ * verdict card: US AQI plus pollutant/aerosol fields (recent + forecast), UV
+ * (now + today's peak), hourly temperature / precip-probability / cloud cover
+ * / UV, and a 7-day daily outlook. Keyless, CORS-enabled, same upstream family
+ * the page's global weather grid already uses.
  *
  * Why this module fetches weather at all (not just AQI/UV): the page's
  * existing WeatherFeed / WeatherForecastFeed singletons operate on a global
@@ -23,6 +23,8 @@
  * bypasses the timer and refetches immediately.
  */
 
+import { CAMS_PROVENANCE } from './air-quality-frame.js';
+
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const AIR_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
 const REFRESH_MS = 15 * 60 * 1000;
@@ -30,6 +32,35 @@ const HOUR_MS = 3_600_000;
 
 const HOURLY_VARS = 'temperature_2m,precipitation_probability,cloud_cover,uv_index';
 const DAILY_VARS = 'temperature_2m_max,temperature_2m_min,weather_code,cloud_cover_mean,precipitation_probability_max';
+const AIR_HOURLY_VARS = [
+    'us_aqi',
+    'pm2_5',
+    'pm10',
+    'ozone',
+    'nitrogen_dioxide',
+    'sulphur_dioxide',
+    'carbon_monoxide',
+    'aerosol_optical_depth',
+    'dust',
+].join(',');
+
+// Stable app-facing names. Keep upstream spelling and units at this boundary
+// so consumers never need to understand Open-Meteo's field grammar.
+const POLLUTANT_FIELDS = Object.freeze({
+    pm25: 'pm2_5',
+    pm10: 'pm10',
+    ozone: 'ozone',
+    nitrogenDioxide: 'nitrogen_dioxide',
+    sulphurDioxide: 'sulphur_dioxide',
+    carbonMonoxide: 'carbon_monoxide',
+    aerosolOpticalDepth: 'aerosol_optical_depth',
+    dust: 'dust',
+});
+
+// Backward-compatible name used by the verdict card. The numeric map layer
+// imports the same object, so point and grid consumers cannot drift on whether
+// CAMS is modeled or ground-observed data.
+export const AIR_QUALITY_SOURCE = CAMS_PROVENANCE;
 
 /** ~1 km location bucket — same-neighbourhood moves don't refetch. */
 const locKey = (lat, lon) => `${lat.toFixed(2)},${lon.toFixed(2)}`;
@@ -44,7 +75,11 @@ export class AirQualityFeed {
         this._state = {
             status: 'idle',          // idle | loading | live | error
             aqi: null,
-            aqiHourly: [],           // [{time(ms), aqi}] ~48 h — chip detail graph
+            aqiHourly: [],           // [{time(ms), aqi}] — compatibility view for chip graph
+            pollutants: emptyPollutants(),
+            pollutionHourly: [],     // 24 h recent + 72 h forecast; AQI + pollutant fields
+            pollutionUnits: {},      // app-facing field name → upstream unit
+            airSource: AIR_QUALITY_SOURCE,
             uvNow: null,
             uvPeak: null,
             uvPeakHour: null,        // ms
@@ -100,7 +135,12 @@ export class AirQualityFeed {
         const common = `latitude=${loc.lat.toFixed(4)}&longitude=${loc.lon.toFixed(4)}&timezone=auto&timeformat=unixtime`;
         const wxUrl = `${FORECAST_URL}?${common}&hourly=${HOURLY_VARS}&daily=${DAILY_VARS}`
             + `&temperature_unit=fahrenheit&forecast_days=8`;
-        const aqUrl = `${AIR_URL}?${common}&hourly=us_aqi&forecast_days=2`;
+        // `past_days=1` supplies a small aligned comparison window without a
+        // second archive request. These are CAMS model fields, not station
+        // observations; airSource preserves that distinction for every
+        // downstream consumer and future training export.
+        const aqUrl = `${AIR_URL}?${common}&hourly=${AIR_HOURLY_VARS}`
+            + `&past_days=1&forecast_days=3`;
 
         // Both fetches in parallel; either may fail independently.
         const [wxRes, aqRes] = await Promise.allSettled([
@@ -157,33 +197,13 @@ export class AirQualityFeed {
         }
 
         if (aqRes.status === 'fulfilled') {
-            const aq = aqRes.value.hourly || {};
-            const times = aq.time || [];
-            let aqi = null;
-            for (let i = 0; i < times.length; i++) {
-                const t = times[i] * 1000;
-                if (t <= nowMs && nowMs - t < HOUR_MS && Number.isFinite(aq.us_aqi?.[i])) {
-                    aqi = aq.us_aqi[i];
-                    break;
-                }
-            }
-            // Fallback: newest non-null value at or before now (upstream
-            // occasionally lags the current hour).
-            if (aqi == null) {
-                for (let i = times.length - 1; i >= 0; i--) {
-                    if (times[i] * 1000 <= nowMs && Number.isFinite(aq.us_aqi?.[i])) {
-                        aqi = aq.us_aqi[i];
-                        break;
-                    }
-                }
-            }
-            next.aqi = aqi;
-            // Keep the whole hourly series — the response already carries
-            // ~48 h and the verdict card's AQI detail graph consumes it, so
-            // retaining it costs zero extra network.
-            next.aqiHourly = times
-                .map((t, i) => ({ time: t * 1000, aqi: numOrNull(aq.us_aqi?.[i]) }))
-                .filter(r => r.aqi != null);
+            const normalized = normalizeAirQuality(aqRes.value, nowMs);
+            next.aqi = normalized.aqi;
+            next.aqiHourly = normalized.aqiHourly;
+            next.pollutants = normalized.pollutants;
+            next.pollutionHourly = normalized.pollutionHourly;
+            next.pollutionUnits = normalized.pollutionUnits;
+            next.airSource = AIR_QUALITY_SOURCE;
         }
 
         next.status = 'live';
@@ -199,6 +219,94 @@ export class AirQualityFeed {
             window.dispatchEvent(new CustomEvent('ev-air-update', { detail: this._state }));
         } catch { /* consumers are optional */ }
     }
+}
+
+/**
+ * Normalize one Open-Meteo/CAMS response into the feed's stable schema.
+ * Exported for a small contract test; it is deliberately pure so later
+ * AirNow/OpenAQ station adapters can be tested against the same field names.
+ */
+export function normalizeAirQuality(payload = {}, nowMs = Date.now()) {
+    const aq = payload.hourly || {};
+    const times = Array.isArray(aq.time) ? aq.time : [];
+    const units = payload.hourly_units || {};
+
+    // Current model hour; if the upstream run lags, use the newest available
+    // hour at or before now. Never substitute a future forecast for "now".
+    let currentIdx = -1;
+    for (let i = 0; i < times.length; i++) {
+        const t = times[i] * 1000;
+        if (t <= nowMs && nowMs - t < HOUR_MS && hasAirValue(aq, i)) {
+            currentIdx = i;
+            break;
+        }
+    }
+    if (currentIdx < 0) {
+        for (let i = times.length - 1; i >= 0; i--) {
+            if (times[i] * 1000 <= nowMs && hasAirValue(aq, i)) {
+                currentIdx = i;
+                break;
+            }
+        }
+    }
+
+    // Preserve the feed's pre-pollution behavior when the composite AQI is
+    // published later than the component concentrations: the chip may use
+    // the newest past AQI while the pollutant grid stays on one aligned
+    // current model hour. Provenance remains modeled for both.
+    let aqiIdx = currentIdx >= 0 && Number.isFinite(aq.us_aqi?.[currentIdx])
+        ? currentIdx : -1;
+    if (aqiIdx < 0) {
+        for (let i = times.length - 1; i >= 0; i--) {
+            if (times[i] * 1000 <= nowMs && Number.isFinite(aq.us_aqi?.[i])) {
+                aqiIdx = i;
+                break;
+            }
+        }
+    }
+
+    const rowAt = (i) => {
+        const row = { time: times[i] * 1000, aqi: numOrNull(aq.us_aqi?.[i]) };
+        for (const [appName, upstreamName] of Object.entries(POLLUTANT_FIELDS)) {
+            row[appName] = numOrNull(aq[upstreamName]?.[i]);
+        }
+        return row;
+    };
+    const pollutionHourly = times
+        .map((_, i) => rowAt(i))
+        .filter(row => row.aqi != null || Object.keys(POLLUTANT_FIELDS).some(k => row[k] != null));
+    const current = currentIdx >= 0 ? rowAt(currentIdx) : null;
+    const pollutants = emptyPollutants();
+    for (const appName of Object.keys(POLLUTANT_FIELDS)) {
+        pollutants[appName] = current?.[appName] ?? null;
+    }
+    const pollutionUnits = {};
+    for (const [appName, upstreamName] of Object.entries(POLLUTANT_FIELDS)) {
+        pollutionUnits[appName] = units[upstreamName] || defaultUnit(appName);
+    }
+
+    return {
+        aqi: aqiIdx >= 0 ? numOrNull(aq.us_aqi?.[aqiIdx]) : null,
+        aqiHourly: pollutionHourly
+            .filter(row => row.aqi != null)
+            .map(row => ({ time: row.time, aqi: row.aqi })),
+        pollutants,
+        pollutionHourly,
+        pollutionUnits,
+    };
+}
+
+function hasAirValue(aq, i) {
+    if (Number.isFinite(aq.us_aqi?.[i])) return true;
+    return Object.values(POLLUTANT_FIELDS).some(name => Number.isFinite(aq[name]?.[i]));
+}
+
+function emptyPollutants() {
+    return Object.fromEntries(Object.keys(POLLUTANT_FIELDS).map(name => [name, null]));
+}
+
+function defaultUnit(name) {
+    return name === 'aerosolOpticalDepth' ? '' : 'µg/m³';
 }
 
 function numOrNull(v) {

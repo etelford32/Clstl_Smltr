@@ -44,6 +44,133 @@ export function shueStandoffRe(n = 5, v = 400, bz = 0) {
 
 const _num = (v) => (Number.isFinite(v) ? v : null);
 
+const G_STORM_WORDS = ['', 'Minor', 'Moderate', 'Strong', 'Severe', 'Extreme'];
+
+/**
+ * One plain-language headline for the shared NOAA strip. This deliberately
+ * consumes the SAME swpc-update state as every numeric chip: it owns no feed,
+ * forecast, timer, or cached copy of the measurements.
+ *
+ * "Solar flare" is reserved for the current GOES X-ray class. A future
+ * arrival is called a CME, because flare radiation is observed at Earth
+ * essentially when the flare happens; the slower plasma ejecta is what can
+ * be inbound for hours or days.
+ */
+export function buildSpaceWeatherHeadline(state = {}) {
+    const sw      = state.solar_wind ?? {};
+    const speed   = _num(sw.speed);
+    const bz      = _num(sw.bz);
+    const kp      = _num(state.kp);
+    const sep     = _num(state.sep_storm_level);
+    const eta     = _num(state.cme_eta_hours ?? state.earth_directed_cme?.hoursUntil);
+    const xray    = typeof state.xray_class === 'string'
+        ? state.xray_class.trim().toUpperCase() : null;
+    const xLetter = xray?.[0] ?? null;
+
+    const metrics = [];
+    if (speed != null) metrics.push(`wind ${Math.round(speed)} km/s`);
+    if (bz != null) metrics.push(`Bz ${bz >= 0 ? '+' : ''}${bz.toFixed(1)} nT`);
+    if (kp != null) metrics.push(`Kp ${kp.toFixed(1)}`);
+    if (xray) metrics.push(`X-ray ${xray}`);
+    const detail = (reason) => [reason, metrics.join(' · ')].filter(Boolean).join('. ');
+    const headline = (label, tone, reason, rank = 0) =>
+        ({ label, tone, detail: detail(reason), rank });
+
+    if (state.status === 'offline') {
+        return headline('SWPC Data Offline', 'offline', 'Live NOAA data is unavailable; retrying');
+    }
+    if (state.status === 'stale') {
+        return headline('SWPC Data Stale', 'offline', 'Showing the latest received NOAA values; retrying');
+    }
+
+    const hasData = speed != null || bz != null || kp != null || xray != null;
+    if (!hasData) {
+        return headline('Awaiting Space Weather Data', 'connecting', 'Connecting to NOAA SWPC');
+    }
+
+    // Candidates are ranked by immediate Earth impact. The highest-ranked
+    // current condition becomes the headline; every raw value remains visible
+    // beside it and in the headline tooltip.
+    const candidates = [];
+    const add = (rank, label, tone, reason) =>
+        candidates.push(headline(label, tone, reason, rank));
+
+    if (sep != null && sep >= 1) {
+        const s = Math.max(1, Math.min(5, Math.floor(sep)));
+        add(130 + s, `S${s} Solar Radiation Storm`, s >= 3 ? 'severe' : 'warning',
+            `NOAA solar-radiation scale is S${s}`);
+    }
+
+    if (xLetter === 'X') {
+        add(125, `${xray} X-Class Solar Flare`, 'severe',
+            `GOES X-ray flux is currently at ${xray}`);
+    }
+
+    if (kp != null && kp >= 5) {
+        const g = Math.max(1, Math.min(5, Math.floor(kp) - 4));
+        add(108 + g * 3, `G${g} ${G_STORM_WORDS[g]} Geomagnetic Storm`,
+            g >= 3 ? 'severe' : 'warning', `Planetary Kp has crossed the NOAA G${g} threshold`);
+    }
+
+    if (xLetter === 'M') {
+        add(108, `${xray} M-Class Solar Flare`, 'warning',
+            `GOES X-ray flux is currently at ${xray}`);
+    }
+
+    const hasInboundCme = !!state.earth_directed_cme && eta != null && eta > -6 && eta <= 72;
+    if (hasInboundCme) {
+        if (eta <= 0) {
+            add(106, 'CME Arrival Window', 'warning', 'An Earth-directed CME is at its estimated arrival window');
+        } else if (eta <= 12) {
+            add(104, `CME Expected Soon · ~${Math.max(1, Math.round(eta))} h`, 'warning',
+                'An Earth-directed CME is approaching its estimated arrival window');
+        } else if (eta <= 36) {
+            add(92, `CME Inbound · ~${Math.round(eta)} h`, 'active',
+                'An Earth-directed CME is forecast to arrive');
+        } else {
+            add(74, `Earth-Directed CME · ~${Math.round(eta)} h`, 'active',
+                'An Earth-directed CME is in the 72-hour outlook');
+        }
+    }
+
+    if (kp != null && kp >= 4) {
+        add(82, 'Geomagnetic Field Active', 'active', 'Planetary Kp is active but below storm level');
+    }
+
+    if (speed != null && bz != null && speed >= 650 && bz <= -10) {
+        add(96, 'Strong Solar Wind Disturbance', 'warning',
+            'Fast solar wind and strongly southward IMF are geoeffective');
+    } else if (speed != null && bz != null && speed >= 500 && bz <= -5) {
+        add(78, 'Solar Wind Disturbance', 'active',
+            'Elevated solar wind and southward IMF favor geomagnetic coupling');
+    }
+
+    if (xLetter === 'C') {
+        add(72, `${xray} C-Class Flare Activity`, 'active',
+            `GOES X-ray flux is currently at ${xray}`);
+    }
+
+    if (bz != null && bz <= -5) {
+        add(66, 'Southward IMF · Aurora Favored', 'active',
+            'Southward Bz favors energy transfer into the magnetosphere');
+    }
+
+    if (speed != null && speed >= 550) {
+        add(60, 'Fast Solar Wind Stream', 'active', 'Solar-wind speed is elevated');
+    }
+
+    if (kp != null && kp >= 3) {
+        add(55, 'Geomagnetic Field Unsettled', 'active', 'Planetary Kp is above quiet levels');
+    }
+
+    if (candidates.length === 0) {
+        return headline('Space Weather Calm', 'quiet',
+            'No active NOAA storm, flare, or geoeffective solar-wind threshold is crossed');
+    }
+
+    return candidates.reduce((best, item) => item.rank > best.rank ? item : best);
+}
+
 /**
  * Pure view-model builder: swpc-update detail → chip contents.
  * Every field degrades to '—' so a partial feed never crashes the strip.
@@ -80,6 +207,7 @@ export function buildHudModel(state = {}) {
         : null;
 
     return {
+        headline: buildSpaceWeatherHeadline(state),
         kp: {
             text:  kp == null ? '—' : kp.toFixed(1),
             color: kp == null ? null : KP_COLORS[Math.max(0, Math.min(9, Math.floor(kp)))],

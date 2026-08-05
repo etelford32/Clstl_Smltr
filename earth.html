@@ -371,7 +371,7 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 #coord-tip.show { opacity:1; }
 
 /* ─── City hover tooltip (major-city dots) ───────────────────── */
-#city-tip, #ocean-tip {
+#city-tip, #ocean-tip, #air-quality-tip {
     position:fixed; z-index:56; display:none; pointer-events:none;
     background:rgba(2,10,20,.9); border:1px solid rgba(77,219,255,.45);
     border-radius:8px; padding:7px 11px; white-space:nowrap;
@@ -379,9 +379,10 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
     backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
 }
 #ocean-tip { border-color:rgba(255,204,68,.5); }
-#city-tip .cty-name, #ocean-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
-#city-tip .cty-sub,  #ocean-tip .cty-sub  { color:#8ff0ff; font-size:10px; margin-top:1px; }
-#city-tip .cty-hint, #ocean-tip .cty-hint { color:#5f7597; font-size:9px;  margin-top:3px; }
+#air-quality-tip { border-color:rgba(77,219,255,.55); }
+#city-tip .cty-name, #ocean-tip .cty-name, #air-quality-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
+#city-tip .cty-sub,  #ocean-tip .cty-sub,  #air-quality-tip .cty-sub  { color:#8ff0ff; font-size:10px; margin-top:1px; }
+#city-tip .cty-hint, #ocean-tip .cty-hint, #air-quality-tip .cty-hint { color:#5f7597; font-size:9px;  margin-top:3px; }
 #coord-tip .ct-title { color: var(--c-accent); font-size:9px; text-transform:uppercase;
     letter-spacing:.6px; margin-bottom:2px; }
 #coord-tip .ct-val { color:#a0d8f0; font-weight:600; }
@@ -518,6 +519,21 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 .lyr-count.live { color:var(--c-status-live); border-color:rgba(61,214,140,.25); }
 .lyr-count.fallback { color:#ffb347; border-color:rgba(255,179,71,.30); }
 .lyr-count.error { color:var(--c-status-error); border-color:rgba(255,80,80,.28); }
+.lyr-count.replay { color:#8fdfff; border-color:rgba(77,219,255,.28); }
+.lyr-count.clamped { color:#ffb347; border-color:rgba(255,179,71,.30); }
+.aq-layer-controls {
+    margin:4px 0 6px 38px; padding:6px 7px;
+    border:1px solid rgba(77,219,255,.12); border-radius:6px;
+    background:rgba(77,219,255,.035);
+}
+.aq-layer-controls select {
+    width:100%; min-height:27px; padding:3px 6px;
+    border:1px solid var(--c-border-soft); border-radius:5px;
+    background:#07111e; color:#bfefff; font:10px ui-monospace, Menlo, monospace;
+}
+.aq-layer-note { margin-top:5px; color:#61788d; font-size:8.5px; line-height:1.4; }
+.aq-layer-legend { display:flex; gap:5px; margin-top:5px; color:#61788d; font-size:8px; }
+.aq-layer-legend i { width:7px; height:7px; margin-top:1px; border-radius:50%; display:inline-block; }
 
 /* Search and section controls stay at the top of the independently
    scrollable layer list. The panel title and close/minimise buttons live
@@ -1768,6 +1784,24 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 #ocean-detail .od-label { color:#6f8298; }
 #ocean-detail .od-value { color:#d9f6ff; text-align:right; font-variant-numeric:tabular-nums; }
 #ocean-detail .od-source { color:#53677e; font-size:9px; margin-top:7px; }
+#air-quality-detail {
+    position:absolute; z-index:97; pointer-events:auto; display:none;
+    min-width:230px; max-width:295px; padding:12px 14px 10px;
+    background:rgba(4,13,24,.96); backdrop-filter:blur(12px);
+    border:1px solid rgba(77,219,255,.40); border-radius:10px;
+    box-shadow:0 6px 24px rgba(0,0,0,.64); font-size:11px; line-height:1.5;
+}
+#air-quality-detail.show { display:block; }
+#air-quality-detail .aqd-close {
+    position:absolute; top:5px; right:7px; padding:3px 6px;
+    border:0; background:none; color:#668; cursor:pointer; font-size:15px;
+}
+#air-quality-detail .aqd-kicker { color:#4ddbff; font-size:9px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+#air-quality-detail .aqd-title { color:#eff9ff; font-size:13px; font-weight:700; margin:4px 20px 6px 0; }
+#air-quality-detail .aqd-row { display:flex; justify-content:space-between; gap:12px; padding:2px 0; border-bottom:1px solid rgba(255,255,255,.04); }
+#air-quality-detail .aqd-label { color:#6f8298; }
+#air-quality-detail .aqd-value { color:#d9f6ff; text-align:right; font-variant-numeric:tabular-nums; }
+#air-quality-detail .aqd-source { color:#53677e; font-size:9px; margin-top:7px; }
 #ocean-mode-hint {
     position:absolute; z-index:66; left:50%; bottom:82px;
     display:none; align-items:center; gap:8px;
@@ -1790,7 +1824,7 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 /* Devices without hover (phones, tablets) don't show the hover tooltips —
    the click-to-pin card is the only surface, which avoids flashing on tap. */
 @media (hover: none) {
-    #alert-tip, #eq-popup, #ocean-tip { display: none !important; }
+    #alert-tip, #eq-popup, #ocean-tip, #air-quality-tip { display: none !important; }
 }
 /* Coarse pointer (touch) → larger tap targets, bigger close button. */
 @media (pointer: coarse) {
@@ -1808,6 +1842,10 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
         transform: translateY(0);
     }
     #ocean-detail.show {
+        left:10px !important; right:10px !important; bottom:14px !important;
+        top:auto !important; max-width:none; width:auto;
+    }
+    #air-quality-detail.show {
         left:10px !important; right:10px !important; bottom:14px !important;
         top:auto !important; max-width:none; width:auto;
     }
@@ -2726,6 +2764,12 @@ import './js/telemetry.js';
         <div class="cty-hint">click for current conditions</div>
     </div>
 
+    <div id="air-quality-tip">
+        <div class="cty-name" id="air-quality-tip-name">—</div>
+        <div class="cty-sub" id="air-quality-tip-sub">—</div>
+        <div class="cty-hint">click for values and provenance</div>
+    </div>
+
     <!-- Layer controls -->
     <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="bottom:16px;right:12px;">⚡ Weather</a>
 
@@ -2915,6 +2959,31 @@ import './js/telemetry.js';
             </div></div>
         </div>
 
+        <!-- ── Numeric air quality ──
+             CAMS provides the timestamped model grid; preliminary AirNow
+             monitor observations appear only at close zoom. Both follow the
+             shared EarthView clock but retain distinct provenance. -->
+        <div class="lyr-section" data-lyr-section="air-quality">
+            <div class="lyr-section-hdr"><span>AIR QUALITY &amp; POLLUTION</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body">
+                <div class="lyr-grid">
+                    <div class="lyr" title="Timestamped numeric air quality. Far view: CAMS modeled grid. Zoom in: denser CAMS cells plus preliminary EPA AirNow monitors. Follows the EarthView time scrubber; model and observation provenance remain separate.">
+                        <input type="checkbox" id="lyr-air-quality"><span class="lyr-status" data-layer="air-quality" title="off — enable to load"></span><label for="lyr-air-quality">Numeric AQI / PM / AOD</label><span class="lyr-count" id="air-quality-count">off</span>
+                    </div>
+                </div>
+                <div class="aq-layer-controls">
+                    <select id="air-quality-metric" aria-label="Air quality metric">
+                        <option value="aqi">US AQI</option>
+                        <option value="pm25">PM2.5 · µg/m³</option>
+                        <option value="pm10">PM10 · µg/m³</option>
+                        <option value="aod">AOD · 550 nm</option>
+                    </select>
+                    <div class="aq-layer-note" id="air-quality-lod-note">Global CAMS model grid · zoom closer for AirNow monitors</div>
+                    <div class="aq-layer-legend" aria-label="AQI severity colors"><span><i style="background:#19e07a"></i>good</span><span><i style="background:#ffdc2e"></i>moderate</span><span><i style="background:#ff272e"></i>unhealthy</span></div>
+                </div>
+            </div>
+        </div>
+
         <!-- ── Ocean & Tides ── -->
         <div class="lyr-section" data-lyr-section="ocean">
             <div class="lyr-section-hdr"><span>OCEAN &amp; TIDES</span><span class="lyr-chevron">▾</span></div>
@@ -3055,12 +3124,12 @@ import './js/telemetry.js';
         <div class="lyr-section collapsed" data-lyr-section="nasa-obs">
             <div class="lyr-section-hdr"><span>NASA EARTH OBSERVATIONS</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <div class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><span class="lyr-status" data-layer="precip-rate"     title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></div>
-                <div class="lyr"><input type="checkbox" id="lyr-obs-aod"><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD, off by default — chunky 1° L3 grid)</label></div>
-                <div class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness (analytic, off by default)</label></div>
-                <div class="lyr"><input type="checkbox" id="lyr-obs-fires"><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></div>
-                <div class="lyr"><input type="checkbox" id="lyr-obs-snow"><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></div>
-                <div class="lyr" title="NASA Blue Marble shaded relief with bathymetry — continental elevation + ocean-floor topography rendered as a hypsometric tint."><input type="checkbox" id="lyr-obs-topo-relief"><span class="lyr-status" data-layer="topo-relief" title="waiting"></span><label for="lyr-obs-topo-relief">Terrain &amp; Bathymetry</label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><span class="lyr-status" data-layer="precip-rate" title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label><span class="lyr-count" data-obs-date="precip-rate">latest</span></div>
+                <div class="lyr" title="Daily NASA MODIS aerosol imagery for smoke, dust, and pollution haze. Follows the EarthView time scrubber; imagery is visual context, not a numeric science grid."><input type="checkbox" id="lyr-obs-aod"><span class="lyr-status" data-layer="aod" title="waiting"></span><label for="lyr-obs-aod">Pollution &amp; Smoke (AOD imagery)</label><span class="lyr-count" data-obs-date="aod">off</span></div>
+                <div class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness (analytic)</label><span class="lyr-count" data-obs-date="cloud-thickness">off</span></div>
+                <div class="lyr"><input type="checkbox" id="lyr-obs-fires"><span class="lyr-status" data-layer="fires" title="waiting"></span><label for="lyr-obs-fires">Active Fires</label><span class="lyr-count" data-obs-date="fires">latest</span></div>
+                <div class="lyr"><input type="checkbox" id="lyr-obs-snow"><span class="lyr-status" data-layer="snow" title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label><span class="lyr-count" data-obs-date="snow">latest</span></div>
+                <div class="lyr" title="NASA Blue Marble shaded relief with bathymetry — continental elevation + ocean-floor topography rendered as a hypsometric tint."><input type="checkbox" id="lyr-obs-topo-relief"><span class="lyr-status" data-layer="topo-relief" title="waiting"></span><label for="lyr-obs-topo-relief">Terrain &amp; Bathymetry</label><span class="lyr-count" data-obs-date="topo-relief">off</span></div>
             </div></div>
         </div>
 
@@ -3757,6 +3826,9 @@ import './js/telemetry.js';
         <div id="tc-buttons-row">
             <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
             <span class="tc-sep"></span>
+            <button class="tc-btn" id="tc-day-back" title="Step the shared EarthView timeline back one day">−1d</button>
+            <button class="tc-btn" id="tc-day-forward" title="Step the shared EarthView timeline forward one day">+1d</button>
+            <span class="tc-sep"></span>
             <button class="tc-btn" data-speed="1"    title="Real time (1×)">1×</button>
             <button class="tc-btn" data-speed="60"   title="1 minute per second">60×</button>
             <button class="tc-btn" data-speed="600"  title="10 minutes per second">600×</button>
@@ -3849,6 +3921,14 @@ import './js/telemetry.js';
         <div class="od-title" id="od-title">—</div>
         <div id="od-body"></div>
         <div class="od-source" id="od-source"></div>
+    </div>
+
+    <div id="air-quality-detail" role="dialog" aria-label="Air quality sample details">
+        <button class="aqd-close" id="aqd-close" aria-label="Close">×</button>
+        <div class="aqd-kicker" id="aqd-kicker">Air quality</div>
+        <div class="aqd-title" id="aqd-title">—</div>
+        <div id="aqd-body"></div>
+        <div class="aqd-source" id="aqd-source"></div>
     </div>
 
     <div id="ocean-mode-hint" role="status" aria-live="polite">
@@ -3987,6 +4067,7 @@ import { solarPosition, sunTimes, compass16 } from './js/sun-altitude.js';
 import { nextPasses } from './js/pass-predictor.js';
 import { VerdictCard } from './js/verdict-card.js';
 import { AirQualityFeed } from './js/air-quality-feed.js';
+import { AirQualityLayer } from './js/air-quality-layer.js';
 import { LocationBeacon } from './js/location-beacon.js';
 import { CityMarkers } from './js/city-markers.js';
 import { MAJOR_CITIES } from './js/data/major-cities.js';
@@ -7929,6 +8010,140 @@ document.getElementById('lyr-dart')?.addEventListener('change', e => {
     oceanStationsLayer.setDartVisible(e.target.checked);
 });
 
+// ── Numeric air-quality LOD ────────────────────────────────────────────────
+// One layer, one shared timestamp, two honestly separated sources:
+// CAMS model cells at every LOD and preliminary AirNow monitors at close zoom.
+const _airQualityCount = document.getElementById('air-quality-count');
+const _airQualityNote = document.getElementById('air-quality-lod-note');
+const _airQualityMetric = document.getElementById('air-quality-metric');
+const airQualityLayer = new AirQualityLayer(THREE, earthMesh, {
+    geoToXYZ,
+    forceFallback: /^(localhost|127\.0\.0\.1)$/.test(location.hostname)
+        && new URLSearchParams(location.search).get('aq_fallback') === '1',
+    onStatus(state, detail = {}) {
+        if (_airQualityCount) {
+            _airQualityCount.classList.remove('live', 'replay', 'fallback', 'error');
+            _airQualityCount.textContent = state === 'fetching' ? '…'
+                : state === 'loaded'
+                    ? `${detail.modelCount ?? 0}${detail.showStations ? `+${detail.stationCount ?? 0}` : ''}`
+                : state === 'fallback' ? 'default'
+                : state === 'error' ? 'error' : 'off';
+            _airQualityCount.classList.toggle('live', state === 'loaded' && detail.mode !== 'replay');
+            _airQualityCount.classList.toggle('replay', state === 'loaded' && detail.mode === 'replay');
+            _airQualityCount.classList.toggle('fallback', state === 'fallback');
+            _airQualityCount.classList.toggle('error', state === 'error');
+            _airQualityCount.title = state === 'loaded'
+                ? `${detail.modelCount ?? 0} CAMS cells${detail.showStations ? ` · ${detail.stationCount ?? 0} preliminary AirNow monitors` : ''} · ${detail.validAt ?? detail.requestedAt ?? '—'}`
+                : detail.error ?? state;
+        }
+        if (_airQualityNote) {
+            _airQualityNote.textContent = state === 'fallback'
+                ? `No numeric frame · reference geometry only · ${detail.error ?? 'data unavailable'}`
+                : detail.detail === 'local'
+                    ? `2.5° CAMS samples · ${detail.stationCount ?? 0} preliminary AirNow monitors`
+                : detail.detail === 'regional'
+                    ? `${detail.showStations ? '5° CAMS + AirNow monitors' : '5° CAMS grid · zoom closer for monitors'}`
+                : 'Global CAMS model grid · zoom closer for AirNow monitors';
+        }
+        const sourceTip = state === 'loaded'
+            ? `${detail.mode ?? 'live'} · ${detail.modelCount ?? 0} modeled CAMS cells${detail.showStations ? ` · ${detail.stationCount ?? 0} preliminary AirNow observations` : ''}${detail.stationError ? ` · monitor feed: ${detail.stationError}` : ''}`
+            : state === 'fetching' ? 'loading timestamped CAMS / AirNow frame…'
+            : state === 'fallback' ? `numeric data unavailable — reference geometry only: ${detail.error ?? 'unknown'}`
+            : 'off — enable to load';
+        _setLayerPipById('air-quality', state, sourceTip);
+    },
+});
+window.__airQualityLayer = airQualityLayer;
+document.getElementById('lyr-air-quality')?.addEventListener('change', event => {
+    airQualityLayer.setEnabled(event.target.checked);
+    if (!event.target.checked) _hideAirQualityDetail();
+});
+_airQualityMetric?.addEventListener('change', event => {
+    airQualityLayer.setMetric(event.target.value);
+});
+timeBus.subscribe(({ simTimeMs: airTimeMs }) => airQualityLayer.setTime(airTimeMs));
+
+const _aqd = {
+    card: document.getElementById('air-quality-detail'),
+    kicker: document.getElementById('aqd-kicker'),
+    title: document.getElementById('aqd-title'),
+    body: document.getElementById('aqd-body'),
+    source: document.getElementById('aqd-source'),
+};
+function _airValue(value, unit = '', decimals = 1) {
+    return Number.isFinite(value) ? `${value.toFixed(decimals)}${unit ? ` ${unit}` : ''}` : '—';
+}
+function _setAirQualityRows(rows) {
+    _aqd.body.replaceChildren();
+    for (const [label, value] of rows) {
+        const row = document.createElement('div'); row.className = 'aqd-row';
+        const key = document.createElement('span'); key.className = 'aqd-label'; key.textContent = label;
+        const val = document.createElement('span'); val.className = 'aqd-value'; val.textContent = value;
+        row.append(key, val); _aqd.body.appendChild(row);
+    }
+}
+function _positionAirQualityDetail(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const width = _aqd.card.offsetWidth || 260;
+    const height = _aqd.card.offsetHeight || 230;
+    _aqd.card.style.left = `${Math.min(Math.max(clientX - rect.left + 14, 8), rect.width - width - 8)}px`;
+    _aqd.card.style.top = `${Math.min(Math.max(clientY - rect.top - 20, 8), rect.height - height - 8)}px`;
+}
+function _showAirQualityDetail(hit, clientX, clientY) {
+    const { point, frame, kind } = hit;
+    const observed = kind === 'station';
+    _hideOceanDetail();
+    _aqd.kicker.textContent = observed
+        ? 'EPA AIRNOW · PRELIMINARY OBSERVATION'
+        : frame.fallback ? 'DEFAULT VIEW · NUMERIC DATA UNAVAILABLE' : 'OPEN-METEO / CAMS · MODEL GRID';
+    _aqd.title.textContent = observed ? point.name
+        : `${Math.abs(point.lat).toFixed(2)}°${point.lat >= 0 ? 'N' : 'S'}  ${Math.abs(point.lon).toFixed(2)}°${point.lon >= 0 ? 'E' : 'W'}`;
+    _setAirQualityRows([
+        ['US AQI', _airValue(point.aqi, '', 0)],
+        ['PM2.5', _airValue(point.pm25, 'µg/m³')],
+        ['PM10', _airValue(point.pm10, 'µg/m³')],
+        ['AOD 550 nm', observed ? 'not measured by AirNow' : _airValue(point.aod, '', 3)],
+        ...(observed ? [
+            ['Ozone', _airValue(point.ozone, point.units?.ozone || '')],
+            ['NO₂', _airValue(point.nitrogenDioxide, point.units?.nitrogenDioxide || '')],
+        ] : []),
+        ['Valid time', new Date(frame.validAt).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })],
+    ]);
+    _aqd.source.textContent = observed
+        ? `${point.agency ?? 'EPA AirNow partner'} · preliminary hourly monitor data · not regulatory AQS data`
+        : frame.fallback
+            ? 'Reference locations only · no value is synthetic or inferred'
+            : `CAMS Global modeled air quality · ~45 km native grid · ${frame.temporalMode}`;
+    _positionAirQualityDetail(clientX, clientY);
+    _aqd.card.classList.add('show');
+}
+function _hideAirQualityDetail() { _aqd.card.classList.remove('show'); }
+document.getElementById('aqd-close')?.addEventListener('click', _hideAirQualityDetail);
+
+let _airQualityHoverKey = '';
+function _setAirQualityHover(hit, clientX, clientY) {
+    const tip = document.getElementById('air-quality-tip');
+    if (!hit) {
+        if (_airQualityHoverKey) { _airQualityHoverKey = ''; tip.style.display = 'none'; }
+        return;
+    }
+    const { point, frame, kind, metric } = hit;
+    const key = `${kind}:${point.id}:${metric}`;
+    if (key !== _airQualityHoverKey) {
+        _airQualityHoverKey = key;
+        const labels = { aqi:'US AQI', pm25:'PM2.5', pm10:'PM10', aod:'AOD 550 nm' };
+        const units = { aqi:'', pm25:'µg/m³', pm10:'µg/m³', aod:'' };
+        document.getElementById('air-quality-tip-name').textContent = kind === 'station'
+            ? point.name : `${labels[metric]} model cell`;
+        document.getElementById('air-quality-tip-sub').textContent = frame.fallback
+            ? 'no numeric frame · reference geometry'
+            : `${labels[metric]} ${_airValue(point[metric], units[metric], metric === 'aqi' ? 0 : metric === 'aod' ? 3 : 1)} · ${kind === 'station' ? 'observed' : 'modeled'}`;
+        tip.style.display = 'block';
+    }
+    tip.style.left = Math.min(clientX + 14, window.innerWidth - 220) + 'px';
+    tip.style.top = Math.min(clientY + 12, window.innerHeight - 70) + 'px';
+}
+
 const _oceanModelToggle = document.getElementById('lyr-ocean-model');
 const _oceanModelState  = document.getElementById('ocean-model-state');
 const _oceanModeHint    = document.getElementById('ocean-mode-hint');
@@ -7984,6 +8199,7 @@ function _positionOceanDetail(clientX, clientY) {
     _od.card.style.top = `${Math.min(Math.max(clientY - r.top - 20, 8), r.height - h - 8)}px`;
 }
 function _openOceanDetail(kicker, title, clientX, clientY) {
+    _hideAirQualityDetail();
     _od.kicker.textContent = kicker;
     _od.title.textContent = title;
     _positionOceanDetail(clientX, clientY);
@@ -9479,11 +9695,18 @@ satFeed.start();
 //  Precipitation, SST, aerosol, cloud thickness, fires, snow
 // ═══════════════════════════════════════════════════════════════
 const earthObsFeed = new EarthObsFeed();
+window._earthObsFeed = earthObsFeed; // dated-frame/cache diagnostics
 // Autoload: every layer is enabled by default inside EarthObsFeed, and
 // start() kicks off polling immediately so the globe is rich on arrival.
 // User toggles only gate visibility — the textures stay cached so flipping
 // a layer back on is instant and doesn't re-hit NASA.
 earthObsFeed.start();
+// NASA daily imagery now follows the SAME shared clock as weather,
+// satellites, sunlight, and the bottom time scrubber. EarthObsFeed resolves
+// this to an available observation day, stages up to three dated textures per
+// layer, and debounces network work until a scrub lands on a new UTC date.
+timeBus.subscribe(({ simTimeMs: obsTimeMs }) => earthObsFeed.setTime(obsTimeMs));
+window._earthTimeBus = timeBus;
 
 // Observation overlay meshes — transparent shells above the Blue Marble.
 //
@@ -9696,6 +9919,32 @@ window.addEventListener('earth-obs-update', e => {
 // the feed; hover reveals the failure reason when something's red.
 window.addEventListener('earth-obs-status', (e) => {
     const d = e.detail ?? {};
+    const dateChip = document.querySelector(`.lyr-count[data-obs-date="${d.layerId}"]`);
+    if (dateChip) {
+        dateChip.classList.remove('live', 'replay', 'clamped', 'error');
+        if (d.state === 'fetching') {
+            dateChip.textContent = 'loading';
+        } else if (d.state === 'error') {
+            dateChip.textContent = 'no data';
+            dateChip.classList.add('error');
+        } else if (d.state === 'loaded' && d.time) {
+            const date = new Date(d.time);
+            const shortDate = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+            if (d.timeMode === 'replay') {
+                dateChip.textContent = `↶ ${shortDate}`;
+                dateChip.classList.add('replay');
+            } else if (d.timeMode === 'clamped-future') {
+                dateChip.textContent = `latest ${shortDate}`;
+                dateChip.classList.add('clamped');
+            } else {
+                dateChip.textContent = shortDate;
+                dateChip.classList.add('live');
+            }
+            dateChip.title = d.timeMode === 'clamped-future'
+                ? `Future scrub: observations stop at ${shortDate}; showing latest published frame`
+                : `${d.timeMode === 'replay' ? 'Historical replay' : 'Latest published observation'} · ${shortDate}${d.cacheHit ? ' · staged cache' : ''}`;
+        }
+    }
     const forceObsFallback = /^(localhost|127\.0\.0\.1)$/.test(location.hostname)
         && new URLSearchParams(location.search).get('obs_fallback') === '1';
     if (d.state === 'error' || (forceObsFallback && d.state === 'loaded')) {
@@ -9707,7 +9956,7 @@ window.addEventListener('earth-obs-status', (e) => {
             'NASA data unavailable — showing a no-data hatch, not observations');
         return;
     }
-    _setLayerPipById(d.layerId, d.state, d.state === 'loaded'   ? `loaded · ${_agoStr(d.updated)} · ${d.source ?? '—'}`
+    _setLayerPipById(d.layerId, d.state, d.state === 'loaded'   ? `${d.timeMode === 'replay' ? 'historical replay' : d.timeMode === 'clamped-future' ? 'latest available (future clamped)' : 'loaded'} · ${d.targetKey ?? '—'} · ${d.cacheHit ? 'staged cache' : _agoStr(d.updated)} · ${d.source ?? '—'}`
                                          : d.state === 'fetching' ? 'fetching from NASA GIBS…'
                                          :                          'waiting for first fetch');
 });
@@ -12172,6 +12421,7 @@ renderer.domElement.addEventListener('mousemove', e => {
         _showEqPopup(eqHovered, e.clientX, e.clientY);
         hideAlertTip();
         _setOceanHover(null);
+        _setAirQualityHover(null);
         _setCityHover(null);
         return;
     } else {
@@ -12184,18 +12434,27 @@ renderer.domElement.addEventListener('mousemove', e => {
     if (hovered) {
         showAlertTip(hovered, e.clientX, e.clientY);
         _setOceanHover(null);
+        _setAirQualityHover(null);
         _setCityHover(null);
     } else {
         hideAlertTip();
         const oceanHovered = oceanStationsLayer.getHovered(alertRay);
         if (oceanHovered) {
             _setOceanHover(oceanHovered, e.clientX, e.clientY);
+            _setAirQualityHover(null);
             _setCityHover(null);
         } else {
             _setOceanHover(null);
-            // City dots take the lowest hover priority — event and ocean
-            // station markers always win the cursor.
-            _setCityHover(cityMarkers.getHovered(alertRay), e.clientX, e.clientY);
+            const airHovered = airQualityLayer.getHovered(alertRay);
+            if (airHovered) {
+                _setAirQualityHover(airHovered, e.clientX, e.clientY);
+                _setCityHover(null);
+            } else {
+                _setAirQualityHover(null);
+                // City dots take the lowest hover priority — event, ocean,
+                // and numeric air-quality samples win the cursor.
+                _setCityHover(cityMarkers.getHovered(alertRay), e.clientX, e.clientY);
+            }
         }
     }
 });
@@ -12203,6 +12462,7 @@ renderer.domElement.addEventListener('mouseleave', () => {
     hideAlertTip();
     _hideEqPopup();
     _setOceanHover(null);
+    _setAirQualityHover(null);
     _setCityHover(null);
 });
 
@@ -12270,6 +12530,12 @@ function _setCityHover(hit, cx, cy) {
         const oceanStation = oceanStationsLayer.getHovered(ray);
         if (oceanStation) {
             _showOceanStationDetail(oceanStation, clientX, clientY);
+            return true;
+        }
+
+        const airSample = airQualityLayer.getHovered(ray);
+        if (airSample) {
+            _showAirQualityDetail(airSample, clientX, clientY);
             return true;
         }
 
@@ -12686,6 +12952,12 @@ function _jumpToNow() {
 
 document.getElementById('tc-play')?.addEventListener('click', () => _setSimPaused(!simPaused));
 document.getElementById('tc-now')?.addEventListener('click', _jumpToNow);
+document.getElementById('tc-day-back')?.addEventListener('click', () => {
+    timeBus.step(-24 * 60 * 60_000);
+});
+document.getElementById('tc-day-forward')?.addEventListener('click', () => {
+    timeBus.step(24 * 60 * 60_000);
+});
 document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
     btn.addEventListener('click', () => _setSimSpeed(Number(btn.dataset.speed)));
 });
@@ -12866,6 +13138,15 @@ function animate() {
     // ── Wind particle advection (tropospheric weather). Camera + parent
     // are passed so the LOD path can derive sub-camera lat/lon and zoom01.
     windParticles.update(dt, camera, earthMesh);
+
+    // Numeric air quality follows the same focus/zoom state as the wind LOD.
+    // The quantized frame key changes only at a true LOD or regional-tile
+    // boundary, so this per-frame call does not create per-frame requests.
+    airQualityLayer.updateLOD(
+        camera.position.length(),
+        windParticles.focusLat,
+        windParticles.focusLon,
+    );
 
     // ── Pressure-level wind layers (850/500/250). Hidden instances return
     // after the focus refresh, so disabled levels stay ~free; the cap check
@@ -13770,7 +14051,7 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     'lyr-isobars', 'lyr-fronts', 'lyr-alerts', 'lyr-earthquakes', 'lyr-iss',
     'lyr-rotate', 'lyr-cities', 'lyr-tsunami-alerts', 'lyr-dart',
     'lyr-tide-gauges', 'lyr-ocean-buoys',
-    'lyr-ocean-model',
+    'lyr-ocean-model', 'lyr-air-quality',
     // Derived weather overlays (humidity / precip-rate / mist) — share
     // the existing weather DataTextures, so they need the same synthetic
     // change-event dispatch on first render to align mesh visibility
@@ -14272,6 +14553,7 @@ const _layerRegistry = {
     'lyr-tide-gauges':         () => oceanStationsLayer.isTidesVisible(),
     'lyr-ocean-buoys':         () => oceanStationsLayer.isBuoysVisible(),
     'lyr-ocean-model':         () => document.getElementById('lyr-ocean-model')?.checked ?? false,
+    'lyr-air-quality':         () => airQualityLayer.group.visible,
     'lyr-obs-aod':             () => _obsOverlays['aod']?.mesh?.visible
                                    ?? document.getElementById('lyr-obs-aod')?.checked ?? false,
     'lyr-obs-cloud-thickness': () => _obsOverlays['cloud-thickness']?.mesh?.visible

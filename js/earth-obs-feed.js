@@ -71,6 +71,7 @@
  */
 
 import * as THREE from 'three';
+import { resolveObservationTime } from './earth-obs-time.js';
 
 // ── GIBS Configuration ───────────────────────────────────────────────────────
 
@@ -79,6 +80,12 @@ const GIBS_WMS      = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi
 
 const GLOBAL_BBOX   = '-90,-180,90,180';
 const CRS           = 'EPSG:4326';
+// GPU textures are uncompressed after upload (~8 MiB at 2048×1024 RGBA).
+// Three frames gives instant current/previous/next comparison without turning
+// five enabled observation layers into a several-hundred-megabyte cache. Older
+// days remain recoverable through the browser/CDN HTTP cache when revisited.
+const FRAME_CACHE_MAX = 3;
+const TIME_SETTLE_MS  = 550;
 
 // ── Layer Catalogue ──────────────────────────────────────────────────────────
 
@@ -285,6 +292,7 @@ export const EARTH_OBS_LAYERS = [
         // hazes like AOD.
         opacity:     0.85,
         defaultOn:   false,   // opt-in: most users want live data first
+        timeInvariant: true,
     },
 ];
 
@@ -363,6 +371,12 @@ export class EarthObsFeed {
         this._timers    = {};
         this._textures  = {};   // id → THREE.Texture
         this._meta      = {};   // id → { source, time, updated, status, error? }
+        this._frames    = {};   // id → Map<YYYY-MM-DD,{ texture, meta }> (LRU)
+        this._inflight  = {};   // id → { key, seq }
+        this._seq       = {};   // id → monotonic request generation
+        this._viewTimeMs = Date.now();
+        this._timeTimer = null;
+        this._pendingTimeSignature = null;
         // Default: only layers marked `defaultOn:true` autoload. The
         // others (cloud-thickness duplicates the shader, AMSR2 duplicates
         // IMERG) stay dormant until the user flips them on.
@@ -382,7 +396,7 @@ export class EarthObsFeed {
             if (this._timers[layer.id]) continue;    // already polling
             this._fetchLayer(layer);
             this._timers[layer.id] = setInterval(
-                () => this._fetchLayer(layer),
+                () => this._fetchLayer(layer, { refresh: true }),
                 layer.cadence
             );
         }
@@ -394,6 +408,60 @@ export class EarthObsFeed {
             clearInterval(this._timers[id]);
         }
         this._timers = {};
+        clearTimeout(this._timeTimer);
+        this._timeTimer = null;
+        this._pendingTimeSignature = null;
+    }
+
+    /**
+     * Follow the shared EarthView time bus. Cheap calls with the same UTC day
+     * are ignored. A different day activates an already-staged frame
+     * immediately or fetches after the scrub settles, so dragging never
+     * creates a request-per-slider-tick burst.
+     */
+    setTime(simTimeMs, { immediate = false } = {}) {
+        if (!Number.isFinite(simTimeMs)) return;
+        this._viewTimeMs = simTimeMs;
+
+        const pendingTargets = [];
+        for (const layer of EARTH_OBS_LAYERS) {
+            if (!this._enabled.has(layer.id)) continue;
+            const timing = this._timing(layer);
+            const frame = this._frames[layer.id]?.get(timing.key);
+            if (frame) {
+                const meta = this._meta[layer.id];
+                // The bus emits at up to 10 Hz. Same frame + same mode is a
+                // strict no-op; otherwise we'd rebroadcast a texture update
+                // on every tick while the user is merely sitting on one day.
+                if (meta?.targetKey !== timing.key || meta?.timeMode !== timing.mode
+                        || meta?.status !== 'live') {
+                    this._activateFrame(layer, frame, timing, true);
+                }
+            } else if (this._meta[layer.id]?.targetKey !== timing.key) {
+                // A failed frame keeps its targetKey. That prevents the
+                // continuously emitting clock from turning a real no-data
+                // day into a retry loop; the normal poll or a different day
+                // is the next opportunity to retry.
+                pendingTargets.push(`${layer.id}:${timing.key}`);
+            }
+        }
+
+        // The time bus emits continuously (up to 10 Hz), even when its
+        // selected instant is not changing. Do not restart the settle timer
+        // for an identical layer+day request or the debounce can never fire.
+        if (!pendingTargets.length) {
+            clearTimeout(this._timeTimer);
+            this._timeTimer = null;
+            this._pendingTimeSignature = null;
+            return;
+        }
+        const signature = pendingTargets.join('|');
+        if (this._timeTimer && signature === this._pendingTimeSignature) return;
+
+        console.info(`[EarthObs] timeline ${new Date(simTimeMs).toISOString()} → stage dated frames`);
+        clearTimeout(this._timeTimer);
+        this._pendingTimeSignature = signature;
+        this._timeTimer = setTimeout(() => this._syncTime(), immediate ? 0 : TIME_SETTLE_MS);
     }
 
     /** Enable/disable a layer. Starts/stops polling accordingly. */
@@ -405,7 +473,7 @@ export class EarthObsFeed {
             this._enabled.add(layerId);
             this._fetchLayer(layer);
             this._timers[layerId] = setInterval(
-                () => this._fetchLayer(layer),
+                () => this._fetchLayer(layer, { refresh: true }),
                 layer.cadence
             );
         } else if (!enabled && this._enabled.has(layerId)) {
@@ -444,10 +512,41 @@ export class EarthObsFeed {
             time:    m.time,
             updated: m.updated,
             error:   m.error,
+            targetKey: m.targetKey,
+            requestedTime: m.requestedTime,
+            timeMode: m.timeMode,
+            cacheHit: m.cacheHit,
         };
     }
 
-    async _fetchLayer(layer) {
+    _timing(layer) {
+        return resolveObservationTime({
+            simTimeMs: layer.timeInvariant ? Date.now() : this._viewTimeMs,
+            nowMs: Date.now(),
+            timeOffsetDays: layer.timeOffset,
+        });
+    }
+
+    _syncTime() {
+        this._timeTimer = null;
+        this._pendingTimeSignature = null;
+        for (const layer of EARTH_OBS_LAYERS) {
+            if (this._enabled.has(layer.id)) this._fetchLayer(layer);
+        }
+    }
+
+    async _fetchLayer(layer, { refresh = false } = {}) {
+        const timing = this._timing(layer);
+        const cached = this._frames[layer.id]?.get(timing.key);
+        if (cached && !refresh) {
+            this._activateFrame(layer, cached, timing, true);
+            return;
+        }
+        if (this._inflight[layer.id]?.key === timing.key) return;
+
+        const seq = (this._seq[layer.id] || 0) + 1;
+        this._seq[layer.id] = seq;
+        this._inflight[layer.id] = { key: timing.key, seq };
         // Flip to 'fetching' immediately so the layer pip pulses amber
         // before the network round-trip resolves. Preserve the previous
         // updated/source so the row keeps useful context while pulling.
@@ -455,11 +554,17 @@ export class EarthObsFeed {
             ...this._meta[layer.id],
             status: 'fetching',
             layer,
+            targetKey: timing.key,
+            requestedTime: new Date(timing.requestedMs),
+            timeMode: timing.mode,
+            cacheHit: false,
         };
         this._dispatchStatus(layer.id);
 
-        const now        = new Date();
-        const targetDate = new Date(now.getTime() - layer.timeOffset * 86_400_000);
+        // Use noon UTC for the selected day. It is stable across local time
+        // zones and accepted by both Snapshot and WMS; daily products select
+        // the same composite regardless of the hour component.
+        const targetDate = new Date(timing.targetMs + 12 * 60 * 60_000);
 
         // GIBS snapshot first, fall back to WMS if the snapshot 404s.
         let tex    = await loadTexture(gibsSnapshotUrl(layer, targetDate));
@@ -469,31 +574,93 @@ export class EarthObsFeed {
             source = 'GIBS WMS';
         }
 
+        let activated = false;
         if (tex) {
-            if (this._textures[layer.id]) this._textures[layer.id].dispose();
-            this._textures[layer.id] = tex;
-            this._meta[layer.id] = {
+            const frameMeta = {
                 source:  `${layer.name} (${source})`,
                 time:    targetDate,
                 updated: new Date(),
                 status:  'live',
                 layer,
+                targetKey: timing.key,
+                requestedTime: new Date(timing.requestedMs),
+                timeMode: timing.mode,
+                cacheHit: false,
             };
+            const frame = { texture: tex, meta: frameMeta };
+            this._stageFrame(layer.id, timing.key, frame);
+
+            // A slow request for an old scrub position may finish after the
+            // user has moved again. Keep it staged for a future scrub, but
+            // only paint it when it still matches the current bus date.
+            const currentTiming = this._timing(layer);
+            if (currentTiming.key === timing.key && this._enabled.has(layer.id)) {
+                this._activateFrame(layer, frame, currentTiming, false);
+                activated = true;
+            }
             console.info(`[EarthObs] ${layer.name} loaded via ${source}`);
         } else {
-            this._meta[layer.id] = {
-                ...this._meta[layer.id],
-                status:  'error',
-                updated: new Date(),
-                // Snapshot + WMS both returned null — surface the most useful
-                // single-line reason so the inline status dot's title= can
-                // tell the user why it went red.
-                error:   `GIBS snapshot + WMS both failed for ${targetDate.toISOString().slice(0,10)}`,
-                layer,
-            };
+            if (this._timing(layer).key === timing.key) {
+                this._meta[layer.id] = {
+                    ...this._meta[layer.id],
+                    status:  'error',
+                    updated: new Date(),
+                    error:   `GIBS snapshot + WMS both failed for ${timing.key}`,
+                    layer,
+                };
+            }
             console.debug(`[EarthObs] ${layer.name} fetch failed — retaining previous`);
         }
 
+        if (this._inflight[layer.id]?.seq === seq) delete this._inflight[layer.id];
+        const stillCurrent = this._timing(layer).key === timing.key;
+        if (stillCurrent) {
+            if (!activated) {
+                this._dispatch();
+                this._dispatchStatus(layer.id);
+            }
+        } else {
+            // The user moved while this loaded; settle onto the newer day.
+            this.setTime(this._viewTimeMs);
+        }
+    }
+
+    _stageFrame(layerId, key, frame) {
+        const frames = this._frames[layerId] || (this._frames[layerId] = new Map());
+        const old = frames.get(key);
+        if (old?.texture && old.texture !== frame.texture) old.texture.dispose();
+        frames.delete(key);
+        frames.set(key, frame);
+        while (frames.size > FRAME_CACHE_MAX) {
+            // Never evict the texture the material is currently painting.
+            // If that happens to be the oldest entry, remove the next-oldest
+            // inactive frame instead; otherwise the active GPU texture would
+            // leak after the subsequent frame swap.
+            const evictKey = [...frames.keys()].find(candidate =>
+                frames.get(candidate)?.texture !== this._textures[layerId]);
+            if (!evictKey) break;
+            const evicted = frames.get(evictKey);
+            frames.delete(evictKey);
+            evicted?.texture?.dispose();
+        }
+    }
+
+    _activateFrame(layer, frame, timing, cacheHit) {
+        const frames = this._frames[layer.id];
+        if (frames?.has(timing.key)) {
+            // Refresh insertion order for LRU eviction.
+            frames.delete(timing.key);
+            frames.set(timing.key, frame);
+        }
+        this._textures[layer.id] = frame.texture;
+        this._meta[layer.id] = {
+            ...frame.meta,
+            requestedTime: new Date(timing.requestedMs),
+            timeMode: timing.mode,
+            cacheHit,
+            targetKey: timing.key,
+            status: 'live',
+        };
         this._dispatch();
         this._dispatchStatus(layer.id);
     }
