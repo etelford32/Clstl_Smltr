@@ -42,8 +42,11 @@ button{color:inherit}
 .mars-app{position:relative;height:calc(100dvh - 50px);min-height:610px;isolation:isolate;overflow:hidden;background:
   radial-gradient(circle at 55% 45%,rgba(115,33,8,.12),transparent 34%),#050302}
 .mars-viewport{position:absolute;inset:0;overflow:hidden;background:#050302}
-#mars-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;outline:none}
+#mars-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;outline:none;cursor:grab;touch-action:none}
+#mars-canvas.is-interacting{cursor:grabbing}
+#mars-canvas:focus-visible{outline:2px solid var(--cyan);outline-offset:-4px}
 .mars-render-degraded #mars-canvas{visibility:hidden}
+.mars-render-degraded .camera-dock{display:none}
 .grain{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.14;mix-blend-mode:soft-light;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.3'/%3E%3C/svg%3E")}
 .vignette{position:absolute;inset:0;z-index:1;pointer-events:none;background:radial-gradient(ellipse at 53% 48%,transparent 35%,rgba(2,1,1,.18) 67%,rgba(2,1,1,.68) 100%)}
 .mars-render-fallback{position:absolute;inset:0;z-index:0;display:grid;place-items:center;padding:110px 24px 54px;text-align:center;background:radial-gradient(circle at 50% 44%,#371409 0,#090403 58%,#030202 100%)}
@@ -70,6 +73,7 @@ button{color:inherit}
 .panel-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:rgba(255,122,61,.10);border:1px solid rgba(255,122,61,.22);color:var(--mars-bright);font-size:.9rem;flex:0 0 auto}
 .panel-toggle{display:grid;place-items:center;width:28px;height:28px;padding:0;border:1px solid var(--line);border-radius:7px;background:rgba(255,255,255,.035);cursor:pointer;color:var(--muted)}
 .panel-toggle:hover{border-color:var(--line-strong);color:#fff}
+.panel-toggle:focus-visible,.action-btn:focus-visible,.camera-btn:focus-visible,.landmark-card-focus:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 .panel.collapsed .panel-body{display:none}
 .panel.collapsed{height:auto!important}
 .panel.collapsed .panel-toggle{transform:rotate(180deg)}
@@ -132,6 +136,8 @@ button{color:inherit}
 .feed-state[data-state="offline"]::before{background:var(--red);box-shadow:0 0 8px rgba(255,107,98,.55)}
 .dock-warning{margin-left:auto;max-width:54%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#bca78f;font-size:.64rem}
 .dock-collapse{display:none;margin-left:auto}
+.data-dock.collapsed .weather-grid,.data-dock.collapsed .dock-foot{display:none}
+.data-dock.collapsed .dock-collapse{transform:rotate(180deg)}
 .weather-grid{display:grid;grid-template-columns:repeat(6,minmax(100px,1fr));gap:1px;background:rgba(255,255,255,.045)}
 .weather-cell{position:relative;min-height:78px;padding:10px 12px;background:rgba(11,6,5,.96)}
 .weather-cell label{display:block;color:var(--faint);font:600 .51rem var(--display);letter-spacing:.13em;text-transform:uppercase}
@@ -141,7 +147,18 @@ button{color:inherit}
 .dock-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:8px 13px;color:#716159;font-size:.58rem}
 .dock-foot a{color:#a77c68;text-decoration:none}.dock-foot a:hover{color:var(--mars-bright);text-decoration:underline}
 
-.view-hint{position:absolute;z-index:4;left:50%;bottom:190px;transform:translateX(-50%);padding:6px 10px;border-radius:999px;background:rgba(7,4,3,.62);border:1px solid rgba(255,255,255,.06);color:#7f6f67;font:.56rem var(--mono);pointer-events:none;white-space:nowrap}
+.camera-dock{position:absolute;z-index:7;left:50%;bottom:184px;display:flex;align-items:center;gap:8px;width:min(680px,calc(100% - 640px));min-width:430px;padding:7px;border:1px solid rgba(255,186,145,.19);border-radius:13px;background:rgba(10,5,4,.82);box-shadow:0 14px 42px rgba(0,0,0,.38);backdrop-filter:blur(18px);transform:translateX(-50%)}
+.camera-readout{display:flex;flex:0 0 auto;flex-direction:column;justify-content:center;min-width:105px;padding:2px 9px 2px 5px;border-right:1px solid var(--line)}
+.camera-readout span{color:var(--faint);font:600 .48rem var(--display);letter-spacing:.14em;text-transform:uppercase}
+.camera-readout strong{display:block;max-width:132px;margin-top:3px;overflow:hidden;color:#f6ded2;font:600 .61rem var(--mono);letter-spacing:0;text-overflow:ellipsis;white-space:nowrap}
+.camera-readout output{margin-top:2px;color:#987f73;font:500 .52rem var(--mono);white-space:nowrap}
+.camera-actions{display:flex;flex:1;align-items:center;justify-content:center;gap:4px;min-width:0}
+.camera-divider{width:1px;height:25px;margin:0 2px;background:var(--line)}
+.camera-btn{display:flex;min-width:34px;height:34px;align-items:center;justify-content:center;gap:5px;padding:0 8px;border:1px solid rgba(255,255,255,.075);border-radius:8px;background:rgba(255,255,255,.03);color:#bca99f;cursor:pointer;font:600 .54rem var(--display);letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.camera-btn:hover{border-color:var(--line-strong);background:rgba(255,122,61,.09);color:#fff}
+.camera-btn[aria-pressed="true"]{border-color:rgba(255,173,114,.52);background:rgba(255,122,61,.17);color:#ffe2d1;box-shadow:inset 0 0 0 1px rgba(255,122,61,.08)}
+.camera-icon{font:500 .78rem var(--mono);line-height:1}
+.camera-help{position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%);color:#725f57;font:.5rem var(--mono);pointer-events:none;white-space:nowrap}
 .mesh-badge{position:absolute;z-index:4;right:310px;top:19px;padding:6px 9px;border-radius:8px;background:rgba(7,4,3,.58);border:1px solid rgba(255,255,255,.06);color:#8c7770;font:.55rem var(--mono);pointer-events:none}
 .mesh-badge strong{color:#d4b6a7;font-weight:500}
 .landmark-card{position:absolute;z-index:8;left:50%;bottom:190px;width:min(360px,calc(100% - 36px));transform:translateX(-50%);padding:14px 15px;border:1px solid rgba(255,173,114,.3);border-radius:13px;background:rgba(13,7,5,.94);box-shadow:0 18px 60px rgba(0,0,0,.55);backdrop-filter:blur(18px)}
@@ -151,9 +168,12 @@ button{color:inherit}
 .landmark-card h3{margin:6px 34px 6px 0;font:700 .9rem var(--display);letter-spacing:.04em}
 .landmark-card p{margin:0;color:#bba79c;font-size:.69rem;line-height:1.45}
 .landmark-card-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;color:#7f6e66;font:.57rem var(--mono)}
+.landmark-card-actions{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.landmark-card-focus{padding:5px 8px;border:1px solid rgba(255,173,114,.25);border-radius:7px;background:rgba(255,122,61,.08);color:#d8b5a2;cursor:pointer;font:600 .51rem var(--display);letter-spacing:.06em;text-transform:uppercase}
+.landmark-card-focus:hover{border-color:var(--mars);color:#fff}
 .landmark-card-meta a{color:#bd8b72;text-decoration:none}.landmark-card-meta a:hover{color:var(--mars-bright);text-decoration:underline}
 
-.loading-screen{position:absolute;inset:0;z-index:20;display:grid;place-items:center;background:#050302;transition:opacity .45s,visibility .45s}
+.loading-screen{position:absolute;inset:0;z-index:3;display:grid;place-items:center;background:radial-gradient(circle at 50% 48%,#170905 0,#050302 62%);transition:opacity .45s,visibility .45s}
 .loading-screen.done{opacity:0;visibility:hidden;pointer-events:none}
 .loader{width:min(340px,80vw);text-align:center}
 .loader-orbit{position:relative;width:54px;height:54px;margin:0 auto 18px;border:1px solid rgba(255,173,114,.20);border-radius:50%}
@@ -166,7 +186,7 @@ button{color:inherit}
   .mars-header{width:min(500px,calc(100% - 580px))}.mars-header h1{font-size:1.05rem}
   .mission-panel{width:270px}.layers-panel{width:258px}.mesh-badge{display:none}
   .weather-grid{grid-template-columns:repeat(3,1fr)}.weather-cell{min-height:67px;padding:8px 10px}
-  .data-dock{min-height:210px}.mission-panel,.layers-panel{max-height:calc(100% - 255px)}.view-hint,.landmark-card{bottom:238px}
+  .data-dock{min-height:210px}.mission-panel,.layers-panel{max-height:calc(100% - 255px)}.camera-dock{bottom:237px;width:min(500px,calc(100% - 560px));min-width:268px}.camera-btn-label{display:none}.landmark-card{bottom:296px}
 }
 @media(max-width:820px){
   body{overflow:auto;background:#050302}
@@ -176,12 +196,13 @@ button{color:inherit}
   .mission-panel,.layers-panel,.data-dock{position:relative;inset:auto;width:auto;max-height:none;margin:0 12px}
   .mission-panel .metric-grid{grid-template-columns:repeat(4,1fr)}
   .layers-panel .panel-body{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.layers-panel .layer-group-title,.layers-panel .source-mini{grid-column:1/-1}
-  .data-dock{min-height:0}.view-hint{display:none}.landmark-card{bottom:16px}
+  .data-dock{min-height:0}.dock-collapse{display:grid}.camera-dock{left:12px;right:12px;bottom:12px;width:auto;min-width:0;transform:none}.camera-btn-label{display:inline}.camera-help{display:none}.landmark-card{bottom:70px}
   .mars-render-fallback{padding-top:92px}.mars-render-fallback-copy{bottom:20px}
 }
 @media(max-width:560px){
   .mars-viewport{aspect-ratio:1 / 1;min-height:350px;max-height:430px}
   .mars-header h1{font-size:.9rem}.mission-strip{font-size:.55rem}.mission-strip span:nth-child(3){display:none}
+  .camera-dock{display:grid;grid-template-columns:1fr;padding:6px}.camera-readout{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:6px;min-width:0;padding:2px 5px 6px;border-right:0;border-bottom:1px solid var(--line)}.camera-readout strong{margin:0}.camera-readout output{margin:0;text-align:right}.camera-actions{width:100%}.camera-btn{flex:1;padding:0 5px}.camera-btn-label{display:none}.camera-divider{margin:0}.landmark-card{bottom:108px}
   .mission-panel .metric-grid{grid-template-columns:1fr 1fr}
   .layers-panel .panel-body{display:block}
   .weather-grid{grid-template-columns:1fr 1fr}.dock-warning{display:none}.dock-foot{align-items:flex-start;flex-direction:column;gap:3px}
@@ -224,10 +245,22 @@ button{color:inherit}
       <span class="landmark-card-kicker" id="landmark-card-category">Mars landmark</span>
       <h3 id="landmark-card-name">Landmark</h3>
       <p id="landmark-card-note"></p>
-      <div class="landmark-card-meta"><span id="landmark-card-stats"></span><a id="landmark-card-source" href="https://planetarynames.wr.usgs.gov/Page/MARS/target" target="_blank" rel="noopener">USGS/IAU record ↗</a></div>
+      <div class="landmark-card-meta"><span id="landmark-card-stats"></span><span class="landmark-card-actions"><button class="landmark-card-focus" id="landmark-card-focus" type="button">Fly here</button><a id="landmark-card-source" href="https://planetarynames.wr.usgs.gov/Page/MARS/target" target="_blank" rel="noopener">Source ↗</a></span></div>
     </aside>
 
-    <div class="view-hint">Drag to orbit · scroll to zoom · click a landmark or sky marker · scrub the NASA traverse by sol</div>
+    <div class="camera-dock" role="group" aria-label="Mars camera controls" aria-describedby="camera-help">
+      <div class="camera-readout"><span>Camera</span><strong id="camera-mode">Global orbit</strong><output id="camera-range" aria-live="polite">Range — km</output></div>
+      <div class="camera-actions">
+        <button class="camera-btn" id="camera-global" type="button" data-camera-preset="global" aria-pressed="true" title="Global view (H)"><span class="camera-icon" aria-hidden="true">◎</span><span class="camera-btn-label">Global</span></button>
+        <button class="camera-btn" id="camera-rover" type="button" data-camera-preset="rover" aria-pressed="false" title="Focus selected rover sol (R)"><span class="camera-icon" aria-hidden="true">◆</span><span class="camera-btn-label">Rover</span></button>
+        <button class="camera-btn" id="camera-landing" type="button" data-camera-preset="landing" aria-pressed="false" title="Focus landing site (L)"><span class="camera-icon" aria-hidden="true">⌖</span><span class="camera-btn-label">Landing</span></button>
+        <span class="camera-divider" aria-hidden="true"></span>
+        <button class="camera-btn" id="camera-zoom-out" type="button" title="Zoom out (-)" aria-label="Zoom out"><span class="camera-icon" aria-hidden="true">−</span></button>
+        <button class="camera-btn" id="camera-zoom-in" type="button" title="Zoom in (+)" aria-label="Zoom in"><span class="camera-icon" aria-hidden="true">＋</span></button>
+        <button class="camera-btn" id="camera-spin" type="button" aria-pressed="true" title="Pause automatic rotation (Space)"><span class="camera-icon" aria-hidden="true">Ⅱ</span><span class="camera-btn-label">Pause</span></button>
+      </div>
+      <span class="camera-help" id="camera-help">Drag to orbit · scroll to zoom · select a marker for details · H/R/L presets</span>
+    </div>
     <div class="mesh-badge" id="mars-mesh-badge"><strong>MESH</strong> <span id="mars-mesh-status">loading surface assets…</span></div>
 
     <div class="loading-screen" id="loading-screen" aria-live="polite">
@@ -301,19 +334,20 @@ button{color:inherit}
   <section class="data-dock" aria-labelledby="weather-title">
     <div class="dock-head">
       <h2 class="dock-title" id="weather-title">MEDA surface observations</h2>
-      <span class="feed-state" id="feed-state" data-state="historical">Loading shared Mars adapter…</span>
-      <span class="dock-warning" id="weather-warning">Values will retain their NASA observation date.</span>
+      <span class="feed-state" id="feed-state" data-state="historical">Bundled MEDA snapshot · sol 1133</span>
+      <span class="dock-warning" id="weather-warning">Observed 2024-04-27 · historical snapshot · not live telemetry</span>
+      <button class="panel-toggle dock-collapse" id="weather-collapse" type="button" aria-label="Collapse MEDA surface observations" aria-expanded="true">⌃</button>
     </div>
     <div class="weather-grid">
-      <div class="weather-cell" id="cell-temp"><label>Air temperature</label><strong class="weather-value" id="weather-temp">—</strong><small class="weather-detail" id="weather-temp-detail">waiting for feed</small></div>
-      <div class="weather-cell" id="cell-pressure"><label>Pressure</label><strong class="weather-value" id="weather-pressure">—</strong><small class="weather-detail">MEDA daily summary</small></div>
+      <div class="weather-cell" id="cell-temp"><label>Air temperature</label><strong class="weather-value" id="weather-temp">-79.3 → -24.7 °C</strong><small class="weather-detail" id="weather-temp-detail">daily minimum → maximum · 2024-04-27</small></div>
+      <div class="weather-cell" id="cell-pressure"><label>Pressure</label><strong class="weather-value" id="weather-pressure">778.9 Pa</strong><small class="weather-detail">MEDA daily summary</small></div>
       <div class="weather-cell" id="cell-wind"><label>Wind speed</label><strong class="weather-value" id="weather-wind">—</strong><small class="weather-detail" id="weather-wind-detail">not in summary</small></div>
-      <div class="weather-cell" id="cell-season"><label>Mars season</label><strong class="weather-value" id="weather-season">—</strong><small class="weather-detail" id="weather-season-detail">solar longitude</small></div>
-      <div class="weather-cell"><label>Observation sol</label><strong class="weather-value" id="weather-sol">—</strong><small class="weather-detail" id="weather-date">NASA date unavailable</small></div>
+      <div class="weather-cell" id="cell-season"><label>Mars season</label><strong class="weather-value" id="weather-season">Ls 249°</strong><small class="weather-detail" id="weather-season-detail">late autumn</small></div>
+      <div class="weather-cell"><label>Observation sol</label><strong class="weather-value" id="weather-sol">Sol 1133</strong><small class="weather-detail" id="weather-date">2024-04-27</small></div>
       <div class="weather-cell"><label>PDS release</label><strong class="weather-value" id="pds-sol">Sol 1726</strong><small class="weather-detail">position + science archive</small></div>
     </div>
     <div class="dock-foot">
-      <span id="feed-provenance">One adapter: /api/mars/weather · no client-side upstream fan-out</span>
+      <span id="feed-provenance">Bundled NASA Mars 2020 MEDA daily summary · shared adapter checking for an update</span>
       <span><a href="https://pds-atmospheres.nmsu.edu/data_and_services/atmospheres_data/PERSEVERANCE/meda.html" target="_blank" rel="noopener">Open MEDA PDS archive</a> · <a href="https://mars.nasa.gov/maps/location/?mission=M20&amp;site=NOW" target="_blank" rel="noopener">Open NASA traverse map</a></span>
     </div>
   </section>
@@ -348,6 +382,6 @@ button{color:inherit}
   });
 })();
 </script>
-<script type="module" src="./js/mars-view.js?v=20260806" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
+<script type="module" src="./js/mars-view.js?v=20260806-camera2" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
 </body>
 </html>

@@ -57,6 +57,22 @@ export const PERSEVERANCE_MISSION = Object.freeze({
     }),
 });
 
+// Last reproducible public MEDA daily summary retained for an immediate,
+// offline-capable first paint. The client always labels this as historical and
+// replaces it when the shared adapter returns a newer usable observation.
+export const PERSEVERANCE_MEDA_SNAPSHOT = Object.freeze({
+    active: true,
+    sol: 1133,
+    terrestrial_date: '2024-04-27',
+    min_temp_C: -79.3,
+    max_temp_C: -24.7,
+    pressure_pa: 778.9,
+    wind_speed_mps: null,
+    ls_deg: 249,
+    season: 'late autumn',
+    source: 'Bundled NASA Mars 2020 MEDA daily summary',
+});
+
 export function derivePositionFromLocalOffset({
     landingLatDeg,
     landingLonDeg,
