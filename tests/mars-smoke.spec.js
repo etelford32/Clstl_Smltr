@@ -78,6 +78,46 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await expect(page.locator('#sky-feed-title')).toContainText('live 5/5');
     await expect(page.locator('#sky-earth-status')).toContainText('Az');
     await expect(page.locator('#terminator-source')).toContainText('JPL Sun direction');
+    await expect(page.locator('#camera-mode')).toHaveText('Mission orbit');
+    await expect(page.locator('#camera-range')).toHaveAttribute('data-range-km', /\d+/);
+
+    await page.locator('#camera-rover').click();
+    await expect(page.locator('#camera-mode')).toContainText('Rover · sol 1940');
+    await expect(page.locator('#camera-rover')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#camera-spin')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('[data-layer="rotate"]')).not.toBeChecked();
+    await expect.poll(async () => Number(await page.locator('#camera-range').getAttribute('data-range-km'))).toBeLessThan(2_000);
+
+    const closeRange = Number(await page.locator('#camera-range').getAttribute('data-range-km'));
+    await page.locator('#camera-zoom-in').click();
+    await expect.poll(async () => Number(await page.locator('#camera-range').getAttribute('data-range-km'))).toBeLessThan(closeRange);
+
+    await page.locator('#camera-global').click();
+    await expect(page.locator('#camera-global')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#camera-spin').click();
+    await expect(page.locator('#camera-spin')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('[data-layer="rotate"]')).toBeChecked();
+
+    await page.getByRole('button', { name: 'Locate Earth in the Mars sky' }).click();
+    await expect(page.locator('#camera-mode')).toHaveText('Earth sky');
+    await expect(page.locator('#landmark-card')).toBeVisible();
+    await expect(page.locator('#landmark-card-name')).toHaveText('Earth');
+    await expect(page.locator('#landmark-card-focus')).toHaveText('Center sky');
+    await page.locator('#landmark-card-close').click();
+    await expect(page.locator('#landmark-card')).toBeHidden();
+
+    const firstRouteSol = await page.locator('#route-sol').getAttribute('min');
+    await page.locator('#route-sol').fill(firstRouteSol);
+    await expect(page.locator('#route-sol-output')).toContainText(`Sol ${firstRouteSol}`);
+
+    for (const layer of [
+        'imagery', 'grid', 'atmosphere', 'rover', 'landing', 'route', 'waypoints',
+        'landmark-volcano', 'landmark-fracture', 'landmark-basins', 'landmark-polar', 'rotate',
+    ]) {
+        const input = page.locator(`[data-layer="${layer}"]`);
+        await input.uncheck({ force: true });
+        await expect.poll(() => page.evaluate(name => window.__marsLab.layerIsVisible(name), layer)).toBe(false);
+    }
 
     const relief = page.locator('[data-layer="relief"]');
     await expect(relief).toBeChecked();
@@ -121,18 +161,21 @@ test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks'
     await expect(page.locator('#route-sol')).toBeDisabled();
     await expect(page.locator('#waypoints-toggle')).toBeDisabled();
     await expect(page.locator('#route-source')).toContainText('markers remain');
-    await expect(page.locator('#feed-state')).toContainText('bundled mission + season');
-    await expect(page.locator('#weather-season')).toHaveText(/^Ls \d+°$/);
-    await expect(page.locator('#weather-warning')).toContainText('orbital season remain available');
+    await expect(page.locator('#feed-state')).toContainText('Bundled MEDA snapshot');
+    await expect(page.locator('#weather-temp')).toHaveText('-79.3 → -24.7 °C');
+    await expect(page.locator('#weather-season')).toHaveText('Ls 249°');
+    await expect(page.locator('#weather-warning')).toContainText('Shared adapter unavailable');
 
     const layout = await page.evaluate(() => {
         const rect = selector => {
             const value = document.querySelector(selector).getBoundingClientRect();
-            return { top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+            return { top: value.top, right: value.right, bottom: value.bottom, left: value.left, width: value.width, height: value.height };
         };
         return {
             stage: rect('#mars-viewport'),
             canvas: rect('#mars-canvas'),
+            cameraDock: rect('.camera-dock'),
+            header: rect('.mars-header'),
             mission: rect('.mission-panel'),
             layers: rect('.layers-panel'),
             dock: rect('.data-dock'),
@@ -144,8 +187,21 @@ test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks'
     expect(layout.stage.height).toBeLessThanOrEqual(430);
     expect(layout.canvas.width).toBeCloseTo(layout.stage.width, 0);
     expect(layout.canvas.height).toBeCloseTo(layout.stage.height, 0);
+    expect(layout.cameraDock.left).toBeGreaterThanOrEqual(layout.stage.left);
+    expect(layout.cameraDock.right).toBeLessThanOrEqual(layout.stage.right);
+    expect(layout.cameraDock.bottom).toBeLessThanOrEqual(layout.stage.bottom);
+    expect(layout.cameraDock.top).toBeGreaterThan(layout.header.bottom);
     expect(layout.mission.top).toBeGreaterThanOrEqual(layout.stage.bottom);
     expect(layout.layers.top).toBeGreaterThanOrEqual(layout.mission.bottom);
     expect(layout.dock.top).toBeGreaterThanOrEqual(layout.layers.bottom);
+
+    const rejectCookies = page.getByRole('button', { name: 'Reject non-essential' });
+    if (await rejectCookies.isVisible()) await rejectCookies.click();
+    await page.locator('#weather-collapse').click();
+    await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
+    await expect(page.locator('#weather-collapse')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.weather-grid')).toBeHidden();
+    await page.locator('#weather-collapse').click();
+    await expect(page.locator('.weather-grid')).toBeVisible();
     expect(errors).toEqual([]);
 });

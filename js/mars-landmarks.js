@@ -150,10 +150,16 @@ export class MarsLandmarks {
         if (!this.enabled) return;
         const localCamera = this.group.worldToLocal(camera.position.clone());
         const cameraDistance = localCamera.length();
-        const cameraDirection = localCamera.normalize();
+        const cameraDirection = localCamera.clone().normalize();
         const maximumPriority = cameraDistance < 1.72 ? 3 : cameraDistance < 2.45 ? 2 : 1;
+        const facingThreshold = cameraDistance < 1.72 ? 0.72 : 0.17;
         for (const entry of this.entries) {
-            const frontFacing = entry.normal.dot(cameraDirection) > 0.17;
+            const frontFacing = entry.normal.dot(cameraDirection) > facingThreshold;
+            const labelDistance = localCamera.distanceTo(entry.label.position);
+            const labelScale = THREE.MathUtils.clamp(labelDistance / 2.4, 0.11, 1);
+            entry.label.scale.set(0.26 * labelScale, 0.045 * labelScale, 1);
+            const dotSize = entry.landmark.priority === 1 ? 0.032 : 0.023;
+            entry.dot.scale.setScalar(dotSize * labelScale);
             entry.label.visible = entry.categoryGroup.visible
                 && entry.landmark.priority <= maximumPriority
                 && frontFacing;
