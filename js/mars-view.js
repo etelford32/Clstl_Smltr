@@ -2,14 +2,15 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     MARS_RADIUS_M,
+    PERSEVERANCE_MEDA_SNAPSHOT,
     PERSEVERANCE_MISSION,
     estimatedMissionSol,
     formatMarsClock,
     localMeanSolarTimeHours,
     marsSubsolarPoint,
     observationFreshness,
-} from './mars-mission-state.js';
-import { MarsLandmarks } from './mars-landmarks.js';
+} from './mars-mission-state.js?v=20260806-camera2';
+import { MarsLandmarks } from './mars-landmarks.js?v=20260806-camera2';
 import { MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
 import { fetchMarsSkyEphemeris } from './horizons.js';
 import { MarsSky } from './mars-sky.js';
@@ -32,7 +33,8 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x080302, 0.025);
 
 const camera = new THREE.PerspectiveCamera(36, 1, 0.01, 100);
-camera.position.set(0.15, 0.42, 3.15);
+const globalCameraPosition = new THREE.Vector3(0.15, 0.42, 3.65);
+camera.position.copy(globalCameraPosition);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.matchMedia('(max-width: 560px)').matches ? 1.5 : 2));
@@ -50,10 +52,16 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.minDistance = 1.22;
 controls.maxDistance = 7;
+controls.enablePan = false;
 controls.rotateSpeed = 0.55;
 controls.zoomSpeed = 0.75;
-controls.autoRotate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+controls.autoRotate = !reducedMotion.matches;
 controls.autoRotateSpeed = 0.34;
+let cameraMode = 'global';
+let cameraModeLabel = 'Mission orbit';
+let cameraTween = null;
+let cardFocusAction = null;
 
 scene.add(new THREE.HemisphereLight(0xffd1b1, 0x080304, 0.58));
 const sun = new THREE.DirectionalLight(0xffead5, 3.2);
@@ -76,6 +84,24 @@ function latLonVector(latDeg, lonDeg, radius = SURFACE_RADIUS) {
         -cosLat * Math.sin(lon),
     ).multiplyScalar(radius);
 }
+
+function tangentFrame(radial) {
+    const north = new THREE.Vector3(0, 1, 0).addScaledVector(radial, -radial.y);
+    if (north.lengthSq() < 1e-6) north.set(1, 0, 0);
+    north.normalize();
+    const east = new THREE.Vector3().crossVectors(north, radial).normalize();
+    return { north, east };
+}
+
+const missionFacingRadial = latLonVector(
+    mission.latest_drive.position.lat_deg,
+    mission.latest_drive.position.lon_deg,
+).applyQuaternion(marsGroup.quaternion).normalize();
+const missionFacingFrame = tangentFrame(missionFacingRadial);
+globalCameraPosition.copy(missionFacingRadial.clone().multiplyScalar(3.55)
+    .addScaledVector(missionFacingFrame.north, 0.34)
+    .addScaledVector(missionFacingFrame.east, 0.16));
+camera.position.copy(globalCameraPosition);
 
 function buildStars() {
     const count = 1700;
@@ -550,6 +576,23 @@ function markMissingWeather() {
     document.querySelector('#weather-date').textContent = 'NASA date unavailable';
 }
 
+function applyBundledWeather(payload = {}, reason = 'Shared adapter is still loading') {
+    applyWeatherUi({
+        ...payload,
+        rovers: {
+            ...(payload.rovers || {}),
+            perseverance: PERSEVERANCE_MEDA_SNAPSHOT,
+        },
+    });
+    const freshness = observationFreshness(PERSEVERANCE_MEDA_SNAPSHOT);
+    const age = freshness.age_days == null ? 'historical' : `${freshness.age_days.toLocaleString()} Earth days old`;
+    const feedState = document.querySelector('#feed-state');
+    feedState.dataset.state = 'historical';
+    feedState.textContent = `Bundled MEDA snapshot · sol ${PERSEVERANCE_MEDA_SNAPSHOT.sol}`;
+    document.querySelector('#weather-warning').textContent = `${reason} · observed ${PERSEVERANCE_MEDA_SNAPSHOT.terrestrial_date} · ${age} · not live telemetry`;
+    document.querySelector('#feed-provenance').textContent = `${PERSEVERANCE_MEDA_SNAPSHOT.source} · retained for offline first paint`;
+}
+
 async function loadMarsFeed() {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 8000);
@@ -558,13 +601,12 @@ async function loadMarsFeed() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
         applyMissionUi(payload?.mission?.perseverance || mission);
-        applyWeatherUi(payload);
+        if (payload?.rovers?.perseverance?.active) applyWeatherUi(payload);
+        else applyBundledWeather(payload, 'NASA daily-summary upstream returned no usable observation');
     } catch (error) {
         console.warn('[Mars] Shared weather adapter unavailable', error);
         applyMissionUi(mission);
-        applyWeatherUi({ ls_deg: null, rovers: { perseverance: { active: false } } });
-        document.querySelector('#feed-state').textContent = 'Adapter unavailable · bundled mission + season';
-        document.querySelector('#feed-provenance').textContent = '/api/mars/weather unavailable · bundled NASA mission snapshot + orbital season model';
+        applyBundledWeather({}, 'Shared adapter unavailable');
     } finally {
         window.clearTimeout(timer);
     }
@@ -663,14 +705,33 @@ function setLayer(name, enabled) {
         landmarks.setCategoryVisible('basin', enabled);
         landmarks.setCategoryVisible('crater', enabled);
     } else if (name === 'landmark-polar') landmarks.setCategoryVisible('polar', enabled);
-    else if (name === 'rotate') controls.autoRotate = enabled && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    else if (name === 'rotate') setAutoRotate(enabled);
+}
+
+function layerIsVisible(name) {
+    if (name === 'imagery') return Boolean(surfaceMaterial.map);
+    if (name === 'relief') return reliefMars.visible;
+    if (name === 'grid') return gridLayer.visible;
+    if (name === 'atmosphere') return atmosphereLayer.visible;
+    if (name === 'terminator') return terminatorLayer.visible;
+    if (name === 'rover') return roverLayer.visible;
+    if (name === 'landing') return landingLayer.visible;
+    if (name === 'route') return routeLayer.visible;
+    if (name === 'waypoints') return waypointsLayer.visible;
+    if (name.startsWith('sky-')) return Boolean(sky.entries[name.slice(4)]?.enabled);
+    if (name === 'landmark-volcano') return landmarks.categoryGroups.volcano.visible;
+    if (name === 'landmark-fracture') return landmarks.categoryGroups.fracture.visible;
+    if (name === 'landmark-basins') return landmarks.categoryGroups.basin.visible && landmarks.categoryGroups.crater.visible;
+    if (name === 'landmark-polar') return landmarks.categoryGroups.polar.visible;
+    if (name === 'rotate') return controls.autoRotate;
+    return null;
 }
 
 document.querySelectorAll('[data-layer]').forEach(input => {
     input.addEventListener('change', () => setLayer(input.dataset.layer, input.checked));
 });
 
-document.querySelectorAll('.panel-toggle').forEach(button => {
+document.querySelectorAll('.panel .panel-toggle').forEach(button => {
     button.addEventListener('click', () => {
         const panel = button.closest('.panel');
         const collapsed = panel.classList.toggle('collapsed');
@@ -679,8 +740,46 @@ document.querySelectorAll('.panel-toggle').forEach(button => {
     });
 });
 
-let cameraTween = null;
-function flyCamera(position, target, duration = 850) {
+const weatherDock = document.querySelector('.data-dock');
+document.querySelector('#weather-collapse').addEventListener('click', event => {
+    const collapsed = weatherDock.classList.toggle('collapsed');
+    event.currentTarget.setAttribute('aria-expanded', String(!collapsed));
+    event.currentTarget.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} MEDA surface observations`);
+});
+
+const cameraModeElement = document.querySelector('#camera-mode');
+const cameraRangeElement = document.querySelector('#camera-range');
+const cameraSpinButton = document.querySelector('#camera-spin');
+const rotateToggle = document.querySelector('[data-layer="rotate"]');
+
+function setCameraMode(mode, label) {
+    cameraMode = mode;
+    cameraModeLabel = label;
+    cameraModeElement.textContent = label;
+    document.querySelectorAll('[data-camera-preset]').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.cameraPreset === mode));
+    });
+}
+
+function setAutoRotate(enabled) {
+    const rotating = Boolean(enabled) && !reducedMotion.matches;
+    controls.autoRotate = rotating;
+    rotateToggle.checked = rotating;
+    cameraSpinButton.setAttribute('aria-pressed', String(rotating));
+    cameraSpinButton.title = `${rotating ? 'Pause' : 'Resume'} automatic rotation (Space)`;
+    cameraSpinButton.querySelector('.camera-icon').textContent = rotating ? 'Ⅱ' : '↻';
+    cameraSpinButton.querySelector('.camera-btn-label').textContent = rotating ? 'Pause' : 'Spin';
+}
+
+function setCameraConstraints(surfaceFocus) {
+    controls.minDistance = surfaceFocus ? 0.18 : 1.22;
+    controls.maxDistance = surfaceFocus ? 3.2 : 7;
+}
+
+function flyCamera(position, target, { duration = 850, mode = 'custom', label = 'Free orbit', surfaceFocus = false } = {}) {
+    setAutoRotate(false);
+    setCameraConstraints(surfaceFocus);
+    setCameraMode(mode, label);
     cameraTween = {
         started: performance.now(), duration,
         fromPosition: camera.position.clone(), toPosition: position.clone(),
@@ -688,26 +787,97 @@ function flyCamera(position, target, duration = 850) {
     };
 }
 
-document.querySelector('#focus-rover').addEventListener('click', () => {
-    const radial = latLonVector(selectedRoutePoint.lat_deg, selectedRoutePoint.lon_deg).applyEuler(marsGroup.rotation).normalize();
-    const tangent = new THREE.Vector3(0, 1, 0).cross(radial).normalize();
-    flyCamera(radial.clone().multiplyScalar(1.72).add(tangent.multiplyScalar(0.36)), radial.clone().multiplyScalar(0.98));
-});
-document.querySelector('#reset-view').addEventListener('click', () => flyCamera(new THREE.Vector3(0.15, 0.42, 3.15), new THREE.Vector3()));
-document.querySelectorAll('[data-sky-focus]').forEach(button => {
-    button.addEventListener('click', () => {
-        const key = button.dataset.skyFocus;
-        const direction = sky.getDirection(key);
-        if (!direction) return;
-        const input = document.querySelector(`[data-layer="sky-${key}"]`);
-        if (input && !input.checked) {
-            input.checked = true;
-            sky.setBodyVisible(key, true);
-        }
-        const worldDirection = direction.applyQuaternion(marsGroup.quaternion).normalize();
-        flyCamera(worldDirection.multiplyScalar(3.15), new THREE.Vector3());
-        showSkyBody(sky.getBodyRecord(key));
+function focusSurfacePoint(latDeg, lonDeg, { mode = 'landmark', label = 'Surface focus', duration = 850 } = {}) {
+    const radial = latLonVector(latDeg, lonDeg).applyQuaternion(marsGroup.quaternion).normalize();
+    const { north, east } = tangentFrame(radial);
+    const position = radial.clone().multiplyScalar(1.22)
+        .addScaledVector(north, 0.09)
+        .addScaledVector(east, 0.1);
+    flyCamera(position, radial.clone().multiplyScalar(0.995), { duration, mode, label, surfaceFocus: true });
+}
+
+function focusSelectedRover(duration = 850) {
+    focusSurfacePoint(selectedRoutePoint.lat_deg, selectedRoutePoint.lon_deg, {
+        mode: 'rover', label: `Rover · sol ${selectedRoutePoint.sol}`, duration,
     });
+}
+
+function focusLandingSite(duration = 850) {
+    focusSurfacePoint(mission.landing_site.lat_deg, mission.landing_site.lon_deg, {
+        mode: 'landing', label: 'Landing site', duration,
+    });
+}
+
+function showGlobalView(duration = 850) {
+    flyCamera(globalCameraPosition, new THREE.Vector3(), {
+        duration, mode: 'global', label: 'Mission orbit', surfaceFocus: false,
+    });
+}
+
+function focusSkyBody(key, { showDetails = true } = {}) {
+    const direction = sky.getDirection(key);
+    if (!direction) return;
+    const input = document.querySelector(`[data-layer="sky-${key}"]`);
+    if (input && !input.checked) {
+        input.checked = true;
+        sky.setBodyVisible(key, true);
+    }
+    const worldDirection = direction.applyQuaternion(marsGroup.quaternion).normalize();
+    const record = sky.getBodyRecord(key);
+    flyCamera(worldDirection.multiplyScalar(3.3), new THREE.Vector3(), {
+        mode: 'sky', label: `${record?.name || key} sky`, surfaceFocus: false,
+    });
+    if (showDetails && record) showSkyBody(record, key);
+}
+
+function zoomCamera(factor) {
+    cameraTween = null;
+    setAutoRotate(false);
+    const offset = camera.position.clone().sub(controls.target);
+    const nextDistance = THREE.MathUtils.clamp(offset.length() * factor, controls.minDistance, controls.maxDistance);
+    const nextPosition = controls.target.clone().add(offset.normalize().multiplyScalar(nextDistance));
+    flyCamera(nextPosition, controls.target.clone(), {
+        duration: 280,
+        mode: cameraMode,
+        label: cameraModeLabel,
+        surfaceFocus: controls.target.length() > 0.5,
+    });
+}
+
+document.querySelector('#focus-rover').addEventListener('click', () => focusSelectedRover());
+document.querySelector('#reset-view').addEventListener('click', () => showGlobalView());
+document.querySelector('#camera-global').addEventListener('click', () => showGlobalView());
+document.querySelector('#camera-rover').addEventListener('click', () => focusSelectedRover());
+document.querySelector('#camera-landing').addEventListener('click', () => focusLandingSite());
+document.querySelector('#camera-zoom-out').addEventListener('click', () => zoomCamera(1.3));
+document.querySelector('#camera-zoom-in').addEventListener('click', () => zoomCamera(0.76));
+cameraSpinButton.addEventListener('click', () => setAutoRotate(!controls.autoRotate));
+
+document.querySelectorAll('[data-sky-focus]').forEach(button => {
+    button.addEventListener('click', () => focusSkyBody(button.dataset.skyFocus));
+});
+
+controls.addEventListener('start', () => {
+    cameraTween = null;
+    setAutoRotate(false);
+    setCameraMode('custom', 'Free orbit');
+    canvas.classList.add('is-interacting');
+});
+controls.addEventListener('end', () => canvas.classList.remove('is-interacting'));
+
+reducedMotion.addEventListener?.('change', event => {
+    if (event.matches) setAutoRotate(false);
+});
+
+canvas.addEventListener('keydown', event => {
+    if (event.key.toLowerCase() === 'h') showGlobalView();
+    else if (event.key.toLowerCase() === 'r') focusSelectedRover();
+    else if (event.key.toLowerCase() === 'l') focusLandingSite();
+    else if (event.key === '+' || event.key === '=') zoomCamera(0.76);
+    else if (event.key === '-' || event.key === '_') zoomCamera(1.3);
+    else if (event.key === ' ') setAutoRotate(!controls.autoRotate);
+    else return;
+    event.preventDefault();
 });
 
 const landmarkCard = document.querySelector('#landmark-card');
@@ -723,16 +893,22 @@ function showLandmark(landmark) {
     document.querySelector('#landmark-card-stats').textContent = `${landmark.diameterKm.toLocaleString(undefined, { maximumFractionDigits: 1 })} km · ${Math.abs(landmark.latDeg).toFixed(2)}°${landmark.latDeg < 0 ? 'S' : 'N'}, ${Math.abs(landmark.lonDeg).toFixed(2)}°${landmark.lonDeg < 0 ? 'W' : 'E'}`;
     document.querySelector('#landmark-card-source').href = landmark.source;
     document.querySelector('#landmark-card-source').textContent = 'USGS/IAU record ↗';
+    const focusButton = document.querySelector('#landmark-card-focus');
+    focusButton.textContent = 'Fly here';
+    cardFocusAction = () => focusSurfacePoint(landmark.latDeg, landmark.lonDeg, { label: landmark.name });
     landmarkCard.hidden = false;
 }
 
-function showSkyBody(record) {
+function showSkyBody(record, key) {
     document.querySelector('#landmark-card-category').textContent = 'JPL Horizons · Mars topocentric sky';
     document.querySelector('#landmark-card-name').textContent = record.name;
     document.querySelector('#landmark-card-note').textContent = `${record.above_horizon ? 'Above' : 'Below'} the airless local horizon at Perseverance's latest public route position. Apparent direction includes light-time and aberration corrections.`;
     document.querySelector('#landmark-card-stats').textContent = `Az ${record.azimuth_deg.toFixed(3)}° · El ${signedDegrees(record.elevation_deg)} · ${record.range_au.toFixed(6)} AU`;
     document.querySelector('#landmark-card-source').href = 'https://ssd-api.jpl.nasa.gov/doc/horizons.html';
     document.querySelector('#landmark-card-source').textContent = 'JPL Horizons method ↗';
+    const focusButton = document.querySelector('#landmark-card-focus');
+    focusButton.textContent = 'Center sky';
+    cardFocusAction = () => focusSkyBody(key, { showDetails: false });
     landmarkCard.hidden = false;
 }
 
@@ -748,7 +924,7 @@ canvas.addEventListener('pointerup', event => {
     const skyHit = raycaster.intersectObjects(sky.hitTargets, false)
         .find(intersection => sky.isBodyVisible(intersection.object.userData.skyBodyKey));
     if (skyHit) {
-        showSkyBody(sky.getBodyRecord(skyHit.object.userData.skyBodyKey));
+        showSkyBody(sky.getBodyRecord(skyHit.object.userData.skyBodyKey), skyHit.object.userData.skyBodyKey);
         return;
     }
     const hit = raycaster.intersectObjects(landmarks.hitTargets, false)
@@ -756,6 +932,7 @@ canvas.addEventListener('pointerup', event => {
     if (hit) showLandmark(hit.object.userData.landmark);
 });
 document.querySelector('#landmark-card-close').addEventListener('click', () => { landmarkCard.hidden = true; });
+document.querySelector('#landmark-card-focus').addEventListener('click', () => cardFocusAction?.());
 
 function updateCameraTween(now) {
     if (!cameraTween) return;
@@ -763,7 +940,29 @@ function updateCameraTween(now) {
     const eased = raw < 0.5 ? 4 * raw ** 3 : 1 - Math.pow(-2 * raw + 2, 3) / 2;
     camera.position.lerpVectors(cameraTween.fromPosition, cameraTween.toPosition, eased);
     controls.target.lerpVectors(cameraTween.fromTarget, cameraTween.toTarget, eased);
-    if (raw >= 1) cameraTween = null;
+    if (raw >= 1) {
+        camera.position.copy(cameraTween.toPosition);
+        controls.target.copy(cameraTween.toTarget);
+        cameraTween = null;
+    }
+}
+
+let displayedCameraRange = '';
+function updateCameraReadout() {
+    const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_M / 1000;
+    const formatted = `${Math.round(rangeKm).toLocaleString()} km`;
+    if (formatted === displayedCameraRange) return;
+    displayedCameraRange = formatted;
+    cameraRangeElement.value = `Range ${formatted}`;
+    cameraRangeElement.textContent = `Range ${formatted}`;
+    cameraRangeElement.dataset.rangeKm = String(Math.round(rangeKm));
+}
+
+const markerWorldPosition = new THREE.Vector3();
+function updateSurfaceMarkerScale(marker) {
+    marker.getWorldPosition(markerWorldPosition);
+    const distance = camera.position.distanceTo(markerWorldPosition);
+    marker.scale.setScalar(THREE.MathUtils.clamp(distance / 2.25, 0.18, 1));
 }
 
 function resize() {
@@ -776,8 +975,12 @@ function resize() {
 if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(viewport);
 window.addEventListener('resize', resize, { passive: true });
 resize();
+setCameraMode('global', 'Mission orbit');
+setAutoRotate(!reducedMotion.matches);
+updateCameraReadout();
 
 applyMissionUi(mission);
+applyBundledWeather({}, 'Checking the shared adapter');
 updateMarsClock();
 updateIllumination();
 window.setInterval(updateMarsClock, 1000);
@@ -792,6 +995,16 @@ scheduleMarsSkyRefresh();
 
 loaderStatus.textContent = hasRelief ? 'MOLA relief ready · locating Perseverance…' : 'Smooth globe ready · MOLA relief unavailable';
 window.__marsReady = true;
+window.__marsLab = Object.freeze({
+    camera,
+    controls,
+    layerIsVisible,
+    cameraState: () => ({
+        mode: cameraMode,
+        label: cameraModeLabel,
+        rangeKm: camera.position.distanceTo(controls.target) * MARS_RADIUS_M / 1000,
+    }),
+});
 window.clearTimeout(window.__marsBootTimer);
 document.querySelector('#mars-render-fallback').hidden = true;
 app.classList.remove('mars-render-degraded');
@@ -806,9 +1019,13 @@ function animate(now) {
     roverLayer.userData.ring.material.opacity = 0.56 + Math.sin(elapsed * 2.7) * 0.16;
     routeCursor.userData.ring.scale.setScalar(1 + Math.sin(elapsed * 3.1) * 0.18);
     routeCursor.userData.ring.material.opacity = 0.58 + Math.sin(elapsed * 3.1) * 0.16;
+    updateSurfaceMarkerScale(roverLayer);
+    updateSurfaceMarkerScale(landingLayer);
+    updateSurfaceMarkerScale(routeCursor);
     landmarks.update(camera);
     sky.updateCamera(camera);
     controls.update();
+    updateCameraReadout();
     renderer.render(scene, camera);
 }
 requestAnimationFrame(animate);
