@@ -972,20 +972,29 @@ document.querySelectorAll('[data-layer]').forEach(input => {
     input.addEventListener('change', () => setLayer(input.dataset.layer, input.checked));
 });
 
+function setCollapsed(container, button, collapsed, label) {
+    container.classList.toggle('collapsed', collapsed);
+    button.setAttribute('aria-expanded', String(!collapsed));
+    button.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Minimize'} ${label}`);
+    button.title = `${collapsed ? 'Expand' : 'Minimize'} ${label}`;
+    button.textContent = collapsed ? '+' : '−';
+}
+
 document.querySelectorAll('.panel .panel-toggle').forEach(button => {
     button.addEventListener('click', () => {
         const panel = button.closest('.panel');
-        const collapsed = panel.classList.toggle('collapsed');
-        button.setAttribute('aria-expanded', String(!collapsed));
-        button.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${panel.querySelector('h2').textContent}`);
+        setCollapsed(panel, button, !panel.classList.contains('collapsed'), panel.querySelector('h2').textContent);
     });
 });
 
 const weatherDock = document.querySelector('.data-dock');
 document.querySelector('#weather-collapse').addEventListener('click', event => {
-    const collapsed = weatherDock.classList.toggle('collapsed');
-    event.currentTarget.setAttribute('aria-expanded', String(!collapsed));
-    event.currentTarget.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} MEDA surface observations`);
+    setCollapsed(
+        weatherDock,
+        event.currentTarget,
+        !weatherDock.classList.contains('collapsed'),
+        'MEDA surface observations',
+    );
 });
 
 const cameraModeElement = document.querySelector('#camera-mode');
@@ -1001,6 +1010,26 @@ const meshStatusElement = document.querySelector('#mars-mesh-status');
 const globalMeshStatus = meshStatusElement.textContent;
 const surfaceLightButton = document.querySelector('#surface-light');
 const surfaceGridButton = document.querySelector('#surface-grid');
+const surfaceCollapseButton = document.querySelector('#surface-collapse');
+const interfaceToggleButton = document.querySelector('#ui-panels-toggle');
+const interfaceToggleIcon = document.querySelector('#ui-panels-icon');
+
+function setInterfaceClean(enabled) {
+    const clean = Boolean(enabled);
+    app.classList.toggle('interface-clean', clean);
+    interfaceToggleButton.setAttribute('aria-pressed', String(clean));
+    interfaceToggleButton.setAttribute('aria-label', clean ? 'Show all interface panels' : 'Hide all interface panels');
+    interfaceToggleButton.title = `${clean ? 'Show' : 'Hide'} all interface panels (P)`;
+    interfaceToggleIcon.textContent = clean ? 'SHOW' : 'HIDE';
+}
+
+interfaceToggleButton.addEventListener('click', () => setInterfaceClean(!app.classList.contains('interface-clean')));
+surfaceCollapseButton.addEventListener('click', () => setCollapsed(
+    surfaceExplorer,
+    surfaceCollapseButton,
+    !surfaceExplorer.classList.contains('collapsed'),
+    'surface controls',
+));
 
 function setCameraMode(mode, label) {
     cameraMode = mode;
@@ -1352,6 +1381,7 @@ canvas.addEventListener('keydown', event => {
     else if (event.key === '+' || event.key === '=') zoomCamera(0.76);
     else if (event.key === '-' || event.key === '_') zoomCamera(1.3);
     else if (event.key === ' ') setAutoRotate(!controls.autoRotate);
+    else if (event.key.toLowerCase() === 'p') setInterfaceClean(!app.classList.contains('interface-clean'));
     else return;
     event.preventDefault();
 });

@@ -65,6 +65,8 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
 
     await page.goto('/mars.html');
     await expect(page.locator('#loading-screen')).toHaveClass(/done/, { timeout: 20_000 });
+    const rejectCookies = page.getByRole('button', { name: 'Reject non-essential' });
+    if (await rejectCookies.isVisible()) await rejectCookies.click();
     await expect(page.locator('#mars-canvas')).toBeVisible();
     await expect(page.locator('#drive-sol')).toHaveText('Sol 1940');
     await expect(page.locator('#fix-sol')).toHaveText('Sol 1940');
@@ -97,6 +99,35 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     expect(desktopControls.dockRight).toBeLessThan(desktopControls.stageLeft + desktopControls.stageWidth / 3);
     expect(desktopControls.dockBottom).toBeLessThanOrEqual(desktopControls.missionTop);
 
+    const clearCanvas = page.locator('#ui-panels-toggle');
+    await expect(clearCanvas).toBeVisible();
+    await clearCanvas.click();
+    await expect(page.locator('.mars-app')).toHaveClass(/interface-clean/);
+    await expect(clearCanvas).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.mission-panel')).toBeHidden();
+    await expect(page.locator('.layers-panel')).toBeHidden();
+    await expect(page.locator('.data-dock')).toBeHidden();
+    await expect(page.locator('#mars-canvas')).toBeVisible();
+    await clearCanvas.click();
+    await expect(clearCanvas).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('.mission-panel')).toBeVisible();
+
+    const missionCollapse = page.locator('.mission-panel .panel-toggle');
+    await missionCollapse.click();
+    await expect(page.locator('.mission-panel')).toHaveClass(/collapsed/);
+    await expect(missionCollapse).toHaveText('+');
+    await missionCollapse.click();
+    await expect(page.locator('.mission-panel .panel-body')).toBeVisible();
+
+    const weatherCollapse = page.locator('#weather-collapse');
+    await expect(weatherCollapse).toBeVisible();
+    await weatherCollapse.click();
+    await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
+    await expect(weatherCollapse).toHaveText('+');
+    await expect(page.locator('.weather-grid')).toBeHidden();
+    await weatherCollapse.click();
+    await expect(page.locator('.weather-grid')).toBeVisible();
+
     await page.locator('#camera-rover').click();
     await expect(page.locator('#camera-mode')).toContainText('Rover · sol 1940');
     await expect(page.locator('#camera-rover')).toHaveAttribute('aria-pressed', 'true');
@@ -118,6 +149,13 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await expect.poll(async () => Number(await page.locator('#camera-range').getAttribute('data-range-km'))).toBeLessThan(50);
     await expect(page.locator('#surface-light')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('#surface-grid')).toHaveAttribute('aria-pressed', 'true');
+
+    await page.locator('#surface-collapse').click();
+    await expect(page.locator('#surface-explorer')).toHaveClass(/collapsed/);
+    await expect(page.locator('#surface-collapse')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.surface-nav')).toBeHidden();
+    await page.locator('#surface-collapse').click();
+    await expect(page.locator('.surface-nav')).toBeVisible();
 
     const surfaceCameraBeforeDrag = await page.evaluate(() => window.__marsLab.camera.position.toArray());
     const surfaceCanvasBox = await page.locator('#mars-canvas').boundingBox();
@@ -220,6 +258,7 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await layersPanel.locator('.panel-toggle').click();
     await expect(layersPanel).toHaveClass(/collapsed/);
     await expect(layersPanel.locator('.panel-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(layersPanel.locator('.panel-toggle')).toHaveText('+');
     expect(errors).toEqual([]);
 });
 
