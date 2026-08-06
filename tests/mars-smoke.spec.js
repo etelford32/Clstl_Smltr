@@ -80,6 +80,22 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await expect(page.locator('#terminator-source')).toContainText('JPL Sun direction');
     await expect(page.locator('#camera-mode')).toHaveText('Mission orbit');
     await expect(page.locator('#camera-range')).toHaveAttribute('data-range-km', /\d+/);
+    const desktopControls = await page.evaluate(() => {
+        const stage = document.querySelector('#mars-viewport').getBoundingClientRect();
+        const dock = document.querySelector('.camera-dock').getBoundingClientRect();
+        const missionPanel = document.querySelector('.mission-panel').getBoundingClientRect();
+        return {
+            stageLeft: stage.left,
+            stageWidth: stage.width,
+            dockLeft: dock.left,
+            dockRight: dock.right,
+            dockBottom: dock.bottom,
+            missionTop: missionPanel.top,
+        };
+    });
+    expect(desktopControls.dockLeft).toBeGreaterThanOrEqual(desktopControls.stageLeft);
+    expect(desktopControls.dockRight).toBeLessThan(desktopControls.stageLeft + desktopControls.stageWidth / 3);
+    expect(desktopControls.dockBottom).toBeLessThanOrEqual(desktopControls.missionTop);
 
     await page.locator('#camera-rover').click();
     await expect(page.locator('#camera-mode')).toContainText('Rover · sol 1940');
@@ -94,6 +110,24 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
 
     await page.locator('#camera-global').click();
     await expect(page.locator('#camera-global')).toHaveAttribute('aria-pressed', 'true');
+    await page.waitForTimeout(900);
+
+    const positionBeforeDrag = await page.evaluate(() => window.__marsLab.camera.position.toArray());
+    const canvasBox = await page.locator('#mars-canvas').boundingBox();
+    await page.mouse.move(canvasBox.x + canvasBox.width * 0.52, canvasBox.y + canvasBox.height * 0.52);
+    await page.mouse.down();
+    await page.mouse.move(canvasBox.x + canvasBox.width * 0.64, canvasBox.y + canvasBox.height * 0.44, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.locator('#camera-mode')).toHaveText('Free orbit');
+    await expect.poll(async () => page.evaluate(before => {
+        const current = window.__marsLab.camera.position.toArray();
+        return Math.hypot(...current.map((value, index) => value - before[index]));
+    }, positionBeforeDrag)).toBeGreaterThan(0.05);
+
+    const rangeBeforeWheel = Number(await page.locator('#camera-range').getAttribute('data-range-km'));
+    await page.mouse.wheel(0, -500);
+    await expect.poll(async () => Number(await page.locator('#camera-range').getAttribute('data-range-km'))).toBeLessThan(rangeBeforeWheel);
+
     await page.locator('#camera-spin').click();
     await expect(page.locator('#camera-spin')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('[data-layer="rotate"]')).toBeChecked();

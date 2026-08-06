@@ -766,6 +766,7 @@ function setAutoRotate(enabled) {
     controls.autoRotate = rotating;
     rotateToggle.checked = rotating;
     cameraSpinButton.setAttribute('aria-pressed', String(rotating));
+    cameraSpinButton.setAttribute('aria-label', `${rotating ? 'Pause' : 'Resume'} automatic rotation`);
     cameraSpinButton.title = `${rotating ? 'Pause' : 'Resume'} automatic rotation (Space)`;
     cameraSpinButton.querySelector('.camera-icon').textContent = rotating ? 'Ⅱ' : '↻';
     cameraSpinButton.querySelector('.camera-btn-label').textContent = rotating ? 'Pause' : 'Spin';
