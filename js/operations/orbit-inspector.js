@@ -28,7 +28,7 @@
  * Mounted in the operations right column near the maneuver panel.
  */
 
-import { propagate, tleEpochToJd, getWasmSgp4 } from '../satellite-tracker.js';
+import { propagate, propagateBatch, tleEpochToJd } from '../satellite-tracker.js';
 import { decayWithSigma, deltaAPerDay, fmtLifetime } from './decision-deck.js';
 import { msisRhoAt, onMsisReady } from './msis-drag.js';
 import { provStore } from './provenance.js';
@@ -105,13 +105,7 @@ function altitudeProfileOverOrbit(tle, epochAnchorMs, samples = 60) {
         times[i] = tsBaseMin + (i / (samples - 1)) * periodMin;
     }
 
-    const wasm = getWasmSgp4();
-    let pos = null;
-    if (wasm?.propagate_batch && tle.line1 && tle.line2) {
-        try {
-            pos = wasm.propagate_batch(tle.line1, tle.line2, times);
-        } catch (_) { pos = null; }
-    }
+    const pos = propagateBatch(tle, times);
     const out = new Float32Array(samples);
     if (pos) {
         for (let i = 0; i < samples; i++) {
@@ -303,8 +297,8 @@ function renderDragSection(tle) {
         ? `${(ratePerDayKm * 365.25).toFixed(1)} km/yr`
         : '';
 
-    // TLE age + B* — the two trust inputs behind every number above.
-    // Age from the TLE epoch; B* straight off the record (MSIS path
+    // Element-set age + B* — the two trust inputs behind every number above.
+    // Age from the GP epoch; B* straight off the record (MSIS path
     // reports what it actually used, incl. the default-B fallback).
     const nowJd   = Date.now() / 86400000 + 2440587.5;
     const ageDays = nowJd - tleEpochToJd(tle);
@@ -313,13 +307,15 @@ function renderDragSection(tle) {
         : '—';
     let bstarStr = '—';
     if (isMsis) {
-        bstarStr = decay.bcSource === 'tle-bstar'
+        bstarStr = ['tle-bstar', 'omm-bstar'].includes(decay.bcSource)
             ? `${decay.bstar.toExponential(1)}`
             : `default B`;
     }
+    const elementFormat = tle.source_format === 'omm-json' ? 'OMM' : 'TLE';
+    const directBstar = isMsis && ['tle-bstar', 'omm-bstar'].includes(decay.bcSource);
     const trustRow = `
-            <div title="TLE age since epoch — position error grows ~1-2 km/day for LEO — and the TLE's B* drag term${isMsis ? (decay.bcSource === 'tle-bstar' ? ' (used by the MSIS decay integration; an SGP4 fit parameter, can sit a factor ~2 from physical C_D·A/m)' : ' (unusable on this record — the integration used a generic default ballistic coefficient with a wider σ)') : ''}.">
-                <span class="op-orbit-tag">TLE</span>${ageStr}<span class="op-orbit-unit"> old · B* ${bstarStr}</span>
+            <div title="Element-set age since epoch — public GP position error grows with age — and the record's B* drag term${isMsis ? (directBstar ? ' (used by the MSIS decay integration; an SGP4 fit parameter, can sit a factor ~2 from physical C_D·A/m)' : ' (unusable on this record — the integration used a generic default ballistic coefficient with a wider σ)') : ''}.">
+                <span class="op-orbit-tag">${elementFormat}</span>${ageStr}<span class="op-orbit-unit"> old · B* ${bstarStr}</span>
             </div>`;
 
     const modelTag = isMsis ? 'NRLMSISE-00' : 'surrogate';

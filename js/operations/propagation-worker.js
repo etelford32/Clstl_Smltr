@@ -78,6 +78,26 @@ async function loadWasm() {
     }
 }
 
+function hasOmmElements(tle) {
+    return !!tle
+        && Number.isInteger(Number(tle.norad_id))
+        && Number(tle.norad_id) > 0
+        && Number.isFinite(Number(tle.epoch_jd))
+        && ['inclination', 'raan', 'eccentricity', 'arg_perigee', 'mean_anomaly', 'mean_motion']
+            .every(key => Number.isFinite(Number(tle[key])))
+        && Number(tle.mean_motion) > 0;
+}
+
+function ommArgs(tle) {
+    return [
+        Number(tle.norad_id), Number(tle.epoch_jd),
+        Number.isFinite(Number(tle.bstar)) ? Number(tle.bstar) : 0,
+        Number(tle.inclination), Number(tle.raan), Number(tle.eccentricity),
+        Number(tle.arg_perigee), Number(tle.mean_anomaly), Number(tle.mean_motion),
+        Number.isFinite(Number(tle.rev_at_epoch)) ? Math.max(0, Math.floor(Number(tle.rev_at_epoch))) : 0,
+    ];
+}
+
 function addSats(tles) {
     if (!_ready) return 0;
     let added = 0;
@@ -86,6 +106,11 @@ function addSats(tles) {
         if (tle?.line1 && tle?.line2) {
             try {
                 _wasm.registry_add(tle.line1, tle.line2);
+                registered = true;
+            } catch (_) { /* fall through */ }
+        } else if (hasOmmElements(tle) && _wasm.registry_add_omm) {
+            try {
+                _wasm.registry_add_omm(...ommArgs(tle));
                 registered = true;
             } catch (_) { /* fall through */ }
         }

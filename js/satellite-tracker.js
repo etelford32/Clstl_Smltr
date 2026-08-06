@@ -1,7 +1,7 @@
 /**
- * satellite-tracker.js — Satellite orbit visualization and TLE management
+ * satellite-tracker.js — Satellite orbit visualization and GP element management
  *
- * Fetches TLE catalogs from the CelesTrak proxy endpoint, propagates orbits
+ * Fetches CCSDS OMM catalogs from the CelesTrak proxy endpoint, propagates orbits
  * using either the Rust SGP4 WASM module (when available) or a pure-JS
  * fallback, and renders satellite positions + orbit trails on a 3D Earth globe.
  *
@@ -13,21 +13,20 @@
  *   tracker.tick(Date.now());
  *
  * ── Data Flow ────────────────────────────────────────────────────────────────
- *   /api/celestrak/tle?group=stations → JSON array of TLEs
+ *   /api/celestrak/tle?group=stations → normalized CCSDS OMM records
  *   → SGP4 propagate each satellite to current time
  *   → TEME → ECEF → lat/lon/alt → 3D position on globe
  *   → Render as dots + optional orbit trails
  *
  * ── Coordinate Frames ────────────────────────────────────────────────────────
- *   TLE epoch → SGP4 → TEME (True Equator Mean Equinox)
+ *   GP epoch → SGP4 → TEME (True Equator Mean Equinox)
  *   TEME → GMST rotation → ECEF (Earth-Centered Earth-Fixed)
  *   ECEF → lat/lon/alt → 3D scene position on globe
  *
  * ── Data Quality Notes ──────────────────────────────────────────────────────
- *   - TLEs are mean elements, not osculating — SGP4 is the ONLY correct
- *     propagator for TLEs. Do NOT use Kepler/VSOP87D with TLE data.
+ *   - OMM/TLE GP records are mean elements, not osculating — use SGP4.
  *   - Accuracy: ~1 km at epoch, degrades ~1-2 km/day for LEO.
- *   - CelesTrak updates every ~8 hours from 18th SDS.
+ *   - CelesTrak checks for a new GP release every two hours.
  *   - TEME→ECEF conversion uses a simplified GMST (no nutation/precession).
  *     For conjunction screening, IAU-2006/2000A precession-nutation would
  *     be needed — but for visualization, GMST is sufficient (<1 km error).
@@ -108,13 +107,48 @@ export function isWasmLoaded() { return _wasmSgp4 !== null; }
 /** Get the WASM module (or null). */
 export function getWasmSgp4() { return _wasmSgp4; }
 
+/** True when a normalized record has the complete OMM mean-element set. */
+export function hasOmmElements(tle) {
+    return !!tle
+        && Number.isInteger(Number(tle.norad_id))
+        && Number(tle.norad_id) > 0
+        && Number.isFinite(Number(tle.epoch_jd))
+        && Number.isFinite(Number(tle.inclination))
+        && Number.isFinite(Number(tle.raan))
+        && Number.isFinite(Number(tle.eccentricity))
+        && Number.isFinite(Number(tle.arg_perigee))
+        && Number.isFinite(Number(tle.mean_anomaly))
+        && Number.isFinite(Number(tle.mean_motion))
+        && Number(tle.mean_motion) > 0;
+}
+
+/** Positional argument contract shared by the main-thread and worker WASM APIs. */
+export function ommElementArgs(tle) {
+    return [
+        Number(tle.norad_id),
+        Number(tle.epoch_jd),
+        Number.isFinite(Number(tle.bstar)) ? Number(tle.bstar) : 0,
+        Number(tle.inclination),
+        Number(tle.raan),
+        Number(tle.eccentricity),
+        Number(tle.arg_perigee),
+        Number(tle.mean_anomaly),
+        Number(tle.mean_motion),
+        Number.isFinite(Number(tle.rev_at_epoch)) ? Math.max(0, Math.floor(Number(tle.rev_at_epoch))) : 0,
+    ];
+}
+
 /** Propagate a TLE via Rust WASM if available, else JS fallback.
  *  Exported so pass-predictor.js and conjunction tools can reuse the same
  *  propagator the live tracker draws with. */
 export function propagate(tle, tsince_min) {
-    if (_wasmSgp4 && tle.line1 && tle.line2) {
+    if (_wasmSgp4) {
         try {
-            const result = _wasmSgp4.propagate_tle(tle.line1, tle.line2, tsince_min);
+            const result = tle.line1 && tle.line2
+                ? _wasmSgp4.propagate_tle(tle.line1, tle.line2, tsince_min)
+                : hasOmmElements(tle) && _wasmSgp4.propagate_omm
+                    ? _wasmSgp4.propagate_omm(...ommElementArgs(tle), tsince_min)
+                    : null;
             if (result && result.length >= 3 && isFinite(result[0])) {
                 return { x: result[0], y: result[1], z: result[2] };
             }
@@ -123,6 +157,28 @@ export function propagate(tle, tsince_min) {
         }
     }
     return jsFallbackPropagate(tle, tsince_min);
+}
+
+/** Full-SGP4 batch propagation for either legacy TLE or normalized OMM. */
+export function propagateBatch(tle, timesMin) {
+    if (!_wasmSgp4) return null;
+    try {
+        if (tle?.line1 && tle?.line2 && _wasmSgp4.propagate_batch) {
+            return _wasmSgp4.propagate_batch(tle.line1, tle.line2, timesMin);
+        }
+        if (hasOmmElements(tle) && _wasmSgp4.propagate_batch_omm) {
+            return _wasmSgp4.propagate_batch_omm(...ommElementArgs(tle), timesMin);
+        }
+    } catch (_) { /* caller chooses its fallback */ }
+    return null;
+}
+
+/** Whether the loaded WASM bundle can batch-propagate this record format. */
+export function canBatchPropagate(tle) {
+    return !!_wasmSgp4 && (
+        (!!tle?.line1 && !!tle?.line2 && typeof _wasmSgp4.propagate_batch === 'function')
+        || (hasOmmElements(tle) && typeof _wasmSgp4.propagate_batch_omm === 'function')
+    );
 }
 
 // ── Pure JS SGP4 fallback (simplified Brouwer mean elements) ─────────────────
@@ -683,6 +739,12 @@ export class SatelliteTracker {
                 composite: data.composite ?? false,
                 subgroups: data.subgroups ?? null,
                 fetched: data.fetched ?? new Date().toISOString(),
+                source: data.source ?? 'CelesTrak GP',
+                sourceFormat: data.source_format ?? 'unknown',
+                upstreamCount: Number(data.upstream_count ?? tles.length),
+                rejectedCount: Number(data.rejected_count ?? 0),
+                updateCadenceHours: Number(data.update_cadence_hours ?? 2),
+                health: data.health ?? null,
             });
 
             // Composite groups can succeed-with-partial. Keep that visible.
@@ -694,7 +756,11 @@ export class SatelliteTracker {
             console.info(`[SatTracker] +${added} satellites (${group}) — total: ${this._satellites.length}`);
 
             window.dispatchEvent(new CustomEvent('satellites-loaded', {
-                detail: { group, count: added, total: this._satellites.length },
+                detail: {
+                    group, count: added, total: this._satellites.length,
+                    sourceFormat: data.source_format ?? 'unknown',
+                    rejectedCount: Number(data.rejected_count ?? 0),
+                },
             }));
 
             return added;
@@ -792,6 +858,9 @@ export class SatelliteTracker {
 
     /** Get all loaded group names. */
     getLoadedGroups() { return [...this._groups.keys()]; }
+
+    /** Maximum normalized records this tracker instance can retain. */
+    getCatalogCapacity() { return this._maxSats; }
 
     /** Get count per group. */
     getGroupCounts() {
@@ -966,6 +1035,9 @@ export class SatelliteTracker {
     getDrawnCount() { return this._lodDrawn || this._satellites.length; }
     /** Total catalogued (and still fully propagated) objects. */
     getCatalogSize() { return this._satellites.length; }
+
+    /** Normalized orbit records currently retained, deduplicated by NORAD ID. */
+    getCatalogRecords() { return this._satellites.map(sat => sat.tle); }
 
     /**
      * Recompute the draw set. With cull on, the candidate list is the
@@ -1318,6 +1390,16 @@ export class SatelliteTracker {
             tles.push({
                 line1: t.line1 || null,
                 line2: t.line2 || null,
+                norad_id: t.norad_id,
+                epoch_jd: t.epoch_jd,
+                bstar: t.bstar,
+                inclination: t.inclination,
+                raan: t.raan,
+                eccentricity: t.eccentricity,
+                arg_perigee: t.arg_perigee,
+                mean_anomaly: t.mean_anomaly,
+                mean_motion: t.mean_motion,
+                rev_at_epoch: t.rev_at_epoch,
             });
         }
         this._workerSyncedTo = upTo;
@@ -1392,6 +1474,14 @@ export class SatelliteTracker {
                     registered = true;
                 } catch (_) {
                     // Parse / init failed — fall through to blank slot.
+                }
+            } else if (hasOmmElements(sat.tle) && _wasmSgp4.registry_add_omm) {
+                try {
+                    _wasmSgp4.registry_add_omm(...ommElementArgs(sat.tle));
+                    sat._batchOk = true;
+                    registered = true;
+                } catch (_) {
+                    // Validation / init failed — fall through to blank slot.
                 }
             }
             if (!registered) {
@@ -1824,9 +1914,10 @@ export class SatelliteTracker {
         // Propagate target at all time steps
         let targetPositions;  // Array of {x, y, z} per step
 
-        if (_wasmSgp4 && target.tle.line1 && target.tle.line2) {
+        if (_wasmSgp4) {
             try {
-                const result = _wasmSgp4.propagate_batch(target.tle.line1, target.tle.line2, times);
+                const result = propagateBatch(target.tle, times);
+                if (!result) throw new Error('batch propagator unavailable');
                 targetPositions = [];
                 for (let i = 0; i < nSteps; i++) {
                     const off = i * 6;
@@ -2015,6 +2106,10 @@ const _hiddenColor = new THREE.Color(0x000000);
  *  Exported for modules that want to propagate independently of the
  *  tracker but using the same epoch arithmetic. */
 export function tleEpochToJd(tle) {
+    if (Number.isFinite(Number(tle?.epoch_jd))) return Number(tle.epoch_jd);
+    if (Number.isFinite(Number(tle?.epoch_ms))) return Number(tle.epoch_ms) / 86400000 + 2440587.5;
+    const epochMs = Date.parse(tle?.epoch);
+    if (Number.isFinite(epochMs)) return epochMs / 86400000 + 2440587.5;
     const epochYr = tle.epoch_yr ?? 2026;
     const yr = Math.floor(epochYr);
     const dayFrac = (epochYr - yr) * (yr % 4 === 0 ? 366 : 365);

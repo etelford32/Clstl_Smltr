@@ -131,6 +131,63 @@ fn parse_tle(line1: &str, line2: &str) -> Result<TleElements, String> {
     })
 }
 
+/// Build the same internal mean-element record directly from a CCSDS OMM
+/// payload. OMM is the catalogue-safe path for six- and nine-digit object
+/// identifiers, which no longer fit the legacy fixed-width TLE identifier
+/// field. Angular inputs are degrees and mean motion is rev/day, matching
+/// CelesTrak's OMM JSON representation.
+fn elements_from_omm(
+    norad_id: u32,
+    epoch_jd: f64,
+    bstar: f64,
+    inclination_deg: f64,
+    raan_deg: f64,
+    eccentricity: f64,
+    arg_perigee_deg: f64,
+    mean_anomaly_deg: f64,
+    mean_motion_rev_day: f64,
+    rev_num: u32,
+) -> Result<TleElements, String> {
+    let finite = epoch_jd.is_finite()
+        && bstar.is_finite()
+        && inclination_deg.is_finite()
+        && raan_deg.is_finite()
+        && eccentricity.is_finite()
+        && arg_perigee_deg.is_finite()
+        && mean_anomaly_deg.is_finite()
+        && mean_motion_rev_day.is_finite();
+    if !finite { return Err("OMM elements must be finite".into()); }
+    if norad_id == 0 { return Err("Bad NORAD ID".into()); }
+    if !(2_000_000.0..3_000_000.0).contains(&epoch_jd) {
+        return Err("Bad OMM epoch JD".into());
+    }
+    if !(0.0..=180.0).contains(&inclination_deg) {
+        return Err("Bad OMM inclination".into());
+    }
+    if !(0.0..1.0).contains(&eccentricity) {
+        return Err("Bad OMM eccentricity".into());
+    }
+    if mean_motion_rev_day <= 0.0 {
+        return Err("Bad OMM mean motion".into());
+    }
+
+    Ok(TleElements {
+        norad_id,
+        // The propagator uses epoch_jd for elapsed time. epoch_yr is retained
+        // only for parse-info compatibility and is not needed on this path.
+        epoch_yr: 0.0,
+        epoch_jd,
+        bstar,
+        incl: inclination_deg * DEG2RAD,
+        raan: raan_deg * DEG2RAD,
+        ecc: eccentricity,
+        argp: arg_perigee_deg * DEG2RAD,
+        mean_anom: mean_anomaly_deg * DEG2RAD,
+        mean_motion: mean_motion_rev_day * TWOPI / MIN_PER_DAY,
+        rev_num,
+    })
+}
+
 /// Parse TLE-format implied-decimal float (e.g. " 50475-4" → 0.50475e-4)
 fn parse_tle_float(s: &str) -> Result<f64, String> {
     let s = s.trim();
@@ -424,6 +481,69 @@ pub fn propagate_batch(line1: &str, line2: &str, times_min: &[f64]) -> Result<Ve
     Ok(results)
 }
 
+/// Propagate one CCSDS OMM mean-element record. This is numerically the same
+/// SGP4 initialization and propagation path used by `propagate_tle`; only the
+/// source parser differs.
+#[wasm_bindgen]
+pub fn propagate_omm(
+    norad_id: u32,
+    epoch_jd: f64,
+    bstar: f64,
+    inclination_deg: f64,
+    raan_deg: f64,
+    eccentricity: f64,
+    arg_perigee_deg: f64,
+    mean_anomaly_deg: f64,
+    mean_motion_rev_day: f64,
+    rev_num: u32,
+    tsince_min: f64,
+) -> Result<Vec<f64>, JsValue> {
+    let tle = elements_from_omm(
+        norad_id, epoch_jd, bstar, inclination_deg, raan_deg,
+        eccentricity, arg_perigee_deg, mean_anomaly_deg,
+        mean_motion_rev_day, rev_num,
+    ).map_err(|e| JsValue::from_str(&e))?;
+    let state = sgp4_init(&tle).map_err(|e| JsValue::from_str(&e))?;
+    let (pos, vel) = sgp4_propagate(&state, tsince_min)
+        .map_err(|e| JsValue::from_str(&e))?;
+    Ok(vec![pos[0], pos[1], pos[2], vel[0], vel[1], vel[2]])
+}
+
+/// Batch companion to `propagate_omm` for orbit trails and conjunction scans.
+#[wasm_bindgen]
+pub fn propagate_batch_omm(
+    norad_id: u32,
+    epoch_jd: f64,
+    bstar: f64,
+    inclination_deg: f64,
+    raan_deg: f64,
+    eccentricity: f64,
+    arg_perigee_deg: f64,
+    mean_anomaly_deg: f64,
+    mean_motion_rev_day: f64,
+    rev_num: u32,
+    times_min: &[f64],
+) -> Result<Vec<f64>, JsValue> {
+    let tle = elements_from_omm(
+        norad_id, epoch_jd, bstar, inclination_deg, raan_deg,
+        eccentricity, arg_perigee_deg, mean_anomaly_deg,
+        mean_motion_rev_day, rev_num,
+    ).map_err(|e| JsValue::from_str(&e))?;
+    let state = sgp4_init(&tle).map_err(|e| JsValue::from_str(&e))?;
+
+    let mut results = Vec::with_capacity(times_min.len() * 6);
+    for &t in times_min {
+        match sgp4_propagate(&state, t) {
+            Ok((pos, vel)) => {
+                results.extend_from_slice(&pos);
+                results.extend_from_slice(&vel);
+            }
+            Err(_) => results.extend_from_slice(&[f64::NAN; 6]),
+        }
+    }
+    Ok(results)
+}
+
 /// Parse a TLE and return orbital elements as JSON-friendly object.
 #[wasm_bindgen]
 pub fn parse_tle_info(line1: &str, line2: &str) -> Result<JsValue, JsValue> {
@@ -496,6 +616,35 @@ pub fn registry_add(line1: &str, line2: &str) -> Result<u32, JsValue> {
         .map_err(|e| JsValue::from_str(&e))?;
     let state = sgp4_init(&tle)
         .map_err(|e| JsValue::from_str(&e))?;
+    let idx = REGISTRY.with(|r| {
+        let mut reg = r.borrow_mut();
+        let i = reg.len();
+        reg.push(Some(state));
+        i as u32
+    });
+    Ok(idx)
+}
+
+/// Append a CCSDS OMM record to the persistent hot-path registry.
+#[wasm_bindgen]
+pub fn registry_add_omm(
+    norad_id: u32,
+    epoch_jd: f64,
+    bstar: f64,
+    inclination_deg: f64,
+    raan_deg: f64,
+    eccentricity: f64,
+    arg_perigee_deg: f64,
+    mean_anomaly_deg: f64,
+    mean_motion_rev_day: f64,
+    rev_num: u32,
+) -> Result<u32, JsValue> {
+    let tle = elements_from_omm(
+        norad_id, epoch_jd, bstar, inclination_deg, raan_deg,
+        eccentricity, arg_perigee_deg, mean_anomaly_deg,
+        mean_motion_rev_day, rev_num,
+    ).map_err(|e| JsValue::from_str(&e))?;
+    let state = sgp4_init(&tle).map_err(|e| JsValue::from_str(&e))?;
     let idx = REGISTRY.with(|r| {
         let mut reg = r.borrow_mut();
         let i = reg.len();
@@ -1009,4 +1158,47 @@ struct OscElements {
     speed_km_s: f64,
     radius_km: f64,
     altitude_km: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn omm_and_tle_inputs_share_the_same_sgp4_path() {
+        let line1 = "1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927";
+        let line2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537";
+        let from_tle = parse_tle(line1, line2).expect("valid reference TLE");
+        let from_omm = elements_from_omm(
+            100_147,
+            from_tle.epoch_jd,
+            from_tle.bstar,
+            from_tle.incl / DEG2RAD,
+            from_tle.raan / DEG2RAD,
+            from_tle.ecc,
+            from_tle.argp / DEG2RAD,
+            from_tle.mean_anom / DEG2RAD,
+            from_tle.mean_motion * MIN_PER_DAY / TWOPI,
+            from_tle.rev_num,
+        ).expect("valid OMM elements");
+
+        assert_eq!(from_omm.norad_id, 100_147);
+        let tle_state = sgp4_init(&from_tle).expect("TLE SGP4 init");
+        let omm_state = sgp4_init(&from_omm).expect("OMM SGP4 init");
+        let (tle_pos, tle_vel) = sgp4_propagate(&tle_state, 60.0).expect("TLE propagate");
+        let (omm_pos, omm_vel) = sgp4_propagate(&omm_state, 60.0).expect("OMM propagate");
+        for i in 0..3 {
+            assert!((tle_pos[i] - omm_pos[i]).abs() < 1e-9);
+            assert!((tle_vel[i] - omm_vel[i]).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn omm_validation_rejects_non_physical_elements() {
+        let result = elements_from_omm(
+            100_147, 2_461_000.5, 0.0, 51.6, 0.0,
+            1.2, 0.0, 0.0, 15.5, 1,
+        );
+        assert!(result.is_err());
+    }
 }

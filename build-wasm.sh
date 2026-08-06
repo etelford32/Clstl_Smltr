@@ -5,6 +5,11 @@ set -e
 
 echo "🦀 Building Rust WASM for deployment..."
 
+# rust-sstar and rust-forecast currently pin this bindgen schema. The CLI and
+# crate schema must match exactly; a newer globally installed CLI should not
+# make an otherwise valid deploy fail or erase the committed fallback bundle.
+LEGACY_BINDGEN_VERSION="0.2.118"
+
 # Ensure Rust/cargo is on PATH.
 # Handles two layouts:
 #   ~/.cargo/bin  — rustup default (local / Claude Code dev sessions)
@@ -35,9 +40,12 @@ cd rust-sstar
 cargo build --release --target wasm32-unknown-unknown
 
 echo "Generating S-star JS bindings..."
-if command -v wasm-bindgen &> /dev/null; then
+if command -v wasm-bindgen &> /dev/null \
+   && wasm-bindgen --version | grep -q "$LEGACY_BINDGEN_VERSION"; then
     wasm-bindgen --target web --out-dir ../js/sstar-wasm/ \
         target/wasm32-unknown-unknown/release/sstar_wasm.wasm
+elif command -v wasm-bindgen &> /dev/null; then
+    echo "WARN: wasm-bindgen CLI does not match rust-sstar $LEGACY_BINDGEN_VERSION — preserving committed JS bindings"
 else
     echo "WARN: wasm-bindgen CLI not found — using pre-built JS bindings"
     cp target/wasm32-unknown-unknown/release/sstar_wasm.wasm ../js/sstar-wasm/sstar_wasm_bg.wasm
@@ -50,9 +58,12 @@ cd rust-forecast
 cargo build --release --target wasm32-unknown-unknown
 
 echo "Generating forecast24 JS bindings..."
-if command -v wasm-bindgen &> /dev/null; then
+if command -v wasm-bindgen &> /dev/null \
+   && wasm-bindgen --version | grep -q "$LEGACY_BINDGEN_VERSION"; then
     wasm-bindgen --target web --out-dir ../js/forecast-wasm/ \
         target/wasm32-unknown-unknown/release/forecast24_wasm.wasm
+elif command -v wasm-bindgen &> /dev/null; then
+    echo "WARN: wasm-bindgen CLI does not match rust-forecast $LEGACY_BINDGEN_VERSION — preserving committed JS bindings"
 else
     # No wasm-bindgen available → locationforecast.html falls back to its
     # bundled JS port (algorithmically identical, ~3× slower in tight loops).

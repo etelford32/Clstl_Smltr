@@ -45,7 +45,7 @@
  * Mounted into a panel in the operations right column.
  */
 
-import { propagate, tleEpochToJd, getWasmSgp4 } from '../satellite-tracker.js';
+import { propagate, propagateBatch, canBatchPropagate, tleEpochToJd } from '../satellite-tracker.js';
 import { timeBus }                              from './time-bus.js';
 
 const MIN_PER_DAY = 1440;
@@ -302,10 +302,10 @@ export function mountManeuverPanel(opts = {}) {
         const times = new Float64Array(n);
         for (let i = 0; i < n; i++) times[i] = tsBurnMin + direction * i * halfStepMin;
 
-        const wasm = getWasmSgp4();
-        if (wasm?.propagate_batch && tle.line1 && tle.line2) {
+        if (canBatchPropagate(tle)) {
             try {
-                const flat = wasm.propagate_batch(tle.line1, tle.line2, times);
+                const flat = propagateBatch(tle, times);
+                if (!flat) throw new Error('batch propagator unavailable');
                 // flat is [x, y, z, vx, vy, vz] per sample. We only
                 // need positions — pack into a tighter Float64Array.
                 const out = new Float64Array(n * 3);
@@ -401,7 +401,7 @@ export function mountManeuverPanel(opts = {}) {
         };
 
         // CW fallback path — only entered if WASM batch is missing.
-        const wasmBatchOk = !!getWasmSgp4()?.propagate_batch;
+        const wasmBatchOk = canBatchPropagate(tle);
         const nRadSec = (tle.mean_motion * 2 * Math.PI) / 86400;
         const useCwFallback = !wasmBatchOk && Number.isFinite(nRadSec) && nRadSec > 0;
 
@@ -492,7 +492,7 @@ export function mountManeuverPanel(opts = {}) {
         // batch propagator is unavailable.
         const ecc = selectedAsset?.tle?.eccentricity ?? 0;
         const periodMin = selectedAsset?.tle?.period_min ?? null;
-        const wasmBatchOk = !!getWasmSgp4()?.propagate_batch;
+        const wasmBatchOk = canBatchPropagate(selectedAsset?.tle);
         const periodHint = Number.isFinite(periodMin)
             ? ` Chief period ${periodMin.toFixed(0)} min.`
             : '';
@@ -626,6 +626,25 @@ export function mountManeuverPanel(opts = {}) {
     render();
 
     return {
+        /** Coordinate external action-comparison controls with this panel. */
+        setDeltaV({ r = dvR, t = dvT, n = dvN, atMs = null } = {}) {
+            dvR = Number.isFinite(Number(r)) ? Number(r) : 0;
+            dvT = Number.isFinite(Number(t)) ? Number(t) : 0;
+            dvN = Number.isFinite(Number(n)) ? Number(n) : 0;
+            if (Number.isFinite(atMs)) {
+                burnMs = atMs;
+                burnLockedToSim = false;
+            }
+            render();
+        },
+        getSnapshot() {
+            return {
+                selectedId,
+                burnMs,
+                deltaV: { r: dvR, t: dvT, n: dvN, magnitudeMs: dvMagMs() },
+                shifts: projectShifts(),
+            };
+        },
         dispose() {
             offSel?.();
             offRows?.();

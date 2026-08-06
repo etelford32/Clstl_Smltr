@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LEO Drag Forecasting That Holds Up During the Storm — Parkers Physics</title>
-<meta name="description" content="MHD-grounded thermospheric drag forecasting for LEO operators. Empirical density models underforecast storm-time drag by 2–5× — exactly when your fleet needs the number. We model the physics that drives it. Validated against the Feb-2022 Starlink loss and the May-2024 Gannon G5.">
+<title>Orbit Margin — Fleet Storm Stress Testing · Parkers Physics</title>
+<meta name="description" content="Load a LEO fleet, stress it against live or historical-class space weather, and compare decay, conjunction, propellant, and maneuver tradeoffs with uncertainty and provenance.">
 <link rel="canonical" href="https://parkersphysics.com/for-operators">
 <meta property="og:site_name" content="Parkers Physics">
-<meta property="og:title" content="The drag forecast that holds up during the storm">
-<meta property="og:description" content="MHD-grounded LEO drag forecasting. The number doesn't fall apart at the moment it matters.">
+<meta property="og:title" content="Orbit Margin — stress-test the fleet before the storm">
+<meta property="og:description" content="Fleet-level drag, decay, conjunction, and maneuver tradeoffs under live and historical-class storm scenarios.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://parkersphysics.com/for-operators">
 <meta property="og:image" content="https://parkersphysics.com/static/og/for-operators.jpg">
@@ -16,8 +16,8 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Parkers Physics — MHD-grounded drag forecasting">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="The drag forecast that holds up during the storm">
-<meta name="twitter:description" content="MHD-grounded LEO drag forecasting for satellite operators. Validated against Feb-2022 Starlink and May-2024 Gannon G5.">
+<meta name="twitter:title" content="Orbit Margin — fleet storm stress testing">
+<meta name="twitter:description" content="Load a LEO fleet and compare storm-time decay, conjunction, propellant, and maneuver tradeoffs.">
 <meta name="twitter:image" content="https://parkersphysics.com/static/og/for-operators.jpg">
 
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -70,6 +70,9 @@ body{min-height:100vh;overflow-x:hidden;background:#03010e;color:var(--fg-2);fon
 .fo-btn-primary:hover{filter:brightness(1.1);transform:translateY(-2px)}
 .fo-btn-ghost{background:transparent;color:var(--fg-1);border:1px solid rgba(183,101,255,.4)}
 .fo-btn-ghost:hover{background:rgba(157,58,255,.1);transform:translateY(-2px)}
+.fo-cta-note{display:block;margin-top:-30px;margin-bottom:36px;font-size:.82rem;color:var(--fg-4)}
+.fo-cta-note a{color:var(--uv-300);text-decoration:none}
+.fo-cta-note a:hover{text-decoration:underline}
 .fo-stats{display:flex;flex-wrap:wrap;gap:14px 40px}
 .fo-stat-num{font-family:var(--font-display);font-size:1.6rem;font-weight:800;background:var(--grad-uv-pink);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.1}
 .fo-stat-lbl{font-family:var(--font-display);font-size:.62rem;text-transform:uppercase;letter-spacing:var(--tracking-cyber);color:var(--fg-4)}
@@ -119,6 +122,26 @@ body{min-height:100vh;overflow-x:hidden;background:#03010e;color:var(--fg-2);fon
 .fo-feat-item h4{font-family:var(--font-display);font-size:.88rem;color:var(--fg-1);margin-bottom:6px;letter-spacing:.02em}
 .fo-feat-item p{font-size:.86rem;color:var(--fg-4)}
 
+/* ── OPERATOR WORKFLOW ──────────────────────────────────────────────────── */
+.fo-workflow{padding:72px 0;background:linear-gradient(180deg,#05010f,#09021a)}
+.fo-steps{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:30px}
+.fo-step{position:relative;padding:24px 20px;background:var(--black-elev-1);border:1px solid rgba(157,58,255,.17);border-radius:12px}
+.fo-step-num{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;margin-bottom:16px;font-family:var(--font-mono);font-size:.78rem;font-weight:700;color:#091018;background:var(--status-ok);box-shadow:0 0 20px rgba(46,255,158,.24)}
+.fo-step h3{font-family:var(--font-display);font-size:.9rem;color:var(--fg-1);margin-bottom:8px}
+.fo-step p{font-size:.86rem;color:var(--fg-4);line-height:1.55}
+.fo-workflow-caveat{margin-top:20px;padding:14px 16px;border-radius:8px;border:1px solid rgba(255,210,63,.18);background:rgba(255,210,63,.04);color:var(--fg-3);font-size:.82rem}
+.fo-workflow-caveat strong{color:var(--status-warn)}
+
+/* ── FOUNDING OFFER ─────────────────────────────────────────────────────── */
+.fo-pilot{padding:72px 0;background:radial-gradient(ellipse at 78% 45%,rgba(83,30,160,.22),transparent 55%),#05010f}
+.fo-pilot-card{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);gap:32px;align-items:center;padding:32px;border:1px solid rgba(183,101,255,.26);border-radius:16px;background:rgba(13,6,38,.84);box-shadow:0 24px 70px rgba(0,0,0,.35)}
+.fo-pilot-list{list-style:none;display:grid;gap:10px}
+.fo-pilot-list li{position:relative;padding-left:24px;color:var(--fg-2);font-size:.91rem}
+.fo-pilot-list li::before{content:'✓';position:absolute;left:0;color:var(--status-ok);font-weight:800}
+.fo-pilot-side{padding:24px;border-radius:12px;background:rgba(157,58,255,.07);border:1px solid rgba(157,58,255,.18)}
+.fo-pilot-side strong{display:block;font-family:var(--font-display);color:var(--fg-1);font-size:1rem;margin-bottom:9px}
+.fo-pilot-side p{color:var(--fg-3);font-size:.88rem;margin-bottom:18px}
+
 /* ── FINAL CTA ──────────────────────────────────────────────────────────── */
 .fo-final{padding:80px 0 96px;text-align:center;background:radial-gradient(ellipse at 50% 30%,#1a0838 0%,#03010e 70%);border-top:1px solid rgba(157,58,255,.14)}
 .fo-final h2{font-family:var(--font-display);font-weight:800;font-size:clamp(1.6rem,4vw,2.4rem);background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:16px;letter-spacing:.02em}
@@ -131,8 +154,11 @@ footer.fo-footer a:hover{color:var(--uv-300)}
 
 @media (max-width:768px){
   .fo-cmp-grid{grid-template-columns:1fr}
+  .fo-steps{grid-template-columns:1fr 1fr}
+  .fo-pilot-card{grid-template-columns:1fr;padding:24px}
   .fo-hero{padding:64px 0 56px}
 }
+@media (max-width:520px){.fo-steps{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -144,23 +170,23 @@ footer.fo-footer a:hover{color:var(--uv-300)}
 <!-- ── HERO ───────────────────────────────────────────────────────────────── -->
 <header class="fo-hero">
   <div class="fo-wrap fo-hero-inner">
-    <div class="fo-badge">MHD-Grounded · LEO Drag Forecasting</div>
-    <h1 class="fo-h1">The drag forecast that <em>holds up during the storm.</em></h1>
+    <div class="fo-badge">Orbit Margin · Fleet Storm Stress Testing</div>
+    <h1 class="fo-h1">Stress-test your fleet <em>before the storm chooses for you.</em></h1>
     <p class="fo-lede">
-      When a geomagnetic storm hits, empirical density models underforecast thermospheric
-      drag by 2&ndash;5&times; &mdash; exactly when your fleet needs the number most.
-      Parkers Physics is grounded in MHD, so the forecast doesn&rsquo;t fall apart at the
-      moment it matters.
+      Load your NORAD IDs, inject live or historical-class space weather, and compare
+      what happens to decay margin, conjunction workload, and maneuver trade space.
+      Every result carries an uncertainty band, model state, and exportable provenance.
     </p>
     <div class="fo-cta-row">
-      <a href="request-access.html" class="fo-btn fo-btn-primary" data-funnel-cta="operators_request_access">Request Access</a>
-      <a href="#proof" class="fo-btn fo-btn-ghost" data-funnel-cta="operators_see_hindcast">See the hindcast</a>
+      <a href="operations.html?fleet=demo&amp;storm=gannon" class="fo-btn fo-btn-primary" data-funnel-cta="operators_demo_fleet">Run the demo fleet</a>
+      <a href="operations.html?fleet=import" class="fo-btn fo-btn-ghost" data-funnel-cta="operators_import_fleet">Bring your fleet</a>
     </div>
+    <span class="fo-cta-note">Need an assisted run? <a href="request-access.html?use_case=fleet_assessment" data-funnel-cta="operators_request_assessment">Request a fleet assessment →</a></span>
     <div class="fo-stats">
-      <div><div class="fo-stat-num">2&ndash;5&times;</div><div class="fo-stat-lbl">Storm drag empirical models miss</div></div>
-      <div><div class="fo-stat-num">38</div><div class="fo-stat-lbl">Starlink sats lost · Feb 2022</div></div>
-      <div><div class="fo-stat-num">G5</div><div class="fo-stat-lbl">Gannon hindcast validated</div></div>
-      <div><div class="fo-stat-num">450 km</div><div class="fo-stat-lbl">Drag-vs-quiet, live</div></div>
+      <div><div class="fo-stat-num">10 assets</div><div class="fo-stat-lbl">No-sign-in fleet preview</div></div>
+      <div><div class="fo-stat-num">3 storms</div><div class="fo-stat-lbl">Historical-class stress tests</div></div>
+      <div><div class="fo-stat-num">14 days</div><div class="fo-stat-lbl">Forward analysis window</div></div>
+      <div><div class="fo-stat-num">SGP4 + MSIS</div><div class="fo-stat-lbl">Traceable model chain</div></div>
     </div>
   </div>
 </header>
@@ -178,7 +204,7 @@ footer.fo-footer a:hover{color:var(--uv-300)}
 
     <div class="fo-chart-card">
       <svg class="fo-chart" viewBox="0 0 800 380" role="img"
-           aria-label="Thermospheric density through a geomagnetic storm: observed truth rises sharply at onset; the empirical model barely responds; the MHD-grounded forecast tracks the truth.">
+           aria-label="Illustrative thermospheric density stress test: observed truth rises sharply at onset, the empirical model responds slowly, and an MHD-grounded scenario follows the storm shape.">
         <!-- axes -->
         <line x1="60" y1="40" x2="60" y2="310" stroke="#2a2150" stroke-width="1"/>
         <line x1="60" y1="310" x2="770" y2="310" stroke="#2a2150" stroke-width="1"/>
@@ -201,7 +227,7 @@ footer.fo-footer a:hover{color:var(--uv-300)}
         <!-- observed truth -->
         <polyline fill="none" stroke="var(--c-observed)" stroke-width="2.5"
           points="60,278 140,276 220,272 293,260 320,190 360,80 420,70 480,110 560,170 640,220 720,250 760,260"/>
-        <!-- parkers (tracks truth) -->
+        <!-- MHD-grounded scenario -->
         <polyline fill="none" stroke="var(--c-parkers)" stroke-width="2.5"
           points="60,279 140,277 220,273 293,262 320,200 360,95 420,82 480,120 560,178 640,224 720,251 760,261"/>
         <!-- the miss callout -->
@@ -212,14 +238,30 @@ footer.fo-footer a:hover{color:var(--uv-300)}
       <div class="fo-legend">
         <span><i class="fo-swatch" style="background:var(--c-observed)"></i>Observed (truth)</span>
         <span><i class="fo-swatch" style="background:var(--c-empirical);background-image:repeating-linear-gradient(90deg,var(--c-empirical) 0 5px,transparent 5px 8px)"></i>Empirical model (NRLMSIS-class)</span>
-        <span><i class="fo-swatch" style="background:var(--c-parkers)"></i>Parkers (MHD-grounded)</span>
+        <span><i class="fo-swatch" style="background:var(--c-parkers)"></i>MHD-grounded scenario</span>
       </div>
       <p class="fo-chart-caption">
-        Illustrative hindcast shape, Feb-2022-class storm. Replay the real Gannon&nbsp;G5 and
-        Feb-2022 density presets in the
+        Illustrative storm shape, not a published skill score. Replay the Gannon&nbsp;G5 and
+        Feb-2022 stress-test presets in the
         <a href="operations.html" style="color:var(--uv-300)">Operations console</a>.
       </p>
     </div>
+  </div>
+</section>
+
+<!-- ── WORKFLOW ────────────────────────────────────────────────────────────── -->
+<section class="fo-workflow" id="workflow">
+  <div class="fo-wrap">
+    <span class="fo-eyebrow">The Decision Loop</span>
+    <h2 class="fo-section-title">From fleet file to an auditable stress test.</h2>
+    <p class="fo-section-sub">The simulator follows the same question sequence an operator uses during elevated conditions: what is exposed, how does the risk change, and which action is worth investigating?</p>
+    <div class="fo-steps">
+      <article class="fo-step"><span class="fo-step-num">01</span><h3>Load the fleet</h3><p>Paste NORAD IDs, import CSV or JSON, or drop ordinary two-line elements. The public preview supports ten assets.</p></article>
+      <article class="fo-step"><span class="fo-step-num">02</span><h3>Stress the atmosphere</h3><p>Start live, then inject a Gannon G5, Feb-2022, or AR3842-class scenario into the forward window.</p></article>
+      <article class="fo-step"><span class="fo-step-num">03</span><h3>Screen the consequences</h3><p>Compare perigee decay, drag-vs-quiet, propellant overhead, and conjunctions against the loaded catalog.</p></article>
+      <article class="fo-step"><span class="fo-step-num">04</span><h3>Compare and brief</h3><p>Choose a spacecraft design, edit mass, area, C<sub>D</sub>, attitude, and propulsion, then compare do-nothing, low-drag, raise, delay, and maneuver branches before export.</p></article>
+    </div>
+    <p class="fo-workflow-caveat"><strong>Public-preview boundary:</strong> TLEs do not include operator covariance. Results are for triage and stress testing, not autonomous maneuver commands. Customer CDM and covariance intake belongs in the assisted assessment and team beta.</p>
   </div>
 </section>
 
@@ -238,7 +280,7 @@ footer.fo-footer a:hover{color:var(--uv-300)}
       <div class="fo-card">
         <span class="fo-card-tag">May 2024 · Gannon G5</span>
         <h3>The strongest storm in two decades</h3>
-        <p>The Gannon superstorm drove mass density spikes that empirical models smoothed away. Our <span class="fo-miss">MHD-corrected density hindcast</span> tracks the observed thermospheric response &mdash; the validation case behind the whole approach.</p>
+        <p>The Gannon superstorm drove mass density spikes that empirical models smoothed away. It is the <span class="fo-miss">primary validation and fleet stress-test case</span> behind the product&rsquo;s storm-time approach.</p>
       </div>
       <div class="fo-card">
         <span class="fo-card-tag">2024 · AR3842</span>
@@ -257,7 +299,7 @@ footer.fo-footer a:hover{color:var(--uv-300)}
     <p class="fo-section-sub">Empirical models fit a climatology to history. They&rsquo;re fast and fine on a calm day &mdash; and they revert to the mean exactly when the storm pushes the atmosphere off the curve.</p>
     <div class="fo-cmp-grid">
       <div class="fo-cmp-col empirical">
-        <h3>Empirical density (NRLMSIS / JB-class)</h3>
+        <h3>Empirical density (NRLMSISE / JB-class)</h3>
         <ul>
           <li>Fit to historical climatology</li>
           <li>Reverts to mean during storms</li>
@@ -270,7 +312,7 @@ footer.fo-footer a:hover{color:var(--uv-300)}
         <ul>
           <li>SWMF / BATS-R-US magnetosphere coupling</li>
           <li>Storm energy deposition drives density</li>
-          <li>Tracks the observed storm-time response</li>
+          <li>Exposes the storm-energy driver chain</li>
           <li>Every number traceable to the equations</li>
         </ul>
       </div>
@@ -278,8 +320,8 @@ footer.fo-footer a:hover{color:var(--uv-300)}
     <div class="fo-candor">
       <strong>Where we&rsquo;re honest:</strong> on a quiet day, our forecast and a good empirical
       model are roughly a wash &mdash; the thermosphere is on its climatological curve and there&rsquo;s
-      little physics to add. The edge is the tail: the storm-time regime where the empirical
-      assumption breaks and your fleet is most exposed. That&rsquo;s the number we&rsquo;re built to get right.
+      little physics to add. The target edge is the tail: the storm-time regime where the empirical
+      assumption breaks and your fleet is most exposed. Predictive-accuracy claims stay behind the published hindcast validation gate.
     </div>
   </div>
 </section>
@@ -299,7 +341,31 @@ footer.fo-footer a:hover{color:var(--uv-300)}
       <div class="fo-feat-item"><span class="fo-ico">🔎</span><h4>Full Provenance</h4><p>Every value traces to its source and model state &mdash; auditable for evaluators.</p></div>
     </div>
     <div class="fo-cta-row" style="margin-top:30px">
-      <a href="operations.html" class="fo-btn fo-btn-ghost" data-funnel-cta="operators_open_console">Open the console</a>
+      <a href="operations.html?fleet=demo&amp;storm=gannon" class="fo-btn fo-btn-primary" data-funnel-cta="operators_open_demo_console">Stress-test the demo fleet</a>
+      <a href="operations.html?fleet=import" class="fo-btn fo-btn-ghost" data-funnel-cta="operators_open_import_console">Import my fleet</a>
+    </div>
+  </div>
+</section>
+
+<!-- ── FOUNDING PILOT ─────────────────────────────────────────────────────── -->
+<section class="fo-pilot" id="assessment">
+  <div class="fo-wrap">
+    <div class="fo-pilot-card">
+      <div>
+        <span class="fo-eyebrow">Founding Operator Pilot</span>
+        <h2 class="fo-section-title">A storm-readiness assessment for your actual fleet.</h2>
+        <ul class="fo-pilot-list">
+          <li>Quiet, Feb-2022, Gannon G5, and one mission-specific scenario</li>
+          <li>Per-asset decay, conjunction-workload, and maneuver sensitivity</li>
+          <li>Editable spacecraft mass, area, C<sub>D</sub>, attitude, thrust, Isp, and propellant assumptions</li>
+          <li>Downloadable briefing plus a 60-minute technical review</li>
+        </ul>
+      </div>
+      <aside class="fo-pilot-side">
+        <strong>Bring the operational question.</strong>
+        <p>Delay deployment? Change attitude? Protect propellant margin? We scope the assessment around the decision your team actually needs to rehearse.</p>
+        <a href="request-access.html?use_case=fleet_assessment" class="fo-btn fo-btn-primary" data-funnel-cta="operators_pilot_request">Request an assessment</a>
+      </aside>
     </div>
   </div>
 </section>
@@ -307,11 +373,11 @@ footer.fo-footer a:hover{color:var(--uv-300)}
 <!-- ── FINAL CTA ──────────────────────────────────────────────────────────── -->
 <section class="fo-final">
   <div class="fo-wrap">
-    <h2>Get the number that holds up.</h2>
-    <p>For LEO operators, government, and research programs that need storm-time drag they can stake a maneuver on.</p>
+    <h2>Know which margin the storm is spending.</h2>
+    <p>For LEO operators, government, and research programs that need a traceable fleet stress test before the next elevated interval.</p>
     <div class="fo-cta-row">
-      <a href="request-access.html" class="fo-btn fo-btn-primary" data-funnel-cta="operators_final_request_access">Request Access</a>
-      <a href="gannon-superstorm.html" class="fo-btn fo-btn-ghost" data-funnel-cta="operators_view_gannon">View the Gannon hindcast</a>
+      <a href="operations.html?fleet=demo&amp;storm=gannon" class="fo-btn fo-btn-primary" data-funnel-cta="operators_final_demo">Run the fleet demo</a>
+      <a href="request-access.html?use_case=fleet_assessment" class="fo-btn fo-btn-ghost" data-funnel-cta="operators_final_request_assessment">Request an assessment</a>
     </div>
   </div>
 </section>
