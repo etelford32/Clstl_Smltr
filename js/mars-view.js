@@ -19,6 +19,12 @@ const SURFACE_RADIUS = 1;
 const RELIEF_EXAGGERATION = 5;
 const MOLA_MIN_M = -8068;
 const MOLA_MAX_M = 21134;
+const MARS_RADIUS_KM = MARS_RADIUS_M / 1000;
+const REGIONAL_TERRAIN_EXTENT_KM = 520;
+const REGIONAL_TERRAIN_SEGMENTS = 256;
+const SURFACE_STEP_KM = 4;
+const SURFACE_CLEARANCE_KM = 0.25;
+const SURFACE_PATCH_OFFSET = 0.00012;
 const TEXTURE_URL = '/assets/mars/mars-viking-jpl.jpg';
 const MOLA_URL = '/assets/mars/mola-topography.png';
 const mission = PERSEVERANCE_MISSION;
@@ -55,6 +61,8 @@ controls.maxDistance = 7;
 controls.enablePan = false;
 controls.rotateSpeed = 0.55;
 controls.zoomSpeed = 0.75;
+controls.minPolarAngle = 0;
+controls.maxPolarAngle = Math.PI;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 controls.autoRotate = !reducedMotion.matches;
 controls.autoRotateSpeed = 0.34;
@@ -62,6 +70,10 @@ let cameraMode = 'global';
 let cameraModeLabel = 'Mission orbit';
 let cameraTween = null;
 let cardFocusAction = null;
+let surfaceModeActive = false;
+let surfaceLocation = null;
+let regionalTerrainCenter = null;
+let lastSurfaceFocus = null;
 
 scene.add(new THREE.HemisphereLight(0xffd1b1, 0x080304, 0.58));
 const sun = new THREE.DirectionalLight(0xffead5, 3.2);
@@ -157,6 +169,72 @@ const [surfaceTexture, molaTexture] = await Promise.all([
     loadTexture(MOLA_URL),
 ]);
 
+for (const texture of [surfaceTexture, molaTexture]) {
+    if (!texture) continue;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.needsUpdate = true;
+}
+
+function createRasterSampler(texture) {
+    const image = texture?.image;
+    if (!image?.width || !image?.height) return null;
+    const sampler = document.createElement('canvas');
+    sampler.width = image.width;
+    sampler.height = image.height;
+    const context = sampler.getContext('2d', { willReadFrequently: true });
+    context.drawImage(image, 0, 0);
+    const pixels = context.getImageData(0, 0, sampler.width, sampler.height).data;
+    return {
+        width: sampler.width,
+        height: sampler.height,
+        sample(u, v) {
+            const wrappedU = ((u % 1) + 1) % 1;
+            const clampedV = THREE.MathUtils.clamp(v, 0, 1);
+            const x = wrappedU * (sampler.width - 1);
+            const y = (1 - clampedV) * (sampler.height - 1);
+            const x0 = Math.floor(x);
+            const y0 = Math.floor(y);
+            const x1 = (x0 + 1) % sampler.width;
+            const y1 = Math.min(y0 + 1, sampler.height - 1);
+            const tx = x - x0;
+            const ty = y - y0;
+            const channel = (px, py) => pixels[(py * sampler.width + px) * 4];
+            const top = THREE.MathUtils.lerp(channel(x0, y0), channel(x1, y0), tx);
+            const bottom = THREE.MathUtils.lerp(channel(x0, y1), channel(x1, y1), tx);
+            return THREE.MathUtils.lerp(top, bottom, ty);
+        },
+    };
+}
+
+let molaSampler = null;
+try {
+    molaSampler = createRasterSampler(molaTexture);
+} catch (error) {
+    console.warn('[Mars] MOLA pixels could not be sampled; regional terrain will use smooth geometry', error);
+}
+
+function latLonUv(latDeg, lonDeg) {
+    return {
+        u: THREE.MathUtils.euclideanModulo(lonDeg + 180, 360) / 360,
+        v: THREE.MathUtils.clamp((latDeg + 90) / 180, 0, 1),
+    };
+}
+
+function elevationAtLatLon(latDeg, lonDeg) {
+    if (!molaSampler) return 0;
+    const { u, v } = latLonUv(latDeg, lonDeg);
+    const gray = molaSampler.sample(u, v);
+    return MOLA_MIN_M + gray / 255 * (MOLA_MAX_M - MOLA_MIN_M);
+}
+
+function reliefRadiusAtLatLon(latDeg, lonDeg, offset = 0) {
+    const reliefEnabled = typeof hasRelief === 'boolean'
+        && hasRelief
+        && document.querySelector('#relief-toggle')?.checked;
+    const exaggeration = reliefEnabled ? RELIEF_EXAGGERATION : 0;
+    return SURFACE_RADIUS + elevationAtLatLon(latDeg, lonDeg) / MARS_RADIUS_M * exaggeration + offset;
+}
+
 loaderStatus.textContent = 'Displacing 32,768 surface vertices with MOLA elevation…';
 await new Promise(resolve => requestAnimationFrame(resolve));
 
@@ -164,23 +242,14 @@ const smoothGeometry = new THREE.SphereGeometry(SURFACE_RADIUS, 256, 128);
 const reliefGeometry = smoothGeometry.clone();
 
 function displaceWithMola(geometry, texture) {
-    const image = texture?.image;
-    if (!image?.width || !image?.height) return false;
-    const sampler = document.createElement('canvas');
-    sampler.width = image.width;
-    sampler.height = image.height;
-    const context = sampler.getContext('2d', { willReadFrequently: true });
-    context.drawImage(image, 0, 0);
-    const pixels = context.getImageData(0, 0, sampler.width, sampler.height).data;
+    if (!texture || !molaSampler) return false;
     const positions = geometry.attributes.position;
     const uvs = geometry.attributes.uv;
     const direction = new THREE.Vector3();
     for (let index = 0; index < positions.count; index += 1) {
         const u = THREE.MathUtils.clamp(uvs.getX(index), 0, 0.999999);
         const v = THREE.MathUtils.clamp(uvs.getY(index), 0, 0.999999);
-        const x = Math.floor(u * sampler.width);
-        const y = Math.min(sampler.height - 1, Math.floor((1 - v) * sampler.height));
-        const gray = pixels[(y * sampler.width + x) * 4];
+        const gray = molaSampler.sample(u, v);
         const elevationM = MOLA_MIN_M + gray / 255 * (MOLA_MAX_M - MOLA_MIN_M);
         const radius = SURFACE_RADIUS + elevationM / MARS_RADIUS_M * RELIEF_EXAGGERATION;
         direction.fromBufferAttribute(positions, index).normalize().multiplyScalar(radius);
@@ -201,6 +270,8 @@ try {
 const surfaceMaterial = new THREE.MeshStandardMaterial({
     color: surfaceTexture ? 0xffffff : 0xa83f20,
     map: surfaceTexture,
+    bumpMap: molaTexture,
+    bumpScale: molaTexture ? 0.0024 : 0,
     roughness: 0.92,
     metalness: 0,
 });
@@ -209,6 +280,168 @@ const reliefMars = new THREE.Mesh(reliefGeometry, surfaceMaterial);
 smoothMars.visible = !hasRelief;
 reliefMars.visible = hasRelief;
 marsGroup.add(smoothMars, reliefMars);
+
+const regionalTerrainMaterial = new THREE.MeshStandardMaterial({
+    color: surfaceTexture ? 0xffffff : 0x9d3d22,
+    map: surfaceTexture,
+    bumpMap: molaTexture,
+    bumpScale: molaTexture ? 0.00032 : 0,
+    emissive: 0x6a2e1a,
+    emissiveMap: surfaceTexture,
+    emissiveIntensity: 1.25,
+    roughness: 0.98,
+    metalness: 0,
+    vertexColors: true,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+});
+const regionalTerrain = new THREE.Mesh(new THREE.BufferGeometry(), regionalTerrainMaterial);
+regionalTerrain.name = 'mola-regional-terrain';
+regionalTerrain.visible = false;
+regionalTerrain.renderOrder = 2;
+marsGroup.add(regionalTerrain);
+
+const regionalTerrainGrid = new THREE.LineSegments(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ color: 0xffbd8c, transparent: true, opacity: 0.16, depthWrite: false }),
+);
+regionalTerrainGrid.name = 'regional-terrain-analysis-grid';
+regionalTerrainGrid.visible = false;
+regionalTerrainGrid.renderOrder = 4;
+marsGroup.add(regionalTerrainGrid);
+
+const surfaceTrail = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ color: 0x69e4ff, transparent: true, opacity: 0.9, depthWrite: false }),
+);
+surfaceTrail.name = 'surface-exploration-trail';
+surfaceTrail.visible = false;
+marsGroup.add(surfaceTrail);
+let surfaceTrailLocations = [];
+
+function destinationLatLon(latDeg, lonDeg, eastKm, northKm) {
+    const distanceKm = Math.hypot(eastKm, northKm);
+    if (distanceKm < 1e-9) return { latDeg, lonDeg };
+    const angularDistance = distanceKm / MARS_RADIUS_KM;
+    const bearing = Math.atan2(eastKm, northKm);
+    const lat = THREE.MathUtils.degToRad(latDeg);
+    const lon = THREE.MathUtils.degToRad(lonDeg);
+    const destinationLat = Math.asin(
+        Math.sin(lat) * Math.cos(angularDistance)
+        + Math.cos(lat) * Math.sin(angularDistance) * Math.cos(bearing),
+    );
+    const destinationLon = lon + Math.atan2(
+        Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(lat),
+        Math.cos(angularDistance) - Math.sin(lat) * Math.sin(destinationLat),
+    );
+    return {
+        latDeg: THREE.MathUtils.radToDeg(destinationLat),
+        lonDeg: THREE.MathUtils.radToDeg(destinationLon),
+    };
+}
+
+function visualRegionalRoughnessKm(eastKm, northKm) {
+    const edge = Math.max(Math.abs(eastKm), Math.abs(northKm)) / (REGIONAL_TERRAIN_EXTENT_KM * 0.5);
+    const fade = 1 - THREE.MathUtils.smoothstep(edge, 0.72, 1);
+    const broad = Math.sin(eastKm * 0.038 + 1.7) * Math.cos(northKm * 0.031 - 0.8) * 0.11;
+    const medium = Math.sin(eastKm * 0.105 - northKm * 0.062) * 0.045;
+    const fine = Math.sin(eastKm * 0.24 + northKm * 0.19 + 2.1) * 0.018;
+    return (broad + medium + fine) * fade;
+}
+
+function rebuildRegionalTerrain(latDeg, lonDeg) {
+    const segments = REGIONAL_TERRAIN_SEGMENTS;
+    const rowLength = segments + 1;
+    const positions = new Float32Array(rowLength * rowLength * 3);
+    const uvs = new Float32Array(rowLength * rowLength * 2);
+    const colors = new Float32Array(rowLength * rowLength * 3);
+    const indices = new Uint32Array(segments * segments * 6);
+    let vertexOffset = 0;
+    for (let northIndex = 0; northIndex <= segments; northIndex += 1) {
+        const northKm = (northIndex / segments - 0.5) * REGIONAL_TERRAIN_EXTENT_KM;
+        for (let eastIndex = 0; eastIndex <= segments; eastIndex += 1) {
+            const eastKm = (eastIndex / segments - 0.5) * REGIONAL_TERRAIN_EXTENT_KM;
+            const location = destinationLatLon(latDeg, lonDeg, eastKm, northKm);
+            const visualRoughnessKm = visualRegionalRoughnessKm(eastKm, northKm);
+            const visualRoughness = visualRoughnessKm / MARS_RADIUS_KM;
+            const radius = reliefRadiusAtLatLon(
+                location.latDeg,
+                location.lonDeg,
+                SURFACE_PATCH_OFFSET + visualRoughness,
+            );
+            const position = latLonVector(location.latDeg, location.lonDeg, radius);
+            const uv = latLonUv(location.latDeg, location.lonDeg);
+            positions[vertexOffset * 3] = position.x;
+            positions[vertexOffset * 3 + 1] = position.y;
+            positions[vertexOffset * 3 + 2] = position.z;
+            uvs[vertexOffset * 2] = uv.u;
+            uvs[vertexOffset * 2 + 1] = uv.v;
+            const shade = THREE.MathUtils.clamp(0.88 + visualRoughnessKm * 0.9, 0.72, 1.08);
+            colors[vertexOffset * 3] = shade;
+            colors[vertexOffset * 3 + 1] = shade * 0.94;
+            colors[vertexOffset * 3 + 2] = shade * 0.9;
+            vertexOffset += 1;
+        }
+    }
+    let indexOffset = 0;
+    for (let row = 0; row < segments; row += 1) {
+        for (let column = 0; column < segments; column += 1) {
+            const a = row * rowLength + column;
+            const b = a + 1;
+            const c = a + rowLength;
+            const d = c + 1;
+            indices.set([a, b, c, b, d, c], indexOffset);
+            indexOffset += 6;
+        }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
+    regionalTerrain.geometry.dispose();
+    regionalTerrain.geometry = geometry;
+    const gridPositions = [];
+    const gridStep = 4;
+    const pushSegment = (fromIndex, toIndex) => {
+        for (const index of [fromIndex, toIndex]) {
+            const vector = new THREE.Vector3(
+                positions[index * 3],
+                positions[index * 3 + 1],
+                positions[index * 3 + 2],
+            ).multiplyScalar(1.000018);
+            gridPositions.push(vector.x, vector.y, vector.z);
+        }
+    };
+    for (let row = 0; row <= segments; row += gridStep) {
+        for (let column = 0; column < segments; column += 1) {
+            pushSegment(row * rowLength + column, row * rowLength + column + 1);
+        }
+    }
+    for (let column = 0; column <= segments; column += gridStep) {
+        for (let row = 0; row < segments; row += 1) {
+            pushSegment(row * rowLength + column, (row + 1) * rowLength + column);
+        }
+    }
+    const gridGeometry = new THREE.BufferGeometry();
+    gridGeometry.setAttribute('position', new THREE.Float32BufferAttribute(gridPositions, 3));
+    regionalTerrainGrid.geometry.dispose();
+    regionalTerrainGrid.geometry = gridGeometry;
+    regionalTerrainCenter = { latDeg, lonDeg };
+}
+
+const surfaceHeadlamp = new THREE.DirectionalLight(0xffb08a, 1.15);
+surfaceHeadlamp.name = 'surface-explorer-light';
+surfaceHeadlamp.visible = false;
+surfaceHeadlamp.target.name = 'surface-explorer-light-target';
+scene.add(surfaceHeadlamp, surfaceHeadlamp.target);
+const surfaceFillLight = new THREE.PointLight(0xff7946, 0.00002, 0.06, 1.5);
+surfaceFillLight.visible = false;
+scene.add(surfaceFillLight);
 
 const surfaceToggle = document.querySelector('#surface-toggle');
 const reliefToggle = document.querySelector('#relief-toggle');
@@ -688,9 +921,16 @@ function setLayer(name, enabled) {
         surfaceMaterial.map = enabled ? surfaceTexture : null;
         surfaceMaterial.color.set(enabled && surfaceTexture ? 0xffffff : 0xa83f20);
         surfaceMaterial.needsUpdate = true;
+        regionalTerrainMaterial.map = enabled ? surfaceTexture : null;
+        regionalTerrainMaterial.emissiveMap = enabled ? surfaceTexture : null;
+        regionalTerrainMaterial.color.set(enabled && surfaceTexture ? 0xffffff : 0x9d3d22);
+        regionalTerrainMaterial.needsUpdate = true;
     } else if (name === 'relief') {
         reliefMars.visible = enabled && hasRelief;
         smoothMars.visible = !reliefMars.visible;
+        if (surfaceModeActive && regionalTerrainCenter) {
+            rebuildRegionalTerrain(regionalTerrainCenter.latDeg, regionalTerrainCenter.lonDeg);
+        }
     } else if (name === 'grid') gridLayer.visible = enabled;
     else if (name === 'atmosphere') atmosphereLayer.visible = enabled;
     else if (name === 'terminator') terminatorLayer.visible = enabled;
@@ -711,6 +951,7 @@ function setLayer(name, enabled) {
 function layerIsVisible(name) {
     if (name === 'imagery') return Boolean(surfaceMaterial.map);
     if (name === 'relief') return reliefMars.visible;
+    if (name === 'regional-terrain') return regionalTerrain.visible;
     if (name === 'grid') return gridLayer.visible;
     if (name === 'atmosphere') return atmosphereLayer.visible;
     if (name === 'terminator') return terminatorLayer.visible;
@@ -751,6 +992,15 @@ const cameraModeElement = document.querySelector('#camera-mode');
 const cameraRangeElement = document.querySelector('#camera-range');
 const cameraSpinButton = document.querySelector('#camera-spin');
 const rotateToggle = document.querySelector('[data-layer="rotate"]');
+const cameraHelpElement = document.querySelector('#camera-help');
+const surfaceExplorer = document.querySelector('#surface-explorer');
+const surfaceLocationElement = document.querySelector('#surface-location');
+const surfaceAltitudeElement = document.querySelector('#surface-altitude');
+const surfaceDetailElement = document.querySelector('#surface-detail');
+const meshStatusElement = document.querySelector('#mars-mesh-status');
+const globalMeshStatus = meshStatusElement.textContent;
+const surfaceLightButton = document.querySelector('#surface-light');
+const surfaceGridButton = document.querySelector('#surface-grid');
 
 function setCameraMode(mode, label) {
     cameraMode = mode;
@@ -766,6 +1016,7 @@ function setAutoRotate(enabled) {
     controls.autoRotate = rotating;
     rotateToggle.checked = rotating;
     cameraSpinButton.setAttribute('aria-pressed', String(rotating));
+    cameraSpinButton.setAttribute('aria-label', `${rotating ? 'Pause' : 'Resume'} automatic rotation`);
     cameraSpinButton.title = `${rotating ? 'Pause' : 'Resume'} automatic rotation (Space)`;
     cameraSpinButton.querySelector('.camera-icon').textContent = rotating ? 'Ⅱ' : '↻';
     cameraSpinButton.querySelector('.camera-btn-label').textContent = rotating ? 'Pause' : 'Spin';
@@ -774,11 +1025,221 @@ function setAutoRotate(enabled) {
 function setCameraConstraints(surfaceFocus) {
     controls.minDistance = surfaceFocus ? 0.18 : 1.22;
     controls.maxDistance = surfaceFocus ? 3.2 : 7;
+    controls.minPolarAngle = 0;
+    controls.maxPolarAngle = Math.PI;
+}
+
+const surfaceOccludedObjects = [gridLayer, atmosphereLayer, terminatorLayer, sky.group, routeLayer, waypointsLayer, roverLayer, landingLayer];
+for (const group of Object.values(landmarks.categoryGroups)) surfaceOccludedObjects.push(group);
+const surfaceVisibilityRestore = new Map();
+
+function setSurfacePresentation(enabled) {
+    if (enabled) {
+        surfaceVisibilityRestore.clear();
+        for (const object of surfaceOccludedObjects) {
+            surfaceVisibilityRestore.set(object, object.visible);
+            object.visible = false;
+        }
+    } else {
+        for (const [object, visible] of surfaceVisibilityRestore) object.visible = visible;
+        surfaceVisibilityRestore.clear();
+    }
+}
+
+function localVectorLatLon(localVector) {
+    const radial = localVector.clone().normalize();
+    return {
+        latDeg: THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(radial.y, -1, 1))),
+        lonDeg: THREE.MathUtils.radToDeg(Math.atan2(-radial.z, radial.x)),
+    };
+}
+
+function worldVectorLatLon(worldVector) {
+    const inverseRotation = marsGroup.quaternion.clone().invert();
+    return localVectorLatLon(worldVector.clone().applyQuaternion(inverseRotation));
+}
+
+function worldSurfacePoint(latDeg, lonDeg, offset = SURFACE_PATCH_OFFSET) {
+    return latLonVector(latDeg, lonDeg, reliefRadiusAtLatLon(latDeg, lonDeg, offset))
+        .applyQuaternion(marsGroup.quaternion);
+}
+
+function greatCircleDistanceKm(a, b) {
+    const latA = THREE.MathUtils.degToRad(a.latDeg);
+    const latB = THREE.MathUtils.degToRad(b.latDeg);
+    const deltaLat = latB - latA;
+    const deltaLon = THREE.MathUtils.degToRad(b.lonDeg - a.lonDeg);
+    const haversine = Math.sin(deltaLat / 2) ** 2
+        + Math.cos(latA) * Math.cos(latB) * Math.sin(deltaLon / 2) ** 2;
+    return 2 * MARS_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(haversine)));
+}
+
+function updateSurfaceTrail(location, { reset = false } = {}) {
+    if (reset) surfaceTrailLocations = [];
+    surfaceTrailLocations.push({ latDeg: location.latDeg, lonDeg: location.lonDeg });
+    if (surfaceTrailLocations.length > 180) surfaceTrailLocations.shift();
+    const points = surfaceTrailLocations.map(point => latLonVector(
+        point.latDeg,
+        point.lonDeg,
+        reliefRadiusAtLatLon(point.latDeg, point.lonDeg, SURFACE_PATCH_OFFSET + 0.00007),
+    ));
+    surfaceTrail.geometry.dispose();
+    surfaceTrail.geometry = new THREE.BufferGeometry().setFromPoints(points);
+}
+
+function formatCoordinate(value, positive, negative) {
+    return `${Math.abs(value).toFixed(3)}°${value < 0 ? negative : positive}`;
+}
+
+function updateSurfaceReadout() {
+    if (!surfaceModeActive || !surfaceLocation) return;
+    const target = worldVectorLatLon(controls.target);
+    surfaceLocation = target;
+    const cameraLocation = worldVectorLatLon(camera.position);
+    const surfaceRadius = reliefRadiusAtLatLon(cameraLocation.latDeg, cameraLocation.lonDeg);
+    const altitudeKm = Math.max(0, (camera.position.length() - surfaceRadius) * MARS_RADIUS_KM);
+    const elevationKm = elevationAtLatLon(target.latDeg, target.lonDeg) / 1000;
+    surfaceLocationElement.textContent = `${formatCoordinate(target.latDeg, 'N', 'S')} · ${formatCoordinate(target.lonDeg, 'E', 'W')}`;
+    surfaceAltitudeElement.textContent = `Eye ${altitudeKm.toFixed(1)} km · MOLA ${elevationKm >= 0 ? '+' : '−'}${Math.abs(elevationKm).toFixed(1)} km`;
+    surfaceExplorer.dataset.lat = target.latDeg.toFixed(6);
+    surfaceExplorer.dataset.lon = target.lonDeg.toFixed(6);
+    surfaceExplorer.dataset.altitudeKm = altitudeKm.toFixed(3);
+}
+
+function setSurfaceLight(enabled) {
+    const active = Boolean(enabled) && surfaceModeActive;
+    surfaceHeadlamp.visible = active;
+    surfaceFillLight.visible = active;
+    surfaceLightButton.setAttribute('aria-pressed', String(active));
+    surfaceLightButton.title = `${active ? 'Disable' : 'Enable'} terrain analysis light`;
+}
+
+function setSurfaceGrid(enabled) {
+    const active = Boolean(enabled) && surfaceModeActive;
+    regionalTerrainGrid.visible = active;
+    surfaceGridButton.setAttribute('aria-pressed', String(active));
+    surfaceGridButton.title = `${active ? 'Hide' : 'Show'} 8 km terrain analysis grid`;
+}
+
+function deactivateSurfaceExplorer() {
+    if (!surfaceModeActive) return;
+    surfaceModeActive = false;
+    app.classList.remove('is-surface-mode');
+    surfaceExplorer.hidden = true;
+    regionalTerrain.visible = false;
+    setSurfaceGrid(false);
+    surfaceTrail.visible = false;
+    setSurfaceLight(false);
+    setSurfacePresentation(false);
+    scene.fog.color.setHex(0x080302);
+    scene.fog.density = 0.025;
+    camera.near = 0.01;
+    camera.up.set(0, 1, 0);
+    camera.updateProjectionMatrix();
+    meshStatusElement.textContent = globalMeshStatus;
+    cameraHelpElement.textContent = 'Drag to orbit · pinch or scroll to zoom';
+}
+
+function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', duration = 1050 } = {}) {
+    setAutoRotate(false);
+    if (surfaceModeActive) setSurfacePresentation(false);
+    surfaceModeActive = true;
+    surfaceLocation = { latDeg, lonDeg };
+    app.classList.add('is-surface-mode');
+    surfaceExplorer.hidden = false;
+    rebuildRegionalTerrain(latDeg, lonDeg);
+    regionalTerrain.visible = true;
+    setSurfaceGrid(true);
+    surfaceTrail.visible = true;
+    setSurfaceLight(true);
+    updateSurfaceTrail(surfaceLocation, { reset: true });
+    setSurfacePresentation(true);
+    scene.fog.color.setHex(0x4d1e12);
+    scene.fog.density = 3.2;
+    camera.near = 0.00002;
+    camera.updateProjectionMatrix();
+    controls.minDistance = 0.00025;
+    controls.maxDistance = 0.18;
+    controls.minPolarAngle = 0;
+    controls.maxPolarAngle = Math.PI;
+    const target = worldSurfacePoint(latDeg, lonDeg);
+    const radial = target.clone().normalize();
+    const { north, east } = tangentFrame(radial);
+    const position = target.clone()
+        .addScaledVector(radial, 0.0006)
+        .addScaledVector(north, -0.0018)
+        .addScaledVector(east, 0.0003);
+    camera.up.copy(radial);
+    setCameraMode('surface', label);
+    cameraTween = {
+        started: performance.now(), duration,
+        fromPosition: camera.position.clone(), toPosition: position,
+        fromTarget: controls.target.clone(), toTarget: target,
+    };
+    surfaceDetailElement.textContent = hasRelief
+        ? '520 km MOLA macro-relief · 8 km analysis grid · visual roughness is illustrative'
+        : 'MOLA unavailable · smooth regional geometry · Viking/material fallback';
+    meshStatusElement.textContent = hasRelief
+        ? 'regional MOLA · 66k vertices · 5× macro relief'
+        : 'regional smooth-terrain fallback';
+    cameraHelpElement.textContent = 'Drag to look · scroll altitude · WASD / arrows move · Esc orbit';
+    updateSurfaceReadout();
+    canvas.focus({ preventScroll: true });
+}
+
+function enterSurfaceAtCurrentFocus() {
+    const focus = lastSurfaceFocus || {
+        latDeg: selectedRoutePoint.lat_deg,
+        lonDeg: selectedRoutePoint.lon_deg,
+        label: `Jezero · sol ${selectedRoutePoint.sol}`,
+    };
+    enterSurfaceExplorer(focus.latDeg, focus.lonDeg, { label: `Surface · ${focus.label}` });
+}
+
+function nudgeSurface(forwardAmount, rightAmount) {
+    if (!surfaceModeActive) return;
+    cameraTween = null;
+    const oldTarget = controls.target.clone();
+    const radial = oldTarget.clone().normalize();
+    let forward = controls.target.clone().sub(camera.position);
+    forward.addScaledVector(radial, -forward.dot(radial));
+    if (forward.lengthSq() < 1e-8) forward.copy(tangentFrame(radial).north);
+    forward.normalize();
+    const right = new THREE.Vector3().crossVectors(forward, radial).normalize();
+    const movement = forward.multiplyScalar(forwardAmount).addScaledVector(right, rightAmount);
+    if (movement.lengthSq() < 1e-8) return;
+    movement.normalize();
+    const angle = SURFACE_STEP_KM / MARS_RADIUS_KM;
+    const newRadial = radial.clone().multiplyScalar(Math.cos(angle))
+        .addScaledVector(movement, Math.sin(angle)).normalize();
+    const location = worldVectorLatLon(newRadial);
+    const newTarget = worldSurfacePoint(location.latDeg, location.lonDeg);
+    const transport = new THREE.Quaternion().setFromUnitVectors(radial, newTarget.clone().normalize());
+    const offset = camera.position.clone().sub(oldTarget).applyQuaternion(transport);
+    controls.target.copy(newTarget);
+    camera.position.copy(newTarget).add(offset);
+    camera.up.copy(newTarget).normalize();
+    surfaceLocation = location;
+    if (!regionalTerrainCenter
+        || greatCircleDistanceKm(regionalTerrainCenter, location) > REGIONAL_TERRAIN_EXTENT_KM * 0.22) {
+        rebuildRegionalTerrain(location.latDeg, location.lonDeg);
+    }
+    updateSurfaceTrail(location);
+    updateSurfaceReadout();
+}
+
+function enforceSurfaceClearance() {
+    if (!surfaceModeActive) return;
+    const location = worldVectorLatLon(camera.position);
+    const minimumRadius = reliefRadiusAtLatLon(location.latDeg, location.lonDeg)
+        + SURFACE_CLEARANCE_KM / MARS_RADIUS_KM;
+    if (camera.position.length() < minimumRadius) camera.position.setLength(minimumRadius);
 }
 
 function flyCamera(position, target, { duration = 850, mode = 'custom', label = 'Free orbit', surfaceFocus = false } = {}) {
+    if (mode !== 'surface') deactivateSurfaceExplorer();
     setAutoRotate(false);
-    setCameraConstraints(surfaceFocus);
+    if (!(mode === 'surface' && surfaceModeActive)) setCameraConstraints(surfaceFocus);
     setCameraMode(mode, label);
     cameraTween = {
         started: performance.now(), duration,
@@ -788,6 +1249,7 @@ function flyCamera(position, target, { duration = 850, mode = 'custom', label = 
 }
 
 function focusSurfacePoint(latDeg, lonDeg, { mode = 'landmark', label = 'Surface focus', duration = 850 } = {}) {
+    lastSurfaceFocus = { latDeg, lonDeg, label };
     const radial = latLonVector(latDeg, lonDeg).applyQuaternion(marsGroup.quaternion).normalize();
     const { north, east } = tangentFrame(radial);
     const position = radial.clone().multiplyScalar(1.22)
@@ -849,9 +1311,18 @@ document.querySelector('#reset-view').addEventListener('click', () => showGlobal
 document.querySelector('#camera-global').addEventListener('click', () => showGlobalView());
 document.querySelector('#camera-rover').addEventListener('click', () => focusSelectedRover());
 document.querySelector('#camera-landing').addEventListener('click', () => focusLandingSite());
+document.querySelector('#camera-surface').addEventListener('click', () => enterSurfaceAtCurrentFocus());
 document.querySelector('#camera-zoom-out').addEventListener('click', () => zoomCamera(1.3));
 document.querySelector('#camera-zoom-in').addEventListener('click', () => zoomCamera(0.76));
 cameraSpinButton.addEventListener('click', () => setAutoRotate(!controls.autoRotate));
+document.querySelectorAll('[data-surface-move]').forEach(button => {
+    button.addEventListener('click', () => nudgeSurface(
+        Number(button.dataset.forward || 0),
+        Number(button.dataset.right || 0),
+    ));
+});
+surfaceLightButton.addEventListener('click', () => setSurfaceLight(!surfaceHeadlamp.visible));
+surfaceGridButton.addEventListener('click', () => setSurfaceGrid(!regionalTerrainGrid.visible));
 
 document.querySelectorAll('[data-sky-focus]').forEach(button => {
     button.addEventListener('click', () => focusSkyBody(button.dataset.skyFocus));
@@ -860,7 +1331,7 @@ document.querySelectorAll('[data-sky-focus]').forEach(button => {
 controls.addEventListener('start', () => {
     cameraTween = null;
     setAutoRotate(false);
-    setCameraMode('custom', 'Free orbit');
+    setCameraMode(surfaceModeActive ? 'surface' : 'custom', surfaceModeActive ? 'Surface traverse' : 'Free orbit');
     canvas.classList.add('is-interacting');
 });
 controls.addEventListener('end', () => canvas.classList.remove('is-interacting'));
@@ -870,7 +1341,12 @@ reducedMotion.addEventListener?.('change', event => {
 });
 
 canvas.addEventListener('keydown', event => {
-    if (event.key.toLowerCase() === 'h') showGlobalView();
+    if (surfaceModeActive && (event.key.toLowerCase() === 'w' || event.key === 'ArrowUp')) nudgeSurface(1, 0);
+    else if (surfaceModeActive && (event.key.toLowerCase() === 's' || event.key === 'ArrowDown')) nudgeSurface(-1, 0);
+    else if (surfaceModeActive && (event.key.toLowerCase() === 'a' || event.key === 'ArrowLeft')) nudgeSurface(0, -1);
+    else if (surfaceModeActive && (event.key.toLowerCase() === 'd' || event.key === 'ArrowRight')) nudgeSurface(0, 1);
+    else if (surfaceModeActive && event.key === 'Escape') showGlobalView();
+    else if (event.key.toLowerCase() === 'h') showGlobalView();
     else if (event.key.toLowerCase() === 'r') focusSelectedRover();
     else if (event.key.toLowerCase() === 'l') focusLandingSite();
     else if (event.key === '+' || event.key === '=') zoomCamera(0.76);
@@ -930,6 +1406,17 @@ canvas.addEventListener('pointerup', event => {
     const hit = raycaster.intersectObjects(landmarks.hitTargets, false)
         .find(intersection => landmarks.isLandmarkVisible(intersection.object.userData.landmark));
     if (hit) showLandmark(hit.object.userData.landmark);
+});
+canvas.addEventListener('dblclick', event => {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = (event.clientX - rect.left) / rect.width * 2 - 1;
+    pointer.y = -(event.clientY - rect.top) / rect.height * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const globeHit = raycaster.intersectObjects([regionalTerrain, reliefMars, smoothMars], false)[0];
+    if (!globeHit) return;
+    const location = worldVectorLatLon(globeHit.point);
+    lastSurfaceFocus = { ...location, label: 'Selected terrain' };
+    enterSurfaceExplorer(location.latDeg, location.lonDeg, { label: 'Surface · selected terrain' });
 });
 document.querySelector('#landmark-card-close').addEventListener('click', () => { landmarkCard.hidden = true; });
 document.querySelector('#landmark-card-focus').addEventListener('click', () => cardFocusAction?.());
@@ -999,10 +1486,21 @@ window.__marsLab = Object.freeze({
     camera,
     controls,
     layerIsVisible,
+    enterSurfaceExplorer,
+    nudgeSurface,
     cameraState: () => ({
         mode: cameraMode,
         label: cameraModeLabel,
         rangeKm: camera.position.distanceTo(controls.target) * MARS_RADIUS_M / 1000,
+    }),
+    surfaceState: () => ({
+        active: surfaceModeActive,
+        location: surfaceLocation ? { ...surfaceLocation } : null,
+        terrainVertices: regionalTerrain.geometry.attributes.position?.count || 0,
+        trailPoints: surfaceTrailLocations.length,
+        gridVisible: regionalTerrainGrid.visible,
+        analysisLightVisible: surfaceHeadlamp.visible,
+        hasRelief,
     }),
 });
 window.clearTimeout(window.__marsBootTimer);
@@ -1024,7 +1522,16 @@ function animate(now) {
     updateSurfaceMarkerScale(routeCursor);
     landmarks.update(camera);
     sky.updateCamera(camera);
-    controls.update();
+    if (!cameraTween) controls.update();
+    enforceSurfaceClearance();
+    if (surfaceModeActive) {
+        const radial = camera.position.clone().normalize();
+        surfaceHeadlamp.position.copy(camera.position);
+        surfaceHeadlamp.target.position.copy(controls.target);
+        surfaceHeadlamp.target.updateMatrixWorld();
+        surfaceFillLight.position.copy(camera.position).addScaledVector(radial, -0.0001);
+        updateSurfaceReadout();
+    }
     updateCameraReadout();
     renderer.render(scene, camera);
 }
