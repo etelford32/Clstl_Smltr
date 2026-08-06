@@ -41,9 +41,16 @@ button{color:inherit}
 
 .mars-app{position:relative;height:calc(100dvh - 50px);min-height:610px;isolation:isolate;overflow:hidden;background:
   radial-gradient(circle at 55% 45%,rgba(115,33,8,.12),transparent 34%),#050302}
+.mars-viewport{position:absolute;inset:0;overflow:hidden;background:#050302}
 #mars-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;outline:none}
+.mars-render-degraded #mars-canvas{visibility:hidden}
 .grain{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.14;mix-blend-mode:soft-light;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.3'/%3E%3C/svg%3E")}
 .vignette{position:absolute;inset:0;z-index:1;pointer-events:none;background:radial-gradient(ellipse at 53% 48%,transparent 35%,rgba(2,1,1,.18) 67%,rgba(2,1,1,.68) 100%)}
+.mars-render-fallback{position:absolute;inset:0;z-index:0;display:grid;place-items:center;padding:110px 24px 54px;text-align:center;background:radial-gradient(circle at 50% 44%,#371409 0,#090403 58%,#030202 100%)}
+.mars-render-fallback[hidden]{display:none}
+.mars-static-globe{width:min(58vmin,520px);aspect-ratio:1;border-radius:50%;background:radial-gradient(circle at 34% 28%,rgba(255,190,137,.42),transparent 28%),linear-gradient(115deg,rgba(255,255,255,.08),rgba(38,9,3,.48)),url('/assets/mars/mars-viking-jpl.jpg') center/cover;box-shadow:inset -44px -18px 72px rgba(0,0,0,.76),0 0 80px rgba(255,92,38,.18);border:1px solid rgba(255,173,114,.2)}
+.mars-render-fallback-copy{position:absolute;left:50%;bottom:42px;transform:translateX(-50%);width:min(560px,calc(100% - 40px));color:#bda69a;font-size:.7rem;line-height:1.5}
+.mars-render-fallback-copy strong{display:block;margin-bottom:5px;color:var(--mars-bright);font:700 .68rem var(--display);letter-spacing:.11em;text-transform:uppercase}
 
 .mars-header{position:absolute;z-index:4;top:19px;left:50%;width:min(620px,calc(100% - 640px));transform:translateX(-50%);text-align:center;pointer-events:none}
 .eyebrow{display:flex;align-items:center;justify-content:center;gap:9px;color:var(--mars-bright);font:700 .66rem var(--display);letter-spacing:.24em;text-transform:uppercase}
@@ -112,6 +119,7 @@ button{color:inherit}
 .switch input:checked+.switch-track{background:rgba(255,122,61,.22);border-color:rgba(255,122,61,.55)}
 .switch input:checked+.switch-track::after{transform:translateX(16px);background:var(--mars-bright);box-shadow:0 0 8px rgba(255,122,61,.7)}
 .switch input:focus-visible+.switch-track{outline:2px solid var(--cyan);outline-offset:2px}
+.switch input:disabled+.switch-track{cursor:not-allowed;opacity:.48}.switch input:disabled+.switch-track::after{box-shadow:none}
 .source-mini{margin:9px 3px 0;padding-top:9px;border-top:1px solid var(--line);font-size:.61rem;line-height:1.45;color:#74625a}
 .source-mini a{color:#bb8b72;text-decoration:none}.source-mini a:hover{text-decoration:underline;color:var(--mars-bright)}
 
@@ -161,17 +169,23 @@ button{color:inherit}
   .data-dock{min-height:210px}.mission-panel,.layers-panel{max-height:calc(100% - 255px)}.view-hint,.landmark-card{bottom:238px}
 }
 @media(max-width:820px){
-  body{overflow:auto;background:#050302}.mars-app{height:auto;min-height:1120px;overflow:hidden}
+  body{overflow:auto;background:#050302}
+  .mars-app{display:grid;gap:12px;height:auto;min-height:0;padding:0 0 12px;overflow:visible}
+  .mars-viewport{position:relative;inset:auto;width:100%;height:auto;aspect-ratio:4 / 3;min-height:360px;max-height:min(72svh,620px)}
   .mars-header{top:16px;left:14px;right:14px;width:auto;transform:none}.mars-header p{display:none}.mission-strip{margin-top:7px;gap:8px}.mission-strip span+span{padding-left:8px}
-  .mission-panel{top:112px;left:12px;right:12px;width:auto;max-height:none}.mission-panel .metric-grid{grid-template-columns:repeat(4,1fr)}
-  .layers-panel{top:390px;left:12px;right:12px;width:auto;max-height:308px}.layers-panel .panel-body{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.layers-panel .layer-group-title,.layers-panel .source-mini{grid-column:1/-1}
-  .data-dock{left:12px;right:12px;bottom:12px}.view-hint{display:none}.landmark-card{bottom:238px}
+  .mission-panel,.layers-panel,.data-dock{position:relative;inset:auto;width:auto;max-height:none;margin:0 12px}
+  .mission-panel .metric-grid{grid-template-columns:repeat(4,1fr)}
+  .layers-panel .panel-body{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.layers-panel .layer-group-title,.layers-panel .source-mini{grid-column:1/-1}
+  .data-dock{min-height:0}.view-hint{display:none}.landmark-card{bottom:16px}
+  .mars-render-fallback{padding-top:92px}.mars-render-fallback-copy{bottom:20px}
 }
 @media(max-width:560px){
-  .mars-app{min-height:1280px}.mars-header h1{font-size:.9rem}.mission-strip{font-size:.55rem}.mission-strip span:nth-child(3){display:none}
+  .mars-viewport{aspect-ratio:1 / 1;min-height:350px;max-height:430px}
+  .mars-header h1{font-size:.9rem}.mission-strip{font-size:.55rem}.mission-strip span:nth-child(3){display:none}
   .mission-panel .metric-grid{grid-template-columns:1fr 1fr}
-  .layers-panel{top:442px;max-height:390px}.layers-panel .panel-body{display:block}
-  .weather-grid{grid-template-columns:1fr 1fr}.data-dock{min-height:300px}.dock-warning{display:none}.dock-foot{align-items:flex-start;flex-direction:column;gap:3px}
+  .layers-panel .panel-body{display:block}
+  .weather-grid{grid-template-columns:1fr 1fr}.dock-warning{display:none}.dock-foot{align-items:flex-start;flex-direction:column;gap:3px}
+  .mars-static-globe{width:min(76vw,300px)}.mars-render-fallback-copy{font-size:.62rem}
 }
 @media(prefers-reduced-motion:reduce){.live-dot,.loader-orbit::after{animation:none}}
 </style>
@@ -185,20 +199,41 @@ button{color:inherit}
 <script type="module">import { initNav } from "./js/nav.js?v=20260805"; initNav("mars");</script>
 
 <main class="mars-app" id="mars-main">
-  <canvas id="mars-canvas" tabindex="0" aria-label="Interactive NASA-data globe of Mars with major landmarks, JPL Horizons sky directions, current illumination, and Perseverance traverse history"></canvas>
-  <div class="grain" aria-hidden="true"></div>
-  <div class="vignette" aria-hidden="true"></div>
-
-  <header class="mars-header">
-    <div class="eyebrow"><span class="live-dot" aria-hidden="true"></span>Real-Time Mars</div>
-    <h1>Mars, as Perseverance experiences it</h1>
-    <p>Live mission context · released surface science · every timestamp visible</p>
-    <div class="mission-strip" aria-label="Mars mission clock">
-      <span>MISSION <strong id="header-sol">SOL —</strong></span>
-      <span>JEZERO LMST <strong id="header-lmst">--:--:--</strong></span>
-      <span>SEASON <strong id="header-season">LS —°</strong></span>
+  <div class="mars-viewport" id="mars-viewport">
+    <canvas id="mars-canvas" tabindex="0" aria-label="Interactive NASA-data globe of Mars with major landmarks, JPL Horizons sky directions, current illumination, and Perseverance traverse history"></canvas>
+    <div class="mars-render-fallback" id="mars-render-fallback" role="status" hidden>
+      <div class="mars-static-globe" aria-hidden="true"></div>
+      <p class="mars-render-fallback-copy"><strong>Interactive renderer unavailable</strong><span id="mars-render-fallback-message">The released mission snapshot and data panels remain available.</span></p>
     </div>
-  </header>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="vignette" aria-hidden="true"></div>
+
+    <header class="mars-header">
+      <div class="eyebrow"><span class="live-dot" aria-hidden="true"></span>Real-Time Mars</div>
+      <h1>Mars, as Perseverance experiences it</h1>
+      <p>Live mission context · released surface science · every timestamp visible</p>
+      <div class="mission-strip" aria-label="Mars mission clock">
+        <span>MISSION <strong id="header-sol">SOL ≥1940</strong></span>
+        <span>JEZERO LMST <strong id="header-lmst">--:--:--</strong></span>
+        <span>SEASON <strong id="header-season">LS —°</strong></span>
+      </div>
+    </header>
+
+    <aside class="landmark-card" id="landmark-card" aria-live="polite" hidden>
+      <button class="landmark-card-close" id="landmark-card-close" type="button" aria-label="Close landmark details">×</button>
+      <span class="landmark-card-kicker" id="landmark-card-category">Mars landmark</span>
+      <h3 id="landmark-card-name">Landmark</h3>
+      <p id="landmark-card-note"></p>
+      <div class="landmark-card-meta"><span id="landmark-card-stats"></span><a id="landmark-card-source" href="https://planetarynames.wr.usgs.gov/Page/MARS/target" target="_blank" rel="noopener">USGS/IAU record ↗</a></div>
+    </aside>
+
+    <div class="view-hint">Drag to orbit · scroll to zoom · click a landmark or sky marker · scrub the NASA traverse by sol</div>
+    <div class="mesh-badge" id="mars-mesh-badge"><strong>MESH</strong> <span id="mars-mesh-status">loading surface assets…</span></div>
+
+    <div class="loading-screen" id="loading-screen" aria-live="polite">
+      <div class="loader"><div class="loader-orbit" aria-hidden="true"></div><div class="loader-title">Building NASA Mars mesh</div><div class="loader-status" id="loader-status">Loading Viking color + MOLA topography…</div></div>
+    </div>
+  </div>
 
   <section class="panel mission-panel" aria-labelledby="mission-panel-title">
     <div class="panel-head">
@@ -207,22 +242,22 @@ button{color:inherit}
     </div>
     <div class="panel-body">
       <div class="status-line">
-        <div><span class="status-label">Mission status</span><div class="status-value" id="mission-status">Checking NASA…</div></div>
-        <span class="status-pill" id="mission-pill">Active</span>
+        <div><span class="status-label">Mission status</span><div class="status-value" id="mission-status">Bundled mission snapshot</div></div>
+        <span class="status-pill" id="mission-pill">Snapshot</span>
       </div>
       <div class="metric-grid">
-        <div class="metric"><span>Latest drive</span><strong id="drive-sol">Sol —</strong><small id="drive-date">NASA map</small></div>
-        <div class="metric"><span>Distance</span><strong id="drive-distance">— km</strong><small>surface total</small></div>
-        <div class="metric"><span>Route snapshot</span><strong id="fix-sol">Sol —</strong><small>NASA MMGIS</small></div>
-        <div class="metric"><span>Coordinates</span><strong id="fix-coordinates">—</strong><small>planetocentric</small></div>
+        <div class="metric"><span>Latest drive</span><strong id="drive-sol">Sol 1940</strong><small id="drive-date">NASA map · checked 2026-08-05</small></div>
+        <div class="metric"><span>Distance</span><strong id="drive-distance">44.14 km</strong><small>surface total</small></div>
+        <div class="metric"><span>Route snapshot</span><strong id="fix-sol">Sol 1940</strong><small>NASA MMGIS</small></div>
+        <div class="metric"><span>Coordinates</span><strong id="fix-coordinates">18.426°N, 77.225°E</strong><small>planetocentric</small></div>
       </div>
-      <p class="provenance-note" id="position-note"><strong>Position integrity:</strong> loading released rover coordinates.</p>
+      <p class="provenance-note" id="position-note"><strong>Position integrity:</strong> bundled NASA route snapshot through sol 1940; not live GPS.</p>
       <div class="action-row">
         <button class="action-btn" type="button" id="focus-rover">Focus selected</button>
         <button class="action-btn" type="button" id="reset-view">Global view</button>
       </div>
       <div class="history-control">
-        <div class="history-head"><label for="route-sol">Traverse history</label><output id="route-sol-output" for="route-sol">Loading NASA route…</output></div>
+        <div class="history-head"><label for="route-sol">Traverse history</label><output id="route-sol-output" for="route-sol">Sol 1940 · 44.14 km</output></div>
         <input type="range" id="route-sol" min="13" max="1940" value="1940" step="1" disabled>
         <div class="history-foot"><span>Landing</span><span id="route-history-source">NASA MMGIS drive stops</span><span>Latest map</span></div>
       </div>
@@ -236,8 +271,8 @@ button{color:inherit}
     </div>
     <div class="panel-body">
       <div class="layer-group-title">Surface</div>
-      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◒</span><div class="layer-name">Viking imagery<span class="layer-desc">JPL / USGS global color</span></div><label class="switch"><input type="checkbox" data-layer="imagery" checked><span class="switch-track"></span></label></div>
-      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">⌁</span><div class="layer-name">MOLA relief<span class="layer-desc">5× vertical exaggeration</span></div><label class="switch"><input type="checkbox" data-layer="relief" checked><span class="switch-track"></span></label></div>
+      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◒</span><div class="layer-name">Viking imagery<span class="layer-desc" id="surface-source">JPL / USGS global color</span></div><label class="switch"><input id="surface-toggle" type="checkbox" data-layer="imagery" checked><span class="switch-track"></span></label></div>
+      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">⌁</span><div class="layer-name">MOLA relief<span class="layer-desc" id="relief-source">5× vertical exaggeration</span></div><label class="switch"><input id="relief-toggle" type="checkbox" data-layer="relief" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">#</span><div class="layer-name">Coordinate grid<span class="layer-desc">30° planetocentric</span></div><label class="switch"><input type="checkbox" data-layer="grid" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◌</span><div class="layer-name">Thin atmosphere<span class="layer-desc">visual CO₂ limb</span></div><label class="switch"><input type="checkbox" data-layer="atmosphere" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◐</span><div class="layer-name">Day/night terminator<span class="layer-desc" id="terminator-source">season + MTC fallback while JPL loads</span></div><label class="switch"><input type="checkbox" data-layer="terminator" checked><span class="switch-track"></span></label></div>
@@ -248,8 +283,8 @@ button{color:inherit}
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">●</span><button class="layer-name sky-focus" type="button" data-sky-focus="ceres" aria-label="Locate Ceres in the Mars sky">Ceres<span class="layer-desc" id="sky-ceres-status">waiting for Mars topocentric position</span></button><label class="switch"><input type="checkbox" data-layer="sky-ceres" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◆</span><button class="layer-name sky-focus" type="button" data-sky-focus="vesta" aria-label="Locate Vesta in the Mars sky">Vesta<span class="layer-desc" id="sky-vesta-status">waiting for Mars topocentric position</span></button><label class="switch"><input type="checkbox" data-layer="sky-vesta" checked><span class="switch-track"></span></label></div>
       <div class="layer-group-title">Mission geography</div>
-      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">⌇</span><div class="layer-name">NASA traverse history<span class="layer-desc">690 drive stops · through sol 1940</span></div><label class="switch"><input type="checkbox" data-layer="route" checked><span class="switch-track"></span></label></div>
-      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">··</span><div class="layer-name">Drive-stop points<span class="layer-desc">NASA MMGIS localizations</span></div><label class="switch"><input type="checkbox" data-layer="waypoints" checked><span class="switch-track"></span></label></div>
+      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">⌇</span><div class="layer-name">NASA traverse history<span class="layer-desc" id="route-source">690 drive stops · through sol 1940</span></div><label class="switch"><input id="route-toggle" type="checkbox" data-layer="route" checked><span class="switch-track"></span></label></div>
+      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">··</span><div class="layer-name">Drive-stop points<span class="layer-desc">NASA MMGIS localizations</span></div><label class="switch"><input id="waypoints-toggle" type="checkbox" data-layer="waypoints" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◆</span><div class="layer-name">PDS science fix<span class="layer-desc">MEDA archive · sol 1726</span></div><label class="switch"><input type="checkbox" data-layer="rover" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">·</span><div class="layer-name">Landing site<span class="layer-desc">Octavia E. Butler Landing</span></div><label class="switch"><input type="checkbox" data-layer="landing" checked><span class="switch-track"></span></label></div>
       <div class="layer-group-title">USGS / IAU landmark atlas</div>
@@ -283,22 +318,36 @@ button{color:inherit}
     </div>
   </section>
 
-  <aside class="landmark-card" id="landmark-card" aria-live="polite" hidden>
-    <button class="landmark-card-close" id="landmark-card-close" type="button" aria-label="Close landmark details">×</button>
-    <span class="landmark-card-kicker" id="landmark-card-category">Mars landmark</span>
-    <h3 id="landmark-card-name">Landmark</h3>
-    <p id="landmark-card-note"></p>
-    <div class="landmark-card-meta"><span id="landmark-card-stats"></span><a id="landmark-card-source" href="https://planetarynames.wr.usgs.gov/Page/MARS/target" target="_blank" rel="noopener">USGS/IAU record ↗</a></div>
-  </aside>
-
-  <div class="view-hint">Drag to orbit · scroll to zoom · click a landmark or sky marker · scrub the NASA traverse by sol</div>
-  <div class="mesh-badge"><strong>MESH</strong> MOLA 4 px/° · 5× relief</div>
-
-  <div class="loading-screen" id="loading-screen" aria-live="polite">
-    <div class="loader"><div class="loader-orbit" aria-hidden="true"></div><div class="loader-title">Building NASA Mars mesh</div><div class="loader-status" id="loader-status">Loading Viking color + MOLA topography…</div></div>
-  </div>
 </main>
 
-<script type="module" src="./js/mars-view.js?v=20260805"></script>
+<script>
+(() => {
+  window.__marsReady = false;
+  window.__marsRevealFallback = message => {
+    if (window.__marsReady) return;
+    const fallback = document.getElementById('mars-render-fallback');
+    const copy = document.getElementById('mars-render-fallback-message');
+    const loading = document.getElementById('loading-screen');
+    if (copy && message) copy.textContent = message;
+    if (fallback) fallback.hidden = false;
+    if (loading) loading.classList.add('done');
+    document.querySelector('.mars-app')?.classList.add('mars-render-degraded');
+  };
+  window.__marsBootTimer = window.setTimeout(() => {
+    window.__marsRevealFallback('The 3D engine did not finish starting. Mission and provenance panels remain usable.');
+  }, 15000);
+  window.addEventListener('error', event => {
+    if (!window.__marsReady && String(event.filename || '').includes('mars-view')) {
+      window.__marsRevealFallback('The 3D engine could not start. Mission and provenance panels remain usable.');
+    }
+  });
+  window.addEventListener('unhandledrejection', event => {
+    if (!window.__marsReady && String(event.reason?.stack || event.reason || '').includes('mars')) {
+      window.__marsRevealFallback('A Mars rendering asset failed during startup. Mission and provenance panels remain usable.');
+    }
+  });
+})();
+</script>
+<script type="module" src="./js/mars-view.js?v=20260806" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
 </body>
 </html>

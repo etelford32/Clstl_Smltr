@@ -12,6 +12,46 @@ test.describe('Orbit Margin fleet-ready flow', () => {
         await expect(page.locator('#assessment')).toContainText(/storm-readiness assessment/i);
     });
 
+    test('Operations globe stays viewport-shaped across desktop and mobile layouts', async ({ page }) => {
+        await page.route('**/api/celestrak/**', route => route.abort());
+        await page.route('**/celestrak.org/**', route => route.abort());
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.goto('/operations.html', { waitUntil: 'domcontentloaded' });
+
+        const desktop = await page.evaluate(() => {
+            const globe = document.querySelector('#op-globe-wrap').getBoundingClientRect();
+            const canvas = document.querySelector('#op-globe').getBoundingClientRect();
+            const right = document.querySelector('#op-right').getBoundingClientRect();
+            return {
+                globe: { width: globe.width, height: globe.height },
+                canvas: { width: canvas.width, height: canvas.height },
+                rightHeight: right.height,
+                position: getComputedStyle(document.querySelector('#op-globe-wrap')).position,
+            };
+        });
+        expect(desktop.position).toBe('sticky');
+        expect(desktop.globe.height).toBeLessThan(700);
+        expect(desktop.globe.height).toBeLessThan(desktop.rightHeight * 0.5);
+        expect(desktop.globe.height / desktop.globe.width).toBeLessThan(1.1);
+        expect(desktop.canvas.width).toBeCloseTo(desktop.globe.width - 2, 0);
+        expect(desktop.canvas.height).toBeCloseTo(desktop.globe.height - 2, 0);
+
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        const mobile = await page.evaluate(() => {
+            const globe = document.querySelector('#op-globe-wrap').getBoundingClientRect();
+            return {
+                width: globe.width,
+                height: globe.height,
+                position: getComputedStyle(document.querySelector('#op-globe-wrap')).position,
+            };
+        });
+        expect(mobile.position).toBe('relative');
+        expect(mobile.width).toBeLessThanOrEqual(390);
+        expect(mobile.height).toBeGreaterThanOrEqual(320);
+        expect(mobile.height).toBeLessThanOrEqual(400);
+    });
+
     test('fleet import accepts CSV and briefing export downloads', async ({ page }) => {
         // Fleet intake and report generation must remain usable even if public
         // TLE relays are unavailable. The rows settle to unresolved, while the

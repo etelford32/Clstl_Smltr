@@ -100,3 +100,52 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await expect(layersPanel.locator('.panel-toggle')).toHaveAttribute('aria-expanded', 'false');
     expect(errors).toEqual([]);
 });
+
+test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.route('**/api/mars/weather', route => route.abort());
+    await page.route('**/api/horizons?**', route => route.abort());
+    await page.route('**/assets/mars/**', route => route.abort());
+    await page.route('**/data/mars/perseverance-route.json', route => route.abort());
+
+    await page.goto('/mars.html');
+    await expect(page.locator('#loading-screen')).toHaveClass(/done/, { timeout: 20_000 });
+    await expect(page.locator('#mars-canvas')).toBeVisible();
+    await expect(page.locator('#mars-render-fallback')).toBeHidden();
+    await expect(page.locator('#surface-toggle')).toBeDisabled();
+    await expect(page.locator('#relief-toggle')).toBeDisabled();
+    await expect(page.locator('#surface-source')).toContainText('material-color fallback');
+    await expect(page.locator('#relief-source')).toContainText('smooth-sphere fallback');
+    await expect(page.locator('#route-sol')).toBeDisabled();
+    await expect(page.locator('#waypoints-toggle')).toBeDisabled();
+    await expect(page.locator('#route-source')).toContainText('markers remain');
+    await expect(page.locator('#feed-state')).toContainText('bundled mission + season');
+    await expect(page.locator('#weather-season')).toHaveText(/^Ls \d+°$/);
+    await expect(page.locator('#weather-warning')).toContainText('orbital season remain available');
+
+    const layout = await page.evaluate(() => {
+        const rect = selector => {
+            const value = document.querySelector(selector).getBoundingClientRect();
+            return { top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+        };
+        return {
+            stage: rect('#mars-viewport'),
+            canvas: rect('#mars-canvas'),
+            mission: rect('.mission-panel'),
+            layers: rect('.layers-panel'),
+            dock: rect('.data-dock'),
+            ready: window.__marsReady,
+        };
+    });
+    expect(layout.ready).toBe(true);
+    expect(layout.stage.height).toBeGreaterThanOrEqual(350);
+    expect(layout.stage.height).toBeLessThanOrEqual(430);
+    expect(layout.canvas.width).toBeCloseTo(layout.stage.width, 0);
+    expect(layout.canvas.height).toBeCloseTo(layout.stage.height, 0);
+    expect(layout.mission.top).toBeGreaterThanOrEqual(layout.stage.bottom);
+    expect(layout.layers.top).toBeGreaterThanOrEqual(layout.mission.bottom);
+    expect(layout.dock.top).toBeGreaterThanOrEqual(layout.layers.bottom);
+    expect(errors).toEqual([]);
+});
