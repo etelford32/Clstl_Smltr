@@ -78,7 +78,7 @@ button{color:inherit}
 .panel.collapsed{height:auto!important}
 .panel.collapsed .panel-toggle{transform:rotate(180deg)}
 
-.mission-panel{left:18px;top:18px;width:298px;max-height:calc(100% - 204px)}
+.mission-panel{left:18px;top:92px;width:298px;max-height:calc(100% - 278px)}
 .panel-body{min-height:0;padding:14px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:rgba(255,173,114,.42) transparent}
 .panel-body::-webkit-scrollbar{width:7px}
 .panel-body::-webkit-scrollbar-track{background:rgba(255,255,255,.015)}
@@ -147,18 +147,19 @@ button{color:inherit}
 .dock-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:8px 13px;color:#716159;font-size:.58rem}
 .dock-foot a{color:#a77c68;text-decoration:none}.dock-foot a:hover{color:var(--mars-bright);text-decoration:underline}
 
-.camera-dock{position:absolute;z-index:7;left:50%;bottom:184px;display:flex;align-items:center;gap:8px;width:min(680px,calc(100% - 640px));min-width:430px;padding:7px;border:1px solid rgba(255,186,145,.19);border-radius:13px;background:rgba(10,5,4,.82);box-shadow:0 14px 42px rgba(0,0,0,.38);backdrop-filter:blur(18px);transform:translateX(-50%)}
-.camera-readout{display:flex;flex:0 0 auto;flex-direction:column;justify-content:center;min-width:105px;padding:2px 9px 2px 5px;border-right:1px solid var(--line)}
+.camera-dock{position:absolute;z-index:7;left:18px;top:18px;display:flex;align-items:center;gap:6px;width:298px;min-width:0;padding:5px;border:1px solid rgba(255,186,145,.19);border-radius:11px;background:rgba(10,5,4,.84);box-shadow:0 12px 34px rgba(0,0,0,.38);backdrop-filter:blur(18px)}
+.camera-readout{display:flex;flex:0 0 80px;flex-direction:column;justify-content:center;min-width:0;padding:2px 6px 2px 2px;border-right:1px solid var(--line)}
 .camera-readout span{color:var(--faint);font:600 .48rem var(--display);letter-spacing:.14em;text-transform:uppercase}
-.camera-readout strong{display:block;max-width:132px;margin-top:3px;overflow:hidden;color:#f6ded2;font:600 .61rem var(--mono);letter-spacing:0;text-overflow:ellipsis;white-space:nowrap}
+.camera-readout strong{display:block;max-width:70px;margin-top:3px;overflow:hidden;color:#f6ded2;font:600 .58rem var(--mono);letter-spacing:0;text-overflow:ellipsis;white-space:nowrap}
 .camera-readout output{margin-top:2px;color:#987f73;font:500 .52rem var(--mono);white-space:nowrap}
-.camera-actions{display:flex;flex:1;align-items:center;justify-content:center;gap:4px;min-width:0}
-.camera-divider{width:1px;height:25px;margin:0 2px;background:var(--line)}
-.camera-btn{display:flex;min-width:34px;height:34px;align-items:center;justify-content:center;gap:5px;padding:0 8px;border:1px solid rgba(255,255,255,.075);border-radius:8px;background:rgba(255,255,255,.03);color:#bca99f;cursor:pointer;font:600 .54rem var(--display);letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.camera-actions{display:flex;flex:1;align-items:center;justify-content:flex-start;gap:3px;min-width:0}
+.camera-divider{width:1px;height:23px;margin:0 2px;background:var(--line)}
+.camera-btn{display:flex;flex:0 0 28px;width:28px;min-width:28px;height:30px;align-items:center;justify-content:center;padding:0;border:1px solid rgba(255,255,255,.075);border-radius:7px;background:rgba(255,255,255,.03);color:#bca99f;cursor:pointer}
 .camera-btn:hover{border-color:var(--line-strong);background:rgba(255,122,61,.09);color:#fff}
 .camera-btn[aria-pressed="true"]{border-color:rgba(255,173,114,.52);background:rgba(255,122,61,.17);color:#ffe2d1;box-shadow:inset 0 0 0 1px rgba(255,122,61,.08)}
 .camera-icon{font:500 .78rem var(--mono);line-height:1}
-.camera-help{position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%);color:#725f57;font:.5rem var(--mono);pointer-events:none;white-space:nowrap}
+.camera-btn-label{display:none}
+.camera-help{position:absolute;left:3px;top:calc(100% + 5px);color:#8a746a;font:.5rem var(--mono);pointer-events:none;white-space:nowrap;text-shadow:0 1px 7px #000}
 .mesh-badge{position:absolute;z-index:4;right:310px;top:19px;padding:6px 9px;border-radius:8px;background:rgba(7,4,3,.58);border:1px solid rgba(255,255,255,.06);color:#8c7770;font:.55rem var(--mono);pointer-events:none}
 .mesh-badge strong{color:#d4b6a7;font-weight:500}
 .landmark-card{position:absolute;z-index:8;left:50%;bottom:190px;width:min(360px,calc(100% - 36px));transform:translateX(-50%);padding:14px 15px;border:1px solid rgba(255,173,114,.3);border-radius:13px;background:rgba(13,7,5,.94);box-shadow:0 18px 60px rgba(0,0,0,.55);backdrop-filter:blur(18px)}
@@ -186,7 +187,7 @@ button{color:inherit}
   .mars-header{width:min(500px,calc(100% - 580px))}.mars-header h1{font-size:1.05rem}
   .mission-panel{width:270px}.layers-panel{width:258px}.mesh-badge{display:none}
   .weather-grid{grid-template-columns:repeat(3,1fr)}.weather-cell{min-height:67px;padding:8px 10px}
-  .data-dock{min-height:210px}.mission-panel,.layers-panel{max-height:calc(100% - 255px)}.camera-dock{bottom:237px;width:min(500px,calc(100% - 560px));min-width:268px}.camera-btn-label{display:none}.landmark-card{bottom:296px}
+  .data-dock{min-height:210px}.mission-panel{max-height:calc(100% - 329px)}.layers-panel{max-height:calc(100% - 255px)}.camera-dock{width:270px}.camera-readout{flex-basis:58px}.camera-readout strong{max-width:54px}.camera-readout output{display:none}.landmark-card{bottom:238px}
 }
 @media(max-width:820px){
   body{overflow:auto;background:#050302}
@@ -196,13 +197,13 @@ button{color:inherit}
   .mission-panel,.layers-panel,.data-dock{position:relative;inset:auto;width:auto;max-height:none;margin:0 12px}
   .mission-panel .metric-grid{grid-template-columns:repeat(4,1fr)}
   .layers-panel .panel-body{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.layers-panel .layer-group-title,.layers-panel .source-mini{grid-column:1/-1}
-  .data-dock{min-height:0}.dock-collapse{display:grid}.camera-dock{left:12px;right:12px;bottom:12px;width:auto;min-width:0;transform:none}.camera-btn-label{display:inline}.camera-help{display:none}.landmark-card{bottom:70px}
+  .data-dock{min-height:0}.dock-collapse{display:grid}.camera-dock{left:12px;right:auto;top:122px;width:min(298px,calc(100% - 24px))}.camera-readout{flex-basis:80px}.camera-readout output{display:block}.landmark-card{bottom:16px}
   .mars-render-fallback{padding-top:92px}.mars-render-fallback-copy{bottom:20px}
 }
 @media(max-width:560px){
   .mars-viewport{aspect-ratio:1 / 1;min-height:350px;max-height:430px}
   .mars-header h1{font-size:.9rem}.mission-strip{font-size:.55rem}.mission-strip span:nth-child(3){display:none}
-  .camera-dock{display:grid;grid-template-columns:1fr;padding:6px}.camera-readout{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:6px;min-width:0;padding:2px 5px 6px;border-right:0;border-bottom:1px solid var(--line)}.camera-readout strong{margin:0}.camera-readout output{margin:0;text-align:right}.camera-actions{width:100%}.camera-btn{flex:1;padding:0 5px}.camera-btn-label{display:none}.camera-divider{margin:0}.landmark-card{bottom:108px}
+  .camera-dock{top:122px;width:calc(100% - 24px)}.landmark-card{bottom:16px}
   .mission-panel .metric-grid{grid-template-columns:1fr 1fr}
   .layers-panel .panel-body{display:block}
   .weather-grid{grid-template-columns:1fr 1fr}.dock-warning{display:none}.dock-foot{align-items:flex-start;flex-direction:column;gap:3px}
@@ -251,15 +252,15 @@ button{color:inherit}
     <div class="camera-dock" role="group" aria-label="Mars camera controls" aria-describedby="camera-help">
       <div class="camera-readout"><span>Camera</span><strong id="camera-mode">Global orbit</strong><output id="camera-range" aria-live="polite">Range — km</output></div>
       <div class="camera-actions">
-        <button class="camera-btn" id="camera-global" type="button" data-camera-preset="global" aria-pressed="true" title="Global view (H)"><span class="camera-icon" aria-hidden="true">◎</span><span class="camera-btn-label">Global</span></button>
-        <button class="camera-btn" id="camera-rover" type="button" data-camera-preset="rover" aria-pressed="false" title="Focus selected rover sol (R)"><span class="camera-icon" aria-hidden="true">◆</span><span class="camera-btn-label">Rover</span></button>
-        <button class="camera-btn" id="camera-landing" type="button" data-camera-preset="landing" aria-pressed="false" title="Focus landing site (L)"><span class="camera-icon" aria-hidden="true">⌖</span><span class="camera-btn-label">Landing</span></button>
+        <button class="camera-btn" id="camera-global" type="button" data-camera-preset="global" aria-label="Global view" aria-pressed="true" title="Global view (H)"><span class="camera-icon" aria-hidden="true">◎</span><span class="camera-btn-label">Global</span></button>
+        <button class="camera-btn" id="camera-rover" type="button" data-camera-preset="rover" aria-label="Focus selected rover sol" aria-pressed="false" title="Focus selected rover sol (R)"><span class="camera-icon" aria-hidden="true">◆</span><span class="camera-btn-label">Rover</span></button>
+        <button class="camera-btn" id="camera-landing" type="button" data-camera-preset="landing" aria-label="Focus landing site" aria-pressed="false" title="Focus landing site (L)"><span class="camera-icon" aria-hidden="true">⌖</span><span class="camera-btn-label">Landing</span></button>
         <span class="camera-divider" aria-hidden="true"></span>
         <button class="camera-btn" id="camera-zoom-out" type="button" title="Zoom out (-)" aria-label="Zoom out"><span class="camera-icon" aria-hidden="true">−</span></button>
         <button class="camera-btn" id="camera-zoom-in" type="button" title="Zoom in (+)" aria-label="Zoom in"><span class="camera-icon" aria-hidden="true">＋</span></button>
-        <button class="camera-btn" id="camera-spin" type="button" aria-pressed="true" title="Pause automatic rotation (Space)"><span class="camera-icon" aria-hidden="true">Ⅱ</span><span class="camera-btn-label">Pause</span></button>
+        <button class="camera-btn" id="camera-spin" type="button" aria-label="Pause automatic rotation" aria-pressed="true" title="Pause automatic rotation (Space)"><span class="camera-icon" aria-hidden="true">Ⅱ</span><span class="camera-btn-label">Pause</span></button>
       </div>
-      <span class="camera-help" id="camera-help">Drag to orbit · scroll to zoom · select a marker for details · H/R/L presets</span>
+      <span class="camera-help" id="camera-help">Drag to orbit · pinch or scroll to zoom</span>
     </div>
     <div class="mesh-badge" id="mars-mesh-badge"><strong>MESH</strong> <span id="mars-mesh-status">loading surface assets…</span></div>
 
