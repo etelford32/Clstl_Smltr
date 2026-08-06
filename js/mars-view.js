@@ -24,6 +24,7 @@ const mission = PERSEVERANCE_MISSION;
 
 const canvas = document.querySelector('#mars-canvas');
 const app = document.querySelector('.mars-app');
+const viewport = document.querySelector('#mars-viewport');
 const loadingScreen = document.querySelector('#loading-screen');
 const loaderStatus = document.querySelector('#loader-status');
 
@@ -34,10 +35,15 @@ const camera = new THREE.PerspectiveCamera(36, 1, 0.01, 100);
 camera.position.set(0.15, 0.42, 3.15);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.matchMedia('(max-width: 560px)').matches ? 1.5 : 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.08;
+canvas.addEventListener('webglcontextlost', event => {
+    event.preventDefault();
+    window.__marsReady = false;
+    window.__marsRevealFallback?.('The browser lost the WebGL context. Mission and provenance panels remain usable.');
+}, { once: true });
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
@@ -160,7 +166,12 @@ function displaceWithMola(geometry, texture) {
     return true;
 }
 
-const hasRelief = displaceWithMola(reliefGeometry, molaTexture);
+let hasRelief = false;
+try {
+    hasRelief = displaceWithMola(reliefGeometry, molaTexture);
+} catch (error) {
+    console.warn('[Mars] MOLA texture could not be sampled; using the smooth sphere', error);
+}
 const surfaceMaterial = new THREE.MeshStandardMaterial({
     color: surfaceTexture ? 0xffffff : 0xa83f20,
     map: surfaceTexture,
@@ -172,6 +183,22 @@ const reliefMars = new THREE.Mesh(reliefGeometry, surfaceMaterial);
 smoothMars.visible = !hasRelief;
 reliefMars.visible = hasRelief;
 marsGroup.add(smoothMars, reliefMars);
+
+const surfaceToggle = document.querySelector('#surface-toggle');
+const reliefToggle = document.querySelector('#relief-toggle');
+if (!surfaceTexture) {
+    surfaceToggle.checked = false;
+    surfaceToggle.disabled = true;
+    document.querySelector('#surface-source').textContent = 'asset unavailable · material-color fallback';
+}
+if (!hasRelief) {
+    reliefToggle.checked = false;
+    reliefToggle.disabled = true;
+    document.querySelector('#relief-source').textContent = 'asset unavailable · smooth-sphere fallback';
+}
+document.querySelector('#mars-mesh-status').textContent = hasRelief
+    ? `MOLA 4 px/° · 5× relief${surfaceTexture ? '' : ' · color fallback'}`
+    : `smooth sphere${surfaceTexture ? ' · Viking color' : ' · material-color fallback'}`;
 
 function buildCoordinateGrid(radius = 1.038) {
     const group = new THREE.Group();
@@ -407,29 +434,56 @@ async function loadTraverseHistory() {
         range.disabled = false;
         range.addEventListener('input', () => selectRouteSol(Number(range.value)));
         document.querySelector('#route-history-source').textContent = `${snapshot.point_count} NASA stops · ${snapshot.snapshot_checked_at}`;
+        document.querySelector('#route-source').textContent = `${snapshot.point_count} bundled NASA stops · through sol ${snapshot.through_sol}`;
         selectRouteSol(snapshot.through_sol);
     } catch (error) {
         console.warn('[Mars] Bundled NASA traverse unavailable', error);
         range.disabled = true;
         document.querySelector('#route-sol-output').textContent = 'Route unavailable';
-        document.querySelector('#route-history-source').textContent = 'PDS science fix still available';
+        document.querySelector('#route-history-source').textContent = 'Bundled endpoint markers remain';
+        document.querySelector('#route-source').textContent = 'snapshot unavailable · landing + latest-drive markers remain';
+        const routeToggle = document.querySelector('#route-toggle');
+        routeToggle.checked = false;
+        routeToggle.disabled = true;
+        const waypointsToggle = document.querySelector('#waypoints-toggle');
+        waypointsToggle.checked = false;
+        waypointsToggle.disabled = true;
         routeLayer.visible = false;
         waypointsLayer.visible = false;
     }
 }
 
+function missionWithFallback(state = {}) {
+    const latestDrive = {
+        ...mission.latest_drive,
+        ...(state.latest_drive || {}),
+        position: {
+            ...mission.latest_drive.position,
+            ...(state.latest_drive?.position || {}),
+        },
+    };
+    return {
+        ...mission,
+        ...state,
+        latest_drive: latestDrive,
+        position: { ...mission.position, ...(state.position || {}) },
+        meda_archive: { ...mission.meda_archive, ...(state.meda_archive || {}) },
+    };
+}
+
 function applyMissionUi(state) {
-    const latestDrive = state.latest_drive;
-    const position = state.position;
+    const resolved = missionWithFallback(state);
+    const latestDrive = resolved.latest_drive;
+    const position = resolved.position;
     const routePosition = latestDrive.position || position;
-    document.querySelector('#mission-status').textContent = state.status === 'operational' ? 'Operating on Mars' : state.status;
-    document.querySelector('#mission-pill').textContent = state.status === 'operational' ? 'Active' : 'Check status';
+    document.querySelector('#mission-status').textContent = resolved.status === 'operational' ? 'Operating on Mars' : (resolved.status || 'Bundled mission snapshot');
+    document.querySelector('#mission-pill').textContent = resolved.status === 'operational' ? 'Active' : 'Snapshot';
     document.querySelector('#drive-sol').textContent = `Sol ${latestDrive.sol}`;
     document.querySelector('#drive-date').textContent = `NASA map · checked ${latestDrive.checked_at}`;
     document.querySelector('#drive-distance').textContent = `${latestDrive.distance_km.toFixed(2)} km`;
     document.querySelector('#fix-sol').textContent = `Sol ${latestDrive.sol}`;
     document.querySelector('#fix-coordinates').textContent = `${routePosition.lat_deg.toFixed(3)}°N, ${routePosition.lon_deg.toFixed(3)}°E`;
-    document.querySelector('#pds-sol').textContent = `Sol ${state.meda_archive.latest_verified_sol}`;
+    document.querySelector('#pds-sol').textContent = `Sol ${resolved.meda_archive.latest_verified_sol}`;
     document.querySelector('#position-note').innerHTML = `<strong>Position integrity:</strong> gold cursor and white history use NASA's MMGIS route snapshot through sol ${latestDrive.sol}. The cyan marker is an independent MEDA/PDS science fix from sol ${position.sol}. Neither is live GPS.`;
 }
 
@@ -450,13 +504,16 @@ function applyWeatherUi(payload) {
     const record = payload?.rovers?.perseverance;
     const feedState = document.querySelector('#feed-state');
     const warning = document.querySelector('#weather-warning');
-    document.querySelector('#header-season').textContent = Number.isFinite(payload?.ls_deg) ? `LS ${Math.round(payload.ls_deg)}°` : 'LS —°';
-    document.querySelector('#weather-season').textContent = Number.isFinite(record?.ls_deg) ? `Ls ${Math.round(record.ls_deg)}°` : (Number.isFinite(payload?.ls_deg) ? `Ls ${Math.round(payload.ls_deg)}°` : '—');
-    document.querySelector('#weather-season-detail').textContent = record?.season || payload?.message || 'season model';
+    const orbitalSeason = marsSubsolarPoint(new Date()).ls_deg;
+    const payloadSeason = numberOrNull(payload?.ls_deg) ?? orbitalSeason;
+    const weatherSeason = numberOrNull(record?.ls_deg) ?? payloadSeason;
+    document.querySelector('#header-season').textContent = `LS ${Math.round(payloadSeason)}°`;
+    document.querySelector('#weather-season').textContent = `Ls ${Math.round(weatherSeason)}°`;
+    document.querySelector('#weather-season-detail').textContent = record?.season || payload?.message || 'orbital season fallback';
     if (!record?.active) {
         feedState.dataset.state = 'offline';
-        feedState.textContent = 'Mars adapter online · MEDA summary unavailable';
-        warning.textContent = 'Globe and PDS marker remain available; no environmental value is being inferred.';
+        feedState.textContent = 'Observation feed unavailable · offline-capable view';
+        warning.textContent = '3D globe, mission snapshot, route, and orbital season remain available; no weather value is inferred.';
         markMissingWeather();
         return;
     }
@@ -506,8 +563,8 @@ async function loadMarsFeed() {
         console.warn('[Mars] Shared weather adapter unavailable', error);
         applyMissionUi(mission);
         applyWeatherUi({ ls_deg: null, rovers: { perseverance: { active: false } } });
-        document.querySelector('#feed-state').textContent = 'Adapter unavailable · bundled PDS snapshot';
-        document.querySelector('#feed-provenance').textContent = '/api/mars/weather unavailable · no direct upstream requests were made';
+        document.querySelector('#feed-state').textContent = 'Adapter unavailable · bundled mission + season';
+        document.querySelector('#feed-provenance').textContent = '/api/mars/weather unavailable · bundled NASA mission snapshot + orbital season model';
     } finally {
         window.clearTimeout(timer);
     }
@@ -710,13 +767,14 @@ function updateCameraTween(now) {
 }
 
 function resize() {
-    const width = Math.max(1, app.clientWidth);
-    const height = Math.max(1, app.clientHeight);
+    const width = Math.max(1, viewport.clientWidth);
+    const height = Math.max(1, viewport.clientHeight);
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
 }
-new ResizeObserver(resize).observe(app);
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(viewport);
+window.addEventListener('resize', resize, { passive: true });
 resize();
 
 applyMissionUi(mission);
@@ -732,7 +790,11 @@ loadTraverseHistory();
 loadMarsSky();
 scheduleMarsSkyRefresh();
 
-loaderStatus.textContent = hasRelief ? 'MOLA relief ready · locating Perseverance…' : 'Color globe ready · MOLA relief unavailable';
+loaderStatus.textContent = hasRelief ? 'MOLA relief ready · locating Perseverance…' : 'Smooth globe ready · MOLA relief unavailable';
+window.__marsReady = true;
+window.clearTimeout(window.__marsBootTimer);
+document.querySelector('#mars-render-fallback').hidden = true;
+app.classList.remove('mars-render-degraded');
 window.setTimeout(() => loadingScreen.classList.add('done'), 250);
 
 const clock = new THREE.Clock();
