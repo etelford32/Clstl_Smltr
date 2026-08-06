@@ -97,6 +97,7 @@ const NAV_DROPDOWNS = [
             { href: 'far-side-watch.html', label: 'Far-Side Watch', sub: 'Regions rotating in · days-to-weeks horizon', tier: 'public', icon: 'far-side', badge: 'NEW', id: 'far-side-watch' },
             { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: 'sun' },
             { section: 'Planetary systems' },
+            { href: 'mars.html',               label: 'Real-Time Mars', sub: 'Perseverance + MEDA on a NASA terrain globe', tier: 'public', icon: 'planet', badge: 'NEW', id: 'mars' },
             { href: 'solar-system.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: 'solar-system', id: 'solar' },
             { href: 'jupiter-system.html', label: 'Jupiter System', sub: 'Galilean moons · 4:2:1 Laplace resonance', tier: 'public', icon: 'planet', id: 'jupiter-system' },
             { href: 'saturn-system.html', label: 'Saturn System', sub: 'Moon-sculpted rings · Cassini Division · live density waves', tier: 'public', icon: 'planet', badge: 'NEW', id: 'saturn-system' },

@@ -1,9 +1,9 @@
 /**
  * Vercel Edge Function: /api/mars/weather
  *
- * Aggregator for Mars surface conditions used by the mission-planner pad
- * weather UI. Combines a server-side synthetic dust-season model with a
- * fan-out across every public NASA in-situ feed we can reach, so each
+ * Aggregator for Mars surface conditions used by the mission-planner and
+ * Real-Time Mars UIs. Combines a server-side dust-season context model with
+ * a fan-out across the public NASA in-situ summaries we can reach, so each
  * Mars pad in the simulator can be paired with the rover whose location
  * is closest:
  *
@@ -33,11 +33,19 @@
  *     / empty-soles response as "feed offline" so the rest of the
  *     payload is unaffected.
  *
- *   Mars 2020 / Perseverance MEDA (Jezero Crater, 18.4°N 77.5°E)
+ *   Mars 2020 / Perseverance MEDA (Jezero Crater)
  *     mars.nasa.gov/rss/api/?feed=weather&category=mars2020&feedtype=json
  *     Same pattern. MEDA samples atmospheric T/p/relative humidity/wind
- *     down to sub-sol cadence; the daily-summary feed is what the public
- *     endpoint exposes.
+ *     down to sub-sol cadence; the daily-summary feed is what this public
+ *     endpoint exposes. NASA currently serves an older summary here, so
+ *     every record includes an explicit freshness classification.
+ *
+ *   Mars 2020 PDS / NASA location map
+ *     Mission status, drive summary, and the first globe marker travel in
+ *     this same response. The marker is derived from the newest released
+ *     MEDA ancillary position product we verified (sol 1726), not guessed
+ *     from the newer drive map. The response preserves both timestamps so a
+ *     client cannot confuse an archived coordinate with a current rover fix.
  *
  * ── Response shape ────────────────────────────────────────────────────
  *
@@ -75,20 +83,26 @@
  *     },
  *   }
  *
- * Inactive rovers are returned as `{ active: false, reason: 'feed-offline' }`
+ * Inactive feeds are returned as `{ active: false, reason: 'feed-offline' }`
  * (still an object, not null) so the client doesn't have to distinguish
  * "rover never existed" from "feed temporarily down".
+ * `active: true` means a usable observation record was returned; mission
+ * operational status is carried separately under `mission.perseverance`.
  *
  * Cache-Control: s-maxage=3600 / swr=1800. Each rover updates ~once per
  * sol (24h 39m); 1 hr fresh + 30 min stale tolerance is plenty.
  */
 
 import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+import {
+    PERSEVERANCE_MISSION,
+    marsSolarLongitudeFromJulianDate,
+    observationFreshness as classifyObservationFreshness,
+} from '../../js/mars-mission-state.js';
+
+export { PERSEVERANCE_MISSION } from '../../js/mars-mission-state.js';
 
 export const config = { runtime: 'edge' };
-
-const MARS_YEAR_DAYS = 686.971;
-const MARS_LS0_JD    = 2460565.5;     // 2024-Sep-12 northern-spring equinox
 
 const CACHE_TTL = 3600;
 const CACHE_SWR = 1800;
@@ -115,13 +129,18 @@ function numOrNull(v) {
     return Number.isFinite(v) ? v : null;
 }
 
-function jdNowUtc() {
-    return Date.now() / 86_400_000 + 2440587.5;
+function observationFreshness(terrestrialDate) {
+    const { status, age_days: ageDays } = classifyObservationFreshness({
+        terrestrial_date: terrestrialDate,
+    });
+    return {
+        observation_status: status,
+        observation_age_days: ageDays,
+    };
 }
 
-function marsLs(jd) {
-    const t = ((jd - MARS_LS0_JD) / MARS_YEAR_DAYS) % 1;
-    return ((t < 0 ? t + 1 : t) * 360);
+function jdNowUtc() {
+    return Date.now() / 86_400_000 + 2440587.5;
 }
 
 function evaluateMarsLs(Ls) {
@@ -163,6 +182,8 @@ async function tryFetchInsight() {
             pressure_pa:    numOrNull(data.PRE?.av),
             ls_deg:         numOrNull(data.Ls),
             note:           'InSight mission ended Dec 2022 — historical reference',
+            observation_status: 'historical',
+            observation_age_days: null,
             source:         'NASA InSight Weather Service',
         };
     } catch (e) {
@@ -215,6 +236,7 @@ async function tryFetchMarsRss({ rover, category, location }) {
             atmo_opacity:     latest.atmo_opacity || null,
             sunrise:          latest.sunrise || null,
             sunset:           latest.sunset  || null,
+            ...observationFreshness(latest.terrestrial_date),
             source:           rover === 'curiosity' ? 'NASA MSL REMS via mars.nasa.gov'
                                                     : 'NASA Mars 2020 MEDA via mars.nasa.gov',
         };
@@ -242,7 +264,7 @@ export default async function handler(request) {
             { status: 400, maxAge: 300 });
     }
 
-    const Ls = marsLs(jd);
+    const Ls = marsSolarLongitudeFromJulianDate(jd);
     const baseStatus = evaluateMarsLs(Ls);
 
     // Fan out to all three rovers in parallel. allSettled guarantees we
@@ -256,9 +278,9 @@ export default async function handler(request) {
             location: 'Gale Crater (4.6°S, 137.4°E)',
         }),
         tryFetchMarsRss({
-            rover:    'mars2020',
+            rover:    'perseverance',
             category: 'mars2020',
-            location: 'Jezero Crater (18.4°N, 77.5°E)',
+            location: 'Jezero Crater / western rim traverse',
         }),
     ]);
 
@@ -267,6 +289,10 @@ export default async function handler(request) {
         status:    baseStatus.status,
         message:   baseStatus.message,
         jd,
+        generated_at: new Date().toISOString(),
+        mission: {
+            perseverance: PERSEVERANCE_MISSION,
+        },
         rovers: {
             insight:      insightR,
             curiosity:    curiosityR,
