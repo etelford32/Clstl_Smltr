@@ -8,7 +8,9 @@
  *
  * All query parameters are forwarded as-is to Horizons.
  *
- * Typical callers: js/horizons.js  _fetchVec()
+ * Typical callers: js/horizons.js planetary vectors and Mars topocentric sky
+ * observer tables. Keeping both on this route gives them the same timeout,
+ * cache, CORS, and upstream error behavior.
  */
 import { jsonError, fetchWithTimeout, CORS_HEADERS } from './_lib/responses.js';
 

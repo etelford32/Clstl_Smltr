@@ -8,6 +8,7 @@
  *           Earth heliocentric   (CENTER='500@10',  COMMAND='399')
  *           Moon  geocentric     (CENTER='500@399', COMMAND='301')
  *           Outer planets helio  (CENTER='500@10',  COMMAND='5xx/6xx/7xx/8xx')
+ *           Mars surface sky     (CENTER='coord@499', observer AZ/EL)
  *           Response units: AU for heliocentric, km for geocentric.
  *
  * FALLBACK  On-device Meeus algorithms (Astronomical Algorithms, 2nd ed.)
@@ -484,6 +485,11 @@ function _parseVec(text) {
 
 async function _fetchVec(command, center, jd = null) {
     const params = _horizonsParams(command, center, jd);
+    const result = await _fetchHorizonsResult(params);
+    return _parseVec(result);
+}
+
+async function _fetchHorizonsResult(params) {
     const url    = `${HORIZONS_URL}?${params}`;
     const resp   = await fetch(url, { cache: 'no-cache' });
     if (!resp.ok) {
@@ -496,7 +502,7 @@ async function _fetchVec(command, center, jd = null) {
     const json = await resp.json();
     if (json.error) throw new Error(`Horizons API: ${json.error}`);
     if (typeof json.result !== 'string') throw new Error('Horizons: no result string');
-    return _parseVec(json.result);
+    return json.result;
 }
 
 /** Convert an ECLIPJ2000 X/Y/Z vector (in AU) to heliocentric ecliptic coords. */
@@ -508,6 +514,210 @@ function _vecToHelioEcliptic(v) {
         dist_AU:  r,
         x_AU: v.x, y_AU: v.y, z_AU: v.z,
         source: 'horizons',
+    };
+}
+
+// ── Mars topocentric sky ─────────────────────────────────────────────────────
+
+/** Bodies shown in the Real-Time Mars sky layer. Small-body commands retain
+ * Horizons' required semicolon so `1;` and `4;` select numbered asteroids,
+ * not a major-body ID or an ambiguous name search. */
+export const MARS_SKY_BODIES = Object.freeze([
+    Object.freeze({ key: 'sun',   name: 'Sun',   command: '10' }),
+    Object.freeze({ key: 'earth', name: 'Earth', command: '399' }),
+    Object.freeze({ key: 'moon',  name: 'Moon',  command: '301' }),
+    Object.freeze({ key: 'ceres', name: 'Ceres', command: '1;' }),
+    Object.freeze({ key: 'vesta', name: 'Vesta', command: '4;' }),
+]);
+
+const MARS_EQUATORIAL_RADIUS_KM = 3396.19;
+const MARS_POLAR_RADIUS_KM = 3376.2;
+
+/** Horizons' user-defined Mars sites use geodetic latitude, while NASA's
+ * MMGIS rover waypoints are planetocentric. Convert on the IAU_MARS reference
+ * ellipsoid before building SITE_COORD. */
+export function marsPlanetocentricToGeodetic(latDeg) {
+    if (!Number.isFinite(latDeg) || Math.abs(latDeg) > 90) throw new RangeError('Mars latitude must be finite and within ±90°');
+    if (Math.abs(latDeg) === 90) return latDeg;
+    const radians = Math.PI / 180;
+    return Math.atan(
+        Math.tan(latDeg * radians)
+        * MARS_EQUATORIAL_RADIUS_KM ** 2 / MARS_POLAR_RADIUS_KM ** 2,
+    ) / radians;
+}
+
+function marsSkySampleWindow(date) {
+    const jd = jdFromDate(date);
+    const startJd = Math.floor(jd * 24) / 24;
+    return { startJd, stopJd: startJd + 1 / 24 };
+}
+
+function parseHorizonsCalendarUtc(value) {
+    const match = value.trim().match(/^(\d{4})-([A-Za-z]{3})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)$/);
+    if (!match) throw new Error(`Horizons: unsupported observer timestamp ${value}`);
+    const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        .indexOf(match[2][0].toUpperCase() + match[2].slice(1).toLowerCase());
+    if (month < 0) throw new Error(`Horizons: unsupported observer month ${match[2]}`);
+    const seconds = Number(match[6]);
+    const wholeSeconds = Math.floor(seconds);
+    const milliseconds = Math.round((seconds - wholeSeconds) * 1000);
+    return new Date(Date.UTC(
+        Number(match[1]), month, Number(match[3]), Number(match[4]), Number(match[5]),
+        wholeSeconds, milliseconds,
+    ));
+}
+
+/** Parse quantity 4 + 20 from a Horizons CSV observer table. Parsing from the
+ * right keeps the two single-character presence/RTS columns from affecting
+ * field positions when a body rises, sets, or is observed in daylight. */
+export function parseHorizonsObserverTable(text) {
+    const start = text.indexOf('$$SOE');
+    const stop = text.indexOf('$$EOE');
+    if (start < 0 || stop < 0 || stop <= start) throw new Error('Horizons: missing observer table markers');
+    const rows = text.slice(start + 5, stop).split('\n').map(line => line.trim()).filter(Boolean);
+    if (!rows.length) throw new Error('Horizons: observer table is empty');
+    return rows.map(line => {
+        const fields = line.split(',').map(field => field.trim());
+        while (fields.at(-1) === '') fields.pop();
+        if (fields.length < 5) throw new Error(`Horizons: malformed observer row ${line}`);
+        const [azimuthDeg, elevationDeg, rangeAu, rangeRateKmS] = fields.slice(-4).map(Number);
+        if (![azimuthDeg, elevationDeg, rangeAu, rangeRateKmS].every(Number.isFinite)) {
+            throw new Error(`Horizons: non-numeric observer row ${line}`);
+        }
+        const observed = parseHorizonsCalendarUtc(fields[0]);
+        return Object.freeze({
+            observed_at: observed.toISOString(),
+            jd: jdFromDate(observed),
+            azimuth_deg: azimuthDeg,
+            elevation_deg: elevationDeg,
+            range_au: rangeAu,
+            range_rate_km_s: rangeRateKmS,
+        });
+    });
+}
+
+function interpolateAngleDegrees(a, b, amount) {
+    const delta = ((b - a + 540) % 360) - 180;
+    const result = ((a + delta * amount) % 360 + 360) % 360;
+    return result > 359.9999999 ? 0 : result;
+}
+
+/** Interpolate between the hourly Horizons samples. This keeps Mars' fast sky
+ * rotation smooth while allowing the shared one-hour proxy cache to absorb
+ * repeated page loads instead of issuing five new JPL queries every minute. */
+export function interpolateHorizonsObserverSamples(samples, date = new Date()) {
+    if (!Array.isArray(samples) || !samples.length) return null;
+    if (samples.length === 1) return { ...samples[0], above_horizon: samples[0].elevation_deg >= 0 };
+    const jd = jdFromDate(date);
+    let left = samples[0];
+    let right = samples.at(-1);
+    for (let index = 0; index < samples.length - 1; index += 1) {
+        if (jd >= samples[index].jd && jd <= samples[index + 1].jd) {
+            left = samples[index];
+            right = samples[index + 1];
+            break;
+        }
+    }
+    const span = Math.max(Number.EPSILON, right.jd - left.jd);
+    const amount = Math.max(0, Math.min(1, (jd - left.jd) / span));
+    const lerp = (a, b) => a + (b - a) * amount;
+    const elevationDeg = lerp(left.elevation_deg, right.elevation_deg);
+    return {
+        observed_at: date.toISOString(),
+        sample_start_at: left.observed_at,
+        sample_stop_at: right.observed_at,
+        jd,
+        azimuth_deg: interpolateAngleDegrees(left.azimuth_deg, right.azimuth_deg, amount),
+        elevation_deg: elevationDeg,
+        range_au: lerp(left.range_au, right.range_au),
+        range_rate_km_s: lerp(left.range_rate_km_s, right.range_rate_km_s),
+        above_horizon: elevationDeg >= 0,
+    };
+}
+
+function marsObserverParams(command, { startJd, stopJd, latDeg, lonDeg, elevationM }) {
+    return new URLSearchParams({
+        format: 'json',
+        COMMAND: `'${command}'`,
+        OBJ_DATA: "'NO'",
+        MAKE_EPHEM: "'YES'",
+        EPHEM_TYPE: "'OBSERVER'",
+        CENTER: "'coord@499'",
+        COORD_TYPE: "'GEODETIC'",
+        // Parkers Physics stores east-positive longitude. Horizons' IAU_MARS
+        // topocentric input is west-positive, so the sign must be reversed.
+        SITE_COORD: `'${-lonDeg},${latDeg},${elevationM / 1000}'`,
+        TLIST: `'${startJd.toFixed(8)},${stopJd.toFixed(8)}'`,
+        QUANTITIES: "'4,20'",
+        CSV_FORMAT: "'YES'",
+        ANG_FORMAT: "'DEG'",
+        APPARENT: "'AIRLESS'",
+        EXTRA_PREC: "'YES'",
+    });
+}
+
+/** Load apparent airless azimuth/elevation as seen from a Mars surface site.
+ * Each body is independent: a failed asteroid lookup does not discard the Sun
+ * or Earth. No synthetic position is returned when Horizons is unavailable. */
+export async function fetchMarsSkyEphemeris({
+    date = new Date(),
+    latDeg,
+    lonDeg,
+    elevationM = 0,
+    siteName = 'Mars surface observer',
+    bodies = MARS_SKY_BODIES,
+} = {}) {
+    if (![latDeg, lonDeg, elevationM].every(Number.isFinite)) {
+        throw new TypeError('Mars sky observer requires finite latDeg, lonDeg, and elevationM');
+    }
+    const { startJd, stopJd } = marsSkySampleWindow(date);
+    const geodeticLatDeg = marsPlanetocentricToGeodetic(latDeg);
+    const fetchBody = async body => ({
+        body,
+        samples: parseHorizonsObserverTable(await _fetchHorizonsResult(marsObserverParams(body.command, {
+            startJd, stopJd, latDeg: geodeticLatDeg, lonDeg, elevationM,
+        }))),
+    });
+    const results = await Promise.allSettled(bodies.map(fetchBody));
+    // Horizons sometimes sheds part of a concurrent burst while resolving
+    // uncached small-body SPKs. Retry only failed bodies, sequentially, so a
+    // transient Ceres/Vesta timeout does not leave a permanently partial sky.
+    for (let index = 0; index < results.length; index += 1) {
+        if (results[index].status === 'fulfilled') continue;
+        try {
+            results[index] = { status: 'fulfilled', value: await fetchBody(bodies[index]) };
+        } catch (error) {
+            results[index] = { status: 'rejected', reason: error };
+        }
+    }
+    const resolvedBodies = {};
+    const errors = {};
+    results.forEach((result, index) => {
+        const body = bodies[index];
+        if (result.status === 'fulfilled') {
+            resolvedBodies[body.key] = Object.freeze({ ...body, samples: Object.freeze(result.value.samples) });
+        } else {
+            errors[body.key] = result.reason?.message || String(result.reason);
+        }
+    });
+    const count = Object.keys(resolvedBodies).length;
+    return {
+        source: 'JPL Horizons',
+        status: count === bodies.length ? 'live' : count ? 'partial' : 'offline',
+        generated_at: new Date().toISOString(),
+        sample_start_at: dateFromJD(startJd).toISOString(),
+        sample_stop_at: dateFromJD(stopJd).toISOString(),
+        observer: Object.freeze({
+            body: 'Mars',
+            site: siteName,
+            lat_deg: latDeg,
+            horizons_geodetic_lat_deg: geodeticLatDeg,
+            lon_deg: lonDeg,
+            elevation_m: elevationM,
+            coordinate_reference: 'MMGIS planetocentric/east-positive in client; converted to IAU_MARS geodetic/west-positive for Horizons',
+        }),
+        bodies: Object.freeze(resolvedBodies),
+        errors: Object.freeze(errors),
     };
 }
 
