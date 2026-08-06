@@ -33,6 +33,7 @@
 import * as THREE from 'three';
 import { HeroMesh, buildHeroMaterial } from './hero-mesh.js';
 import { annotate as annotateDebris } from '../debris-catalog.js';
+import { getVehicleProfile } from './vehicle-scenarios.js';
 
 // NORADs / groups that already render their own dedicated mesh. The
 // FocusMesh stays out of their way so a selected ISS doesn't get both
@@ -116,6 +117,46 @@ function buildPayload() {
     return finalize(out);
 }
 
+/** Editable vehicle-template geometry for the paid-workbench preview. */
+function buildVehicleDesign(config) {
+    const p = getVehicleProfile(config?.profileId);
+    const v = p.visual;
+    const out = { positions: [], normals: [], colors: [], indices: [] };
+    const [bx, by, bz] = v.bus;
+    const busColor = v.form === 'cube' ? [0.76, 0.78, 0.82]
+                   : v.form === 'flat' ? [0.82, 0.84, 0.88]
+                   : v.form === 'platform' ? [0.90, 0.90, 0.86]
+                   : [0.84, 0.86, 0.90];
+    pushBox(out, 0, 0, 0, bx, by, bz, busColor);
+
+    // Nadir payload/antenna deck gives every archetype an oriented face.
+    const deckZ = Math.max(0.035, bz * 0.08);
+    pushBox(out, 0, 0.05 * by, bz / 2 + deckZ / 2,
+        bx * 0.56, by * 0.42, deckZ, [0.45, 0.40, 0.30]);
+
+    const lowDrag = config?.attitude === 'low-drag';
+    const panelLen = v.panelSpan;
+    const panelW = v.panelWidth;
+    const panelY = lowDrag ? panelW : 0.035;
+    const panelZ = lowDrag ? 0.035 : panelW;
+    const panelColor = v.form === 'platform' ? [0.50, 0.36, 0.13] : [0.10, 0.15, 0.31];
+    const x = bx / 2 + 0.05 + panelLen / 2;
+
+    if (v.form === 'flat') {
+        pushBox(out, x, 0, 0, panelLen, panelY, panelZ, panelColor);
+    } else {
+        pushBox(out,  x, 0, 0, panelLen, panelY, panelZ, panelColor);
+        pushBox(out, -x, 0, 0, panelLen, panelY, panelZ, panelColor);
+    }
+    if (v.form === 'platform') {
+        pushBox(out, 0, 0, 0, bx + panelLen * 1.2, 0.10, 0.10, [0.48, 0.50, 0.50]);
+    }
+
+    // Dark aft engine deck. The animated plume meshes attach separately.
+    pushBox(out, 0, -by / 2 - 0.035, 0, bx * 0.62, 0.07, bz * 0.56, [0.25, 0.27, 0.30]);
+    return finalize(out);
+}
+
 /** Rocket body: an elongated cylinder along +Y (along-track). */
 function buildRocketBody() {
     const geo = new THREE.CylinderGeometry(0.22, 0.22, 1.5, 16, 1);
@@ -183,6 +224,8 @@ export class FocusMesh {
         this._activeNorad  = null;     // norad the glyph is currently built for
         this._needsRebuild = false;
         this._kind         = null;
+        this._vehicleStore = opts.vehicleStore ?? null;
+        this._vehicleConfig = null;
 
         // One reusable material so opacity tweaks (the fade) don't churn
         // shader programs. Transparent so the fade reads on the dark sky.
@@ -204,6 +247,14 @@ export class FocusMesh {
         });
         this._hero.getMesh().renderOrder = 13;   // above dots (10) + highlight sprite (12)
 
+        // Thruster plumes are children of the LVLH-oriented vehicle mesh, so
+        // they follow the selected satellite through orbit without their own
+        // propagation path. Geometry is rebuilt only when the profile changes.
+        this._plumeGroup = new THREE.Group();
+        this._plumeGroup.name = 'op-focus-thruster-plumes';
+        this._plumeGroup.visible = false;
+        this._hero.getMesh().add(this._plumeGroup);
+
         const off = opts.onSelectChange?.((id) => {
             const next = id == null ? null : Number(id);
             if (next === this._selectedId) return;
@@ -211,6 +262,10 @@ export class FocusMesh {
             this._needsRebuild = true;
         });
         this._offSel = off;
+        this._offVehicle = this._vehicleStore?.onChange?.(({ noradId }) => {
+            if (Number(noradId) !== this._selectedId) return;
+            this._needsRebuild = true;
+        });
         // Pick up the current selection if one already exists.
         const cur = opts.getSelectedId?.();
         if (cur != null) { this._selectedId = Number(cur); this._needsRebuild = true; }
@@ -219,6 +274,7 @@ export class FocusMesh {
     /** Decide whether a selected object should get a generic glyph. */
     _excluded(sat) {
         if (!sat) return true;
+        if (this._vehicleStore?.get?.(sat.norad_id)) return false;
         if (DEDICATED_NORADS.has(sat.norad_id)) return true;
         if (DEDICATED_GROUPS.has(sat.group))    return true;
         return false;
@@ -243,21 +299,58 @@ export class FocusMesh {
         }
         if (this._excluded(sat)) { this._hero.setVisible(false); return; }
 
+        this._vehicleConfig = this._vehicleStore?.get?.(id) ?? null;
+
         let size = null;
         try {
             size = annotateDebris({ name: sat.name, noradId: id })?.size ?? null;
         } catch (_) { /* best-effort sizing */ }
 
-        const kind = glyphKind(sat.name, sat.group);
-        const geo  = kind === 'rocket' ? buildRocketBody()
+        const kind = this._vehicleConfig ? 'vehicle-design' : glyphKind(sat.name, sat.group);
+        const visualConfig = this._vehicleConfig?.activeAction === 'low-drag'
+            ? { ...this._vehicleConfig, attitude: 'low-drag' }
+            : this._vehicleConfig;
+        const geo  = this._vehicleConfig ? buildVehicleDesign(visualConfig)
+                   : kind === 'rocket' ? buildRocketBody()
                    : kind === 'debris' ? buildDebris()
                    :                     buildPayload();
 
         this._hero.setGeometry(geo);
-        this._hero.setModelScale?.(glyphScale(size));
+        const vehicleScale = this._vehicleConfig
+            ? getVehicleProfile(this._vehicleConfig.profileId).visual.scale
+            : null;
+        this._hero.setModelScale?.(vehicleScale ?? glyphScale(size));
         this._hero.setNorad(id);
         this._activeNorad = id;
         this._kind        = kind;
+        this._configurePlumes(this._vehicleConfig);
+    }
+
+    _configurePlumes(config) {
+        for (const child of [...this._plumeGroup.children]) {
+            this._plumeGroup.remove(child);
+            child.geometry?.dispose?.();
+            child.material?.dispose?.();
+        }
+        if (!config) { this._plumeGroup.visible = false; return; }
+        const profile = getVehicleProfile(config.profileId);
+        const { bus, thrusters = 1, plume = 'chemical' } = profile.visual;
+        const count = Math.max(1, Math.min(4, thrusters));
+        const color = plume === 'electric' ? 0x66bbff : 0xff8844;
+        const length = plume === 'electric' ? 1.55 : 1.05;
+        const radius = plume === 'electric' ? 0.10 : 0.17;
+        for (let i = 0; i < count; i++) {
+            const geo = new THREE.ConeGeometry(radius, length, 12, 1, true);
+            const mat = new THREE.MeshBasicMaterial({
+                color, transparent: true, opacity: 0,
+                blending: THREE.AdditiveBlending, depthWrite: false,
+            });
+            const flame = new THREE.Mesh(geo, mat);
+            const x = count === 1 ? 0 : ((i / (count - 1)) - 0.5) * bus[0] * 0.52;
+            flame.position.set(x, -bus[1] / 2 - length / 2, 0);
+            flame.renderOrder = 15;
+            this._plumeGroup.add(flame);
+        }
     }
 
     /** Drive per frame from the globe's render loop. */
@@ -274,7 +367,9 @@ export class FocusMesh {
             return;
         }
         const dist = this._camera.position.distanceTo(_scratch);
-        const opacity = clamp((FADE_START - dist) / (FADE_START - FADE_FULL), 0, 1);
+        const fadeStart = this._vehicleConfig ? 2.80 : FADE_START;
+        const fadeFull  = this._vehicleConfig ? 1.05 : FADE_FULL;
+        const opacity = clamp((fadeStart - dist) / (fadeStart - fadeFull), 0, 1);
 
         if (opacity <= 0.01) {
             this._hero.setVisible(false);
@@ -283,10 +378,38 @@ export class FocusMesh {
         this._material.opacity = opacity;
         this._hero.setVisible(true);
         this._hero.tick(simTimeMs);
+        const burning = this._vehicleConfig &&
+            (this._vehicleConfig.activeAction === 'raise' || this._vehicleConfig.activeAction === 'maneuver') &&
+            this._vehicleConfig.thrustN > 0;
+        this._plumeGroup.visible = !!burning;
+        if (burning) {
+            const pulse = 0.72 + 0.22 * Math.sin((simTimeMs || Date.now()) / 95);
+            for (let i = 0; i < this._plumeGroup.children.length; i++) {
+                const flame = this._plumeGroup.children[i];
+                flame.material.opacity = opacity * pulse;
+                flame.scale.y = 0.88 + 0.18 * Math.sin((simTimeMs || Date.now()) / 73 + i);
+            }
+        }
+    }
+
+    getVisualState() {
+        return {
+            selectedNoradId: this._activeNorad,
+            kind: this._kind,
+            profileId: this._vehicleConfig?.profileId ?? null,
+            attitude: this._vehicleConfig?.activeAction === 'low-drag'
+                ? 'low-drag'
+                : (this._vehicleConfig?.attitude ?? null),
+            activeAction: this._vehicleConfig?.activeAction ?? null,
+            plumeCount: this._plumeGroup.children.length,
+            plumesVisible: this._plumeGroup.visible,
+        };
     }
 
     dispose() {
         this._offSel?.();
+        this._offVehicle?.();
+        this._configurePlumes(null);
         this._hero.dispose();
     }
 }

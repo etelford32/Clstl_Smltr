@@ -209,6 +209,78 @@ export function propagate_batch(line1, line2, times_min) {
 }
 
 /**
+ * Batch companion to `propagate_omm` for orbit trails and conjunction scans.
+ * @param {number} norad_id
+ * @param {number} epoch_jd
+ * @param {number} bstar
+ * @param {number} inclination_deg
+ * @param {number} raan_deg
+ * @param {number} eccentricity
+ * @param {number} arg_perigee_deg
+ * @param {number} mean_anomaly_deg
+ * @param {number} mean_motion_rev_day
+ * @param {number} rev_num
+ * @param {Float64Array} times_min
+ * @returns {Float64Array}
+ */
+export function propagate_batch_omm(norad_id, epoch_jd, bstar, inclination_deg, raan_deg, eccentricity, arg_perigee_deg, mean_anomaly_deg, mean_motion_rev_day, rev_num, times_min) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF64ToWasm0(times_min, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.propagate_batch_omm(retptr, norad_id, epoch_jd, bstar, inclination_deg, raan_deg, eccentricity, arg_perigee_deg, mean_anomaly_deg, mean_motion_rev_day, rev_num, ptr0, len0);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v2 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 8, 8);
+        return v2;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Propagate one CCSDS OMM mean-element record. This is numerically the same
+ * SGP4 initialization and propagation path used by `propagate_tle`; only the
+ * source parser differs.
+ * @param {number} norad_id
+ * @param {number} epoch_jd
+ * @param {number} bstar
+ * @param {number} inclination_deg
+ * @param {number} raan_deg
+ * @param {number} eccentricity
+ * @param {number} arg_perigee_deg
+ * @param {number} mean_anomaly_deg
+ * @param {number} mean_motion_rev_day
+ * @param {number} rev_num
+ * @param {number} tsince_min
+ * @returns {Float64Array}
+ */
+export function propagate_omm(norad_id, epoch_jd, bstar, inclination_deg, raan_deg, eccentricity, arg_perigee_deg, mean_anomaly_deg, mean_motion_rev_day, rev_num, tsince_min) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.propagate_omm(retptr, norad_id, epoch_jd, bstar, inclination_deg, raan_deg, eccentricity, arg_perigee_deg, mean_anomaly_deg, mean_motion_rev_day, rev_num, tsince_min);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v1 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 8, 8);
+        return v1;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
  * Parse a TLE and propagate to tsince minutes from epoch.
  * Returns [x, y, z, vx, vy, vz] in km and km/s (TEME frame).
  * @param {string} line1
@@ -287,6 +359,36 @@ export function registry_add(line1, line2) {
         const ptr1 = passStringToWasm0(line2, wasm.__wbindgen_export, wasm.__wbindgen_export3);
         const len1 = WASM_VECTOR_LEN;
         wasm.registry_add(retptr, ptr0, len0, ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return r0 >>> 0;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Append a CCSDS OMM record to the persistent hot-path registry.
+ * @param {number} norad_id
+ * @param {number} epoch_jd
+ * @param {number} bstar
+ * @param {number} inclination_deg
+ * @param {number} raan_deg
+ * @param {number} eccentricity
+ * @param {number} arg_perigee_deg
+ * @param {number} mean_anomaly_deg
+ * @param {number} mean_motion_rev_day
+ * @param {number} rev_num
+ * @returns {number}
+ */
+export function registry_add_omm(norad_id, epoch_jd, bstar, inclination_deg, raan_deg, eccentricity, arg_perigee_deg, mean_anomaly_deg, mean_motion_rev_day, rev_num) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.registry_add_omm(retptr, norad_id, epoch_jd, bstar, inclination_deg, raan_deg, eccentricity, arg_perigee_deg, mean_anomaly_deg, mean_motion_rev_day, rev_num);
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);

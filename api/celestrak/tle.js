@@ -30,18 +30,20 @@
  *   ?format=json      Return parsed JSON (default)
  *   ?format=tle       Return raw TLE text
  *
- * Response: Array of { name, line1, line2, norad_id, epoch, inclination,
- *           period_min, apogee_km, perigee_km }
+ * JSON response: normalized CCSDS OMM mean elements with catalogue IDs up to
+ * nine digits. `?format=tle` remains available only as a raw compatibility
+ * response for legacy consumers.
  *
  * CelesTrak is free, CORS-enabled, and does not require authentication
  * for basic GP element queries.
  */
 import { jsonOk, jsonError, fetchWithTimeout, CORS_HEADERS } from '../_lib/responses.js';
+import { normalizeOmmPayload, summarizeOrbitRecords } from '../_lib/omm.js';
 
 export const config = { runtime: 'edge' };
 
 const CELESTRAK_BASE = 'https://celestrak.org/NORAD/elements/gp.php';
-const CACHE_TTL      = 3600;   // 1 hour — TLEs update every ~8 hours
+const CACHE_TTL      = 2 * 3600; // CelesTrak checks for a new GP release every 2 h
 const CACHE_SWR      = 300;
 
 // ── CelesTrak group → query parameter mapping ────────────────────────────────
@@ -103,93 +105,6 @@ const COMPOSITE_GROUPS = {
     ],
 };
 
-const RE = 6378.135;  // WGS-72 Earth radius (km)
-const MU = 398600.8;  // km³/s²
-const TWOPI = 2 * Math.PI;
-const MIN_PER_DAY = 1440;
-
-/** Parse mean motion (rev/day) → period, apogee, perigee */
-function orbitParams(meanMotion, ecc) {
-    const n = meanMotion * TWOPI / MIN_PER_DAY;  // rad/min
-    const a = Math.pow(MU / (n * n / 3600), 1 / 3);  // semi-major axis (km) — simplified
-    // Better: a = (MU^(1/3)) / (n_rad_per_sec)^(2/3)
-    const n_rad_s = meanMotion * TWOPI / 86400;
-    const a_km = Math.pow(MU / (n_rad_s * n_rad_s), 1 / 3);
-    const period_min = MIN_PER_DAY / meanMotion;
-    const apogee_km = a_km * (1 + ecc) - RE;
-    const perigee_km = a_km * (1 - ecc) - RE;
-    return { period_min, apogee_km, perigee_km, sma_km: a_km };
-}
-
-/** Parse TLE text format into structured objects */
-function parseTleText(text) {
-    const lines = text.trim().split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    const satellites = [];
-
-    let i = 0;
-    while (i < lines.length) {
-        // Detect 3-line TLE (name + line1 + line2) vs 2-line (line1 + line2)
-        if (i + 2 < lines.length && lines[i + 1].startsWith('1 ') && lines[i + 2].startsWith('2 ')) {
-            // 3-line format
-            const name = lines[i];
-            const line1 = lines[i + 1];
-            const line2 = lines[i + 2];
-            satellites.push(parseSingleTle(name, line1, line2));
-            i += 3;
-        } else if (lines[i].startsWith('1 ') && i + 1 < lines.length && lines[i + 1].startsWith('2 ')) {
-            // 2-line format (no name)
-            const line1 = lines[i];
-            const line2 = lines[i + 1];
-            satellites.push(parseSingleTle('UNKNOWN', line1, line2));
-            i += 2;
-        } else {
-            i++;  // skip malformed line
-        }
-    }
-    return satellites;
-}
-
-function parseSingleTle(name, line1, line2) {
-    const norad_id = parseInt(line1.substring(2, 7).trim(), 10);
-
-    // Epoch
-    const epochYr2 = parseInt(line1.substring(18, 20).trim(), 10);
-    const epochDay = parseFloat(line1.substring(20, 32).trim());
-    const epochYr = epochYr2 >= 57 ? 1900 + epochYr2 : 2000 + epochYr2;
-    const epochDate = new Date(Date.UTC(epochYr, 0, 1));
-    epochDate.setTime(epochDate.getTime() + (epochDay - 1) * 86400000);
-
-    // Line 2 fields
-    const inclination = parseFloat(line2.substring(8, 16).trim());
-    const raan = parseFloat(line2.substring(17, 25).trim());
-    const eccStr = '0.' + line2.substring(26, 33).trim();
-    const ecc = parseFloat(eccStr);
-    const argPerigee = parseFloat(line2.substring(34, 42).trim());
-    const meanAnomaly = parseFloat(line2.substring(43, 51).trim());
-    const meanMotion = parseFloat(line2.substring(52, 63).trim());
-
-    const { period_min, apogee_km, perigee_km, sma_km } = orbitParams(meanMotion, ecc);
-
-    return {
-        name: name.trim(),
-        norad_id,
-        line1,
-        line2,
-        epoch: epochDate.toISOString(),
-        epoch_yr: epochYr + epochDay / (epochYr % 4 === 0 ? 366 : 365),
-        inclination,
-        raan,
-        eccentricity: ecc,
-        arg_perigee: argPerigee,
-        mean_anomaly: meanAnomaly,
-        mean_motion: meanMotion,
-        period_min: Math.round(period_min * 100) / 100,
-        apogee_km: Math.round(apogee_km),
-        perigee_km: Math.round(perigee_km),
-        sma_km: Math.round(sma_km),
-    };
-}
-
 /** Fetch one CelesTrak group, return raw TLE text. Throws on failure. */
 async function fetchGroupText(groupParam) {
     const url = `${CELESTRAK_BASE}?${groupParam}&FORMAT=TLE`;
@@ -211,6 +126,33 @@ async function fetchGroupText(groupParam) {
     return text;
 }
 
+/** Fetch one CelesTrak group as CCSDS OMM JSON. */
+async function fetchGroupOmm(groupParam) {
+    const url = `${CELESTRAK_BASE}?${groupParam}&FORMAT=JSON`;
+    const res = await fetchWithTimeout(url, {
+        headers: {
+            'User-Agent': 'ParkerPhysics/1.0 (satellite-tracker)',
+            Accept: 'application/json',
+        },
+    });
+    if (!res.ok) throw new Error(`CelesTrak HTTP ${res.status} (${groupParam})`);
+    let payload;
+    try { payload = await res.json(); }
+    catch (_) { throw new Error(`CelesTrak malformed OMM JSON (${groupParam})`); }
+    if (!Array.isArray(payload)) throw new Error(`CelesTrak no OMM records (${groupParam})`);
+    return payload;
+}
+
+function ommEnvelope(records, { received, rejected } = {}) {
+    return {
+        source_format: 'omm-json',
+        upstream_count: Number.isFinite(received) ? received : records.length,
+        rejected_count: Number.isFinite(rejected) ? rejected : 0,
+        update_cadence_hours: 2,
+        health: summarizeOrbitRecords(records),
+    };
+}
+
 export default async function handler(request) {
     const url = new URL(request.url);
     const group = url.searchParams.get('group') || 'stations';
@@ -218,41 +160,58 @@ export default async function handler(request) {
     const search = url.searchParams.get('search');
     const fmt = url.searchParams.get('format') || 'json';
 
+    if (norad && !/^\d{1,9}$/.test(norad)) {
+        return jsonError('invalid_catalog_id', 'Catalogue ID must contain 1–9 digits', {
+            status: 400,
+            maxAge: 300,
+        });
+    }
+
     // ── Single-shot lookups (NORAD or name search) ──────────────────────────
     if (norad || search) {
-        const celestrakUrl = norad
-            ? `${CELESTRAK_BASE}?CATNR=${norad}&FORMAT=TLE`
-            : `${CELESTRAK_BASE}?NAME=${encodeURIComponent(search)}&FORMAT=TLE`;
-        let text;
-        try {
-            const res = await fetchWithTimeout(celestrakUrl, {
-                headers: { 'User-Agent': 'ParkerPhysics/1.0 (satellite-tracker)' },
-            });
-            if (!res.ok) throw new Error(`CelesTrak HTTP ${res.status}`);
-            text = await res.text();
-        } catch (e) {
-            return jsonError('upstream_unavailable', e.message, { source: 'CelesTrak' });
-        }
-        if (!text || text.trim().length === 0) {
-            return jsonError('empty_response', 'CelesTrak returned no TLEs', { source: 'CelesTrak' });
-        }
+        const query = norad ? `CATNR=${norad}` : `NAME=${encodeURIComponent(search)}`;
         if (fmt === 'tle') {
+            let text;
+            try {
+                const res = await fetchWithTimeout(`${CELESTRAK_BASE}?${query}&FORMAT=TLE`, {
+                    headers: { 'User-Agent': 'ParkerPhysics/1.0 (satellite-tracker)' },
+                });
+                if (!res.ok) throw new Error(`CelesTrak HTTP ${res.status}`);
+                text = await res.text();
+            } catch (e) {
+                return jsonError('upstream_unavailable', e.message, { source: 'CelesTrak' });
+            }
+            if (!text || text.trim().length === 0) {
+                return jsonError('empty_response', 'CelesTrak returned no TLEs', { source: 'CelesTrak' });
+            }
             return new Response(text, {
                 status: 200,
                 headers: {
-                    'Content-Type':  'text/plain',
+                    'Content-Type': 'text/plain',
                     'Cache-Control': `public, s-maxage=${CACHE_TTL}, stale-while-revalidate=${CACHE_SWR}`,
                     ...CORS_HEADERS,
                 },
             });
         }
-        const satellites = parseTleText(text);
+
+        let payload;
+        try {
+            payload = await fetchGroupOmm(query);
+        } catch (e) {
+            return jsonError('upstream_unavailable', e.message, { source: 'CelesTrak' });
+        }
+        const normalized = normalizeOmmPayload(payload);
+        const satellites = normalized.records;
+        if (satellites.length === 0) {
+            return jsonError('empty_response', 'CelesTrak returned no valid OMM records', { source: 'CelesTrak' });
+        }
         return jsonOk({
-            source: 'CelesTrak',
+            source: 'CelesTrak GP / OMM',
             group: norad ? `NORAD ${norad}` : `search:${search}`,
             count: satellites.length,
             fetched: new Date().toISOString(),
             satellites,
+            ...ommEnvelope(satellites, normalized),
         }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
     }
 
@@ -260,15 +219,19 @@ export default async function handler(request) {
     if (COMPOSITE_GROUPS[group]) {
         const subgroups = COMPOSITE_GROUPS[group];
         const settled = await Promise.allSettled(
-            subgroups.map(sg => fetchGroupText(GROUP_MAP[sg]).then(text => ({ sg, text })))
+            subgroups.map(sg => (fmt === 'tle'
+                ? fetchGroupText(GROUP_MAP[sg]).then(text => ({ sg, text }))
+                : fetchGroupOmm(GROUP_MAP[sg]).then(payload => ({ sg, payload }))))
         );
 
         const subResults = [];      // per-sub status for the response envelope
         const tleChunks  = [];
+        const ommPayloads = [];
         for (let i = 0; i < settled.length; i++) {
             const r = settled[i];
             if (r.status === 'fulfilled') {
-                tleChunks.push(r.value.text);
+                if (fmt === 'tle') tleChunks.push(r.value.text);
+                else ommPayloads.push(r.value.payload);
                 subResults.push({ group: subgroups[i], status: 'ok' });
             } else {
                 subResults.push({
@@ -279,7 +242,7 @@ export default async function handler(request) {
             }
         }
 
-        if (tleChunks.length === 0) {
+        if ((fmt === 'tle' ? tleChunks : ommPayloads).length === 0) {
             // Every subgroup failed — return a 503 with the per-sub
             // breakdown so the client can show useful diagnostics.
             return jsonError('upstream_unavailable',
@@ -298,24 +261,39 @@ export default async function handler(request) {
             });
         }
 
-        // Parse + dedupe by NORAD ID. Per-event groups don't overlap in
+        // Normalize + dedupe by NORAD ID. Per-event groups don't overlap in
         // practice, but a defensive dedupe makes the count truthful if
         // CelesTrak ever rolls fragments between groups.
         const merged = new Map();
-        for (const text of tleChunks) {
-            for (const sat of parseTleText(text)) {
+        let received = 0;
+        let rejected = 0;
+        for (const payload of ommPayloads) {
+            const normalized = normalizeOmmPayload(payload);
+            received += normalized.received;
+            rejected += normalized.rejected;
+            for (const sat of normalized.records) {
                 if (!merged.has(sat.norad_id)) merged.set(sat.norad_id, sat);
             }
         }
 
+        const satellites = [...merged.values()];
+
+        if (satellites.length === 0) {
+            return jsonError('empty_response', 'CelesTrak returned no valid OMM records', {
+                source: 'CelesTrak',
+                detail: subResults,
+            });
+        }
+
         return jsonOk({
-            source: 'CelesTrak',
+            source: 'CelesTrak GP / OMM',
             group,
             composite: true,
             subgroups: subResults,
-            count: merged.size,
+            count: satellites.length,
             fetched: new Date().toISOString(),
-            satellites: [...merged.values()],
+            satellites,
+            ...ommEnvelope(satellites, { received, rejected }),
         }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
     }
 
@@ -327,14 +305,10 @@ export default async function handler(request) {
             { status: 400, maxAge: 300 });
     }
 
-    let text;
-    try {
-        text = await fetchGroupText(groupParam);
-    } catch (e) {
-        return jsonError('upstream_unavailable', e.message, { source: 'CelesTrak' });
-    }
-
     if (fmt === 'tle') {
+        let text;
+        try { text = await fetchGroupText(groupParam); }
+        catch (e) { return jsonError('upstream_unavailable', e.message, { source: 'CelesTrak' }); }
         return new Response(text, {
             status: 200,
             headers: {
@@ -345,12 +319,20 @@ export default async function handler(request) {
         });
     }
 
-    const satellites = parseTleText(text);
+    let payload;
+    try { payload = await fetchGroupOmm(groupParam); }
+    catch (e) { return jsonError('upstream_unavailable', e.message, { source: 'CelesTrak' }); }
+    const normalized = normalizeOmmPayload(payload);
+    const satellites = normalized.records;
+    if (satellites.length === 0) {
+        return jsonError('empty_response', 'CelesTrak returned no valid OMM records', { source: 'CelesTrak' });
+    }
     return jsonOk({
-        source: 'CelesTrak',
+        source: 'CelesTrak GP / OMM',
         group,
         count: satellites.length,
         fetched: new Date().toISOString(),
         satellites,
+        ...ommEnvelope(satellites, normalized),
     }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

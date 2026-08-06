@@ -101,10 +101,34 @@ function jsFallbackPropagate(tle, tsince_min) {
     };
 }
 
+function hasOmmElements(tle) {
+    return !!tle
+        && Number.isInteger(Number(tle.norad_id))
+        && Number(tle.norad_id) > 0
+        && Number.isFinite(Number(tle.epoch_jd))
+        && ['inclination', 'raan', 'eccentricity', 'arg_perigee', 'mean_anomaly', 'mean_motion']
+            .every(key => Number.isFinite(Number(tle[key])))
+        && Number(tle.mean_motion) > 0;
+}
+
+function ommArgs(tle) {
+    return [
+        Number(tle.norad_id), Number(tle.epoch_jd),
+        Number.isFinite(Number(tle.bstar)) ? Number(tle.bstar) : 0,
+        Number(tle.inclination), Number(tle.raan), Number(tle.eccentricity),
+        Number(tle.arg_perigee), Number(tle.mean_anomaly), Number(tle.mean_motion),
+        Number.isFinite(Number(tle.rev_at_epoch)) ? Math.max(0, Math.floor(Number(tle.rev_at_epoch))) : 0,
+    ];
+}
+
 function propagate(tle, tsince_min) {
-    if (_wasmSgp4 && tle.line1 && tle.line2) {
+    if (_wasmSgp4) {
         try {
-            const result = _wasmSgp4.propagate_tle(tle.line1, tle.line2, tsince_min);
+            const result = tle.line1 && tle.line2
+                ? _wasmSgp4.propagate_tle(tle.line1, tle.line2, tsince_min)
+                : hasOmmElements(tle) && _wasmSgp4.propagate_omm
+                    ? _wasmSgp4.propagate_omm(...ommArgs(tle), tsince_min)
+                    : null;
             if (result && result.length >= 3 && isFinite(result[0])) {
                 return { x: result[0], y: result[1], z: result[2] };
             }
@@ -113,10 +137,27 @@ function propagate(tle, tsince_min) {
     return jsFallbackPropagate(tle, tsince_min);
 }
 
+function propagateBatch(tle, times) {
+    if (!_wasmSgp4) return null;
+    try {
+        if (tle?.line1 && tle?.line2 && _wasmSgp4.propagate_batch) {
+            return _wasmSgp4.propagate_batch(tle.line1, tle.line2, times);
+        }
+        if (hasOmmElements(tle) && _wasmSgp4.propagate_batch_omm) {
+            return _wasmSgp4.propagate_batch_omm(...ommArgs(tle), times);
+        }
+    } catch (_) {}
+    return null;
+}
+
 // TLE epoch fractional year → Julian Date. Same arithmetic as the main
 // tracker's tleEpochToJd so worker results line up with animate-loop
 // propagation to the same jd.
 function tleEpochToJd(tle) {
+    if (Number.isFinite(Number(tle?.epoch_jd))) return Number(tle.epoch_jd);
+    if (Number.isFinite(Number(tle?.epoch_ms))) return Number(tle.epoch_ms) / 86400000 + 2440587.5;
+    const epochMs = Date.parse(tle?.epoch);
+    if (Number.isFinite(epochMs)) return epochMs / 86400000 + 2440587.5;
     const epochYr = tle.epoch_yr ?? 2026;
     const yr      = Math.floor(epochYr);
     const dayFrac = (epochYr - yr) * (yr % 4 === 0 ? 366 : 365);
@@ -141,9 +182,10 @@ function screenOne(target, debris, params) {
 
     // Propagate target across all steps.
     let targetPos = null;
-    if (_wasmSgp4 && target.tle.line1 && target.tle.line2) {
+    if (_wasmSgp4) {
         try {
-            const result = _wasmSgp4.propagate_batch(target.tle.line1, target.tle.line2, times);
+            const result = propagateBatch(target.tle, times);
+            if (!result) throw new Error('batch propagator unavailable');
             targetPos = new Array(nSteps);
             for (let i = 0; i < nSteps; i++) {
                 const off = i * 6;
@@ -231,9 +273,10 @@ function screenOneFleet(target, secondaries, params, epochMs) {
     for (let i = 0; i < nSteps; i++) times[i] = tsinceBase + i * stepMin;
 
     let targetPos = null;
-    if (_wasmSgp4 && target.tle.line1 && target.tle.line2) {
+    if (_wasmSgp4) {
         try {
-            const result = _wasmSgp4.propagate_batch(target.tle.line1, target.tle.line2, times);
+            const result = propagateBatch(target.tle, times);
+            if (!result) throw new Error('batch propagator unavailable');
             targetPos = new Array(nSteps);
             for (let i = 0; i < nSteps; i++) {
                 const off = i * 6;
