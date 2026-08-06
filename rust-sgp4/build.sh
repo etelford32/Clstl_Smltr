@@ -37,6 +37,15 @@ if ! command -v clang &> /dev/null; then
     exit 1
 fi
 
+# Apple's Command Line Tools clang is host-only and reports no compatible
+# wasm32 target. Prefer Homebrew LLVM automatically when it is available so a
+# normal `bash rust-sgp4/build.sh` remains reproducible on macOS.
+if [[ "$(uname -s)" == "Darwin" ]] && [[ -x /opt/homebrew/opt/llvm/bin/clang ]]; then
+    export CC_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/clang
+elif [[ "$(uname -s)" == "Darwin" ]] && [[ -x /usr/local/opt/llvm/bin/clang ]]; then
+    export CC_wasm32_unknown_unknown=/usr/local/opt/llvm/bin/clang
+fi
+
 # Ensure wasm-bindgen-cli matches the wasm-bindgen crate pin. wasm-bindgen
 # is strict about CLI/crate version match — mismatches yield "wasm-bindgen
 # version mismatch" at runtime. We resolve to the pinned version to keep

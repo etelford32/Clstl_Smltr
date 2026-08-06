@@ -37,6 +37,7 @@ import {
 import {
     annotate as annotateDebris, hazardEnergyMJ, shortFamilyName,
 } from '../debris-catalog.js';
+import { parseNoradText } from './fleet-io.js';
 
 /* ─── Decay heuristic ─────────────────────────────────────────
  * The existing js/orbital-analytics.js estimateOrbitLifetime() ships
@@ -260,17 +261,36 @@ export function mountMyFleet(fleet, opts = {}) {
     const onSelectChange = opts.onSelectChange ?? ((fn) => () => {});
 
     root.innerHTML = `
+        <div class="op-fleet-summary">
+            <span id="op-fleet-count">0 / ${fleet.constructor.MAX_ASSETS} assets</span>
+            <span>public-GP preview</span>
+        </div>
         <div class="op-fleet-add">
-            <input type="text" id="op-fleet-input" placeholder="NORAD ID…" inputmode="numeric" maxlength="6">
+            <input type="text" id="op-fleet-input" placeholder="Catalogue ID…" inputmode="numeric" maxlength="9">
             <button id="op-fleet-add-btn" type="button">Add</button>
         </div>
         <div class="op-fleet-presets">
             ${PRESETS.map(p => `<button class="op-fleet-preset" type="button" data-norad="${p.norad}">${p.label}</button>`).join('')}
         </div>
+        <details class="op-fleet-import" id="op-fleet-import">
+            <summary>Bulk import · NORAD, CSV, JSON, or TLE</summary>
+            <textarea id="op-fleet-import-text" rows="4"
+                aria-label="Fleet IDs or CSV"
+                placeholder="norad_id,name&#10;25544,ISS&#10;20580,Hubble"></textarea>
+            <div class="op-fleet-import-actions">
+                <button type="button" id="op-fleet-import-btn">Import fleet</button>
+                <label class="op-fleet-file-btn" for="op-fleet-file">Choose file</label>
+                <input id="op-fleet-file" type="file" accept=".csv,.txt,.json,.tle,text/csv,text/plain,application/json" hidden>
+            </div>
+        </details>
+        <div class="op-fleet-actions">
+            <button type="button" id="op-fleet-demo">Load demo fleet</button>
+            <button type="button" id="op-fleet-clear">Clear</button>
+        </div>
         <div class="op-fleet-msg" id="op-fleet-msg" aria-live="polite"></div>
         <ul class="op-fleet-list" id="op-fleet-list"></ul>
         <div class="op-fleet-empty" id="op-fleet-empty">
-            Add up to ${fleet.constructor.MAX_ASSETS} assets — soft-saved locally.
+            Add up to ${fleet.constructor.MAX_ASSETS} assets. This preview stays on this device.
         </div>
     `;
 
@@ -278,9 +298,14 @@ export function mountMyFleet(fleet, opts = {}) {
     const addBtn = root.querySelector('#op-fleet-add-btn');
     const msg    = root.querySelector('#op-fleet-msg');
 
+    function setMessage(text, kind = '') {
+        msg.textContent = text;
+        msg.className = 'op-fleet-msg';
+        if (kind) msg.classList.add(`op-fleet-msg-${kind}`);
+    }
+
     async function tryAdd(idRaw) {
-        msg.textContent = '';
-        msg.className   = 'op-fleet-msg';
+        setMessage('');
         const r = await fleet.add(idRaw);
         if (!r.ok) {
             const reasons = {
@@ -289,9 +314,31 @@ export function mountMyFleet(fleet, opts = {}) {
                 'fleet-full':    `Fleet full (max ${fleet.constructor.MAX_ASSETS}).`,
                 'fetch-failed':  `Couldn't resolve TLE for #${r.id}.`,
             };
-            msg.textContent = reasons[r.reason] ?? 'Add failed.';
-            msg.classList.add('op-fleet-msg-err');
+            setMessage(reasons[r.reason] ?? 'Add failed.', 'err');
+        } else {
+            setMessage(`Added NORAD ${r.id}.`, 'ok');
         }
+    }
+
+    async function tryAddMany(raw) {
+        const room = Math.max(0, fleet.constructor.MAX_ASSETS - fleet.count());
+        const parsed = parseNoradText(raw, { max: room });
+        if (parsed.ids.length === 0) {
+            setMessage(room === 0 ? 'Fleet full. Clear an asset before importing.' : 'No NORAD IDs found.', 'err');
+            return;
+        }
+
+        setMessage(`Resolving ${parsed.ids.length} asset${parsed.ids.length === 1 ? '' : 's'}…`);
+        const result = await fleet.addMany(parsed.ids);
+        const notes = [];
+        if (result.added.length) notes.push(`${result.added.length} added`);
+        if (result.duplicates.length) notes.push(`${result.duplicates.length} already present`);
+        if (result.failed.length) notes.push(`${result.failed.length} unresolved`);
+        const omitted = parsed.truncated + result.full.length;
+        if (omitted) notes.push(`${omitted} over preview limit`);
+        if (parsed.rejectedLines.length) notes.push(`${parsed.rejectedLines.length} row${parsed.rejectedLines.length === 1 ? '' : 's'} skipped`);
+        setMessage(notes.join(' · ') || 'Import complete.', result.added.length ? 'ok' : 'err');
+        if (result.added.length) root.querySelector('#op-fleet-import').open = false;
     }
 
     addBtn.addEventListener('click', () => {
@@ -305,10 +352,38 @@ export function mountMyFleet(fleet, opts = {}) {
         btn.addEventListener('click', () => tryAdd(btn.dataset.norad));
     });
 
+    const importText = root.querySelector('#op-fleet-import-text');
+    root.querySelector('#op-fleet-import-btn')?.addEventListener('click', () => {
+        tryAddMany(importText.value);
+    });
+    root.querySelector('#op-fleet-file')?.addEventListener('change', async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        try {
+            importText.value = await file.text();
+            await tryAddMany(importText.value);
+        } catch (_) {
+            setMessage(`Couldn't read ${file.name}.`, 'err');
+        } finally {
+            event.target.value = '';
+        }
+    });
+    root.querySelector('#op-fleet-demo')?.addEventListener('click', () => {
+        tryAddMany(PRESETS.map(p => p.norad).join('\n'));
+    });
+    root.querySelector('#op-fleet-clear')?.addEventListener('click', () => {
+        if (fleet.count() === 0) return;
+        if (!window.confirm('Clear this device\'s preview fleet?')) return;
+        fleet.clear();
+        setMessage('Preview fleet cleared.');
+    });
+
     fleet.onChange((list) => {
         const ul = root.querySelector('#op-fleet-list');
         const empty = root.querySelector('#op-fleet-empty');
+        const count = root.querySelector('#op-fleet-count');
         empty.style.display = list.length === 0 ? '' : 'none';
+        if (count) count.textContent = `${list.length} / ${fleet.constructor.MAX_ASSETS} assets`;
 
         const selected = getSelectedFn();
 
@@ -400,9 +475,10 @@ export function mountDecayWatch(fleet) {
             const provKey = `decay.lifetime.${a.noradId}`;
             const r = decayWithSigma(a.tle, f107, sigF107, ap, sigAp);
             const isMsis = r.model === 'msis';
-            const bstarStr = Number.isFinite(r.bstar) && r.bcSource === 'tle-bstar'
-                ? `B* ${r.bstar.toExponential(2)} R⊕⁻¹ from the TLE`
-                : `default C_D·A/m ${r.bc ?? '?'} m²/kg (TLE B* unusable)`;
+            const elementFormat = a.tle?.source_format === 'omm-json' ? 'OMM' : 'TLE';
+            const bstarStr = Number.isFinite(r.bstar) && ['tle-bstar', 'omm-bstar'].includes(r.bcSource)
+                ? `B* ${r.bstar.toExponential(2)} R⊕⁻¹ from the ${elementFormat}`
+                : `default C_D·A/m ${r.bc ?? '?'} m²/kg (${elementFormat} B* unusable)`;
             provStore.set(provKey, {
                 value: r.lifetime_days,
                 unit:  'days',
@@ -423,7 +499,7 @@ export function mountDecayWatch(fleet) {
                     ? `Orbit lifetime for ${a.name} (NORAD ${a.noradId}) at perigee ` +
                       `${r.perigee_km ?? '?'} km, integrated over NRLMSISE-00 density ` +
                       `(day/night-averaged equatorial profile) with ${bstarStr}. ` +
-                      `TLE B* is an SGP4 fit parameter, not a measurement — it can sit a ` +
+                      `${elementFormat} B* is an SGP4 fit parameter, not a measurement — it can sit a ` +
                       `factor ~2 from the physical C_D·A/m; the σ band carries that plus ` +
                       `the F10.7 / Ap forecast spread. Triage-grade, not flight dynamics.`
                     : `Triage estimate of orbit lifetime for ${a.name} (NORAD ` +

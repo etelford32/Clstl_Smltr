@@ -81,12 +81,40 @@ export class MyFleet {
      */
     async add(noradIdRaw) {
         const id = parseInt(noradIdRaw, 10);
-        if (!Number.isInteger(id) || id <= 0) return { ok: false, reason: 'invalid-id' };
+        if (!Number.isInteger(id) || id <= 0 || id > 999999999) {
+            return { ok: false, reason: 'invalid-id' };
+        }
         if (this.has(id))                     return { ok: false, reason: 'already-added' };
         if (this.isFull())                    return { ok: false, reason: 'fleet-full' };
 
         const asset = await this._addInternal(id, { persist: true });
         return asset.status === 'ready' ? { ok: true, id } : { ok: false, reason: 'fetch-failed', id };
+    }
+
+    /**
+     * Add a bounded fleet intake without making the UI reproduce the store's
+     * duplicate / capacity / async-resolution rules. Loads sequentially so a
+     * ten-ID paste cannot stampede the CelesTrak relay on a cold catalog.
+     */
+    async addMany(noradIds) {
+        const summary = { added: [], duplicates: [], failed: [], full: [] };
+        const unique = [...new Set((noradIds || []).map(n => parseInt(n, 10)).filter(Number.isInteger))];
+        for (const id of unique) {
+            if (this.has(id)) {
+                summary.duplicates.push(id);
+                continue;
+            }
+            if (this.isFull()) {
+                summary.full.push(id);
+                continue;
+            }
+            const result = await this.add(id);
+            if (result.ok) summary.added.push(id);
+            else if (result.reason === 'already-added') summary.duplicates.push(id);
+            else if (result.reason === 'fleet-full') summary.full.push(id);
+            else summary.failed.push(id);
+        }
+        return summary;
     }
 
     async _addInternal(id, { persist }) {

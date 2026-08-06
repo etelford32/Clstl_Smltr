@@ -111,9 +111,12 @@ export function bstarToBallistic(bstar) {
  * a zero-fill (GEO / fresh objects), above 0.5 it's a fit artifact.
  */
 export function ballisticFromTle(tle) {
-    const bstar = tle?.line1 ? parseBstar(tle.line1) : null;
+    const bstar = Number.isFinite(Number(tle?.bstar))
+        ? Number(tle.bstar)
+        : tle?.line1 ? parseBstar(tle.line1) : null;
     if (Number.isFinite(bstar) && bstar > 1e-9 && bstar < 0.5) {
-        return { bc: bstarToBallistic(bstar), bstar, source: 'tle-bstar', sigmaFrac: SIGMA_FRAC_TLE };
+        const source = tle?.source_format === 'omm-json' ? 'omm-bstar' : 'tle-bstar';
+        return { bc: bstarToBallistic(bstar), bstar, source, sigmaFrac: SIGMA_FRAC_TLE };
     }
     return { bc: DEFAULT_BC, bstar, source: 'default', sigmaFrac: SIGMA_FRAC_DEFAULT };
 }

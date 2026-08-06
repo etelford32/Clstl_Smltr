@@ -90,6 +90,10 @@ console.log('Part A — pure integrator + parsing');
     const noLine = ballisticFromTle({});
     assert.equal(noLine.source, 'default', 'missing line1 falls back');
 
+    const fromOmm = ballisticFromTle({ bstar: 0.30777e-3, source_format: 'omm-json' });
+    assert.equal(fromOmm.source, 'omm-bstar');
+    approx(fromOmm.bc, BSTAR_TO_BC * 0.30777e-3, 1e-9, 'bc from OMM B*');
+
     assert.ok(neg.sigmaFrac > fromTle.sigmaFrac, 'fallback carries wider σ');
     ok('ballisticFromTle prefers usable TLE B*, falls back with wider σ');
 }

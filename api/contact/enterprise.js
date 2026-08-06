@@ -32,7 +32,8 @@
  *   SALES_EMAIL           — destination address (default: sales@parkerphysics.com)
  *   ALERT_FROM_EMAIL      — From: address (reused from alerts module)
  *   APP_URL               — used for the admin link in the notification email
- *   ALLOWED_ORIGINS       — comma-list; defaults to parkerphysics.com + .app
+ *   ALLOWED_ORIGINS       — comma-list; defaults to the canonical
+ *                           parkersphysics.com plus legacy aliases
  */
 
 export const config = { runtime: 'edge' };
@@ -43,10 +44,10 @@ const RESEND_API    = 'https://api.resend.com/emails';
 const RESEND_KEY    = process.env.RESEND_API_KEY || '';
 const SALES_EMAIL   = process.env.SALES_EMAIL || 'sales@parkerphysics.com';
 const FROM_EMAIL    = process.env.ALERT_FROM_EMAIL || 'Parkers Physics <noreply@parkerphysics.com>';
-const APP_URL       = process.env.APP_URL || 'https://parkerphysics.com';
+const APP_URL       = process.env.APP_URL || 'https://parkersphysics.com';
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS
-    || 'https://parkerphysics.com,https://www.parkerphysics.com,https://parkerphysics.app,https://www.parkerphysics.app')
+    || 'https://parkersphysics.com,https://www.parkersphysics.com,https://parkerphysics.com,https://www.parkerphysics.com,https://parkerphysics.app,https://www.parkerphysics.app')
     .split(',').map(s => s.trim()).filter(Boolean);
 
 // Allowed use-case tags. The frontend renders these as checkboxes and

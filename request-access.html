@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Request Access — Parkers Physics LEO Drag Forecasting</title>
-<meta name="description" content="Request access to Parkers Physics — MHD-grounded storm-time LEO drag forecasting for satellite operators, government, and research programs. We'll be in touch within one business day.">
+<title>Request a Fleet Assessment — Parkers Physics</title>
+<meta name="description" content="Request a traceable storm-time fleet stress test for a LEO operator, government mission, or research program. We'll be in touch within one business day.">
 <link rel="canonical" href="https://parkersphysics.com/request-access">
 <meta property="og:site_name" content="Parkers Physics">
-<meta property="og:title" content="Request Access — Parkers Physics">
-<meta property="og:description" content="Storm-time LEO drag forecasting you can stake a maneuver on. Request access for your fleet.">
+<meta property="og:title" content="Request a Fleet Assessment — Parkers Physics">
+<meta property="og:description" content="Bring the fleet decision you need to rehearse and request an assisted storm-time stress test.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://parkersphysics.com/request-access">
 <meta property="og:image" content="https://parkersphysics.com/static/og/request-access.jpg">
@@ -16,8 +16,8 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Parkers Physics — MHD-grounded drag forecasting">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Request Access — Parkers Physics">
-<meta name="twitter:description" content="MHD-grounded LEO drag forecasting for satellite operators, government, and research.">
+<meta name="twitter:title" content="Request a Fleet Assessment — Parkers Physics">
+<meta name="twitter:description" content="A traceable storm-time fleet stress test for satellite operators, government, and research.">
 <meta name="twitter:image" content="https://parkersphysics.com/static/og/request-access.jpg">
 
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -118,11 +118,11 @@ footer.ra-footer a:hover{color:var(--uv-300)}
 <header class="ra-hero">
   <div class="ra-wrap ra-hero-inner">
     <span class="ra-eyebrow">Request Access</span>
-    <h1 class="ra-h1">Get the drag forecast that holds up during the storm.</h1>
+    <h1 class="ra-h1">Bring us the fleet decision you need to rehearse.</h1>
     <p class="ra-lede">
-      For LEO operators, government, and research programs that need storm-time
-      thermospheric drag they can stake a maneuver on. Tell us about your fleet
-      and we&rsquo;ll be in touch within one business day.
+      For LEO operators, government, and research programs that need a traceable
+      storm-time stress test. Tell us about the fleet and operational question;
+      we&rsquo;ll be in touch within one business day.
     </p>
   </div>
 </header>
@@ -199,8 +199,8 @@ footer.ra-footer a:hover{color:var(--uv-300)}
         <li><strong>Full provenance</strong> — every number traceable to the equations, auditable for evaluators.</li>
       </ul>
       <div class="ra-callout">
-        <strong>Validated where it counts.</strong> Hindcast against the Feb-2022 Starlink
-        loss and the May-2024 Gannon&nbsp;G5 — the storms that defined the gap.
+        <strong>Validation stays visible.</strong> Feb-2022 and the May-2024 Gannon&nbsp;G5
+        are the defining stress tests; model skill, uncertainty, and limitations travel with the result.
       </div>
       <p class="ra-alt">
         Want to see it first? <a href="for-operators.html">Read the operator brief</a>
@@ -224,10 +224,23 @@ footer.ra-footer a:hover{color:var(--uv-300)}
   const form   = document.getElementById('ra-form');
   const btn    = document.getElementById('ra-submit');
   const status = document.getElementById('ra-status');
+  const accessParams = new URLSearchParams(location.search);
+  const isFleetAssessment = accessParams.get('use_case') === 'fleet_assessment';
+  const defaultSubmitLabel = isFleetAssessment ? 'Request fleet assessment →' : 'Request access →';
 
   // Source marker so operator access-requests are distinguishable from
   // generic enterprise leads in the shared enterprise_leads table.
-  const SOURCE_TAG = '[request-access · LEO operators]';
+  const SOURCE_TAG = isFleetAssessment
+    ? '[request-access · fleet storm-readiness assessment]'
+    : '[request-access · LEO operators]';
+
+  if (isFleetAssessment) {
+    const satOps = form.querySelector('input[name="use_case"][value="satellite_operations"]');
+    const message = document.getElementById('ra-message');
+    if (satOps) satOps.checked = true;
+    if (message) message.placeholder = 'Fleet size, NORAD IDs or altitude bands, spacecraft mass/area/attitude assumptions, and the decision to rehearse (delay, attitude, raise, conjunction screening, or propellant margin).';
+    btn.textContent = defaultSubmitLabel;
+  }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -275,13 +288,13 @@ footer.ra-footer a:hover{color:var(--uv-300)}
         status.className = 'ra-status err';
         status.textContent = data.detail || data.error || 'Something went wrong. Please email sales@parkerphysics.com directly.';
         btn.disabled = false;
-        btn.textContent = 'Request access →';
+        btn.textContent = defaultSubmitLabel;
       }
     } catch (err) {
       status.className = 'ra-status err';
       status.textContent = 'Network error. Please email sales@parkerphysics.com directly.';
       btn.disabled = false;
-      btn.textContent = 'Request access →';
+      btn.textContent = defaultSubmitLabel;
     }
   });
 </script>

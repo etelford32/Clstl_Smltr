@@ -10,6 +10,15 @@
 
 The page started as a static "PRO Preview" with a globe, a fleet panel, and a placeholder scrub bar. It's now a working predictions-first satellite-operations console with deterministic time scrub, real conjunction screening, encounter visualizations, a maneuver what-if planner, and a per-asset orbit inspector — all on top of a SGP4 propagator that runs off the main thread under a SharedArrayBuffer protocol.
 
+**2026-08 catalogue-integrity slice:** the CelesTrak edge route is now
+OMM-first (`FORMAT=JSON`) and retains one- through nine-digit catalogue IDs.
+Normalized OMM records propagate through the same full Rust SGP4 path as
+legacy TLEs in the main thread, batch tools, hot registry, and both workers.
+The left rail now includes **Catalogue Coverage Health**: selected-layer scope,
+unique loaded records, OMM format, six-plus-digit IDs, epoch-age buckets,
+tracker capacity, rejected records, and partial subgroup failures. Raw
+`?format=tle` remains as a compatibility response, not the application default.
+
 **Commits on the branch** (oldest at bottom):
 
 ```
@@ -43,6 +52,7 @@ operations.html
 │   └── SatelliteTracker  (js/satellite-tracker.js)  WASM SGP4 + worker + SAB
 │       ├── propagation-worker.js                    Atomics.waitAsync tick loop
 │       └── sgp4-wasm/sgp4_wasm.js                   Rust → WASM, registry_propagate_into
+├── catalog-health.js                                OMM / freshness / selected-scope health
 ├── OperationsVisuals (js/operations/visuals.js)     trails, threat ring, TCA glyphs,
 │   │                                                encounter tube, v_rel arrow,
 │   │                                                covariance ellipsoids
@@ -53,6 +63,13 @@ operations.html
 │   │   └── debris-threat-worker.js   off-thread fleet × catalog screen, dv + miss_vec
 │   ├── auto-rescreen on time-cursor drift (debounced)
 │   └── horizon chips (24 h / 7 d / 14 d)
+├── risk-outlook.js                                  fleet 6/24/72 h perigee outlook,
+│   └── risk-analysis.js                             drag-vs-quiet + synthetic σ overlap +
+│                                                    debris family / energy roll-up
+├── vehicle-lab.js                                   editable vehicle assumptions + five
+│   ├── vehicle-scenarios.js                         72 h action branches (pure/tested)
+│   ├── vehicle-config.js                            per-asset local configuration store
+│   └── focus-mesh.js                                design/attitude geometry + thruster plumes
 ├── conj-timeline.js                                 severity-coloured tick strip
 ├── maneuver.js                                      RTN Δv + linearised two-body
 │                                                    (YA-equivalent) projection
@@ -128,6 +145,43 @@ operations.html
 - Per-frame WASM allocation is **zero** (`registry_propagate_into` writes through a `js_sys::Float32Array`).
 - Falls back through SAB-postMessage → transferable ArrayBuffer → main-thread batch → per-sat WASM → per-sat JS Kepler. Same numerics across all five paths.
 
+### 8. Fleet risk outlook
+- Every ready fleet asset gets a short-horizon perigee table: current, +6 h,
+  +24 h, and +72 h, plus drag relative to the quiet reference. The projection
+  holds the current local orbit-averaged rate constant and recalculates when
+  the space-weather state changes.
+- Completed conjunction screens are ranked by miss distance relative to the
+  largest combined synthetic 1σ axis. Rows distinguish inside 1σ, inside 3σ,
+  uncertainty watch, and screened separation without reporting a probability
+  of collision.
+- Debris rows carry fragmentation-family attribution, estimated size/mass,
+  encounter closing speed, and kinetic-energy context. The panel rolls up the
+  dominant debris families across the current fleet screen.
+- Clicking an altitude row selects the asset. Clicking an encounter scrubs to
+  TCA and opens the existing b-plane and globe encounter visualizations.
+- Fleet JSON/CSV exports include the altitude horizons, drag-vs-quiet,
+  synthetic-σ ratio, debris family, and estimated impact energy.
+
+### 9. Vehicle & action lab
+- Select a ready fleet asset and start from one of six representative designs:
+  3U CubeSat, 12U CubeSat, 150 kg EO, 300 kg microsat, 800 kg flat-sat with
+  electric propulsion, or a large orbital platform. Templates are illustrative;
+  every physical value is editable.
+- Override wet mass, nominal/low-drag/broadside area, C_D, attitude, thrust,
+  specific impulse, and usable propellant. The fleet risk outlook immediately
+  scales the TLE-derived local ȧ by the configured C_D·A/m.
+- Compare five 72-hour branches side by side: do nothing, low-drag, immediate
+  raise, delayed raise, and an along-track collision-avoidance maneuver. Each
+  branch reports perigee, Δv, propellant, burn duration, drag loss, and whether
+  the configured propulsion can execute it.
+- Selecting low-drag changes the selected spacecraft's displayed panel pose.
+  Selecting raise or maneuver lights chemical-orange or electric-blue thruster
+  plumes on the selected vehicle while it follows its SGP4 orbit.
+- Selecting maneuver also loads its along-track Δv into the existing
+  conjunction maneuver panel so the operator can inspect miss-distance shifts.
+- Fleet JSON/CSV exports now carry vehicle inputs; JSON also carries the full
+  five-branch comparison.
+
 ---
 
 ## Known limits (with severity tags)
@@ -138,6 +192,19 @@ operations.html
 - **P2 — Maneuver model is linearised.** Assumes |Δr| << |r_chief|. Fine until Δr ~100 km (1.5 % of orbit radius). Bigger maneuvers should run a fresh screen, not a what-if.
 - **~~P3 — Drag model is a King-Hele surrogate.~~ SHIPPED 2026-07: decay is now an NRLMSISE-00 orbit-averaged integration** (`js/operations/msis-drag.js`) reading the TLE's own B* (roadmap items #13 + #14). The King-Hele surrogate remains as the no-WASM fallback; results carry `model: 'msis' | 'surrogate'` and the inspector/provenance label which ran. Residual caveat: TLE B* is an SGP4 fit parameter that can sit a factor ~2 from physical C_D·A/m — σ carries ±35 % (TLE) / ±60 % (default-B fallback). Gate: `node tests/operations-msis-drag.mjs`.
 - **P3 — GMST is simplified.** TEME→ECEF rotation uses GMST without nutation/precession (≤1 km error). Fine for visualisation; insufficient for production conjunction screening.
+- **P2 — 6/24/72-hour altitude is a local-rate sensitivity projection.** It
+  holds the current orbit-averaged ȧ constant instead of integrating a changing
+  density forecast and changing elements through the horizon. It is useful for
+  fleet ranking; it is not a propagated ephemeris or reentry prediction.
+- **P2 — Vehicle action branches are comparative approximations.** Vehicle drag
+  scales the current TLE-derived rate by configured C_D·A/m; raise uses a
+  circular Hohmann approximation; maneuver uses first-order tangential orbital
+  energy for altitude and the separate YA-equivalent panel for encounter shift.
+  Finite burns, attitude slew time, eclipses, power, thermal limits, and full
+  post-burn re-propagation are not yet modeled.
+- **P3 — Thruster plumes are state visualization, not a burn clock.** A plume
+  means the operator selected a powered branch. It does not imply the burn is
+  occurring at that exact rendered instant or at true physical scale.
 
 ### Data feeds
 - **P1 — TLE-only catalog.** Conjunction screening is fleet × loaded layers. There's no Space-Track CDM ingestion (commercial / Enterprise upgrade path documented in the b-plane caveat).
@@ -165,9 +232,12 @@ operations.html
 ### Quick smoke (2 min)
 1. Load `/operations.html`.
 2. Confirm globe paints, satellites move, time-strip cursor advances at real-time pace.
-3. Hover a debris dot → tooltip should show name + NORAD + altitude.
-4. Right-click → menu opens; click outside → menu dismisses.
-5. Press `Space` → cursor pauses; press `Space` again → resumes from last frame.
+3. In **Catalogue Coverage Health**, confirm the format badge says OMM, selected
+   layers are listed, and the epoch-age bar/counts populate. The scope caveat
+   must say this is not full public-catalogue or sensor coverage.
+4. Hover a debris dot → tooltip should show name + NORAD + altitude.
+5. Right-click → menu opens; click outside → menu dismisses.
+6. Press `Space` → cursor pauses; press `Space` again → resumes from last frame.
 
 ### Conjunction workflow (5 min)
 1. Add 2-3 NORAD IDs to My Fleet (e.g., 25544 = ISS, 48274 = Starlink-2310, any of your operational primaries).
@@ -176,6 +246,26 @@ operations.html
 4. Click an expanded sub-row for a conjunction — confirm the time cursor jumps to TCA, the asset highlights on the globe, the b-plane inset populates, the TCA pins appear with a connector + tube + arrow.
 5. Open the **Conjunction timeline strip** above the scrub track — confirm severity-coloured ticks appear; click one to jump.
 6. Toggle Auto on/off in the conjunctions toolbar; scrub the cursor by ~30 min; confirm "Auto" re-runs the screen after a brief debounce.
+7. In **Fleet risk outlook**, confirm the completed screen produces synthetic
+   σ ratios and debris-family/energy context. Click an encounter and confirm the
+   cursor jumps to its TCA.
+
+### Altitude / drag outlook (2 min)
+1. Add at least one LEO asset and confirm current/+6 h/+24 h/+72 h perigee values appear.
+2. Select Gannon G5, scrub into the storm, and confirm the 72-hour loss and
+   drag-vs-quiet value increase while the panel remains labelled as a local-rate projection.
+3. Export Fleet JSON and confirm `perigeeForecast72hKm`, `dragVsQuiet`, and the
+   public-TLE limitations are present.
+
+### Vehicle / action workbench (3 min)
+1. Select a ready fleet asset and confirm five action columns appear.
+2. Switch among the six design templates; edit mass, area, C_D, thrust, Isp,
+   and propellant, then Apply. Confirm C_D·A/m and branch values update.
+3. Select Low-drag and zoom toward the chosen asset; confirm its solar-panel
+   pose feathers. Select Raise or Maneuver; confirm the thruster plume appears.
+4. Select Maneuver and confirm the same along-track Δv appears in the existing
+   maneuver panel. A zero-propellant or zero-thrust configuration should mark
+   powered branches infeasible.
 
 ### Maneuver what-if (3 min)
 1. With an asset selected, open the **Maneuver · what-if** panel.
@@ -213,6 +303,11 @@ In rough priority order. Each item is sized to be a single sprint slice unless n
 
 ### Trust-and-safety (unblock real-operator usage)
 
+0. ~~**OMM + Catalogue Coverage Health**~~ — **SHIPPED 2026-08**: OMM-first
+   CelesTrak ingestion, one- through nine-digit catalogue IDs, native Rust/WASM
+   SGP4 for OMM, and selected-layer freshness/partial-failure health telemetry.
+   This fixes format coverage; it does not provide operator covariance or
+   sensor-tasking completeness.
 1. **Space-Track CDM ingestion** — read the standard Conjunction Data Message format. Replaces the synthetic σ rings + isotropic combined miss with operator-grade covariances. Largest single trust win for the page. *Medium-large; needs an Enterprise-tier auth pathway and a CDM XML parser.*
 2. ~~**TLE-age + B* in the inspector**~~ — **SHIPPED 2026-07**: the Drag & decay block now shows "TLE 2.4 d old · B* 3.2e-4" with the trust caveats in the tooltip.
 3. **"Re-screen with maneuver" button** — drops the "TCA held fixed" caveat. Fork the screener, swap the primary's propagator for a perturbed-state one (already designed), surface old vs. new TCAs in the diff list. *Medium.*
@@ -221,7 +316,7 @@ In rough priority order. Each item is sized to be a single sprint slice unless n
 ### Operator workflow
 
 5. **Save & share scenarios** — beyond the URL hash, named scenarios stored to a profile (Supabase). PRO-tier feature; lets a team hand work off across shifts. *Medium.*
-6. **CSV / CDM export** — populates the placeholder Export panel. Critical for any team with downstream tooling. *Small.*
+6. **Fleet CSV / JSON briefing export** — **SHIPPED 2026-08**: the Fleet Briefing panel exports the current asset list, decay bands, latest conjunction summary, scenario hash, model versions, and public-TLE caveats. CDM export remains a Team-beta item because it requires operator covariance semantics, not just a file extension.
 7. **Pass predictor for ground sites** — given a lat/lon/alt, list AOS/LOS times for the next 24 h for the selected asset. Operationally critical for comm planners. *Medium.*
 8. **Ground track over N orbits** — in the inspector, draw the lat/lon path on a small 2D map or as a polyline on the globe surface. *Medium.*
 9. **Osculating elements at sim time** — short-period oscillation around the mean elements. Cheap from r,v; differentiates "right now" from the TLE epoch. *Small.*
@@ -247,7 +342,7 @@ In rough priority order. Each item is sized to be a single sprint slice unless n
 
 ### Polish
 
-20. Replace the static "Coming next" Export panel with a working JSON download.
+20. ~~Replace the static "Coming next" Export panel with a working JSON download.~~ **SHIPPED 2026-08** with both JSON and CSV fleet briefings. Bulk NORAD/CSV/JSON/TLE intake and a representative demo fleet shipped in the same fleet-ready slice (`js/operations/fleet-io.js`).
 21. Move the b-plane inset to a tab on mobile (currently disappears under 420 px).
 22. Add a `?debug=1` overlay with FPS, worker-tick budget, SAB byte usage, and the active fallback path.
 23. Smoke tests in `tests/operations-smoke.spec.js` (Playwright) — boot the page, screen, scrub, click a row, take a screenshot.
@@ -264,6 +359,7 @@ js/operations/decision-deck.js         conj rebuild + decay exports
 js/operations/conj-timeline.js         new — severity tick strip
 js/operations/maneuver.js              new — RTN Δv + YA-equivalent
 js/operations/orbit-inspector.js       new — per-asset analysis
+js/operations/catalog-health.js        OMM coverage + freshness health panel
 js/operations/visuals.js               trails, encounter tube, v_rel arrow
 js/operations/b-plane.js               real (B·T, B·R) projection
 js/operations/globe-picker.js          new — pointer / touch picking
@@ -271,6 +367,8 @@ js/operations/propagation-worker.js    new — off-thread + Atomics
 js/operations/toast.js                 new — feedback stack
 js/satellite-tracker.js                worker plumbing + SAB + Atomics
 js/sgp4-wasm/sgp4_wasm*                rebuilt — registry + propagate_into
+api/_lib/omm.js                         CCSDS OMM normalization + health summary
+api/celestrak/tle.js                    OMM-first proxy; raw TLE compatibility
 js/debris-threat-worker.js             screen-fleet message
 operations.html                        all the panel/CSS work
 rust-sgp4/src/lib.rs                   registry_*, propagate_into
