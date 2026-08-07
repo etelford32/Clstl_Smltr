@@ -59,10 +59,16 @@ controls.dampingFactor = 0.06;
 controls.minDistance = 1.22;
 controls.maxDistance = 7;
 controls.enablePan = false;
+controls.zoomToCursor = true;
 controls.rotateSpeed = 0.55;
 controls.zoomSpeed = 0.75;
 controls.minPolarAngle = 0;
 controls.maxPolarAngle = Math.PI;
+controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+controls.touches.ONE = THREE.TOUCH.ROTATE;
+controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 controls.autoRotate = !reducedMotion.matches;
 controls.autoRotateSpeed = 0.34;
@@ -1166,7 +1172,7 @@ function deactivateSurfaceExplorer() {
     camera.up.set(0, 1, 0);
     camera.updateProjectionMatrix();
     meshStatusElement.textContent = globalMeshStatus;
-    cameraHelpElement.textContent = 'Drag to orbit · pinch or scroll to zoom';
+    cameraHelpElement.textContent = 'Drag orbit · wheel zoom · pinch · double-tap land';
 }
 
 function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', duration = 1050 } = {}) {
@@ -1211,7 +1217,7 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
     meshStatusElement.textContent = hasRelief
         ? 'regional MOLA · 66k vertices · 5× macro relief'
         : 'regional smooth-terrain fallback';
-    cameraHelpElement.textContent = 'Drag to look · scroll altitude · WASD / arrows move · Esc orbit';
+    cameraHelpElement.textContent = 'Drag look · pinch altitude · double-tap move · WASD';
     updateSurfaceReadout();
     canvas.focus({ preventScroll: true });
 }
@@ -1363,7 +1369,10 @@ controls.addEventListener('start', () => {
     setCameraMode(surfaceModeActive ? 'surface' : 'custom', surfaceModeActive ? 'Surface traverse' : 'Free orbit');
     canvas.classList.add('is-interacting');
 });
-controls.addEventListener('end', () => canvas.classList.remove('is-interacting'));
+controls.addEventListener('end', () => {
+    canvas.classList.remove('is-interacting');
+    if (pointerStarts.size === 0 && canvas.dataset.inputState !== 'double-tap') setInputHint(defaultInputHint());
+});
 
 reducedMotion.addEventListener?.('change', event => {
     if (event.matches) setAutoRotate(false);
@@ -1389,7 +1398,41 @@ canvas.addEventListener('keydown', event => {
 const landmarkCard = document.querySelector('#landmark-card');
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
-let pointerDown = null;
+const pointerStarts = new Map();
+let lastTouchTap = null;
+let inputHintTimer = null;
+
+function defaultInputHint() {
+    return surfaceModeActive
+        ? 'Drag look · pinch altitude · double-tap move · WASD'
+        : 'Drag orbit · wheel zoom · pinch · double-tap land';
+}
+
+function setInputHint(message, state = 'idle', resetDelay = 1400) {
+    window.clearTimeout(inputHintTimer);
+    cameraHelpElement.textContent = message;
+    cameraHelpElement.dataset.active = String(state !== 'idle');
+    canvas.dataset.inputState = state;
+    if (resetDelay > 0) {
+        inputHintTimer = window.setTimeout(() => {
+            cameraHelpElement.textContent = defaultInputHint();
+            cameraHelpElement.dataset.active = 'false';
+            canvas.dataset.inputState = 'idle';
+        }, resetDelay);
+    }
+}
+
+function updatePointerDataset(pointerType = canvas.dataset.pointerType || 'none') {
+    canvas.dataset.pointerType = pointerType;
+    canvas.dataset.pointerCount = String(pointerStarts.size);
+}
+
+function setRaycastPointer(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = (clientX - rect.left) / rect.width * 2 - 1;
+    pointer.y = -(clientY - rect.top) / rect.height * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+}
 
 function showLandmark(landmark) {
     const category = MARS_LANDMARK_CATEGORIES[landmark.category];
@@ -1418,35 +1461,107 @@ function showSkyBody(record, key) {
     landmarkCard.hidden = false;
 }
 
-canvas.addEventListener('pointerdown', event => { pointerDown = { x: event.clientX, y: event.clientY }; });
-canvas.addEventListener('pointerup', event => {
-    const start = pointerDown;
-    pointerDown = null;
-    if (!start || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5) return;
-    const rect = canvas.getBoundingClientRect();
-    pointer.x = (event.clientX - rect.left) / rect.width * 2 - 1;
-    pointer.y = -(event.clientY - rect.top) / rect.height * 2 + 1;
-    raycaster.setFromCamera(pointer, camera);
+function pickPointOfInterest(clientX, clientY) {
+    setRaycastPointer(clientX, clientY);
     const skyHit = raycaster.intersectObjects(sky.hitTargets, false)
         .find(intersection => sky.isBodyVisible(intersection.object.userData.skyBodyKey));
     if (skyHit) {
         showSkyBody(sky.getBodyRecord(skyHit.object.userData.skyBodyKey), skyHit.object.userData.skyBodyKey);
-        return;
+        return true;
     }
     const hit = raycaster.intersectObjects(landmarks.hitTargets, false)
         .find(intersection => landmarks.isLandmarkVisible(intersection.object.userData.landmark));
-    if (hit) showLandmark(hit.object.userData.landmark);
-});
-canvas.addEventListener('dblclick', event => {
-    const rect = canvas.getBoundingClientRect();
-    pointer.x = (event.clientX - rect.left) / rect.width * 2 - 1;
-    pointer.y = -(event.clientY - rect.top) / rect.height * 2 + 1;
-    raycaster.setFromCamera(pointer, camera);
-    const globeHit = raycaster.intersectObjects([regionalTerrain, reliefMars, smoothMars], false)[0];
-    if (!globeHit) return;
+    if (!hit) return false;
+    showLandmark(hit.object.userData.landmark);
+    return true;
+}
+
+function enterSurfaceAtClientPoint(clientX, clientY) {
+    setRaycastPointer(clientX, clientY);
+    const targets = surfaceModeActive ? [regionalTerrain, reliefMars, smoothMars] : [reliefMars, smoothMars];
+    const globeHit = raycaster.intersectObjects(targets, false)[0];
+    if (!globeHit) return false;
     const location = worldVectorLatLon(globeHit.point);
     lastSurfaceFocus = { ...location, label: 'Selected terrain' };
     enterSurfaceExplorer(location.latDeg, location.lonDeg, { label: 'Surface · selected terrain' });
+    return true;
+}
+
+canvas.dataset.inputState = 'idle';
+canvas.dataset.pointerType = 'none';
+canvas.dataset.pointerCount = '0';
+cameraHelpElement.dataset.active = 'false';
+
+canvas.addEventListener('contextmenu', event => event.preventDefault());
+canvas.addEventListener('wheel', () => setInputHint(
+    surfaceModeActive ? 'Wheel adjusts eye altitude at the cursor' : 'Wheel zooms toward the cursor',
+    'wheel',
+), { passive: true });
+canvas.addEventListener('pointerdown', event => {
+    const record = {
+        x: event.clientX,
+        y: event.clientY,
+        pointerType: event.pointerType || 'mouse',
+        button: event.button,
+        moved: false,
+        multiTouch: false,
+    };
+    pointerStarts.set(event.pointerId, record);
+    if (record.pointerType === 'touch') {
+        const touchRecords = [...pointerStarts.values()].filter(item => item.pointerType === 'touch');
+        if (touchRecords.length > 1) touchRecords.forEach(item => { item.multiTouch = true; });
+        setInputHint(
+            touchRecords.length > 1 ? 'Pinch zoom · twist orbit' : (surfaceModeActive ? 'One-finger surface look' : 'One-finger orbit'),
+            touchRecords.length > 1 ? 'pinch' : 'touch-drag',
+            0,
+        );
+    } else {
+        setInputHint(event.button === 1 ? 'Middle-drag zoom' : 'Drag to orbit', 'mouse-drag', 0);
+    }
+    updatePointerDataset(record.pointerType);
+});
+canvas.addEventListener('pointermove', event => {
+    const record = pointerStarts.get(event.pointerId);
+    if (!record) return;
+    if (Math.hypot(event.clientX - record.x, event.clientY - record.y) > 7) record.moved = true;
+});
+canvas.addEventListener('pointercancel', event => {
+    pointerStarts.delete(event.pointerId);
+    updatePointerDataset(event.pointerType || 'touch');
+    if (pointerStarts.size === 0) setInputHint(defaultInputHint());
+});
+canvas.addEventListener('pointerup', event => {
+    const start = pointerStarts.get(event.pointerId);
+    pointerStarts.delete(event.pointerId);
+    updatePointerDataset(event.pointerType || start?.pointerType || 'mouse');
+    if (!start || start.moved || start.multiTouch || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 7) {
+        if (pointerStarts.size === 0) setInputHint(defaultInputHint());
+        return;
+    }
+
+    if (start.pointerType === 'touch') {
+        const now = performance.now();
+        const isDoubleTap = lastTouchTap
+            && now - lastTouchTap.time < 360
+            && Math.hypot(event.clientX - lastTouchTap.x, event.clientY - lastTouchTap.y) < 28;
+        if (isDoubleTap) {
+            lastTouchTap = null;
+            if (enterSurfaceAtClientPoint(event.clientX, event.clientY)) {
+                event.preventDefault();
+                setInputHint('Surface target acquired', 'double-tap');
+                return;
+            }
+        } else {
+            lastTouchTap = { time: now, x: event.clientX, y: event.clientY };
+        }
+    }
+
+    if (start.pointerType === 'touch' || start.button === 0) pickPointOfInterest(event.clientX, event.clientY);
+    setInputHint(defaultInputHint());
+});
+canvas.addEventListener('dblclick', event => {
+    event.preventDefault();
+    if (enterSurfaceAtClientPoint(event.clientX, event.clientY)) setInputHint('Surface target acquired', 'double-click');
 });
 document.querySelector('#landmark-card-close').addEventListener('click', () => { landmarkCard.hidden = true; });
 document.querySelector('#landmark-card-focus').addEventListener('click', () => cardFocusAction?.());
@@ -1522,6 +1637,14 @@ window.__marsLab = Object.freeze({
         mode: cameraMode,
         label: cameraModeLabel,
         rangeKm: camera.position.distanceTo(controls.target) * MARS_RADIUS_M / 1000,
+    }),
+    inputState: () => ({
+        zoomToCursor: controls.zoomToCursor,
+        mouse: { primary: 'rotate', middle: 'dolly', secondary: 'rotate' },
+        touch: { oneFinger: 'rotate', twoFinger: 'dolly-rotate', doubleTap: 'surface-target' },
+        activePointers: pointerStarts.size,
+        pointerType: canvas.dataset.pointerType,
+        state: canvas.dataset.inputState,
     }),
     surfaceState: () => ({
         active: surfaceModeActive,

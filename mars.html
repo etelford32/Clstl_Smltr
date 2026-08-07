@@ -164,7 +164,8 @@ button{color:inherit}
 .ui-panels-toggle[aria-pressed="true"]{border-color:rgba(105,228,255,.58);background:rgba(105,228,255,.14);color:#e7fbff}
 .camera-icon{font:500 .78rem var(--mono);line-height:1}
 .camera-btn-label{display:none}
-.camera-help{position:absolute;left:3px;top:calc(100% + 5px);color:#8a746a;font:.5rem var(--mono);pointer-events:none;white-space:nowrap;text-shadow:0 1px 7px #000}
+.camera-help{position:absolute;left:3px;top:calc(100% + 5px);max-width:calc(100% - 6px);overflow:hidden;color:#8a746a;font:.5rem var(--mono);pointer-events:none;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 7px #000;transition:color .16s,background .16s,border-color .16s}
+.camera-help[data-active="true"]{padding:3px 5px;border:1px solid rgba(105,228,255,.22);border-radius:6px;background:rgba(5,11,12,.76);color:#bcecf4}
 .surface-explorer{position:absolute;z-index:7;left:18px;top:84px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 9px;width:334px;padding:7px 42px 7px 7px;border:1px solid rgba(105,228,255,.25);border-radius:11px;background:rgba(7,8,8,.88);box-shadow:0 14px 38px rgba(0,0,0,.45);backdrop-filter:blur(18px)}
 .surface-explorer[hidden]{display:none}
 .surface-collapse{position:absolute;right:6px;top:6px}
@@ -250,7 +251,7 @@ button{color:inherit}
 
 <main class="mars-app" id="mars-main">
   <div class="mars-viewport" id="mars-viewport">
-    <canvas id="mars-canvas" tabindex="0" aria-label="Interactive NASA-data globe and regional surface explorer of Mars with major landmarks, JPL Horizons sky directions, current illumination, and Perseverance traverse history"></canvas>
+    <canvas id="mars-canvas" tabindex="0" aria-describedby="camera-help" aria-label="Interactive NASA-data globe and regional surface explorer of Mars with major landmarks, JPL Horizons sky directions, current illumination, and Perseverance traverse history"></canvas>
     <div class="mars-render-fallback" id="mars-render-fallback" role="status" hidden>
       <div class="mars-static-globe" aria-hidden="true"></div>
       <p class="mars-render-fallback-copy"><strong>Interactive renderer unavailable</strong><span id="mars-render-fallback-message">The released mission snapshot and data panels remain available.</span></p>
@@ -290,7 +291,7 @@ button{color:inherit}
         <button class="camera-btn" id="camera-spin" type="button" aria-label="Pause automatic rotation" aria-pressed="true" title="Pause automatic rotation (Space)"><span class="camera-icon" aria-hidden="true">Ⅱ</span><span class="camera-btn-label">Pause</span></button>
         <button class="camera-btn ui-panels-toggle" id="ui-panels-toggle" type="button" aria-label="Hide all interface panels" aria-pressed="false" title="Hide all interface panels (P)"><span class="camera-icon" id="ui-panels-icon" aria-hidden="true">HIDE</span><span class="camera-btn-label">Hide panels</span></button>
       </div>
-      <span class="camera-help" id="camera-help">Drag to orbit · pinch or scroll to zoom</span>
+      <span class="camera-help" id="camera-help">Drag orbit · wheel zoom · pinch · double-tap land</span>
     </div>
     <div class="surface-explorer" id="surface-explorer" role="group" aria-label="Regional surface movement" hidden>
       <button class="panel-toggle surface-collapse" id="surface-collapse" type="button" aria-label="Minimize surface controls" aria-expanded="true" title="Minimize surface controls">−</button>
@@ -426,6 +427,6 @@ button{color:inherit}
   });
 })();
 </script>
-<script type="module" src="./js/mars-view.js?v=20260806-ui1" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
+<script type="module" src="./js/mars-view.js?v=20260806-input1" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
 </body>
 </html>

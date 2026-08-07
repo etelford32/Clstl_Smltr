@@ -82,6 +82,11 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await expect(page.locator('#terminator-source')).toContainText('JPL Sun direction');
     await expect(page.locator('#camera-mode')).toHaveText('Mission orbit');
     await expect(page.locator('#camera-range')).toHaveAttribute('data-range-km', /\d+/);
+    await expect.poll(() => page.evaluate(() => window.__marsLab.inputState())).toMatchObject({
+        zoomToCursor: true,
+        mouse: { primary: 'rotate', middle: 'dolly', secondary: 'rotate' },
+        touch: { oneFinger: 'rotate', twoFinger: 'dolly-rotate', doubleTap: 'surface-target' },
+    });
     const desktopControls = await page.evaluate(() => {
         const stage = document.querySelector('#mars-viewport').getBoundingClientRect();
         const dock = document.querySelector('.camera-dock').getBoundingClientRect();
@@ -262,7 +267,7 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     expect(errors).toEqual([]);
 });
 
-test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks', async ({ page }) => {
+test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks', async ({ page, context }) => {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.setViewportSize({ width: 390, height: 844 });
@@ -316,8 +321,39 @@ test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks'
     expect(layout.layers.top).toBeGreaterThanOrEqual(layout.mission.bottom);
     expect(layout.dock.top).toBeGreaterThanOrEqual(layout.layers.bottom);
 
-    await page.locator('#camera-surface').click();
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+    const mobileCanvas = await page.locator('#mars-canvas').boundingBox();
+    const centerX = mobileCanvas.x + mobileCanvas.width * 0.5;
+    const centerY = mobileCanvas.y + mobileCanvas.height * 0.5;
+    const cameraBeforeTouch = await page.evaluate(() => window.__marsLab.camera.position.toArray());
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: centerX, y: centerY, id: 1 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: centerX + 52, y: centerY - 38, id: 1 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect.poll(() => page.evaluate(before => {
+        const current = window.__marsLab.camera.position.toArray();
+        return Math.hypot(...current.map((value, index) => value - before[index]));
+    }, cameraBeforeTouch)).toBeGreaterThan(0.01);
+    await expect.poll(() => page.evaluate(() => window.__marsLab.inputState().pointerType)).toBe('touch');
+
+    const rangeBeforePinch = await page.evaluate(() => window.__marsLab.cameraState().rangeKm);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [
+        { x: centerX - 24, y: centerY, id: 2 },
+        { x: centerX + 24, y: centerY, id: 3 },
+    ] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [
+        { x: centerX - 72, y: centerY, id: 2 },
+        { x: centerX + 72, y: centerY, id: 3 },
+    ] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect.poll(() => page.evaluate(before => Math.abs(window.__marsLab.cameraState().rangeKm - before), rangeBeforePinch)).toBeGreaterThan(10);
+
+    for (let tap = 0; tap < 2; tap += 1) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: centerX, y: centerY, id: 10 + tap }] });
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    }
     await expect(page.locator('#surface-explorer')).toBeVisible();
+    await expect(page.locator('#camera-mode')).toContainText('selected terrain');
     await expect(page.locator('#surface-detail')).toContainText('MOLA unavailable');
     await expect.poll(() => page.evaluate(() => window.__marsLab.surfaceState())).toMatchObject({
         active: true,
