@@ -7,11 +7,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Real-Time Mars — Perseverance Environment Simulator | Parkers Physics</title>
 <link rel="canonical" href="https://parkersphysics.com/mars.html">
-<meta name="description" content="Explore a NASA-data Mars globe, follow Perseverance's released position, and inspect clearly timestamped MEDA environmental observations.">
+<meta name="description" content="Explore NASA-data Mars from global orbit to a movable MOLA-guided regional surface, follow Perseverance's released position, and inspect timestamped MEDA observations.">
 <meta name="theme-color" content="#130804">
 <meta property="og:site_name" content="Parkers Physics">
 <meta property="og:title" content="Real-Time Mars — Parkers Physics">
-<meta property="og:description" content="A NASA MOLA Mars globe with Perseverance mission state and timestamped MEDA observations.">
+<meta property="og:description" content="A NASA MOLA Mars globe and regional surface explorer with Perseverance mission state and timestamped MEDA observations.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://parkersphysics.com/mars.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -46,7 +46,7 @@ button{color:inherit}
 #mars-canvas.is-interacting{cursor:grabbing}
 #mars-canvas:focus-visible{outline:2px solid var(--cyan);outline-offset:-4px}
 .mars-render-degraded #mars-canvas{visibility:hidden}
-.mars-render-degraded .camera-dock{display:none}
+.mars-render-degraded .camera-dock,.mars-render-degraded .surface-explorer{display:none}
 .grain{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.14;mix-blend-mode:soft-light;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.3'/%3E%3C/svg%3E")}
 .vignette{position:absolute;inset:0;z-index:1;pointer-events:none;background:radial-gradient(ellipse at 53% 48%,transparent 35%,rgba(2,1,1,.18) 67%,rgba(2,1,1,.68) 100%)}
 .mars-render-fallback{position:absolute;inset:0;z-index:0;display:grid;place-items:center;padding:110px 24px 54px;text-align:center;background:radial-gradient(circle at 50% 44%,#371409 0,#090403 58%,#030202 100%)}
@@ -71,14 +71,15 @@ button{color:inherit}
 .panel-kicker{display:block;color:var(--faint);font:600 .53rem var(--display);letter-spacing:.17em;text-transform:uppercase;margin-bottom:3px}
 .panel-title h2{margin:0;font:700 .78rem var(--display);letter-spacing:.07em;text-transform:uppercase;white-space:nowrap}
 .panel-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:rgba(255,122,61,.10);border:1px solid rgba(255,122,61,.22);color:var(--mars-bright);font-size:.9rem;flex:0 0 auto}
-.panel-toggle{display:grid;place-items:center;width:28px;height:28px;padding:0;border:1px solid var(--line);border-radius:7px;background:rgba(255,255,255,.035);cursor:pointer;color:var(--muted)}
-.panel-toggle:hover{border-color:var(--line-strong);color:#fff}
+.panel-toggle{display:grid;place-items:center;width:30px;height:30px;padding:0;border:1px solid rgba(255,173,114,.28);border-radius:8px;background:rgba(255,122,61,.075);cursor:pointer;color:#ead0c2;font:700 .9rem var(--mono);line-height:1;transition:border-color .16s,background .16s,color .16s}
+.panel-toggle:hover{border-color:var(--mars-bright);background:rgba(255,122,61,.16);color:#fff}
+.panel-toggle[aria-expanded="false"]{border-color:rgba(105,228,255,.34);background:rgba(105,228,255,.08);color:var(--cyan)}
 .panel-toggle:focus-visible,.action-btn:focus-visible,.camera-btn:focus-visible,.landmark-card-focus:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 .panel.collapsed .panel-body{display:none}
 .panel.collapsed{height:auto!important}
-.panel.collapsed .panel-toggle{transform:rotate(180deg)}
+.panel.collapsed .panel-head{border-bottom:0}
 
-.mission-panel{left:18px;top:18px;width:298px;max-height:calc(100% - 204px)}
+.mission-panel{left:18px;top:92px;width:298px;max-height:calc(100% - 278px)}
 .panel-body{min-height:0;padding:14px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:rgba(255,173,114,.42) transparent}
 .panel-body::-webkit-scrollbar{width:7px}
 .panel-body::-webkit-scrollbar-track{background:rgba(255,255,255,.015)}
@@ -135,9 +136,10 @@ button{color:inherit}
 .feed-state[data-state="recent"]::before{background:var(--green);box-shadow:0 0 8px rgba(115,245,168,.55)}
 .feed-state[data-state="offline"]::before{background:var(--red);box-shadow:0 0 8px rgba(255,107,98,.55)}
 .dock-warning{margin-left:auto;max-width:54%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#bca78f;font-size:.64rem}
-.dock-collapse{display:none;margin-left:auto}
+.dock-collapse{display:grid;flex:0 0 auto;margin-left:0}
+.data-dock.collapsed{min-height:0}
+.data-dock.collapsed .dock-head{border-bottom:0}
 .data-dock.collapsed .weather-grid,.data-dock.collapsed .dock-foot{display:none}
-.data-dock.collapsed .dock-collapse{transform:rotate(180deg)}
 .weather-grid{display:grid;grid-template-columns:repeat(6,minmax(100px,1fr));gap:1px;background:rgba(255,255,255,.045)}
 .weather-cell{position:relative;min-height:78px;padding:10px 12px;background:rgba(11,6,5,.96)}
 .weather-cell label{display:block;color:var(--faint);font:600 .51rem var(--display);letter-spacing:.13em;text-transform:uppercase}
@@ -147,18 +149,44 @@ button{color:inherit}
 .dock-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:8px 13px;color:#716159;font-size:.58rem}
 .dock-foot a{color:#a77c68;text-decoration:none}.dock-foot a:hover{color:var(--mars-bright);text-decoration:underline}
 
-.camera-dock{position:absolute;z-index:7;left:50%;bottom:184px;display:flex;align-items:center;gap:8px;width:min(680px,calc(100% - 640px));min-width:430px;padding:7px;border:1px solid rgba(255,186,145,.19);border-radius:13px;background:rgba(10,5,4,.82);box-shadow:0 14px 42px rgba(0,0,0,.38);backdrop-filter:blur(18px);transform:translateX(-50%)}
-.camera-readout{display:flex;flex:0 0 auto;flex-direction:column;justify-content:center;min-width:105px;padding:2px 9px 2px 5px;border-right:1px solid var(--line)}
+.camera-dock{position:absolute;z-index:7;left:18px;top:18px;display:flex;align-items:center;gap:6px;width:365px;min-width:0;padding:5px;border:1px solid rgba(255,186,145,.19);border-radius:11px;background:rgba(10,5,4,.84);box-shadow:0 12px 34px rgba(0,0,0,.38);backdrop-filter:blur(18px)}
+.camera-readout{display:flex;flex:0 0 64px;flex-direction:column;justify-content:center;min-width:0;padding:2px 6px 2px 2px;border-right:1px solid var(--line)}
 .camera-readout span{color:var(--faint);font:600 .48rem var(--display);letter-spacing:.14em;text-transform:uppercase}
-.camera-readout strong{display:block;max-width:132px;margin-top:3px;overflow:hidden;color:#f6ded2;font:600 .61rem var(--mono);letter-spacing:0;text-overflow:ellipsis;white-space:nowrap}
+.camera-readout strong{display:block;max-width:56px;margin-top:3px;overflow:hidden;color:#f6ded2;font:600 .58rem var(--mono);letter-spacing:0;text-overflow:ellipsis;white-space:nowrap}
 .camera-readout output{margin-top:2px;color:#987f73;font:500 .52rem var(--mono);white-space:nowrap}
-.camera-actions{display:flex;flex:1;align-items:center;justify-content:center;gap:4px;min-width:0}
-.camera-divider{width:1px;height:25px;margin:0 2px;background:var(--line)}
-.camera-btn{display:flex;min-width:34px;height:34px;align-items:center;justify-content:center;gap:5px;padding:0 8px;border:1px solid rgba(255,255,255,.075);border-radius:8px;background:rgba(255,255,255,.03);color:#bca99f;cursor:pointer;font:600 .54rem var(--display);letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.camera-actions{display:flex;flex:1;align-items:center;justify-content:flex-start;gap:3px;min-width:0}
+.camera-divider{width:1px;height:23px;margin:0 2px;background:var(--line)}
+.camera-btn{display:flex;flex:0 0 28px;width:28px;min-width:28px;height:30px;align-items:center;justify-content:center;padding:0;border:1px solid rgba(255,255,255,.075);border-radius:7px;background:rgba(255,255,255,.03);color:#bca99f;cursor:pointer}
 .camera-btn:hover{border-color:var(--line-strong);background:rgba(255,122,61,.09);color:#fff}
 .camera-btn[aria-pressed="true"]{border-color:rgba(255,173,114,.52);background:rgba(255,122,61,.17);color:#ffe2d1;box-shadow:inset 0 0 0 1px rgba(255,122,61,.08)}
+.ui-panels-toggle{flex-basis:44px;width:44px;min-width:44px;border-color:rgba(105,228,255,.24);color:#b9e9f2}
+.ui-panels-toggle .camera-icon{font:700 .46rem var(--display);letter-spacing:.06em}
+.ui-panels-toggle[aria-pressed="true"]{border-color:rgba(105,228,255,.58);background:rgba(105,228,255,.14);color:#e7fbff}
 .camera-icon{font:500 .78rem var(--mono);line-height:1}
-.camera-help{position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%);color:#725f57;font:.5rem var(--mono);pointer-events:none;white-space:nowrap}
+.camera-btn-label{display:none}
+.camera-help{position:absolute;left:3px;top:calc(100% + 5px);max-width:calc(100% - 6px);overflow:hidden;color:#8a746a;font:.5rem var(--mono);pointer-events:none;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 7px #000;transition:color .16s,background .16s,border-color .16s}
+.camera-help[data-active="true"]{padding:3px 5px;border:1px solid rgba(105,228,255,.22);border-radius:6px;background:rgba(5,11,12,.76);color:#bcecf4}
+.surface-explorer{position:absolute;z-index:7;left:18px;top:84px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 9px;width:334px;padding:7px 42px 7px 7px;border:1px solid rgba(105,228,255,.25);border-radius:11px;background:rgba(7,8,8,.88);box-shadow:0 14px 38px rgba(0,0,0,.45);backdrop-filter:blur(18px)}
+.surface-explorer[hidden]{display:none}
+.surface-collapse{position:absolute;right:6px;top:6px}
+.surface-explorer.collapsed{display:block;width:auto;padding:5px}
+.surface-explorer.collapsed .surface-nav,.surface-explorer.collapsed .surface-telemetry,.surface-explorer.collapsed .surface-detail{display:none}
+.surface-explorer.collapsed .surface-collapse{position:relative;inset:auto}
+.surface-nav{display:grid;grid-template-columns:repeat(6,28px);gap:3px;align-items:center}
+.surface-move{display:grid;width:28px;height:30px;place-items:center;padding:0;border:1px solid rgba(105,228,255,.15);border-radius:7px;background:rgba(105,228,255,.045);color:#acd9e1;cursor:pointer;font:600 .75rem var(--mono)}
+.surface-move:hover{border-color:rgba(105,228,255,.48);background:rgba(105,228,255,.11);color:#fff}
+.surface-move:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.surface-telemetry{display:flex;min-width:0;flex-direction:column;justify-content:center}
+.surface-telemetry strong{overflow:hidden;color:#e7fbff;font:600 .57rem var(--mono);text-overflow:ellipsis;white-space:nowrap}
+.surface-telemetry output{margin-top:3px;color:#8da7aa;font:500 .51rem var(--mono);white-space:nowrap}
+.surface-detail{grid-column:1/-1;overflow:hidden;color:#667d80;font:.48rem var(--mono);letter-spacing:.01em;text-overflow:ellipsis;white-space:nowrap}
+.is-surface-mode .mission-panel{top:166px;max-height:calc(100% - 352px)}
+.is-surface-mode .mars-viewport{background:radial-gradient(ellipse at 50% 76%,#9a3d1d 0,#4a160d 38%,#190807 72%,#070303 100%)}
+.is-surface-mode .vignette{background:linear-gradient(180deg,rgba(19,7,4,.08),transparent 45%,rgba(5,2,1,.42))}
+.interface-clean .mars-header,.interface-clean .mission-panel,.interface-clean .layers-panel,.interface-clean .data-dock,.interface-clean .surface-explorer,.interface-clean .mesh-badge{display:none}
+.interface-clean .camera-dock{width:auto}
+.interface-clean .camera-readout,.interface-clean .camera-actions>:not(.ui-panels-toggle),.interface-clean .camera-help{display:none}
+.interface-clean .camera-actions{flex:0 0 auto}
 .mesh-badge{position:absolute;z-index:4;right:310px;top:19px;padding:6px 9px;border-radius:8px;background:rgba(7,4,3,.58);border:1px solid rgba(255,255,255,.06);color:#8c7770;font:.55rem var(--mono);pointer-events:none}
 .mesh-badge strong{color:#d4b6a7;font-weight:500}
 .landmark-card{position:absolute;z-index:8;left:50%;bottom:190px;width:min(360px,calc(100% - 36px));transform:translateX(-50%);padding:14px 15px;border:1px solid rgba(255,173,114,.3);border-radius:13px;background:rgba(13,7,5,.94);box-shadow:0 18px 60px rgba(0,0,0,.55);backdrop-filter:blur(18px)}
@@ -186,7 +214,8 @@ button{color:inherit}
   .mars-header{width:min(500px,calc(100% - 580px))}.mars-header h1{font-size:1.05rem}
   .mission-panel{width:270px}.layers-panel{width:258px}.mesh-badge{display:none}
   .weather-grid{grid-template-columns:repeat(3,1fr)}.weather-cell{min-height:67px;padding:8px 10px}
-  .data-dock{min-height:210px}.mission-panel,.layers-panel{max-height:calc(100% - 255px)}.camera-dock{bottom:237px;width:min(500px,calc(100% - 560px));min-width:268px}.camera-btn-label{display:none}.landmark-card{bottom:296px}
+  .data-dock{min-height:210px}.mission-panel{max-height:calc(100% - 329px)}.layers-panel{max-height:calc(100% - 255px)}.camera-dock,.surface-explorer{width:304px}.camera-readout{display:none}.landmark-card{bottom:238px}
+  .is-surface-mode .mission-panel{max-height:calc(100% - 403px)}
 }
 @media(max-width:820px){
   body{overflow:auto;background:#050302}
@@ -196,18 +225,19 @@ button{color:inherit}
   .mission-panel,.layers-panel,.data-dock{position:relative;inset:auto;width:auto;max-height:none;margin:0 12px}
   .mission-panel .metric-grid{grid-template-columns:repeat(4,1fr)}
   .layers-panel .panel-body{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.layers-panel .layer-group-title,.layers-panel .source-mini{grid-column:1/-1}
-  .data-dock{min-height:0}.dock-collapse{display:grid}.camera-dock{left:12px;right:12px;bottom:12px;width:auto;min-width:0;transform:none}.camera-btn-label{display:inline}.camera-help{display:none}.landmark-card{bottom:70px}
+  .data-dock{min-height:0}.camera-dock{left:12px;right:auto;top:122px;width:min(334px,calc(100% - 24px))}.camera-readout{display:none}.surface-explorer{left:12px;top:188px;width:min(334px,calc(100% - 24px))}.is-surface-mode .mission-panel{top:auto;max-height:none}.landmark-card{bottom:16px}
   .mars-render-fallback{padding-top:92px}.mars-render-fallback-copy{bottom:20px}
 }
 @media(max-width:560px){
   .mars-viewport{aspect-ratio:1 / 1;min-height:350px;max-height:430px}
   .mars-header h1{font-size:.9rem}.mission-strip{font-size:.55rem}.mission-strip span:nth-child(3){display:none}
-  .camera-dock{display:grid;grid-template-columns:1fr;padding:6px}.camera-readout{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:6px;min-width:0;padding:2px 5px 6px;border-right:0;border-bottom:1px solid var(--line)}.camera-readout strong{margin:0}.camera-readout output{margin:0;text-align:right}.camera-actions{width:100%}.camera-btn{flex:1;padding:0 5px}.camera-btn-label{display:none}.camera-divider{margin:0}.landmark-card{bottom:108px}
+  .camera-dock{top:122px;width:calc(100% - 24px)}.surface-explorer{top:188px;width:calc(100% - 24px)}.landmark-card{bottom:16px}
   .mission-panel .metric-grid{grid-template-columns:1fr 1fr}
   .layers-panel .panel-body{display:block}
   .weather-grid{grid-template-columns:1fr 1fr}.dock-warning{display:none}.dock-foot{align-items:flex-start;flex-direction:column;gap:3px}
   .mars-static-globe{width:min(76vw,300px)}.mars-render-fallback-copy{font-size:.62rem}
 }
+@media(max-width:360px){.camera-readout{display:none}.camera-actions{justify-content:center}.surface-telemetry output{font-size:.47rem}}
 @media(prefers-reduced-motion:reduce){.live-dot,.loader-orbit::after{animation:none}}
 </style>
 <script type="importmap">
@@ -221,7 +251,7 @@ button{color:inherit}
 
 <main class="mars-app" id="mars-main">
   <div class="mars-viewport" id="mars-viewport">
-    <canvas id="mars-canvas" tabindex="0" aria-label="Interactive NASA-data globe of Mars with major landmarks, JPL Horizons sky directions, current illumination, and Perseverance traverse history"></canvas>
+    <canvas id="mars-canvas" tabindex="0" aria-describedby="camera-help" aria-label="Interactive NASA-data globe and regional surface explorer of Mars with major landmarks, JPL Horizons sky directions, current illumination, and Perseverance traverse history"></canvas>
     <div class="mars-render-fallback" id="mars-render-fallback" role="status" hidden>
       <div class="mars-static-globe" aria-hidden="true"></div>
       <p class="mars-render-fallback-copy"><strong>Interactive renderer unavailable</strong><span id="mars-render-fallback-message">The released mission snapshot and data panels remain available.</span></p>
@@ -251,15 +281,30 @@ button{color:inherit}
     <div class="camera-dock" role="group" aria-label="Mars camera controls" aria-describedby="camera-help">
       <div class="camera-readout"><span>Camera</span><strong id="camera-mode">Global orbit</strong><output id="camera-range" aria-live="polite">Range — km</output></div>
       <div class="camera-actions">
-        <button class="camera-btn" id="camera-global" type="button" data-camera-preset="global" aria-pressed="true" title="Global view (H)"><span class="camera-icon" aria-hidden="true">◎</span><span class="camera-btn-label">Global</span></button>
-        <button class="camera-btn" id="camera-rover" type="button" data-camera-preset="rover" aria-pressed="false" title="Focus selected rover sol (R)"><span class="camera-icon" aria-hidden="true">◆</span><span class="camera-btn-label">Rover</span></button>
-        <button class="camera-btn" id="camera-landing" type="button" data-camera-preset="landing" aria-pressed="false" title="Focus landing site (L)"><span class="camera-icon" aria-hidden="true">⌖</span><span class="camera-btn-label">Landing</span></button>
+        <button class="camera-btn" id="camera-global" type="button" data-camera-preset="global" aria-label="Global view" aria-pressed="true" title="Global view (H)"><span class="camera-icon" aria-hidden="true">◎</span><span class="camera-btn-label">Global</span></button>
+        <button class="camera-btn" id="camera-rover" type="button" data-camera-preset="rover" aria-label="Focus selected rover sol" aria-pressed="false" title="Focus selected rover sol (R)"><span class="camera-icon" aria-hidden="true">◆</span><span class="camera-btn-label">Rover</span></button>
+        <button class="camera-btn" id="camera-landing" type="button" data-camera-preset="landing" aria-label="Focus landing site" aria-pressed="false" title="Focus landing site (L)"><span class="camera-icon" aria-hidden="true">⌖</span><span class="camera-btn-label">Landing</span></button>
+        <button class="camera-btn" id="camera-surface" type="button" data-camera-preset="surface" aria-label="Explore the surface at the current focus" aria-pressed="false" title="Enter regional surface explorer"><span class="camera-icon" aria-hidden="true">▰</span><span class="camera-btn-label">Surface</span></button>
         <span class="camera-divider" aria-hidden="true"></span>
         <button class="camera-btn" id="camera-zoom-out" type="button" title="Zoom out (-)" aria-label="Zoom out"><span class="camera-icon" aria-hidden="true">−</span></button>
         <button class="camera-btn" id="camera-zoom-in" type="button" title="Zoom in (+)" aria-label="Zoom in"><span class="camera-icon" aria-hidden="true">＋</span></button>
-        <button class="camera-btn" id="camera-spin" type="button" aria-pressed="true" title="Pause automatic rotation (Space)"><span class="camera-icon" aria-hidden="true">Ⅱ</span><span class="camera-btn-label">Pause</span></button>
+        <button class="camera-btn" id="camera-spin" type="button" aria-label="Pause automatic rotation" aria-pressed="true" title="Pause automatic rotation (Space)"><span class="camera-icon" aria-hidden="true">Ⅱ</span><span class="camera-btn-label">Pause</span></button>
+        <button class="camera-btn ui-panels-toggle" id="ui-panels-toggle" type="button" aria-label="Hide all interface panels" aria-pressed="false" title="Hide all interface panels (P)"><span class="camera-icon" id="ui-panels-icon" aria-hidden="true">HIDE</span><span class="camera-btn-label">Hide panels</span></button>
       </div>
-      <span class="camera-help" id="camera-help">Drag to orbit · scroll to zoom · select a marker for details · H/R/L presets</span>
+      <span class="camera-help" id="camera-help">Drag orbit · wheel zoom · pinch · double-tap land</span>
+    </div>
+    <div class="surface-explorer" id="surface-explorer" role="group" aria-label="Regional surface movement" hidden>
+      <button class="panel-toggle surface-collapse" id="surface-collapse" type="button" aria-label="Minimize surface controls" aria-expanded="true" title="Minimize surface controls">−</button>
+      <div class="surface-nav">
+        <button class="surface-move" type="button" data-surface-move data-right="-1" aria-label="Move west" title="Move left (A or left arrow)">←</button>
+        <button class="surface-move" type="button" data-surface-move data-forward="1" aria-label="Move forward" title="Move forward (W or up arrow)">↑</button>
+        <button class="surface-move" type="button" data-surface-move data-forward="-1" aria-label="Move backward" title="Move backward (S or down arrow)">↓</button>
+        <button class="surface-move" type="button" data-surface-move data-right="1" aria-label="Move east" title="Move right (D or right arrow)">→</button>
+        <button class="surface-move" id="surface-light" type="button" aria-label="Toggle terrain analysis light" aria-pressed="true" title="Disable terrain analysis light">◉</button>
+        <button class="surface-move" id="surface-grid" type="button" aria-label="Toggle terrain analysis grid" aria-pressed="true" title="Hide 8 km terrain analysis grid">#</button>
+      </div>
+      <div class="surface-telemetry"><strong id="surface-location">18.426°N · 77.225°E</strong><output id="surface-altitude" aria-live="polite">Eye — km · MOLA — km</output></div>
+      <span class="surface-detail" id="surface-detail">MOLA regional terrain · loading source resolution</span>
     </div>
     <div class="mesh-badge" id="mars-mesh-badge"><strong>MESH</strong> <span id="mars-mesh-status">loading surface assets…</span></div>
 
@@ -271,7 +316,7 @@ button{color:inherit}
   <section class="panel mission-panel" aria-labelledby="mission-panel-title">
     <div class="panel-head">
       <div class="panel-title"><span class="panel-icon" aria-hidden="true">◆</span><div><span class="panel-kicker">Mars 2020</span><h2 id="mission-panel-title">Perseverance</h2></div></div>
-      <button class="panel-toggle" type="button" aria-label="Collapse Perseverance panel" aria-expanded="true">⌃</button>
+      <button class="panel-toggle" type="button" aria-label="Minimize Perseverance panel" aria-expanded="true" title="Minimize Perseverance panel">−</button>
     </div>
     <div class="panel-body">
       <div class="status-line">
@@ -300,7 +345,7 @@ button{color:inherit}
   <aside class="panel layers-panel" aria-labelledby="layers-panel-title">
     <div class="panel-head">
       <div class="panel-title"><span class="panel-icon" aria-hidden="true">◫</span><div><span class="panel-kicker">Display</span><h2 id="layers-panel-title">Mars layers</h2></div></div>
-      <button class="panel-toggle" type="button" aria-label="Collapse Mars layers" aria-expanded="true">⌃</button>
+      <button class="panel-toggle" type="button" aria-label="Minimize Mars layers" aria-expanded="true" title="Minimize Mars layers">−</button>
     </div>
     <div class="panel-body">
       <div class="layer-group-title">Surface</div>
@@ -336,7 +381,7 @@ button{color:inherit}
       <h2 class="dock-title" id="weather-title">MEDA surface observations</h2>
       <span class="feed-state" id="feed-state" data-state="historical">Bundled MEDA snapshot · sol 1133</span>
       <span class="dock-warning" id="weather-warning">Observed 2024-04-27 · historical snapshot · not live telemetry</span>
-      <button class="panel-toggle dock-collapse" id="weather-collapse" type="button" aria-label="Collapse MEDA surface observations" aria-expanded="true">⌃</button>
+      <button class="panel-toggle dock-collapse" id="weather-collapse" type="button" aria-label="Minimize MEDA surface observations" aria-expanded="true" title="Minimize MEDA surface observations">−</button>
     </div>
     <div class="weather-grid">
       <div class="weather-cell" id="cell-temp"><label>Air temperature</label><strong class="weather-value" id="weather-temp">-79.3 → -24.7 °C</strong><small class="weather-detail" id="weather-temp-detail">daily minimum → maximum · 2024-04-27</small></div>
@@ -382,6 +427,6 @@ button{color:inherit}
   });
 })();
 </script>
-<script type="module" src="./js/mars-view.js?v=20260806-camera2" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
+<script type="module" src="./js/mars-view.js?v=20260806-input1" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
 </body>
 </html>
