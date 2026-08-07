@@ -65,6 +65,8 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
 
     await page.goto('/mars.html');
     await expect(page.locator('#loading-screen')).toHaveClass(/done/, { timeout: 20_000 });
+    const rejectCookies = page.getByRole('button', { name: 'Reject non-essential' });
+    if (await rejectCookies.isVisible()) await rejectCookies.click();
     await expect(page.locator('#mars-canvas')).toBeVisible();
     await expect(page.locator('#drive-sol')).toHaveText('Sol 1940');
     await expect(page.locator('#fix-sol')).toHaveText('Sol 1940');
@@ -80,6 +82,11 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await expect(page.locator('#terminator-source')).toContainText('JPL Sun direction');
     await expect(page.locator('#camera-mode')).toHaveText('Mission orbit');
     await expect(page.locator('#camera-range')).toHaveAttribute('data-range-km', /\d+/);
+    await expect.poll(() => page.evaluate(() => window.__marsLab.inputState())).toMatchObject({
+        zoomToCursor: true,
+        mouse: { primary: 'rotate', middle: 'dolly', secondary: 'rotate' },
+        touch: { oneFinger: 'rotate', twoFinger: 'dolly-rotate', doubleTap: 'surface-target' },
+    });
     const desktopControls = await page.evaluate(() => {
         const stage = document.querySelector('#mars-viewport').getBoundingClientRect();
         const dock = document.querySelector('.camera-dock').getBoundingClientRect();
@@ -96,6 +103,35 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     expect(desktopControls.dockLeft).toBeGreaterThanOrEqual(desktopControls.stageLeft);
     expect(desktopControls.dockRight).toBeLessThan(desktopControls.stageLeft + desktopControls.stageWidth / 3);
     expect(desktopControls.dockBottom).toBeLessThanOrEqual(desktopControls.missionTop);
+
+    const clearCanvas = page.locator('#ui-panels-toggle');
+    await expect(clearCanvas).toBeVisible();
+    await clearCanvas.click();
+    await expect(page.locator('.mars-app')).toHaveClass(/interface-clean/);
+    await expect(clearCanvas).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.mission-panel')).toBeHidden();
+    await expect(page.locator('.layers-panel')).toBeHidden();
+    await expect(page.locator('.data-dock')).toBeHidden();
+    await expect(page.locator('#mars-canvas')).toBeVisible();
+    await clearCanvas.click();
+    await expect(clearCanvas).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('.mission-panel')).toBeVisible();
+
+    const missionCollapse = page.locator('.mission-panel .panel-toggle');
+    await missionCollapse.click();
+    await expect(page.locator('.mission-panel')).toHaveClass(/collapsed/);
+    await expect(missionCollapse).toHaveText('+');
+    await missionCollapse.click();
+    await expect(page.locator('.mission-panel .panel-body')).toBeVisible();
+
+    const weatherCollapse = page.locator('#weather-collapse');
+    await expect(weatherCollapse).toBeVisible();
+    await weatherCollapse.click();
+    await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
+    await expect(weatherCollapse).toHaveText('+');
+    await expect(page.locator('.weather-grid')).toBeHidden();
+    await weatherCollapse.click();
+    await expect(page.locator('.weather-grid')).toBeVisible();
 
     await page.locator('#camera-rover').click();
     await expect(page.locator('#camera-mode')).toContainText('Rover · sol 1940');
@@ -118,6 +154,13 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await expect.poll(async () => Number(await page.locator('#camera-range').getAttribute('data-range-km'))).toBeLessThan(50);
     await expect(page.locator('#surface-light')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('#surface-grid')).toHaveAttribute('aria-pressed', 'true');
+
+    await page.locator('#surface-collapse').click();
+    await expect(page.locator('#surface-explorer')).toHaveClass(/collapsed/);
+    await expect(page.locator('#surface-collapse')).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.surface-nav')).toBeHidden();
+    await page.locator('#surface-collapse').click();
+    await expect(page.locator('.surface-nav')).toBeVisible();
 
     const surfaceCameraBeforeDrag = await page.evaluate(() => window.__marsLab.camera.position.toArray());
     const surfaceCanvasBox = await page.locator('#mars-canvas').boundingBox();
@@ -220,10 +263,11 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await layersPanel.locator('.panel-toggle').click();
     await expect(layersPanel).toHaveClass(/collapsed/);
     await expect(layersPanel.locator('.panel-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(layersPanel.locator('.panel-toggle')).toHaveText('+');
     expect(errors).toEqual([]);
 });
 
-test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks', async ({ page }) => {
+test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks', async ({ page, context }) => {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.setViewportSize({ width: 390, height: 844 });
@@ -277,8 +321,39 @@ test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks'
     expect(layout.layers.top).toBeGreaterThanOrEqual(layout.mission.bottom);
     expect(layout.dock.top).toBeGreaterThanOrEqual(layout.layers.bottom);
 
-    await page.locator('#camera-surface').click();
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+    const mobileCanvas = await page.locator('#mars-canvas').boundingBox();
+    const centerX = mobileCanvas.x + mobileCanvas.width * 0.5;
+    const centerY = mobileCanvas.y + mobileCanvas.height * 0.5;
+    const cameraBeforeTouch = await page.evaluate(() => window.__marsLab.camera.position.toArray());
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: centerX, y: centerY, id: 1 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: centerX + 52, y: centerY - 38, id: 1 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect.poll(() => page.evaluate(before => {
+        const current = window.__marsLab.camera.position.toArray();
+        return Math.hypot(...current.map((value, index) => value - before[index]));
+    }, cameraBeforeTouch)).toBeGreaterThan(0.01);
+    await expect.poll(() => page.evaluate(() => window.__marsLab.inputState().pointerType)).toBe('touch');
+
+    const rangeBeforePinch = await page.evaluate(() => window.__marsLab.cameraState().rangeKm);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [
+        { x: centerX - 24, y: centerY, id: 2 },
+        { x: centerX + 24, y: centerY, id: 3 },
+    ] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [
+        { x: centerX - 72, y: centerY, id: 2 },
+        { x: centerX + 72, y: centerY, id: 3 },
+    ] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect.poll(() => page.evaluate(before => Math.abs(window.__marsLab.cameraState().rangeKm - before), rangeBeforePinch)).toBeGreaterThan(10);
+
+    for (let tap = 0; tap < 2; tap += 1) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: centerX, y: centerY, id: 10 + tap }] });
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    }
     await expect(page.locator('#surface-explorer')).toBeVisible();
+    await expect(page.locator('#camera-mode')).toContainText('selected terrain');
     await expect(page.locator('#surface-detail')).toContainText('MOLA unavailable');
     await expect.poll(() => page.evaluate(() => window.__marsLab.surfaceState())).toMatchObject({
         active: true,
