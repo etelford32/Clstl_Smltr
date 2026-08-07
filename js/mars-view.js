@@ -974,35 +974,6 @@ function layerIsVisible(name) {
     return null;
 }
 
-document.querySelectorAll('[data-layer]').forEach(input => {
-    input.addEventListener('change', () => setLayer(input.dataset.layer, input.checked));
-});
-
-function setCollapsed(container, button, collapsed, label) {
-    container.classList.toggle('collapsed', collapsed);
-    button.setAttribute('aria-expanded', String(!collapsed));
-    button.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Minimize'} ${label}`);
-    button.title = `${collapsed ? 'Expand' : 'Minimize'} ${label}`;
-    button.textContent = collapsed ? '+' : '−';
-}
-
-document.querySelectorAll('.panel .panel-toggle').forEach(button => {
-    button.addEventListener('click', () => {
-        const panel = button.closest('.panel');
-        setCollapsed(panel, button, !panel.classList.contains('collapsed'), panel.querySelector('h2').textContent);
-    });
-});
-
-const weatherDock = document.querySelector('.data-dock');
-document.querySelector('#weather-collapse').addEventListener('click', event => {
-    setCollapsed(
-        weatherDock,
-        event.currentTarget,
-        !weatherDock.classList.contains('collapsed'),
-        'MEDA surface observations',
-    );
-});
-
 const cameraModeElement = document.querySelector('#camera-mode');
 const cameraRangeElement = document.querySelector('#camera-range');
 const cameraSpinButton = document.querySelector('#camera-spin');
@@ -1016,26 +987,6 @@ const meshStatusElement = document.querySelector('#mars-mesh-status');
 const globalMeshStatus = meshStatusElement.textContent;
 const surfaceLightButton = document.querySelector('#surface-light');
 const surfaceGridButton = document.querySelector('#surface-grid');
-const surfaceCollapseButton = document.querySelector('#surface-collapse');
-const interfaceToggleButton = document.querySelector('#ui-panels-toggle');
-const interfaceToggleIcon = document.querySelector('#ui-panels-icon');
-
-function setInterfaceClean(enabled) {
-    const clean = Boolean(enabled);
-    app.classList.toggle('interface-clean', clean);
-    interfaceToggleButton.setAttribute('aria-pressed', String(clean));
-    interfaceToggleButton.setAttribute('aria-label', clean ? 'Show all interface panels' : 'Hide all interface panels');
-    interfaceToggleButton.title = `${clean ? 'Show' : 'Hide'} all interface panels (P)`;
-    interfaceToggleIcon.textContent = clean ? 'SHOW' : 'HIDE';
-}
-
-interfaceToggleButton.addEventListener('click', () => setInterfaceClean(!app.classList.contains('interface-clean')));
-surfaceCollapseButton.addEventListener('click', () => setCollapsed(
-    surfaceExplorer,
-    surfaceCollapseButton,
-    !surfaceExplorer.classList.contains('collapsed'),
-    'surface controls',
-));
 
 function setCameraMode(mode, label) {
     cameraMode = mode;
@@ -1341,26 +1292,22 @@ function zoomCamera(factor) {
     });
 }
 
-document.querySelector('#focus-rover').addEventListener('click', () => focusSelectedRover());
-document.querySelector('#reset-view').addEventListener('click', () => showGlobalView());
-document.querySelector('#camera-global').addEventListener('click', () => showGlobalView());
-document.querySelector('#camera-rover').addEventListener('click', () => focusSelectedRover());
-document.querySelector('#camera-landing').addEventListener('click', () => focusLandingSite());
-document.querySelector('#camera-surface').addEventListener('click', () => enterSurfaceAtCurrentFocus());
-document.querySelector('#camera-zoom-out').addEventListener('click', () => zoomCamera(1.3));
-document.querySelector('#camera-zoom-in').addEventListener('click', () => zoomCamera(0.76));
-cameraSpinButton.addEventListener('click', () => setAutoRotate(!controls.autoRotate));
-document.querySelectorAll('[data-surface-move]').forEach(button => {
-    button.addEventListener('click', () => nudgeSurface(
-        Number(button.dataset.forward || 0),
-        Number(button.dataset.right || 0),
-    ));
-});
-surfaceLightButton.addEventListener('click', () => setSurfaceLight(!surfaceHeadlamp.visible));
-surfaceGridButton.addEventListener('click', () => setSurfaceGrid(!regionalTerrainGrid.visible));
-
-document.querySelectorAll('[data-sky-focus]').forEach(button => {
-    button.addEventListener('click', () => focusSkyBody(button.dataset.skyFocus));
+window.__marsUi?.registerLayerHandler(setLayer);
+window.__marsUi?.registerCommands({
+    'focus-rover': () => focusSelectedRover(),
+    'global-view': () => showGlobalView(),
+    'focus-landing': () => focusLandingSite(),
+    'enter-surface': () => enterSurfaceAtCurrentFocus(),
+    'zoom-out': () => zoomCamera(1.3),
+    'zoom-in': () => zoomCamera(0.76),
+    'toggle-spin': () => setAutoRotate(!controls.autoRotate),
+    'surface-move': ({ dataset }) => nudgeSurface(
+        Number(dataset.forward || 0),
+        Number(dataset.right || 0),
+    ),
+    'toggle-surface-light': () => setSurfaceLight(!surfaceHeadlamp.visible),
+    'toggle-surface-grid': () => setSurfaceGrid(!regionalTerrainGrid.visible),
+    'sky-focus': ({ dataset }) => focusSkyBody(dataset.skyFocus),
 });
 
 controls.addEventListener('start', () => {
@@ -1390,7 +1337,6 @@ canvas.addEventListener('keydown', event => {
     else if (event.key === '+' || event.key === '=') zoomCamera(0.76);
     else if (event.key === '-' || event.key === '_') zoomCamera(1.3);
     else if (event.key === ' ') setAutoRotate(!controls.autoRotate);
-    else if (event.key.toLowerCase() === 'p') setInterfaceClean(!app.classList.contains('interface-clean'));
     else return;
     event.preventDefault();
 });
@@ -1563,8 +1509,10 @@ canvas.addEventListener('dblclick', event => {
     event.preventDefault();
     if (enterSurfaceAtClientPoint(event.clientX, event.clientY)) setInputHint('Surface target acquired', 'double-click');
 });
-document.querySelector('#landmark-card-close').addEventListener('click', () => { landmarkCard.hidden = true; });
-document.querySelector('#landmark-card-focus').addEventListener('click', () => cardFocusAction?.());
+window.__marsUi?.registerCommands({
+    'close-landmark-card': () => { landmarkCard.hidden = true; },
+    'focus-landmark-card': () => cardFocusAction?.(),
+});
 
 function updateCameraTween(now) {
     if (!cameraTween) return;
@@ -1656,6 +1604,7 @@ window.__marsLab = Object.freeze({
         hasRelief,
     }),
 });
+window.__marsUi?.setEngineState('ready');
 window.clearTimeout(window.__marsBootTimer);
 document.querySelector('#mars-render-fallback').hidden = true;
 app.classList.remove('mars-render-degraded');
