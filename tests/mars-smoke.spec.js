@@ -384,3 +384,49 @@ test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks'
     await expect(page.locator('.weather-grid')).toBeVisible();
     expect(errors).toEqual([]);
 });
+
+test('Mars UI remains interactive while the 3D engine is still starting', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.route('**/js/mars-view.js?*', route => route.fulfill({
+        status: 200,
+        contentType: 'text/javascript',
+        body: 'await new Promise(() => {});',
+    }));
+
+    await page.goto('/mars.html', { waitUntil: 'commit' });
+    const app = page.locator('.mars-app');
+    await expect(app).toHaveAttribute('data-ui-ready', 'true');
+    await expect(app).toHaveAttribute('data-engine-state', 'loading');
+    await expect(app).toHaveAttribute('aria-busy', 'true');
+
+    const missionCollapse = page.locator('.mission-panel .panel-toggle');
+    await missionCollapse.click();
+    await expect(page.locator('.mission-panel')).toHaveClass(/collapsed/);
+    await expect(missionCollapse).toHaveText('+');
+    await missionCollapse.click();
+    await expect(page.locator('.mission-panel .panel-body')).toBeVisible();
+
+    const weatherCollapse = page.locator('#weather-collapse');
+    await weatherCollapse.click();
+    await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
+    await expect(page.locator('.weather-grid')).toBeHidden();
+    await weatherCollapse.click();
+    await expect(page.locator('.weather-grid')).toBeVisible();
+
+    await page.locator('[data-layer="grid"]').uncheck({ force: true });
+    await expect(page.locator('[data-layer="grid"]')).not.toBeChecked();
+    await expect(app).toHaveAttribute('data-pending-layers', 'true');
+
+    await page.locator('#camera-rover').click();
+    await expect(app).toHaveAttribute('data-pending-command', 'focus-rover');
+    await expect(page.locator('#camera-help')).toContainText('command queued');
+
+    await page.keyboard.press('p');
+    await expect(app).toHaveClass(/interface-clean/);
+    await expect(page.locator('#ui-panels-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('p');
+    await expect(app).not.toHaveClass(/interface-clean/);
+    await expect(page.locator('#ui-panels-toggle')).toHaveAttribute('aria-pressed', 'false');
+    expect(errors).toEqual([]);
+});

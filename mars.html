@@ -399,6 +399,7 @@ button{color:inherit}
 
 </main>
 
+<script src="./js/mars-ui-shell.js?v=20260806-ui2"></script>
 <script>
 (() => {
   window.__marsReady = false;
@@ -411,6 +412,7 @@ button{color:inherit}
     if (fallback) fallback.hidden = false;
     if (loading) loading.classList.add('done');
     document.querySelector('.mars-app')?.classList.add('mars-render-degraded');
+    window.__marsUi?.setEngineState('failed', message);
   };
   window.__marsBootTimer = window.setTimeout(() => {
     window.__marsRevealFallback('The 3D engine did not finish starting. Mission and provenance panels remain usable.');
@@ -427,6 +429,6 @@ button{color:inherit}
   });
 })();
 </script>
-<script type="module" src="./js/mars-view.js?v=20260806-input1" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
+<script type="module" src="./js/mars-view.js?v=20260806-ui2" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
 </body>
 </html>
