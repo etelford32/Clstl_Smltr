@@ -246,6 +246,59 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await weatherCollapse.click();
     await expect(page.locator('.weather-grid')).toBeVisible();
 
+    // ── A bare click selects; it does not seize the camera ─────────────────
+    // OrbitControls fires 'start' on pointerdown, so wiring the mode switch to
+    // it meant one click to inspect a landmark silently relabelled the camera
+    // "Free orbit" and stopped the globe rotating.
+    await expect(page.locator('#camera-mode')).toHaveText('Mission orbit');
+    await expect(page.locator('#camera-spin')).toHaveAttribute('aria-pressed', 'true');
+    const canvasForClick = await page.locator('#mars-canvas').boundingBox();
+    await page.mouse.click(canvasForClick.x + canvasForClick.width * 0.5, canvasForClick.y + 300);
+    await page.waitForTimeout(300);
+    await expect(page.locator('#camera-mode')).toHaveText('Mission orbit');
+    await expect(page.locator('#camera-spin')).toHaveAttribute('aria-pressed', 'true');
+    // A real drag does take the camera.
+    await page.mouse.move(canvasForClick.x + canvasForClick.width * 0.5, canvasForClick.y + 300);
+    await page.mouse.down();
+    await page.mouse.move(canvasForClick.x + canvasForClick.width * 0.5 + 70, canvasForClick.y + 270, { steps: 6 });
+    await page.mouse.up();
+    await expect(page.locator('#camera-mode')).toHaveText('Free orbit');
+    await expect(page.locator('#camera-spin')).toHaveAttribute('aria-pressed', 'false');
+
+    // ── Hover advertises that markers are clickable ────────────────────────
+    // Nothing on this canvas used to change on hover, so the landmark atlas
+    // read as decoration rather than as 18 clickable features.
+    const hovered = await (async () => {
+        for (let gx = 0.30; gx <= 0.72; gx += 0.012) {
+            for (const gy of [0.30, 0.38, 0.46, 0.54]) {
+                await page.mouse.move(canvasForClick.x + canvasForClick.width * gx, canvasForClick.y + canvasForClick.height * gy);
+                await page.waitForTimeout(90);
+                const state = await page.evaluate(() => window.__marsLab.hoverState());
+                if (state.label) return state;
+            }
+        }
+        return null;
+    })();
+    expect(hovered, 'a landmark or sky body should be hoverable somewhere over the globe').not.toBeNull();
+    expect(hovered.cursor).toBe('pick');
+    await expect(page.locator('#mars-canvas')).toHaveAttribute('data-hover', 'pick');
+    await expect(page.locator('#camera-help')).toContainText(hovered.label);
+    // The hint that explains how to drive the canvas has to be legible: it
+    // shipped at .5rem, which computes to 8px.
+    const helpFontPx = await page.locator('#camera-help').evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+    expect(helpFontPx).toBeGreaterThanOrEqual(10);
+
+    await page.locator('#camera-rover').click();
+    await expect(page.locator('#camera-mode')).toContainText('Rover · sol 1940');
+
+    // ── Shortcuts work when a dock button holds focus ──────────────────────
+    // They were bound to the canvas, so clicking any button — including the
+    // ones whose own tooltips advertise "(H)", "(R)", "(L)" — killed them.
+    await expect(page.evaluate(() => document.activeElement?.id)).resolves.toBe('camera-rover');
+    await page.keyboard.press('h');
+    await expect(page.locator('#camera-mode')).toHaveText('Mission orbit');
+    await page.keyboard.press('l');
+    await expect(page.locator('#camera-mode')).toHaveText('Landing site');
     await page.locator('#camera-rover').click();
     await expect(page.locator('#camera-mode')).toContainText('Rover · sol 1940');
     await expect(page.locator('#camera-rover')).toHaveAttribute('aria-pressed', 'true');
@@ -319,6 +372,55 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await page.mouse.wheel(0, -350);
     await expect.poll(async () => Number(await page.locator('#camera-range').getAttribute('data-range-km'))).toBeLessThan(surfaceRangeBeforeWheel);
 
+    // ── The surface camera cannot orbit below its own horizon ──────────────
+    // OrbitControls caches its orbit axis from camera.up AT CONSTRUCTION
+    // (vendored r160, OrbitControls.js:176). Surface mode sets camera.up to the
+    // local radial and reasons in a local-horizon frame, so without rebuilding
+    // the controls every polar limit was being applied to Mars' spin axis
+    // instead — 72° off at Jezero. Dragging swung the eye underground, and the
+    // clearance clamp then fought OrbitControls for the camera every frame.
+    const surfaceLimits = await page.evaluate(() => window.__marsLab.surfaceLimits());
+    expect(surfaceLimits.maxPolarDeg).toBeLessThan(90);
+    expect(surfaceLimits.maxPolarDeg).toBeGreaterThan(45);
+    const eyeAltitude = async () => Number(await page.locator('#surface-explorer').getAttribute('data-altitude-km'));
+    // Comfortably clear of SURFACE_MIN_EYE_KM (2.4). Sitting AT the floor is the
+    // old failure signature: the clamp had caught a camera that OrbitControls
+    // had already swung underground, and it stayed pinned there.
+    expect(await eyeAltitude()).toBeGreaterThan(3);
+    // Drag hard toward the horizon three times; the eye must stay above ground
+    // and the orbit radius must not collapse from the clamp fighting back.
+    const orbitBefore = surfaceLimits.orbitRadiusKm;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        await page.mouse.move(surfaceCanvasBox.x + surfaceCanvasBox.width * 0.5, surfaceCanvasBox.y + 300);
+        await page.mouse.down();
+        for (let step = 1; step <= 10; step += 1) {
+            await page.mouse.move(surfaceCanvasBox.x + surfaceCanvasBox.width * 0.5, surfaceCanvasBox.y + 300 - 40 * step);
+        }
+        await page.mouse.up();
+        await page.waitForTimeout(200);
+    }
+    expect(await eyeAltitude()).toBeGreaterThan(3);
+    // The orbit radius must be untouched by rotation. It used to shrink every
+    // frame the clearance clamp and OrbitControls disagreed (55.7 → 49.1 → 46.8).
+    const orbitAfter = (await page.evaluate(() => window.__marsLab.surfaceLimits())).orbitRadiusKm;
+    expect(Math.abs(orbitAfter - orbitBefore)).toBeLessThan(orbitBefore * 0.02);
+
+    // ── Right-drag translates across the terrain ───────────────────────────
+    // RIGHT was mapped to ROTATE, an exact duplicate of LEFT, while the context
+    // menu was suppressed anyway — the button did nothing observable.
+    await expect.poll(() => page.evaluate(() => window.__marsLab.inputState().mouse.secondary)).toBe('pan-surface');
+    const panBefore = await page.locator('#surface-explorer').evaluate(el => ({ lat: el.dataset.lat, lon: el.dataset.lon }));
+    await page.mouse.move(surfaceCanvasBox.x + surfaceCanvasBox.width * 0.5, surfaceCanvasBox.y + 300);
+    await page.mouse.down({ button: 'right' });
+    for (let step = 1; step <= 10; step += 1) {
+        await page.mouse.move(surfaceCanvasBox.x + surfaceCanvasBox.width * 0.5 + 14 * step, surfaceCanvasBox.y + 300 + 9 * step);
+    }
+    await page.mouse.up({ button: 'right' });
+    await expect.poll(async () => {
+        const now = await page.locator('#surface-explorer').evaluate(el => ({ lat: el.dataset.lat, lon: el.dataset.lon }));
+        return now.lat !== panBefore.lat || now.lon !== panBefore.lon;
+    }).toBe(true);
+
     const surfaceCoordinatesBeforeMove = await page.locator('#surface-explorer').evaluate(element => ({
         lat: Number(element.dataset.lat),
         lon: Number(element.dataset.lon),
@@ -335,6 +437,15 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await expect.poll(() => page.evaluate(() => window.__marsLab.surfaceState().gridVisible)).toBe(false);
     await page.locator('#surface-grid').click();
     await expect(page.locator('#surface-grid')).toHaveAttribute('aria-pressed', 'true');
+
+    // Escape leaves the explorer — and works from wherever focus happens to be,
+    // which is the point of binding the shortcuts at document level.
+    await page.locator('#surface-grid').click();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#surface-explorer')).toBeHidden();
+    await expect.poll(() => page.evaluate(() => window.__marsLab.surfaceState().active)).toBe(false);
+    // Right-drag goes back to being a second rotate once there is no ground.
+    await expect.poll(() => page.evaluate(() => window.__marsLab.inputState().mouse.secondary)).toBe('rotate');
 
     await page.locator('#camera-global').click();
     await expect(page.locator('#surface-explorer')).toBeHidden();

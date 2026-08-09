@@ -43,6 +43,10 @@ const SURFACE_EYE_ALTITUDE_KM = 9;
 const SURFACE_LOOK_AHEAD_KM = 55;
 const SURFACE_MIN_EYE_KM = 2.4;
 const SURFACE_MAX_EYE_KM = 260;
+// Closest the eye may orbit its ground target. This has to sit comfortably
+// ABOVE SURFACE_MIN_EYE_KM: the polar limit below is derived from the ratio of
+// the two, and at parity it collapses to "you may only look straight down".
+const SURFACE_MIN_ORBIT_KM = 4.5;
 
 // Depth range per mode. The old code paired near = 0.00002 with far = 100 —
 // a 5,000,000:1 ratio that leaves a 24-bit depth buffer with almost no usable
@@ -112,25 +116,10 @@ canvas.addEventListener('webglcontextlost', event => {
     window.__marsRevealFallback?.('The browser lost the WebGL context. Mission and provenance panels remain usable.');
 }, { once: true });
 
-const controls = new OrbitControls(camera, canvas);
-controls.enableDamping = true;
-controls.dampingFactor = 0.06;
-controls.minDistance = 1.22;
-controls.maxDistance = 7;
-controls.enablePan = false;
-controls.zoomToCursor = true;
-controls.rotateSpeed = 0.55;
-controls.zoomSpeed = 0.75;
-controls.minPolarAngle = 0;
-controls.maxPolarAngle = Math.PI;
-controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
-controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
-controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
-controls.touches.ONE = THREE.TOUCH.ROTATE;
-controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-controls.autoRotate = !reducedMotion.matches;
-controls.autoRotateSpeed = 0.34;
+
+// Camera state. Declared BEFORE the controls are built because
+// applyControlMode() reads surfaceModeActive during construction.
 let cameraMode = 'global';
 let cameraModeLabel = 'Mission orbit';
 let cameraTween = null;
@@ -139,6 +128,108 @@ let surfaceModeActive = false;
 let surfaceLocation = null;
 let regionalTerrainCenter = null;
 let lastSurfaceFocus = null;
+// Local vertical the controls' orbit axis was last built for. Travelling far
+// enough across the terrain rotates the true local vertical away from it, at
+// which point the frame has to be rebuilt (see refreshControlFrame).
+let controlFrameUp = new THREE.Vector3(0, 1, 0);
+const CONTROL_FRAME_DRIFT_DEG = 1.5;
+
+/**
+ * ═══ WHY `controls` IS A `let` AND GETS REBUILT ═══════════════════════════
+ *
+ * OrbitControls captures its orbit axis ONCE, at construction:
+ *
+ *     js/vendor/three-0.160.0/jsm/controls/OrbitControls.js:176
+ *     const quat = new Quaternion().setFromUnitVectors(object.up, ...)
+ *
+ * That line sits in the closure around `this.update`, so it runs when the
+ * instance is built and never again. **Assigning `camera.up` afterwards does
+ * nothing to how the camera orbits.**
+ *
+ * The surface explorer sets `camera.up` to the local radial and then reasons
+ * entirely in a local-horizon frame — polar limits, ground clearance, "don't
+ * look below the horizon". None of that was reaching OrbitControls, which kept
+ * orbiting about world +Y (Mars' spin axis). At Jezero, 18.4°N, the two frames
+ * are ~72° apart, so every polar limit was applied to the wrong axis: dragging
+ * "up" hit an invisible wall, dragging down swung the camera under the terrain,
+ * and the placement code and the controls disagreed about where the camera even
+ * was. It looked like several unrelated bugs; it is this one.
+ *
+ * The library exposes no way to re-seat that quaternion, so the frame is
+ * refreshed by rebuilding the instance — cheap, and only when the local
+ * vertical has actually moved (mode change, or enough travel across the
+ * terrain to matter). Everything reads `controls` through this binding, and
+ * `__marsLab` exposes it via a getter so external references never go stale.
+ */
+let controls = createControls();
+
+function configureControls(next) {
+    next.enableDamping = true;
+    next.dampingFactor = 0.06;
+    next.enablePan = false;
+    next.rotateSpeed = 0.55;
+    next.zoomSpeed = 0.75;
+    next.autoRotateSpeed = 0.34;
+    next.touches.ONE = THREE.TOUCH.ROTATE;
+    next.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
+    next.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+    next.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+    applyControlMode(next);
+    return next;
+}
+
+/** Mode-specific limits, re-applied after every rebuild. */
+function applyControlMode(next = controls) {
+    if (surfaceModeActive) {
+        next.minDistance = SURFACE_MIN_ORBIT_KM / MARS_RADIUS_KM;
+        next.maxDistance = SURFACE_MAX_EYE_KM / MARS_RADIUS_KM;
+        next.zoomToCursor = false;
+        // Right-drag becomes ground translation (panSurfaceByPixels), so
+        // OrbitControls must stop claiming it as a duplicate rotate.
+        next.mouseButtons.RIGHT = null;
+    } else {
+        next.minDistance = 1.22;
+        next.maxDistance = 7;
+        next.zoomToCursor = true;
+        next.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+        next.maxPolarAngle = Math.PI;
+    }
+    next.minPolarAngle = 0;
+}
+
+function createControls() {
+    const next = new OrbitControls(camera, canvas);
+    configureControls(next);
+    next.addEventListener('start', onControlsStart);
+    next.addEventListener('end', onControlsEnd);
+    return next;
+}
+
+/**
+ * Rebuild the controls so their orbit axis picks up the current `camera.up`.
+ * Preserves the target, the orbit geometry, and auto-rotate state.
+ */
+function refreshControlFrame() {
+    const target = controls.target.clone();
+    const autoRotating = controls.autoRotate;
+    controls.dispose();
+    controls = createControls();
+    controls.target.copy(target);
+    controls.autoRotate = autoRotating;
+    controlFrameUp.copy(camera.up).normalize();
+    if (surfaceModeActive) updateSurfacePolarLimit();
+    controls.update();
+}
+
+/**
+ * Rebuild the frame only once the local vertical has drifted enough to matter.
+ * 1.5° is ~89 km of travel on Mars — far enough that the horizon would visibly
+ * tilt, close enough that the rebuild is imperceptible.
+ */
+function refreshControlFrameIfDrifted() {
+    if (camera.up.angleTo(controlFrameUp) < THREE.MathUtils.degToRad(CONTROL_FRAME_DRIFT_DEG)) return;
+    refreshControlFrame();
+}
 
 scene.add(new THREE.HemisphereLight(0xffd1b1, 0x080304, 0.58));
 const sun = new THREE.DirectionalLight(0xffead5, 3.2);
@@ -1765,24 +1856,18 @@ function deactivateSurfaceExplorer() {
     scene.fog.color.setHex(0x080302);
     scene.fog.density = 0.025;
     camera.up.set(0, 1, 0);
-    controls.zoomToCursor = true;
+    applyControlMode();
+    // camera.up just went back to world +Y, which OrbitControls cannot pick up
+    // without a rebuild — see the note on `let controls`.
+    refreshControlFrame();
     applyCameraRange();
     // Surface mode swapped the globe's 5× relief for the patch's 18×; the
     // ground-anchored layers have to come back to the globe radius with it.
     refreshSurfaceAnchors();
     meshStatusElement.textContent = globalMeshStatus;
-    cameraHelpElement.textContent = 'Drag orbit · wheel zoom · pinch · double-tap land';
+    cameraHelpElement.textContent = defaultInputHint();
 }
 
-/**
- * Frame the surface explorer so the horizon is actually in the picture.
- *
- * The previous framing put the camera 2 km up and 6 km back, pitched ~18° down
- * with a 36° field of view — the horizon sat above the top of the frame, so the
- * canvas filled edge to edge with unbroken ground and the layer read as a solid
- * orange rectangle. Standing higher and looking further ahead puts the horizon
- * roughly a third of the way down and gives the sky dome somewhere to be.
- */
 /**
  * Surface HUD provenance line. Reports the patch's ACTUAL relief span, the
  * exaggeration applied to it, and the graticule spacing the geometry really
@@ -1797,15 +1882,35 @@ function updateSurfaceDetail() {
     surfaceDetailElement.textContent = `${REGIONAL_TERRAIN_EXTENT_KM} km MOLA patch · relief ${(regionalTerrainRelief.minElevationM / 1000).toFixed(1)} → ${(regionalTerrainRelief.maxElevationM / 1000).toFixed(1)} km at ${REGIONAL_RELIEF_EXAGGERATION}× · ${regionalGridSpacingKm} km grid · sub-sample roughness is illustrative`;
 }
 
+/**
+ * Frame the surface explorer so the horizon is actually in the picture.
+ *
+ * The original framing put the camera 2 km up and 6 km back, pitched below the
+ * horizon line with a 36° field of view — the horizon sat above the top of the
+ * frame, so the canvas filled edge to edge with unbroken ground. Standing
+ * higher and looking further ahead puts the horizon in the upper third and
+ * gives the sky dome somewhere to be.
+ */
 function surfaceCameraPlacement(latDeg, lonDeg, headingRad = 0) {
     const target = worldSurfacePoint(latDeg, lonDeg);
     const radial = target.clone().normalize();
-    const { north, east } = tangentFrame(radial);
-    const forward = north.clone().multiplyScalar(Math.cos(headingRad))
-        .addScaledVector(east, Math.sin(headingRad)).normalize();
-    const position = target.clone()
-        .addScaledVector(radial, SURFACE_EYE_ALTITUDE_KM / MARS_RADIUS_KM)
-        .addScaledVector(forward, -SURFACE_LOOK_AHEAD_KM / MARS_RADIUS_KM);
+
+    // CRITICAL: the eye is placed above the ground BENEATH THE EYE, not above
+    // the target's ground. Offsetting from the target assumed a flat plane —
+    // but the eye stands 55 km away, and at the patch's vertical exaggeration
+    // a 2 km real elevation change between there and the target becomes tens of
+    // km of drawn relief. The camera was landing inside the terrain, and
+    // enforceSurfaceClearance() then shoved it radially to ~53 km altitude and
+    // fought every subsequent drag for control.
+    const eyeGround = destinationLatLon(
+        latDeg, lonDeg,
+        -Math.sin(headingRad) * SURFACE_LOOK_AHEAD_KM,
+        -Math.cos(headingRad) * SURFACE_LOOK_AHEAD_KM,
+    );
+    const eyeRadius = regionalRadiusAtLatLon(eyeGround.latDeg, eyeGround.lonDeg)
+        + SURFACE_EYE_ALTITUDE_KM / MARS_RADIUS_KM;
+    const position = latLonVector(eyeGround.latDeg, eyeGround.lonDeg, eyeRadius)
+        .applyQuaternion(marsGroup.quaternion);
     return { target, radial, position };
 }
 
@@ -1827,17 +1932,18 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
     updateSurfaceTrail(surfaceLocation, { reset: true });
     scene.fog.density = SURFACE_FOG_DENSITY;
     applyCameraRange();
-    // Orbit radius around the look-ahead point: 3 km to 300 km of eye altitude.
-    controls.minDistance = SURFACE_MIN_EYE_KM / MARS_RADIUS_KM;
-    controls.maxDistance = SURFACE_MAX_EYE_KM / MARS_RADIUS_KM;
-    controls.minPolarAngle = 0;
-    controls.maxPolarAngle = Math.PI;
-    // zoomToCursor walks the orbit target toward whatever is under the pointer.
-    // On a globe that is exactly right; on the ground it drags the target off
-    // the terrain and into the sky, so the explorer keeps a fixed ground target.
-    controls.zoomToCursor = false;
+    // Orbit limits for the ground camera: zoomToCursor off (on the ground it
+    // drags the target off the terrain and into the sky), right-drag freed for
+    // ground translation, and minPolarAngle 0 kept because straight overhead is
+    // a useful map view — it is the OTHER end that had to be constrained.
+    applyControlMode();
     const { target, radial, position } = surfaceCameraPlacement(latDeg, lonDeg);
     camera.up.copy(radial);
+    // The local vertical is now the orbit axis, and OrbitControls only reads
+    // camera.up at construction — without this rebuild every polar limit below
+    // would be measured against the planet's spin axis instead.
+    controls.target.copy(target);
+    refreshControlFrame();
     setCameraMode('surface', label);
     cameraTween = {
         started: performance.now(), duration,
@@ -1857,7 +1963,7 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
     meshStatusElement.textContent = hasRelief
         ? `regional MOLA · 66k vertices · ${REGIONAL_RELIEF_EXAGGERATION}× relief`
         : 'regional smooth-terrain fallback';
-    cameraHelpElement.textContent = 'Drag look · wheel altitude · double-tap move · WASD';
+    cameraHelpElement.textContent = defaultInputHint();
     updateSurfaceReadout({ force: true });
     canvas.focus({ preventScroll: true });
 }
@@ -1871,8 +1977,24 @@ function enterSurfaceAtCurrentFocus() {
     enterSurfaceExplorer(focus.latDeg, focus.lonDeg, { label: `Surface · ${focus.label}` });
 }
 
-function nudgeSurface(forwardAmount, rightAmount) {
+/**
+ * Walk the ground target across the terrain by a distance in KILOMETRES,
+ * carrying the camera with it.
+ *
+ * The camera offset is parallel-transported by the same rotation that moves the
+ * target, so heading and eye altitude survive the step — without that, walking
+ * north slowly tips the horizon over as the local vertical rotates underneath.
+ *
+ * @param {number} forwardKm  along the current view heading
+ * @param {number} rightKm    perpendicular, positive = right of the heading
+ * @param {boolean} [trail]   append to the exploration trail (false while
+ *                            right-dragging, which would otherwise scribble a
+ *                            trail point per mouse-move event)
+ */
+function moveSurfaceBy(forwardKm, rightKm, { trail = true } = {}) {
     if (!surfaceModeActive) return;
+    const distanceKm = Math.hypot(forwardKm, rightKm);
+    if (distanceKm < 1e-6) return;
     cameraTween = null;
     const oldTarget = controls.target.clone();
     const radial = oldTarget.clone().normalize();
@@ -1881,10 +2003,10 @@ function nudgeSurface(forwardAmount, rightAmount) {
     if (forward.lengthSq() < 1e-8) forward.copy(tangentFrame(radial).north);
     forward.normalize();
     const right = new THREE.Vector3().crossVectors(forward, radial).normalize();
-    const movement = forward.multiplyScalar(forwardAmount).addScaledVector(right, rightAmount);
-    if (movement.lengthSq() < 1e-8) return;
+    const movement = forward.multiplyScalar(forwardKm).addScaledVector(right, rightKm);
+    if (movement.lengthSq() < 1e-12) return;
     movement.normalize();
-    const angle = SURFACE_STEP_KM / MARS_RADIUS_KM;
+    const angle = distanceKm / MARS_RADIUS_KM;
     const newRadial = radial.clone().multiplyScalar(Math.cos(angle))
         .addScaledVector(movement, Math.sin(angle)).normalize();
     const location = worldVectorLatLon(newRadial);
@@ -1894,21 +2016,58 @@ function nudgeSurface(forwardAmount, rightAmount) {
     controls.target.copy(newTarget);
     camera.position.copy(newTarget).add(offset);
     camera.up.copy(newTarget).normalize();
+    // Walking across the terrain rotates the local vertical; once it has moved
+    // far enough the orbit axis has to follow, or dragging starts working in a
+    // frame the visitor left behind.
+    refreshControlFrameIfDrifted();
     surfaceLocation = location;
     if (!regionalTerrainCenter
         || greatCircleDistanceKm(regionalTerrainCenter, location) > REGIONAL_TERRAIN_EXTENT_KM * 0.22) {
         rebuildRegionalTerrain(location.latDeg, location.lonDeg);
+        updateSurfaceDetail();
     }
-    updateSurfaceTrail(location);
+    if (trail) updateSurfaceTrail(location);
     updateSurfaceReadout({ force: true });
 }
 
+/** One discrete step, for the arrow buttons and WASD. */
+function nudgeSurface(forwardAmount, rightAmount) {
+    moveSurfaceBy(forwardAmount * SURFACE_STEP_KM, rightAmount * SURFACE_STEP_KM);
+}
+
 /**
- * Keep the eye above the terrain, and above `SURFACE_NEAR`.
+ * Stop the surface camera from orbiting below its own horizon.
  *
- * The floor is not cosmetic: SURFACE_NEAR is 0.0002 (≈ 0.7 km), so a camera
- * allowed closer than that would clip the ground away and show the inside of
- * the patch. SURFACE_MIN_EYE_KM sits comfortably above it.
+ * THE BUG THIS FIXES: surface mode inherited maxPolarAngle = π, so one firm
+ * upward drag swung the eye past the target's tangent plane and underground.
+ * enforceSurfaceClearance() then caught it and snapped it back with
+ * `setLength()` — but OrbitControls recomputes its orbit radius from the
+ * camera position it did not author, so every frame of that fight shortened
+ * the orbit (measured: 55.7 → 49.1 → 46.8 km) while the eye stayed pinned at
+ * the 2.4 km floor. The view was stuck at ground level and could not recover.
+ *
+ * Constraining the polar angle means the clamp below almost never has to fire.
+ * cos(maxPolar) = minEye / orbitRadius is exactly "the eye stays at least
+ * SURFACE_MIN_EYE_KM above the target's tangent plane", so the limit opens up
+ * as you pull back and tightens as you close in — which is also how it should
+ * feel: hovering 4 km over a point, you cannot also be looking at it edge-on.
+ */
+function updateSurfacePolarLimit() {
+    if (!surfaceModeActive) return;
+    const orbitRadius = camera.position.distanceTo(controls.target);
+    if (!(orbitRadius > 0)) return;
+    const ratio = THREE.MathUtils.clamp(
+        (SURFACE_MIN_EYE_KM / MARS_RADIUS_KM) / orbitRadius, 0, 1,
+    );
+    controls.maxPolarAngle = Math.acos(ratio);
+}
+
+/**
+ * Backstop for terrain the tangent-plane limit above cannot know about: a ridge
+ * between the eye and its target. Rare now, but a hill in the way is still a
+ * hill in the way. SURFACE_NEAR is 0.0002 (≈ 0.7 km), so the floor also keeps
+ * the near plane from clipping the ground away and showing the inside of the
+ * patch.
  */
 function enforceSurfaceClearance() {
     if (!surfaceModeActive) return;
@@ -2006,30 +2165,74 @@ window.__marsUi?.registerCommands({
     'sky-focus': ({ dataset }) => focusSkyBody(dataset.skyFocus),
 });
 
-controls.addEventListener('start', () => {
+/**
+ * Hand the camera to the visitor.
+ *
+ * Called when an interaction is confirmed — a drag past the movement threshold,
+ * or a wheel/zoom — NOT on bare pointerdown. OrbitControls' 'start' event fires
+ * the instant a button goes down, so wiring this to it meant a single click to
+ * inspect a landmark silently relabelled the camera "Free orbit" and stopped
+ * the globe rotating. Selecting something is not taking the wheel.
+ */
+function beginManualCamera() {
     cameraTween = null;
     setAutoRotate(false);
-    setCameraMode(surfaceModeActive ? 'surface' : 'custom', surfaceModeActive ? 'Surface traverse' : 'Free orbit');
+    setCameraMode(
+        surfaceModeActive ? 'surface' : 'custom',
+        surfaceModeActive ? 'Surface traverse' : 'Free orbit',
+    );
+}
+
+// Bound in createControls() so they survive a frame rebuild. Declarations, not
+// consts: createControls() runs during module init, above this point.
+function onControlsStart() {
     canvas.classList.add('is-interacting');
-});
-controls.addEventListener('end', () => {
+}
+function onControlsEnd() {
     canvas.classList.remove('is-interacting');
     if (pointerStarts.size === 0 && canvas.dataset.inputState !== 'double-tap') setInputHint(defaultInputHint());
-});
+}
 
 reducedMotion.addEventListener?.('change', event => {
     if (event.matches) setAutoRotate(false);
 });
 
-canvas.addEventListener('keydown', event => {
-    if (surfaceModeActive && (event.key.toLowerCase() === 'w' || event.key === 'ArrowUp')) nudgeSurface(1, 0);
-    else if (surfaceModeActive && (event.key.toLowerCase() === 's' || event.key === 'ArrowDown')) nudgeSurface(-1, 0);
-    else if (surfaceModeActive && (event.key.toLowerCase() === 'a' || event.key === 'ArrowLeft')) nudgeSurface(0, -1);
-    else if (surfaceModeActive && (event.key.toLowerCase() === 'd' || event.key === 'ArrowRight')) nudgeSurface(0, 1);
+/**
+ * Camera shortcuts, bound at DOCUMENT level.
+ *
+ * These used to be bound to the canvas, which meant they only fired while the
+ * canvas itself held focus — so clicking any camera-dock button (which takes
+ * focus, as buttons do) silently killed every shortcut the button's own tooltip
+ * advertises. Pressing H after clicking "Rover" did nothing. Same for W/A/S/D
+ * after using the on-screen surface arrows.
+ *
+ * Two guards keep a global binding from stealing legitimate input:
+ *   - typing targets (the traverse-sol slider, any future input) are skipped
+ *     entirely, so arrow keys still scrub the slider;
+ *   - Space and Enter on a focused button/link belong to that control, not to
+ *     the camera — otherwise Space would both press the button and toggle spin.
+ */
+function shortcutTargetIsBusy(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.isContentEditable) return true;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return true;
+    if ((event.key === ' ' || event.key === 'Enter') && target.closest('button, a, [role="button"]')) return true;
+    return false;
+}
+
+document.addEventListener('keydown', event => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (shortcutTargetIsBusy(event)) return;
+    const key = event.key.toLowerCase();
+    if (surfaceModeActive && (key === 'w' || event.key === 'ArrowUp')) nudgeSurface(1, 0);
+    else if (surfaceModeActive && (key === 's' || event.key === 'ArrowDown')) nudgeSurface(-1, 0);
+    else if (surfaceModeActive && (key === 'a' || event.key === 'ArrowLeft')) nudgeSurface(0, -1);
+    else if (surfaceModeActive && (key === 'd' || event.key === 'ArrowRight')) nudgeSurface(0, 1);
     else if (surfaceModeActive && event.key === 'Escape') showGlobalView();
-    else if (event.key.toLowerCase() === 'h') showGlobalView();
-    else if (event.key.toLowerCase() === 'r') focusSelectedRover();
-    else if (event.key.toLowerCase() === 'l') focusLandingSite();
+    else if (key === 'h') showGlobalView();
+    else if (key === 'r') focusSelectedRover();
+    else if (key === 'l') focusLandingSite();
     else if (event.key === '+' || event.key === '=') zoomCamera(0.76);
     else if (event.key === '-' || event.key === '_') zoomCamera(1.3);
     else if (event.key === ' ') setAutoRotate(!controls.autoRotate);
@@ -2041,13 +2244,38 @@ const landmarkCard = document.querySelector('#landmark-card');
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const pointerStarts = new Map();
+// Movement past which a pointer gesture counts as a drag rather than a click.
+const DRAG_THRESHOLD_PX = 7;
+
+/**
+ * Right-drag translation across the terrain, in surface mode only.
+ *
+ * RIGHT was mapped to ROTATE, i.e. an exact duplicate of LEFT, so the button
+ * did nothing a user could notice while the context menu was suppressed anyway.
+ * On the ground the missing verb is "move", and the on-screen arrows plus WASD
+ * were the only way to do it.
+ *
+ * The pixel→kilometre scale is the true one for a perspective camera: the world
+ * height spanned at the target distance is 2·d·tan(fov/2), so dragging a
+ * feature keeps it roughly under the cursor rather than sliding at some
+ * invented rate. Screen Y is inverted (down is +y in client coords, and
+ * dragging down should pull the terrain toward you).
+ */
+function panSurfaceByPixels(deltaX, deltaY) {
+    if (!surfaceModeActive || (deltaX === 0 && deltaY === 0)) return;
+    const distance = camera.position.distanceTo(controls.target);
+    const worldPerPixel = 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)
+        / Math.max(1, renderer.domElement.clientHeight);
+    const scaleKm = worldPerPixel * MARS_RADIUS_KM;
+    moveSurfaceBy(deltaY * scaleKm, -deltaX * scaleKm, { trail: false });
+}
 let lastTouchTap = null;
 let inputHintTimer = null;
 
 function defaultInputHint() {
     return surfaceModeActive
-        ? 'Drag look · pinch altitude · double-tap move · WASD'
-        : 'Drag orbit · wheel zoom · pinch · double-tap land';
+        ? 'Drag look · right-drag move · wheel altitude · WASD · Esc to orbit'
+        : 'Drag orbit · wheel zoom · click a landmark · double-click to land';
 }
 
 function setInputHint(message, state = 'idle', resetDelay = 1400) {
@@ -2135,20 +2363,89 @@ canvas.dataset.pointerCount = '0';
 cameraHelpElement.dataset.active = 'false';
 
 canvas.addEventListener('contextmenu', event => event.preventDefault());
-canvas.addEventListener('wheel', () => setInputHint(
-    surfaceModeActive ? 'Wheel adjusts eye altitude at the cursor' : 'Wheel zooms toward the cursor',
-    'wheel',
-), { passive: true });
+canvas.addEventListener('wheel', () => {
+    // Wheel IS taking the wheel — unlike a bare click, it always means the
+    // visitor wants the camera.
+    beginManualCamera();
+    setInputHint(
+        surfaceModeActive ? 'Wheel adjusts eye altitude' : 'Wheel zooms toward the cursor',
+        'wheel',
+    );
+}, { passive: true });
+
+// ── Hover ───────────────────────────────────────────────────────────────────
+// Every landmark, sky body, and marker on this page is clickable, and none of
+// them looked it: the cursor stayed `grab` everywhere and nothing highlighted,
+// so the atlas read as decoration. Raycasting on move fixes the affordance.
+// Throttled and skipped entirely while dragging — 23 hit targets is cheap, but
+// not at 60 Hz on a software rasteriser that is already the bottleneck.
+const HOVER_INTERVAL_MS = 70;
+let lastHoverAt = 0;
+let hoveredLabel = null;
+
+function clearHover() {
+    const changed = landmarks.setHighlight(null) || sky.setHighlight(null);
+    if (hoveredLabel !== null) {
+        hoveredLabel = null;
+        canvas.dataset.hover = 'none';
+        setInputHint(defaultInputHint());
+    }
+    return changed;
+}
+
+function updateHover(clientX, clientY) {
+    const now = performance.now();
+    if (now - lastHoverAt < HOVER_INTERVAL_MS) return;
+    lastHoverAt = now;
+    setRaycastPointer(clientX, clientY);
+
+    const skyHit = raycaster.intersectObjects(sky.hitTargets, false)
+        .find(intersection => sky.isBodyVisible(intersection.object.userData.skyBodyKey));
+    if (skyHit) {
+        const key = skyHit.object.userData.skyBodyKey;
+        landmarks.setHighlight(null);
+        sky.setHighlight(key);
+        const name = sky.getBodyRecord(key)?.name || key;
+        if (hoveredLabel !== name) {
+            hoveredLabel = name;
+            canvas.dataset.hover = 'pick';
+            setInputHint(`${name} · click for its Mars-sky position`, 'hover', 0);
+        }
+        return;
+    }
+
+    const hit = raycaster.intersectObjects(landmarks.hitTargets, false)
+        .find(intersection => landmarks.isLandmarkVisible(intersection.object.userData.landmark));
+    if (hit) {
+        const landmark = hit.object.userData.landmark;
+        sky.setHighlight(null);
+        landmarks.setHighlight(landmark);
+        if (hoveredLabel !== landmark.name) {
+            hoveredLabel = landmark.name;
+            canvas.dataset.hover = 'pick';
+            setInputHint(`${landmark.name} · click for details`, 'hover', 0);
+        }
+        return;
+    }
+    clearHover();
+}
+
 canvas.addEventListener('pointerdown', event => {
     const record = {
         x: event.clientX,
         y: event.clientY,
+        lastX: event.clientX,
+        lastY: event.clientY,
         pointerType: event.pointerType || 'mouse',
         button: event.button,
         moved: false,
         multiTouch: false,
+        // Right-drag on the ground translates the view instead of duplicating
+        // left-drag's rotation (see surfacePanEnabled below).
+        panning: event.button === 2 && surfaceModeActive && event.pointerType !== 'touch',
     };
     pointerStarts.set(event.pointerId, record);
+    if (record.panning) canvas.setPointerCapture?.(event.pointerId);
     if (record.pointerType === 'touch') {
         const touchRecords = [...pointerStarts.values()].filter(item => item.pointerType === 'touch');
         if (touchRecords.length > 1) touchRecords.forEach(item => { item.multiTouch = true; });
@@ -2157,16 +2454,37 @@ canvas.addEventListener('pointerdown', event => {
             touchRecords.length > 1 ? 'pinch' : 'touch-drag',
             0,
         );
+    } else if (record.panning) {
+        setInputHint('Right-drag moves across the terrain', 'mouse-pan', 0);
     } else {
-        setInputHint(event.button === 1 ? 'Middle-drag zoom' : 'Drag to orbit', 'mouse-drag', 0);
+        setInputHint(event.button === 1 ? 'Middle-drag zoom' : (surfaceModeActive ? 'Drag to look around' : 'Drag to orbit'), 'mouse-drag', 0);
     }
     updatePointerDataset(record.pointerType);
 });
+
 canvas.addEventListener('pointermove', event => {
     const record = pointerStarts.get(event.pointerId);
-    if (!record) return;
-    if (Math.hypot(event.clientX - record.x, event.clientY - record.y) > 7) record.moved = true;
+    if (!record) {
+        // No button down: this is a hover, not a drag.
+        if (pointerStarts.size === 0 && event.pointerType !== 'touch') updateHover(event.clientX, event.clientY);
+        return;
+    }
+    const travelled = Math.hypot(event.clientX - record.x, event.clientY - record.y);
+    if (!record.moved && travelled > DRAG_THRESHOLD_PX) {
+        record.moved = true;
+        // Only NOW is this a camera interaction. A click that never moves stays
+        // a selection and leaves the camera mode and auto-rotate alone.
+        if (!record.panning) beginManualCamera();
+        clearHover();
+    }
+    if (record.panning && record.moved) {
+        panSurfaceByPixels(event.clientX - record.lastX, event.clientY - record.lastY);
+    }
+    record.lastX = event.clientX;
+    record.lastY = event.clientY;
 });
+
+canvas.addEventListener('pointerleave', () => { if (pointerStarts.size === 0) clearHover(); });
 canvas.addEventListener('pointercancel', event => {
     pointerStarts.delete(event.pointerId);
     updatePointerDataset(event.pointerType || 'touch');
@@ -2175,8 +2493,10 @@ canvas.addEventListener('pointercancel', event => {
 canvas.addEventListener('pointerup', event => {
     const start = pointerStarts.get(event.pointerId);
     pointerStarts.delete(event.pointerId);
+    if (start?.panning) canvas.releasePointerCapture?.(event.pointerId);
     updatePointerDataset(event.pointerType || start?.pointerType || 'mouse');
-    if (!start || start.moved || start.multiTouch || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 7) {
+    if (!start || start.moved || start.multiTouch
+        || Math.hypot(event.clientX - start.x, event.clientY - start.y) > DRAG_THRESHOLD_PX) {
         if (pointerStarts.size === 0) setInputHint(defaultInputHint());
         return;
     }
@@ -2198,7 +2518,12 @@ canvas.addEventListener('pointerup', event => {
         }
     }
 
-    if (start.pointerType === 'touch' || start.button === 0) pickPointOfInterest(event.clientX, event.clientY);
+    if (start.pointerType === 'touch' || start.button === 0) {
+        // A click that hits nothing dismisses the detail card. Previously the
+        // only way to close it was the × — clicking away, which every card-like
+        // UI treats as dismissal, did nothing.
+        if (!pickPointOfInterest(event.clientX, event.clientY)) landmarkCard.hidden = true;
+    }
     setInputHint(defaultInputHint());
 });
 canvas.addEventListener('dblclick', event => {
@@ -2364,7 +2689,9 @@ loaderStatus.textContent = hasRelief ? 'MOLA relief ready · locating Perseveran
 window.__marsReady = true;
 window.__marsLab = Object.freeze({
     camera,
-    controls,
+    // Getter, not a value: refreshControlFrame() replaces the instance whenever
+    // the local vertical changes, and a captured reference would go stale.
+    get controls() { return controls; },
     layerIsVisible,
     enterSurfaceExplorer,
     nudgeSurface,
@@ -2375,11 +2702,32 @@ window.__marsLab = Object.freeze({
     }),
     inputState: () => ({
         zoomToCursor: controls.zoomToCursor,
-        mouse: { primary: 'rotate', middle: 'dolly', secondary: 'rotate' },
+        mouse: {
+            primary: 'rotate',
+            middle: 'dolly',
+            // Right-drag translates the ground in surface mode; on the globe
+            // there is nothing to translate, so it stays a second rotate.
+            secondary: surfaceModeActive ? 'pan-surface' : 'rotate',
+        },
         touch: { oneFinger: 'rotate', twoFinger: 'dolly-rotate', doubleTap: 'surface-target' },
         activePointers: pointerStarts.size,
         pointerType: canvas.dataset.pointerType,
         state: canvas.dataset.inputState,
+        dragThresholdPx: DRAG_THRESHOLD_PX,
+    }),
+    /** What the pointer is currently over, and how the canvas advertises it. */
+    hoverState: () => ({
+        label: hoveredLabel,
+        cursor: canvas.dataset.hover || 'none',
+        landmark: landmarks.highlighted?.name || null,
+        skyBody: sky.highlighted || null,
+    }),
+    /** Surface camera limits — the constraint that stops it burrowing. */
+    surfaceLimits: () => ({
+        minDistanceKm: controls.minDistance * MARS_RADIUS_KM,
+        maxDistanceKm: controls.maxDistance * MARS_RADIUS_KM,
+        maxPolarDeg: THREE.MathUtils.radToDeg(controls.maxPolarAngle),
+        orbitRadiusKm: camera.position.distanceTo(controls.target) * MARS_RADIUS_KM,
     }),
     surfaceState: () => ({
         active: surfaceModeActive,
@@ -2474,7 +2822,12 @@ function animate(now) {
     updateSurfaceMarkerScale(routeCursor);
     landmarks.update(camera);
     sky.updateCamera(camera);
-    if (!cameraTween) controls.update();
+    if (!cameraTween) {
+        // Must run BEFORE update() — OrbitControls applies the polar limits
+        // inside update(), so setting them afterwards is a frame too late.
+        updateSurfacePolarLimit();
+        controls.update();
+    }
     enforceSurfaceClearance();
     // Stars are at infinity, so the field rides with the camera. This is also
     // what keeps `far` small enough for a usable depth buffer in both modes.

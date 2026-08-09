@@ -101,6 +101,7 @@ export class MarsLandmarks {
         this.entries = [];
         this.disposables = [];
         this.enabled = true;
+        this.highlighted = null;
 
         const track = object => { this.disposables.push(object); return object; };
         const dotTexture = track(glowTexture());
@@ -170,6 +171,21 @@ export class MarsLandmarks {
         return this.enabled && Boolean(this.categoryGroups[landmark.category]?.visible);
     }
 
+    /**
+     * Mark one landmark as hovered. Every marker on this globe is clickable and
+     * none of them looked it — there was no cursor change and no highlight, so
+     * the only way to discover that the atlas is interactive was to click a dot
+     * on the off-chance. `update()` applies the visual; this just records it.
+     *
+     * @param {object|null} landmark  the hovered landmark, or null to clear
+     * @returns {boolean} true if the highlight actually changed
+     */
+    setHighlight(landmark) {
+        if (this.highlighted === landmark) return false;
+        this.highlighted = landmark || null;
+        return true;
+    }
+
     update(camera) {
         if (!this.enabled) return;
         const localCamera = this.group.worldToLocal(camera.position.clone());
@@ -179,15 +195,20 @@ export class MarsLandmarks {
         const facingThreshold = cameraDistance < 1.72 ? 0.72 : 0.17;
         for (const entry of this.entries) {
             const frontFacing = entry.normal.dot(cameraDirection) > facingThreshold;
+            const hovered = this.highlighted === entry.landmark;
             const labelDistance = localCamera.distanceTo(entry.label.position);
             const labelScale = THREE.MathUtils.clamp(labelDistance / 2.4, 0.11, 1);
-            entry.label.scale.set(0.26 * labelScale, 0.045 * labelScale, 1);
+            // A hovered marker swells and always shows its label, even if the
+            // LOD would normally have hidden it — you are pointing at it, so it
+            // has earned the pixels.
+            const emphasis = hovered ? 1.45 : 1;
+            entry.label.scale.set(0.26 * labelScale * emphasis, 0.045 * labelScale * emphasis, 1);
             const dotSize = entry.landmark.priority === 1 ? 0.032 : 0.023;
-            entry.dot.scale.setScalar(dotSize * labelScale);
+            entry.dot.scale.setScalar(dotSize * labelScale * emphasis);
             entry.label.visible = entry.categoryGroup.visible
-                && entry.landmark.priority <= maximumPriority
-                && frontFacing;
-            entry.dot.material.opacity = frontFacing ? 0.9 : 0.15;
+                && frontFacing
+                && (hovered || entry.landmark.priority <= maximumPriority);
+            entry.dot.material.opacity = hovered ? 1 : (frontFacing ? 0.9 : 0.15);
         }
     }
 

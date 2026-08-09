@@ -50,7 +50,12 @@ button{color:inherit}
   radial-gradient(circle at 55% 45%,rgba(115,33,8,.12),transparent 34%),#050302}
 .mars-viewport{position:absolute;inset:0;overflow:hidden;background:#050302}
 #mars-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;outline:none;cursor:grab;touch-action:none}
+/* Hover affordance. Every landmark and sky body is clickable; without this the
+   cursor stayed `grab` over all of them and the atlas read as decoration.
+   mars-view.js sets data-hover="pick" from the hover raycast. */
+#mars-canvas[data-hover="pick"]{cursor:pointer}
 #mars-canvas.is-interacting{cursor:grabbing}
+#mars-canvas.is-interacting[data-hover="pick"]{cursor:grabbing}
 #mars-canvas:focus-visible{outline:2px solid var(--cyan);outline-offset:-4px}
 .mars-render-degraded #mars-canvas{visibility:hidden}
 .mars-render-degraded .camera-dock,.mars-render-degraded .surface-explorer{display:none}
@@ -171,8 +176,12 @@ button{color:inherit}
 .ui-panels-toggle[aria-pressed="true"]{border-color:rgba(105,228,255,.58);background:rgba(105,228,255,.14);color:#e7fbff}
 .camera-icon{font:500 .78rem var(--mono);line-height:1}
 .camera-btn-label{display:none}
-.camera-help{position:absolute;left:3px;top:calc(100% + 5px);max-width:calc(100% - 6px);overflow:hidden;color:#8a746a;font:.5rem var(--mono);pointer-events:none;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 7px #000;transition:color .16s,background .16s,border-color .16s}
-.camera-help[data-active="true"]{padding:3px 5px;border:1px solid rgba(105,228,255,.22);border-radius:6px;background:rgba(5,11,12,.76);color:#bcecf4}
+/* Was .5rem — 8px computed, below anything legible, for the one element that
+   explains how to drive the canvas. Widened past the dock too: at 365px the
+   hint was ellipsised down to about four words. */
+.camera-help{position:absolute;left:3px;top:calc(100% + 6px);width:max-content;max-width:min(560px,calc(100vw - 40px));overflow:hidden;color:#a89187;font:.66rem var(--mono);pointer-events:none;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 7px #000,0 0 12px #000;transition:color .16s,background .16s,border-color .16s}
+.camera-help[data-active="true"]{padding:3px 7px;border:1px solid rgba(105,228,255,.22);border-radius:6px;background:rgba(5,11,12,.82);color:#cdf3fa}
+@media(max-width:560px){.camera-help{font-size:.58rem;max-width:calc(100vw - 30px)}}
 .surface-explorer{position:absolute;z-index:7;left:18px;top:84px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 9px;width:334px;padding:7px 42px 7px 7px;border:1px solid rgba(105,228,255,.25);border-radius:11px;background:rgba(7,8,8,.88);box-shadow:0 14px 38px rgba(0,0,0,.45);backdrop-filter:blur(18px)}
 .surface-explorer[hidden]{display:none}
 .surface-collapse{position:absolute;right:6px;top:6px}
