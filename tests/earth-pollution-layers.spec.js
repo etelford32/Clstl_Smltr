@@ -1,0 +1,92 @@
+/**
+ * earth-pollution-layers.spec.js — gate for the two Environment toggles on
+ * EarthView: Pollution Centers (live AQI rings) and Wildfire Events (EONET).
+ * ═══════════════════════════════════════════════════════════════════════════
+ * Boots earth.html (verdict card off to keep the boot light) with the two
+ * feeds mocked, then verifies the toggle contract end to end:
+ *
+ *   1. Both checkbox rows exist in the AIR QUALITY & POLLUTION section and
+ *      default OFF with their layer groups hidden (synthetic-change sync).
+ *   2. Enabling each toggle fetches its feed, populates the layer
+ *      (window.__pollutionCentersLayer / window.__wildfireLayer), makes the
+ *      group visible, and writes a live count pill.
+ *   3. A stale feed (freshness:'stale') drives the pill to its error state —
+ *      a dead upstream must never render as a quiet healthy layer.
+ *
+ * Runs via `npx playwright test tests/earth-pollution-layers.spec.js`.
+ */
+
+import { test, expect } from '@playwright/test';
+
+const NOW_ISO = () => new Date().toISOString();
+
+const CENTERS_FIXTURE = {
+    updated: NOW_ISO(), count: 3, freshness: 'live',
+    provenance: { id: 'open-meteo-cams-global', kind: 'model' },
+    cities: [
+        { name: 'Delhi', country: 'India', lat: 28.61, lon: 77.21, pop: 32, aqi: 172, pm25: 96, aod: 0.85, time: NOW_ISO() },
+        { name: 'New York', country: 'USA', lat: 40.71, lon: -74.01, pop: 19.5, aqi: 42, pm25: 9, aod: 0.1, time: NOW_ISO() },
+        { name: 'London', country: 'UK', lat: 51.51, lon: -0.13, pop: 14, aqi: 46, pm25: 11, aod: 0.12, time: NOW_ISO() },
+    ],
+    worst: ['Delhi'],
+};
+
+const FIRES_FIXTURE = {
+    updated: NOW_ISO(), count: 2, freshness: 'live',
+    fires: [
+        { id: 'EONET_1', name: 'Ridge Fire', lat: 40.2, lon: -121.2, startedAt: NOW_ISO(), lastUpdate: NOW_ISO(), areaAcres: 8400, ageDays: 0.5, link: null },
+        { id: 'EONET_2', name: 'Creek Fire', lat: 34.1, lon: -118.1, startedAt: NOW_ISO(), lastUpdate: NOW_ISO(), areaAcres: 300, ageDays: 2.1, link: null },
+    ],
+    sources: { eonet: { ok: true, count: 2 } },
+};
+
+test.describe('EarthView pollution + wildfire toggles', () => {
+    test('toggles load their layers and report counts', async ({ page }) => {
+        await page.route('**/api/air-quality/centers', r => r.fulfill({ json: CENTERS_FIXTURE }));
+        await page.route('**/api/wildfires/events', r => r.fulfill({ json: FIRES_FIXTURE }));
+        await page.goto('/earth.html?verdict=0');
+
+        // Layers construct late in boot; the window handles are the signal.
+        await page.waitForFunction(
+            () => window.__pollutionCentersLayer && window.__wildfireLayer,
+            null, { timeout: 45_000 });
+
+        // 1. Default state: rows exist, boxes unchecked, groups hidden.
+        await expect(page.locator('#lyr-pollution-centers')).not.toBeChecked();
+        await expect(page.locator('#lyr-wildfires')).not.toBeChecked();
+        expect(await page.evaluate(() => window.__pollutionCentersLayer.group.visible)).toBe(false);
+        expect(await page.evaluate(() => window.__wildfireLayer.group.visible)).toBe(false);
+
+        // 2. Enable pollution centers → feed loads, group shows, pill counts.
+        await page.check('#lyr-pollution-centers');
+        await page.waitForFunction(
+            () => window.__pollutionCentersLayer.centers.length === 3, null, { timeout: 15_000 });
+        expect(await page.evaluate(() => window.__pollutionCentersLayer.group.visible)).toBe(true);
+        await expect(page.locator('#pollution-centers-count')).toContainText('3');
+        await expect(page.locator('#pollution-centers-count')).toContainText('Delhi 172');
+
+        // Enable wildfires → same contract.
+        await page.check('#lyr-wildfires');
+        await page.waitForFunction(
+            () => window.__wildfireLayer.fires.length === 2, null, { timeout: 15_000 });
+        expect(await page.evaluate(() => window.__wildfireLayer.group.visible)).toBe(true);
+        await expect(page.locator('#wildfires-count')).toContainText('2');
+
+        // Toggling off hides the group again.
+        await page.uncheck('#lyr-wildfires');
+        expect(await page.evaluate(() => window.__wildfireLayer.group.visible)).toBe(false);
+    });
+
+    test('stale feed reads as an error, not a quiet empty layer', async ({ page }) => {
+        await page.route('**/api/air-quality/centers', r => r.fulfill({
+            json: { updated: NOW_ISO(), count: 0, freshness: 'stale', cities: [], worst: [], error: 'CAMS HTTP 503' },
+        }));
+        await page.goto('/earth.html?verdict=0');
+        await page.waitForFunction(() => window.__pollutionCentersLayer, null, { timeout: 45_000 });
+
+        await page.check('#lyr-pollution-centers');
+        await expect(page.locator('#pollution-centers-count')).toContainText('error', { timeout: 15_000 });
+        await expect(page.locator('#pollution-centers-count')).toHaveClass(/error/);
+        expect(await page.evaluate(() => window.__pollutionCentersLayer.centers.length)).toBe(0);
+    });
+});

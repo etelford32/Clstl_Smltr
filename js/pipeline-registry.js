@@ -17,7 +17,7 @@
  *   label       human display name
  *   endpoint    same-origin path Vercel serves
  *   category    'space-weather' | 'events' | 'atmosphere' | 'weather' |
- *               'orbital' | 'planetary' | 'admin'
+ *               'orbital' | 'environment' | 'planetary' | 'admin'
  *               Must also appear in CATEGORIES below, or the status page
  *               silently renders no table for it.
  *   upstream    short label for the data origin
@@ -284,6 +284,39 @@ export const PIPELINES = [
       warnAgeS:  6 * 3600, critAgeS: 24 * 3600,
       notes: 'Powers the storm-feed overlay on Earth + satellite-track sims.' },
 
+    // ── Environment · air quality + wildfire (earth.html, pollution.html) ──
+    // The two 2026-07 AQ routes (#971) shipped without registry rows — the
+    // exact silent-gap failure this file's header warns about. Registered
+    // retroactively; both serve per-request timestamped frames rather than a
+    // top-level fetched_at, hence freshnessExempt.
+    { id: 'air-quality-grid',   label: 'CAMS air-quality grid',
+      endpoint: '/api/air-quality/grid',
+      category: 'environment', upstream: 'Open-Meteo · CAMS Global',
+      cadence_s: 3_600, prewarm: 'medium', freshnessExempt: true,
+      warnAgeS:  2 * 3600, critAgeS: 6 * 3600,
+      notes: 'Timestamped CAMS model frames for the EarthView numeric AQI layer; freshness lives inside frame.validAt, not a top-level field.' },
+
+    { id: 'air-quality-stations', label: 'AirNow monitor observations',
+      endpoint: '/api/air-quality/stations',
+      category: 'environment', upstream: 'EPA AirNow HourlyAQObs',
+      cadence_s: 3_600, prewarm: null, freshnessExempt: true,
+      warnAgeS:  2 * 3600, critAgeS: 6 * 3600,
+      notes: 'Regional per-request query (defaults to CONUS center) — not usefully pre-warmable; AirNow publishes each hour file ~1 h behind wall time by design.' },
+
+    { id: 'air-quality-centers', label: 'City pollution centers (CAMS)',
+      endpoint: '/api/air-quality/centers',
+      category: 'environment', upstream: 'Open-Meteo · CAMS Global',
+      cadence_s: 3_600, prewarm: 'medium',
+      warnAgeS:  2 * 3600, critAgeS: 6 * 3600,
+      notes: 'One batched request: current AQI/PM for the top ~100 major-cities.js metros. Powers the EarthView Pollution Centers layer + Pollution Lab. 200 + freshness:stale + empty list when CAMS is down.' },
+
+    { id: 'wildfire-events',    label: 'Active wildfire events',
+      endpoint: '/api/wildfires/events',
+      category: 'environment', upstream: 'NASA EONET v3',
+      cadence_s: 43_200, prewarm: 'medium',
+      warnAgeS:  24 * 3600, critAgeS: 72 * 3600,
+      notes: 'Named open wildfire events (discrete markers) — complements the GIBS Active Fires imagery layer. EONET curates ~2×/day. 200 + freshness:stale + empty list when EONET is down.' },
+
     // ── Planetary · Mars (mars.html) ───────────────────────────────────────
     // All three answer 200 even when their upstream is down, because the page
     // has a working fallback for each and a 5xx would be indistinguishable
@@ -335,6 +368,7 @@ export const CATEGORIES = [
     { id: 'events',        label: 'Solar/Geomag Events'   },
     { id: 'weather',       label: 'Terrestrial Weather'   },
     { id: 'orbital',       label: 'Orbital · TLE / Launches' },
+    { id: 'environment',   label: 'Environment · Air & Fire' },
     { id: 'planetary',     label: 'Planetary · Mars'      },
 ];
 

@@ -43,6 +43,13 @@ const UPSTREAMS = [
     { source: 'mars-mmgis',   url: 'https://mars.nasa.gov/mmgis-maps/M20/Layers/json/M20_waypoints.json', edge_authoritative: true },
     { source: 'mars-rss',     url: 'https://mars.nasa.gov/rss/api/?feed=weather&category=mars2020&feedtype=json', edge_authoritative: true },
     { source: 'jpl-horizons', url: 'https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%27399%27&EPHEM_TYPE=VECTORS&CENTER=%27500@10%27&START_TIME=%272026-01-01%27&STOP_TIME=%272026-01-02%27&STEP_SIZE=%271%20d%27', edge_authoritative: true },
+    // Environment upstreams. Both are proxied through the edge
+    // (/api/wildfires/events, /api/air-quality/{grid,centers}), so these
+    // rows are authoritative for the EarthView pollution/wildfire layers
+    // and the Pollution Lab. The single-point CAMS probe is the cheapest
+    // request that exercises the real air-quality API path.
+    { source: 'eonet-wildfires', url: 'https://eonet.gsfc.nasa.gov/api/v3/events?category=wildfires&status=open&limit=1', edge_authoritative: true },
+    { source: 'open-meteo-cams', url: 'https://air-quality-api.open-meteo.com/v1/air-quality?latitude=28.61&longitude=77.21&current=us_aqi', edge_authoritative: true },
 ];
 
 async function ping({ source, url, edge_authoritative }) {
