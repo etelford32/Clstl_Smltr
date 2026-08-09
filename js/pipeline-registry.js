@@ -17,7 +17,9 @@
  *   label       human display name
  *   endpoint    same-origin path Vercel serves
  *   category    'space-weather' | 'events' | 'atmosphere' | 'weather' |
- *               'orbital' | 'admin'
+ *               'orbital' | 'planetary' | 'admin'
+ *               Must also appear in CATEGORIES below, or the status page
+ *               silently renders no table for it.
  *   upstream    short label for the data origin
  *   cadence_s   upstream publish cadence (seconds). Drives the warn/crit
  *               freshness thresholds; also the cache TTL ceiling.
@@ -281,6 +283,43 @@ export const PIPELINES = [
       cadence_s: 1_800, prewarm: 'medium',
       warnAgeS:  6 * 3600, critAgeS: 24 * 3600,
       notes: 'Powers the storm-feed overlay on Earth + satellite-track sims.' },
+
+    // ── Planetary · Mars (mars.html) ───────────────────────────────────────
+    // All three answer 200 even when their upstream is down, because the page
+    // has a working fallback for each and a 5xx would be indistinguishable
+    // from "the site is broken" to a client whose fallback is a static file.
+    // They therefore signal degradation with a top-level `freshness: 'stale'`,
+    // which _rtProxyHealth() already understands — a row here going amber means
+    // "serving the fallback", not "endpoint down". See data/mars/SOURCES.md.
+
+    // Only genuinely live Mars feed. JPL Horizons has never been retired and
+    // is not DEMO_KEY rate-limited, unlike every NASA rover endpoint below.
+    { id: 'mars-ephemeris',     label: 'Mars geometry (Ls, light time)',
+      endpoint: '/api/mars/ephemeris',
+      category: 'planetary', upstream: 'JPL Horizons',
+      cadence_s: 1_800, prewarm: 'medium', probeTimeoutMs: 24_000,
+      warnAgeS:  90 * 60, critAgeS: 6 * 3600,
+      notes: 'Amber = fell back to the analytic mean-motion Ls model (~11° error near solstices). Horizons queries can take 20 s cold, hence the raised probe timeout.' },
+
+    // Live rover position. Amber here means the globe is drawing the bundled
+    // snapshot in data/mars/perseverance-route.json instead of live MMGIS.
+    { id: 'mars-route',         label: 'Perseverance traverse (MMGIS)',
+      endpoint: '/api/mars/route',
+      category: 'planetary', upstream: 'NASA MMGIS · M20 waypoints',
+      cadence_s: 3_600, prewarm: 'medium', probeTimeoutMs: 16_000,
+      warnAgeS:  3 * 3600, critAgeS: 12 * 3600,
+      notes: 'Amber = serving the bundled route snapshot. MMGIS publishes ≤1 localization per sol (24h 39m).' },
+
+    // EXPECT THIS ROW TO BE AMBER. The mars.nasa.gov RSS rover-weather
+    // endpoints have been frozen or intermittent since 2024 and InSight ended
+    // in Dec 2022; the adapter itself is healthy, its upstreams are not. The
+    // `sources[]` array in the response names which one failed and why.
+    { id: 'mars-weather',       label: 'Mars surface weather (MEDA/REMS)',
+      endpoint: '/api/mars/weather',
+      category: 'planetary', upstream: 'NASA MEDA · REMS · InSight',
+      cadence_s: 3_600, prewarm: 'medium', probeTimeoutMs: 16_000,
+      warnAgeS:  3 * 3600, critAgeS: 12 * 3600,
+      notes: 'Amber is the expected steady state: NASA rover daily-summary feeds are frozen/retired, so the page serves a bundled MEDA snapshot and labels it historical.' },
 ];
 
 /**
@@ -296,6 +335,7 @@ export const CATEGORIES = [
     { id: 'events',        label: 'Solar/Geomag Events'   },
     { id: 'weather',       label: 'Terrestrial Weather'   },
     { id: 'orbital',       label: 'Orbital · TLE / Launches' },
+    { id: 'planetary',     label: 'Planetary · Mars'      },
 ];
 
 export function pipelinesByCategory(catId) {

@@ -35,6 +35,13 @@ const UPSTREAMS = [
     { source: 'swpc-f107',      url: 'https://services.swpc.noaa.gov/json/f107_cm_flux.json',                   edge_authoritative: false },
     { source: 'swpc-ap-daily',  url: 'https://services.swpc.noaa.gov/text/daily-geomagnetic-indices.txt',       edge_authoritative: false },
     { source: 'donki-cme',    url: `https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/CME?api_key=${NASA_KEY}`, edge_authoritative: true },
+    // Mars upstreams. Both are proxied through the edge (/api/mars/route and
+    // /api/mars/weather), so these rows ARE authoritative. mars.nasa.gov has
+    // been intermittent since 2024 — a `down` here is the expected steady
+    // state for mars-rss and explains an amber mars-weather row on the status
+    // board. jpl-horizons above already covers /api/mars/ephemeris.
+    { source: 'mars-mmgis',   url: 'https://mars.nasa.gov/mmgis-maps/M20/Layers/json/M20_waypoints.json', edge_authoritative: true },
+    { source: 'mars-rss',     url: 'https://mars.nasa.gov/rss/api/?feed=weather&category=mars2020&feedtype=json', edge_authoritative: true },
     { source: 'jpl-horizons', url: 'https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%27399%27&EPHEM_TYPE=VECTORS&CENTER=%27500@10%27&START_TIME=%272026-01-01%27&STOP_TIME=%272026-01-02%27&STEP_SIZE=%271%20d%27', edge_authoritative: true },
 ];
 

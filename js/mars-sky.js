@@ -93,6 +93,7 @@ export class MarsSky {
         this.ephemeris = null;
         this.entries = {};
         this.hitTargets = [];
+        this.highlighted = null;
         this.disposables = [];
 
         const track = object => { this.disposables.push(object); return object; };
@@ -227,15 +228,36 @@ export class MarsSky {
         this.onUpdate?.(values, this.ephemeris);
     }
 
+    /**
+     * Mark one sky body as hovered, mirroring MarsLandmarks.setHighlight().
+     * These markers are clickable too and had exactly the same problem: no
+     * cursor change, no highlight, no way to tell.
+     *
+     * @param {string|null} key  body key ('sun', 'earth', …) or null to clear
+     * @returns {boolean} true if the highlight actually changed
+     */
+    setHighlight(key) {
+        const next = key && this.entries[key] ? key : null;
+        if (this.highlighted === next) return false;
+        this.highlighted = next;
+        return true;
+    }
+
     updateCamera(camera) {
         if (!this.ephemeris) return;
         const localCamera = this.group.worldToLocal(camera.position.clone()).normalize();
-        for (const entry of Object.values(this.entries)) {
+        for (const [key, entry] of Object.entries(this.entries)) {
             if (!entry.direction || !entry.current) continue;
             const frontFacing = entry.direction.dot(localCamera) > -0.08;
-            entry.label.visible = frontFacing;
-            entry.leader.visible = frontFacing && entry.style.labelOffset !== 0;
-            entry.dot.material.opacity = frontFacing ? 1 : 0.18;
+            const hovered = this.highlighted === key;
+            const emphasis = hovered ? 1.4 : 1;
+            entry.dot.scale.setScalar(entry.style.size * emphasis);
+            entry.label.visible = frontFacing || hovered;
+            entry.leader.visible = (frontFacing || hovered) && entry.style.labelOffset !== 0;
+            entry.dot.material.opacity = hovered ? 1 : (frontFacing ? 1 : 0.18);
+            entry.ray.material.opacity = hovered
+                ? 0.7
+                : (key === 'sun' ? 0.48 : 0.28);
         }
     }
 
