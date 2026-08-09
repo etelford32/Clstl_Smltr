@@ -286,6 +286,7 @@ export default async function handler(request) {
 
     return jsonOk({
         ls_deg:    Number(Ls.toFixed(2)),
+        ls_source: 'analytic',
         status:    baseStatus.status,
         message:   baseStatus.message,
         jd,
@@ -298,5 +299,32 @@ export default async function handler(request) {
             curiosity:    curiosityR,
             perseverance: perseveranceR,
         },
+        // Per-upstream roll-up. Without this, "no weather shown" is
+        // indistinguishable from "NASA returned a sol with null readings", and
+        // the page can only say something vague. Each entry is exactly what the
+        // fetcher above concluded, so the client can name the failing source.
+        sources: [
+            describeSource('perseverance', 'NASA Mars 2020 MEDA daily summary', MARS_RSS_BASE, perseveranceR),
+            describeSource('curiosity',    'NASA MSL REMS daily summary',       MARS_RSS_BASE, curiosityR),
+            describeSource('insight',      'NASA InSight Weather Service',      NASA_INSIGHT_BASE, insightR),
+        ],
+        // Ls here is the linear mean-motion model, which runs up to ~11° off
+        // near the solstices. /api/mars/ephemeris carries the JPL Horizons
+        // value; clients that need the season should prefer that route. This
+        // field stays for the mission-planner pads that already read it.
+        ls_note: 'analytic mean-motion Ls; /api/mars/ephemeris carries the JPL Horizons value',
     }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
+}
+
+function describeSource(key, label, endpoint, record) {
+    return {
+        key,
+        label,
+        endpoint,
+        active: Boolean(record?.active),
+        reason: record?.active ? null : (record?.reason || 'unknown'),
+        observed_date: record?.terrestrial_date ?? null,
+        observation_status: record?.observation_status ?? null,
+        observation_age_days: record?.observation_age_days ?? null,
+    };
 }

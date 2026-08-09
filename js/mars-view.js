@@ -9,8 +9,8 @@ import {
     localMeanSolarTimeHours,
     marsSubsolarPoint,
     observationFreshness,
-} from './mars-mission-state.js?v=20260806-camera2';
-import { MarsLandmarks } from './mars-landmarks.js?v=20260806-camera2';
+} from './mars-mission-state.js?v=20260809-live';
+import { MarsLandmarks } from './mars-landmarks.js?v=20260809-live';
 import { MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
 import { fetchMarsSkyEphemeris } from './horizons.js';
 import { MarsSky } from './mars-sky.js';
@@ -21,10 +21,46 @@ const MOLA_MIN_M = -8068;
 const MOLA_MAX_M = 21134;
 const MARS_RADIUS_KM = MARS_RADIUS_M / 1000;
 const REGIONAL_TERRAIN_EXTENT_KM = 520;
-const REGIONAL_TERRAIN_SEGMENTS = 256;
-const SURFACE_STEP_KM = 4;
-const SURFACE_CLEARANCE_KM = 0.25;
+// Target ground spacing for the analysis graticule. The actual step is derived
+// per rebuild from the current quality level's segment count so the spacing
+// stays put when the render budget changes.
+const REGIONAL_GRID_TARGET_KM = 16;
+const SURFACE_STEP_KM = 12;
 const SURFACE_PATCH_OFFSET = 0.00012;
+
+// The regional patch carries its own vertical exaggeration. 5× reads well on a
+// whole globe but is invisible across a 520 km patch: Jezero's regional relief
+// spans ~2 km over 520 km, so at 5× the terrain rises 0.003 of its own width —
+// a flat wash, which is exactly what the surface explorer used to render.
+// 18× makes the same MOLA data legible. The MOLA readout in the surface HUD
+// still reports TRUE elevation, and the exaggeration is printed on-screen.
+const REGIONAL_RELIEF_EXAGGERATION = 18;
+
+// Surface-explorer camera framing. Eye altitude and look-ahead are chosen so the
+// horizon lands in the upper third of a 36° frame: at 9 km the horizon is 247 km
+// out and 4.2° below local horizontal, while the camera is pitched 9.3° down.
+const SURFACE_EYE_ALTITUDE_KM = 9;
+const SURFACE_LOOK_AHEAD_KM = 55;
+const SURFACE_MIN_EYE_KM = 2.4;
+const SURFACE_MAX_EYE_KM = 260;
+
+// Depth range per mode. The old code paired near = 0.00002 with far = 100 —
+// a 5,000,000:1 ratio that leaves a 24-bit depth buffer with almost no usable
+// precision, which is why coincident surface layers flickered. Keeping the
+// star field camera-locked (below) lets `far` stay small in both modes.
+const GLOBAL_NEAR = 0.02;
+const GLOBAL_FAR = 12;
+const SURFACE_NEAR = 0.0002;   // ≈ 0.7 km, below the enforced eye floor
+const SURFACE_FAR = 0.9;
+
+// Fog in surface mode is real atmospheric depth, not decoration: Mars' dusty
+// CO₂ column visibly softens terrain past ~150 km. FogExp2 density is in scene
+// units where 1 unit = 3396 km, so this resolves to ~10% haze at 100 km and
+// ~55% at 250 km. The page shipped with 3.2, which over these distances
+// resolved to no visible fog at all — the horizon had nothing to fade into.
+// Pushing it much higher washes the near field out to a flat sky-coloured
+// sheet, which is the opposite failure.
+const SURFACE_FOG_DENSITY = 11;
 const TEXTURE_URL = '/assets/mars/mars-viking-jpl.jpg';
 const MOLA_URL = '/assets/mars/mola-topography.png';
 const mission = PERSEVERANCE_MISSION;
@@ -43,7 +79,30 @@ const globalCameraPosition = new THREE.Vector3(0.15, 0.42, 3.65);
 camera.position.copy(globalCameraPosition);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.matchMedia('(max-width: 560px)').matches ? 1.5 : 2));
+// Quality ladder. The page renders a PBR globe, an additive limb shell, and a
+// 66k-vertex regional patch — on a software rasteriser or an integrated GPU at
+// 4K that lands well under 10 fps, and an unusable framerate reads as a broken
+// canvas. `applyQuality` walks this ladder from measured frame times instead of
+// guessing from device class, so a fast machine keeps full resolution and a
+// slow one stays interactive.
+// `terrainSegments` matters as much as `pixelRatio` here: the regional patch is
+// a 256×256 grid, i.e. 131k triangles submitted every frame, which dominates on
+// a software rasteriser long before fill rate does. Halving it to 128 is a 4×
+// cut in geometry for a patch whose underlying MOLA raster only carries ~37
+// real samples per side — the visible relief is unchanged.
+// The ladder trades FIDELITY, never instruments. Resolution, star count, the
+// decorative limb glow, and the globe's bump term all scale; the analysis
+// graticule, the terrain itself, and every readout stay at all four levels. A
+// visitor on a slow machine should get a coarser Mars, not a smaller feature set.
+const QUALITY_LEVELS = Object.freeze([
+    Object.freeze({ name: 'high',    pixelRatio: 1,    atmosphere: true,  starCount: 1700, terrainSegments: 256, globeBump: true }),
+    Object.freeze({ name: 'medium',  pixelRatio: 0.8,  atmosphere: true,  starCount: 1700, terrainSegments: 192, globeBump: true }),
+    Object.freeze({ name: 'low',     pixelRatio: 0.62, atmosphere: false, starCount: 900,  terrainSegments: 128, globeBump: false }),
+    Object.freeze({ name: 'minimal', pixelRatio: 0.5,  atmosphere: false, starCount: 500,  terrainSegments: 96,  globeBump: false }),
+]);
+const maxPixelRatio = Math.min(window.devicePixelRatio || 1, window.matchMedia('(max-width: 560px)').matches ? 1.5 : 2);
+let qualityIndex = 0;
+renderer.setPixelRatio(maxPixelRatio);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.08;
@@ -87,6 +146,12 @@ scene.add(sun);
 const rim = new THREE.DirectionalLight(0xff6837, 0.38);
 rim.position.set(4, -1.5, -3);
 scene.add(rim);
+// Night-side floor. Focusing a target that happens to be past the terminator
+// used to fill the canvas with pure black and look like a rendering failure.
+// This keeps the unlit hemisphere dim but legible without washing out the
+// terminator, which is still the layer that says where day actually ends.
+const nightFloor = new THREE.AmbientLight(0x40211a, 0.5);
+scene.add(nightFloor);
 
 const marsGroup = new THREE.Group();
 marsGroup.rotation.y = THREE.MathUtils.degToRad(-77.25);
@@ -121,14 +186,34 @@ globalCameraPosition.copy(missionFacingRadial.clone().multiplyScalar(3.55)
     .addScaledVector(missionFacingFrame.east, 0.16));
 camera.position.copy(globalCameraPosition);
 
-function buildStars() {
-    const count = 1700;
+/**
+ * Star field, built on a UNIT sphere and scaled per mode.
+ *
+ * Stars used to sit 15–40 scene units from the origin, which forced `far` to
+ * 100 in every mode; paired with a surface-mode `near` of 0.00002 that gave a
+ * depth ratio no 24-bit buffer can resolve. They are at infinity physically, so
+ * riding with the camera is the correct model AND is what lets both modes keep
+ * a tight depth range.
+ *
+ * Depth testing stays ON. It is tempting to disable it so nothing can clip the
+ * sky — but three.js draws transparent objects after opaque ones, so a
+ * depth-test-free star field paints straight through the planet and the terrain
+ * you are standing on. The radius is scaled per mode instead, so the stars are
+ * always behind the scene without ever leaving the frustum:
+ *   global   9 units — beyond the globe from any allowed camera distance (≤7),
+ *                      inside GLOBAL_FAR (12)
+ *   surface  0.5     — beyond the 520 km patch (≤0.25 away), inside SURFACE_FAR
+ */
+const GLOBAL_STAR_SCALE = 9;
+const SURFACE_STAR_SCALE = 0.5;
+
+function buildStars(count = 1700) {
     const positions = new Float32Array(count * 3);
     const random = mulberry32(20260805);
     for (let i = 0; i < count; i += 1) {
         const z = random() * 2 - 1;
         const theta = random() * Math.PI * 2;
-        const r = 15 + random() * 25;
+        const r = 0.86 + random() * 0.14;
         const xy = Math.sqrt(1 - z * z);
         positions[i * 3] = Math.cos(theta) * xy * r;
         positions[i * 3 + 1] = z * r;
@@ -136,14 +221,22 @@ function buildStars() {
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    return new THREE.Points(geometry, new THREE.PointsMaterial({
+    const points = new THREE.Points(geometry, new THREE.PointsMaterial({
         color: 0xffe5d6,
-        size: 0.025,
+        size: 1.6,
         transparent: true,
-        opacity: 0.65,
-        sizeAttenuation: true,
+        opacity: 0.7,
+        // Constant pixel size: with the sphere rescaled per mode, size
+        // attenuation would make the same star a speck in one view and a blob
+        // in the other.
+        sizeAttenuation: false,
         depthWrite: false,
     }));
+    points.name = 'mars-star-field';
+    points.renderOrder = -2;
+    points.frustumCulled = false;
+    points.scale.setScalar(surfaceModeActive ? SURFACE_STAR_SCALE : GLOBAL_STAR_SCALE);
+    return points;
 }
 
 function mulberry32(seed) {
@@ -155,7 +248,8 @@ function mulberry32(seed) {
     };
 }
 
-scene.add(buildStars());
+let starField = buildStars();
+scene.add(starField);
 
 const textureLoader = new THREE.TextureLoader();
 const loadTexture = async (url, { color = false } = {}) => {
@@ -233,12 +327,34 @@ function elevationAtLatLon(latDeg, lonDeg) {
     return MOLA_MIN_M + gray / 255 * (MOLA_MAX_M - MOLA_MIN_M);
 }
 
-function reliefRadiusAtLatLon(latDeg, lonDeg, offset = 0) {
-    const reliefEnabled = typeof hasRelief === 'boolean'
-        && hasRelief
-        && document.querySelector('#relief-toggle')?.checked;
-    const exaggeration = reliefEnabled ? RELIEF_EXAGGERATION : 0;
-    return SURFACE_RADIUS + elevationAtLatLon(latDeg, lonDeg) / MARS_RADIUS_M * exaggeration + offset;
+// HOT PATH. This is called once per regional-terrain vertex (66,049 of them per
+// rebuild) plus once per route point, marker, and grid node. It used to run
+// `document.querySelector('#relief-toggle')` on every one of those calls. The
+// enabled flag is now cached and refreshed by setLayer('relief', …) — if you
+// add another way to toggle relief, update `reliefEnabled` there too.
+let reliefEnabled = true;
+
+function reliefRadiusAtLatLon(latDeg, lonDeg, offset = 0, exaggeration = RELIEF_EXAGGERATION) {
+    const scale = hasRelief && reliefEnabled ? exaggeration : 0;
+    return SURFACE_RADIUS + elevationAtLatLon(latDeg, lonDeg) / MARS_RADIUS_M * scale + offset;
+}
+
+/** Radius of the regional patch, which carries its own vertical exaggeration. */
+function regionalRadiusAtLatLon(latDeg, lonDeg, offset = 0) {
+    return reliefRadiusAtLatLon(latDeg, lonDeg, offset, REGIONAL_RELIEF_EXAGGERATION);
+}
+
+/**
+ * Surface radius for anything anchored to the ground — markers, the traverse,
+ * the graticule, the exploration trail. In surface mode that means the regional
+ * patch (the globe meshes are hidden there); on the globe it means the 5× relief
+ * sphere. Getting this wrong is what left the rover marker and the NASA route
+ * floating ~150 km above the terrain they describe.
+ */
+function anchorRadiusAtLatLon(latDeg, lonDeg, offset = 0) {
+    return surfaceModeActive
+        ? regionalRadiusAtLatLon(latDeg, lonDeg, offset)
+        : reliefRadiusAtLatLon(latDeg, lonDeg, offset);
 }
 
 loaderStatus.textContent = 'Displacing 32,768 surface vertices with MOLA elevation…';
@@ -287,15 +403,19 @@ smoothMars.visible = !hasRelief;
 reliefMars.visible = hasRelief;
 marsGroup.add(smoothMars, reliefMars);
 
+// NO emissive/emissiveMap here, deliberately. The patch used to be lit at
+// emissiveIntensity 1.25 from the Viking colour map, which meant every vertex
+// glowed at its own albedo regardless of sun angle — so slopes, ridges, and
+// crater walls all shaded identically and 66k vertices of MOLA relief rendered
+// as one flat orange field. Sunlit shading is the whole point of the layer.
+// No bumpMap either. The patch spans ~37 MOLA texels, so a derivative-based
+// bump term had nothing to perturb — it was contributing an expensive
+// dFdx/dFdy pair per fragment for a detail smaller than one texel. The relief
+// this layer shows comes from displaced geometry, which is real.
 const regionalTerrainMaterial = new THREE.MeshStandardMaterial({
     color: surfaceTexture ? 0xffffff : 0x9d3d22,
     map: surfaceTexture,
-    bumpMap: molaTexture,
-    bumpScale: molaTexture ? 0.00032 : 0,
-    emissive: 0x6a2e1a,
-    emissiveMap: surfaceTexture,
-    emissiveIntensity: 1.25,
-    roughness: 0.98,
+    roughness: 0.96,
     metalness: 0,
     vertexColors: true,
     side: THREE.DoubleSide,
@@ -348,49 +468,103 @@ function destinationLatLon(latDeg, lonDeg, eastKm, northKm) {
     };
 }
 
+/**
+ * Illustrative micro-relief. MOLA's global grid is ~4 px/degree — about 15 km
+ * per sample at Jezero — so a 520 km patch resolves roughly 35 real samples per
+ * side. This adds sub-sample texture so the interpolated surface does not read
+ * as bilinear mush. It is DECORATION, labelled as such in the surface HUD, and
+ * its amplitude (≤ ~0.35 km) stays well under the real relief it sits on.
+ */
 function visualRegionalRoughnessKm(eastKm, northKm) {
     const edge = Math.max(Math.abs(eastKm), Math.abs(northKm)) / (REGIONAL_TERRAIN_EXTENT_KM * 0.5);
     const fade = 1 - THREE.MathUtils.smoothstep(edge, 0.72, 1);
-    const broad = Math.sin(eastKm * 0.038 + 1.7) * Math.cos(northKm * 0.031 - 0.8) * 0.11;
-    const medium = Math.sin(eastKm * 0.105 - northKm * 0.062) * 0.045;
-    const fine = Math.sin(eastKm * 0.24 + northKm * 0.19 + 2.1) * 0.018;
-    return (broad + medium + fine) * fade;
+    const broad = Math.sin(eastKm * 0.038 + 1.7) * Math.cos(northKm * 0.031 - 0.8) * 0.14;
+    const medium = Math.sin(eastKm * 0.105 - northKm * 0.062) * 0.072;
+    const fine = Math.sin(eastKm * 0.24 + northKm * 0.19 + 2.1) * 0.036;
+    const grain = Math.sin(eastKm * 0.63 - northKm * 0.51 + 0.6) * 0.014;
+    return (broad + medium + fine + grain) * fade;
+}
+
+/**
+ * Hypsometric tint from the REAL MOLA elevation.
+ *
+ * This replaces a tint driven by the decorative roughness above, which meant
+ * the only colour variation on the patch encoded invented data. Now the shading
+ * a viewer reads as "that ridge is higher" actually is higher.
+ *
+ * The ramp normalizes to the PATCH's own relief span rather than a fixed
+ * altitude band. Mars ranges from Hellas at −8 km to Olympus at +21 km, so any
+ * global constant is wrong nearly everywhere: it flattens Jezero's ~1 km of
+ * local structure to nothing while clipping the Tharsis flanks to solid white.
+ * Per-patch normalization means every region reads at the same contrast — and
+ * matters more here than it would elsewhere, because the bundled MOLA raster is
+ * 4 px/°, so a 520 km patch has only ~37 real samples per side to work with.
+ *
+ * `spanM` is floored so a genuinely flat patch (northern plains) does not have
+ * its noise amplified into fake topography.
+ */
+function hypsometricShade(elevationM, midpointM, spanM) {
+    const relative = THREE.MathUtils.clamp((elevationM - midpointM) / spanM, -1, 1);
+    return 0.98 + relative * 0.30;
 }
 
 function rebuildRegionalTerrain(latDeg, lonDeg) {
-    const segments = REGIONAL_TERRAIN_SEGMENTS;
+    const segments = QUALITY_LEVELS[qualityIndex].terrainSegments;
     const rowLength = segments + 1;
-    const positions = new Float32Array(rowLength * rowLength * 3);
-    const uvs = new Float32Array(rowLength * rowLength * 2);
-    const colors = new Float32Array(rowLength * rowLength * 3);
+    const vertexCount = rowLength * rowLength;
+    const positions = new Float32Array(vertexCount * 3);
+    const uvs = new Float32Array(vertexCount * 2);
+    const colors = new Float32Array(vertexCount * 3);
+    const elevations = new Float32Array(vertexCount);
     const indices = new Uint32Array(segments * segments * 6);
+
+    // Pass 1: geometry + real elevation. No per-vertex object allocation — this
+    // loop runs 66,049 times on every rebuild, and rebuilds happen while the
+    // user is driving the camera.
     let vertexOffset = 0;
+    let elevationSum = 0;
+    let minElevationM = Infinity;
+    let maxElevationM = -Infinity;
     for (let northIndex = 0; northIndex <= segments; northIndex += 1) {
         const northKm = (northIndex / segments - 0.5) * REGIONAL_TERRAIN_EXTENT_KM;
         for (let eastIndex = 0; eastIndex <= segments; eastIndex += 1) {
             const eastKm = (eastIndex / segments - 0.5) * REGIONAL_TERRAIN_EXTENT_KM;
             const location = destinationLatLon(latDeg, lonDeg, eastKm, northKm);
-            const visualRoughnessKm = visualRegionalRoughnessKm(eastKm, northKm);
-            const visualRoughness = visualRoughnessKm / MARS_RADIUS_KM;
-            const radius = reliefRadiusAtLatLon(
+            const elevationM = elevationAtLatLon(location.latDeg, location.lonDeg);
+            elevations[vertexOffset] = elevationM;
+            elevationSum += elevationM;
+            if (elevationM < minElevationM) minElevationM = elevationM;
+            if (elevationM > maxElevationM) maxElevationM = elevationM;
+            const visualRoughness = visualRegionalRoughnessKm(eastKm, northKm) / MARS_RADIUS_KM;
+            const radius = regionalRadiusAtLatLon(
                 location.latDeg,
                 location.lonDeg,
                 SURFACE_PATCH_OFFSET + visualRoughness,
             );
-            const position = latLonVector(location.latDeg, location.lonDeg, radius);
+            const lat = THREE.MathUtils.degToRad(location.latDeg);
+            const lon = THREE.MathUtils.degToRad(location.lonDeg);
+            const cosLat = Math.cos(lat);
+            positions[vertexOffset * 3] = cosLat * Math.cos(lon) * radius;
+            positions[vertexOffset * 3 + 1] = Math.sin(lat) * radius;
+            positions[vertexOffset * 3 + 2] = -cosLat * Math.sin(lon) * radius;
             const uv = latLonUv(location.latDeg, location.lonDeg);
-            positions[vertexOffset * 3] = position.x;
-            positions[vertexOffset * 3 + 1] = position.y;
-            positions[vertexOffset * 3 + 2] = position.z;
             uvs[vertexOffset * 2] = uv.u;
             uvs[vertexOffset * 2 + 1] = uv.v;
-            const shade = THREE.MathUtils.clamp(0.88 + visualRoughnessKm * 0.9, 0.72, 1.08);
-            colors[vertexOffset * 3] = shade;
-            colors[vertexOffset * 3 + 1] = shade * 0.94;
-            colors[vertexOffset * 3 + 2] = shade * 0.9;
             vertexOffset += 1;
         }
     }
+
+    // Pass 2: hypsometric tint, which needs the patch's own span from pass 1.
+    const meanElevationM = elevationSum / vertexCount;
+    const midpointM = (minElevationM + maxElevationM) / 2;
+    const spanM = Math.max(220, (maxElevationM - minElevationM) / 2);
+    for (let index = 0; index < vertexCount; index += 1) {
+        const shade = hypsometricShade(elevations[index], midpointM, spanM);
+        colors[index * 3] = shade;
+        colors[index * 3 + 1] = shade * 0.945;
+        colors[index * 3 + 2] = shade * 0.9;
+    }
+
     let indexOffset = 0;
     for (let row = 0; row < segments; row += 1) {
         for (let column = 0; column < segments; column += 1) {
@@ -411,16 +585,29 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
     geometry.computeBoundingSphere();
     regionalTerrain.geometry.dispose();
     regionalTerrain.geometry = geometry;
-    const gridPositions = [];
-    const gridStep = 4;
+
+    // Analysis graticule, drawn straight from the terrain vertices so it drapes
+    // over the relief instead of hovering above it. Written into a sized typed
+    // array — the previous push-based build allocated ~66k Vector3 objects per
+    // rebuild, which is most of a GC pause every time the camera moved.
+    //
+    // The step is derived from the segment count so the grid keeps the SAME
+    // ground spacing across quality levels. A fixed step would silently change
+    // what the scale bar means whenever the render budget changed.
+    const gridStep = Math.max(1, Math.round(
+        REGIONAL_GRID_TARGET_KM * segments / REGIONAL_TERRAIN_EXTENT_KM,
+    ));
+    regionalGridSpacingKm = Math.round(REGIONAL_TERRAIN_EXTENT_KM / segments * gridStep);
+    const rowLines = Math.floor(segments / gridStep) + 1;
+    const gridVertexCount = rowLines * segments * 2 * 2;
+    const gridPositions = new Float32Array(gridVertexCount * 3);
+    let gridOffset = 0;
     const pushSegment = (fromIndex, toIndex) => {
         for (const index of [fromIndex, toIndex]) {
-            const vector = new THREE.Vector3(
-                positions[index * 3],
-                positions[index * 3 + 1],
-                positions[index * 3 + 2],
-            ).multiplyScalar(1.000018);
-            gridPositions.push(vector.x, vector.y, vector.z);
+            gridPositions[gridOffset * 3] = positions[index * 3] * 1.000018;
+            gridPositions[gridOffset * 3 + 1] = positions[index * 3 + 1] * 1.000018;
+            gridPositions[gridOffset * 3 + 2] = positions[index * 3 + 2] * 1.000018;
+            gridOffset += 1;
         }
     };
     for (let row = 0; row <= segments; row += gridStep) {
@@ -434,11 +621,22 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
         }
     }
     const gridGeometry = new THREE.BufferGeometry();
-    gridGeometry.setAttribute('position', new THREE.Float32BufferAttribute(gridPositions, 3));
+    gridGeometry.setAttribute('position', new THREE.BufferAttribute(gridPositions.subarray(0, gridOffset * 3), 3));
     regionalTerrainGrid.geometry.dispose();
     regionalTerrainGrid.geometry = gridGeometry;
     regionalTerrainCenter = { latDeg, lonDeg };
+    regionalTerrainRelief = {
+        meanElevationM,
+        minElevationM,
+        maxElevationM,
+        spanM: maxElevationM - minElevationM,
+    };
 }
+
+let regionalTerrainRelief = { meanElevationM: 0, minElevationM: 0, maxElevationM: 0, spanM: 0 };
+// Actual spacing of the last graticule built, so the HUD cannot claim a number
+// the geometry no longer has. 0 means the grid was dropped for render budget.
+let regionalGridSpacingKm = 0;
 
 const surfaceHeadlamp = new THREE.DirectionalLight(0xffb08a, 1.15);
 surfaceHeadlamp.name = 'surface-explorer-light';
@@ -465,24 +663,41 @@ document.querySelector('#mars-mesh-status').textContent = hasRelief
     ? `MOLA 4 px/° · 5× relief${surfaceTexture ? '' : ' · color fallback'}`
     : `smooth sphere${surfaceTexture ? ' · Viking color' : ' · material-color fallback'}`;
 
-function buildCoordinateGrid(radius = 1.038) {
-    const group = new THREE.Group();
-    const material = new THREE.LineBasicMaterial({ color: 0xffc2a0, transparent: true, opacity: 0.16, depthWrite: false });
+// Graticule drawn ON the relief rather than on a floating shell. At the old
+// fixed 1.038 radius it stood ~130 km off the ground, so at any close range the
+// meridians swept across the frame as unexplained diagonal streaks well clear
+// of the surface they were supposed to label.
+const GRID_OFFSET = 0.0006;
+const gridMaterial = new THREE.LineBasicMaterial({
+    color: 0xffc2a0, transparent: true, opacity: 0.16, depthWrite: false,
+});
+
+// The layer node itself is stable so visibility bookkeeping (setLayer, the
+// surface-mode occlusion map) can hold a permanent reference; only its line
+// children are rebuilt when the relief toggle changes the surface radius.
+const gridLayer = new THREE.Group();
+gridLayer.name = 'mars-coordinate-grid';
+marsGroup.add(gridLayer);
+
+function rebuildCoordinateGrid() {
+    for (const child of gridLayer.children) child.geometry.dispose();
+    gridLayer.clear();
     for (let lon = -180; lon < 180; lon += 30) {
         const points = [];
-        for (let lat = -90; lat <= 90; lat += 2) points.push(latLonVector(lat, lon, radius));
-        group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material));
+        for (let lat = -90; lat <= 90; lat += 2) {
+            points.push(latLonVector(lat, lon, reliefRadiusAtLatLon(lat, lon, GRID_OFFSET)));
+        }
+        gridLayer.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), gridMaterial));
     }
     for (let lat = -60; lat <= 60; lat += 30) {
         const points = [];
-        for (let lon = -180; lon <= 180; lon += 2) points.push(latLonVector(lat, lon, radius));
-        group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material));
+        for (let lon = -180; lon <= 180; lon += 2) {
+            points.push(latLonVector(lat, lon, reliefRadiusAtLatLon(lat, lon, GRID_OFFSET)));
+        }
+        gridLayer.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), gridMaterial));
     }
-    return group;
 }
-
-const gridLayer = buildCoordinateGrid();
-marsGroup.add(gridLayer);
+rebuildCoordinateGrid();
 
 function terminatorPoints(sunDirection, radius = 1.043) {
     sunDirection = sunDirection.clone().normalize();
@@ -508,10 +723,41 @@ terminatorLayer.name = 'current-mars-terminator';
 terminatorLayer.add(terminatorLine);
 marsGroup.add(terminatorLayer);
 
+/**
+ * Feed provenance, surfaced through __marsLab.feedState() and the UI.
+ *
+ * Every value on this page now comes from one of several sources of very
+ * different quality, and the difference is the whole point of the provenance
+ * panel: a live MMGIS position is not a baked snapshot, and a JPL sub-solar
+ * point is not a linear mean-motion approximation. Track which one won.
+ */
+const marsFeedState = {
+    route: 'pending',
+    routeReason: null,
+    routeThroughSol: null,
+    ephemeris: 'pending',
+    ephemerisReason: null,
+    illumination: 'analytic',
+    weather: 'pending',
+};
+
 let horizonsSunDirection = null;
+// Sub-solar point from /api/mars/ephemeris (JPL Horizons). Ranks between the
+// topocentric Horizons sun direction and the analytic model — see
+// updateIllumination for the ladder.
+let ephemerisSunDirection = null;
+
 function updateIllumination(date = new Date()) {
     const subsolar = marsSubsolarPoint(date);
-    const fallbackDirection = latLonVector(subsolar.lat_deg, subsolar.lon_deg).normalize();
+    const analyticDirection = latLonVector(subsolar.lat_deg, subsolar.lon_deg).normalize();
+    // Illumination ladder, best first:
+    //   1. Horizons topocentric Sun az/el at the rover site (the sky layer)
+    //   2. Horizons sub-solar point from /api/mars/ephemeris
+    //   3. the linear mean-motion model, which can be ~11° of Ls off
+    const fallbackDirection = ephemerisSunDirection || analyticDirection;
+    marsFeedState.illumination = horizonsSunDirection ? 'horizons-topocentric'
+        : ephemerisSunDirection ? 'horizons-subsolar'
+        : 'analytic';
     const { points, sunDirection } = terminatorPoints(horizonsSunDirection || fallbackDirection);
     terminatorLine.geometry.dispose();
     terminatorLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -536,7 +782,128 @@ const atmosphereMaterial = new THREE.ShaderMaterial({
 const atmosphereLayer = new THREE.Mesh(new THREE.SphereGeometry(1.075, 128, 64), atmosphereMaterial);
 marsGroup.add(atmosphereLayer);
 
-const landmarks = new MarsLandmarks(marsGroup, latLonVector);
+/**
+ * Martian sky dome for the surface explorer.
+ *
+ * Surface mode used to hide every celestial layer and render nothing above the
+ * terrain, so the "regional surface explorer" was a flat orange field with no
+ * horizon, no sky, and no way to tell up from down. This is the missing half of
+ * the frame: a camera-locked gradient that carries the sun's own light.
+ *
+ * The palettes below are the real thing, not stylisation. Mars' daytime sky is
+ * butterscotch because suspended dust absorbs blue; at low sun the SAME dust
+ * forward-scatters, which is why Mars has warm days and famously BLUE sunsets —
+ * the inverse of Earth. `uSunTint` carries that swing, so the glow around the
+ * Sun goes cool as it sets. Do not "correct" it to an orange sunset.
+ *
+ * Draw order: star field (renderOrder −2) then the dome (−1), both after the
+ * opaque terrain. The dome depth-tests against the terrain so the ground is
+ * never painted over, and being drawn after the stars it hides them by day and
+ * — at its low night alpha — lets them through after dark. Its radius sits
+ * BEYOND the stars (0.6 > 0.5) so nothing about that ordering depends on luck.
+ */
+const skyDomeMaterial = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+        uUp: { value: new THREE.Vector3(0, 1, 0) },
+        uSunDirection: { value: new THREE.Vector3(0, 1, 0) },
+        uHorizon: { value: new THREE.Color(0xd8a273) },
+        uZenith: { value: new THREE.Color(0x9c6446) },
+        uSunTint: { value: new THREE.Color(0xfff0dc) },
+        uOpacity: { value: 0 },
+        uGlow: { value: 0.5 },
+    },
+    vertexShader: `varying vec3 vDirection;
+        void main(){vDirection=normalize(position);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader: `uniform vec3 uUp; uniform vec3 uSunDirection; uniform vec3 uHorizon; uniform vec3 uZenith;
+        uniform vec3 uSunTint; uniform float uOpacity; uniform float uGlow;
+        varying vec3 vDirection;
+        void main(){
+            vec3 dir=normalize(vDirection);
+            float altitude=dot(dir,uUp);
+            // Compress the gradient toward the horizon, where a real dusty
+            // atmosphere has by far the longest optical path.
+            float band=pow(1.0-clamp(altitude,0.0,1.0),2.6);
+            vec3 sky=mix(uZenith,uHorizon,band);
+            float sunAngle=max(dot(dir,uSunDirection),0.0);
+            sky+=uSunTint*(pow(sunAngle,42.0)*1.15+pow(sunAngle,7.0)*0.30)*uGlow;
+            // Below the local horizontal there is ground, not sky. Fade out so
+            // the dome never paints over the terrain silhouette.
+            float belowHorizon=smoothstep(-0.06,0.0,altitude);
+            gl_FragColor=vec4(sky,uOpacity*belowHorizon);
+        }`,
+});
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), skyDomeMaterial);
+skyDome.name = 'mars-surface-sky';
+skyDome.scale.setScalar(0.6);
+skyDome.renderOrder = -1;
+skyDome.frustumCulled = false;
+skyDome.visible = false;
+scene.add(skyDome);
+
+const SKY_PALETTES = Object.freeze([
+    // sunElevationDeg floor, horizon, zenith, sun tint, opacity, glow
+    Object.freeze({ above: 18,  horizon: 0xdCA877, zenith: 0x9a6244, tint: 0xfff2de, opacity: 1,    glow: 0.55 }),
+    Object.freeze({ above: 6,   horizon: 0xe0a06a, zenith: 0x8a5540, tint: 0xffe6c8, opacity: 1,    glow: 0.8 }),
+    Object.freeze({ above: 0,   horizon: 0xc98a63, zenith: 0x5c3f4c, tint: 0xbcd4ff, opacity: 0.96, glow: 1.15 }),
+    Object.freeze({ above: -6,  horizon: 0x8f5f5c, zenith: 0x33253c, tint: 0x9fc2ff, opacity: 0.82, glow: 1.0 }),
+    Object.freeze({ above: -12, horizon: 0x4a3038, zenith: 0x150f1e, tint: 0x6f92cc, opacity: 0.5,  glow: 0.5 }),
+    Object.freeze({ above: -90, horizon: 0x160e10, zenith: 0x05040a, tint: 0x24304a, opacity: 0.16, glow: 0.15 }),
+]);
+
+const skyHorizonColor = new THREE.Color();
+const skyZenithColor = new THREE.Color();
+const skySunTint = new THREE.Color();
+const skyPaletteLow = new THREE.Color();
+
+/**
+ * Blend the palette table at the current solar elevation and push it into the
+ * dome and the fog. Returns the sun elevation in degrees so callers can report
+ * whether the explored point is in daylight.
+ */
+function updateSurfaceSky(radialWorld) {
+    const sunDirection = sun.position.clone().normalize();
+    const sunElevationDeg = THREE.MathUtils.radToDeg(
+        Math.asin(THREE.MathUtils.clamp(sunDirection.dot(radialWorld), -1, 1)),
+    );
+    // SKY_PALETTES is sorted descending by `above`. Find the first stop the sun
+    // is at or above; that stop is the lower bound and its predecessor the upper.
+    let stop = SKY_PALETTES.findIndex(entry => sunElevationDeg >= entry.above);
+    if (stop < 0) stop = SKY_PALETTES.length - 1;
+    const lower = SKY_PALETTES[stop];
+    const upper = SKY_PALETTES[Math.max(0, stop - 1)];
+    const span = Math.max(1e-6, upper.above - lower.above);
+    const amount = stop === 0
+        ? 1
+        : THREE.MathUtils.clamp((sunElevationDeg - lower.above) / span, 0, 1);
+    const blend = (target, low, high) => {
+        target.setHex(low);
+        skyPaletteLow.setHex(high);
+        target.lerp(skyPaletteLow, amount);
+    };
+    blend(skyHorizonColor, lower.horizon, upper.horizon);
+    blend(skyZenithColor, lower.zenith, upper.zenith);
+    blend(skySunTint, lower.tint, upper.tint);
+
+    skyDomeMaterial.uniforms.uUp.value.copy(radialWorld);
+    skyDomeMaterial.uniforms.uSunDirection.value.copy(sunDirection);
+    skyDomeMaterial.uniforms.uHorizon.value.copy(skyHorizonColor);
+    skyDomeMaterial.uniforms.uZenith.value.copy(skyZenithColor);
+    skyDomeMaterial.uniforms.uSunTint.value.copy(skySunTint);
+    skyDomeMaterial.uniforms.uOpacity.value = THREE.MathUtils.lerp(lower.opacity, upper.opacity, amount);
+    skyDomeMaterial.uniforms.uGlow.value = THREE.MathUtils.lerp(lower.glow, upper.glow, amount);
+
+    // Distant terrain has to fade into the sky it meets, or the horizon reads
+    // as a hard cut-out. Fog colour tracks the horizon band for exactly that.
+    scene.fog.color.copy(skyHorizonColor);
+    return sunElevationDeg;
+}
+
+const landmarks = new MarsLandmarks(marsGroup, latLonVector, {
+    radiusAt: (latDeg, lonDeg) => reliefRadiusAtLatLon(latDeg, lonDeg),
+});
 const sky = new MarsSky(marsGroup, { onUpdate: applyMarsSkyUi });
 
 function makeLabel(text, color = '#ffd9c4') {
@@ -564,11 +931,18 @@ function makeLabel(text, color = '#ffd9c4') {
     return sprite;
 }
 
+// Markers sit ON the relief. The old fixed 1.046 radius put every beacon
+// ~156 km above the ground, so at rover-focus range the rover marker, the
+// landing site, and the terrain they name were visibly three different places.
+const MARKER_OFFSET = 0.0009;
+
 function placeSurfaceMarker(group, lat, lon) {
-    const position = latLonVector(lat, lon, 1.046);
+    const position = latLonVector(lat, lon, anchorRadiusAtLatLon(lat, lon, MARKER_OFFSET));
     const normal = position.clone().normalize();
     group.position.copy(position);
     group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+    group.userData.latDeg = lat;
+    group.userData.lonDeg = lon;
     return normal;
 }
 
@@ -669,6 +1043,44 @@ function reportedDistanceAt(points, index) {
     return null;
 }
 
+// The traverse is 690 NASA localizations draped on the relief. It used to be
+// drawn on a fixed 1.044 shell — ~150 km above the ground it describes.
+const ROUTE_OFFSET = 0.00055;
+
+function rebuildRouteGeometry() {
+    if (!routeSnapshot?.points?.length) return;
+    const vectors = routeSnapshot.points.map(point => latLonVector(
+        point.lat_deg,
+        point.lon_deg,
+        anchorRadiusAtLatLon(point.lat_deg, point.lon_deg, ROUTE_OFFSET),
+    ));
+    const previousDrawRange = routeLine.geometry.drawRange.count;
+    routeLine.geometry.dispose();
+    routeLine.geometry = new THREE.BufferGeometry().setFromPoints(vectors);
+    waypointsLayer.geometry.dispose();
+    waypointsLayer.geometry = new THREE.BufferGeometry().setFromPoints(vectors);
+    // setFromPoints resets drawRange to Infinity, which would flash the full
+    // traverse back in when the relief toggle rebuilds geometry mid-scrub.
+    if (Number.isFinite(previousDrawRange)) {
+        routeLine.geometry.setDrawRange(0, previousDrawRange);
+        waypointsLayer.geometry.setDrawRange(0, previousDrawRange);
+    }
+}
+
+/**
+ * Re-seat everything anchored to the ground after the surface radius changes —
+ * relief toggled, or surface mode entered/left (which swaps the 5× globe
+ * exaggeration for the patch's 18×). Every caller that changes the radius
+ * function MUST call this, or markers detach from the terrain again.
+ */
+function refreshSurfaceAnchors() {
+    rebuildCoordinateGrid();
+    rebuildRouteGeometry();
+    placeSurfaceMarker(roverLayer, mission.position.lat_deg, mission.position.lon_deg);
+    placeSurfaceMarker(landingLayer, mission.landing_site.lat_deg, mission.landing_site.lon_deg);
+    placeSurfaceMarker(routeCursor, selectedRoutePoint.lat_deg, selectedRoutePoint.lon_deg);
+}
+
 function selectRouteSol(requestedSol) {
     if (!routeSnapshot?.points?.length) return;
     const index = routeIndexAtSol(routeSnapshot.points, requestedSol);
@@ -680,29 +1092,87 @@ function selectRouteSol(requestedSol) {
     document.querySelector('#route-sol-output').textContent = `Sol ${selectedRoutePoint.sol}${distance == null ? '' : ` · ${distance.toFixed(2)} km`}`;
 }
 
+/**
+ * Live NASA/JPL MMGIS traverse, bundled snapshot as the fallback.
+ *
+ * /api/mars/route answers 200 either way and says `live: true|false`, so a NASA
+ * outage is an ordinary branch rather than an exception. The bundled file is
+ * still the offline path and is still labelled as a snapshot when it is used —
+ * the provenance line names which one is on screen, always.
+ */
+let routeScrubBound = false;
+
+async function fetchTraverseSnapshot() {
+    try {
+        const response = await fetch('/api/mars/route', { headers: { Accept: 'application/json' } });
+        if (response.ok) {
+            const payload = await response.json();
+            if (payload?.live && Array.isArray(payload.points) && payload.points.length >= 2) {
+                // Clear any reason left by an earlier hourly attempt, or the UI
+                // keeps explaining a fallback that is no longer in effect.
+                marsFeedState.routeReason = null;
+                return { snapshot: payload, live: true };
+            }
+            marsFeedState.routeReason = payload?.reason || 'MMGIS returned no usable route';
+        } else {
+            marsFeedState.routeReason = `route adapter HTTP ${response.status}`;
+        }
+    } catch (error) {
+        marsFeedState.routeReason = error.message || 'route adapter unreachable';
+    }
+    const response = await fetch('/data/mars/perseverance-route.json', { headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const snapshot = await response.json();
+    if (!Array.isArray(snapshot.points) || snapshot.points.length < 2) throw new Error('route snapshot has no points');
+    return { snapshot, live: false };
+}
+
 async function loadTraverseHistory() {
     const range = document.querySelector('#route-sol');
     try {
-        const response = await fetch('/data/mars/perseverance-route.json', { headers: { Accept: 'application/json' } });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const snapshot = await response.json();
-        if (!Array.isArray(snapshot.points) || snapshot.points.length < 2) throw new Error('route snapshot has no points');
+        const { snapshot, live } = await fetchTraverseSnapshot();
         routeSnapshot = snapshot;
-        const vectors = snapshot.points.map(point => latLonVector(point.lat_deg, point.lon_deg, 1.044));
-        routeLine.geometry.dispose();
-        routeLine.geometry = new THREE.BufferGeometry().setFromPoints(vectors);
-        waypointsLayer.geometry.dispose();
-        waypointsLayer.geometry = new THREE.BufferGeometry().setFromPoints(vectors);
+        marsFeedState.route = live ? 'live' : 'bundled';
+        marsFeedState.routeThroughSol = snapshot.through_sol;
+        rebuildRouteGeometry();
+        // Hourly refresh: keep the visitor's scrub position unless they were
+        // parked at the end of the traverse, in which case follow the rover.
+        const wasAtLatest = !routeScrubBound || Number(range.value) >= Number(range.max);
         range.min = String(snapshot.points[0].sol);
         range.max = String(snapshot.through_sol);
-        range.value = String(snapshot.through_sol);
+        if (wasAtLatest) range.value = String(snapshot.through_sol);
         range.disabled = false;
-        range.addEventListener('input', () => selectRouteSol(Number(range.value)));
-        document.querySelector('#route-history-source').textContent = `${snapshot.point_count} NASA stops · ${snapshot.snapshot_checked_at}`;
-        document.querySelector('#route-source').textContent = `${snapshot.point_count} bundled NASA stops · through sol ${snapshot.through_sol}`;
-        selectRouteSol(snapshot.through_sol);
+        if (!routeScrubBound) {
+            range.addEventListener('input', () => selectRouteSol(Number(range.value)));
+            routeScrubBound = true;
+        }
+        document.querySelector('#route-history-source').textContent = live
+            ? `${snapshot.point_count} NASA stops · live MMGIS`
+            : `${snapshot.point_count} NASA stops · ${snapshot.snapshot_checked_at}`;
+        document.querySelector('#route-source').textContent = live
+            ? `${snapshot.point_count} live NASA MMGIS stops · through sol ${snapshot.through_sol}`
+            : `${snapshot.point_count} bundled NASA stops · through sol ${snapshot.through_sol}`;
+        // The live traverse supersedes the compiled-in mission constant, so the
+        // panel's drive sol and odometer follow MMGIS rather than the build date.
+        if (live) {
+            const latest = snapshot.points.at(-1);
+            applyMissionUi({
+                latest_drive: {
+                    sol: latest.sol,
+                    distance_km: snapshot.distance_km,
+                    checked_at: snapshot.snapshot_checked_at,
+                    position: {
+                        lat_deg: latest.lat_deg,
+                        lon_deg: latest.lon_deg,
+                        elevation_m: latest.elevation_m ?? mission.latest_drive.position.elevation_m,
+                    },
+                },
+            });
+        }
+        selectRouteSol(Number(range.value));
     } catch (error) {
-        console.warn('[Mars] Bundled NASA traverse unavailable', error);
+        marsFeedState.route = 'unavailable';
+        console.warn('[Mars] NASA traverse unavailable (live adapter and bundled snapshot)', error);
         range.disabled = true;
         document.querySelector('#route-sol-output').textContent = 'Route unavailable';
         document.querySelector('#route-history-source').textContent = 'Bundled endpoint markers remain';
@@ -769,12 +1239,18 @@ function applyWeatherUi(payload) {
     const record = payload?.rovers?.perseverance;
     const feedState = document.querySelector('#feed-state');
     const warning = document.querySelector('#weather-warning');
-    const orbitalSeason = marsSubsolarPoint(new Date()).ls_deg;
-    const payloadSeason = numberOrNull(payload?.ls_deg) ?? orbitalSeason;
-    const weatherSeason = numberOrNull(record?.ls_deg) ?? payloadSeason;
-    document.querySelector('#header-season').textContent = `LS ${Math.round(payloadSeason)}°`;
-    document.querySelector('#weather-season').textContent = `Ls ${Math.round(weatherSeason)}°`;
-    document.querySelector('#weather-season-detail').textContent = record?.season || payload?.message || 'orbital season fallback';
+    // Season belongs to /api/mars/ephemeris once JPL has answered — the Ls in
+    // the weather payload is the linear mean-motion model, and letting a later
+    // weather refresh overwrite the JPL value would quietly re-introduce up to
+    // ~11° of error that applyEphemerisUi had just removed.
+    if (marsFeedState.ephemeris !== 'jpl-horizons') {
+        const orbitalSeason = marsSubsolarPoint(new Date()).ls_deg;
+        const payloadSeason = numberOrNull(payload?.ls_deg) ?? orbitalSeason;
+        const weatherSeason = numberOrNull(record?.ls_deg) ?? payloadSeason;
+        document.querySelector('#header-season').textContent = `LS ${Math.round(payloadSeason)}°`;
+        document.querySelector('#weather-season').textContent = `Ls ${Math.round(weatherSeason)}°`;
+        document.querySelector('#weather-season-detail').textContent = record?.season || payload?.message || 'orbital season fallback';
+    }
     if (!record?.active) {
         feedState.dataset.state = 'offline';
         feedState.textContent = 'Observation feed unavailable · offline-capable view';
@@ -839,13 +1315,108 @@ async function loadMarsFeed() {
         const response = await fetch('/api/mars/weather', { signal: controller.signal, headers: { Accept: 'application/json' } });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const payload = await response.json();
-        applyMissionUi(payload?.mission?.perseverance || mission);
-        if (payload?.rovers?.perseverance?.active) applyWeatherUi(payload);
-        else applyBundledWeather(payload, 'NASA daily-summary upstream returned no usable observation');
+        // The live MMGIS traverse, if it landed, is newer than the mission
+        // constant this payload echoes — don't roll the panel back to it.
+        if (marsFeedState.route !== 'live') applyMissionUi(payload?.mission?.perseverance || mission);
+        if (payload?.rovers?.perseverance?.active) {
+            marsFeedState.weather = payload.rovers.perseverance.observation_status || 'active';
+            applyWeatherUi(payload);
+        } else {
+            // Name the upstream that failed instead of shrugging. The adapter's
+            // `sources` roll-up exists precisely so this line can be specific.
+            const failed = Array.isArray(payload?.sources)
+                ? payload.sources.find(source => source.key === 'perseverance')
+                : null;
+            marsFeedState.weather = 'offline';
+            applyBundledWeather(payload, failed?.reason
+                ? `NASA MEDA daily summary unavailable (${failed.reason})`
+                : 'NASA daily-summary upstream returned no usable observation');
+        }
     } catch (error) {
         console.warn('[Mars] Shared weather adapter unavailable', error);
+        marsFeedState.weather = 'unavailable';
         applyMissionUi(mission);
         applyBundledWeather({}, 'Shared adapter unavailable');
+    } finally {
+        window.clearTimeout(timer);
+    }
+}
+
+// ── Live Mars geometry (JPL Horizons via /api/mars/ephemeris) ───────────────
+
+function formatRange(km) {
+    if (!Number.isFinite(km)) return '—';
+    return `${(km / 1e6).toFixed(1)} M km`;
+}
+
+function applyEphemerisUi(payload) {
+    const live = payload?.source === 'jpl-horizons';
+    marsFeedState.ephemeris = live ? 'jpl-horizons' : 'analytic';
+    marsFeedState.ephemerisReason = payload?.degraded_reason || null;
+
+    const lsDeg = Number.isFinite(payload?.ls_deg) ? payload.ls_deg : null;
+    if (lsDeg != null) {
+        document.querySelector('#header-season').textContent = `LS ${Math.round(lsDeg)}°`;
+        document.querySelector('#weather-season').textContent = `Ls ${Math.round(lsDeg)}°`;
+        document.querySelector('#weather-season-detail').textContent = payload.season
+            ? `${payload.season}${live ? ' · JPL' : ' · analytic model'}`
+            : (live ? 'JPL Horizons L_s' : 'analytic model');
+    }
+
+    const setGeometry = (id, value, detail) => {
+        const cell = document.querySelector(id);
+        if (!cell) return;
+        cell.querySelector('strong').textContent = value;
+        const small = cell.querySelector('small');
+        if (small && detail != null) small.textContent = detail;
+        cell.dataset.quality = value === '—' ? 'missing' : 'available';
+    };
+    setGeometry('#geo-range', formatRange(payload?.earth_range_km),
+        Number.isFinite(payload?.earth_range_au) ? `${payload.earth_range_au.toFixed(3)} AU` : 'Earth–Mars distance');
+    setGeometry('#geo-light-time', payload?.light_time_text || '—', 'one-way, at light speed');
+    setGeometry('#geo-elongation',
+        Number.isFinite(payload?.solar_elongation_deg) ? `${payload.solar_elongation_deg.toFixed(1)}°` : '—',
+        payload?.solar_conjunction?.note || 'Sun–Earth–Mars angle');
+    setGeometry('#geo-subsolar',
+        Number.isFinite(payload?.sub_solar?.lat_deg) && Number.isFinite(payload?.sub_solar?.lon_deg)
+            ? `${payload.sub_solar.lat_deg.toFixed(1)}°, ${payload.sub_solar.lon_deg.toFixed(1)}°`
+            : '—',
+        'sub-solar lat, lon');
+
+    const note = document.querySelector('#geometry-note');
+    if (note) {
+        if (live) {
+            const delta = Number.isFinite(payload.ls_model_delta_deg)
+                ? ` The bundled analytic season model differs by ${Math.abs(payload.ls_model_delta_deg).toFixed(1)}° of Ls.`
+                : '';
+            note.innerHTML = `<strong>Geometry:</strong> live JPL Horizons, refreshed every 15 minutes.${delta}`;
+        } else {
+            note.innerHTML = `<strong>Geometry:</strong> JPL Horizons unavailable (${payload?.degraded_reason || 'no response'}); showing the bundled analytic season model, which can run ~11° of Ls off near the solstices.`;
+        }
+    }
+
+    // Feed the sub-solar point into the terminator. This is strictly better than
+    // the analytic model and independent of the five-body topocentric sky query,
+    // so illumination survives a partial Horizons outage.
+    if (live && Number.isFinite(payload.sub_solar?.lat_deg) && Number.isFinite(payload.sub_solar?.lon_deg)) {
+        ephemerisSunDirection = latLonVector(payload.sub_solar.lat_deg, payload.sub_solar.lon_deg).normalize();
+    }
+    updateIllumination();
+}
+
+async function loadMarsEphemeris() {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 25_000);
+    try {
+        const response = await fetch('/api/mars/ephemeris', { signal: controller.signal, headers: { Accept: 'application/json' } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        applyEphemerisUi(await response.json());
+    } catch (error) {
+        console.warn('[Mars] Live geometry adapter unavailable', error);
+        marsFeedState.ephemeris = 'unavailable';
+        marsFeedState.ephemerisReason = error.message || 'adapter unreachable';
+        const note = document.querySelector('#geometry-note');
+        if (note) note.innerHTML = '<strong>Geometry:</strong> live adapter unreachable; the season shown is the bundled analytic model.';
     } finally {
         window.clearTimeout(timer);
     }
@@ -932,13 +1503,19 @@ function setLayer(name, enabled) {
         regionalTerrainMaterial.color.set(enabled && surfaceTexture ? 0xffffff : 0x9d3d22);
         regionalTerrainMaterial.needsUpdate = true;
     } else if (name === 'relief') {
-        reliefMars.visible = enabled && hasRelief;
-        smoothMars.visible = !reliefMars.visible;
+        // Order matters: reliefEnabled feeds reliefRadiusAtLatLon, which every
+        // ground-anchored rebuild below reads.
+        reliefEnabled = Boolean(enabled);
+        setGlobeVisibility(reliefEnabled && hasRelief);
+        refreshSurfaceAnchors();
         if (surfaceModeActive && regionalTerrainCenter) {
             rebuildRegionalTerrain(regionalTerrainCenter.latDeg, regionalTerrainCenter.lonDeg);
+            updateSurfaceTrail(surfaceLocation || regionalTerrainCenter, { reset: true });
         }
     } else if (name === 'grid') gridLayer.visible = enabled;
-    else if (name === 'atmosphere') atmosphereLayer.visible = enabled;
+    // The quality ladder can drop the limb shell entirely; the layer switch must
+    // not turn it back on underneath that decision.
+    else if (name === 'atmosphere') atmosphereLayer.visible = enabled && QUALITY_LEVELS[qualityIndex].atmosphere;
     else if (name === 'terminator') terminatorLayer.visible = enabled;
     else if (name === 'rover') roverLayer.visible = enabled;
     else if (name === 'landing') landingLayer.visible = enabled;
@@ -956,7 +1533,13 @@ function setLayer(name, enabled) {
 
 function layerIsVisible(name) {
     if (name === 'imagery') return Boolean(surfaceMaterial.map);
-    if (name === 'relief') return reliefMars.visible;
+    // While the explorer is up the globe meshes are force-hidden, so the honest
+    // answer for "is relief on" is the pending value in the restore map.
+    if (name === 'relief') {
+        return surfaceModeActive
+            ? Boolean(surfaceVisibilityRestore.get(reliefMars))
+            : reliefMars.visible;
+    }
     if (name === 'regional-terrain') return regionalTerrain.visible;
     if (name === 'grid') return gridLayer.visible;
     if (name === 'atmosphere') return atmosphereLayer.visible;
@@ -1015,7 +1598,37 @@ function setCameraConstraints(surfaceFocus) {
     controls.maxPolarAngle = Math.PI;
 }
 
-const surfaceOccludedObjects = [gridLayer, atmosphereLayer, terminatorLayer, sky.group, routeLayer, waypointsLayer, roverLayer, landingLayer];
+/**
+ * Depth range per mode.
+ *
+ * Surface mode gets a small `far` because the globe meshes are hidden there and
+ * the 520 km patch plus the camera-locked sky dome are all that remain — which
+ * is what lets `near` stay tight enough to keep the coincident terrain, grid,
+ * trail, and marker layers from z-fighting.
+ */
+function applyCameraRange() {
+    camera.near = surfaceModeActive ? SURFACE_NEAR : GLOBAL_NEAR;
+    camera.far = surfaceModeActive ? SURFACE_FAR : GLOBAL_FAR;
+    camera.updateProjectionMatrix();
+    // The star sphere has to move with `far`, or it lands outside the frustum
+    // in one of the two modes and the sky goes empty.
+    starField.scale.setScalar(surfaceModeActive ? SURFACE_STAR_SCALE : GLOBAL_STAR_SCALE);
+}
+
+// Hidden while the surface explorer is up. The globe meshes are in here because
+// the regional patch replaces them and their limb would otherwise cut across the
+// horizon; keeping them out is also what allows the tight surface depth range.
+//
+// sky.group stays hidden ON PURPOSE. Its body markers are placed for the
+// ephemeris observer site (the rover's route position); the explorer lets you
+// walk 260 km away, where the local vertical has rotated ~4°, so those markers
+// would be quietly wrong. The Sun still reaches this view honestly — the sky
+// dome's glow is aimed by `sun.position`, which is the JPL Horizons direction.
+const surfaceOccludedObjects = [
+    gridLayer, atmosphereLayer, terminatorLayer, sky.group,
+    routeLayer, waypointsLayer, roverLayer, landingLayer,
+    reliefMars, smoothMars,
+];
 for (const group of Object.values(landmarks.categoryGroups)) surfaceOccludedObjects.push(group);
 const surfaceVisibilityRestore = new Map();
 
@@ -1032,6 +1645,22 @@ function setSurfacePresentation(enabled) {
     }
 }
 
+/**
+ * Set a globe-mesh visibility that survives surface mode. While the explorer is
+ * up the globe is force-hidden, so writing `.visible` directly would make it
+ * reappear mid-scene and then get clobbered on exit — the pending value belongs
+ * in the restore map instead.
+ */
+function setGlobeVisibility(wantRelief) {
+    if (surfaceModeActive) {
+        surfaceVisibilityRestore.set(reliefMars, wantRelief);
+        surfaceVisibilityRestore.set(smoothMars, !wantRelief);
+        return;
+    }
+    reliefMars.visible = wantRelief;
+    smoothMars.visible = !wantRelief;
+}
+
 function localVectorLatLon(localVector) {
     const radial = localVector.clone().normalize();
     return {
@@ -1046,7 +1675,7 @@ function worldVectorLatLon(worldVector) {
 }
 
 function worldSurfacePoint(latDeg, lonDeg, offset = SURFACE_PATCH_OFFSET) {
-    return latLonVector(latDeg, lonDeg, reliefRadiusAtLatLon(latDeg, lonDeg, offset))
+    return latLonVector(latDeg, lonDeg, anchorRadiusAtLatLon(latDeg, lonDeg, offset))
         .applyQuaternion(marsGroup.quaternion);
 }
 
@@ -1067,7 +1696,7 @@ function updateSurfaceTrail(location, { reset = false } = {}) {
     const points = surfaceTrailLocations.map(point => latLonVector(
         point.latDeg,
         point.lonDeg,
-        reliefRadiusAtLatLon(point.latDeg, point.lonDeg, SURFACE_PATCH_OFFSET + 0.00007),
+        anchorRadiusAtLatLon(point.latDeg, point.lonDeg, SURFACE_PATCH_OFFSET + 0.00012),
     ));
     surfaceTrail.geometry.dispose();
     surfaceTrail.geometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -1077,13 +1706,25 @@ function formatCoordinate(value, positive, negative) {
     return `${Math.abs(value).toFixed(3)}°${value < 0 ? negative : positive}`;
 }
 
-function updateSurfaceReadout() {
+// The readout writes four DOM properties and samples the MOLA raster twice.
+// Doing that on every frame forces a style recalc per frame for a number that
+// changes by metres — 8 Hz is past the point anyone can read it change.
+const SURFACE_READOUT_INTERVAL_MS = 125;
+let lastSurfaceReadoutAt = 0;
+
+function updateSurfaceReadout({ force = false } = {}) {
     if (!surfaceModeActive || !surfaceLocation) return;
+    const now = performance.now();
+    if (!force && now - lastSurfaceReadoutAt < SURFACE_READOUT_INTERVAL_MS) return;
+    lastSurfaceReadoutAt = now;
     const target = worldVectorLatLon(controls.target);
     surfaceLocation = target;
     const cameraLocation = worldVectorLatLon(camera.position);
-    const surfaceRadius = reliefRadiusAtLatLon(cameraLocation.latDeg, cameraLocation.lonDeg);
+    const surfaceRadius = anchorRadiusAtLatLon(cameraLocation.latDeg, cameraLocation.lonDeg);
     const altitudeKm = Math.max(0, (camera.position.length() - surfaceRadius) * MARS_RADIUS_KM);
+    // MOLA elevation stays TRUE here. The patch is drawn at 18× exaggeration,
+    // but the number a viewer reads off the HUD is the real areoid height —
+    // never scale this to match what the geometry looks like.
     const elevationKm = elevationAtLatLon(target.latDeg, target.lonDeg) / 1000;
     surfaceLocationElement.textContent = `${formatCoordinate(target.latDeg, 'N', 'S')} · ${formatCoordinate(target.lonDeg, 'E', 'W')}`;
     surfaceAltitudeElement.textContent = `Eye ${altitudeKm.toFixed(1)} km · MOLA ${elevationKm >= 0 ? '+' : '−'}${Math.abs(elevationKm).toFixed(1)} km`;
@@ -1104,7 +1745,10 @@ function setSurfaceGrid(enabled) {
     const active = Boolean(enabled) && surfaceModeActive;
     regionalTerrainGrid.visible = active;
     surfaceGridButton.setAttribute('aria-pressed', String(active));
-    surfaceGridButton.title = `${active ? 'Hide' : 'Show'} 8 km terrain analysis grid`;
+    // Title tracks the spacing the geometry actually has — it was hard-coded to
+    // "8 km" while the grid had been 16 km since the segment count last moved.
+    const label = regionalGridSpacingKm > 0 ? `${regionalGridSpacingKm} km` : 'terrain';
+    surfaceGridButton.title = `${active ? 'Hide' : 'Show'} ${label} analysis grid`;
 }
 
 function deactivateSurfaceExplorer() {
@@ -1113,17 +1757,56 @@ function deactivateSurfaceExplorer() {
     app.classList.remove('is-surface-mode');
     surfaceExplorer.hidden = true;
     regionalTerrain.visible = false;
+    skyDome.visible = false;
     setSurfaceGrid(false);
     surfaceTrail.visible = false;
     setSurfaceLight(false);
     setSurfacePresentation(false);
     scene.fog.color.setHex(0x080302);
     scene.fog.density = 0.025;
-    camera.near = 0.01;
     camera.up.set(0, 1, 0);
-    camera.updateProjectionMatrix();
+    controls.zoomToCursor = true;
+    applyCameraRange();
+    // Surface mode swapped the globe's 5× relief for the patch's 18×; the
+    // ground-anchored layers have to come back to the globe radius with it.
+    refreshSurfaceAnchors();
     meshStatusElement.textContent = globalMeshStatus;
     cameraHelpElement.textContent = 'Drag orbit · wheel zoom · pinch · double-tap land';
+}
+
+/**
+ * Frame the surface explorer so the horizon is actually in the picture.
+ *
+ * The previous framing put the camera 2 km up and 6 km back, pitched ~18° down
+ * with a 36° field of view — the horizon sat above the top of the frame, so the
+ * canvas filled edge to edge with unbroken ground and the layer read as a solid
+ * orange rectangle. Standing higher and looking further ahead puts the horizon
+ * roughly a third of the way down and gives the sky dome somewhere to be.
+ */
+/**
+ * Surface HUD provenance line. Reports the patch's ACTUAL relief span, the
+ * exaggeration applied to it, and the graticule spacing the geometry really
+ * has — all three move with the quality ladder, so this is rebuilt rather than
+ * written once at entry.
+ */
+function updateSurfaceDetail() {
+    if (!hasRelief) {
+        surfaceDetailElement.textContent = 'MOLA unavailable · smooth regional geometry · Viking/material fallback';
+        return;
+    }
+    surfaceDetailElement.textContent = `${REGIONAL_TERRAIN_EXTENT_KM} km MOLA patch · relief ${(regionalTerrainRelief.minElevationM / 1000).toFixed(1)} → ${(regionalTerrainRelief.maxElevationM / 1000).toFixed(1)} km at ${REGIONAL_RELIEF_EXAGGERATION}× · ${regionalGridSpacingKm} km grid · sub-sample roughness is illustrative`;
+}
+
+function surfaceCameraPlacement(latDeg, lonDeg, headingRad = 0) {
+    const target = worldSurfacePoint(latDeg, lonDeg);
+    const radial = target.clone().normalize();
+    const { north, east } = tangentFrame(radial);
+    const forward = north.clone().multiplyScalar(Math.cos(headingRad))
+        .addScaledVector(east, Math.sin(headingRad)).normalize();
+    const position = target.clone()
+        .addScaledVector(radial, SURFACE_EYE_ALTITUDE_KM / MARS_RADIUS_KM)
+        .addScaledVector(forward, -SURFACE_LOOK_AHEAD_KM / MARS_RADIUS_KM);
+    return { target, radial, position };
 }
 
 function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', duration = 1050 } = {}) {
@@ -1135,26 +1818,25 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
     surfaceExplorer.hidden = false;
     rebuildRegionalTerrain(latDeg, lonDeg);
     regionalTerrain.visible = true;
+    skyDome.visible = true;
     setSurfaceGrid(true);
     surfaceTrail.visible = true;
-    setSurfaceLight(true);
-    updateSurfaceTrail(surfaceLocation, { reset: true });
     setSurfacePresentation(true);
-    scene.fog.color.setHex(0x4d1e12);
-    scene.fog.density = 3.2;
-    camera.near = 0.00002;
-    camera.updateProjectionMatrix();
-    controls.minDistance = 0.00025;
-    controls.maxDistance = 0.18;
+    // Anchors re-seat onto the patch's exaggeration before the trail is laid.
+    refreshSurfaceAnchors();
+    updateSurfaceTrail(surfaceLocation, { reset: true });
+    scene.fog.density = SURFACE_FOG_DENSITY;
+    applyCameraRange();
+    // Orbit radius around the look-ahead point: 3 km to 300 km of eye altitude.
+    controls.minDistance = SURFACE_MIN_EYE_KM / MARS_RADIUS_KM;
+    controls.maxDistance = SURFACE_MAX_EYE_KM / MARS_RADIUS_KM;
     controls.minPolarAngle = 0;
     controls.maxPolarAngle = Math.PI;
-    const target = worldSurfacePoint(latDeg, lonDeg);
-    const radial = target.clone().normalize();
-    const { north, east } = tangentFrame(radial);
-    const position = target.clone()
-        .addScaledVector(radial, 0.0006)
-        .addScaledVector(north, -0.0018)
-        .addScaledVector(east, 0.0003);
+    // zoomToCursor walks the orbit target toward whatever is under the pointer.
+    // On a globe that is exactly right; on the ground it drags the target off
+    // the terrain and into the sky, so the explorer keeps a fixed ground target.
+    controls.zoomToCursor = false;
+    const { target, radial, position } = surfaceCameraPlacement(latDeg, lonDeg);
     camera.up.copy(radial);
     setCameraMode('surface', label);
     cameraTween = {
@@ -1162,14 +1844,21 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
         fromPosition: camera.position.clone(), toPosition: position,
         fromTarget: controls.target.clone(), toTarget: target,
     };
-    surfaceDetailElement.textContent = hasRelief
-        ? '520 km MOLA macro-relief · 8 km analysis grid · visual roughness is illustrative'
-        : 'MOLA unavailable · smooth regional geometry · Viking/material fallback';
+    // The analysis lamp now defaults to whatever the terrain actually needs.
+    // With emissive shading gone the sun does the lighting, so leaving the lamp
+    // on in daylight just flattens the relief it exists to reveal — but past the
+    // terminator it is the only thing that makes the ground readable at all.
+    const sunElevationDeg = updateSurfaceSky(radial);
+    setSurfaceLight(sunElevationDeg < 3);
+    // Report the patch's ACTUAL relief span. It is the number that tells a
+    // viewer whether the shape in front of them is a 3 km scarp or 200 m of
+    // noise stretched by the exaggeration, and it costs nothing to be specific.
+    updateSurfaceDetail();
     meshStatusElement.textContent = hasRelief
-        ? 'regional MOLA · 66k vertices · 5× macro relief'
+        ? `regional MOLA · 66k vertices · ${REGIONAL_RELIEF_EXAGGERATION}× relief`
         : 'regional smooth-terrain fallback';
-    cameraHelpElement.textContent = 'Drag look · pinch altitude · double-tap move · WASD';
-    updateSurfaceReadout();
+    cameraHelpElement.textContent = 'Drag look · wheel altitude · double-tap move · WASD';
+    updateSurfaceReadout({ force: true });
     canvas.focus({ preventScroll: true });
 }
 
@@ -1211,14 +1900,21 @@ function nudgeSurface(forwardAmount, rightAmount) {
         rebuildRegionalTerrain(location.latDeg, location.lonDeg);
     }
     updateSurfaceTrail(location);
-    updateSurfaceReadout();
+    updateSurfaceReadout({ force: true });
 }
 
+/**
+ * Keep the eye above the terrain, and above `SURFACE_NEAR`.
+ *
+ * The floor is not cosmetic: SURFACE_NEAR is 0.0002 (≈ 0.7 km), so a camera
+ * allowed closer than that would clip the ground away and show the inside of
+ * the patch. SURFACE_MIN_EYE_KM sits comfortably above it.
+ */
 function enforceSurfaceClearance() {
     if (!surfaceModeActive) return;
     const location = worldVectorLatLon(camera.position);
-    const minimumRadius = reliefRadiusAtLatLon(location.latDeg, location.lonDeg)
-        + SURFACE_CLEARANCE_KM / MARS_RADIUS_KM;
+    const minimumRadius = anchorRadiusAtLatLon(location.latDeg, location.lonDeg)
+        + SURFACE_MIN_EYE_KM / MARS_RADIUS_KM;
     if (camera.position.length() < minimumRadius) camera.position.setLength(minimumRadius);
 }
 
@@ -1555,7 +2251,90 @@ function resize() {
 if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(viewport);
 window.addEventListener('resize', resize, { passive: true });
 resize();
+
+// ── Adaptive quality ────────────────────────────────────────────────────────
+// An unusable framerate reads to a visitor as a broken canvas, not a slow one,
+// so the render budget is measured rather than assumed. Steps are hysteretic:
+// downgrade needs a sustained bad median, upgrade needs a sustained good one,
+// and the ladder never climbs above the device's own pixel-ratio cap.
+const frameSamples = [];
+let qualityCooldownUntil = 0;
+
+function applyQuality(index) {
+    const next = THREE.MathUtils.clamp(index, 0, QUALITY_LEVELS.length - 1);
+    if (next === qualityIndex) return;
+    const previousSegments = QUALITY_LEVELS[qualityIndex].terrainSegments;
+    qualityIndex = next;
+    const level = QUALITY_LEVELS[qualityIndex];
+    renderer.setPixelRatio(Math.min(maxPixelRatio, level.pixelRatio * maxPixelRatio));
+    resize();
+    // The regional patch is built at the quality level's segment count, so a
+    // step up or down has to rebuild it — otherwise the ladder's biggest lever
+    // (4× fewer triangles) does nothing until the visitor happens to move.
+    if (surfaceModeActive && regionalTerrainCenter && level.terrainSegments !== previousSegments) {
+        rebuildRegionalTerrain(regionalTerrainCenter.latDeg, regionalTerrainCenter.lonDeg);
+        updateSurfaceDetail();
+    }
+    // The additive limb shell is a full-screen overdraw pass for a decorative
+    // glow — the first thing worth losing, and the last thing worth keeping.
+    atmosphereLayer.visible = level.atmosphere
+        && Boolean(document.querySelector('[data-layer="atmosphere"]')?.checked);
+    // The globe's bump term costs a dFdx/dFdy pair per fragment across the whole
+    // disc. Unlike the regional patch's (which was perturbing detail finer than
+    // one texel and is gone for good), this one earns its keep at full quality —
+    // the 1440×720 MOLA raster genuinely textures a whole-planet view.
+    const wantBump = level.globeBump && Boolean(molaTexture);
+    if (Boolean(surfaceMaterial.bumpMap) !== wantBump) {
+        surfaceMaterial.bumpMap = wantBump ? molaTexture : null;
+        surfaceMaterial.bumpScale = wantBump ? 0.0024 : 0;
+        surfaceMaterial.needsUpdate = true;
+    }
+    if (starField.geometry.attributes.position.count !== level.starCount) {
+        scene.remove(starField);
+        starField.geometry.dispose();
+        starField.material.dispose();
+        starField = buildStars(level.starCount);
+        scene.add(starField);
+    }
+    app.dataset.renderQuality = level.name;
+}
+
+let qualityWindowStart = 0;
+
+function sampleFrame(frameMs) {
+    // Ignore any single stall (a terrain rebuild, a tab regaining focus) —
+    // those are not the steady state the ladder is trying to measure.
+    if (frameMs > 500) return;
+    const now = performance.now();
+    if (!qualityWindowStart) qualityWindowStart = now;
+    frameSamples.push(frameMs);
+    // CRITICAL: close the window on ELAPSED TIME, not sample count. A pure
+    // count of 45 frames is ~0.75 s on a healthy machine but 30 s at 1.5 fps —
+    // so the slower the canvas, the longer the visitor waits for the fix. Time
+    // bounds it: the worse it renders, the fewer samples the decision needs.
+    const elapsed = now - qualityWindowStart;
+    if (frameSamples.length < 8 || (elapsed < 900 && frameSamples.length < 45)) return;
+    const median = frameSamples.slice().sort((a, b) => a - b)[Math.floor(frameSamples.length / 2)];
+    frameSamples.length = 0;
+    qualityWindowStart = 0;
+    if (now < qualityCooldownUntil) return;
+    if (median > 42 && qualityIndex < QUALITY_LEVELS.length - 1) {
+        // A catastrophic frame time skips a rung. Walking down one step at a
+        // time from 600 ms/frame would take longer than anyone will wait.
+        const steps = median > 160 ? 2 : 1;
+        applyQuality(qualityIndex + steps);
+        qualityCooldownUntil = now + 2500;
+    } else if (median < 19 && qualityIndex > 0) {
+        applyQuality(qualityIndex - 1);
+        qualityCooldownUntil = now + 8000;
+    }
+}
+
 setCameraMode('global', 'Mission orbit');
+applyCameraRange();
+// Level 0 is what the renderer, materials, and star field were constructed
+// with; publish it so the attribute is never absent before the first step.
+app.dataset.renderQuality = QUALITY_LEVELS[qualityIndex].name;
 setAutoRotate(!reducedMotion.matches);
 updateCameraReadout();
 
@@ -1570,8 +2349,16 @@ window.setInterval(() => {
 }, 15_000);
 loadMarsFeed();
 loadTraverseHistory();
+loadMarsEphemeris();
 loadMarsSky();
 scheduleMarsSkyRefresh();
+// The sub-solar longitude moves ~15°/hr with Mars' rotation; the edge cache is
+// 15 minutes, so refreshing on that period keeps the terminator within a few
+// degrees without ever reaching past the cache to JPL.
+window.setInterval(loadMarsEphemeris, 15 * 60_000);
+// MMGIS publishes at most one localization per sol. Hourly is generous and
+// still catches a new drive the same afternoon it lands.
+window.setInterval(loadTraverseHistory, 60 * 60_000);
 
 loaderStatus.textContent = hasRelief ? 'MOLA relief ready · locating Perseverance…' : 'Smooth globe ready · MOLA relief unavailable';
 window.__marsReady = true;
@@ -1598,11 +2385,58 @@ window.__marsLab = Object.freeze({
         active: surfaceModeActive,
         location: surfaceLocation ? { ...surfaceLocation } : null,
         terrainVertices: regionalTerrain.geometry.attributes.position?.count || 0,
+        terrainSegments: QUALITY_LEVELS[qualityIndex].terrainSegments,
+        gridSpacingKm: regionalGridSpacingKm,
         trailPoints: surfaceTrailLocations.length,
         gridVisible: regionalTerrainGrid.visible,
         analysisLightVisible: surfaceHeadlamp.visible,
+        skyVisible: skyDome.visible,
+        skyOpacity: skyDomeMaterial.uniforms.uOpacity.value,
+        reliefExaggeration: REGIONAL_RELIEF_EXAGGERATION,
+        patchRelief: { ...regionalTerrainRelief },
         hasRelief,
     }),
+    /** Solar geometry, so a test can ask whether the focused point is in daylight. */
+    sunState: () => {
+        const sunDirection = sun.position.clone().normalize();
+        const targetRadial = controls.target.clone().normalize();
+        return {
+            source: marsFeedState.illumination,
+            elevationAtTargetDeg: THREE.MathUtils.radToDeg(
+                Math.asin(THREE.MathUtils.clamp(sunDirection.dot(targetRadial), -1, 1)),
+            ),
+            subSolar: worldVectorLatLon(sunDirection),
+        };
+    },
+    renderState: () => ({
+        quality: QUALITY_LEVELS[qualityIndex].name,
+        pixelRatio: renderer.getPixelRatio(),
+        near: camera.near,
+        far: camera.far,
+        // Depth ratio is the number that used to be 5,000,000:1 and made every
+        // coincident surface layer flicker. If a change pushes it back past
+        // ~1e5, the surface layers will z-fight again.
+        depthRatio: camera.far / camera.near,
+        starsFollowCamera: starField.position.distanceTo(camera.position) < 1e-6,
+        atmosphere: atmosphereLayer.visible,
+    }),
+    /** Ground-anchor audit: how far each surface layer floats above the terrain. */
+    anchorState: () => {
+        const groundRadius = anchorRadiusAtLatLon(selectedRoutePoint.lat_deg, selectedRoutePoint.lon_deg);
+        const routePositions = routeLine.geometry.attributes.position;
+        return {
+            groundRadius,
+            markerAltitudeKm: (routeCursor.position.length() - groundRadius) * MARS_RADIUS_KM,
+            routeAltitudeKm: routePositions
+                ? (new THREE.Vector3().fromBufferAttribute(routePositions, routePositions.count - 1).length()
+                    - anchorRadiusAtLatLon(
+                        routeSnapshot?.points?.at(-1)?.lat_deg ?? selectedRoutePoint.lat_deg,
+                        routeSnapshot?.points?.at(-1)?.lon_deg ?? selectedRoutePoint.lon_deg,
+                    )) * MARS_RADIUS_KM
+                : null,
+        };
+    },
+    feedState: () => ({ ...marsFeedState }),
 });
 window.__marsUi?.setEngineState('ready');
 window.clearTimeout(window.__marsBootTimer);
@@ -1611,8 +2445,24 @@ app.classList.remove('mars-render-degraded');
 window.setTimeout(() => loadingScreen.classList.add('done'), 250);
 
 const clock = new THREE.Clock();
+const cameraRadial = new THREE.Vector3();
+let lastFrameAt = 0;
+
+/**
+ * The graticule is a global reference frame, and at close range it stops being
+ * one: 30° meridians resolve into a couple of unexplained lines sweeping the
+ * frame. Fade it out as the camera closes so it reads at the scale where it
+ * means something and gets out of the way at the scale where it does not.
+ */
+function updateGridFade(cameraDistance) {
+    const target = THREE.MathUtils.smoothstep(cameraDistance, 1.24, 1.95) * 0.16;
+    if (Math.abs(gridMaterial.opacity - target) > 0.002) gridMaterial.opacity = target;
+}
+
 function animate(now) {
     requestAnimationFrame(animate);
+    if (lastFrameAt) sampleFrame(now - lastFrameAt);
+    lastFrameAt = now;
     const elapsed = clock.getElapsedTime();
     updateCameraTween(now);
     roverLayer.userData.ring.scale.setScalar(1 + Math.sin(elapsed * 2.7) * 0.14);
@@ -1626,13 +2476,20 @@ function animate(now) {
     sky.updateCamera(camera);
     if (!cameraTween) controls.update();
     enforceSurfaceClearance();
+    // Stars are at infinity, so the field rides with the camera. This is also
+    // what keeps `far` small enough for a usable depth buffer in both modes.
+    starField.position.copy(camera.position);
     if (surfaceModeActive) {
-        const radial = camera.position.clone().normalize();
+        cameraRadial.copy(camera.position).normalize();
         surfaceHeadlamp.position.copy(camera.position);
         surfaceHeadlamp.target.position.copy(controls.target);
         surfaceHeadlamp.target.updateMatrixWorld();
-        surfaceFillLight.position.copy(camera.position).addScaledVector(radial, -0.0001);
+        surfaceFillLight.position.copy(camera.position).addScaledVector(cameraRadial, -0.0001);
+        skyDome.position.copy(camera.position);
+        updateSurfaceSky(cameraRadial);
         updateSurfaceReadout();
+    } else {
+        updateGridFade(camera.position.length());
     }
     updateCameraReadout();
     renderer.render(scene, camera);

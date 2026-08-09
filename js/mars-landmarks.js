@@ -3,8 +3,16 @@ import * as THREE from 'three';
 import { MARS_LANDMARKS, MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
 
 const MARS_RADIUS_KM = 3396.19;
-const RING_ALTITUDE = 1.041;
-const DOT_ALTITUDE = 1.047;
+// Heights ABOVE the local surface, not absolute radii. The constants used to be
+// absolute (1.041 / 1.047 / 1.078), which pinned every extent ring and dot to a
+// sphere ~140 km up — fine on a smooth globe, visibly detached from the terrain
+// once MOLA relief is on and the camera is close. `radiusAt` (supplied by
+// mars-view.js) puts them back on the ground; the default keeps the old
+// smooth-sphere behaviour for any caller that does not pass one.
+const RING_OFFSET = 0.0007;
+const DOT_OFFSET = 0.0013;
+const LABEL_OFFSET = 0.032;
+const DEFAULT_SURFACE_RADIUS = 1.0405;
 
 function basisAt(toVector, latDeg, lonDeg) {
     const normal = toVector(latDeg, lonDeg, 1).normalize();
@@ -14,19 +22,25 @@ function basisAt(toVector, latDeg, lonDeg) {
     return { normal, east, north };
 }
 
-function extentRingGeometry(toVector, landmark) {
+function extentRingGeometry(toVector, landmark, radiusAt) {
     const { normal, east, north } = basisAt(toVector, landmark.latDeg, landmark.lonDeg);
     const angularRadius = Math.min(1.2, landmark.diameterKm / 2 / MARS_RADIUS_KM);
     const cosRadius = Math.cos(angularRadius);
     const sinRadius = Math.sin(angularRadius);
     const points = [];
+    const direction = new THREE.Vector3();
     for (let index = 0; index < 96; index += 1) {
         const theta = index / 96 * Math.PI * 2;
-        points.push(new THREE.Vector3()
+        direction.set(0, 0, 0)
             .addScaledVector(normal, cosRadius)
             .addScaledVector(east, sinRadius * Math.cos(theta))
             .addScaledVector(north, sinRadius * Math.sin(theta))
-            .multiplyScalar(RING_ALTITUDE));
+            .normalize();
+        // Sample the surface radius around the rim so a crater ring follows the
+        // rim it is tracing instead of cutting through it.
+        const latDeg = Math.asin(Math.max(-1, Math.min(1, direction.y))) * 180 / Math.PI;
+        const lonDeg = Math.atan2(-direction.z, direction.x) * 180 / Math.PI;
+        points.push(direction.clone().multiplyScalar(radiusAt(latDeg, lonDeg) + RING_OFFSET));
     }
     return new THREE.BufferGeometry().setFromPoints(points);
 }
@@ -69,10 +83,19 @@ function labelTexture(text, color) {
 }
 
 export class MarsLandmarks {
-    constructor(parent, toVector) {
+    /**
+     * @param {THREE.Object3D} parent
+     * @param {(latDeg:number, lonDeg:number, radius:number) => THREE.Vector3} toVector
+     * @param {{ radiusAt?: (latDeg:number, lonDeg:number) => number }} [options]
+     *   radiusAt returns the local surface radius so rings, dots, and labels sit
+     *   on the relief. Omit it to keep the flat 1.0405 sphere.
+     */
+    constructor(parent, toVector, { radiusAt = () => DEFAULT_SURFACE_RADIUS } = {}) {
         this.group = new THREE.Group();
         this.group.name = 'mars-landmarks';
         parent.add(this.group);
+        this.toVector = toVector;
+        this.radiusAt = radiusAt;
         this.categoryGroups = {};
         this.hitTargets = [];
         this.entries = [];
@@ -95,10 +118,11 @@ export class MarsLandmarks {
             const category = MARS_LANDMARK_CATEGORIES[landmark.category];
             const categoryGroup = this.categoryGroups[landmark.category];
             const color = category.color;
-            const position = toVector(landmark.latDeg, landmark.lonDeg, DOT_ALTITUDE);
+            const surfaceRadius = this.radiusAt(landmark.latDeg, landmark.lonDeg);
+            const position = toVector(landmark.latDeg, landmark.lonDeg, surfaceRadius + DOT_OFFSET);
             const normal = position.clone().normalize();
 
-            const ringGeometry = track(extentRingGeometry(toVector, landmark));
+            const ringGeometry = track(extentRingGeometry(toVector, landmark, this.radiusAt));
             const ringMaterial = track(new THREE.LineBasicMaterial({
                 color, transparent: true, opacity: landmark.priority === 1 ? 0.48 : 0.28, depthWrite: false,
             }));
@@ -118,7 +142,7 @@ export class MarsLandmarks {
                 map: nameTexture, transparent: true, opacity: 0.92, depthTest: true, depthWrite: false,
             }));
             const label = new THREE.Sprite(labelMaterial);
-            label.position.copy(normal.clone().multiplyScalar(1.078));
+            label.position.copy(normal.clone().multiplyScalar(surfaceRadius + LABEL_OFFSET));
             label.scale.set(0.26, 0.045, 1);
             label.renderOrder = 8;
             categoryGroup.add(label);

@@ -132,6 +132,8 @@ const API_ROUTES = {
     '/api/lightning/strikes':      'api/lightning/strikes.js',
     '/api/nws/convective':         'api/nws/convective.js',
     '/api/mars/weather':           'api/mars/weather.js',
+    '/api/mars/route':             'api/mars/route.js',
+    '/api/mars/ephemeris':         'api/mars/ephemeris.js',
     '/api/storms':                 'api/storms.js',
     '/api/health':                 'api/health.js',
     '/api/solar/aia':              'api/solar/aia.js',
