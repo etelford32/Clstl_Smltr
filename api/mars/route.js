@@ -43,6 +43,11 @@ function unavailable(reason) {
     return jsonOk({
         live: false,
         reason,
+        // Read by status.html's _rtProxyHealth(): a 200 carrying
+        // freshness:'stale' renders amber rather than green. This route
+        // deliberately never 5xx's (the client has a working fallback), so
+        // without this the status page would report a dead MMGIS as healthy.
+        freshness: 'stale',
         source_name: 'NASA/JPL MMGIS Rover Waypoints',
         source_url: MARS_ROUTE_SOURCE_URL,
         map_url: MARS_ROUTE_MAP_URL,

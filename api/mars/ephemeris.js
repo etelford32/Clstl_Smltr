@@ -82,6 +82,11 @@ export default async function handler(request) {
     const degraded = (reason, extra = {}) => jsonOk({
         source: 'analytic',
         degraded_reason: reason,
+        // Read by status.html's _rtProxyHealth(): a 200 carrying
+        // freshness:'stale' renders amber. This route always answers 200 so
+        // the page keeps a season to show; without this the status board
+        // would call a dead Horizons healthy.
+        freshness: 'stale',
         generated_at: new Date().toISOString(),
         jd,
         ls_deg: analytic.ls_deg,

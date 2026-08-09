@@ -284,12 +284,19 @@ export default async function handler(request) {
         }),
     ]);
 
+    // Read by status.html's _rtProxyHealth(). The adapter answering 200 with
+    // every rover offline is NOT healthy — that is the frozen-NASA-feed state
+    // the page papers over with a bundled snapshot, and the status board
+    // should show it amber rather than green. Any usable observation clears it.
+    const anyRoverActive = [insightR, curiosityR, perseveranceR].some(record => record?.active);
+
     return jsonOk({
         ls_deg:    Number(Ls.toFixed(2)),
         ls_source: 'analytic',
         status:    baseStatus.status,
         message:   baseStatus.message,
         jd,
+        ...(anyRoverActive ? {} : { freshness: 'stale' }),
         generated_at: new Date().toISOString(),
         mission: {
             perseverance: PERSEVERANCE_MISSION,

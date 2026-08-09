@@ -18,6 +18,38 @@ snapshot exists and why `/api/mars/weather` now returns a per-upstream
 `sources[]` roll-up: when the page says "no observation", it can name which
 endpoint failed and why instead of shrugging.
 
+## Monitoring
+
+All three Mars routes are registered in `js/pipeline-registry.js` under the
+`planetary` category, which is what puts them on **`/status.html`** (Proxy
+Freshness card) and into the **medium** pre-warm tier
+(`api/cron/prewarm-medium.js`, every 30 min). `node tests/pipeline-registry.mjs`
+gates the registration.
+
+| Registry id | Endpoint | Green means | Amber means |
+|-------------|----------|-------------|-------------|
+| `mars-ephemeris` | `/api/mars/ephemeris` | JPL Horizons answered | fell back to the analytic Ls model |
+| `mars-route` | `/api/mars/route` | live MMGIS traverse | serving the bundled route snapshot |
+| `mars-weather` | `/api/mars/weather` | a rover returned a usable observation | every NASA rover feed is offline |
+
+**These routes never return 5xx.** Each has a working client-side fallback, and
+a 5xx would be indistinguishable from "the site is down" to a client whose
+fallback is a static file. They signal degradation with a top-level
+`freshness: 'stale'`, which `status.html`'s `_rtProxyHealth()` already scores as
+amber. **If you remove that field, a dead NASA feed renders green.**
+
+**`mars-weather` is expected to sit amber.** That is not an alert to chase — it
+is the frozen-upstream state described above, and the page says so in its own
+provenance line. `mars-ephemeris` going amber is worth investigating; it means
+JPL Horizons is unreachable, and the terminator has silently dropped to a model
+that can be ~11° of Ls wrong.
+
+Upstream reachability from the Vercel edge is separately pinged by
+`/api/health` (`mars-mmgis`, `mars-rss`, `jpl-horizons`). Those rows are
+`edge_authoritative` because all three are proxied server-side.
+
+The client's own view of which tier won is `window.__marsLab.feedState()`.
+
 # Perseverance route snapshot
 
 `perseverance-route.json` is the OFFLINE FALLBACK for `/api/mars/route`, not
