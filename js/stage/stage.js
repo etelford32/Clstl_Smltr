@@ -230,10 +230,53 @@ function mount(host) {
     // Near plane small enough for the My Sky station (camera ~0.008 units
     // from its target); the scene is sparse so the depth range is safe.
     const camera = new THREE.PerspectiveCamera(50, 1, 0.002, 60);
-    const controls = new OrbitControls(camera, canvas);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
+    // ═══ THE STAGE IS Z-UP, AND THE CONTROLS HAVE TO BE TOLD BEFORE BIRTH ═══
+    // Ecliptic in XY, solar north +Z — every station sets camera.up to +Z
+    // (flyTo below), and My Sky swaps in the observer's local vertical.
+    //
+    // OrbitControls captures its orbit axis from camera.up ONCE, in the closure
+    // around this.update (vendored r160, OrbitControls.js:177), and ignores
+    // every later assignment. This line used to come after the constructor, so
+    // the controls orbited about world +Y while the scene stood Z-up: dragging
+    // tumbled the ecliptic instead of spinning it, and the gimbal poles sat IN
+    // the ecliptic plane rather than above and below it. Measured before the
+    // fix — driving the controls' own rotation left the offset's Y component
+    // exactly unchanged while X and Z moved.
+    //
+    // Setting it here fixes every solar-frame station. My Sky needs more: see
+    // refreshControlFrame().
+    camera.up.set(0, 0, 1);
+    let controls = createControls();
+    // Local vertical the current orbit axis was built for.
+    const controlFrameUp = camera.up.clone();
     const scene = new THREE.Scene();
+
+    function createControls() {
+        const next = new OrbitControls(camera, canvas);
+        next.enableDamping = true;
+        next.dampingFactor = 0.08;
+        return next;
+    }
+
+    /**
+     * Rebuild the controls so their orbit axis picks up the current camera.up.
+     * The library exposes no way to re-seat that cached quaternion, so the
+     * instance is replaced — cheap, and only when the up vector actually moved
+     * (station changes that keep the solar +Z frame skip it entirely).
+     * Preserves the orbit target and the station's distance limits.
+     */
+    function refreshControlFrame() {
+        if (camera.up.angleTo(controlFrameUp) < 1e-4) return;
+        const target = controls.target.clone();
+        const minD = controls.minDistance;
+        const maxD = controls.maxDistance;
+        controls.dispose();
+        controls = createControls();
+        controls.target.copy(target);
+        controls.minDistance = minD;
+        controls.maxDistance = maxD;
+        controlFrameUp.copy(camera.up);
+    }
 
     const state = {
         fc: null, kernel: null, rope: null, launchMs: 0,
@@ -1268,6 +1311,11 @@ function mount(host) {
         } else {
             camera.up.set(0, 0, 1);
         }
+        // The up vector just changed frames (solar +Z ⇄ the pin's local
+        // vertical). OrbitControls only reads it at construction, so without
+        // this the dome would look level while dragging still orbited about
+        // the old axis. No-ops when the frame is unchanged.
+        refreshControlFrame();
         if (!cut && !state.attract && id !== state.station) track('station_change', { station: id });
         state.station = id;
         for (const b of tabs.children) b.classList.toggle('active', b.dataset.station === id);
@@ -2554,6 +2602,14 @@ function mount(host) {
                      ribbonVisible: ribbon.visible,
                      sunAltDeg: state.sunAltDeg ?? null,
                      dark: ribbonMat.uniforms.uDark.value };
+        },
+        // Camera frame, as plain data like every other getter here. Exists so
+        // the browser gate can prove the orbit axis still tracks camera.up —
+        // the two silently disagreed for as long as the Stage has shipped.
+        get cameraFrame() {
+            return { up: camera.up.toArray(),
+                     pos: camera.position.toArray(),
+                     target: controls.target.toArray() };
         },
         flyTo, setTau,
     };
