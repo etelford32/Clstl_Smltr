@@ -73,6 +73,7 @@ const NAV_DROPDOWNS = [
         id: 'earth-menu',
         items: [
             { href: 'earth.html',             label: 'EarthView',           sub: 'Predictive weather + magnetosphere',   tier: 'public',   icon: 'earth' },
+            { href: 'pollution.html',         label: 'Pollution Lab',       sub: 'Live AQI · hotspot ML · climate forcing', tier: 'public', icon: 'atmosphere', badge: 'NEW', id: 'pollution' },
             { href: 'moon.html',              label: 'Moon',                sub: 'Lunar radiation environment',          tier: 'public',   icon: 'moon' },
             { href: 'colony.html',            label: 'Lunar Colony',        sub: 'Strategy game · the real Sun attacks', tier: 'public',   icon: 'moon', badge: 'NEW', id: 'colony' },
             { href: 'operations.html',        label: 'Operations',          sub: 'Fleet & debris analysis console',      tier: 'public',   icon: 'operations', badge: 'PRO PREVIEW', id: 'operations' },

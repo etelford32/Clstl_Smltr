@@ -371,7 +371,7 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 #coord-tip.show { opacity:1; }
 
 /* ─── City hover tooltip (major-city dots) ───────────────────── */
-#city-tip, #ocean-tip, #air-quality-tip {
+#city-tip, #ocean-tip, #air-quality-tip, #pollution-tip, #wildfire-tip {
     position:fixed; z-index:56; display:none; pointer-events:none;
     background:rgba(2,10,20,.9); border:1px solid rgba(77,219,255,.45);
     border-radius:8px; padding:7px 11px; white-space:nowrap;
@@ -380,9 +380,11 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 }
 #ocean-tip { border-color:rgba(255,204,68,.5); }
 #air-quality-tip { border-color:rgba(77,219,255,.55); }
-#city-tip .cty-name, #ocean-tip .cty-name, #air-quality-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
-#city-tip .cty-sub,  #ocean-tip .cty-sub,  #air-quality-tip .cty-sub  { color:#8ff0ff; font-size:10px; margin-top:1px; }
-#city-tip .cty-hint, #ocean-tip .cty-hint, #air-quality-tip .cty-hint { color:#5f7597; font-size:9px;  margin-top:3px; }
+#pollution-tip { border-color:rgba(255,140,40,.55); }
+#wildfire-tip { border-color:rgba(255,80,30,.6); }
+#city-tip .cty-name, #ocean-tip .cty-name, #air-quality-tip .cty-name, #pollution-tip .cty-name, #wildfire-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
+#city-tip .cty-sub,  #ocean-tip .cty-sub,  #air-quality-tip .cty-sub, #pollution-tip .cty-sub, #wildfire-tip .cty-sub  { color:#8ff0ff; font-size:10px; margin-top:1px; }
+#city-tip .cty-hint, #ocean-tip .cty-hint, #air-quality-tip .cty-hint, #pollution-tip .cty-hint, #wildfire-tip .cty-hint { color:#5f7597; font-size:9px;  margin-top:3px; }
 #coord-tip .ct-title { color: var(--c-accent); font-size:9px; text-transform:uppercase;
     letter-spacing:.6px; margin-bottom:2px; }
 #coord-tip .ct-val { color:#a0d8f0; font-weight:600; }
@@ -2770,6 +2772,21 @@ import './js/telemetry.js';
         <div class="cty-hint">click for values and provenance</div>
     </div>
 
+    <!-- Pollution-center / wildfire hover tooltips (shared raycast). Same
+         follow-cursor contract as #city-tip; on touch the tap handler pins
+         them at the tap point instead. -->
+    <div id="pollution-tip">
+        <div class="cty-name" id="pollution-tip-name">—</div>
+        <div class="cty-sub" id="pollution-tip-sub">—</div>
+        <div class="cty-hint" id="pollution-tip-hint">CAMS modeled air quality</div>
+    </div>
+
+    <div id="wildfire-tip">
+        <div class="cty-name" id="wildfire-tip-name">—</div>
+        <div class="cty-sub" id="wildfire-tip-sub">—</div>
+        <div class="cty-hint" id="wildfire-tip-hint">NASA EONET wildfire event</div>
+    </div>
+
     <!-- Layer controls -->
     <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="bottom:16px;right:12px;">⚡ Weather</a>
 
@@ -2969,6 +2986,12 @@ import './js/telemetry.js';
                 <div class="lyr-grid">
                     <div class="lyr" title="Timestamped numeric air quality. Far view: CAMS modeled grid. Zoom in: denser CAMS cells plus preliminary EPA AirNow monitors. Follows the EarthView time scrubber; model and observation provenance remain separate.">
                         <input type="checkbox" id="lyr-air-quality"><span class="lyr-status" data-layer="air-quality" title="off — enable to load"></span><label for="lyr-air-quality">Numeric AQI / PM / AOD</label><span class="lyr-count" id="air-quality-count">off</span>
+                    </div>
+                    <div class="lyr" title="Live AQI at the world's ~100 largest metros in one batched CAMS sample — ring markers colored on the EPA scale, sized by severity, pulsing where AQI ≥ 150 (unhealthy). Hover a ring for the city's AQI + PM2.5. Modeled CAMS data, not station observations.">
+                        <input type="checkbox" id="lyr-pollution-centers"><span class="lyr-status" data-layer="pollution-centers" title="off — enable to load"></span><label for="lyr-pollution-centers">Pollution Centers (live AQI)</label><span class="lyr-count" id="pollution-centers-count">off</span>
+                    </div>
+                    <div class="lyr" title="Named active wildfire events from NASA EONET — discrete flickering markers sized by reported acreage, fading with days since the last update. Complements (does not replace) the GIBS Active Fires thermal imagery in Observations. Hover a marker for name, acreage, and start date.">
+                        <input type="checkbox" id="lyr-wildfires"><span class="lyr-status" data-layer="wildfires" title="off — enable to load"></span><label for="lyr-wildfires">Wildfire Events (EONET)</label><span class="lyr-count" id="wildfires-count">off</span>
                     </div>
                 </div>
                 <div class="aq-layer-controls">
@@ -4068,6 +4091,8 @@ import { nextPasses } from './js/pass-predictor.js';
 import { VerdictCard } from './js/verdict-card.js';
 import { AirQualityFeed } from './js/air-quality-feed.js';
 import { AirQualityLayer } from './js/air-quality-layer.js';
+import { PollutionCentersLayer } from './js/pollution-centers-layer.js';
+import { WildfireLayer } from './js/wildfire-layer.js';
 import { LocationBeacon } from './js/location-beacon.js';
 import { CityMarkers } from './js/city-markers.js';
 import { MAJOR_CITIES } from './js/data/major-cities.js';
@@ -8062,6 +8087,78 @@ _airQualityMetric?.addEventListener('change', event => {
     airQualityLayer.setMetric(event.target.value);
 });
 timeBus.subscribe(({ simTimeMs: airTimeMs }) => airQualityLayer.setTime(airTimeMs));
+
+// ── Pollution Centers + Wildfire Events ────────────────────────────────────
+// Two discrete-marker layers in the same section: live batched CAMS AQI at
+// the ~100 largest metros, and named EONET wildfire events. Both are
+// live-only snapshots (they do NOT follow the time scrubber — the feeds
+// have no history endpoint) and both report a stale upstream as an error
+// state instead of rendering a quiet empty layer.
+const _pollutionCount = document.getElementById('pollution-centers-count');
+const pollutionCentersLayer = new PollutionCentersLayer(THREE, {
+    geoToXYZ,
+    onStatus(state, detail = {}) {
+        if (_pollutionCount) {
+            _pollutionCount.classList.remove('live', 'error');
+            _pollutionCount.textContent = state === 'fetching' ? '…'
+                : state === 'loaded' ? `${detail.count}` +
+                    (detail.worst ? ` · worst ${detail.worst}` : '')
+                : state === 'error' ? 'error' : 'off';
+            _pollutionCount.classList.toggle('live', state === 'loaded');
+            _pollutionCount.classList.toggle('error', state === 'error');
+            _pollutionCount.title = state === 'loaded'
+                ? `${detail.count} metros · CAMS modeled · ${detail.updated ?? '—'}`
+                : detail.error ?? state;
+        }
+        _setLayerPipById('pollution-centers',
+            state === 'loaded' ? 'loaded' : state === 'fetching' ? 'fetching'
+                : state === 'error' ? 'error' : 'idle',
+            state === 'loaded'
+                ? `${detail.count} city samples · CAMS modeled (not observations)`
+                : state === 'error' ? `feed unavailable: ${detail.error ?? 'unknown'}`
+                : state === 'fetching' ? 'loading batched CAMS city sample…'
+                : 'off — enable to load');
+    },
+});
+earthMesh.add(pollutionCentersLayer.group);
+window.__pollutionCentersLayer = pollutionCentersLayer;
+document.getElementById('lyr-pollution-centers')?.addEventListener('change', e => {
+    pollutionCentersLayer.setVisible(e.target.checked);
+    if (!e.target.checked) _setPollutionHover(null);
+});
+
+const _wildfireCount = document.getElementById('wildfires-count');
+const wildfireLayer = new WildfireLayer(THREE, {
+    geoToXYZ,
+    onStatus(state, detail = {}) {
+        if (_wildfireCount) {
+            _wildfireCount.classList.remove('live', 'error');
+            _wildfireCount.textContent = state === 'fetching' ? '…'
+                : state === 'loaded' ? `${detail.count}`
+                : state === 'error' ? 'error' : 'off';
+            _wildfireCount.classList.toggle('live', state === 'loaded');
+            _wildfireCount.classList.toggle('error', state === 'error');
+            _wildfireCount.title = state === 'loaded'
+                ? `${detail.count} open EONET wildfire events` +
+                    (detail.biggest ? ` · biggest: ${detail.biggest}` : '')
+                : detail.error ?? state;
+        }
+        _setLayerPipById('wildfires',
+            state === 'loaded' ? 'loaded' : state === 'fetching' ? 'fetching'
+                : state === 'error' ? 'error' : 'idle',
+            state === 'loaded'
+                ? `${detail.count} named wildfire events · NASA EONET`
+                : state === 'error' ? `feed unavailable: ${detail.error ?? 'unknown'}`
+                : state === 'fetching' ? 'loading EONET wildfire events…'
+                : 'off — enable to load');
+    },
+});
+earthMesh.add(wildfireLayer.group);
+window.__wildfireLayer = wildfireLayer;
+document.getElementById('lyr-wildfires')?.addEventListener('change', e => {
+    wildfireLayer.setVisible(e.target.checked);
+    if (!e.target.checked) _setWildfireHover(null);
+});
 
 const _aqd = {
     card: document.getElementById('air-quality-detail'),
@@ -12422,6 +12519,8 @@ renderer.domElement.addEventListener('mousemove', e => {
         hideAlertTip();
         _setOceanHover(null);
         _setAirQualityHover(null);
+        _setWildfireHover(null);
+        _setPollutionHover(null);
         _setCityHover(null);
         return;
     } else {
@@ -12435,6 +12534,8 @@ renderer.domElement.addEventListener('mousemove', e => {
         showAlertTip(hovered, e.clientX, e.clientY);
         _setOceanHover(null);
         _setAirQualityHover(null);
+        _setWildfireHover(null);
+        _setPollutionHover(null);
         _setCityHover(null);
     } else {
         hideAlertTip();
@@ -12442,18 +12543,33 @@ renderer.domElement.addEventListener('mousemove', e => {
         if (oceanHovered) {
             _setOceanHover(oceanHovered, e.clientX, e.clientY);
             _setAirQualityHover(null);
+            _setWildfireHover(null);
+            _setPollutionHover(null);
             _setCityHover(null);
         } else {
             _setOceanHover(null);
             const airHovered = airQualityLayer.getHovered(alertRay);
             if (airHovered) {
                 _setAirQualityHover(airHovered, e.clientX, e.clientY);
+                _setWildfireHover(null);
+                _setPollutionHover(null);
                 _setCityHover(null);
             } else {
                 _setAirQualityHover(null);
-                // City dots take the lowest hover priority — event, ocean,
-                // and numeric air-quality samples win the cursor.
-                _setCityHover(cityMarkers.getHovered(alertRay), e.clientX, e.clientY);
+                // Wildfire events (rarer, higher stakes) outrank pollution
+                // rings; both outrank plain city dots.
+                const fireHovered = wildfireLayer.getHovered(alertRay);
+                const pcHovered = fireHovered ? null
+                    : pollutionCentersLayer.getHovered(alertRay);
+                _setWildfireHover(fireHovered, e.clientX, e.clientY);
+                _setPollutionHover(pcHovered, e.clientX, e.clientY);
+                if (fireHovered || pcHovered) {
+                    _setCityHover(null);
+                } else {
+                    // City dots take the lowest hover priority — event, ocean,
+                    // and numeric air-quality samples win the cursor.
+                    _setCityHover(cityMarkers.getHovered(alertRay), e.clientX, e.clientY);
+                }
             }
         }
     }
@@ -12463,6 +12579,8 @@ renderer.domElement.addEventListener('mouseleave', () => {
     _hideEqPopup();
     _setOceanHover(null);
     _setAirQualityHover(null);
+    _setWildfireHover(null);
+    _setPollutionHover(null);
     _setCityHover(null);
 });
 
@@ -12495,6 +12613,74 @@ function _setCityHover(hit, cx, cy) {
     // Follow the cursor (viewport-fixed), nudged off the pointer and
     // clamped so it never clips the right/bottom edge.
     tip.style.left = Math.min(cx + 14, window.innerWidth - 170) + 'px';
+    tip.style.top  = Math.min(cy + 12, window.innerHeight - 70) + 'px';
+}
+
+// ── Pollution-center hover: tooltip + ring highlight ────────────────────────
+// hit = { center, index } | null from pollutionCentersLayer.getHovered.
+// Same transition-tracked pattern as _setCityHover.
+let _pollutionHoverIdx = -1;
+function _setPollutionHover(hit, cx, cy) {
+    const tip = document.getElementById('pollution-tip');
+    if (!hit) {
+        if (_pollutionHoverIdx !== -1) {
+            _pollutionHoverIdx = -1;
+            pollutionCentersLayer.setHighlight(-1);
+            tip.style.display = 'none';
+            renderer.domElement.style.cursor = '';
+        }
+        return;
+    }
+    const { center, index } = hit;
+    if (index !== _pollutionHoverIdx) {
+        _pollutionHoverIdx = index;
+        pollutionCentersLayer.setHighlight(index);
+        const aqi = Number.isFinite(center.aqi) ? Math.round(center.aqi) : null;
+        const cat = aqi == null ? '' : aqi <= 50 ? 'good' : aqi <= 100 ? 'moderate'
+            : aqi <= 150 ? 'unhealthy (sensitive)' : aqi <= 200 ? 'unhealthy'
+            : aqi <= 300 ? 'very unhealthy' : 'hazardous';
+        document.getElementById('pollution-tip-name').textContent =
+            `${center.name} · AQI ${aqi ?? '—'}`;
+        document.getElementById('pollution-tip-sub').textContent =
+            `${cat}${center.pm25 != null ? ` · PM2.5 ${center.pm25.toFixed(1)} µg/m³` : ''}`
+            + `${center.aod != null ? ` · AOD ${center.aod.toFixed(2)}` : ''}`;
+        tip.style.display = 'block';
+        renderer.domElement.style.cursor = 'pointer';
+    }
+    tip.style.left = Math.min(cx + 14, window.innerWidth - 230) + 'px';
+    tip.style.top  = Math.min(cy + 12, window.innerHeight - 70) + 'px';
+}
+
+// ── Wildfire hover: tooltip + marker highlight ──────────────────────────────
+// hit = { fire, index } | null from wildfireLayer.getHovered.
+let _wildfireHoverIdx = -1;
+function _setWildfireHover(hit, cx, cy) {
+    const tip = document.getElementById('wildfire-tip');
+    if (!hit) {
+        if (_wildfireHoverIdx !== -1) {
+            _wildfireHoverIdx = -1;
+            wildfireLayer.setHighlight(-1);
+            tip.style.display = 'none';
+            renderer.domElement.style.cursor = '';
+        }
+        return;
+    }
+    const { fire, index } = hit;
+    if (index !== _wildfireHoverIdx) {
+        _wildfireHoverIdx = index;
+        wildfireLayer.setHighlight(index);
+        document.getElementById('wildfire-tip-name').textContent = fire.name;
+        const started = fire.startedAt
+            ? new Date(fire.startedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+            : null;
+        document.getElementById('wildfire-tip-sub').textContent =
+            `${fire.areaAcres != null ? `${Math.round(fire.areaAcres).toLocaleString()} acres · ` : ''}`
+            + `${started ? `since ${started} · ` : ''}`
+            + `updated ${fire.ageDays <= 1 ? 'today' : `${Math.round(fire.ageDays)} d ago`}`;
+        tip.style.display = 'block';
+        renderer.domElement.style.cursor = 'pointer';
+    }
+    tip.style.left = Math.min(cx + 14, window.innerWidth - 240) + 'px';
     tip.style.top  = Math.min(cy + 12, window.innerHeight - 70) + 'px';
 }
 
@@ -12539,6 +12725,22 @@ function _setCityHover(hit, cx, cy) {
             return true;
         }
 
+        // Wildfire / pollution-center markers: tap pins their hover tooltip
+        // at the tap point (the touch equivalent of hovering). A later tap
+        // on empty globe falls through to the dismiss branch below.
+        const fireTap = wildfireLayer.getHovered(ray);
+        if (fireTap) {
+            _setWildfireHover(fireTap, clientX, clientY);
+            _setPollutionHover(null);
+            return true;
+        }
+        const pcTap = pollutionCentersLayer.getHovered(ray);
+        if (pcTap) {
+            _setPollutionHover(pcTap, clientX, clientY);
+            _setWildfireHover(null);
+            return true;
+        }
+
         // City dots: tap → select as "my location". Same pipeline as the
         // EarthView card's search box (saveUserLocation → card + beacon +
         // saved list), so every location surface stays in sync.
@@ -12569,9 +12771,12 @@ function _setCityHover(hit, cx, cy) {
             }
         }
 
-        // Empty globe — dismiss any pinned card
+        // Empty globe — dismiss any pinned card (and any tap-pinned
+        // wildfire/pollution tooltip, which touch has no mousemove to clear)
         if (_ed.card.classList.contains('show')) _hideEventDetail();
         if (_od.card.classList.contains('show')) _hideOceanDetail();
+        _setWildfireHover(null);
+        _setPollutionHover(null);
         return false;
     }
 
@@ -13212,6 +13417,16 @@ function animate() {
     // is in device pixels, so DPR is already folded into .height).
     cityMarkers.tick(t, renderer.domElement.height /
         (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)));
+
+    // Pollution-center pulse + wildfire flicker share the same pixel-scale
+    // factor; both tick unconditionally (uniform writes are trivially cheap
+    // and the groups are hidden when toggled off).
+    {
+        const _envPixelScale = renderer.domElement.height /
+            (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+        pollutionCentersLayer.tick(t, _envPixelScale);
+        wildfireLayer.tick(t, _envPixelScale);
+    }
 
     // ── Fly-to animation
     if (_flyTarget && _flyProgress < 1) {
@@ -14052,6 +14267,9 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     'lyr-rotate', 'lyr-cities', 'lyr-tsunami-alerts', 'lyr-dart',
     'lyr-tide-gauges', 'lyr-ocean-buoys',
     'lyr-ocean-model', 'lyr-air-quality',
+    // Pollution centers + wildfire events default off; the dispatch keeps
+    // their groups aligned with the unchecked boxes on first paint.
+    'lyr-pollution-centers', 'lyr-wildfires',
     // Derived weather overlays (humidity / precip-rate / mist) — share
     // the existing weather DataTextures, so they need the same synthetic
     // change-event dispatch on first render to align mesh visibility
@@ -14554,6 +14772,8 @@ const _layerRegistry = {
     'lyr-ocean-buoys':         () => oceanStationsLayer.isBuoysVisible(),
     'lyr-ocean-model':         () => document.getElementById('lyr-ocean-model')?.checked ?? false,
     'lyr-air-quality':         () => airQualityLayer.group.visible,
+    'lyr-pollution-centers':   () => pollutionCentersLayer.group.visible,
+    'lyr-wildfires':           () => wildfireLayer.group.visible,
     'lyr-obs-aod':             () => _obsOverlays['aod']?.mesh?.visible
                                    ?? document.getElementById('lyr-obs-aod')?.checked ?? false,
     'lyr-obs-cloud-thickness': () => _obsOverlays['cloud-thickness']?.mesh?.visible
