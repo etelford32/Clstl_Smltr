@@ -71,6 +71,54 @@ test.describe('the Stage (S1) on space-weather.html', () => {
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+    // The Stage is Z-up: ecliptic in XY, solar north +Z. OrbitControls captures
+    // its orbit axis from camera.up ONCE at construction (vendored r160,
+    // OrbitControls.js:177) and ignores every later assignment — so building it
+    // before camera.up was set left it orbiting about world +Y for as long as
+    // the Stage had shipped. Dragging tumbled the ecliptic instead of spinning
+    // it, and the gimbal poles sat IN the ecliptic plane.
+    //
+    // This asserts the axis by its definition: rotate, and the component of
+    // (camera − target) along camera.up is the one that must not change.
+    test('the orbit axis is the scene vertical, not world +Y', async ({ page }) => {
+        const host = page.locator('#sw-stage-host');
+        await expect(host.locator('canvas')).toBeVisible({ timeout: 30_000 });
+        await expect.poll(() => page.evaluate(() => window.__swStage?.cameraFrame?.up?.[2])).toBe(1);
+
+        const canvas = host.locator('canvas');
+        const box = await canvas.boundingBox();
+        const cx = box.x + box.width * 0.5;
+        const cy = box.y + box.height * 0.5;
+
+        const frame = () => page.evaluate(() => window.__swStage.cameraFrame);
+        const axial = (f) => {
+            const off = [0, 1, 2].map((i) => f.pos[i] - f.target[i]);
+            return {
+                along: off.reduce((sum, v, i) => sum + v * f.up[i], 0),
+                length: Math.hypot(...off),
+            };
+        };
+
+        const before = axial(await frame());
+        await page.mouse.move(cx, cy);
+        await page.mouse.down();
+        for (let step = 1; step <= 12; step += 1) {
+            await page.mouse.move(cx + 16 * step, cy);
+        }
+        await page.mouse.up();
+        // Damping settles over a few frames; poll rather than race it.
+        await expect.poll(async () => axial(await frame()).length > 0).toBe(true);
+        await page.waitForTimeout(600);
+        const after = axial(await frame());
+
+        // A horizontal drag is a rotation about the up axis: the radius and the
+        // height along `up` both survive it. Before the fix the up-component
+        // swung freely while the world-Y component was the invariant one.
+        expect(Math.abs(after.length - before.length)).toBeLessThan(before.length * 0.02);
+        expect(Math.abs(after.along - before.along)).toBeLessThan(before.length * 0.03);
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
     test('τ-timeline scrubs, labels the regime, and dispatches sw-tau', async ({ page }) => {
         const host = page.locator('#sw-stage-host');
         const slider = host.locator('input[type=range]');

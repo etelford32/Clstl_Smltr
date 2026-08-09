@@ -16,7 +16,14 @@
 <meta property="og:url" content="https://parkersphysics.com/mars.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<!-- Loaded non-render-blocking (media swap on load, <noscript> for the rest).
+     A plain stylesheet link here blocks EXECUTION of every classic script that
+     follows it, including js/mars-ui-shell.js — so the promise that the mission
+     panels stay interactive while the 3D engine boots was silently gated on
+     fonts.googleapis.com answering first. On a slow or blocked font request the
+     controls were dead, not merely unstyled. -->
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"></noscript>
 <link rel="stylesheet" href="js/nav-styles.css">
 <link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
 <link rel="preload" href="/assets/mars/mars-viking-jpl.jpg" as="image">
@@ -43,7 +50,12 @@ button{color:inherit}
   radial-gradient(circle at 55% 45%,rgba(115,33,8,.12),transparent 34%),#050302}
 .mars-viewport{position:absolute;inset:0;overflow:hidden;background:#050302}
 #mars-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;outline:none;cursor:grab;touch-action:none}
+/* Hover affordance. Every landmark and sky body is clickable; without this the
+   cursor stayed `grab` over all of them and the atlas read as decoration.
+   mars-view.js sets data-hover="pick" from the hover raycast. */
+#mars-canvas[data-hover="pick"]{cursor:pointer}
 #mars-canvas.is-interacting{cursor:grabbing}
+#mars-canvas.is-interacting[data-hover="pick"]{cursor:grabbing}
 #mars-canvas:focus-visible{outline:2px solid var(--cyan);outline-offset:-4px}
 .mars-render-degraded #mars-canvas{visibility:hidden}
 .mars-render-degraded .camera-dock,.mars-render-degraded .surface-explorer{display:none}
@@ -164,8 +176,12 @@ button{color:inherit}
 .ui-panels-toggle[aria-pressed="true"]{border-color:rgba(105,228,255,.58);background:rgba(105,228,255,.14);color:#e7fbff}
 .camera-icon{font:500 .78rem var(--mono);line-height:1}
 .camera-btn-label{display:none}
-.camera-help{position:absolute;left:3px;top:calc(100% + 5px);max-width:calc(100% - 6px);overflow:hidden;color:#8a746a;font:.5rem var(--mono);pointer-events:none;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 7px #000;transition:color .16s,background .16s,border-color .16s}
-.camera-help[data-active="true"]{padding:3px 5px;border:1px solid rgba(105,228,255,.22);border-radius:6px;background:rgba(5,11,12,.76);color:#bcecf4}
+/* Was .5rem — 8px computed, below anything legible, for the one element that
+   explains how to drive the canvas. Widened past the dock too: at 365px the
+   hint was ellipsised down to about four words. */
+.camera-help{position:absolute;left:3px;top:calc(100% + 6px);width:max-content;max-width:min(560px,calc(100vw - 40px));overflow:hidden;color:#a89187;font:.66rem var(--mono);pointer-events:none;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 7px #000,0 0 12px #000;transition:color .16s,background .16s,border-color .16s}
+.camera-help[data-active="true"]{padding:3px 7px;border:1px solid rgba(105,228,255,.22);border-radius:6px;background:rgba(5,11,12,.82);color:#cdf3fa}
+@media(max-width:560px){.camera-help{font-size:.58rem;max-width:calc(100vw - 30px)}}
 .surface-explorer{position:absolute;z-index:7;left:18px;top:84px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 9px;width:334px;padding:7px 42px 7px 7px;border:1px solid rgba(105,228,255,.25);border-radius:11px;background:rgba(7,8,8,.88);box-shadow:0 14px 38px rgba(0,0,0,.45);backdrop-filter:blur(18px)}
 .surface-explorer[hidden]{display:none}
 .surface-collapse{position:absolute;right:6px;top:6px}
@@ -330,6 +346,14 @@ button{color:inherit}
         <div class="metric"><span>Coordinates</span><strong id="fix-coordinates">18.426°N, 77.225°E</strong><small>planetocentric</small></div>
       </div>
       <p class="provenance-note" id="position-note"><strong>Position integrity:</strong> bundled NASA route snapshot through sol 1940; not live GPS.</p>
+      <div class="layer-group-title">Mars right now · JPL Horizons</div>
+      <div class="metric-grid">
+        <div class="metric" id="geo-range"><span>Earth range</span><strong>—</strong><small>Earth–Mars distance</small></div>
+        <div class="metric" id="geo-light-time"><span>Light time</span><strong>—</strong><small>one-way, at light speed</small></div>
+        <div class="metric" id="geo-elongation"><span>Sun–Earth–Mars</span><strong>—</strong><small>solar elongation</small></div>
+        <div class="metric" id="geo-subsolar"><span>Sub-solar point</span><strong>—</strong><small>sub-solar lat, lon</small></div>
+      </div>
+      <p class="provenance-note" id="geometry-note"><strong>Geometry:</strong> requesting live JPL Horizons ephemeris…</p>
       <div class="action-row">
         <button class="action-btn" type="button" id="focus-rover">Focus selected</button>
         <button class="action-btn" type="button" id="reset-view">Global view</button>
@@ -350,7 +374,7 @@ button{color:inherit}
     <div class="panel-body">
       <div class="layer-group-title">Surface</div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◒</span><div class="layer-name">Viking imagery<span class="layer-desc" id="surface-source">JPL / USGS global color</span></div><label class="switch"><input id="surface-toggle" type="checkbox" data-layer="imagery" checked><span class="switch-track"></span></label></div>
-      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">⌁</span><div class="layer-name">MOLA relief<span class="layer-desc" id="relief-source">5× vertical exaggeration</span></div><label class="switch"><input id="relief-toggle" type="checkbox" data-layer="relief" checked><span class="switch-track"></span></label></div>
+      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">⌁</span><div class="layer-name">MOLA relief<span class="layer-desc" id="relief-source">5× on the globe · 18× on the surface patch</span></div><label class="switch"><input id="relief-toggle" type="checkbox" data-layer="relief" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">#</span><div class="layer-name">Coordinate grid<span class="layer-desc">30° planetocentric</span></div><label class="switch"><input type="checkbox" data-layer="grid" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◌</span><div class="layer-name">Thin atmosphere<span class="layer-desc">visual CO₂ limb</span></div><label class="switch"><input type="checkbox" data-layer="atmosphere" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◐</span><div class="layer-name">Day/night terminator<span class="layer-desc" id="terminator-source">season + MTC fallback while JPL loads</span></div><label class="switch"><input type="checkbox" data-layer="terminator" checked><span class="switch-track"></span></label></div>
@@ -399,7 +423,7 @@ button{color:inherit}
 
 </main>
 
-<script src="./js/mars-ui-shell.js?v=20260806-ui2"></script>
+<script src="./js/mars-ui-shell.js?v=20260809-live"></script>
 <script>
 (() => {
   window.__marsReady = false;
@@ -429,6 +453,6 @@ button{color:inherit}
   });
 })();
 </script>
-<script type="module" src="./js/mars-view.js?v=20260806-ui2" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
+<script type="module" src="./js/mars-view.js?v=20260809-live" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
 </body>
 </html>

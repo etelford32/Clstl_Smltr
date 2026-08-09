@@ -210,6 +210,7 @@ const PAGES = [
     { file: 'sun.html',              label: 'The Sun',                  tag: 'sim',  deps: ['js/nav.js','js/swpc-feed.js','js/wind-pipeline-feed.js','js/soho-feed.js','js/solar-atmosphere.js','js/solar-weather-forecast.js'] },
     { file: 'earth.html',            label: 'Earth',                    tag: 'sim',  deps: ['js/nav.js','js/swpc-feed.js','js/user-location.js','js/weather-feed.js','js/nws-alerts.js','js/isobar-engine.js','js/magnetosphere-engine.js','js/exosphere-engine.js','js/solar-wind-magnetosphere.js','js/solar-weather-history.js','js/solar-weather-forecast.js','js/satellite-feed.js','js/earth-obs-feed.js','js/scale-nav.js','js/earth-feeds.js','js/satellite-tracker.js','js/earth-skin.js','js/storm-feed.js'] },
     { file: 'moon.html',             label: 'Moon',                     tag: 'sim',  deps: ['js/nav.js','js/moon-skin.js','js/swpc-feed.js','js/scale-nav.js','js/analytics.js','js/user-state.js','js/greeting.js'] },
+    { file: 'mars.html',             label: 'Real-Time Mars',           tag: 'sim',  deps: ['js/nav.js','js/mars-view.js','js/mars-ui-shell.js','js/mars-mission-state.js','js/mars-landmarks.js','js/mars-landmarks-data.js','js/mars-sky.js','js/mars-ephemeris.js','js/mars-route-normalize.js','js/horizons.js'] },
     { file: 'solar-system.html',          label: 'Solar System',             tag: 'sim',  deps: ['js/nav.js','js/scale-nav.js','js/horizons.js','js/jupiter-shader.js','js/planet-moons.js','js/jovian-system.js','js/gravity-lab/physics.js','js/swpc-feed.js'] },
     { file: 'galactic-map.html',     label: 'Galaxy Map',               tag: 'sim',  deps: ['js/nav.js','js/scale-nav.js','js/live-status-bar.js','js/sstar-wasm/sstar_wasm.js'] },
     { file: 'sagittarius.html',      label: 'Sagittarius A*',           tag: 'sim',  deps: ['js/nav.js','js/sgr-a-star.js','js/analytics.js','js/user-state.js','js/greeting.js'] },
@@ -251,6 +252,13 @@ const JS_MODULES = [
     'js/earth-skin.js','js/earth-orbit.js','js/earth-feeds.js','js/earth-obs-feed.js',
     'js/earth-forecast.js','js/exosphere-engine.js',
     'js/moon-skin.js','js/scale-nav.js','js/live-status-bar.js',
+    // Real-Time Mars. mars-ephemeris.js and mars-route-normalize.js are shared
+    // with api/mars/* — the edge routes import them directly, so a missing file
+    // here breaks the pipelines, not just the page.
+    'js/mars-view.js','js/mars-ui-shell.js','js/mars-mission-state.js',
+    'js/mars-landmarks.js','js/mars-landmarks-data.js','js/mars-sky.js',
+    'js/mars-ephemeris.js','js/mars-route-normalize.js',
+    'js/pipeline-registry.js',
     'js/horizons.js','js/horizons-extended.js','js/outer-planets.js',
     'js/orbit-trails.js','js/orbital-analytics.js',
     'js/jupiter-shader.js','js/jupiter-skin.js','js/planet-moons.js','js/jovian-system.js',
@@ -427,6 +435,11 @@ async function _probeProxy(spec) {
     // storm feed uses `updated`. Accept all three so the status card
     // doesn't show "no freshness info" for endpoints that are healthy.
     else if (body?.fetched)          { const t = Date.parse(body.fetched);          if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
+    // Aggregator/compute endpoints (mars/*, aurora/outlook, density/tudelft,
+    // hindcast/gannon-model) stamp `generated_at` at response time rather than
+    // a single upstream fetch time — for a cached edge response that IS the
+    // cache-fill age, which is exactly what this column means.
+    else if (body?.generated_at)     { const t = Date.parse(body.generated_at);     if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
     else if (body?.updated)          { const t = Date.parse(body.updated);          if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
     else if (body?.data?.updated)    { const t = Date.parse(body.data.updated);     if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
     else if (Array.isArray(body)) {
