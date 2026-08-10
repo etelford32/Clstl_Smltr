@@ -983,21 +983,54 @@ void main() {
     // what keeps disc boundaries from rendering as a hard line of
     // cloud-density change — don't quantize or threshold satData here.
     float satNoDataMask = 0.0;   // research-mode hatch flag (set below)
-    vec4  satPix = vec4(0.0);    // hoisted: the cloud-top-height pass below reuses it
+    vec4  satPix   = vec4(0.0);  // hoisted: the anvil pass below reuses it
+    float satCthKm = -1.0;       // IR cloud-top height, km; < 0 = no IR estimate
     if (u_satellite_on > 0.5) {
         vec4  sat      = texture2D(u_satellite, vUv);
         satPix         = sat;
         float satCloud = sat.r;
         float satData  = sat.a;                             // 1 where the satellite saw this pixel
         float satShape = smoothstep(0.18, 0.85, satCloud);
-        float satLow   = satShape * mix(0.85, 1.0, shapeLow);
-        float satMid   = satShape * mix(0.55, 0.85, shapeMid);
         // Coverage-weighted blend: full satellite influence only where the
         // alpha mask confirms the pixel is real observation.
         float influence = satData * 0.82;
-        alphaLow  = mix(alphaLow,  satLow,           influence);
-        alphaMid  = mix(alphaMid,  satMid,           0.60 * satData);
-        alphaHigh = mix(alphaHigh, satShape * 0.35,  0.35 * satData);
+
+        // ── IR deck routing (Phase 2.5) ──────────────────────────────────
+        // The mosaic's B channel is the IR cloud-top height proxy (0 →
+        // ~300 K, 1 → ~195 K; keep the 26.85 − b·105 ramp in lockstep with
+        // IR_BT_WARM_K/IR_BT_COLD_K in cloud-mosaic-core.js). Decoded
+        // against 2 m temperature + a 6.5 K/km lapse it tells us WHICH deck
+        // the measured cover belongs to — so route it there, instead of
+        // painting all three decks with the same footprint. The old blend
+        // (the else branch, kept for pixels no IR disc saw) correlated the
+        // decks everywhere the satellite looked, which flattened the
+        // layered render exactly where the data is best: a real cirrus
+        // shield tripled into one white blob instead of reading as a veil
+        // above the model's low deck. Decks the observed top does NOT
+        // claim keep their Open-Meteo/procedural alpha — IR only sees the
+        // top, so the model remains the best guess underneath.
+        if (sat.b > 0.02) {
+            float t2mC = sampleWeatherField(vUv).r * 110.0 - 60.0;
+            float btC  = 26.85 - sat.b * 105.0;
+            satCthKm   = clamp((t2mC - btC) / 6.5, 0.0, 18.0);
+            float wHigh = smoothstep(5.0, 8.5, satCthKm);
+            float wMid  = smoothstep(1.6, 4.2, satCthKm) * (1.0 - wHigh);
+            float wLow  = clamp(1.0 - wMid - wHigh, 0.0, 1.0);
+            float satLowT  = satShape * mix(0.85, 1.00, shapeLow);
+            float satMidT  = satShape * mix(0.60, 0.90, shapeMid);
+            float satHighT = satShape * mix(0.50, 0.80, shapeHigh);
+            alphaLow  = mix(alphaLow,  satLowT,  influence * wLow);
+            alphaMid  = mix(alphaMid,  satMidT,  0.72 * satData * wMid);
+            alphaHigh = mix(alphaHigh, satHighT, 0.80 * satData * wHigh);
+        } else {
+            // Legacy footprint blend — no IR estimate at this pixel (COT /
+            // GeoColor / truecolor fill), so vertical placement is unknown.
+            float satLow = satShape * mix(0.85, 1.0, shapeLow);
+            float satMid = satShape * mix(0.55, 0.85, shapeMid);
+            alphaLow  = mix(alphaLow,  satLow,           influence);
+            alphaMid  = mix(alphaMid,  satMid,           0.60 * satData);
+            alphaHigh = mix(alphaHigh, satShape * 0.35,  0.35 * satData);
+        }
 
         // Research mode: outside the satellite's footprint (satData < 1) we
         // want the user to SEE that nothing was observed there, not a
@@ -1005,6 +1038,20 @@ void main() {
         // hatch overlay below; in composite mode this stays at 0 so nothing
         // changes for casual viewers.
         satNoDataMask = (1.0 - satData) * u_research_mode;
+    }
+
+    // ── Mass clumping (presentation only) ────────────────────────────────────
+    // A gentle S-curve on the two opaque decks deepens the clear gaps and
+    // solidifies the cores, so cloud MASSES read instead of a uniform
+    // 40–60% haze — the "grey soup" the layered compositing alone couldn't
+    // fully kill. Cirrus is exempt (it is a veil, not a mass) but capped so
+    // a satellite-bright shield never bleaches into a solid white cutout.
+    // Research mode renders the measured fields untouched — this is a
+    // presentation curve, not data.
+    if (u_research_mode < 0.5) {
+        alphaLow  = alphaLow * alphaLow * (3.0 - 2.0 * alphaLow);
+        alphaMid  = alphaMid * alphaMid * (3.0 - 2.0 * alphaMid);
+        alphaHigh = min(alphaHigh, 0.80);
     }
 
 #ifdef SHELL_SPLIT
@@ -1021,25 +1068,19 @@ void main() {
 #endif
 
 #if !defined(SHELL_SPLIT) || SHELL_LAYER == 2
-    // Cloud-top height (Phase 2.3): the mosaic's B channel carries IR
-    // brightness-temperature "top coldness" (0 → ~300 K, 1 → ~195 K; see
-    // IR_BT_WARM_K/IR_BT_COLD_K in cloud-mosaic-core.js — keep the 26.85 −
-    // b·105 ramp below in lockstep). Against the 2 m surface temperature
-    // and a 6.5 K/km lapse, cold tops decode to height; deep convection
-    // (tops punching past ~7 km) thickens and seeds the high shell so
-    // towers visibly rise. Confidence-feathered — procedural-fill regions
-    // grow no fake anvils. B = 0 means "no IR estimate" and is skipped.
+    // Deep-convection anvil boost (Phase 2.3): tops punching past ~7 km
+    // thicken and seed the high deck so towers visibly rise. satCthKm is
+    // the IR cloud-top height decoded once in the satellite block above
+    // (< 0 when no IR disc saw the pixel — procedural-fill regions grow no
+    // fake anvils, and the estimate is confidence-feathered by satPix.a).
     // Runs for the split high shell AND the layered aggregate's high deck,
     // so anvils survive a governor collapse to the composite. Research mode
     // is excluded on purpose: the boost ADDS coverage the measured
     // low/mid/high channels didn't supply, and measured-only alpha must
     // stay alpha = data.
-    if (u_satellite_on > 0.5 && u_research_mode < 0.5 && satPix.b > 0.02) {
-        float t2mC  = sampleWeatherField(vUv).r * 110.0 - 60.0;
-        float btC   = 26.85 - satPix.b * 105.0;
-        float cthKm = clamp((t2mC - btC) / 6.5, 0.0, 18.0);
-        float tower = smoothstep(7.0, 13.0, cthKm) * satPix.a;
-        alphaHigh   = clamp(alphaHigh * (1.0 + 0.9 * tower) + 0.12 * tower, 0.0, 1.0);
+    if (satCthKm > 0.0 && u_research_mode < 0.5) {
+        float tower = smoothstep(7.0, 13.0, satCthKm) * satPix.a;
+        alphaHigh   = clamp(alphaHigh * (1.0 + 0.9 * tower) + 0.12 * tower, 0.0, 0.80);
     }
 #endif
 
@@ -1130,9 +1171,11 @@ void main() {
     // Direct sun reaching a deck is attenuated by the decks stacked above
     // it — cirrus + altostratus visibly veil the cumulus below. Split shells
     // can't see their siblings (those alphas are pinned to 0), so there the
-    // veil stays 1; the aggregate is where the stacked look pays off.
-    float veilLow = 1.0 - 0.35 * clamp(alphaMid + alphaHigh, 0.0, 1.0);
-    float veilMid = 1.0 - 0.30 * clamp(alphaHigh, 0.0, 1.0);
+    // veil stays 1; the aggregate is where the stacked look pays off. Now
+    // that IR routing decorrelates the deck footprints, these shadows
+    // pattern the lower decks instead of dimming everything uniformly.
+    float veilLow = 1.0 - 0.45 * clamp(alphaMid + alphaHigh, 0.0, 1.0);
+    float veilMid = 1.0 - 0.38 * clamp(alphaHigh, 0.0, 1.0);
 
     float dayMixLow, dayMixMid, dayMixHigh;
     // Low cumulus: the classic bright-core ramp, full relief + self-shadow.
@@ -1146,15 +1189,15 @@ void main() {
     vec3 colMid  = shadeDeck(alphaMid,
                              NdotLf + liftMid, mix(NdotLf, NdotLb, relMid) + liftMid,
                              selfSh * relMid, veilMid, forward, 0.80, 0.30,
-                             vec3(0.63, 0.68, 0.79), vec3(0.94, 0.96, 0.99),
+                             vec3(0.62, 0.66, 0.77), vec3(0.91, 0.94, 0.98),
                              vec3(0.43, 0.52, 0.68), dayMixMid);
     // High cirrus: an icy translucent veil — never pure white, strongest
     // forward-scatter silver, warmest terminator (alpenglow lingers here).
     vec3 colHigh = shadeDeck(alphaHigh,
                              NdotLf + liftHigh, mix(NdotLf, NdotLb, relHigh) + liftHigh,
                              selfSh * relHigh, 1.0, forward, 1.35, 0.40,
-                             vec3(0.74, 0.80, 0.92), vec3(0.90, 0.94, 1.00),
-                             vec3(0.55, 0.62, 0.78), dayMixHigh);
+                             vec3(0.70, 0.78, 0.94), vec3(0.86, 0.92, 1.00),
+                             vec3(0.52, 0.60, 0.78), dayMixHigh);
 
     // ── Precipitation: 3-D rain / snow shafts ────────────────────────────────
     // The old version drew fract() stripes in equirectangular UV: they
