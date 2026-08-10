@@ -77,9 +77,8 @@ test.describe('EarthView pollution + wildfire toggles', () => {
         expect(await page.evaluate(() => window.__wildfireLayer.group.visible)).toBe(false);
     });
 
-    test('international ground monitors load; unconfigured key reads as setup', async ({ page }) => {
-        test.setTimeout(240_000);       // two earth.html boots under software GL
-        // Loaded path: three mocked OpenAQ observations.
+    test('international ground monitors load with attribution', async ({ page }) => {
+        test.setTimeout(240_000);       // one earth.html boot under software GL
         await page.route('**/api/air-quality/stations-intl', r => r.fulfill({
             json: {
                 updated: NOW_ISO(), count: 3, freshness: 'live', configured: true,
@@ -102,9 +101,10 @@ test.describe('EarthView pollution + wildfire toggles', () => {
         await expect(page.locator('#intl-stations-count')).toContainText('3');
         // CC BY attribution must survive into the pill title.
         await expect(page.locator('#intl-stations-count')).toHaveAttribute('title', /OpenAQ · CC BY 4.0/);
+    });
 
-        // Unconfigured-key path: the route's honest setup answer.
-        await page.unroute('**/api/air-quality/stations-intl');
+    test('unconfigured OpenAQ key reads as setup, not error', async ({ page }) => {
+        test.setTimeout(240_000);       // one earth.html boot under software GL
         await page.route('**/api/air-quality/stations-intl', r => r.fulfill({
             json: {
                 updated: NOW_ISO(), count: 0, freshness: 'stale', configured: false,
