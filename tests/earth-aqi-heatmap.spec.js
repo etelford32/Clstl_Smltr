@@ -61,6 +61,17 @@ async function bootWithHeatmap(page, { co2 = true } = {}) {
 const probe = (page, lat, lon) =>
     page.evaluate(([la, lo]) => window.__aqiHeatmapLayer.valueAt(la, lo), [lat, lon]);
 
+// Drive a range input programmatically. Pointer-based fill() must scroll a
+// tiny slider inside the layers panel's overflow column into view and hold
+// it stable — under this suite's software-GL load that actionability check
+// retries forever. Setting value + dispatching 'input' exercises the exact
+// same page contract (the input listener → layer setter).
+const slide = (page, id, value) => page.evaluate(([elId, v]) => {
+    const el = document.getElementById(elId);
+    el.value = String(v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+}, [id, value]);
+
 test.describe('EarthView AQI density heatmap', () => {
     test('gradient field, species divergence, slider control', async ({ page }) => {
         // earth.html boots in ~40-50 s under headless software GL, and this
@@ -102,8 +113,7 @@ test.describe('EarthView AQI density heatmap', () => {
         // 4. Plume-spread slider: at 2000 km a probe ~1200 km from Delhi
         //    carries plume signal; narrowed to 500 km it falls to background.
         const farBefore = await probe(page, 20, 70);
-        await page.locator('#aqi-heat-spread').fill('500');
-        await page.locator('#aqi-heat-spread').dispatchEvent('input');
+        await slide(page, 'aqi-heat-spread', 500);
         await expect(page.locator('#aqi-heat-spread-out')).toHaveText('500 km');
         await page.waitForFunction(([before]) => {
             const now = window.__aqiHeatmapLayer.valueAt(20, 70);
@@ -111,8 +121,7 @@ test.describe('EarthView AQI density heatmap', () => {
         }, [farBefore], { timeout: 20_000 });
 
         // Density-floor slider updates its readout and layer state.
-        await page.locator('#aqi-heat-floor').fill('60');
-        await page.locator('#aqi-heat-floor').dispatchEvent('input');
+        await slide(page, 'aqi-heat-floor', 60);
         await expect(page.locator('#aqi-heat-floor-out')).toHaveText('60%');
         await page.waitForFunction(
             () => window.__aqiHeatmapLayer.floorPct === 60, null, { timeout: 5_000 });
@@ -123,6 +132,7 @@ test.describe('EarthView AQI density heatmap', () => {
     });
 
     test('feed without CO₂ disables the CO₂ option instead of erroring', async ({ page }) => {
+        test.setTimeout(240_000);       // boot alone can exceed the 60 s default here
         await bootWithHeatmap(page, { co2: false });
         await expect(page.locator('#aqi-heatmap-species option[value="co2"]')).toBeDisabled();
         // Aggregate still works untouched.
