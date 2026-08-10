@@ -53,28 +53,87 @@ const REBUILD_DEBOUNCE_MS = 150;        // slider drags coalesce
 /**
  * Species registry. `scale` is [transparent-floor-min, saturated-ceiling] in
  * the species' native unit — the density-floor slider picks its cutoff
- * inside this range, and heatAlpha saturates at the ceiling. Backgrounds:
- * aggregate/no2 fade to clean-air values; CO₂ fades to the ~422 ppm
- * well-mixed ambient baseline (its "pollution" signal is the urban EXCESS
- * above that baseline, which is why its scale starts there).
+ * inside this range, and heatAlpha saturates at the ceiling. Backgrounds
+ * fade remote cells to clean-air values; the well-mixed greenhouse gases
+ * (CO₂, CH₄) anchor their scales at the ambient baseline instead of zero —
+ * their pollution signal is the urban EXCESS, and a zero-based scale would
+ * paint the whole planet.
+ *
+ * `pick` reads a city row from /api/air-quality/centers; `gridPick`, where
+ * present, reads a sparse-grid point from /api/air-quality/grid (the grid
+ * frame only carries aqi/pm25/pm10/aod, so gas species are city-only and an
+ * all-null species yields zero samples — the honest "unavailable" signal).
  */
+const num = v => (Number.isFinite(v) ? v : null);
 export const HEAT_SPECIES = Object.freeze({
     aggregate: Object.freeze({
         label: 'Aggregate (US AQI)', unit: 'AQI',
         scale: Object.freeze([0, 300]), background: 12,
-        pick: row => Number.isFinite(row.aqi) ? row.aqi : null,
+        pick: row => num(row.aqi), gridPick: p => num(p.aqi),
     }),
-    co2: Object.freeze({
-        label: 'CO₂', unit: 'ppm',
-        scale: Object.freeze([422, 520]), background: 422,
-        pick: row => Number.isFinite(row.co2) ? row.co2 : null,
+    // ── Particulates & aerosol ────────────────────────────────────────────
+    pm25: Object.freeze({
+        label: 'PM2.5', unit: 'µg/m³',
+        scale: Object.freeze([0, 150]), background: 3,
+        pick: row => num(row.pm25), gridPick: p => num(p.pm25),
+    }),
+    pm10: Object.freeze({
+        label: 'PM10', unit: 'µg/m³',
+        scale: Object.freeze([0, 250]), background: 6,
+        pick: row => num(row.pm10), gridPick: p => num(p.pm10),
+    }),
+    dust: Object.freeze({
+        label: 'Dust', unit: 'µg/m³',
+        scale: Object.freeze([0, 300]), background: 0,
+        pick: row => num(row.dust),
+    }),
+    aod: Object.freeze({
+        label: 'AOD 550 nm', unit: '',
+        scale: Object.freeze([0, 1.5]), background: 0.03,
+        pick: row => num(row.aod), gridPick: p => num(p.aod),
+    }),
+    // ── Gases ─────────────────────────────────────────────────────────────
+    o3: Object.freeze({
+        label: 'O₃', unit: 'µg/m³',
+        scale: Object.freeze([0, 240]), background: 40,   // real ambient background
+        pick: row => num(row.ozone),
     }),
     no2: Object.freeze({
         label: 'NO₂', unit: 'µg/m³',
         scale: Object.freeze([0, 150]), background: 2,
-        pick: row => Number.isFinite(row.no2) ? row.no2 : null,
+        pick: row => num(row.no2),
+    }),
+    so2: Object.freeze({
+        label: 'SO₂', unit: 'µg/m³',
+        scale: Object.freeze([0, 200]), background: 1,
+        pick: row => num(row.so2),
+    }),
+    co: Object.freeze({
+        label: 'CO', unit: 'µg/m³',
+        scale: Object.freeze([0, 4000]), background: 100,
+        pick: row => num(row.co),
+    }),
+    co2: Object.freeze({
+        label: 'CO₂', unit: 'ppm',
+        scale: Object.freeze([422, 520]), background: 422,
+        pick: row => num(row.co2),
+    }),
+    ch4: Object.freeze({
+        label: 'CH₄', unit: 'µg/m³',
+        scale: Object.freeze([1250, 1700]), background: 1250,  // ≈1.9 ppm ambient
+        pick: row => num(row.ch4),
     }),
 });
+
+/** Per-species sample availability for the current feed data — the page
+ *  uses this to gray options instead of letting them error on selection. */
+export function availableSpecies(cities = [], gridPoints = []) {
+    const out = {};
+    for (const key of Object.keys(HEAT_SPECIES)) {
+        out[key] = buildHeatSamples(cities, gridPoints, key).length > 0;
+    }
+    return out;
+}
 
 /**
  * Extract IDW samples for one species from the two feeds. The sparse global
@@ -92,9 +151,9 @@ export function buildHeatSamples(cities = [], gridPoints = [], species = 'aggreg
             out.push({ lat: c.lat, lon: c.lon, value: v });
         }
     }
-    if (key === 'aggregate') {
+    if (spec.gridPick) {
         for (const p of gridPoints) {
-            const v = Number.isFinite(p.aqi) ? p.aqi : null;
+            const v = spec.gridPick(p);
             if (v != null && Number.isFinite(p.lat) && Number.isFinite(p.lon)) {
                 out.push({ lat: p.lat, lon: p.lon, value: v });
             }
@@ -119,23 +178,53 @@ function ramp(stops, v) {
     return [last[1], last[2], last[3]];
 }
 
-// CO₂: cool teal at ambient → amber → deep red at heavily-enhanced urban
-// plumes. NO₂: WHO-guideline-shaped (10 annual / 25 daily µg/m³ sit at the
-// green→yellow knee). Both are this layer's own ramps; the aggregate view
-// reuses the EPA stops shared by every other AQ surface.
-const CO2_STOPS = [
-    [422, 0.10, 0.65, 0.60], [440, 0.85, 0.80, 0.20],
-    [470, 1.00, 0.49, 0.05], [500, 1.00, 0.15, 0.18], [520, 0.62, 0.25, 0.78],
-];
-const NO2_STOPS = [
-    [5, 0.10, 0.88, 0.48], [25, 1.00, 0.86, 0.18],
-    [60, 1.00, 0.49, 0.05], [120, 1.00, 0.15, 0.18], [150, 0.62, 0.25, 0.78],
-];
+// Gas ramps are WHO-guideline-shaped where a guideline exists (the
+// green→yellow knee sits at it) and all end "beyond red" in purple, the
+// same convention as the EPA stops. The greenhouse gases anchor at their
+// ambient baselines. Aggregate + the particulate metrics the rest of the
+// site already colors (PM2.5/PM10/AOD) reuse the SHARED EPA stops via
+// airQualityMetricColor so no two surfaces can disagree.
+const GAS_STOPS = Object.freeze({
+    co2: [
+        [422, 0.10, 0.65, 0.60], [440, 0.85, 0.80, 0.20],
+        [470, 1.00, 0.49, 0.05], [500, 1.00, 0.15, 0.18], [520, 0.62, 0.25, 0.78],
+    ],
+    no2: [
+        [5, 0.10, 0.88, 0.48], [25, 1.00, 0.86, 0.18],
+        [60, 1.00, 0.49, 0.05], [120, 1.00, 0.15, 0.18], [150, 0.62, 0.25, 0.78],
+    ],
+    // WHO 8-h O₃ guideline 100 µg/m³ at the yellow knee.
+    o3: [
+        [50, 0.10, 0.88, 0.48], [100, 1.00, 0.86, 0.18],
+        [150, 1.00, 0.49, 0.05], [200, 1.00, 0.15, 0.18], [240, 0.62, 0.25, 0.78],
+    ],
+    // WHO 24-h SO₂ guideline 40 µg/m³ at the yellow knee.
+    so2: [
+        [10, 0.10, 0.88, 0.48], [40, 1.00, 0.86, 0.18],
+        [90, 1.00, 0.49, 0.05], [150, 1.00, 0.15, 0.18], [200, 0.62, 0.25, 0.78],
+    ],
+    // WHO 24-h CO guideline 4 mg/m³ = 4000 µg/m³ at the red end.
+    co: [
+        [300, 0.10, 0.88, 0.48], [1000, 1.00, 0.86, 0.18],
+        [2000, 1.00, 0.49, 0.05], [3000, 1.00, 0.15, 0.18], [4000, 0.62, 0.25, 0.78],
+    ],
+    ch4: [
+        [1250, 0.10, 0.65, 0.60], [1350, 0.85, 0.80, 0.20],
+        [1450, 1.00, 0.49, 0.05], [1580, 1.00, 0.15, 0.18], [1700, 0.62, 0.25, 0.78],
+    ],
+    // Dust has no WHO line of its own; ramp shaped to Saharan-event scales.
+    dust: [
+        [20, 0.55, 0.48, 0.25], [80, 0.85, 0.68, 0.25],
+        [160, 0.95, 0.52, 0.12], [240, 0.90, 0.30, 0.10], [300, 0.62, 0.25, 0.78],
+    ],
+});
 
-/** Species value → [r, g, b] in 0–1. Aggregate = shared EPA stops. */
+/** Species value → [r, g, b] in 0–1. Shared EPA stops wherever they exist. */
 export function heatColor(species, value) {
-    if (species === 'co2') return ramp(CO2_STOPS, value);
-    if (species === 'no2') return ramp(NO2_STOPS, value);
+    if (GAS_STOPS[species]) return ramp(GAS_STOPS[species], value);
+    if (species === 'pm25' || species === 'pm10' || species === 'aod') {
+        return airQualityMetricColor(species, value);
+    }
     return airQualityMetricColor('aqi', value);
 }
 
@@ -166,7 +255,8 @@ export class AqiHeatmapLayer {
         this.floorPct = 20;             // % of the species scale
         this.cities = [];
         this.gridPoints = [];
-        this.co2Available = null;       // null until the feed answers
+        this.available = null;          // per-species map, null until the feed answers
+        this.co2Available = null;       // back-compat alias
         this.sampleCount = 0;
         this._timer = null;
         this._rebuildTimer = null;
@@ -273,10 +363,13 @@ export class AqiHeatmapLayer {
                     ?? centersRes.reason?.message ?? 'city feed is stale');
             }
             this.cities = centers.cities;
-            this.co2Available = centers.co2Available !== false
-                && centers.cities.some(c => Number.isFinite(c.co2));
             const grid = gridRes.status === 'fulfilled' ? gridRes.value : null;
             this.gridPoints = grid?.available ? (grid.frame?.points ?? []) : [];
+            // Sample-presence is the one availability truth: it already
+            // reflects the feed's retry-ladder (a rung that dropped CO₂/CH₄
+            // leaves those fields null in every row).
+            this.available = availableSpecies(this.cities, this.gridPoints);
+            this.co2Available = this.available.co2;      // back-compat alias
             this._rebuild();
         })().catch(err => {
             this._onStatus('error', { error: err?.message ?? 'fetch failed' });
@@ -340,6 +433,7 @@ export class AqiHeatmapLayer {
             count: samples.length,
             spreadKm: this.spreadKm,
             floorPct: this.floorPct,
+            available: this.available,
             co2Available: this.co2Available,
         });
     }

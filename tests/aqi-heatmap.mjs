@@ -18,7 +18,7 @@
  */
 
 import {
-    HEAT_SPECIES, buildHeatSamples, heatColor, heatAlpha,
+    HEAT_SPECIES, buildHeatSamples, heatColor, heatAlpha, availableSpecies,
 } from '../js/aqi-heatmap-layer.js';
 import { airQualityMetricColor } from '../js/air-quality-frame.js';
 
@@ -35,28 +35,31 @@ function assert(cond, msg) {
 const near = (a, b, tol, msg) => assert(Math.abs(a - b) <= tol, `${msg} (got ${a}, want ${b}±${tol})`);
 
 const CITIES = [
-    { name: 'Delhi', lat: 28.61, lon: 77.21, aqi: 172, pm25: 96, no2: 44, co2: 468 },
-    { name: 'New York', lat: 40.71, lon: -74.01, aqi: 42, pm25: 9, no2: 18, co2: 432 },
+    { name: 'Delhi', lat: 28.61, lon: 77.21, aqi: 172, pm25: 96, pm10: 180, no2: 44, so2: 12, co: 850, co2: 468, ch4: 1350, dust: 22, ozone: 30, aod: 0.85 },
+    { name: 'New York', lat: 40.71, lon: -74.01, aqi: 42, pm25: 9, pm10: 18, no2: 18, so2: 3, co: 250, co2: 432, ch4: 1290, dust: 2, ozone: 60, aod: 0.1 },
     { name: 'NoSpecies', lat: 51.51, lon: -0.13, aqi: 46, pm25: 11, no2: null, co2: null },
     { name: 'BadCoords', lat: NaN, lon: 10, aqi: 80, no2: 30, co2: 450 },
 ];
 const GRID = [
-    { lat: 0, lon: -140, aqi: 18, pm25: 4 },
-    { lat: 30, lon: 100, aqi: 55, pm25: 16 },
+    { lat: 0, lon: -140, aqi: 18, pm25: 4, pm10: 8, aod: 0.04 },
+    { lat: 30, lon: 100, aqi: 55, pm25: 16, pm10: 30, aod: 0.2 },
     { lat: -30, lon: 20, aqi: null, pm25: 6 },   // no aqi → dropped from aggregate
 ];
 
 // ── Species registry shape ──────────────────────────────────────────────────
 {
-    for (const key of ['aggregate', 'co2', 'no2']) {
+    const ALL = ['aggregate', 'pm25', 'pm10', 'dust', 'aod', 'o3', 'no2', 'so2', 'co', 'co2', 'ch4'];
+    assert(Object.keys(HEAT_SPECIES).length === ALL.length, `registry has ${ALL.length} species`);
+    for (const key of ALL) {
         const s = HEAT_SPECIES[key];
         assert(s && s.label && s.unit != null, `${key}: registered with label + unit`);
         assert(Array.isArray(s.scale) && s.scale[1] > s.scale[0], `${key}: scale is a rising [lo, hi]`);
         assert(Number.isFinite(s.background), `${key}: has a background value`);
     }
-    // CO₂'s floor starts at the well-mixed ambient baseline — its signal is
-    // the urban EXCESS, so a zero-based scale would paint the whole planet.
+    // Well-mixed greenhouse gases start at their ambient baselines — the
+    // signal is urban EXCESS; a zero-based scale would paint the planet.
     assert(HEAT_SPECIES.co2.scale[0] >= 400, 'CO₂ scale starts at the ambient baseline, not zero');
+    assert(HEAT_SPECIES.ch4.scale[0] >= 1200, 'CH₄ scale starts at the ambient baseline, not zero');
 }
 
 // ── Sample extraction ───────────────────────────────────────────────────────
@@ -74,6 +77,20 @@ const GRID = [
 
     assert(buildHeatSamples([], [], 'co2').length === 0, 'no cities → no CO₂ samples (honest emptiness)');
     assert(buildHeatSamples(CITIES, GRID, 'nonsense').length === 5, 'unknown species falls back to aggregate');
+
+    // Grid-served species merge both feeds; gas species stay city-only.
+    const pm = buildHeatSamples(CITIES, GRID, 'pm25');
+    assert(pm.length === 6, `PM2.5 merges 3 city + 3 grid samples (got ${pm.length})`);
+    const aodS = buildHeatSamples(CITIES, GRID, 'aod');
+    assert(aodS.length === 4, `AOD merges 2 city + 2 grid samples (got ${aodS.length})`);
+    assert(buildHeatSamples(CITIES, GRID, 'so2').length === 2, 'SO₂ is city-only');
+    assert(buildHeatSamples(CITIES, GRID, 'ch4').length === 2, 'CH₄ is city-only');
+
+    // Availability map: served species true, an all-null one false.
+    const avail = availableSpecies(CITIES, GRID);
+    assert(avail.aggregate && avail.pm25 && avail.so2 && avail.ch4, 'served species read available');
+    const noGas = availableSpecies([{ name: 'X', lat: 0, lon: 0, aqi: 40, pm25: 8 }], GRID);
+    assert(noGas.aggregate && noGas.pm25 && !noGas.co2 && !noGas.so2, 'all-null species read unavailable');
 }
 
 // ── Color ramps ─────────────────────────────────────────────────────────────
@@ -98,6 +115,17 @@ const GRID = [
     // NaN → the shared no-data gray, never NaN channels.
     const nan = heatColor('co2', NaN);
     assert(nan.every(Number.isFinite), 'NaN value → finite fallback color');
+
+    // PM2.5/PM10/AOD reuse the SHARED EPA stops (not private ramps).
+    for (const [sp, v] of [['pm25', 40], ['pm10', 120], ['aod', 0.6]]) {
+        const a = heatColor(sp, v), b = airQualityMetricColor(sp, v);
+        assert(a[0] === b[0] && a[1] === b[1] && a[2] === b[2], `${sp} reuses the shared EPA stops`);
+    }
+    // New gas ramps: green at the WHO knee's clean side, red when heavy.
+    assert(heatColor('o3', 40)[1] > 0.7 && heatColor('o3', 210)[0] > 0.9, 'O₃ ramp green→red');
+    assert(heatColor('so2', 5)[1] > 0.7 && heatColor('so2', 160)[0] > 0.9, 'SO₂ ramp green→red');
+    assert(heatColor('co', 200)[1] > 0.7 && heatColor('co', 3200)[0] > 0.9, 'CO ramp green→red');
+    assert(heatColor('ch4', 1260)[1] > 0.5 && heatColor('ch4', 1600)[0] > 0.9, 'CH₄ ramp baseline→red');
 }
 
 // ── Density-floor alpha ─────────────────────────────────────────────────────

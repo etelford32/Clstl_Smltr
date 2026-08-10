@@ -77,6 +77,48 @@ test.describe('EarthView pollution + wildfire toggles', () => {
         expect(await page.evaluate(() => window.__wildfireLayer.group.visible)).toBe(false);
     });
 
+    test('international ground monitors load; unconfigured key reads as setup', async ({ page }) => {
+        test.setTimeout(240_000);       // two earth.html boots under software GL
+        // Loaded path: three mocked OpenAQ observations.
+        await page.route('**/api/air-quality/stations-intl', r => r.fulfill({
+            json: {
+                updated: NOW_ISO(), count: 3, freshness: 'live', configured: true,
+                attribution: 'OpenAQ · CC BY 4.0',
+                stations: [
+                    { id: '101:7', lat: 51.51, lon: -0.13, pm25: 34.2, utc: NOW_ISO() },
+                    { id: '102:9', lat: 28.61, lon: 77.21, pm25: 96.5, utc: NOW_ISO() },
+                    { id: '103:1', lat: -33.87, lon: 151.21, pm25: 4.1, utc: NOW_ISO() },
+                ],
+            },
+        }));
+        await page.goto('/earth.html?verdict=0');
+        await page.waitForFunction(() => window.__intlStationsLayer, null, { timeout: 60_000 });
+
+        await expect(page.locator('#lyr-intl-stations')).not.toBeChecked();
+        await page.check('#lyr-intl-stations');
+        await page.waitForFunction(
+            () => window.__intlStationsLayer.stations.length === 3, null, { timeout: 15_000 });
+        expect(await page.evaluate(() => window.__intlStationsLayer.group.visible)).toBe(true);
+        await expect(page.locator('#intl-stations-count')).toContainText('3');
+        // CC BY attribution must survive into the pill title.
+        await expect(page.locator('#intl-stations-count')).toHaveAttribute('title', /OpenAQ · CC BY 4.0/);
+
+        // Unconfigured-key path: the route's honest setup answer.
+        await page.unroute('**/api/air-quality/stations-intl');
+        await page.route('**/api/air-quality/stations-intl', r => r.fulfill({
+            json: {
+                updated: NOW_ISO(), count: 0, freshness: 'stale', configured: false,
+                reason: 'OPENAQ_API_KEY not configured — free key at explore.openaq.org/register',
+                attribution: 'OpenAQ · CC BY 4.0', stations: [],
+            },
+        }));
+        await page.goto('/earth.html?verdict=0');
+        await page.waitForFunction(() => window.__intlStationsLayer, null, { timeout: 60_000 });
+        await page.check('#lyr-intl-stations');
+        await expect(page.locator('#intl-stations-count')).toContainText('needs key', { timeout: 15_000 });
+        await expect(page.locator('#intl-stations-count')).toHaveAttribute('title', /OPENAQ_API_KEY/);
+    });
+
     test('stale feed reads as an error, not a quiet empty layer', async ({ page }) => {
         await page.route('**/api/air-quality/centers', r => r.fulfill({
             json: { updated: NOW_ISO(), count: 0, freshness: 'stale', cities: [], worst: [], error: 'CAMS HTTP 503' },

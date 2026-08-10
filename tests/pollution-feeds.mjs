@@ -100,7 +100,7 @@ function assert(cond, msg) {
     ];
     const t = 1_754_740_800; // any unix hour
     const payload = [
-        { current: { time: t, us_aqi: 168, pm2_5: 92.4, pm10: 140, ozone: 30, nitrogen_dioxide: 44, aerosol_optical_depth: 0.82, carbon_dioxide: 468 } },
+        { current: { time: t, us_aqi: 168, pm2_5: 92.4, pm10: 140, ozone: 30, nitrogen_dioxide: 44, sulphur_dioxide: 12, carbon_monoxide: 850, dust: 22, aerosol_optical_depth: 0.82, carbon_dioxide: 468, methane: 1350 } },
         { current: { time: t, us_aqi: 21, pm2_5: 3.1 } },
         { current: { time: t } },   // no numeric AQ values → row dropped
     ];
@@ -110,6 +110,8 @@ function assert(cond, msg) {
     assert(delhi.name === 'Delhi' && delhi.country === 'India' && delhi.pop === 32, 'city identity passthrough');
     assert(delhi.aqi === 168 && delhi.pm25 === 92.4 && delhi.aod === 0.82, 'pollutant fields mapped');
     assert(delhi.no2 === 44 && delhi.co2 === 468, 'NO₂ + CO₂ species surfaced separately');
+    assert(delhi.so2 === 12 && delhi.co === 850 && delhi.dust === 22 && delhi.ch4 === 1350,
+        'SO₂ / CO / dust / CH₄ species surfaced separately');
     assert(delhi.time === new Date(t * 1000).toISOString(), 'sample hour surfaced as ISO');
     assert(rows[1].pm10 === null && rows[1].aod === null && rows[1].co2 === null, 'missing fields → null, not undefined/NaN');
     assert(normalizeCenters(null, cities).length === 0, 'null payload → empty list');
