@@ -17,7 +17,10 @@
 
 import { parseEvents } from '../api/wildfires/events.js';
 import { selectCenterCities, normalizeCenters } from '../api/air-quality/centers.js';
-import { normalizeOpenAq } from '../api/air-quality/stations-intl.js';
+import {
+    normalizeOpenAq, checkParameterMeta, STATION_SPECIES,
+} from '../api/air-quality/stations-intl.js';
+import { thinStations, thinToCap, buildResiduals } from '../api/air-quality/residuals.js';
 import { MAJOR_CITIES } from '../js/data/major-cities.js';
 
 let checks = 0;
@@ -135,11 +138,64 @@ function assert(cond, msg) {
     };
     const st = normalizeOpenAq(payload, now);
     assert(st.length === 2, `sentinel/dead/malformed sensors dropped (got ${st.length})`);
-    assert(st[0].id === '101:7' && st[0].pm25 === 34.2, 'station id + value mapped');
-    assert(st[1].pm25 === 0, 'a genuine zero reading is kept (only negatives are sentinels)');
+    assert(st[0].id === '101:7' && st[0].value === 34.2, 'station id + value mapped');
+    assert(st[1].value === 0, 'a genuine zero reading is kept (only negatives are sentinels)');
     assert(st[0].utc === iso(1), 'observation time surfaced as ISO');
     assert(normalizeOpenAq(null, now).length === 0, 'null payload → empty list');
     assert(normalizeOpenAq({ results: 'nope' }, now).length === 0, 'malformed results → empty list');
+
+    // Species registry + self-validation of OpenAQ parameter metadata.
+    const keys = Object.keys(STATION_SPECIES);
+    assert(keys.length === 7, `7 station species registered (got ${keys.length})`);
+    assert(new Set(keys.map(k => STATION_SPECIES[k].id)).size === keys.length, 'parameter ids unique');
+    const pmSpec = STATION_SPECIES.pm25;
+    assert(checkParameterMeta({ results: [{ id: 2, name: 'pm25', units: 'µg/m³' }] }, pmSpec) === null,
+        'matching metadata validates');
+    assert(checkParameterMeta({ results: [{ id: 2, name: 'pm25', units: 'ug/m3' }] }, pmSpec) === null,
+        'ASCII-µ unit spelling still validates');
+    assert(/expected "pm25"/.test(checkParameterMeta({ results: [{ id: 2, name: 'um100', units: 'µg/m³' }] }, pmSpec) ?? ''),
+        'wrong parameter name is rejected with the actual name');
+    assert(/serves "ppm"/.test(checkParameterMeta({ results: [{ id: 2, name: 'pm25', units: 'ppm' }] }, pmSpec) ?? ''),
+        'unit-class mismatch (ppm vs mass) is rejected');
+    assert(checkParameterMeta({}, pmSpec) != null, 'missing metadata is rejected');
+}
+
+// ── Model-vs-observation residuals ─────────────────────────────────────────
+{
+    const mk = (id, lat, lon, value, utc) => ({ id, lat, lon, value, utc });
+    const t1 = '2026-08-09T10:00:00Z', t2 = '2026-08-09T11:00:00Z';
+
+    // Thinning: two stations in the same 0.5° cell → newest wins.
+    const thin = thinStations([
+        mk('a', 51.50, -0.12, 30, t1),
+        mk('b', 51.52, -0.14, 33, t2),
+        mk('c', 40.7, -74.0, 9, t1),
+    ], 0.5);
+    assert(thin.length === 2, `per-cell dedup (got ${thin.length})`);
+    assert(thin.some(s => s.id === 'b'), 'newest observation wins the cell');
+
+    // Cap ladder: 100 stations in one small area collapse instead of a
+    // first-N slice; a global spread survives untouched.
+    const dense = Array.from({ length: 100 }, (_, i) =>
+        mk(`d${i}`, 48 + (i % 10) * 0.04, 2 + Math.floor(i / 10) * 0.04, 20, t1));
+    assert(thinToCap(dense, 5).length <= 5, 'cap ladder collapses a dense cluster');
+    const spread = Array.from({ length: 8 }, (_, i) => mk(`s${i}`, i * 10 - 40, i * 20 - 80, 10, t1));
+    assert(thinToCap(spread, 300).length === 8, 'a sparse global set passes through untouched');
+
+    // Residual pairing + stats: residual = obs − model, station-weighted.
+    const stations = [mk('x', 28.6, 77.2, 96, t1), mk('y', 40.7, -74.0, 9, t1), mk('z', 0, 0, 5, t1)];
+    const cams = [
+        { current: { pm2_5: 80 } },     // model low → residual +16
+        { current: { pm2_5: 13 } },     // model high → residual −4
+        { current: {} },                // no model value → row dropped
+    ];
+    const { rows, stats } = buildResiduals(stations, cams);
+    assert(rows.length === 2, `model-less rows dropped (got ${rows.length})`);
+    assert(rows[0].residual === 16 && rows[1].residual === -4, 'residual = obs − model per station');
+    assert(rows[0].obs === 96 && rows[0].model === 80, 'both source values ride every row');
+    assert(Math.abs(stats.bias - 6) < 1e-9, `bias is the mean residual (got ${stats.bias})`);
+    assert(Math.abs(stats.rmse - Math.sqrt((256 + 16) / 2)) < 1e-9, 'rmse over paired rows');
+    assert(buildResiduals([], []).stats === null, 'no pairs → null stats, not NaN');
 }
 
 if (process.exitCode) {

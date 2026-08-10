@@ -26,10 +26,52 @@
  */
 
 import { airQualityMetricColor } from './air-quality-frame.js';
+import { heatColor } from './aqi-heatmap-layer.js';
 
 const FEED_URL = '/api/air-quality/stations-intl';
 const REFRESH_MS = 15 * 60 * 1000;
 const HIT_THRESHOLD = 0.014;      // tighter than city dots — monitors cluster
+
+// Black carbon is the one station species with no CAMS twin (that absence
+// is exactly why it's valuable here). WHO names no guideline; the ramp is
+// shaped to urban reality — ~1 µg/m³ clean, 2–4 traffic, 8+ severe.
+const BC_STOPS = [
+    [0.5, 0.10, 0.88, 0.48], [2, 1.00, 0.86, 0.18],
+    [4, 1.00, 0.49, 0.05], [8, 1.00, 0.15, 0.18], [15, 0.62, 0.25, 0.78],
+];
+function bcRamp(v) {
+    if (!Number.isFinite(v)) return [0.34, 0.39, 0.46];
+    if (v <= BC_STOPS[0][0]) return BC_STOPS[0].slice(1);
+    for (let i = 1; i < BC_STOPS.length; i++) {
+        if (v <= BC_STOPS[i][0]) {
+            const [v0, r0, g0, b0] = BC_STOPS[i - 1];
+            const [v1, r1, g1, b1] = BC_STOPS[i];
+            const t = (v - v0) / (v1 - v0);
+            return [r0 + (r1 - r0) * t, g0 + (g1 - g0) * t, b0 + (b1 - b0) * t];
+        }
+    }
+    return BC_STOPS[BC_STOPS.length - 1].slice(1);
+}
+
+// Per-species severity ceiling for marker sizing (native µg/m³).
+const SIZE_CEIL = Object.freeze({
+    pm25: 100, pm10: 200, o3: 200, no2: 120, so2: 150, co: 3000, bc: 10,
+});
+
+/**
+ * Station species → [r, g, b]. Particulates reuse the SHARED EPA stops and
+ * the gases reuse the heatmap's WHO-shaped ramps — a monitor and the model
+ * field behind it are colored on the same scale by construction, so where
+ * their colors differ, the SOURCES differ. Only BC has its own ramp.
+ */
+export function stationColor(species, value) {
+    if (species === 'pm10') return airQualityMetricColor('pm10', value);
+    if (species === 'o3' || species === 'no2' || species === 'so2' || species === 'co') {
+        return heatColor(species, value);
+    }
+    if (species === 'bc') return bcRamp(value);
+    return airQualityMetricColor('pm25', value);
+}
 
 export class IntlStationsLayer {
     /**
@@ -46,6 +88,9 @@ export class IntlStationsLayer {
         this._onStatus = onStatus ?? (() => {});
         this.stations = [];
         this.updated = null;
+        this.species = 'pm25';
+        this.speciesLabel = 'PM2.5';
+        this.speciesUnit = 'µg/m³';
         this.attribution = 'OpenAQ · CC BY 4.0';
         this._hiIndex = -1;
         this._timer = null;
@@ -113,14 +158,29 @@ export class IntlStationsLayer {
         }
     }
 
+    /** Switch the observed species; refetches (each species is its own
+     *  OpenAQ parameter feed, CDN-cached per query string). */
+    setSpecies(species) {
+        if (species === this.species) return;
+        this.species = species;
+        this.stations = [];
+        this._points.visible = false;
+        if (this.group.visible) this._refresh();
+    }
+
     async _refresh() {
         if (this._inflight) return;
         this._onStatus('fetching', {});
+        const requested = this.species;
         this._inflight = (async () => {
-            const res = await fetch(FEED_URL, { signal: AbortSignal.timeout(15_000) });
+            const res = await fetch(`${FEED_URL}?species=${encodeURIComponent(requested)}`,
+                { signal: AbortSignal.timeout(15_000) });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const body = await res.json();
+            if (requested !== this.species) return;   // stale response — user re-switched
             if (body.attribution) this.attribution = body.attribution;
+            this.speciesLabel = body.label ?? requested;
+            this.speciesUnit = body.unit ?? 'µg/m³';
             if (body.freshness !== 'live' || !body.stations?.length) {
                 // Setup state vs failure state — the page shows them
                 // differently, so keep the distinction on the error object.
@@ -134,12 +194,17 @@ export class IntlStationsLayer {
             this._onStatus('loaded', {
                 count: this.stations.length,
                 updated: body.updated,
+                species: requested,
+                label: this.speciesLabel,
+                unit: this.speciesUnit,
                 attribution: this.attribution,
             });
         })().catch(err => {
             this._onStatus('error', {
                 error: err?.message ?? 'fetch failed',
                 configured: err?.configured !== false,
+                species: requested,
+                label: this.speciesLabel,
             });
         }).finally(() => { this._inflight = null; });
         await this._inflight;
@@ -153,15 +218,16 @@ export class IntlStationsLayer {
         const color = new Float32Array(n * 3);
         const hi = new Float32Array(n);
 
+        const ceil = SIZE_CEIL[this.species] ?? 100;
         for (let i = 0; i < n; i++) {
             const s = this.stations[i];
             const v = this._geoToXYZ(s.lat, s.lon).multiplyScalar(this._radius);
             pos[i * 3] = v.x; pos[i * 3 + 1] = v.y; pos[i * 3 + 2] = v.z;
             // Modest severity sizing — a thousand markers must read as a
-            // network, not a carpet. 0.007 clean → 0.013 at 100+ µg/m³.
-            const pm = Number.isFinite(s.pm25) ? s.pm25 : 0;
-            size[i] = 0.007 + 0.006 * Math.min(1, pm / 100);
-            const [r, g, b] = airQualityMetricColor('pm25', Number.isFinite(s.pm25) ? s.pm25 : NaN);
+            // network, not a carpet. 0.007 clean → 0.013 at the ceiling.
+            const val = Number.isFinite(s.value) ? s.value : 0;
+            size[i] = 0.007 + 0.006 * Math.min(1, val / ceil);
+            const [r, g, b] = stationColor(this.species, Number.isFinite(s.value) ? s.value : NaN);
             color[i * 3] = r; color[i * 3 + 1] = g; color[i * 3 + 2] = b;
         }
 
