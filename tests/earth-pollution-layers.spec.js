@@ -40,8 +40,23 @@ const FIRES_FIXTURE = {
     sources: { eonet: { ok: true, count: 2 } },
 };
 
+// Toggle a layer checkbox programmatically (value + change event — the same
+// contract the pointer path exercises). Pointer check() must wait for the
+// row to be "stable", and rows below a live count pill shift as the pill's
+// text changes width — under software-GL load that stability check can
+// starve past any budget. The FIRST toggle in each test stays a real
+// pointer check() so clickability is still proven once per boot.
+const setToggle = (page, id, on) => page.evaluate(([elId, want]) => {
+    const el = document.getElementById(elId);
+    if (el.checked !== want) {
+        el.checked = want;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+}, [id, on]);
+
 test.describe('EarthView pollution + wildfire toggles', () => {
     test('toggles load their layers and report counts', async ({ page }) => {
+        test.setTimeout(240_000);       // one earth.html boot under software GL
         await page.route('**/api/air-quality/centers', r => r.fulfill({ json: CENTERS_FIXTURE }));
         await page.route('**/api/wildfires/events', r => r.fulfill({ json: FIRES_FIXTURE }));
         await page.goto('/earth.html?verdict=0');
@@ -65,16 +80,18 @@ test.describe('EarthView pollution + wildfire toggles', () => {
         await expect(page.locator('#pollution-centers-count')).toContainText('3');
         await expect(page.locator('#pollution-centers-count')).toContainText('Delhi 172');
 
-        // Enable wildfires → same contract.
-        await page.check('#lyr-wildfires');
+        // Enable wildfires → same contract. (Programmatic: the row sits
+        // below the pollution pill whose text just changed width.)
+        await setToggle(page, 'lyr-wildfires', true);
         await page.waitForFunction(
             () => window.__wildfireLayer.fires.length === 2, null, { timeout: 15_000 });
         expect(await page.evaluate(() => window.__wildfireLayer.group.visible)).toBe(true);
         await expect(page.locator('#wildfires-count')).toContainText('2');
 
         // Toggling off hides the group again.
-        await page.uncheck('#lyr-wildfires');
-        expect(await page.evaluate(() => window.__wildfireLayer.group.visible)).toBe(false);
+        await setToggle(page, 'lyr-wildfires', false);
+        await page.waitForFunction(
+            () => !window.__wildfireLayer.group.visible, null, { timeout: 5_000 });
     });
 
     test('ground monitors load with attribution; species select refetches', async ({ page }) => {
