@@ -17,6 +17,7 @@
 
 import { parseEvents } from '../api/wildfires/events.js';
 import { selectCenterCities, normalizeCenters } from '../api/air-quality/centers.js';
+import { normalizeOpenAq } from '../api/air-quality/stations-intl.js';
 import { MAJOR_CITIES } from '../js/data/major-cities.js';
 
 let checks = 0;
@@ -99,7 +100,7 @@ function assert(cond, msg) {
     ];
     const t = 1_754_740_800; // any unix hour
     const payload = [
-        { current: { time: t, us_aqi: 168, pm2_5: 92.4, pm10: 140, ozone: 30, nitrogen_dioxide: 44, aerosol_optical_depth: 0.82 } },
+        { current: { time: t, us_aqi: 168, pm2_5: 92.4, pm10: 140, ozone: 30, nitrogen_dioxide: 44, aerosol_optical_depth: 0.82, carbon_dioxide: 468 } },
         { current: { time: t, us_aqi: 21, pm2_5: 3.1 } },
         { current: { time: t } },   // no numeric AQ values → row dropped
     ];
@@ -108,15 +109,39 @@ function assert(cond, msg) {
     const delhi = rows[0];
     assert(delhi.name === 'Delhi' && delhi.country === 'India' && delhi.pop === 32, 'city identity passthrough');
     assert(delhi.aqi === 168 && delhi.pm25 === 92.4 && delhi.aod === 0.82, 'pollutant fields mapped');
+    assert(delhi.no2 === 44 && delhi.co2 === 468, 'NO₂ + CO₂ species surfaced separately');
     assert(delhi.time === new Date(t * 1000).toISOString(), 'sample hour surfaced as ISO');
-    assert(rows[1].pm10 === null && rows[1].aod === null, 'missing fields → null, not undefined/NaN');
+    assert(rows[1].pm10 === null && rows[1].aod === null && rows[1].co2 === null, 'missing fields → null, not undefined/NaN');
     assert(normalizeCenters(null, cities).length === 0, 'null payload → empty list');
     // Single-location responses arrive as a bare object, not an array.
     assert(normalizeCenters(payload[0], cities.slice(0, 1)).length === 1, 'bare-object payload accepted');
 }
 
+// ── OpenAQ v3 international-station normalization ──────────────────────────
+{
+    const now = Date.parse('2026-08-09T12:00:00Z');
+    const iso = h => new Date(now - h * 3_600_000).toISOString();
+    const payload = {
+        results: [
+            { datetime: { utc: iso(1) }, value: 34.2, coordinates: { latitude: 51.51, longitude: -0.13 }, sensorsId: 7, locationsId: 101 },
+            { datetime: { utc: iso(2) }, value: 0, coordinates: { latitude: -33.87, longitude: 151.21 }, sensorsId: 9, locationsId: 102 },
+            { datetime: { utc: iso(1) }, value: -999, coordinates: { latitude: 10, longitude: 10 }, sensorsId: 1, locationsId: 103 },   // sentinel
+            { datetime: { utc: iso(90) }, value: 12, coordinates: { latitude: 20, longitude: 20 }, sensorsId: 2, locationsId: 104 },     // dead sensor
+            { datetime: { utc: iso(1) }, value: 8, coordinates: { latitude: null, longitude: 30 }, sensorsId: 3, locationsId: 105 },     // no coords
+            { value: 8, coordinates: { latitude: 30, longitude: 30 }, sensorsId: 4, locationsId: 106 },                                  // no timestamp
+        ],
+    };
+    const st = normalizeOpenAq(payload, now);
+    assert(st.length === 2, `sentinel/dead/malformed sensors dropped (got ${st.length})`);
+    assert(st[0].id === '101:7' && st[0].pm25 === 34.2, 'station id + value mapped');
+    assert(st[1].pm25 === 0, 'a genuine zero reading is kept (only negatives are sentinels)');
+    assert(st[0].utc === iso(1), 'observation time surfaced as ISO');
+    assert(normalizeOpenAq(null, now).length === 0, 'null payload → empty list');
+    assert(normalizeOpenAq({ results: 'nope' }, now).length === 0, 'malformed results → empty list');
+}
+
 if (process.exitCode) {
     console.error(`pollution-feeds: FAILED (${checks} checks)`);
 } else {
-    console.log(`pollution-feeds: ${checks} checks passed — EONET wildfire + CAMS city-center normalizers`);
+    console.log(`pollution-feeds: ${checks} checks passed — EONET wildfire + CAMS city-center + OpenAQ intl normalizers`);
 }

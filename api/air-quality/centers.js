@@ -38,7 +38,13 @@ import { MAJOR_CITIES } from '../../js/data/major-cities.js';
 export const config = { runtime: 'edge' };
 
 const CAMS_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
-const CURRENT_VARS = 'us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide,aerosol_optical_depth';
+// carbon_dioxide (ppm) rides CAMS' greenhouse-gas fields. It is requested
+// with a RETRY-WITHOUT fallback below: if the upstream ever rejects the
+// variable name (Open-Meteo errors the WHOLE multi-coordinate request on an
+// unknown variable), the second attempt drops it rather than taking the
+// city feed down. `co2Available` in the response says which path served.
+const CURRENT_VARS = 'us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide,aerosol_optical_depth,carbon_dioxide';
+const CURRENT_VARS_NO_CO2 = 'us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide,aerosol_optical_depth';
 
 // One batched request stays well under URL limits at 100 coordinates
 // (~2.5 kB of query string) while covering every metro ≥ ~1.5 M plus the
@@ -70,6 +76,7 @@ export function normalizeCenters(payload, cities) {
             pm10: num(cur.pm10),
             ozone: num(cur.ozone),
             no2: num(cur.nitrogen_dioxide),
+            co2: num(cur.carbon_dioxide),
             aod: num(cur.aerosol_optical_depth),
             time: Number.isFinite(cur.time) ? new Date(cur.time * 1000).toISOString() : null,
         };
@@ -78,27 +85,43 @@ export function normalizeCenters(payload, cities) {
     return out;
 }
 
-export default async function handler() {
-    const nowMs = Date.now();
-    const cities = selectCenterCities();
+async function fetchCams(cities, currentVars) {
     const params = new URLSearchParams({
         latitude: cities.map(c => c.lat).join(','),
         longitude: cities.map(c => c.lon).join(','),
-        current: CURRENT_VARS,
+        current: currentVars,
         domains: 'cams_global',
         cell_selection: 'nearest',
         timeformat: 'unixtime',
         timezone: 'GMT',
     });
+    const res = await fetchWithTimeout(`${CAMS_URL}?${params}`, {
+        timeoutMs: 15_000,
+        headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) throw new Error(`CAMS HTTP ${res.status}`);
+    const payload = await res.json();
+    if (payload?.error) throw new Error(payload.reason || 'CAMS returned an error');
+    return payload;
+}
+
+export default async function handler() {
+    const nowMs = Date.now();
+    const cities = selectCenterCities();
 
     try {
-        const res = await fetchWithTimeout(`${CAMS_URL}?${params}`, {
-            timeoutMs: 15_000,
-            headers: { Accept: 'application/json' },
-        });
-        if (!res.ok) throw new Error(`CAMS HTTP ${res.status}`);
-        const payload = await res.json();
-        if (payload?.error) throw new Error(payload.reason || 'CAMS returned an error');
+        let payload;
+        let co2Available = true;
+        try {
+            payload = await fetchCams(cities, CURRENT_VARS);
+        } catch (e) {
+            // A variable-name rejection and a transient outage are not
+            // distinguishable from the error string across Open-Meteo
+            // versions, so any first-attempt failure gets one retry on the
+            // known-good variable set before the route degrades to stale.
+            payload = await fetchCams(cities, CURRENT_VARS_NO_CO2);
+            co2Available = false;
+        }
         const rows = normalizeCenters(payload, cities);
         if (!rows.length) throw new Error('CAMS returned no numeric city samples');
         const worst = [...rows]
@@ -111,6 +134,7 @@ export default async function handler() {
             count: rows.length,
             freshness: 'live',
             provenance: CAMS_PROVENANCE,
+            co2Available,
             cities: rows,
             worst,
         }, { maxAge: 900, swr: 300 });

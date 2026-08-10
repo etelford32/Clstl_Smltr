@@ -303,6 +303,13 @@ export const PIPELINES = [
       warnAgeS:  2 * 3600, critAgeS: 6 * 3600,
       notes: 'Regional per-request query (defaults to CONUS center) — not usefully pre-warmable; AirNow publishes each hour file ~1 h behind wall time by design.' },
 
+    { id: 'air-quality-stations-intl', label: 'International monitors (OpenAQ)',
+      endpoint: '/api/air-quality/stations-intl',
+      category: 'environment', upstream: 'OpenAQ v3 · CC BY 4.0',
+      cadence_s: 3_600, prewarm: null,
+      warnAgeS:  2 * 3600, critAgeS: 6 * 3600,
+      notes: 'Global ground-station PM2.5 — the international counterpart to the US-only AirNow row. AMBER UNTIL CONFIGURED: needs the free OPENAQ_API_KEY env var (explore.openaq.org/register); until then the route answers freshness:stale with the setup pointer in `reason`.' },
+
     { id: 'air-quality-centers', label: 'City pollution centers (CAMS)',
       endpoint: '/api/air-quality/centers',
       category: 'environment', upstream: 'Open-Meteo · CAMS Global',

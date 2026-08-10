@@ -536,6 +536,10 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 .aq-layer-note { margin-top:5px; color:#61788d; font-size:8.5px; line-height:1.4; }
 .aq-layer-legend { display:flex; gap:5px; margin-top:5px; color:#61788d; font-size:8px; }
 .aq-layer-legend i { width:7px; height:7px; margin-top:1px; border-radius:50%; display:inline-block; }
+.aq-heat-row { display:flex; align-items:center; gap:6px; margin-top:5px; font-size:9px; color:#61788d; }
+.aq-heat-row label { min-width:74px; }
+.aq-heat-row input[type=range] { flex:1; accent-color:#4ddbff; min-width:0; }
+.aq-heat-row output { min-width:52px; text-align:right; color:#9fc6e0; font:9px ui-monospace, Menlo, monospace; }
 
 /* Search and section controls stay at the top of the independently
    scrollable layer list. The panel title and close/minimise buttons live
@@ -2987,6 +2991,9 @@ import './js/telemetry.js';
                     <div class="lyr" title="Timestamped numeric air quality. Far view: CAMS modeled grid. Zoom in: denser CAMS cells plus preliminary EPA AirNow monitors. Follows the EarthView time scrubber; model and observation provenance remain separate.">
                         <input type="checkbox" id="lyr-air-quality"><span class="lyr-status" data-layer="air-quality" title="off — enable to load"></span><label for="lyr-air-quality">Numeric AQI / PM / AOD</label><span class="lyr-count" id="air-quality-count">off</span>
                     </div>
+                    <div class="lyr" title="Continuous pollution-density gradient draped on the globe — live CAMS samples interpolated by the same IDW kernel the Pollution Lab uses. Track the aggregate US AQI, or CO₂ and NO₂ separately. 'Plume spread' sets how far a source's gradient reaches; 'density floor' cuts everything below it to isolate the dense cores. Modeled CAMS data, not station observations.">
+                        <input type="checkbox" id="lyr-aqi-heatmap"><span class="lyr-status" data-layer="aqi-heatmap" title="off — enable to load"></span><label for="lyr-aqi-heatmap">AQI Heatmap (density gradient)</label><span class="lyr-count" id="aqi-heatmap-count">off</span>
+                    </div>
                     <div class="lyr" title="Live AQI at the world's ~100 largest metros in one batched CAMS sample — ring markers colored on the EPA scale, sized by severity, pulsing where AQI ≥ 150 (unhealthy). Hover a ring for the city's AQI + PM2.5. Modeled CAMS data, not station observations.">
                         <input type="checkbox" id="lyr-pollution-centers"><span class="lyr-status" data-layer="pollution-centers" title="off — enable to load"></span><label for="lyr-pollution-centers">Pollution Centers (live AQI)</label><span class="lyr-count" id="pollution-centers-count">off</span>
                     </div>
@@ -3003,6 +3010,28 @@ import './js/telemetry.js';
                     </select>
                     <div class="aq-layer-note" id="air-quality-lod-note">Global CAMS model grid · zoom closer for AirNow monitors</div>
                     <div class="aq-layer-legend" aria-label="AQI severity colors"><span><i style="background:#19e07a"></i>good</span><span><i style="background:#ffdc2e"></i>moderate</span><span><i style="background:#ff272e"></i>unhealthy</span></div>
+                </div>
+                <!-- Heatmap controls: species (separate + aggregate tracking) and
+                     the two density-gradient sliders. NO₂ here is nitrogen
+                     dioxide — CAMS/Open-Meteo publish no nitrate (NO₃⁻) field,
+                     so the label must never drift to "NO₃". -->
+                <div class="aq-layer-controls" id="aqi-heatmap-controls">
+                    <select id="aqi-heatmap-species" aria-label="Heatmap species">
+                        <option value="aggregate">Aggregate · US AQI</option>
+                        <option value="co2">CO₂ · ppm</option>
+                        <option value="no2">NO₂ · µg/m³</option>
+                    </select>
+                    <div class="aq-heat-row">
+                        <label for="aqi-heat-spread">plume spread</label>
+                        <input type="range" id="aqi-heat-spread" min="500" max="4000" step="100" value="2000">
+                        <output id="aqi-heat-spread-out">2000 km</output>
+                    </div>
+                    <div class="aq-heat-row">
+                        <label for="aqi-heat-floor">density floor</label>
+                        <input type="range" id="aqi-heat-floor" min="0" max="80" step="5" value="20">
+                        <output id="aqi-heat-floor-out">20%</output>
+                    </div>
+                    <div class="aq-layer-note" id="aqi-heatmap-note">Gradient = interpolated density between live CAMS samples</div>
                 </div>
             </div>
         </div>
@@ -4093,6 +4122,7 @@ import { AirQualityFeed } from './js/air-quality-feed.js';
 import { AirQualityLayer } from './js/air-quality-layer.js';
 import { PollutionCentersLayer } from './js/pollution-centers-layer.js';
 import { WildfireLayer } from './js/wildfire-layer.js';
+import { AqiHeatmapLayer } from './js/aqi-heatmap-layer.js';
 import { LocationBeacon } from './js/location-beacon.js';
 import { CityMarkers } from './js/city-markers.js';
 import { MAJOR_CITIES } from './js/data/major-cities.js';
@@ -8158,6 +8188,68 @@ window.__wildfireLayer = wildfireLayer;
 document.getElementById('lyr-wildfires')?.addEventListener('change', e => {
     wildfireLayer.setVisible(e.target.checked);
     if (!e.target.checked) _setWildfireHover(null);
+});
+
+// ── AQI density heatmap ────────────────────────────────────────────────────
+// Continuous IDW gradient between live CAMS samples (same kernel as the
+// Pollution Lab), draped on a shell whose shader inverts the page's geo
+// convention exactly. Species: aggregate US AQI, CO₂, NO₂ — separately and
+// in aggregate. The two sliders are the density-gradient controls.
+const _aqiHeatCount = document.getElementById('aqi-heatmap-count');
+const _aqiHeatNote = document.getElementById('aqi-heatmap-note');
+const _aqiHeatSpecies = document.getElementById('aqi-heatmap-species');
+const aqiHeatmapLayer = new AqiHeatmapLayer(THREE, earthMesh, {
+    onStatus(state, detail = {}) {
+        if (_aqiHeatCount) {
+            _aqiHeatCount.classList.remove('live', 'error');
+            _aqiHeatCount.textContent = state === 'fetching' ? '…'
+                : state === 'loaded' ? `${detail.count} pts`
+                : state === 'error' ? 'error' : 'off';
+            _aqiHeatCount.classList.toggle('live', state === 'loaded');
+            _aqiHeatCount.classList.toggle('error', state === 'error');
+            _aqiHeatCount.title = state === 'loaded'
+                ? `${detail.count} CAMS samples · ${detail.label} · spread ${detail.spreadKm} km · floor ${detail.floorPct}%`
+                : detail.error ?? state;
+        }
+        if (_aqiHeatNote) {
+            _aqiHeatNote.textContent = state === 'error' && detail.species
+                ? `${detail.error} — pick another species`
+                : state === 'loaded'
+                    ? `${detail.label} · IDW gradient between ${detail.count} live CAMS samples`
+                    : 'Gradient = interpolated density between live CAMS samples';
+        }
+        // CO₂ rides CAMS' greenhouse-gas fields; when the feed says it isn't
+        // served, gray the option instead of letting it error on selection.
+        if (detail.co2Available === false && _aqiHeatSpecies) {
+            const opt = _aqiHeatSpecies.querySelector('option[value="co2"]');
+            if (opt) { opt.disabled = true; opt.textContent = 'CO₂ · not served by CAMS'; }
+        }
+        _setLayerPipById('aqi-heatmap',
+            state === 'loaded' ? 'loaded' : state === 'fetching' ? 'fetching'
+                : state === 'error' ? 'error' : 'idle',
+            state === 'loaded'
+                ? `${detail.label} density gradient · CAMS modeled (not observations)`
+                : state === 'error' ? `heatmap: ${detail.error ?? 'unavailable'}`
+                : state === 'fetching' ? 'loading CAMS samples…'
+                : 'off — enable to load');
+    },
+});
+window.__aqiHeatmapLayer = aqiHeatmapLayer;
+document.getElementById('lyr-aqi-heatmap')?.addEventListener('change', e => {
+    aqiHeatmapLayer.setEnabled(e.target.checked);
+});
+_aqiHeatSpecies?.addEventListener('change', e => {
+    aqiHeatmapLayer.setSpecies(e.target.value);
+});
+document.getElementById('aqi-heat-spread')?.addEventListener('input', e => {
+    const km = Number(e.target.value);
+    document.getElementById('aqi-heat-spread-out').textContent = `${km} km`;
+    aqiHeatmapLayer.setSpread(km);
+});
+document.getElementById('aqi-heat-floor')?.addEventListener('input', e => {
+    const pct = Number(e.target.value);
+    document.getElementById('aqi-heat-floor-out').textContent = `${pct}%`;
+    aqiHeatmapLayer.setFloor(pct);
 });
 
 const _aqd = {
@@ -14267,9 +14359,10 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     'lyr-rotate', 'lyr-cities', 'lyr-tsunami-alerts', 'lyr-dart',
     'lyr-tide-gauges', 'lyr-ocean-buoys',
     'lyr-ocean-model', 'lyr-air-quality',
-    // Pollution centers + wildfire events default off; the dispatch keeps
-    // their groups aligned with the unchecked boxes on first paint.
-    'lyr-pollution-centers', 'lyr-wildfires',
+    // Pollution centers + wildfire events + AQI heatmap default off; the
+    // dispatch keeps their groups aligned with the unchecked boxes on
+    // first paint.
+    'lyr-pollution-centers', 'lyr-wildfires', 'lyr-aqi-heatmap',
     // Derived weather overlays (humidity / precip-rate / mist) — share
     // the existing weather DataTextures, so they need the same synthetic
     // change-event dispatch on first render to align mesh visibility
@@ -14774,6 +14867,7 @@ const _layerRegistry = {
     'lyr-air-quality':         () => airQualityLayer.group.visible,
     'lyr-pollution-centers':   () => pollutionCentersLayer.group.visible,
     'lyr-wildfires':           () => wildfireLayer.group.visible,
+    'lyr-aqi-heatmap':         () => aqiHeatmapLayer.group.visible,
     'lyr-obs-aod':             () => _obsOverlays['aod']?.mesh?.visible
                                    ?? document.getElementById('lyr-obs-aod')?.checked ?? false,
     'lyr-obs-cloud-thickness': () => _obsOverlays['cloud-thickness']?.mesh?.visible
