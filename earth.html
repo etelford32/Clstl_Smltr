@@ -371,7 +371,7 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 #coord-tip.show { opacity:1; }
 
 /* ─── City hover tooltip (major-city dots) ───────────────────── */
-#city-tip, #ocean-tip, #air-quality-tip, #pollution-tip, #wildfire-tip {
+#city-tip, #ocean-tip, #air-quality-tip, #pollution-tip, #wildfire-tip, #station-tip, #residual-tip {
     position:fixed; z-index:56; display:none; pointer-events:none;
     background:rgba(2,10,20,.9); border:1px solid rgba(77,219,255,.45);
     border-radius:8px; padding:7px 11px; white-space:nowrap;
@@ -382,9 +382,11 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 #air-quality-tip { border-color:rgba(77,219,255,.55); }
 #pollution-tip { border-color:rgba(255,140,40,.55); }
 #wildfire-tip { border-color:rgba(255,80,30,.6); }
-#city-tip .cty-name, #ocean-tip .cty-name, #air-quality-tip .cty-name, #pollution-tip .cty-name, #wildfire-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
+#station-tip { border-color:rgba(120,255,190,.5); }
+#residual-tip { border-color:rgba(190,160,255,.55); }
+#city-tip .cty-name, #ocean-tip .cty-name, #air-quality-tip .cty-name, #pollution-tip .cty-name, #wildfire-tip .cty-name, #station-tip .cty-name, #residual-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
 #city-tip .cty-sub,  #ocean-tip .cty-sub,  #air-quality-tip .cty-sub, #pollution-tip .cty-sub, #wildfire-tip .cty-sub  { color:#8ff0ff; font-size:10px; margin-top:1px; }
-#city-tip .cty-hint, #ocean-tip .cty-hint, #air-quality-tip .cty-hint, #pollution-tip .cty-hint, #wildfire-tip .cty-hint { color:#5f7597; font-size:9px;  margin-top:3px; }
+#city-tip .cty-hint, #ocean-tip .cty-hint, #air-quality-tip .cty-hint, #pollution-tip .cty-hint, #wildfire-tip .cty-hint, #station-tip .cty-hint, #residual-tip .cty-hint { color:#5f7597; font-size:9px;  margin-top:3px; }
 #coord-tip .ct-title { color: var(--c-accent); font-size:9px; text-transform:uppercase;
     letter-spacing:.6px; margin-bottom:2px; }
 #coord-tip .ct-val { color:#a0d8f0; font-weight:600; }
@@ -536,6 +538,10 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 .aq-layer-note { margin-top:5px; color:#61788d; font-size:8.5px; line-height:1.4; }
 .aq-layer-legend { display:flex; gap:5px; margin-top:5px; color:#61788d; font-size:8px; }
 .aq-layer-legend i { width:7px; height:7px; margin-top:1px; border-radius:50%; display:inline-block; }
+.aq-heat-row { display:flex; align-items:center; gap:6px; margin-top:5px; font-size:9px; color:#61788d; }
+.aq-heat-row label { min-width:74px; }
+.aq-heat-row input[type=range] { flex:1; accent-color:#4ddbff; min-width:0; }
+.aq-heat-row output { min-width:52px; text-align:right; color:#9fc6e0; font:9px ui-monospace, Menlo, monospace; }
 
 /* Search and section controls stay at the top of the independently
    scrollable layer list. The panel title and close/minimise buttons live
@@ -2787,6 +2793,18 @@ import './js/telemetry.js';
         <div class="cty-hint" id="wildfire-tip-hint">NASA EONET wildfire event</div>
     </div>
 
+    <div id="station-tip">
+        <div class="cty-name" id="station-tip-name">—</div>
+        <div class="cty-sub" id="station-tip-sub">—</div>
+        <div class="cty-hint" id="station-tip-hint">ground observation · OpenAQ · CC BY 4.0</div>
+    </div>
+
+    <div id="residual-tip">
+        <div class="cty-name" id="residual-tip-name">—</div>
+        <div class="cty-sub" id="residual-tip-sub">—</div>
+        <div class="cty-hint">obs = OpenAQ monitor · model = CAMS · never blended</div>
+    </div>
+
     <!-- Layer controls -->
     <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="bottom:16px;right:12px;">⚡ Weather</a>
 
@@ -2987,6 +3005,15 @@ import './js/telemetry.js';
                     <div class="lyr" title="Timestamped numeric air quality. Far view: CAMS modeled grid. Zoom in: denser CAMS cells plus preliminary EPA AirNow monitors. Follows the EarthView time scrubber; model and observation provenance remain separate.">
                         <input type="checkbox" id="lyr-air-quality"><span class="lyr-status" data-layer="air-quality" title="off — enable to load"></span><label for="lyr-air-quality">Numeric AQI / PM / AOD</label><span class="lyr-count" id="air-quality-count">off</span>
                     </div>
+                    <div class="lyr" title="International ground monitors: the newest observation from ~1000 OpenAQ reference stations worldwide (CC BY 4.0) — real measurements, drawn as squares to distinguish them from every modeled CAMS surface. Pick the species below (PM2.5/PM10/O₃/NO₂/SO₂/CO/black carbon; coverage varies by country). Hover a square for the reading and its observation time. Needs the OPENAQ_API_KEY server env var.">
+                        <input type="checkbox" id="lyr-intl-stations"><span class="lyr-status" data-layer="intl-stations" title="off — enable to load"></span><label for="lyr-intl-stations">Ground Monitors (Intl · OpenAQ)</label><span class="lyr-count" id="intl-stations-count">off</span>
+                    </div>
+                    <div class="lyr" title="Where the model is wrong: CAMS PM2.5 sampled at each OpenAQ monitor, drawn as diamonds colored by obs − model — red means CAMS underestimates the real reading (missed pollution), blue means it overestimates, faint gray means they agree. Sized by the gap; network bias and RMSE in the pill. Shares the OpenAQ key.">
+                        <input type="checkbox" id="lyr-aq-residuals"><span class="lyr-status" data-layer="aq-residuals" title="off — enable to load"></span><label for="lyr-aq-residuals">Model − Obs Residuals</label><span class="lyr-count" id="aq-residuals-count">off</span>
+                    </div>
+                    <div class="lyr" title="Continuous pollution-density gradient draped on the globe — live CAMS samples interpolated by the same IDW kernel the Pollution Lab uses. Track the aggregate US AQI, or each species separately (particulates, ozone, NO₂, SO₂, CO, CO₂, CH₄, dust, AOD). 'Plume spread' sets how far a source's gradient reaches; 'density floor' cuts everything below it to isolate the dense cores. Modeled CAMS data, not station observations.">
+                        <input type="checkbox" id="lyr-aqi-heatmap"><span class="lyr-status" data-layer="aqi-heatmap" title="off — enable to load"></span><label for="lyr-aqi-heatmap">AQI Heatmap (density gradient)</label><span class="lyr-count" id="aqi-heatmap-count">off</span>
+                    </div>
                     <div class="lyr" title="Live AQI at the world's ~100 largest metros in one batched CAMS sample — ring markers colored on the EPA scale, sized by severity, pulsing where AQI ≥ 150 (unhealthy). Hover a ring for the city's AQI + PM2.5. Modeled CAMS data, not station observations.">
                         <input type="checkbox" id="lyr-pollution-centers"><span class="lyr-status" data-layer="pollution-centers" title="off — enable to load"></span><label for="lyr-pollution-centers">Pollution Centers (live AQI)</label><span class="lyr-count" id="pollution-centers-count">off</span>
                     </div>
@@ -3003,6 +3030,55 @@ import './js/telemetry.js';
                     </select>
                     <div class="aq-layer-note" id="air-quality-lod-note">Global CAMS model grid · zoom closer for AirNow monitors</div>
                     <div class="aq-layer-legend" aria-label="AQI severity colors"><span><i style="background:#19e07a"></i>good</span><span><i style="background:#ffdc2e"></i>moderate</span><span><i style="background:#ff272e"></i>unhealthy</span></div>
+                </div>
+                <!-- Ground-monitor species: each option is its own OpenAQ
+                     parameter feed (server-validated ids). Black carbon has
+                     no CAMS twin — observation-only, which is the point. -->
+                <div class="aq-layer-controls" id="intl-stations-controls">
+                    <select id="intl-stations-species" aria-label="Ground-monitor species">
+                        <option value="pm25">Monitors · PM2.5</option>
+                        <option value="pm10">Monitors · PM10</option>
+                        <option value="o3">Monitors · O₃</option>
+                        <option value="no2">Monitors · NO₂</option>
+                        <option value="so2">Monitors · SO₂</option>
+                        <option value="co">Monitors · CO</option>
+                        <option value="bc">Monitors · Black carbon</option>
+                    </select>
+                    <div class="aq-layer-note">OpenAQ reference monitors · CC BY 4.0 · species coverage varies by country</div>
+                </div>
+                <!-- Heatmap controls: species (separate + aggregate tracking) and
+                     the two density-gradient sliders. NO₂ here is nitrogen
+                     dioxide — CAMS/Open-Meteo publish no nitrate (NO₃⁻) field,
+                     so the label must never drift to "NO₃". -->
+                <div class="aq-layer-controls" id="aqi-heatmap-controls">
+                    <select id="aqi-heatmap-species" aria-label="Heatmap species">
+                        <option value="aggregate">Aggregate · US AQI</option>
+                        <optgroup label="Particulates &amp; aerosol">
+                            <option value="pm25">PM2.5 · µg/m³</option>
+                            <option value="pm10">PM10 · µg/m³</option>
+                            <option value="dust">Dust · µg/m³</option>
+                            <option value="aod">AOD · 550 nm</option>
+                        </optgroup>
+                        <optgroup label="Gases">
+                            <option value="o3">O₃ · µg/m³</option>
+                            <option value="no2">NO₂ · µg/m³</option>
+                            <option value="so2">SO₂ · µg/m³</option>
+                            <option value="co">CO · µg/m³</option>
+                            <option value="co2">CO₂ · ppm</option>
+                            <option value="ch4">CH₄ · µg/m³</option>
+                        </optgroup>
+                    </select>
+                    <div class="aq-heat-row">
+                        <label for="aqi-heat-spread">plume spread</label>
+                        <input type="range" id="aqi-heat-spread" min="500" max="4000" step="100" value="2000">
+                        <output id="aqi-heat-spread-out">2000 km</output>
+                    </div>
+                    <div class="aq-heat-row">
+                        <label for="aqi-heat-floor">density floor</label>
+                        <input type="range" id="aqi-heat-floor" min="0" max="80" step="5" value="20">
+                        <output id="aqi-heat-floor-out">20%</output>
+                    </div>
+                    <div class="aq-layer-note" id="aqi-heatmap-note">Gradient = interpolated density between live CAMS samples</div>
                 </div>
             </div>
         </div>
@@ -4093,6 +4169,9 @@ import { AirQualityFeed } from './js/air-quality-feed.js';
 import { AirQualityLayer } from './js/air-quality-layer.js';
 import { PollutionCentersLayer } from './js/pollution-centers-layer.js';
 import { WildfireLayer } from './js/wildfire-layer.js';
+import { AqiHeatmapLayer } from './js/aqi-heatmap-layer.js';
+import { IntlStationsLayer } from './js/intl-stations-layer.js';
+import { ResidualLayer } from './js/residual-layer.js';
 import { LocationBeacon } from './js/location-beacon.js';
 import { CityMarkers } from './js/city-markers.js';
 import { MAJOR_CITIES } from './js/data/major-cities.js';
@@ -8162,6 +8241,155 @@ window.__wildfireLayer = wildfireLayer;
 document.getElementById('lyr-wildfires')?.addEventListener('change', e => {
     wildfireLayer.setVisible(e.target.checked);
     if (!e.target.checked) _setWildfireHover(null);
+});
+
+// ── International ground monitors (OpenAQ) ────────────────────────────────
+// Real PM2.5 observations from ~1000 reference stations worldwide — the
+// international counterpart to the numeric layer's US-only AirNow monitors.
+// The unconfigured-key state renders as an actionable setup message, never
+// as a quiet empty layer.
+const _intlStationsCount = document.getElementById('intl-stations-count');
+const intlStationsLayer = new IntlStationsLayer(THREE, {
+    geoToXYZ,
+    onStatus(state, detail = {}) {
+        const needsKey = state === 'error' && detail.configured === false;
+        if (_intlStationsCount) {
+            _intlStationsCount.classList.remove('live', 'error');
+            _intlStationsCount.textContent = state === 'fetching' ? '…'
+                : state === 'loaded' ? `${detail.count}`
+                : needsKey ? 'needs key'
+                : state === 'error' ? 'error' : 'off';
+            _intlStationsCount.classList.toggle('live', state === 'loaded');
+            _intlStationsCount.classList.toggle('error', state === 'error');
+            _intlStationsCount.title = state === 'loaded'
+                ? `${detail.count} ground monitors · ${detail.attribution ?? 'OpenAQ · CC BY 4.0'} · ${detail.updated ?? '—'}`
+                : detail.error ?? state;
+        }
+        _setLayerPipById('intl-stations',
+            state === 'loaded' ? 'loaded' : state === 'fetching' ? 'fetching'
+                : state === 'error' ? (needsKey ? 'fallback' : 'error') : 'idle',
+            state === 'loaded'
+                ? `${detail.count} PM2.5 ground observations · ${detail.attribution ?? 'OpenAQ · CC BY 4.0'}`
+                : needsKey ? `setup needed: ${detail.error}`
+                : state === 'error' ? `feed unavailable: ${detail.error ?? 'unknown'}`
+                : state === 'fetching' ? 'loading OpenAQ ground monitors…'
+                : 'off — enable to load');
+    },
+});
+earthMesh.add(intlStationsLayer.group);
+window.__intlStationsLayer = intlStationsLayer;
+document.getElementById('lyr-intl-stations')?.addEventListener('change', e => {
+    intlStationsLayer.setVisible(e.target.checked);
+    if (!e.target.checked) _setStationHover(null);
+});
+document.getElementById('intl-stations-species')?.addEventListener('change', e => {
+    intlStationsLayer.setSpecies(e.target.value);
+    _setStationHover(null);
+});
+
+// ── Model − observation residuals (CAMS at OpenAQ monitors) ────────────────
+// The skill surface: diamonds colored by obs − model, agreement faint by
+// design. Shares the OpenAQ key, so its unconfigured state reads as setup.
+const _residualCount = document.getElementById('aq-residuals-count');
+const residualLayer = new ResidualLayer(THREE, {
+    geoToXYZ,
+    onStatus(state, detail = {}) {
+        const needsKey = state === 'error' && detail.configured === false;
+        if (_residualCount) {
+            _residualCount.classList.remove('live', 'error');
+            _residualCount.textContent = state === 'fetching' ? '…'
+                : state === 'loaded' ? `${detail.count} · bias ${detail.stats?.bias >= 0 ? '+' : ''}${detail.stats?.bias?.toFixed(1) ?? '—'}`
+                : needsKey ? 'needs key'
+                : state === 'error' ? 'error' : 'off';
+            _residualCount.classList.toggle('live', state === 'loaded');
+            _residualCount.classList.toggle('error', state === 'error');
+            _residualCount.title = state === 'loaded'
+                ? `${detail.count} monitor↔model pairs · bias ${detail.stats?.bias?.toFixed(2)} µg/m³ (obs − model, + = CAMS underestimates) · rmse ${detail.stats?.rmse?.toFixed(2)} µg/m³ · station-weighted · ${detail.attribution ?? 'OpenAQ · CC BY 4.0'}`
+                : detail.error ?? state;
+        }
+        _setLayerPipById('aq-residuals',
+            state === 'loaded' ? 'loaded' : state === 'fetching' ? 'fetching'
+                : state === 'error' ? (needsKey ? 'fallback' : 'error') : 'idle',
+            state === 'loaded'
+                ? `CAMS vs ${detail.count} OpenAQ monitors · rmse ${detail.stats?.rmse?.toFixed(1)} µg/m³`
+                : needsKey ? `setup needed: ${detail.error}`
+                : state === 'error' ? `feed unavailable: ${detail.error ?? 'unknown'}`
+                : state === 'fetching' ? 'pairing CAMS with OpenAQ monitors…'
+                : 'off — enable to load');
+    },
+});
+earthMesh.add(residualLayer.group);
+window.__residualLayer = residualLayer;
+document.getElementById('lyr-aq-residuals')?.addEventListener('change', e => {
+    residualLayer.setVisible(e.target.checked);
+    if (!e.target.checked) _setResidualHover(null);
+});
+
+// ── AQI density heatmap ────────────────────────────────────────────────────
+// Continuous IDW gradient between live CAMS samples (same kernel as the
+// Pollution Lab), draped on a shell whose shader inverts the page's geo
+// convention exactly. Species: aggregate US AQI, CO₂, NO₂ — separately and
+// in aggregate. The two sliders are the density-gradient controls.
+const _aqiHeatCount = document.getElementById('aqi-heatmap-count');
+const _aqiHeatNote = document.getElementById('aqi-heatmap-note');
+const _aqiHeatSpecies = document.getElementById('aqi-heatmap-species');
+const aqiHeatmapLayer = new AqiHeatmapLayer(THREE, earthMesh, {
+    onStatus(state, detail = {}) {
+        if (_aqiHeatCount) {
+            _aqiHeatCount.classList.remove('live', 'error');
+            _aqiHeatCount.textContent = state === 'fetching' ? '…'
+                : state === 'loaded' ? `${detail.count} pts`
+                : state === 'error' ? 'error' : 'off';
+            _aqiHeatCount.classList.toggle('live', state === 'loaded');
+            _aqiHeatCount.classList.toggle('error', state === 'error');
+            _aqiHeatCount.title = state === 'loaded'
+                ? `${detail.count} CAMS samples · ${detail.label} · spread ${detail.spreadKm} km · floor ${detail.floorPct}%`
+                : detail.error ?? state;
+        }
+        if (_aqiHeatNote) {
+            _aqiHeatNote.textContent = state === 'error' && detail.species
+                ? `${detail.error} — pick another species`
+                : state === 'loaded'
+                    ? `${detail.label} · IDW gradient between ${detail.count} live CAMS samples`
+                    : 'Gradient = interpolated density between live CAMS samples';
+        }
+        // Per-species availability: gray any option the current feed data
+        // can't serve (greenhouse gases behind the retry ladder, gas species
+        // with all-null rows) instead of letting it error on selection.
+        if (detail.available && _aqiHeatSpecies) {
+            for (const opt of _aqiHeatSpecies.options) {
+                if (opt.value === 'aggregate') continue;
+                const ok = detail.available[opt.value] !== false;
+                opt.disabled = !ok;
+                opt.title = ok ? '' : 'not served by the feed right now';
+            }
+        }
+        _setLayerPipById('aqi-heatmap',
+            state === 'loaded' ? 'loaded' : state === 'fetching' ? 'fetching'
+                : state === 'error' ? 'error' : 'idle',
+            state === 'loaded'
+                ? `${detail.label} density gradient · CAMS modeled (not observations)`
+                : state === 'error' ? `heatmap: ${detail.error ?? 'unavailable'}`
+                : state === 'fetching' ? 'loading CAMS samples…'
+                : 'off — enable to load');
+    },
+});
+window.__aqiHeatmapLayer = aqiHeatmapLayer;
+document.getElementById('lyr-aqi-heatmap')?.addEventListener('change', e => {
+    aqiHeatmapLayer.setEnabled(e.target.checked);
+});
+_aqiHeatSpecies?.addEventListener('change', e => {
+    aqiHeatmapLayer.setSpecies(e.target.value);
+});
+document.getElementById('aqi-heat-spread')?.addEventListener('input', e => {
+    const km = Number(e.target.value);
+    document.getElementById('aqi-heat-spread-out').textContent = `${km} km`;
+    aqiHeatmapLayer.setSpread(km);
+});
+document.getElementById('aqi-heat-floor')?.addEventListener('input', e => {
+    const pct = Number(e.target.value);
+    document.getElementById('aqi-heat-floor-out').textContent = `${pct}%`;
+    aqiHeatmapLayer.setFloor(pct);
 });
 
 const _aqd = {
@@ -12560,14 +12788,21 @@ renderer.domElement.addEventListener('mousemove', e => {
                 _setCityHover(null);
             } else {
                 _setAirQualityHover(null);
-                // Wildfire events (rarer, higher stakes) outrank pollution
-                // rings; both outrank plain city dots.
-                const fireHovered = wildfireLayer.getHovered(alertRay);
-                const pcHovered = fireHovered ? null
+                // Ground observations outrank model markers; wildfire events
+                // (rarer, higher stakes) outrank pollution rings; everything
+                // outranks plain city dots.
+                const stationHovered = intlStationsLayer.getHovered(alertRay);
+                const residualHovered = stationHovered ? null
+                    : residualLayer.getHovered(alertRay);
+                const fireHovered = (stationHovered || residualHovered) ? null
+                    : wildfireLayer.getHovered(alertRay);
+                const pcHovered = (stationHovered || residualHovered || fireHovered) ? null
                     : pollutionCentersLayer.getHovered(alertRay);
+                _setStationHover(stationHovered, e.clientX, e.clientY);
+                _setResidualHover(residualHovered, e.clientX, e.clientY);
                 _setWildfireHover(fireHovered, e.clientX, e.clientY);
                 _setPollutionHover(pcHovered, e.clientX, e.clientY);
-                if (fireHovered || pcHovered) {
+                if (stationHovered || residualHovered || fireHovered || pcHovered) {
                     _setCityHover(null);
                 } else {
                     // City dots take the lowest hover priority — event, ocean,
@@ -12583,6 +12818,8 @@ renderer.domElement.addEventListener('mouseleave', () => {
     _hideEqPopup();
     _setOceanHover(null);
     _setAirQualityHover(null);
+    _setStationHover(null);
+    _setResidualHover(null);
     _setWildfireHover(null);
     _setPollutionHover(null);
     _setCityHover(null);
@@ -12652,6 +12889,69 @@ function _setPollutionHover(hit, cx, cy) {
         renderer.domElement.style.cursor = 'pointer';
     }
     tip.style.left = Math.min(cx + 14, window.innerWidth - 230) + 'px';
+    tip.style.top  = Math.min(cy + 12, window.innerHeight - 70) + 'px';
+}
+
+// ── Ground-monitor hover: tooltip + square highlight ────────────────────────
+// hit = { station, index } | null from intlStationsLayer.getHovered.
+let _stationHoverIdx = -1;
+function _setStationHover(hit, cx, cy) {
+    const tip = document.getElementById('station-tip');
+    if (!hit) {
+        if (_stationHoverIdx !== -1) {
+            _stationHoverIdx = -1;
+            intlStationsLayer.setHighlight(-1);
+            tip.style.display = 'none';
+            renderer.domElement.style.cursor = '';
+        }
+        return;
+    }
+    const { station, index } = hit;
+    if (index !== _stationHoverIdx) {
+        _stationHoverIdx = index;
+        intlStationsLayer.setHighlight(index);
+        document.getElementById('station-tip-name').textContent =
+            `${intlStationsLayer.speciesLabel} ${Number.isFinite(station.value) ? station.value.toFixed(1) : '—'} ${intlStationsLayer.speciesUnit}`;
+        const obsTime = station.utc
+            ? new Date(station.utc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC'
+            : '—';
+        document.getElementById('station-tip-sub').textContent =
+            `reference monitor · observed ${obsTime}`;
+        tip.style.display = 'block';
+        renderer.domElement.style.cursor = 'pointer';
+    }
+    tip.style.left = Math.min(cx + 14, window.innerWidth - 230) + 'px';
+    tip.style.top  = Math.min(cy + 12, window.innerHeight - 70) + 'px';
+}
+
+// ── Residual hover: obs vs model tooltip ────────────────────────────────────
+// hit = { row, index } | null from residualLayer.getHovered. Shows all
+// three numbers — obs, model, Δ — never a blended one.
+let _residualHoverIdx = -1;
+function _setResidualHover(hit, cx, cy) {
+    const tip = document.getElementById('residual-tip');
+    if (!hit) {
+        if (_residualHoverIdx !== -1) {
+            _residualHoverIdx = -1;
+            residualLayer.setHighlight(-1);
+            tip.style.display = 'none';
+            renderer.domElement.style.cursor = '';
+        }
+        return;
+    }
+    const { row, index } = hit;
+    if (index !== _residualHoverIdx) {
+        _residualHoverIdx = index;
+        residualLayer.setHighlight(index);
+        const d = row.residual;
+        document.getElementById('residual-tip-name').textContent =
+            `Δ ${d >= 0 ? '+' : ''}${d.toFixed(1)} µg/m³ — CAMS ${d >= 0 ? 'underestimates' : 'overestimates'}`;
+        document.getElementById('residual-tip-sub').textContent =
+            `monitor ${row.obs.toFixed(1)} · CAMS ${row.model.toFixed(1)} µg/m³ PM2.5`;
+        tip.style.display = 'block';
+        renderer.domElement.style.cursor = 'pointer';
+    }
+    tip.style.left = Math.min(cx + 14, window.innerWidth - 260) + 'px';
     tip.style.top  = Math.min(cy + 12, window.innerHeight - 70) + 'px';
 }
 
@@ -12729,9 +13029,24 @@ function _setWildfireHover(hit, cx, cy) {
             return true;
         }
 
-        // Wildfire / pollution-center markers: tap pins their hover tooltip
-        // at the tap point (the touch equivalent of hovering). A later tap
-        // on empty globe falls through to the dismiss branch below.
+        // Station / wildfire / pollution-center markers: tap pins their
+        // hover tooltip at the tap point (the touch equivalent of hovering).
+        // A later tap on empty globe falls through to the dismiss branch.
+        const stationTap = intlStationsLayer.getHovered(ray);
+        if (stationTap) {
+            _setStationHover(stationTap, clientX, clientY);
+            _setResidualHover(null);
+            _setWildfireHover(null);
+            _setPollutionHover(null);
+            return true;
+        }
+        const residualTap = residualLayer.getHovered(ray);
+        if (residualTap) {
+            _setResidualHover(residualTap, clientX, clientY);
+            _setWildfireHover(null);
+            _setPollutionHover(null);
+            return true;
+        }
         const fireTap = wildfireLayer.getHovered(ray);
         if (fireTap) {
             _setWildfireHover(fireTap, clientX, clientY);
@@ -12779,6 +13094,8 @@ function _setWildfireHover(hit, cx, cy) {
         // wildfire/pollution tooltip, which touch has no mousemove to clear)
         if (_ed.card.classList.contains('show')) _hideEventDetail();
         if (_od.card.classList.contains('show')) _hideOceanDetail();
+        _setStationHover(null);
+        _setResidualHover(null);
         _setWildfireHover(null);
         _setPollutionHover(null);
         return false;
@@ -13430,6 +13747,8 @@ function animate() {
             (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
         pollutionCentersLayer.tick(t, _envPixelScale);
         wildfireLayer.tick(t, _envPixelScale);
+        intlStationsLayer.tick(t, _envPixelScale);
+        residualLayer.tick(t, _envPixelScale);
     }
 
     // ── Fly-to animation
@@ -14271,9 +14590,11 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     'lyr-rotate', 'lyr-cities', 'lyr-tsunami-alerts', 'lyr-dart',
     'lyr-tide-gauges', 'lyr-ocean-buoys',
     'lyr-ocean-model', 'lyr-air-quality',
-    // Pollution centers + wildfire events default off; the dispatch keeps
-    // their groups aligned with the unchecked boxes on first paint.
-    'lyr-pollution-centers', 'lyr-wildfires',
+    // Pollution centers + wildfire events + AQI heatmap default off; the
+    // dispatch keeps their groups aligned with the unchecked boxes on
+    // first paint.
+    'lyr-pollution-centers', 'lyr-wildfires', 'lyr-aqi-heatmap',
+    'lyr-intl-stations', 'lyr-aq-residuals',
     // Derived weather overlays (humidity / precip-rate / mist) — share
     // the existing weather DataTextures, so they need the same synthetic
     // change-event dispatch on first render to align mesh visibility
@@ -14778,6 +15099,9 @@ const _layerRegistry = {
     'lyr-air-quality':         () => airQualityLayer.group.visible,
     'lyr-pollution-centers':   () => pollutionCentersLayer.group.visible,
     'lyr-wildfires':           () => wildfireLayer.group.visible,
+    'lyr-aqi-heatmap':         () => aqiHeatmapLayer.group.visible,
+    'lyr-intl-stations':       () => intlStationsLayer.group.visible,
+    'lyr-aq-residuals':        () => residualLayer.group.visible,
     'lyr-obs-aod':             () => _obsOverlays['aod']?.mesh?.visible
                                    ?? document.getElementById('lyr-obs-aod')?.checked ?? false,
     'lyr-obs-cloud-thickness': () => _obsOverlays['cloud-thickness']?.mesh?.visible
