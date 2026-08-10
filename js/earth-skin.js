@@ -7,7 +7,8 @@
  * Exports:
  *   EARTH_TEXTURES        — { day, night, ocean, clouds } CDN URLs (version-pinned)
  *   EARTH_VERT / EARTH_FRAG — Earth surface GLSL shaders
- *   CLOUD_VERT / CLOUD_FRAG — Cloud layer GLSL shaders (with cyclonic storm swirl)
+ *   CLOUD_VERT / CLOUD_FRAG — Cloud layer GLSL shaders (cyclonic storm swirl +
+ *                             per-deck layered compositing, see shadeDeck)
  *   createEarthUniforms(sunDir) — default uniform block for earth surface
  *   createCloudUniforms(sunDir) — default uniform block for cloud layer
  *   loadEarthTextures(eu, cu)   — loads textures into uniforms, returns Promise
@@ -507,16 +508,23 @@ uniform float u_shell_lift;          // altitude terminator bias (Phase 2.2).
                                      // Added to NdotL so high cirrus stays
                                      // sunlit after the surface terminator
                                      // passes (alpenglow) and low decks darken
-                                     // first. 0 on the composite shell → the
-                                     // classic render is bit-identical.
+                                     // first. Per-shell uniform on the split
+                                     // shells; 0 on the composite material,
+                                     // where the layered aggregate applies
+                                     // the same per-deck biases as constants
+                                     // (see the lift block in main()).
 
-// ── Split-shell compilation (Phase 2.1) ──────────────────────────────────────
+// ── Split-shell compilation (Phase 2.1) + layered aggregate (Phase 2.4) ─────
 // The same source compiles four ways. With no defines (the composite shell,
-// ALSO the floor-quality tier and research mode) the preprocessor emits
-// byte-identical GLSL to the single-shell era. With SHELL_SPLIT + SHELL_LAYER
+// ALSO the floor-quality tier and research mode) all three decks are computed
+// in one pass, each lit with its own palette/terminator bias, and composited
+// in altitude order — the "layered aggregate". With SHELL_SPLIT + SHELL_LAYER
 // ∈ {0,1,2} the material renders exactly one deck: the other two layers'
 // noise stacks compile out (so three split shells cost ≈ one composite shell
-// in ALU) and their alphas are pinned to 0 after the data blends.
+// in ALU) and their alphas are pinned to 0 after the data blends. Both paths
+// share shadeDeck() and the same over-operator (the split meshes get it from
+// GPU alpha blending), so a governor tier flip changes parallax fidelity,
+// never a deck's character or the stack's total density.
 
 // Storm systems: .xy = UV position, .z = intensity [0-1], .w = spin (+1 CCW/-1 CW)
 uniform vec4 u_storms[8];
@@ -718,6 +726,49 @@ float stormStructure(vec2 uv) {
     return mult;
 }
 
+// ── Per-deck shading ─────────────────────────────────────────────────────────
+// One deck's lit colour. Shared by the layered aggregate (all three decks in
+// one pass) and the split shells (one deck each), so a governor tier flip
+// never changes a deck's character. NdotL inputs arrive pre-lifted — the
+// per-altitude terminator bias is the caller's job.
+//   a        deck alpha (post data/satellite/storm blends)
+//   NdotLd   flat-shell sun angle + deck lift       (day/night + terminator)
+//   NdotLbD  relief-perturbed sun angle + deck lift (== NdotLd on flat decks)
+//   selfShD  self-shadow term (form-owner deck only, else 0)
+//   veilD    direct-sun transmission through decks stacked above [0..1]
+//   fwd      shared forward-scatter phase pow(max(V·L,0), 6)
+//   silverW  silver-lining weight  (cirrus > cumulus > altostratus)
+//   termW    terminator warm-tint weight (alpenglow lingers on cirrus)
+//   thinCol / coreCol / shadeCol   deck palette
+//   dayMixD  OUT: this deck's day/night blend (the precip veil reuses low's)
+vec3 shadeDeck(float a, float NdotLd, float NdotLbD, float selfShD, float veilD,
+               float fwd, float silverW, float termW,
+               vec3 thinCol, vec3 coreCol, vec3 shadeCol, out float dayMixD) {
+    dayMixD    = smoothstep(-0.18, 0.20, NdotLd);
+    float sunD = clamp(NdotLbD * 0.5 + 0.5, 0.0, 1.0);
+    sunD       = sunD * sunD * veilD;
+    float litD = mix(0.30, 1.0, sunD) * (1.0 - 0.60 * selfShD);
+
+    // Forward (Mie) scatter — the "silver lining". Thin edges glow when the
+    // view is roughly sun-aligned; the cue that most sells cloud volume.
+    float thinD   = 1.0 - smoothstep(0.0, 0.55, a);
+    float silverD = fwd * (0.30 + 0.70 * thinD) * dayMixD * silverW;
+
+    // Density-driven colour: thick cores opaque and bright, thin wisps a
+    // cooler translucent grey. The shadowed side fills with sky ambient
+    // rather than going to black, which is what real cloud underbellies do.
+    float thickD  = smoothstep(0.12, 0.78, clamp(a * 1.3, 0.0, 1.0));
+    vec3  baseD   = mix(thinCol, coreCol, thickD);
+    vec3  dayD    = mix(shadeCol, baseD, litD)
+                  + vec3(1.00, 0.95, 0.82) * silverD * 0.55;   // golden rim
+    vec3  nightD  = vec3(0.15, 0.18, 0.29) * (0.65 + 0.35 * (1.0 - selfShD));
+    vec3  colD    = mix(nightD, dayD, dayMixD);
+
+    // Warm golden tint at terminator (sunrise/sunset through the deck)
+    float termD = smoothstep(-0.12, 0.0, NdotLd) * smoothstep(0.24, 0.06, NdotLd);
+    return mix(colD, vec3(0.97, 0.66, 0.32), termD * termW);
+}
+
 void main() {
     // UV reconstructed from the interpolated surface normal — kills the
     // pole-fan wedge artifact that stock SphereGeometry produces and the
@@ -726,9 +777,12 @@ void main() {
     vec2 vUv      = normalToUV(N_sphere);
 
     vec3  N     = normalize(vWorldNormal);
-    // u_shell_lift biases the terminator per shell altitude: cirrus keeps
-    // catching sun the surface no longer sees; low decks fall dark first.
-    float NdotL = dot(N, u_sun_dir) + u_shell_lift;
+    // Flat-shell sun angle. Per-deck altitude lifts (u_shell_lift on the
+    // split shells, matching constants in the layered aggregate) are applied
+    // at the shading stage so each deck gets its own terminator response:
+    // cirrus keeps catching sun the surface no longer sees; low decks fall
+    // dark first.
+    float NdotLf = dot(N, u_sun_dir);
 
     // View direction + the tangent-plane component of it. The tangential
     // part is what drives inter-layer PARALLAX: when you orbit toward the
@@ -929,8 +983,10 @@ void main() {
     // what keeps disc boundaries from rendering as a hard line of
     // cloud-density change — don't quantize or threshold satData here.
     float satNoDataMask = 0.0;   // research-mode hatch flag (set below)
+    vec4  satPix = vec4(0.0);    // hoisted: the cloud-top-height pass below reuses it
     if (u_satellite_on > 0.5) {
         vec4  sat      = texture2D(u_satellite, vUv);
+        satPix         = sat;
         float satCloud = sat.r;
         float satData  = sat.a;                             // 1 where the satellite saw this pixel
         float satShape = smoothstep(0.18, 0.85, satCloud);
@@ -961,6 +1017,10 @@ void main() {
     alphaLow = 0.0; alphaHigh = 0.0;
     #else
     alphaLow = 0.0; alphaMid = 0.0;
+    #endif
+#endif
+
+#if !defined(SHELL_SPLIT) || SHELL_LAYER == 2
     // Cloud-top height (Phase 2.3): the mosaic's B channel carries IR
     // brightness-temperature "top coldness" (0 → ~300 K, 1 → ~195 K; see
     // IR_BT_WARM_K/IR_BT_COLD_K in cloud-mosaic-core.js — keep the 26.85 −
@@ -969,37 +1029,48 @@ void main() {
     // (tops punching past ~7 km) thickens and seeds the high shell so
     // towers visibly rise. Confidence-feathered — procedural-fill regions
     // grow no fake anvils. B = 0 means "no IR estimate" and is skipped.
-    if (u_satellite_on > 0.5) {
-        vec4 satC = texture2D(u_satellite, vUv);
-        if (satC.b > 0.02) {
-            float t2mC  = sampleWeatherField(vUv).r * 110.0 - 60.0;
-            float btC   = 26.85 - satC.b * 105.0;
-            float cthKm = clamp((t2mC - btC) / 6.5, 0.0, 18.0);
-            float tower = smoothstep(7.0, 13.0, cthKm) * satC.a;
-            alphaHigh   = clamp(alphaHigh * (1.0 + 0.9 * tower) + 0.12 * tower, 0.0, 1.0);
-        }
+    // Runs for the split high shell AND the layered aggregate's high deck,
+    // so anvils survive a governor collapse to the composite. Research mode
+    // is excluded on purpose: the boost ADDS coverage the measured
+    // low/mid/high channels didn't supply, and measured-only alpha must
+    // stay alpha = data.
+    if (u_satellite_on > 0.5 && u_research_mode < 0.5 && satPix.b > 0.02) {
+        float t2mC  = sampleWeatherField(vUv).r * 110.0 - 60.0;
+        float btC   = 26.85 - satPix.b * 105.0;
+        float cthKm = clamp((t2mC - btC) / 6.5, 0.0, 18.0);
+        float tower = smoothstep(7.0, 13.0, cthKm) * satPix.a;
+        alphaHigh   = clamp(alphaHigh * (1.0 + 0.9 * tower) + 0.12 * tower, 0.0, 1.0);
     }
-    #endif
 #endif
 
-    // Composite layers: opaque low clouds dominate, cirrus adds on top
-    float alpha = max(alphaLow, alphaMid);
-    alpha = clamp(alpha + alphaHigh * (1.0 - alpha * 0.55), 0.0, 0.95);
-
-    // Eye/eyewall structure for active hurricanes/typhoons
+    // ── Storm structure (eye / eyewall) ──────────────────────────────────────
+    // Applied per deck BEFORE lighting so the carve shapes each deck's own
+    // thickness ramp — the eye reads clear at every altitude, exactly as it
+    // did against the old flattened alpha.
     if (u_storm_count > 0) {
-        alpha *= stormStructure(vUv);
-        alpha  = clamp(alpha, 0.0, 0.95);
+        float sMult = stormStructure(vUv);
+        alphaLow  = clamp(alphaLow  * sMult, 0.0, 0.95);
+        alphaMid  = clamp(alphaMid  * sMult, 0.0, 0.95);
+        alphaHigh = clamp(alphaHigh * sMult, 0.0, 0.95);
     }
 
     // ── Relief lighting ──────────────────────────────────────────────────────
-    // The old shader lit the cloud with a flat half-Lambert and never
-    // perturbed the normal, so it read as a painted decal. We now build a
-    // bump normal from the cheap cloud-form field's gradient (same trick the
-    // Earth surface shader uses for terrain) so cumulus towers catch the sun
-    // on their sunward face and self-shade on the lee. The bump amplitude is
-    // gated by the local cloud amount, so flat thin overcast stays flat while
-    // a deep convective stack stands proud.
+    // A bump normal built from the cheap cloud-form field's gradient (same
+    // trick the Earth surface shader uses for terrain) so cumulus towers
+    // catch the sun on their sunward face and self-shade on the lee. The bump
+    // amplitude is gated by the local cloud amount, so flat thin overcast
+    // stays flat while a deep convective stack stands proud. The relief
+    // belongs to the deck whose form field N_form tracks — the low cumulus in
+    // the aggregate, each shell's own deck when split. The other decks are
+    // lit flat: the form gradient is uncorrelated with their shapes, and
+    // perturbing them with it only added noise-shaped lighting.
+#if defined(SHELL_SPLIT) && SHELL_LAYER == 1
+    float reliefAlpha = alphaMid;
+#elif defined(SHELL_SPLIT) && SHELL_LAYER == 2
+    float reliefAlpha = alphaHigh;
+#else
+    float reliefAlpha = alphaLow;
+#endif
     vec3  up   = abs(N_sphere.y) < 0.985 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
     vec3  tE   = normalize(cross(up, N_sphere));      // local east-ish tangent
     vec3  tN   = normalize(cross(N_sphere, tE));      // local north-ish tangent
@@ -1015,7 +1086,7 @@ void main() {
         float fC   = cloudForm(N_form);
         float fE   = cloudForm(normalize(N_form + tE * EPS));
         float fN   = cloudForm(normalize(N_form + tN * EPS));
-        float relAmp = clamp(alpha * 1.6, 0.0, 1.0);
+        float relAmp = clamp(reliefAlpha * 1.6, 0.0, 1.0);
         Nb = normalize(N - (tE * (fE - fC) + tN * (fN - fC)) * 8.0 * relAmp);
 
         // Self-shadow / contact occlusion: one extra form tap a short step toward
@@ -1026,41 +1097,64 @@ void main() {
         selfSh = clamp((fSun - fC) * 3.2, 0.0, 1.0) * relAmp;
     }
 
-    float NdotLb = dot(Nb, u_sun_dir) + u_shell_lift;
-    float dayMix = smoothstep(-0.18, 0.20, NdotL);
-    float sun    = clamp(NdotLb * 0.5 + 0.5, 0.0, 1.0);
-    sun          = sun * sun;
-    float lit    = mix(0.30, 1.0, sun) * (1.0 - 0.60 * selfSh);
+    // ── Per-deck altitude lifts + relief routing ─────────────────────────────
+#ifdef SHELL_SPLIT
+    // Split shells: the per-shell uniform carries this deck's altitude bias,
+    // and the relief normal belongs to this deck's own form field. (The two
+    // sibling decks' alphas are pinned to 0, so their shadeDeck calls below
+    // contribute nothing to the composite.)
+    float liftLow = u_shell_lift, liftMid = u_shell_lift, liftHigh = u_shell_lift;
+    #if SHELL_LAYER == 0
+    float relLow = 1.0, relMid = 0.0, relHigh = 0.0;
+    #elif SHELL_LAYER == 1
+    float relLow = 0.0, relMid = 1.0, relHigh = 0.0;
+    #else
+    float relLow = 0.0, relMid = 0.0, relHigh = 1.0;
+    #endif
+#else
+    // Layered aggregate: the same per-altitude terminator biases the split
+    // shells are constructed with in earth.html (u_shell_lift is 0 on the
+    // composite material — keep the two value sets in lockstep), so the
+    // aggregate and split renders agree at the terminator: low decks darken
+    // first, cirrus keeps the alpenglow.
+    float liftLow  = u_shell_lift - 0.04;
+    float liftMid  = u_shell_lift + 0.04;
+    float liftHigh = u_shell_lift + 0.14;
+    float relLow = 1.0, relMid = 0.0, relHigh = 0.0;
+#endif
 
-    // Forward (Mie) scatter — the "silver lining". When the view is roughly
-    // sun-aligned, thin cloud edges glow brightly because sunlight scatters
-    // forward through them. This is the cue that most sells cloud volume.
-    float VdotL  = dot(V, u_sun_dir);
+    float NdotLb  = dot(Nb, u_sun_dir);
+    float VdotL   = dot(V, u_sun_dir);
     float forward = pow(clamp(VdotL, 0.0, 1.0), 6.0);
-    float thinEdge = 1.0 - smoothstep(0.0, 0.55, alpha);
-    float silver  = forward * (0.30 + 0.70 * thinEdge) * dayMix;
 
-    // ── Cloud colour ──────────────────────────────────────────────────────────
-    // Density-driven: thick cores opaque bright white, thin wisps a cooler
-    // translucent grey. The shadowed side fills with sky-blue ambient rather
-    // than going to black, which is what real cloud underbellies do.
-    float thick    = smoothstep(0.12, 0.78, clamp(alpha * 1.3, 0.0, 1.0));
-    vec3  thinGrey = vec3(0.60, 0.66, 0.78);
-    vec3  coreWhite= vec3(0.98, 0.99, 1.00);
-    vec3  baseCol  = mix(thinGrey, coreWhite, thick);
-    vec3  skyFill  = vec3(0.40, 0.50, 0.66);          // shaded-underside ambient
-    vec3  dayCol   = mix(skyFill, baseCol, lit);
-    dayCol        += vec3(1.00, 0.95, 0.82) * silver * 0.55;   // golden rim
-    vec3  nightCol = vec3(0.15, 0.18, 0.29) * (0.65 + 0.35 * (1.0 - selfSh));
-    vec3  col      = mix(nightCol, dayCol, dayMix);
+    // Direct sun reaching a deck is attenuated by the decks stacked above
+    // it — cirrus + altostratus visibly veil the cumulus below. Split shells
+    // can't see their siblings (those alphas are pinned to 0), so there the
+    // veil stays 1; the aggregate is where the stacked look pays off.
+    float veilLow = 1.0 - 0.35 * clamp(alphaMid + alphaHigh, 0.0, 1.0);
+    float veilMid = 1.0 - 0.30 * clamp(alphaHigh, 0.0, 1.0);
 
-    // Cirrus reads as a thin icy veil where the high fraction dominates
-    float cirrusDom = alphaHigh / max(0.01, alpha);
-    col = mix(col, vec3(0.90, 0.93, 1.00), cirrusDom * dayMix * 0.30);
-
-    // Warm golden tint at terminator (sunrise/sunset through clouds)
-    float termZone = smoothstep(-0.12, 0.0, NdotL) * smoothstep(0.24, 0.06, NdotL);
-    col = mix(col, vec3(0.97, 0.66, 0.32), termZone * 0.30);
+    float dayMixLow, dayMixMid, dayMixHigh;
+    // Low cumulus: the classic bright-core ramp, full relief + self-shadow.
+    vec3 colLow  = shadeDeck(alphaLow,
+                             NdotLf + liftLow, mix(NdotLf, NdotLb, relLow) + liftLow,
+                             selfSh * relLow, veilLow, forward, 1.0, 0.30,
+                             vec3(0.60, 0.66, 0.78), vec3(0.98, 0.99, 1.00),
+                             vec3(0.40, 0.50, 0.66), dayMixLow);
+    // Mid altostratus: a softer, flatter sheet — a slightly dimmer core so a
+    // break in the low deck under altostratus still reads as two layers.
+    vec3 colMid  = shadeDeck(alphaMid,
+                             NdotLf + liftMid, mix(NdotLf, NdotLb, relMid) + liftMid,
+                             selfSh * relMid, veilMid, forward, 0.80, 0.30,
+                             vec3(0.63, 0.68, 0.79), vec3(0.94, 0.96, 0.99),
+                             vec3(0.43, 0.52, 0.68), dayMixMid);
+    // High cirrus: an icy translucent veil — never pure white, strongest
+    // forward-scatter silver, warmest terminator (alpenglow lingers here).
+    vec3 colHigh = shadeDeck(alphaHigh,
+                             NdotLf + liftHigh, mix(NdotLf, NdotLb, relHigh) + liftHigh,
+                             selfSh * relHigh, 1.0, forward, 1.35, 0.40,
+                             vec3(0.74, 0.80, 0.92), vec3(0.90, 0.94, 1.00),
+                             vec3(0.55, 0.62, 0.78), dayMixHigh);
 
     // ── Precipitation: 3-D rain / snow shafts ────────────────────────────────
     // The old version drew fract() stripes in equirectangular UV: they
@@ -1078,7 +1172,9 @@ void main() {
     //     latitude — snow falls in a winter mid-latitude storm and not over a
     //     warm tropical highland, which the old abs(lat) test got backwards.
     // Split shells: the rain/snow veil hangs under the LOW deck only — the
-    // mid/high shells must not repeat it at altitude.
+    // mid/high shells must not repeat it at altitude. In the layered
+    // aggregate it is painted onto the low deck BEFORE compositing for the
+    // same reason: rain must read under a passing cirrus veil, not over it.
 #if !defined(SHELL_SPLIT) || SHELL_LAYER == 0
     if (u_weather_on > 0.5 && precip > 0.004) {
         float precipI = clamp(sqrt(precip * 1.7), 0.0, 1.0);
@@ -1105,13 +1201,29 @@ void main() {
         float n1    = fbm(vec2(rc.x * scl, rc.y * scl * 0.20 - u_time * fall), 3);
         float shaft = smoothstep(0.46, 0.80, n1);
 
-        float veil = precipI * (0.30 + 0.70 * dayMix);
+        float veil = precipI * (0.30 + 0.70 * dayMixLow);
         // Ambient "it is raining here" wash + brighter/darker falling shafts.
-        col   = mix(col, pcol, veil * 0.42);
-        col   = mix(col, pcol * mix(0.80, 1.30, snowFrac), shaft * veil * 0.50);
-        alpha = clamp(alpha + (0.10 + shaft * 0.20) * veil, 0.0, 0.98);
+        colLow   = mix(colLow, pcol, veil * 0.42);
+        colLow   = mix(colLow, pcol * mix(0.80, 1.30, snowFrac), shaft * veil * 0.50);
+        alphaLow = clamp(alphaLow + (0.10 + shaft * 0.20) * veil, 0.0, 0.98);
     }
 #endif
+
+    // ── Altitude-ordered compositing (premultiplied over) ────────────────────
+    // Cirrus over altostratus over cumulus. The old aggregate flattened the
+    // decks with max()+add into ONE alpha before colouring, which erased
+    // layer identity — and rendered thinner than the split shells, whose
+    // three meshes the GPU already blends with this exact over operator. One
+    // compositing rule for both paths means a governor tier flip no longer
+    // changes the sky's density, only its parallax fidelity.
+    float A = alphaHigh;
+    vec3  C = colHigh * alphaHigh;
+    C += colMid * alphaMid * (1.0 - A);
+    A += alphaMid * (1.0 - A);
+    C += colLow * alphaLow * (1.0 - A);
+    A += alphaLow * (1.0 - A);
+    vec3  col   = C / max(A, 1e-4);
+    float alpha = min(A, 0.95);
 
     // Thin cloud edges stay translucent so they don't read as hard cut-outs
     alpha *= mix(0.55, 1.0, smoothstep(0.0, 0.30, alpha));
@@ -1650,8 +1762,10 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         // Research / measured-only mode (see CLOUD_FRAG): 0 = composite (default),
         // 1 = data-only with hatched no-data overlay. UI toggle in earth.html.
         u_research_mode: { value: 0 },
-        // Altitude terminator bias (Phase 2.2). 0 on the composite shell;
-        // the split shells override per altitude via their own uniform entry.
+        // Altitude terminator bias (Phase 2.2). 0 on the composite shell —
+        // its layered aggregate adds the split shells' per-deck biases as
+        // in-shader constants — and overridden per altitude by the split
+        // shells via their own uniform entry.
         u_shell_lift:    { value: 0 },
         u_storms:        { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 1)) },
         u_storm_count:   { value: 0 },

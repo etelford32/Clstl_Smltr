@@ -4664,6 +4664,10 @@ var cloudShellMeshes = null;
         scene.add(mesh);
         return mesh;
     };
+    // The lift values are duplicated as in-shader constants in CLOUD_FRAG's
+    // layered-aggregate branch (the composite applies them per deck since
+    // its u_shell_lift is 0) — change them together or the aggregate and
+    // split renders drift apart at the terminator.
     cloudShellMeshes = [
         mkShell(R_CLOUD_LOW,  0, -0.04, 3.0),   // low decks darken first…
         mkShell(R_CLOUD_MID,  1,  0.04, 3.1),
