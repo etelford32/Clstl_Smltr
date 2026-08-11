@@ -66,6 +66,51 @@ test('moon exosphere, landmarks, and dynamo mechanisms boot and respond', async 
     await expect(page.locator('#ip-landmarks')).toContainText('Tycho');
     await expect(page.locator('#ip-landmarks')).toContainText('South Pole–Aitken');
 
+    // ── Regional terrain synth: boots on Reiner Gamma, discloses its seed ──
+    // Textures are aborted in this spec, so the synth MUST report the
+    // landmark-catalog fallback — a run that claims measured albedo while the
+    // base map never arrived is lying about provenance.
+    await expect(page.locator('#synth-site')).toContainText('Reiner Gamma');
+    await expect(page.locator('#synth-prov')).toContainText('fallback');
+    await expect(page.locator('#synth-prov')).toContainText('synthesized');
+    await expect(page.locator('#synth-legend')).toContainText('Mare basalt');
+    const synthState = await page.evaluate(() => window.__moonLab.terrainSynth());
+    expect(synthState.site).toBe('Reiner Gamma');
+    expect(synthState.shares.maria).toBeGreaterThan(0.3);
+    expect(synthState.shares.swirl).toBeGreaterThan(0);
+    // The canvas actually painted (not a blank rectangle).
+    const synthPainted = await page.evaluate(() => {
+        const canvas = document.querySelector('#synth-canvas');
+        const data = canvas.getContext('2d').getImageData(0, 0, 40, 40).data;
+        let sum = 0;
+        for (let i = 0; i < data.length; i += 4) sum += data[i];
+        return sum;
+    });
+    expect(synthPainted).toBeGreaterThan(1000);
+
+    // ── Graticule accuracy: the two past bugs stay fixed ──
+    // (1) mounted on the rotating moon mesh, not the scene; (2) built with
+    // latLonToXYZ, so the lon-0 meridian's equator vertex sits at +X — the
+    // old mirrored inline trig put it at +Z, which this catches.
+    const grid = await page.evaluate(() => {
+        const { gridGroup, moonMesh } = window.__moonLab;
+        const meridian0 = gridGroup.children[6];      // lon = −180 + 6·30 = 0°
+        const positions = meridian0.geometry.attributes.position;
+        const equatorIndex = 45;                       // lat = −90 + 45·2 = 0°
+        return {
+            parentIsMoonMesh: gridGroup.parent === moonMesh,
+            equatorVertex: [
+                positions.getX(equatorIndex),
+                positions.getY(equatorIndex),
+                positions.getZ(equatorIndex),
+            ],
+        };
+    });
+    expect(grid.parentIsMoonMesh).toBe(true);
+    expect(grid.equatorVertex[0]).toBeCloseTo(1.001, 3);
+    expect(Math.abs(grid.equatorVertex[1])).toBeLessThan(1e-6);
+    expect(Math.abs(grid.equatorVertex[2])).toBeLessThan(1e-6);
+
     // Hover tooltip: project a camera-facing marker via the __moonLab hook
     // and move the mouse onto it — deterministic, no blind sweeps.
     const pt = await page.evaluate(() => {
@@ -94,10 +139,15 @@ test('moon exosphere, landmarks, and dynamo mechanisms boot and respond', async 
     await page.mouse.move(30, 400);
     await expect(page.locator('#lm-tip')).toBeHidden();
 
-    // Category toggle + row click (pulse) survive without errors
+    // Category toggle + row click (pulse) survive without errors — and the
+    // row click now ALSO re-synthesizes the terrain card for that site.
     await page.locator('input[data-lm-cat="mare"]').uncheck();
     await page.locator('.lm-row', { hasText: 'Tycho' }).first().click();
     await page.waitForTimeout(300);
+    await expect(page.locator('#synth-site')).toContainText('Tycho');
+    const tychoSynth = await page.evaluate(() => window.__moonLab.terrainSynth());
+    expect(tychoSynth.site).toBe('Tycho');
+    expect(tychoSynth.shares.highlands).toBeGreaterThan(0.3);
 
     // Exosphere layer toggles
     await page.locator('#lyr-exo').uncheck();

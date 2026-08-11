@@ -14,6 +14,10 @@ import { MarsLandmarks } from './mars-landmarks.js?v=20260809-live';
 import { MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
 import { fetchMarsSkyEphemeris } from './horizons.js';
 import { MarsSky } from './mars-sky.js';
+import {
+    MARS_TILESET, collapse as collapseWfc, marsClassPriors, regionSeed,
+    regionGrid as wfcRegionGrid, sampleClassInto, classShares,
+} from './terrain-wfc.js';
 
 const SURFACE_RADIUS = 1;
 const RELIEF_EXAGGERATION = 5;
@@ -35,6 +39,20 @@ const SURFACE_PATCH_OFFSET = 0.00012;
 // 18× makes the same MOLA data legible. The MOLA readout in the surface HUD
 // still reports TRUE elevation, and the exaggeration is printed on-screen.
 const REGIONAL_RELIEF_EXAGGERATION = 18;
+
+// Geology synth (WFC) grid over the regional patch. 48 cells across 520 km is
+// ~10.8 km per cell — deliberately AT the bundled MOLA raster's real sample
+// spacing (4 px/°, ~15 km at Jezero), so the synthesized class map never
+// pretends to more resolution than the data that seeds it. The synth layer is
+// decoration in the same sense as the decorative roughness it modulates: it is
+// labelled "synthesized" in the surface HUD, and the MOLA readouts stay true.
+// Cell count does NOT ride the quality ladder — the ladder trades fidelity,
+// and a 48² collapse costs ~15 ms, which is noise inside a 66k-vertex rebuild.
+const REGIONAL_SYNTH_CELLS = 48;
+// How far the class tint pulls the vertex color away from the neutral
+// hypsometric ramp. 1 would replace the Viking albedo outright; 0.55 keeps the
+// photometric base readable underneath the geology.
+const SYNTH_TINT_STRENGTH = 0.55;
 
 // Surface-explorer camera framing. Eye altitude and look-ahead are chosen so the
 // horizon lands in the upper third of a 36° frame: at 9 km the horizon is 247 km
@@ -577,6 +595,85 @@ function visualRegionalRoughnessKm(eastKm, northKm) {
 }
 
 /**
+ * Wave-function-collapse geology synth for the regional patch.
+ *
+ * The kernel lives in js/terrain-wfc.js (node-gated by tests/terrain-wfc.mjs);
+ * this function only feeds it MEASURED priors: real MOLA elevation and local
+ * slope sampled at each synth cell's accurate great-circle coordinates. The
+ * collapsed class map then (a) tints the patch's vertex colors so dune fields,
+ * channel floors, and polar ice read as different ground, and (b) shapes the
+ * decorative roughness amplitude so smooth plains actually render smooth while
+ * chaos terrain keeps its full grain. Deterministic per site: the seed is
+ * quantized from the patch center, so revisiting Jezero always grows the same
+ * geology. No MOLA sampler ⇒ no synth — the layer refuses to invent classes
+ * with nothing real to seed them.
+ */
+let synthEnabled = true;
+let synthResult = null;
+let synthShares = null;
+let synthKey = '';
+// Scratch for the per-vertex hot path — sampleClassInto allocates nothing.
+const synthScratch = { color: [0, 0, 0], reliefAmpM: 0, grain: 0, tileIndex: 0 };
+// The class tint is normalized so 'plains' ≈ no change: the Viking base map
+// already looks like plains nearly everywhere, and an un-normalized tint would
+// re-color the whole patch instead of marking the exceptions.
+const SYNTH_NEUTRAL = MARS_TILESET.tiles.find(tile => tile.id === 'plains').color;
+
+function computeRegionalSynth(latDeg, lonDeg) {
+    if (!molaSampler) return null;
+    // Same quarter-degree quantization as regionSeed: rebuilds triggered by the
+    // quality ladder (same center) hit the cache; a real traverse (patch
+    // recenters after ~114 km) re-collapses.
+    const key = `${Math.round(latDeg * 4)}:${Math.round(lonDeg * 4)}`;
+    if (synthResult && synthKey === key) return synthResult;
+    const cells = REGIONAL_SYNTH_CELLS;
+    const region = wfcRegionGrid({
+        centerLatDeg: latDeg, centerLonDeg: lonDeg,
+        extentKm: REGIONAL_TERRAIN_EXTENT_KM, cells, radiusKm: MARS_RADIUS_KM,
+    });
+    const cellCount = cells * cells;
+    const elevations = new Float32Array(cellCount);
+    for (let i = 0; i < cellCount; i += 1) {
+        elevations[i] = elevationAtLatLon(region.latDeg[i], region.lonDeg[i]);
+    }
+    const tileCount = MARS_TILESET.tiles.length;
+    const priors = new Float32Array(cellCount * tileCount);
+    const stepM = region.spacingKm * 1000;
+    for (let row = 0; row < cells; row += 1) {
+        for (let col = 0; col < cells; col += 1) {
+            const i = row * cells + col;
+            const eastDrop = col + 1 < cells
+                ? elevations[i + 1] - elevations[i]
+                : elevations[i] - elevations[i - 1];
+            const northDrop = row > 0
+                ? elevations[i - cells] - elevations[i]
+                : elevations[i] - elevations[i + cells];
+            const slopeDeg = Math.atan(Math.hypot(eastDrop, northDrop) / stepM) * 180 / Math.PI;
+            priors.set(
+                marsClassPriors({ elevationM: elevations[i], slopeDeg, latDeg: region.latDeg[i] }),
+                i * tileCount,
+            );
+        }
+    }
+    try {
+        synthResult = collapseWfc({
+            tileset: MARS_TILESET, width: cells, height: cells,
+            seed: regionSeed('mars', latDeg, lonDeg), priors,
+        });
+        synthShares = classShares(synthResult);
+        synthKey = key;
+    } catch (error) {
+        // Over-constrained priors are a kernel bug, not a page failure — the
+        // patch simply renders without the synth layer.
+        console.warn('[Mars] geology synth failed; rendering without it', error);
+        synthResult = null;
+        synthShares = null;
+        synthKey = '';
+    }
+    return synthResult;
+}
+
+/**
  * Hypsometric tint from the REAL MOLA elevation.
  *
  * This replaces a tint driven by the decorative roughness above, which meant
@@ -608,6 +705,10 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
     const colors = new Float32Array(vertexCount * 3);
     const elevations = new Float32Array(vertexCount);
     const indices = new Uint32Array(segments * segments * 6);
+    const synth = synthEnabled ? computeRegionalSynth(latDeg, lonDeg) : null;
+    // Class tints stashed in pass 1 (where the synth is sampled for roughness
+    // anyway) and applied in pass 2 on top of the hypsometric shade.
+    const synthTint = synth ? new Float32Array(vertexCount * 3) : null;
 
     // Pass 1: geometry + real elevation. No per-vertex object allocation — this
     // loop runs 66,049 times on every rebuild, and rebuilds happen while the
@@ -626,7 +727,22 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
             elevationSum += elevationM;
             if (elevationM < minElevationM) minElevationM = elevationM;
             if (elevationM > maxElevationM) maxElevationM = elevationM;
-            const visualRoughness = visualRegionalRoughnessKm(eastKm, northKm) / MARS_RADIUS_KM;
+            let roughnessKm = visualRegionalRoughnessKm(eastKm, northKm);
+            if (synth) {
+                // Synth grid row 0 is the NORTH edge; this loop's northIndex 0
+                // is the SOUTH edge, hence the v flip.
+                sampleClassInto(synth, eastIndex / segments, 1 - northIndex / segments, synthScratch);
+                // Class-shaped micro-relief, still inside the existing ≤0.35 km
+                // decoration budget: plains flatten it, chaos keeps full grain.
+                roughnessKm *= Math.min(1, Math.max(0.15, synthScratch.reliefAmpM / 300));
+                for (let channel = 0; channel < 3; channel += 1) {
+                    const ratio = synthScratch.color[channel] / SYNTH_NEUTRAL[channel];
+                    synthTint[vertexOffset * 3 + channel] = THREE.MathUtils.clamp(
+                        1 + SYNTH_TINT_STRENGTH * (ratio - 1), 0.35, 1.9,
+                    );
+                }
+            }
+            const visualRoughness = roughnessKm / MARS_RADIUS_KM;
             const radius = regionalRadiusAtLatLon(
                 location.latDeg,
                 location.lonDeg,
@@ -651,9 +767,15 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
     const spanM = Math.max(220, (maxElevationM - minElevationM) / 2);
     for (let index = 0; index < vertexCount; index += 1) {
         const shade = hypsometricShade(elevations[index], midpointM, spanM);
-        colors[index * 3] = shade;
-        colors[index * 3 + 1] = shade * 0.945;
-        colors[index * 3 + 2] = shade * 0.9;
+        if (synthTint) {
+            colors[index * 3] = shade * synthTint[index * 3];
+            colors[index * 3 + 1] = shade * 0.945 * synthTint[index * 3 + 1];
+            colors[index * 3 + 2] = shade * 0.9 * synthTint[index * 3 + 2];
+        } else {
+            colors[index * 3] = shade;
+            colors[index * 3 + 1] = shade * 0.945;
+            colors[index * 3 + 2] = shade * 0.9;
+        }
     }
 
     let indexOffset = 0;
@@ -1603,6 +1725,14 @@ function setLayer(name, enabled) {
             rebuildRegionalTerrain(regionalTerrainCenter.latDeg, regionalTerrainCenter.lonDeg);
             updateSurfaceTrail(surfaceLocation || regionalTerrainCenter, { reset: true });
         }
+    } else if (name === 'synth') {
+        // Deliberately does NOT touch reliefEnabled — the synth layer modulates
+        // decoration and tint only; the anchor stack must not move with it.
+        synthEnabled = Boolean(enabled);
+        if (surfaceModeActive && regionalTerrainCenter) {
+            rebuildRegionalTerrain(regionalTerrainCenter.latDeg, regionalTerrainCenter.lonDeg);
+            updateSurfaceDetail();
+        }
     } else if (name === 'grid') gridLayer.visible = enabled;
     // The quality ladder can drop the limb shell entirely; the layer switch must
     // not turn it back on underneath that decision.
@@ -1632,6 +1762,7 @@ function layerIsVisible(name) {
             : reliefMars.visible;
     }
     if (name === 'regional-terrain') return regionalTerrain.visible;
+    if (name === 'synth') return synthEnabled;
     if (name === 'grid') return gridLayer.visible;
     if (name === 'atmosphere') return atmosphereLayer.visible;
     if (name === 'terminator') return terminatorLayer.visible;
@@ -1879,7 +2010,16 @@ function updateSurfaceDetail() {
         surfaceDetailElement.textContent = 'MOLA unavailable · smooth regional geometry · Viking/material fallback';
         return;
     }
-    surfaceDetailElement.textContent = `${REGIONAL_TERRAIN_EXTENT_KM} km MOLA patch · relief ${(regionalTerrainRelief.minElevationM / 1000).toFixed(1)} → ${(regionalTerrainRelief.maxElevationM / 1000).toFixed(1)} km at ${REGIONAL_RELIEF_EXAGGERATION}× · ${regionalGridSpacingKm} km grid · sub-sample roughness is illustrative`;
+    // Both provenance tails are honest about the same thing: everything below
+    // the MOLA sample spacing is synthesized. With the WFC layer on, the HUD
+    // names the leading class so the viewer knows what the tint is claiming.
+    let detailNote = 'sub-sample roughness is illustrative';
+    if (synthEnabled && synthResult && synthShares) {
+        const [topId, topShare] = Object.entries(synthShares).sort((a, b) => b[1] - a[1])[0];
+        const topLabel = MARS_TILESET.tiles.find(tile => tile.id === topId).label.toLowerCase();
+        detailNote = `WFC geology synth ${Math.round(topShare * 100)}% ${topLabel} · synthesized below ${Math.round(REGIONAL_TERRAIN_EXTENT_KM / REGIONAL_SYNTH_CELLS)} km`;
+    }
+    surfaceDetailElement.textContent = `${REGIONAL_TERRAIN_EXTENT_KM} km MOLA patch · relief ${(regionalTerrainRelief.minElevationM / 1000).toFixed(1)} → ${(regionalTerrainRelief.maxElevationM / 1000).toFixed(1)} km at ${REGIONAL_RELIEF_EXAGGERATION}× · ${regionalGridSpacingKm} km grid · ${detailNote}`;
 }
 
 /**
@@ -2743,6 +2883,13 @@ window.__marsLab = Object.freeze({
         reliefExaggeration: REGIONAL_RELIEF_EXAGGERATION,
         patchRelief: { ...regionalTerrainRelief },
         hasRelief,
+        synth: {
+            enabled: synthEnabled,
+            active: Boolean(synthEnabled && synthResult),
+            cells: REGIONAL_SYNTH_CELLS,
+            restarts: synthResult?.restarts ?? null,
+            shares: synthShares ? { ...synthShares } : null,
+        },
     }),
     /** Solar geometry, so a test can ask whether the focused point is in daylight. */
     sunState: () => {

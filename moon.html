@@ -352,6 +352,24 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
             </div>
         </div>
 
+        <!-- Regional terrain synth (WFC) -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Regional Terrain — WFC Synth</div>
+            <div id="synth-site" style="font-size:10px;color:#bcd;margin-bottom:6px">—</div>
+            <canvas id="synth-canvas" width="320" height="320" style="width:100%;border-radius:6px;display:block;background:#0a0c12"></canvas>
+            <div id="synth-legend" style="display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:6px;font-size:8px;color:#99a"></div>
+            <div id="synth-prov" style="font-size:8px;color:#667;margin-top:4px">—</div>
+            <div style="font-size:8px;color:#556;line-height:1.6;margin-top:4px">
+                Wave-function-collapse synthesis of the region's geologic
+                classes, seeded by measured albedo at each cell's IAU
+                coordinates and constrained by real adjacency rules (swirls
+                live only on maria; rilles thread mare floors). A synthesized
+                illustration, not imagery — the graticule and scale bar are
+                accurate. Click any landmark row or marker to re-run.
+                Gated by tests/moon-terrain-synth.mjs.
+            </div>
+        </div>
+
         <!-- Comparison -->
         <div class="ip-section ip-surface-only">
             <div class="ip-title">Dose Comparison</div>
@@ -431,7 +449,11 @@ import {
     ARTEMIS_I_FINDINGS,
     APOLLO_SITES,
     ARTEMIS_III_CANDIDATES,
+    latLonToXYZ,
 } from './js/artemis-data.js';
+import {
+    synthesizeLandmarkRegion, drawSynthMap, synthLegend, albedoSamplerFromImage,
+} from './js/moon-terrain-synth.js';
 import { LandingSites } from './js/moon-landing-sites.js';
 import { MoonInterior, INTERIOR_PALETTE } from './js/moon-interior.js';
 import {
@@ -548,6 +570,13 @@ moon.loadTextures(renderer).then(() => {
     // one fetch, two consumers.
     interior.setSurfaceTexture(moon.moonU.u_surface.value);
     document.getElementById('loading').classList.add('done');
+    // Terrain synth albedo source: read the base map back if CORS allows;
+    // albedoSamplerFromImage returns null otherwise and the synth discloses
+    // the landmark-catalog fallback in its provenance line.
+    _synthAlbedoAt = albedoSamplerFromImage(moon.moonU.u_surface.value.image);
+    // Default site: Reiner Gamma — the one feature the surface AND interior
+    // views cross-link, and the reason the tileset has a swirl class at all.
+    synthesizeLandmark('Reiner Gamma');
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -783,30 +812,88 @@ document.getElementById('lyr-artemis')?.addEventListener('change', e => {
         return `<div class="lm-cat-head" style="color:${hex(cat.color)}">${cat.label}</div>${items}`;
     }).join('');
     listHost.querySelectorAll('.lm-row').forEach(row => {
-        row.addEventListener('click', () => landmarks.pulse(row.dataset.lmName));
+        row.addEventListener('click', () => {
+            landmarks.pulse(row.dataset.lmName);
+            synthesizeLandmark(row.dataset.lmName);
+        });
     });
 })();
+
+// ═══════════════════════════════════════════════════════════════
+//  REGIONAL TERRAIN SYNTH — WFC over measured albedo
+//  (pure layer: js/moon-terrain-synth.js, gated by its node test;
+//  this block only routes clicks and paints kernel numbers)
+// ═══════════════════════════════════════════════════════════════
+let _synthAlbedoAt = null;    // assigned once textures load; null ⇒ catalog fallback
+let _synthState = null;       // last run, exposed via __moonLab for the smoke spec
+
+function synthesizeLandmark(name) {
+    const lm = LANDMARKS.find(l => l.name === name);
+    const canvas = document.getElementById('synth-canvas');
+    if (!lm || !canvas) return null;
+    const synth = synthesizeLandmarkRegion(lm, { albedoAt: _synthAlbedoAt });
+    drawSynthMap(synth, canvas);
+    const fmt = (v, pos, neg) => `${Math.abs(v).toFixed(1)}°${v >= 0 ? pos : neg}`;
+    document.getElementById('synth-site').textContent =
+        `${lm.name} · ${fmt(lm.latDeg, 'N', 'S')}, ${fmt(lm.lonDeg, 'E', 'W')} · ${Math.round(synth.extentKm)} km window`;
+    const cssColor = (c) => `rgb(${c.map(v => Math.round(v * 255)).join(',')})`;
+    document.getElementById('synth-legend').innerHTML = synthLegend(synth.shares).map(row =>
+        `<span><span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:${cssColor(row.color)};margin-right:3px"></span>${row.label} ${(row.share * 100).toFixed(0)}%</span>`,
+    ).join('');
+    document.getElementById('synth-prov').textContent =
+        `${synth.provenance} · WFC ${synth.result.width}² cells · synthesized`;
+    _synthState = {
+        site: lm.name,
+        provenance: synth.provenance,
+        shares: synth.shares,
+        restarts: synth.result.restarts,
+        cells: synth.result.width,
+        extentKm: synth.extentKm,
+    };
+    return synth;
+}
 
 // ── Landmark hover tooltip (raycast against the invisible hit spheres) ──
 const _lmRaycaster = new THREE.Raycaster();
 const _lmPointer = new THREE.Vector2();
 const _lmTip = document.getElementById('lm-tip');
 
-renderer.domElement.addEventListener('pointermove', (ev) => {
-    if (viewMode !== 'surface' || !_lmTip) return;
+// Shared raycast: the hover tooltip and the click-to-synthesize handler must
+// agree about what the pointer is over. Tests invisible hit meshes (by
+// design); filters to shown categories, and to the NEAR hemisphere — a hit
+// farther away than the Moon's centre is on the back of the globe.
+function _landmarkAtEvent(ev) {
     const rect = renderer.domElement.getBoundingClientRect();
     _lmPointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
     _lmPointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
     _lmRaycaster.setFromCamera(_lmPointer, camera);
-    // The raycaster tests invisible hit meshes too (by design); filter to
-    // shown categories, and to the NEAR hemisphere — a hit farther away
-    // than the Moon's centre is on the back of the globe.
     const distToCenter = camera.position.length();
     const hit = _lmRaycaster.intersectObjects(landmarks.hitTargets, false)
         .find(h => h.distance < distToCenter &&
             landmarks.isLandmarkVisible(h.object.userData.landmark));
-    if (hit) {
-        const lm = hit.object.userData.landmark;
+    return hit ? hit.object.userData.landmark : null;
+}
+
+// Click a marker → synthesize its region. Guarded against orbit drags: a
+// press that travelled is camera work, not a selection.
+let _lmDownAt = null;
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+    _lmDownAt = { x: ev.clientX, y: ev.clientY };
+});
+renderer.domElement.addEventListener('click', (ev) => {
+    if (viewMode !== 'surface' || !_lmDownAt) return;
+    if (Math.hypot(ev.clientX - _lmDownAt.x, ev.clientY - _lmDownAt.y) > 6) return;
+    const lm = _landmarkAtEvent(ev);
+    if (lm) {
+        landmarks.pulse(lm.name);
+        synthesizeLandmark(lm.name);
+    }
+});
+
+renderer.domElement.addEventListener('pointermove', (ev) => {
+    if (viewMode !== 'surface' || !_lmTip) return;
+    const lm = _landmarkAtEvent(ev);
+    if (lm) {
         const cat = LANDMARK_CATEGORIES[lm.category];
         _lmTip.innerHTML = `
             <div class="lt-name">${lm.name}</div>
@@ -1104,37 +1191,57 @@ document.getElementById('lyr-grid').addEventListener('change', e => {
     gridGroup.visible = e.target.checked;
 });
 
-// Simple lat/lon grid
+// Lat/lon grid. TWO past bugs live here — do not reintroduce them:
+//   1. The grid was built with its own inline trig (x = cosφ·sinλ,
+//      z = cosφ·cosλ), which is latLonToXYZ MIRRORED and rotated 90° — every
+//      meridian was drawn at the wrong longitude relative to the landmarks
+//      and the texture. A 30° graticule is symmetric enough that it LOOKED
+//      fine, which is how it survived. It now uses the same latLonToXYZ as
+//      every marker on the page (planetocentric, east-positive).
+//   2. It was mounted on `scene` while the Moon mesh slowly rotates in
+//      surface view, so the grid DRIFTED across the surface. It is now a
+//      child of moon.moonMesh, like the landmarks and landing sites.
+// The equator and prime meridian draw brighter so coordinates are readable.
 {
     const R = 1.001;
     const mat = new THREE.LineBasicMaterial({ color: 0x334455, opacity: 0.3, transparent: true });
+    const originMat = new THREE.LineBasicMaterial({ color: 0x4a6a95, opacity: 0.5, transparent: true });
     for (let lon = -180; lon < 180; lon += 30) {
         const pts = [];
         for (let lat = -90; lat <= 90; lat += 2) {
-            const phi = lat * DEG, lam = lon * DEG;
-            pts.push(new THREE.Vector3(
-                R * Math.cos(phi) * Math.sin(lam),
-                R * Math.sin(phi),
-                R * Math.cos(phi) * Math.cos(lam)
-            ));
+            const p = latLonToXYZ(lat, lon, R);
+            pts.push(new THREE.Vector3(p.x, p.y, p.z));
         }
-        gridGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+        gridGroup.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            lon === 0 ? originMat : mat,
+        ));
     }
     for (let lat = -60; lat <= 60; lat += 30) {
         const pts = [];
         for (let lon = 0; lon <= 360; lon += 2) {
-            const phi = lat * DEG, lam = lon * DEG;
-            pts.push(new THREE.Vector3(
-                R * Math.cos(phi) * Math.sin(lam),
-                R * Math.sin(phi),
-                R * Math.cos(phi) * Math.cos(lam)
-            ));
+            const p = latLonToXYZ(lat, lon, R);
+            pts.push(new THREE.Vector3(p.x, p.y, p.z));
         }
-        gridGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+        gridGroup.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            lat === 0 ? originMat : mat,
+        ));
     }
     gridGroup.visible = false;
-    scene.add(gridGroup);
+    moon.moonMesh.add(gridGroup);
 }
+
+// Browser-gate hook, part 2 (tests/moon-surface-smoke.spec.js): the graticule
+// convention + parenting fix and the terrain synth are asserted through these.
+try {
+    Object.assign(window.__moonLab, {
+        moonMesh: moon.moonMesh,
+        gridGroup,
+        terrainSynth: () => (_synthState ? { ..._synthState } : null),
+        synthesizeLandmark,
+    });
+} catch {}
 
 // ═══════════════════════════════════════════════════════════════
 //  ANIMATION LOOP

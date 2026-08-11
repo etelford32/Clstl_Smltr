@@ -339,6 +339,25 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     // Jezero's 520 km patch carries several km of genuine MOLA relief; if this
     // collapses, the hypsometric ramp and the HUD span are both reading noise.
     expect(surfaceState.patchRelief.spanM).toBeGreaterThan(1_000);
+    // WFC geology synth: on by default, seeded from the same MOLA raster, and
+    // honest in the HUD about being synthesized. Shares must sum to 1 — a
+    // partial grid means the collapse died mid-solve.
+    expect(surfaceState.synth.active).toBe(true);
+    expect(surfaceState.synth.cells).toBe(48);
+    const synthShareTotal = Object.values(surfaceState.synth.shares)
+        .reduce((sum, share) => sum + share, 0);
+    expect(Math.abs(synthShareTotal - 1)).toBeLessThan(1e-9);
+    await expect(page.locator('#surface-detail')).toContainText('WFC geology synth');
+    await expect(page.locator('#surface-detail')).toContainText('synthesized');
+    // Toggling the layer off restores the pre-synth provenance line and stops
+    // tinting — without touching the anchor stack (relief stays on).
+    await page.locator('[data-layer="synth"]').uncheck({ force: true });
+    await expect.poll(() => page.evaluate(() => window.__marsLab.layerIsVisible('synth'))).toBe(false);
+    await expect(page.locator('#surface-detail')).toContainText('sub-sample roughness is illustrative');
+    await expect.poll(() => page.evaluate(() => window.__marsLab.layerIsVisible('relief'))).toBe(true);
+    await page.locator('[data-layer="synth"]').check({ force: true });
+    await expect.poll(() => page.evaluate(() => window.__marsLab.layerIsVisible('synth'))).toBe(true);
+    await expect(page.locator('#surface-detail')).toContainText('WFC geology synth');
     const surfaceRender = await page.evaluate(() => window.__marsLab.renderState());
     expect(surfaceRender.depthRatio).toBeLessThan(20_000);
     expect(surfaceRender.near).toBeGreaterThan(0.0001);
@@ -628,6 +647,9 @@ test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks'
     await expect.poll(() => page.evaluate(() => window.__marsLab.surfaceState())).toMatchObject({
         active: true,
         hasRelief: false,
+        // No MOLA ⇒ no geology synth: the WFC layer refuses to invent classes
+        // with nothing measured to seed them, even while its toggle stays on.
+        synth: { enabled: true, active: false },
     });
     await expect.poll(() => page.evaluate(() => {
         const state = window.__marsLab.surfaceState();
@@ -686,6 +708,11 @@ test('Mars UI remains interactive while the 3D engine is still starting', async 
     await weatherCollapse.click();
     await expect(page.locator('.weather-grid')).toBeVisible();
 
+    // The dock clicks above scroll the page; at 720 px that can park the layer
+    // switches under the sticky nav, where a force-click hits the nav's Sign Up
+    // anchor instead of the checkbox. Reset scroll — the assertion is about the
+    // pending-layer queue, not about clicking through the nav.
+    await page.evaluate(() => window.scrollTo(0, 0));
     await page.locator('[data-layer="grid"]').uncheck({ force: true });
     await expect(page.locator('[data-layer="grid"]')).not.toBeChecked();
     await expect(app).toHaveAttribute('data-pending-layers', 'true');
