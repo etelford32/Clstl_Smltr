@@ -144,6 +144,58 @@ function injectStyle() {
     box-shadow: var(--shadow-panel, 0 6px 24px rgba(0,0,0,.45));
     transition: transform .18s ease;
 }
+/* While the verdict card is active (body.ev-verdict-solo) the card owns
+   the top-left corner: 400px wide, z-index 70, and — since it grew its
+   detail graphs / pollution / weekly sections — tall enough to bury this
+   entire panel. It DID bury it: users reported the storm panel "not
+   showing up at all" because only a 60px header sliver peeked above the
+   card. Home the panel BESIDE the card instead (card is left:10 +
+   min(400px, 100vw - 20px) wide; +8px gap). A user-dragged position
+   (inline style, persisted by draggable-panel.js) still overrides this.
+   With the card off (?verdict=0 or boot failure removes the class) the
+   panel returns to the top-left corner. */
+body.ev-verdict-solo #${PANEL_ID} {
+    left: calc(18px + min(400px, 100vw - 20px));
+}
+/* Mobile bottom sheet. These rules ALSO exist in earth.html's static
+   stylesheet, but this <style> element is appended at mount time — i.e.
+   AFTER the page's — so on equal specificity THIS sheet wins the
+   cascade. The desktop block above was silently beating the page's
+   sheet rules (the panel rendered as a 240px floating column instead of
+   a full-width sheet, and translateY(110%) of a short panel left it
+   peeking above the bottom edge while "closed"). The sheet geometry
+   therefore has to live HERE, after the desktop block it overrides.
+   The dock button toggles .panel-open (earth.html mobile toolbar);
+   translateY(calc(100% + 60px)) is fully off-screen for ANY panel
+   height, unlike a bare percentage (the sheet sits 56px above the
+   viewport bottom, so 100% + 60px always clears it). */
+@media (max-width: 768px) {
+    /* !important mirrors the #layer-panel precedent in earth.html: a
+       desktop drag persists an INLINE left/top (+ right/bottom:auto) via
+       draggable-panel.js, and inline style beats any sheet rule. Without
+       these, a remembered desktop position turns the mobile sheet into a
+       stranded floating column. */
+    #${PANEL_ID},
+    body.ev-verdict-solo #${PANEL_ID} {
+        top: auto !important; left: 0 !important;
+        right: 0 !important; bottom: 56px !important;
+        width: 100% !important; max-width: 100% !important;
+        max-height: 72vh;
+        overflow-y: auto;
+        z-index: 75;
+        border-radius: 18px 18px 0 0;
+        padding: 14px 16px 20px;
+        box-shadow: 0 -8px 40px rgba(0,0,0,.6);
+    }
+    #${PANEL_ID}:not(.panel-open),
+    body.ev-verdict-solo #${PANEL_ID}:not(.panel-open) {
+        transform: translateY(calc(100% + 60px));
+    }
+    #${PANEL_ID}.panel-open,
+    body.ev-verdict-solo #${PANEL_ID}.panel-open {
+        transform: translateY(0);
+    }
+}
 #${PANEL_ID}.panel-minimized .panel-body { max-height: 0; opacity: 0; }
 #${PANEL_ID} .panel-header {
     display:flex; align-items:center; justify-content:space-between;

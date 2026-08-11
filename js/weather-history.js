@@ -160,7 +160,15 @@ export class WeatherHistory {
             this._dbOk = true;
             await this._warmRing();
         } catch (err) {
-            console.warn('[WeatherHistory] IndexedDB unavailable, using in-memory only:', err.message);
+            // err can be null/undefined — some browsers fire IDB onerror
+            // with request.error unset (e.g. private-mode aborts). Reading
+            // .message off that used to throw INSIDE this catch, which made
+            // open() reject after all — and earth.html top-level-awaits
+            // open(), so that rejection killed every feature initialised
+            // below the await (verdict card, storm watch panel, mobile
+            // toolbar). Keep this catch throw-proof.
+            console.warn('[WeatherHistory] IndexedDB unavailable, using in-memory only:',
+                err?.message ?? err);
         }
         this._ready = true;
         console.info(`[WeatherHistory] ready — ${this._ring.size}/${this._ring.capacity} frames`);
@@ -170,14 +178,37 @@ export class WeatherHistory {
     _openDB() {
         return new Promise((resolve, reject) => {
             const req = indexedDB.open(DB_NAME, DB_VERSION);
+            // Settle guard. indexedDB.open can fire onblocked (another tab
+            // holding a connection mid-upgrade) — and some corrupted-profile
+            // states fire NO callback at all. Either way the promise would
+            // never settle, the page's top-level await would hang forever,
+            // and everything below it silently never initialised — with
+            // zero console output to debug from. Never let this hang.
+            let settled = false;
+            const settle = (fn, val) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(guard);
+                fn(val);
+            };
+            const guard = setTimeout(
+                () => settle(reject, new Error('IndexedDB open timed out')), 5000);
+            req.onblocked = () =>
+                settle(reject, new Error('IndexedDB open blocked by another connection'));
             req.onupgradeneeded = (e) => {
                 const db = e.target.result;
                 if (!db.objectStoreNames.contains(TIER.name)) {
                     db.createObjectStore(TIER.name, { keyPath: 't' });
                 }
             };
-            req.onsuccess = (e) => resolve(e.target.result);
-            req.onerror   = (e) => reject(e.target.error);
+            req.onsuccess = (e) => {
+                // A success that lands after the timeout already rejected:
+                // close the orphan connection so it can't block future opens.
+                if (settled) { try { e.target.result.close(); } catch { /* noop */ } return; }
+                settle(resolve, e.target.result);
+            };
+            req.onerror = (e) =>
+                settle(reject, e.target.error ?? new Error('IndexedDB open failed'));
         });
     }
 

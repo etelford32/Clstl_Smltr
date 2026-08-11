@@ -44,6 +44,33 @@ const CLICK_THRESHOLD_PX = 4;
 // only a 1-pixel sliver showed, then never get it back.
 const MIN_VISIBLE_PX = 36;
 
+// ── Raise-on-grab (opt-in per panel) ───────────────────────────────────────
+// Panels that share a screen corner stack (earth.html: verdict card z70
+// over storm-watch z60 over loc-panel z51). Stack-and-drag only works if
+// grabbing a partially-buried panel can bring it to the front — otherwise
+// a grown neighbour buries it for good. Opt-in via { raiseOnGrab: true }
+// so pages that never stack panels keep their static z-order.
+//
+// The band [76, 89] is deliberate: above the mobile sheets (75) and the
+// verdict card (70), below the hover tooltips and popups (90+), which
+// must stay on top of any panel. Session-only — never persisted.
+const RAISE_Z_MIN = 76;
+const RAISE_Z_MAX = 89;
+const _raisePanels = new Set();
+let _raiseZ = RAISE_Z_MIN;
+
+function _raisePanel(panel) {
+    if (_raiseZ > RAISE_Z_MAX) {
+        // Band exhausted: renormalize, preserving the current stacking
+        // order, so long sessions can't crawl past the tooltip layer.
+        const sorted = [..._raisePanels].sort((a, b) =>
+            (parseInt(a.style.zIndex, 10) || 0) - (parseInt(b.style.zIndex, 10) || 0));
+        _raiseZ = RAISE_Z_MIN;
+        for (const p of sorted) p.style.zIndex = String(_raiseZ++);
+    }
+    panel.style.zIndex = String(_raiseZ++);
+}
+
 function clampToViewport(panel, left, top) {
     const w = panel.offsetWidth  || 1;
     const h = panel.offsetHeight || 1;
@@ -92,8 +119,12 @@ function writeStoredPos(id, pos) {
  * @param {boolean}     [opts.persist] Write/read localStorage. Default true.
  * @param {HTMLElement} [opts.handle]  Drag handle element. Defaults to the
  *                                     panel's `.panel-header`.
+ * @param {boolean}     [opts.raiseOnGrab] Bring the panel to the front of
+ *                                     the raise-enabled stack on pointer-
+ *                                     down. Default false. See the
+ *                                     raise-on-grab block above.
  */
-export function makePanelDraggable(panel, { id, persist = true, handle } = {}) {
+export function makePanelDraggable(panel, { id, persist = true, handle, raiseOnGrab = false } = {}) {
     if (!panel) return;
 
     const storageId = id ?? panel.id;
@@ -105,6 +136,10 @@ export function makePanelDraggable(panel, { id, persist = true, handle } = {}) {
     // no matter how many handles are attached afterwards.
     const firstHandleForPanel = panel.dataset.draggableWired !== '1';
     panel.dataset.draggableWired = '1';
+
+    // Register for the renormalize sweep in _raisePanel. A Set makes this
+    // idempotent across multiple handles on the same panel.
+    if (raiseOnGrab) _raisePanels.add(panel);
 
     // Visual affordance: the header's existing cursor:pointer becomes
     // grab/grabbing for clarity. Buttons inside the header keep the
@@ -130,6 +165,10 @@ export function makePanelDraggable(panel, { id, persist = true, handle } = {}) {
     let pointerId = null;
 
     function onPointerDown(e) {
+        // Any grab (even one that resolves to a click) counts as focus:
+        // raise BEFORE the button guard so tapping minimise on a buried
+        // panel also surfaces it.
+        if (raiseOnGrab) _raisePanel(panel);
         // Ignore drags that start on a button — the existing minimise /
         // close buttons must continue to click cleanly.
         if (e.target.closest('.panel-btn')) return;
