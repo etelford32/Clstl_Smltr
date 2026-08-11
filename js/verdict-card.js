@@ -440,8 +440,12 @@ export class VerdictCard {
         // header is display:none while minimised, so the pill has to carry
         // the drag itself. Its click-to-expand survives because the drag
         // machinery swallows the click only after a real (>4 px) drag.
-        makePanelDraggable(card);
-        makePanelDraggable(card, { handle: card.querySelector('[data-ev="pill"]') });
+        // raiseOnGrab keeps stack-and-drag honest both ways: the card sits
+        // above storm-watch/loc-panel by default (z70), but once a user
+        // raises one of THOSE, grabbing the card must be able to take the
+        // top spot back.
+        makePanelDraggable(card, { raiseOnGrab: true });
+        makePanelDraggable(card, { handle: card.querySelector('[data-ev="pill"]'), raiseOnGrab: true });
         const head = card.querySelector('.ev-verdict-head');
         head.addEventListener('dblclick', (ev) => {
             if (ev.target.closest('.panel-btn')) return;
