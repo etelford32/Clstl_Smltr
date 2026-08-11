@@ -658,6 +658,111 @@ export function expandClassPriors(tileset, classVector, priors, cellIndex) {
     }
 }
 
+/**
+ * Alignment of one family variant with a feature AXIS whose east/north
+ * components are (ae, an), both already |absolute| and normalized. Segments
+ * and end-caps score by the axis component along their own axis. Bends score
+ * (ae+an)/√2: on a CARDINAL axis that is 0.71 — they lose to the aligned
+ * segment (1.0) and straight runs stay straight — but on a DIAGONAL axis it
+ * reaches 1.0 while both segments tie at 0.71, so bends WIN and the chain
+ * zigzags along the diagonal. Without this, a diagonal fall line (or the
+ * diagonal sectors of a basin-tangent arc) gave the solver no directional
+ * signal at all and chains drifted straight across as chords — measured
+ * mean tangential alignment stuck at ~0.69 vs 0.64 unbiased.
+ */
+function variantAxisScore(tile, ae, an) {
+    if (tile.kind === 1) return (ae + an) / Math.SQRT2;              // bend
+    const northish = (tile.ports & (PORT_BIT[DIR_N] | PORT_BIT[DIR_S])) !== 0;
+    return northish ? an : ae;                                       // seg / end
+}
+
+/**
+ * FLOW-AWARE variant expansion: like expandClassPriors, but linear-family
+ * variants are additionally weighted by how well they align with a caller-
+ * supplied feature axis — this is what makes martian channels run down the
+ * measured MOLA fall line and lunar wrinkle ridges arc around their mare's
+ * center. The kernel stays geology-agnostic: callers decide what the axis
+ * MEANS (downhill gradient, basin tangent, …).
+ *
+ * @param {object} flows  { [familyClassId]: { axisEast, axisNorth, strength } }
+ *        axisEast/axisNorth — the feature's long-axis direction in local
+ *        east/north components; SIGN IS IGNORED (a channel is the same line
+ *        read uphill or down) and the vector need not be normalized.
+ *        strength — 0..1 how hard to steer; internally capped at 0.85 and
+ *        the per-variant multiplier is floored at 0.1, so flow can never
+ *        exclude a variant outright — that stays the priors' job. At a
+ *        forced line tip the class prior cancels but THESE multipliers do
+ *        not, which is exactly how a chain tracks a curving axis: the
+ *        cross-axis segment loses to a bend where the axis turns.
+ */
+export function expandClassPriorsFlow(tileset, classVector, priors, cellIndex, flows = null) {
+    const T = tileset.tiles.length;
+    const base = cellIndex * T;
+    for (let t = 0; t < T; t += 1) {
+        const tile = tileset.tiles[t];
+        let p = classVector[tileset.classOfTile[t]];
+        const flow = flows && tile.kind >= 0 ? flows[tile.classId] : null;
+        if (flow && p > 0) {
+            const mag = Math.hypot(flow.axisEast, flow.axisNorth);
+            const s = Math.min(0.85, Math.max(0, flow.strength ?? 0));
+            if (mag > 1e-12 && s > 0) {
+                const score = variantAxisScore(tile, Math.abs(flow.axisEast) / mag, Math.abs(flow.axisNorth) / mag);
+                p *= Math.max(0.1, (1 - s) + s * 2 * score);
+            }
+        }
+        priors[base + t] = p;
+    }
+}
+
+/**
+ * Per-cell slope/flow field from a cells×cells elevation grid (row 0 north,
+ * same layout as regionGrid). Two DIFFERENT derivatives on purpose:
+ *
+ *   axisEast/axisNorth — CENTRAL differences. At a resolved valley floor the
+ *   two walls cancel and the tiny along-valley signal survives, which is the
+ *   direction a channel actually runs. Forward differences there see only
+ *   the nearest wall and point the axis CROSS-valley — the bug this helper
+ *   exists to avoid. (Sign of the axis is irrelevant downstream.)
+ *
+ *   wallSlopeDeg — max one-sided difference per axis. A valley floor flanked
+ *   by steep walls KEEPS a high value, so channel priors still seed there
+ *   even though the floor itself is nearly flat. slopeDeg (central) is the
+ *   honest local gradient magnitude for everything else.
+ *
+ * @param {Float32Array|number[]} elevations  length cells², metres
+ * @param {number} cells
+ * @param {number} spacingM  cell spacing in METRES
+ */
+export function slopeField(elevations, cells, spacingM) {
+    const n = cells * cells;
+    const axisEast = new Float32Array(n);
+    const axisNorth = new Float32Array(n);
+    const slopeDeg = new Float32Array(n);
+    const wallSlopeDeg = new Float32Array(n);
+    const RAD2DEG = 180 / Math.PI;
+    for (let row = 0; row < cells; row += 1) {
+        for (let col = 0; col < cells; col += 1) {
+            const i = row * cells + col;
+            const e = elevations[i];
+            const eE = col + 1 < cells ? elevations[i + 1] : e;
+            const eW = col > 0 ? elevations[i - 1] : e;
+            const eN = row > 0 ? elevations[i - cells] : e;      // row 0 = north
+            const eS = row + 1 < cells ? elevations[i + cells] : e;
+            const spanE = (col + 1 < cells ? 1 : 0) + (col > 0 ? 1 : 0);
+            const spanN = (row > 0 ? 1 : 0) + (row + 1 < cells ? 1 : 0);
+            const gradE = spanE ? (eE - eW) / (spanE * spacingM) : 0;
+            const gradN = spanN ? (eN - eS) / (spanN * spacingM) : 0;
+            axisEast[i] = gradE;
+            axisNorth[i] = gradN;
+            slopeDeg[i] = Math.atan(Math.hypot(gradE, gradN)) * RAD2DEG;
+            const wallE = Math.max(Math.abs(eE - e), Math.abs(e - eW)) / spacingM;
+            const wallN = Math.max(Math.abs(eN - e), Math.abs(e - eS)) / spacingM;
+            wallSlopeDeg[i] = Math.atan(Math.hypot(wallE, wallN)) * RAD2DEG;
+        }
+    }
+    return { axisEast, axisNorth, slopeDeg, wallSlopeDeg };
+}
+
 // ── Geo-referenced cell layout ───────────────────────────────────────────────
 
 /**

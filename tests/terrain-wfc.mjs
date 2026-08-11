@@ -27,8 +27,8 @@
 import assert from 'node:assert/strict';
 import {
     MARS_TILESET, MOON_TILESET, buildTileset, validateTileset, collapse,
-    marsClassPriors, moonClassPriors, expandClassPriors,
-    hashSeed, mulberry32, regionSeed,
+    marsClassPriors, moonClassPriors, expandClassPriors, expandClassPriorsFlow,
+    slopeField, hashSeed, mulberry32, regionSeed,
     destinationLatLon, localOffsetKm, regionGrid, sampleClass, classShares,
 } from '../js/terrain-wfc.js';
 
@@ -239,6 +239,115 @@ function uniformClassPriors(tileset, cells, override = {}) {
     assert.ok(chains.reduce((s, v) => s + v.size, 0) / chains.length >= 3, 'channel chains ≥ 3 cells mean');
     assert.ok(!hasFatBlock(result, 'channel'), 'channels stay one cell wide');
     ok('mars channels: thin connected chains in outflow country');
+}
+
+// ── 5c. Flow-aware priors: channels run down the real slopes ─────────────────
+{
+    const smoothstep = (a, b, v) => {
+        const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
+        return t * t * (3 - 2 * t);
+    };
+    const tileIdx = (id) => MARS_TILESET.tiles.findIndex(t => t.id === id);
+    const NS = tileIdx('channel:ns');
+    const EW = tileIdx('channel:ew');
+
+    // Unit behavior: a pure north-south axis boosts NS segments, starves EW
+    // ones (floored, never zero), leaves bends neutral; zero strength is
+    // byte-identical to the flow-blind expansion.
+    const T = MARS_TILESET.tiles.length;
+    const vec = marsClassPriors({ elevationM: -3000, slopeDeg: 2.5, latDeg: 10 });
+    const plain = new Float32Array(T);
+    const flowed = new Float32Array(T);
+    expandClassPriors(MARS_TILESET, vec, plain, 0);
+    expandClassPriorsFlow(MARS_TILESET, vec, flowed, 0,
+        { channel: { axisEast: 0, axisNorth: 1, strength: 0.85 } });
+    assert.ok(flowed[NS] > plain[NS] * 1.5, 'NS axis boosts NS segments');
+    assert.ok(flowed[EW] < plain[EW] * 0.3 && flowed[EW] > 0, 'EW segments starved but never zeroed');
+    // On a cardinal axis a bend sits BETWEEN the two segments (0.71 score):
+    // above the starved cross-segment, below the aligned one — and on a
+    // DIAGONAL axis the bend must WIN, or the chain has no way to track it.
+    const bend = tileIdx('channel:ne');
+    assert.ok(flowed[bend] > flowed[EW] && flowed[bend] < flowed[NS],
+        'cardinal axis: bend between the two segments');
+    const diag = new Float32Array(T);
+    expandClassPriorsFlow(MARS_TILESET, vec, diag, 0,
+        { channel: { axisEast: 1, axisNorth: 1, strength: 0.85 } });
+    assert.ok(diag[bend] > diag[NS] && diag[bend] > diag[EW],
+        'diagonal axis: bends beat both segments (zigzag tracks the diagonal)');
+    const zeroStrength = new Float32Array(T);
+    expandClassPriorsFlow(MARS_TILESET, vec, zeroStrength, 0,
+        { channel: { axisEast: 0, axisNorth: 1, strength: 0 } });
+    assert.deepEqual(Array.from(zeroStrength), Array.from(plain), 'strength 0 ⇒ flow-blind');
+
+    // Shared harness: synthetic terrain → slopeField → priors+flow → collapse.
+    const cells = 48;
+    const extentKm = 120;
+    const stepM = extentKm / cells * 1000;
+    const localKm = (idx) => ({
+        eastKm: ((idx % cells + 0.5) / cells - 0.5) * extentKm,
+        northKm: (0.5 - (Math.floor(idx / cells) + 0.5) / cells) * extentKm,
+    });
+    const synthOn = (elevFn, seed) => {
+        const elev = new Float32Array(cells * cells);
+        for (let i = 0; i < cells * cells; i += 1) {
+            const { eastKm, northKm } = localKm(i);
+            elev[i] = elevFn(eastKm, northKm);
+        }
+        const field = slopeField(elev, cells, stepM);
+        const priors = new Float32Array(cells * cells * T);
+        for (let i = 0; i < cells * cells; i += 1) {
+            const v = marsClassPriors({ elevationM: elev[i], slopeDeg: field.wallSlopeDeg[i], latDeg: 12 });
+            // The page's recipe: axis from central differences; strength ramps
+            // over the CENTRAL slope with a gentle saturation (real outflow
+            // floors tilt only ~0.1–0.3° and should still steer) and a 0.06°
+            // floor so numerically-flat ground stays isotropic.
+            const strength = 0.85 * smoothstep(0.06, 0.6, field.slopeDeg[i]);
+            expandClassPriorsFlow(MARS_TILESET, v, priors, i, {
+                channel: { axisEast: field.axisEast[i], axisNorth: field.axisNorth[i], strength },
+            });
+        }
+        return collapse({ tileset: MARS_TILESET, width: cells, height: cells, seed, priors });
+    };
+    const segCounts = (result) => {
+        let ns = 0;
+        let ew = 0;
+        for (const t of result.grid) {
+            if (t === NS) ns += 1;
+            else if (t === EW) ew += 1;
+        }
+        return { ns, ew };
+    };
+
+    // Tilted plane falling north (40 m/km ≈ 2.3°): fall line is N-S, so NS
+    // segments must dominate; the orthogonal tilt flips the answer.
+    const northTilt = synthOn((e, n) => -2500 - n * 40, 21);
+    const nsTilt = segCounts(northTilt);
+    assert.ok(nsTilt.ns >= 3 * Math.max(1, nsTilt.ew),
+        `N-S fall line ⇒ NS segments dominate (ns ${nsTilt.ns}, ew ${nsTilt.ew})`);
+    const eastTilt = synthOn((e, n) => -2500 - e * 40, 21);
+    const ewTilt = segCounts(eastTilt);
+    assert.ok(ewTilt.ew >= 3 * Math.max(1, ewTilt.ns),
+        `E-W fall line ⇒ EW segments dominate (ns ${ewTilt.ns}, ew ${ewTilt.ew})`);
+
+    // V-valley running east-west (45 m/km walls, gentle 6 m/km fall east along
+    // the floor). The honest LOCAL-physics claim: on the walls the fall line
+    // runs DOWN THE WALL into the valley, so wall channels are north-south
+    // tributaries — that IS "channels run down the real slopes". (A trunk
+    // channel along the flat floor needs drainage ACCUMULATION, not local
+    // slope — deliberately out of scope; the floor rows are excluded here.)
+    const valley = synthOn((e, n) => -3000 + Math.abs(n) * 45 - e * 6, 33);
+    assertAdjacencyHolds(valley);
+    let wallNs = 0;
+    let wallEw = 0;
+    for (let i = 0; i < cells * cells; i += 1) {
+        if (Math.abs(localKm(i).northKm) < extentKm * 0.06) continue;   // skip the floor band
+        if (valley.grid[i] === NS) wallNs += 1;
+        else if (valley.grid[i] === EW) wallEw += 1;
+    }
+    assert.ok(wallNs + wallEw > 0, 'valley walls grow channels at all');
+    assert.ok(wallNs >= 2 * Math.max(1, wallEw),
+        `wall channels dive down-slope into the valley (ns ${wallNs}, ew ${wallEw})`);
+    ok(`flow priors: fall-line alignment (${nsTilt.ns}:${nsTilt.ew} NS-tilt, ${ewTilt.ns}:${ewTilt.ew} EW-tilt), valley walls ${wallNs}:${wallEw} down-slope`);
 }
 
 // ── 6. Priors: hard constraints are respected ────────────────────────────────

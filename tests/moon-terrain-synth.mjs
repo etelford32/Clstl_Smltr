@@ -120,6 +120,57 @@ const byName = (name) => LANDMARKS.find(l => l.name === name);
     ok('Imbrium: basalt floor threaded by CONNECTED, one-cell-wide linear structures');
 }
 
+// ── 5b. Flow priors: wrinkle ridges arc around the basin, rilles run radial ──
+{
+    // Mare Serenitatis — big, compact, and less crowded by neighbor-mare
+    // frames than Imbrium, so the geometry signal is cleanest. The site synth
+    // is seed-deterministic, so these are exact-repeatable measurements, not
+    // statistics: mean axis alignment of SEGMENT cells vs the nearest mare's
+    // tangent (wrinkle, mid-annulus) / radial (rille, interior). An unbiased
+    // solver measures ≈ 0.637 (E[|cos|]); the pins sit well above it and a
+    // couple points under the measured values (0.757 / 0.704).
+    const { MOON_TILESET, localOffsetKm } = await import('../js/terrain-wfc.js');
+    const { R_MOON_KM } = await import('../js/moon-interior-model.js');
+    const DEG = Math.PI / 180;
+    const maria = LANDMARKS.filter(l => l.category === 'mare');
+    const synth = synthesizeLandmarkRegion(byName('Mare Serenitatis'));
+    const { grid, tileset } = synth.result;
+    const stats = { wrinkle: { sum: 0, n: 0 }, rille: { sum: 0, n: 0 } };
+    for (let i = 0; i < grid.length; i += 1) {
+        const tile = tileset.tiles[grid[i]];
+        if (tile.kind !== 0) continue;                    // segments only
+        const [cls, suffix] = tile.id.split(':');
+        if (cls !== 'wrinkle' && cls !== 'rille') continue;
+        const lat = synth.region.latDeg[i];
+        const lon = synth.region.lonDeg[i];
+        let best = null;
+        let bestNorm = Infinity;
+        for (const m of maria) {
+            const radiusDeg = (m.diameterKm / 2) / R_MOON_KM / DEG;
+            const norm = angularSeparationDeg(lat, lon, m.latDeg, m.lonDeg) / radiusDeg;
+            if (norm < bestNorm) { bestNorm = norm; best = m; }
+        }
+        if (cls === 'wrinkle' && (bestNorm < 0.3 || bestNorm > 0.72)) continue;
+        if (cls === 'rille' && bestNorm > 0.8) continue;
+        const r = localOffsetKm(best.latDeg, best.lonDeg, lat, lon, R_MOON_KM);
+        const mag = Math.hypot(r.eastKm, r.northKm);
+        if (mag < 1) continue;
+        const axis = cls === 'wrinkle'
+            ? [-r.northKm / mag, r.eastKm / mag]          // basin tangent
+            : [r.eastKm / mag, r.northKm / mag];          // radial
+        stats[cls].sum += suffix === 'ns' ? Math.abs(axis[1]) : Math.abs(axis[0]);
+        stats[cls].n += 1;
+    }
+    const wrinkleAlign = stats.wrinkle.sum / Math.max(1, stats.wrinkle.n);
+    const rilleAlign = stats.rille.sum / Math.max(1, stats.rille.n);
+    assert.ok(stats.wrinkle.n >= 20, `enough ridge segments to judge (${stats.wrinkle.n})`);
+    assert.ok(wrinkleAlign >= 0.72,
+        `wrinkle ridges arc around the basin (tangent alignment ${wrinkleAlign.toFixed(3)} vs 0.637 unbiased)`);
+    assert.ok(rilleAlign >= 0.66,
+        `rilles run broadly radial (alignment ${rilleAlign.toFixed(3)} vs 0.637 unbiased)`);
+    ok(`Serenitatis flow: ridges tangential ${wrinkleAlign.toFixed(2)}, rilles radial ${rilleAlign.toFixed(2)} (unbiased 0.64)`);
+}
+
 // ── 6. Determinism + measured-albedo path + legend ───────────────────────────
 {
     const a = synthesizeLandmarkRegion(byName('Copernicus'));

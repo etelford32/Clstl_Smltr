@@ -25,7 +25,7 @@
  */
 
 import {
-    MOON_TILESET, collapse, moonClassPriors, expandClassPriors, regionSeed,
+    MOON_TILESET, collapse, moonClassPriors, expandClassPriorsFlow, regionSeed,
     regionGrid, localOffsetKm, sampleClassInto, classShares,
 } from './terrain-wfc.js';
 import { LANDMARKS } from './moon-landmarks-data.js';
@@ -143,13 +143,42 @@ export function synthesizeLandmarkRegion(landmark, { albedoAt = null, saltSeed =
             const norm = angularSeparationDeg(lat, lon, swirl.latDeg, swirl.lonDeg) / radiusDeg;
             swirlBoost = Math.max(swirlBoost, smooth(2.2, 0.9, norm));
         }
-        // Class-ordered priors expand onto the tile variants (the rille and
-        // wrinkle families' segments/bends/ends inherit their class priors).
-        expandClassPriors(
+        // FLOW-AWARE priors from real mare GEOMETRY (the Moon page carries no
+        // DEM, but the IAU mare circles are measured). Mascon subsidence
+        // arranges a mare's interior structures around its center: wrinkle
+        // ridges form CONCENTRIC arcs (axis = basin tangent, strongest in the
+        // mid annulus), and sinuous rilles run broadly RADIAL, flowing from
+        // the edges toward the interior. The nearest mare supplies the frame.
+        let nearestMare = null;
+        let nearestNorm = Infinity;
+        for (const mare of MARIA) {
+            const radiusDeg = (mare.diameterKm / 2) / R_MOON_KM / DEG;
+            const norm = angularSeparationDeg(lat, lon, mare.latDeg, mare.lonDeg) / radiusDeg;
+            if (norm < nearestNorm) { nearestNorm = norm; nearestMare = mare; }
+        }
+        let flows = null;
+        if (nearestMare && nearestNorm < 1.15) {
+            const radial = localOffsetKm(nearestMare.latDeg, nearestMare.lonDeg, lat, lon, R_MOON_KM);
+            if (Math.hypot(radial.eastKm, radial.northKm) > 1) {
+                const ridgeRing = smooth(0.08, 0.3, nearestNorm) * smooth(1.08, 0.72, nearestNorm);
+                flows = {
+                    rille: {
+                        axisEast: radial.eastKm, axisNorth: radial.northKm,
+                        strength: 0.6 * smooth(1.1, 0.8, nearestNorm),
+                    },
+                    wrinkle: {
+                        axisEast: -radial.northKm, axisNorth: radial.eastKm,   // basin tangent
+                        strength: 0.85 * ridgeRing,
+                    },
+                };
+            }
+        }
+        expandClassPriorsFlow(
             MOON_TILESET,
             moonClassPriors({ albedo: sampleAlbedo(lat, lon), latDeg: lat, craterDistNorm, swirlBoost }),
             priors,
             i,
+            flows,
         );
     }
     const result = collapse({

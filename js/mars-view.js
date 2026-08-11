@@ -15,8 +15,8 @@ import { MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
 import { fetchMarsSkyEphemeris } from './horizons.js';
 import { MarsSky } from './mars-sky.js';
 import {
-    MARS_TILESET, collapse as collapseWfc, marsClassPriors, expandClassPriors,
-    regionSeed, regionGrid as wfcRegionGrid, sampleClassInto, classShares,
+    MARS_TILESET, collapse as collapseWfc, marsClassPriors, expandClassPriorsFlow,
+    slopeField, regionSeed, regionGrid as wfcRegionGrid, sampleClassInto, classShares,
 } from './terrain-wfc.js';
 
 const SURFACE_RADIUS = 1;
@@ -639,25 +639,32 @@ function computeRegionalSynth(latDeg, lonDeg) {
     const tileCount = MARS_TILESET.tiles.length;
     const priors = new Float32Array(cellCount * tileCount);
     const stepM = region.spacingKm * 1000;
-    for (let row = 0; row < cells; row += 1) {
-        for (let col = 0; col < cells; col += 1) {
-            const i = row * cells + col;
-            const eastDrop = col + 1 < cells
-                ? elevations[i + 1] - elevations[i]
-                : elevations[i] - elevations[i - 1];
-            const northDrop = row > 0
-                ? elevations[i - cells] - elevations[i]
-                : elevations[i] - elevations[i + cells];
-            const slopeDeg = Math.atan(Math.hypot(eastDrop, northDrop) / stepM) * 180 / Math.PI;
-            // Class-ordered priors expand onto the tile variants (the linear
-            // channel family's segments/bends/ends all inherit the class prior).
-            expandClassPriors(
-                MARS_TILESET,
-                marsClassPriors({ elevationM: elevations[i], slopeDeg, latDeg: region.latDeg[i] }),
-                priors,
-                i,
-            );
-        }
+    // FLOW-AWARE priors: the channel family's variants are steered along the
+    // measured MOLA fall line. slopeField gives two different derivatives on
+    // purpose — the flow AXIS from central differences (at a resolved valley
+    // floor the walls cancel and the along-valley direction survives; forward
+    // differences would point channels at the walls) and the prior's slope
+    // from max one-sided differences (so channels still SEED in valley floors
+    // flanked by steep walls). Strength saturates by 0.6° because real
+    // outflow floors tilt only ~0.1–0.3° and should still steer; below 0.06°
+    // the ground is numerically flat and stays isotropic.
+    const flow = slopeField(elevations, cells, stepM);
+    const flowSpec = { channel: { axisEast: 0, axisNorth: 0, strength: 0 } };
+    for (let i = 0; i < cellCount; i += 1) {
+        flowSpec.channel.axisEast = flow.axisEast[i];
+        flowSpec.channel.axisNorth = flow.axisNorth[i];
+        flowSpec.channel.strength = 0.85 * THREE.MathUtils.smoothstep(flow.slopeDeg[i], 0.06, 0.6);
+        expandClassPriorsFlow(
+            MARS_TILESET,
+            marsClassPriors({
+                elevationM: elevations[i],
+                slopeDeg: flow.wallSlopeDeg[i],
+                latDeg: region.latDeg[i],
+            }),
+            priors,
+            i,
+            flowSpec,
+        );
     }
     try {
         synthResult = collapseWfc({
