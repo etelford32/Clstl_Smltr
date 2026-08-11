@@ -116,8 +116,17 @@ These advisor warnings will fire on every `get_advisors` call. They are **intent
 `earth.html` is branded **EarthView** (title / meta / HUD wordmark). Its default
 dashboard is the **verdict card** — a draggable, touch-optimized answer card
 mounted at `#verdict-host` (first left-panel element; z-index 70 so it sits
-above loc-panel 51 / storm-watch 60 — panels stack-and-drag by design, that
-overlap is not a bug).
+above loc-panel 51 / storm-watch 60 — panels stack-and-drag by design).
+Two 2026-08 adjustments after the card grew tall enough to bury the storm
+watch panel completely ("not showing up at all" report): (1) while
+`body.ev-verdict-solo` is active the storm panel's HOME position is beside
+the card, not under it — the rule lives in `js/storm-watch-panel.js`'s
+injected stylesheet, which wins cascade ties against earth.html's static
+CSS because it's appended at mount time (this ordering is also why the
+panel's mobile-sheet rules live there); (2) the stacked left panels + the
+card use `makePanelDraggable`'s `raiseOnGrab` (z band 76–89, below
+tooltips at 90+) so grabbing a buried panel surfaces it. Gate:
+`tests/storm-watch-visibility.spec.js`.
 
 - **Modules:** `js/verdict-engine.js` (PURE fusion logic — no DOM, no fetch,
   no ambient time; unit-tested by `tests/verdict-engine.mjs`),
