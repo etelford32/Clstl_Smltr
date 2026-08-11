@@ -25,7 +25,7 @@
  */
 
 import {
-    MOON_TILESET, collapse, moonClassPriors, regionSeed,
+    MOON_TILESET, collapse, moonClassPriors, expandClassPriors, regionSeed,
     regionGrid, localOffsetKm, sampleClassInto, classShares,
 } from './terrain-wfc.js';
 import { LANDMARKS } from './moon-landmarks-data.js';
@@ -143,9 +143,13 @@ export function synthesizeLandmarkRegion(landmark, { albedoAt = null, saltSeed =
             const norm = angularSeparationDeg(lat, lon, swirl.latDeg, swirl.lonDeg) / radiusDeg;
             swirlBoost = Math.max(swirlBoost, smooth(2.2, 0.9, norm));
         }
-        priors.set(
+        // Class-ordered priors expand onto the tile variants (the rille and
+        // wrinkle families' segments/bends/ends inherit their class priors).
+        expandClassPriors(
+            MOON_TILESET,
             moonClassPriors({ albedo: sampleAlbedo(lat, lon), latDeg: lat, craterDistNorm, swirlBoost }),
-            i * tileCount,
+            priors,
+            i,
         );
     }
     const result = collapse({
@@ -166,8 +170,8 @@ export function synthesizeLandmarkRegion(landmark, { albedoAt = null, saltSeed =
 
 /** Legend rows for the page: visible classes, largest share first. */
 export function synthLegend(shares) {
-    return MOON_TILESET.tiles
-        .map(tile => ({ id: tile.id, label: tile.label, color: tile.color, share: shares[tile.id] || 0 }))
+    return MOON_TILESET.classes
+        .map(cls => ({ id: cls.id, label: cls.label, color: cls.color, share: shares[cls.id] || 0 }))
         .filter(row => row.share > 0.004)
         .sort((a, b) => b.share - a.share);
 }

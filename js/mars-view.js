@@ -15,8 +15,8 @@ import { MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
 import { fetchMarsSkyEphemeris } from './horizons.js';
 import { MarsSky } from './mars-sky.js';
 import {
-    MARS_TILESET, collapse as collapseWfc, marsClassPriors, regionSeed,
-    regionGrid as wfcRegionGrid, sampleClassInto, classShares,
+    MARS_TILESET, collapse as collapseWfc, marsClassPriors, expandClassPriors,
+    regionSeed, regionGrid as wfcRegionGrid, sampleClassInto, classShares,
 } from './terrain-wfc.js';
 
 const SURFACE_RADIUS = 1;
@@ -617,7 +617,7 @@ const synthScratch = { color: [0, 0, 0], reliefAmpM: 0, grain: 0, tileIndex: 0 }
 // The class tint is normalized so 'plains' ≈ no change: the Viking base map
 // already looks like plains nearly everywhere, and an un-normalized tint would
 // re-color the whole patch instead of marking the exceptions.
-const SYNTH_NEUTRAL = MARS_TILESET.tiles.find(tile => tile.id === 'plains').color;
+const SYNTH_NEUTRAL = MARS_TILESET.classes.find(cls => cls.id === 'plains').color;
 
 function computeRegionalSynth(latDeg, lonDeg) {
     if (!molaSampler) return null;
@@ -649,9 +649,13 @@ function computeRegionalSynth(latDeg, lonDeg) {
                 ? elevations[i - cells] - elevations[i]
                 : elevations[i] - elevations[i + cells];
             const slopeDeg = Math.atan(Math.hypot(eastDrop, northDrop) / stepM) * 180 / Math.PI;
-            priors.set(
+            // Class-ordered priors expand onto the tile variants (the linear
+            // channel family's segments/bends/ends all inherit the class prior).
+            expandClassPriors(
+                MARS_TILESET,
                 marsClassPriors({ elevationM: elevations[i], slopeDeg, latDeg: region.latDeg[i] }),
-                i * tileCount,
+                priors,
+                i,
             );
         }
     }
@@ -2016,7 +2020,9 @@ function updateSurfaceDetail() {
     let detailNote = 'sub-sample roughness is illustrative';
     if (synthEnabled && synthResult && synthShares) {
         const [topId, topShare] = Object.entries(synthShares).sort((a, b) => b[1] - a[1])[0];
-        const topLabel = MARS_TILESET.tiles.find(tile => tile.id === topId).label.toLowerCase();
+        // shares are keyed by CLASS id — linear families have no tile named
+        // after the class, so this lookup must go through classes.
+        const topLabel = MARS_TILESET.classes.find(cls => cls.id === topId).label.toLowerCase();
         detailNote = `WFC geology synth ${Math.round(topShare * 100)}% ${topLabel} · synthesized below ${Math.round(REGIONAL_TERRAIN_EXTENT_KM / REGIONAL_SYNTH_CELLS)} km`;
     }
     surfaceDetailElement.textContent = `${REGIONAL_TERRAIN_EXTENT_KM} km MOLA patch · relief ${(regionalTerrainRelief.minElevationM / 1000).toFixed(1)} → ${(regionalTerrainRelief.maxElevationM / 1000).toFixed(1)} km at ${REGIONAL_RELIEF_EXAGGERATION}× · ${regionalGridSpacingKm} km grid · ${detailNote}`;

@@ -90,7 +90,34 @@ const byName = (name) => LANDMARKS.find(l => l.name === name);
     assert.ok(synth.shares.maria > 0.45, `mare floor is basalt (${(synth.shares.maria * 100).toFixed(0)}%)`);
     const interior = (synth.shares.rille || 0) + (synth.shares.wrinkle || 0);
     assert.ok(interior > 0.02, `rilles/wrinkle ridges thread the mare (${(interior * 100).toFixed(1)}%)`);
-    ok('Imbrium: basalt floor threaded by mare-interior structures');
+
+    // The linear families must actually read as LINES here: connected chains
+    // (no isolated interior cells — the port rules make them illegal) that
+    // stay one cell wide (no 2×2 block of the same family).
+    const { grid, width, height, tileset } = synth.result;
+    for (const classId of ['rille', 'wrinkle']) {
+        const ci = tileset.classes.findIndex(c => c.id === classId);
+        const isC = (c) => tileset.classOfTile[grid[c]] === ci;
+        for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+                const c = y * width + x;
+                if (!isC(c)) continue;
+                const neighbors = [
+                    y > 0 ? c - width : -1, y < height - 1 ? c + width : -1,
+                    x > 0 ? c - 1 : -1, x < width - 1 ? c + 1 : -1,
+                ].filter(nb => nb >= 0);
+                const connected = neighbors.some(isC);
+                const onBorder = x === 0 || y === 0 || x === width - 1 || y === height - 1;
+                assert.ok(connected || onBorder,
+                    `${classId} cell at (${x},${y}) is isolated interior speckle`);
+                if (y + 1 < height && x + 1 < width) {
+                    assert.ok(!(isC(c) && isC(c + 1) && isC(c + width) && isC(c + width + 1)),
+                        `${classId} forms a 2×2 blob at (${x},${y})`);
+                }
+            }
+        }
+    }
+    ok('Imbrium: basalt floor threaded by CONNECTED, one-cell-wide linear structures');
 }
 
 // ── 6. Determinism + measured-albedo path + legend ───────────────────────────

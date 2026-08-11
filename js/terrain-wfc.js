@@ -21,21 +21,41 @@
  *   synthesized wherever it renders; the elevation readouts, landmark
  *   positions, and photometric base maps stay untouched and true.
  *
+ * CLASSES vs TILES — the two-level vocabulary:
+ *   A *class* is what the viewer sees: one legend row, one color, one prior
+ *   (maria, rille, channel, ice…). A *tile* is what the solver places. Blob
+ *   classes have exactly one tile; LINEAR classes (lunar rilles and wrinkle
+ *   ridges, martian outflow channels) expand into a 10-tile family of
+ *   port-carrying variants — two straight segments (NS, EW), four bends, four
+ *   end-caps — with DIRECTIONAL adjacency:
+ *     • an OPEN port may sit only against a matching open port of the same
+ *       family (bend-to-bend excluded, which is what forbids tight 2×2
+ *       loops while still letting lines meander),
+ *     • a CLOSED side may touch only the family's background classes.
+ *   Propagation therefore FORCES a placed segment to continue until an
+ *   end-cap terminates it: lines are emergent from constraints, not painted
+ *   by priors. Minimum chain is 2 cells (cap+cap), so single-cell speckle of
+ *   a linear class is structurally impossible. Priors apply per CLASS and
+ *   scale every variant of it equally (expandClassPriors).
+ *
  * Solver: classic min-entropy WFC over a rectangular grid.
  *   - domains are bitmasks (≤ 31 tiles per tileset),
  *   - collapse picks by weight × prior through the seeded PRNG,
- *   - AC-3-style propagation over the 4-neighborhood,
+ *   - AC-3-style propagation over the 4-neighborhood with PER-DIRECTION
+ *     compatibility masks (N/E/S/W — this is what carries the port rules),
  *   - contradiction ⇒ deterministic restart with a derived seed (bounded).
- *   Grids here are small (≤ ~64² cells), so the O(n) min-entropy scan per
- *   step is comfortably fast (<10 ms) — do not "optimize" it into a heap
- *   without keeping determinism byte-identical.
+ *   Grids here are small (≤ ~64² cells) and entropies are cached per cell,
+ *   refreshed only when a domain shrinks — do not "simplify" the cache away;
+ *   the naive rescan cost ~500 ms per 48² solve, a visible stall on a Mars
+ *   patch rebuild.
  *
  * Coordinate contract: planetocentric latitude, east-positive longitude,
  * normalized to −180..180 — the SAME convention as moon-landmarks-data.js and
  * mars-landmarks-data.js (IAU Gazetteer). regionGrid() lays cell centers out
  * along great circles from the site center, so a cell's (lat, lon) is where
  * the caller should sample its raster — that is the "accurate mapping" half
- * of the contract.
+ * of the contract. Grid row 0 is the NORTH edge; direction indices below
+ * follow that (N = row above).
  */
 
 // ── Seeded PRNG ──────────────────────────────────────────────────────────────
@@ -70,102 +90,273 @@ export function regionSeed(body, latDeg, lonDeg, salt = 0) {
     return hashSeed(body, Math.round(latDeg * 4), Math.round(lonDeg * 4), salt);
 }
 
-// ── Tilesets ─────────────────────────────────────────────────────────────────
-// Each tile: id, label (for legends/HUD), color (linear-ish RGB 0..1 — a TINT
-// the renderer blends over the real base map, not a replacement albedo),
-// reliefAmpM (micro-relief amplitude budget the renderer MAY spend — the Mars
-// patch's decorative roughness cap is 350 m, so all values sit well under it),
-// grain (relative noise frequency), weight (global base rate).
-// adjacency lists are SYMMETRIC and every tile is self-compatible — terrain
-// classes are regions, not Wang borders. validateTileset() enforces both.
+// ── Directions and ports ─────────────────────────────────────────────────────
+// Direction indices: 0 = N (row above), 1 = E, 2 = S, 3 = W. Port bits match.
+
+export const DIR_N = 0;
+export const DIR_E = 1;
+export const DIR_S = 2;
+export const DIR_W = 3;
+const OPP = [2, 3, 0, 1];
+const PORT_BIT = [1, 2, 4, 8];
+
+// The 10 variants of a linear family: ports = bitmask of OPEN sides.
+// kind: 0 = segment, 1 = bend, 2 = end-cap (bend↔bend connections are barred).
+const FAMILY_VARIANTS = [
+    { suffix: 'ns', ports: PORT_BIT[DIR_N] | PORT_BIT[DIR_S], kind: 0 },
+    { suffix: 'ew', ports: PORT_BIT[DIR_E] | PORT_BIT[DIR_W], kind: 0 },
+    { suffix: 'ne', ports: PORT_BIT[DIR_N] | PORT_BIT[DIR_E], kind: 1 },
+    { suffix: 'es', ports: PORT_BIT[DIR_E] | PORT_BIT[DIR_S], kind: 1 },
+    { suffix: 'sw', ports: PORT_BIT[DIR_S] | PORT_BIT[DIR_W], kind: 1 },
+    { suffix: 'wn', ports: PORT_BIT[DIR_W] | PORT_BIT[DIR_N], kind: 1 },
+    { suffix: 'n', ports: PORT_BIT[DIR_N], kind: 2 },
+    { suffix: 'e', ports: PORT_BIT[DIR_E], kind: 2 },
+    { suffix: 's', ports: PORT_BIT[DIR_S], kind: 2 },
+    { suffix: 'w', ports: PORT_BIT[DIR_W], kind: 2 },
+];
+
+// ── Tileset builder ──────────────────────────────────────────────────────────
 
 const F = Object.freeze;
 
-export const MARS_TILESET = F({
-    body: 'mars',
-    tiles: F([
-        F({ id: 'plains',   label: 'Smooth plains',        color: F([0.78, 0.45, 0.30]), reliefAmpM: 40,  grain: 0.6, weight: 1.00 }),
-        F({ id: 'cratered', label: 'Cratered highlands',   color: F([0.62, 0.34, 0.22]), reliefAmpM: 220, grain: 1.4, weight: 0.95 }),
-        F({ id: 'dunes',    label: 'Dune field',           color: F([0.45, 0.26, 0.20]), reliefAmpM: 60,  grain: 2.2, weight: 0.55 }),
-        F({ id: 'channel',  label: 'Outflow channel',      color: F([0.82, 0.55, 0.38]), reliefAmpM: 120, grain: 1.0, weight: 0.50 }),
-        F({ id: 'chaos',    label: 'Chaos terrain',        color: F([0.50, 0.28, 0.19]), reliefAmpM: 300, grain: 1.8, weight: 0.40 }),
-        F({ id: 'lava',     label: 'Volcanic flank',       color: F([0.58, 0.30, 0.20]), reliefAmpM: 90,  grain: 0.8, weight: 0.45 }),
-        F({ id: 'ice',      label: 'Polar layered ice',    color: F([0.93, 0.88, 0.86]), reliefAmpM: 80,  grain: 0.7, weight: 0.30 }),
-    ]),
-    // Real relationships: channels emerge from chaos (Ares Vallis ← Iani Chaos);
-    // dunes pool in plains, channel floors, and ring the polar cap (Olympia
-    // Undae) but do not abut raw chaos; ice touches only plains and its erg.
-    adjacency: F({
-        plains:   F(['plains', 'cratered', 'dunes', 'channel', 'lava', 'ice']),
-        cratered: F(['cratered', 'plains', 'channel', 'chaos', 'lava']),
-        dunes:    F(['dunes', 'plains', 'channel', 'ice']),
-        channel:  F(['channel', 'plains', 'cratered', 'chaos', 'dunes']),
-        chaos:    F(['chaos', 'cratered', 'channel']),
-        lava:     F(['lava', 'plains', 'cratered']),
-        ice:      F(['ice', 'plains', 'dunes']),
-    }),
-});
+/**
+ * Build a tileset from declarative geology:
+ * @param {object} spec
+ *   body        — 'moon' | 'mars' | …
+ *   classes     — ordered [{ id, label, color:[r,g,b], reliefAmpM, grain }]:
+ *                 THE order class-prior vectors use (marsClassPriors etc.)
+ *   base        — { classId: { weight, adj: [classIds] } } blob classes;
+ *                 adj lists must be symmetric and self-inclusive
+ *   families    — { classId: { background: [baseClassIds],
+ *                              segWeight, bendWeight, endWeight } }
+ * Every class must appear in exactly one of base/families.
+ */
+export function buildTileset(spec) {
+    const classes = spec.classes.map(c => F({ ...c, color: F([...c.color]) }));
+    const classIds = classes.map(c => c.id);
+    const classIndex = new Map(classIds.map((id, i) => [id, i]));
+    if (classIndex.size !== classIds.length) {
+        throw new Error(`tileset ${spec.body}: duplicate class ids`);
+    }
+    for (const id of classIds) {
+        const inBase = Object.hasOwn(spec.base, id);
+        const inFamily = Object.hasOwn(spec.families ?? {}, id);
+        if (inBase === inFamily) {
+            throw new Error(`tileset ${spec.body}: class ${id} must be in exactly one of base/families`);
+        }
+    }
+    // Base adjacency: symmetric + self-compatible, over base classes only.
+    for (const [id, def] of Object.entries(spec.base)) {
+        if (!def.adj.includes(id)) throw new Error(`tileset ${spec.body}: ${id} must be self-compatible`);
+        for (const other of def.adj) {
+            if (!Object.hasOwn(spec.base, other)) {
+                throw new Error(`tileset ${spec.body}: ${id} → ${other} is not a base class (families connect via ports + background, not adj lists)`);
+            }
+            if (!spec.base[other].adj.includes(id)) {
+                throw new Error(`tileset ${spec.body}: adjacency not symmetric (${id} → ${other})`);
+            }
+        }
+        if (!(def.weight > 0)) throw new Error(`tileset ${spec.body}: ${id} needs weight > 0`);
+    }
+    const tiles = [];
+    for (const cls of classes) {
+        if (Object.hasOwn(spec.base, cls.id)) {
+            tiles.push({
+                id: cls.id, classId: cls.id, weight: spec.base[cls.id].weight,
+                ports: 0, kind: -1,
+                color: cls.color, reliefAmpM: cls.reliefAmpM, grain: cls.grain,
+            });
+        } else {
+            const fam = spec.families[cls.id];
+            for (const bg of fam.background) {
+                if (!Object.hasOwn(spec.base, bg)) {
+                    throw new Error(`tileset ${spec.body}: family ${cls.id} background ${bg} is not a base class`);
+                }
+            }
+            const weightOf = [fam.segWeight, fam.bendWeight, fam.endWeight];
+            for (const v of FAMILY_VARIANTS) {
+                if (!(weightOf[v.kind] > 0)) {
+                    throw new Error(`tileset ${spec.body}: family ${cls.id} needs positive seg/bend/end weights`);
+                }
+                tiles.push({
+                    id: `${cls.id}:${v.suffix}`, classId: cls.id, weight: weightOf[v.kind],
+                    ports: v.ports, kind: v.kind,
+                    color: cls.color, reliefAmpM: cls.reliefAmpM, grain: cls.grain,
+                });
+            }
+        }
+    }
+    if (tiles.length < 2 || tiles.length > 31) {
+        throw new Error(`tileset ${spec.body}: need 2..31 tiles, got ${tiles.length}`);
+    }
+    const classOfTile = new Uint8Array(tiles.length);
+    tiles.forEach((t, i) => { classOfTile[i] = classIndex.get(t.classId); });
+    const tileset = {
+        body: spec.body,
+        classes: F(classes),
+        tiles: F(tiles.map(t => F(t))),
+        baseAdjacency: F(Object.fromEntries(
+            Object.entries(spec.base).map(([id, def]) => [id, F([...def.adj])]),
+        )),
+        families: F(Object.fromEntries(
+            Object.entries(spec.families ?? {}).map(([id, fam]) => [id, F({ ...fam, background: F([...fam.background]) })]),
+        )),
+        classOfTile,
+    };
+    tileset.masks = compileAdjacency(tileset);
+    return F(tileset);
+}
 
-export const MOON_TILESET = F({
-    body: 'moon',
-    tiles: F([
-        F({ id: 'maria',     label: 'Mare basalt',         color: F([0.30, 0.31, 0.35]), reliefAmpM: 40,  grain: 0.6, weight: 1.00 }),
-        F({ id: 'highlands', label: 'Feldspathic highlands', color: F([0.72, 0.70, 0.66]), reliefAmpM: 240, grain: 1.5, weight: 1.00 }),
-        F({ id: 'rim',       label: 'Crater rim',          color: F([0.60, 0.58, 0.55]), reliefAmpM: 320, grain: 2.0, weight: 0.35 }),
-        F({ id: 'ejecta',    label: 'Ejecta / rays',       color: F([0.86, 0.84, 0.80]), reliefAmpM: 90,  grain: 1.2, weight: 0.40 }),
-        F({ id: 'rille',     label: 'Sinuous rille',       color: F([0.22, 0.23, 0.27]), reliefAmpM: 110, grain: 0.9, weight: 0.18 }),
-        F({ id: 'wrinkle',   label: 'Wrinkle ridge',       color: F([0.38, 0.38, 0.41]), reliefAmpM: 130, grain: 0.8, weight: 0.22 }),
-        F({ id: 'swirl',     label: 'Bright swirl',        color: F([0.92, 0.90, 0.84]), reliefAmpM: 0,   grain: 0.5, weight: 0.10 }),
-    ]),
-    // Rilles and wrinkle ridges are mare-interior structures; swirls are
-    // albedo features ON maria (Reiner Gamma) — zero relief on purpose.
-    // Ejecta and rims bridge maria ↔ highlands (every contact does, via impact).
-    adjacency: F({
-        maria:     F(['maria', 'rille', 'wrinkle', 'swirl', 'rim', 'ejecta', 'highlands']),
-        highlands: F(['highlands', 'rim', 'ejecta', 'maria']),
-        rim:       F(['rim', 'ejecta', 'maria', 'highlands']),
-        ejecta:    F(['ejecta', 'rim', 'maria', 'highlands']),
-        rille:     F(['rille', 'maria']),
-        wrinkle:   F(['wrinkle', 'maria']),
-        swirl:     F(['swirl', 'maria']),
-    }),
-});
+/**
+ * May tile `a` sit with tile `b` on its `dir` side? The declarative rules,
+ * evaluated in one place (the test re-implements these independently as an
+ * oracle — keep both in sync):
+ *   base|base     — the symmetric class adjacency lists
+ *   base|family   — family side CLOSED toward the base tile, and the base
+ *                   class is in the family's background list
+ *   family|family — same family, facing ports both OPEN, not bend↔bend;
+ *                   different families (or open|closed, closed|closed) never
+ *                   touch — that is what keeps lines one cell wide
+ */
+export function tilesCompatible(tileset, a, dir, b) {
+    const ta = tileset.tiles[a];
+    const tb = tileset.tiles[b];
+    const aFam = ta.ports !== 0 || ta.kind >= 0;
+    const bFam = tb.ports !== 0 || tb.kind >= 0;
+    if (!aFam && !bFam) {
+        return tileset.baseAdjacency[ta.classId].includes(tb.classId);
+    }
+    const aOpen = aFam ? (ta.ports & PORT_BIT[dir]) !== 0 : false;
+    const bOpen = bFam ? (tb.ports & PORT_BIT[OPP[dir]]) !== 0 : false;
+    if (aFam && bFam) {
+        if (ta.classId !== tb.classId) return false;
+        if (aOpen && bOpen) return !(ta.kind === 1 && tb.kind === 1);
+        return false;
+    }
+    if (aFam) {
+        return !aOpen && tileset.families[ta.classId].background.includes(tb.classId);
+    }
+    return !bOpen && tileset.families[tb.classId].background.includes(ta.classId);
+}
+
+/** Per-tile per-direction compatibility bitmasks: masks[t*4 + dir]. */
+function compileAdjacency(tileset) {
+    const T = tileset.tiles.length;
+    const masks = new Uint32Array(T * 4);
+    for (let a = 0; a < T; a += 1) {
+        for (let dir = 0; dir < 4; dir += 1) {
+            let mask = 0;
+            for (let b = 0; b < T; b += 1) {
+                if (tilesCompatible(tileset, a, dir, b)) mask |= 1 << b;
+            }
+            masks[a * 4 + dir] = mask;
+        }
+    }
+    return masks;
+}
 
 /** Throws if a tileset breaks the solver's assumptions. */
 export function validateTileset(ts) {
-    const n = ts.tiles.length;
-    if (n < 2 || n > 31) throw new Error(`tileset ${ts.body}: need 2..31 tiles, got ${n}`);
-    const ids = ts.tiles.map(t => t.id);
-    const index = new Map(ids.map((id, i) => [id, i]));
-    if (index.size !== n) throw new Error(`tileset ${ts.body}: duplicate tile ids`);
-    for (const id of ids) {
-        const adj = ts.adjacency[id];
-        if (!adj) throw new Error(`tileset ${ts.body}: ${id} has no adjacency list`);
-        if (!adj.includes(id)) throw new Error(`tileset ${ts.body}: ${id} must be self-compatible`);
-        for (const other of adj) {
-            if (!index.has(other)) throw new Error(`tileset ${ts.body}: ${id} → unknown tile ${other}`);
-            if (!ts.adjacency[other].includes(id)) {
-                throw new Error(`tileset ${ts.body}: adjacency not symmetric (${id} → ${other})`);
+    const T = ts.tiles.length;
+    if (T < 2 || T > 31) throw new Error(`tileset ${ts.body}: need 2..31 tiles, got ${T}`);
+    const ids = new Set(ts.tiles.map(t => t.id));
+    if (ids.size !== T) throw new Error(`tileset ${ts.body}: duplicate tile ids`);
+    for (const t of ts.tiles) {
+        if (!(t.weight > 0)) throw new Error(`tileset ${ts.body}: ${t.id} needs weight > 0`);
+        if (!Array.isArray(t.color) || t.color.length !== 3) {
+            throw new Error(`tileset ${ts.body}: ${t.id} needs [r,g,b] color`);
+        }
+    }
+    // The compiled masks must be symmetric: b on a's dir side ⟺ a on b's
+    // opposite side. Guards tilesCompatible against a one-sided rule edit.
+    for (let a = 0; a < T; a += 1) {
+        for (let dir = 0; dir < 4; dir += 1) {
+            for (let b = 0; b < T; b += 1) {
+                const ab = (ts.masks[a * 4 + dir] >>> b) & 1;
+                const ba = (ts.masks[b * 4 + OPP[dir]] >>> a) & 1;
+                if (ab !== ba) {
+                    throw new Error(`tileset ${ts.body}: masks not symmetric (${ts.tiles[a].id} dir ${dir} ${ts.tiles[b].id})`);
+                }
             }
         }
-        const tile = ts.tiles[index.get(id)];
-        if (!(tile.weight > 0)) throw new Error(`tileset ${ts.body}: ${id} needs weight > 0`);
-        if (!Array.isArray(tile.color) || tile.color.length !== 3) {
-            throw new Error(`tileset ${ts.body}: ${id} needs [r,g,b] color`);
+    }
+    // Every tile must be able to stand in SOME 4-neighborhood.
+    for (let a = 0; a < T; a += 1) {
+        for (let dir = 0; dir < 4; dir += 1) {
+            if (ts.masks[a * 4 + dir] === 0) {
+                throw new Error(`tileset ${ts.body}: ${ts.tiles[a].id} has no legal neighbor toward dir ${dir}`);
+            }
         }
     }
     return true;
 }
 
-/** Precompute adjacency bitmasks: allowed[i] = bitmask of tiles that may sit next to i. */
-function adjacencyMasks(ts) {
-    const index = new Map(ts.tiles.map((t, i) => [t.id, i]));
-    return ts.tiles.map(t => {
-        let mask = 0;
-        for (const other of ts.adjacency[t.id]) mask |= 1 << index.get(other);
-        return mask;
-    });
-}
+// ── The tilesets ─────────────────────────────────────────────────────────────
+
+export const MARS_TILESET = buildTileset({
+    body: 'mars',
+    classes: [
+        { id: 'plains',   label: 'Smooth plains',      color: [0.78, 0.45, 0.30], reliefAmpM: 40,  grain: 0.6 },
+        { id: 'cratered', label: 'Cratered highlands', color: [0.62, 0.34, 0.22], reliefAmpM: 220, grain: 1.4 },
+        { id: 'dunes',    label: 'Dune field',         color: [0.45, 0.26, 0.20], reliefAmpM: 60,  grain: 2.2 },
+        { id: 'channel',  label: 'Outflow channel',    color: [0.82, 0.55, 0.38], reliefAmpM: 120, grain: 1.0 },
+        { id: 'chaos',    label: 'Chaos terrain',      color: [0.50, 0.28, 0.19], reliefAmpM: 300, grain: 1.8 },
+        { id: 'lava',     label: 'Volcanic flank',     color: [0.58, 0.30, 0.20], reliefAmpM: 90,  grain: 0.8 },
+        { id: 'ice',      label: 'Polar layered ice',  color: [0.93, 0.88, 0.86], reliefAmpM: 80,  grain: 0.7 },
+    ],
+    // Real relationships: dunes pool in plains and ring the polar cap
+    // (Olympia Undae) but do not abut raw chaos; ice touches only plains and
+    // its erg. Channels are a LINEAR family now — they thread through plains,
+    // cratered ground, dunes, and the chaos they historically emerge from,
+    // but as one-cell-wide chains with forced continuation, not blobs.
+    base: {
+        plains:   { weight: 1.00, adj: ['plains', 'cratered', 'dunes', 'lava', 'ice'] },
+        cratered: { weight: 0.95, adj: ['cratered', 'plains', 'chaos', 'lava'] },
+        dunes:    { weight: 0.55, adj: ['dunes', 'plains', 'ice'] },
+        chaos:    { weight: 0.40, adj: ['chaos', 'cratered'] },
+        lava:     { weight: 0.45, adj: ['lava', 'plains', 'cratered'] },
+        ice:      { weight: 0.30, adj: ['ice', 'plains', 'dunes'] },
+    },
+    // Family weights are TUNED, not guessed: at a forced line tip the domain
+    // is family-only, so the class prior cancels and the seg:bend:end ratio
+    // alone sets chain length (0.22:0.045:0.012 ⇒ mean ~12 cells). Priors
+    // control only how often lines SEED — lower the prior coefficient, not
+    // these ratios, to make a family rarer.
+    families: {
+        channel: { background: ['plains', 'cratered', 'chaos', 'dunes'], segWeight: 0.22, bendWeight: 0.045, endWeight: 0.012 },
+    },
+});
+
+export const MOON_TILESET = buildTileset({
+    body: 'moon',
+    classes: [
+        { id: 'maria',     label: 'Mare basalt',           color: [0.30, 0.31, 0.35], reliefAmpM: 40,  grain: 0.6 },
+        { id: 'highlands', label: 'Feldspathic highlands', color: [0.72, 0.70, 0.66], reliefAmpM: 240, grain: 1.5 },
+        { id: 'rim',       label: 'Crater rim',            color: [0.60, 0.58, 0.55], reliefAmpM: 320, grain: 2.0 },
+        { id: 'ejecta',    label: 'Ejecta / rays',         color: [0.86, 0.84, 0.80], reliefAmpM: 90,  grain: 1.2 },
+        { id: 'rille',     label: 'Sinuous rille',         color: [0.22, 0.23, 0.27], reliefAmpM: 110, grain: 0.9 },
+        { id: 'wrinkle',   label: 'Wrinkle ridge',         color: [0.38, 0.38, 0.41], reliefAmpM: 130, grain: 0.8 },
+        { id: 'swirl',     label: 'Bright swirl',          color: [0.92, 0.90, 0.84], reliefAmpM: 0,   grain: 0.5 },
+    ],
+    // Rilles and wrinkle ridges are LINEAR mare-interior structures — port
+    // families over a maria background, so they grow as one-cell-wide chains
+    // (a collapsed lava channel, a compression ridge), never speckle. Swirls
+    // are albedo PATCHES on maria (Reiner Gamma) — a blob class on purpose,
+    // zero relief on purpose. Ejecta and rims bridge maria ↔ highlands.
+    base: {
+        maria:     { weight: 1.00, adj: ['maria', 'swirl', 'rim', 'ejecta', 'highlands'] },
+        highlands: { weight: 1.00, adj: ['highlands', 'rim', 'ejecta', 'maria'] },
+        rim:       { weight: 0.35, adj: ['rim', 'ejecta', 'maria', 'highlands'] },
+        ejecta:    { weight: 0.40, adj: ['ejecta', 'rim', 'maria', 'highlands'] },
+        swirl:     { weight: 0.10, adj: ['swirl', 'maria'] },
+    },
+    // Same tuned tip ratios as the Mars channels (see that note): chain
+    // length lives here, seeding rate lives in moonClassPriors.
+    families: {
+        rille:   { background: ['maria'], segWeight: 0.22, bendWeight: 0.045, endWeight: 0.012 },
+        wrinkle: { background: ['maria'], segWeight: 0.26, bendWeight: 0.050, endWeight: 0.016 },
+    },
+});
 
 // ── The solver ───────────────────────────────────────────────────────────────
 
@@ -173,14 +364,15 @@ function adjacencyMasks(ts) {
  * Collapse a width×height grid over the tileset.
  *
  * @param {object}   opts
- * @param {object}   opts.tileset   MARS_TILESET | MOON_TILESET | custom (validated)
+ * @param {object}   opts.tileset   MARS_TILESET | MOON_TILESET | buildTileset(...)
  * @param {number}   opts.width     cells across (east)
- * @param {number}   opts.height    cells down (north→south row order)
+ * @param {number}   opts.height    cells down (row 0 = NORTH edge)
  * @param {number}   opts.seed      uint32 — see regionSeed()
  * @param {Float32Array|number[]|null} [opts.priors]
  *        length width*height*tiles.length, row-major, tile-fastest: the weight
  *        MULTIPLIER for tile t at cell (x,y) is priors[(y*width+x)*T + t].
- *        0 excludes a tile from that cell outright. null ⇒ uniform.
+ *        0 excludes a tile from that cell outright. null ⇒ uniform. Build
+ *        per-class priors with expandClassPriors().
  * @param {number}   [opts.maxRestarts=10]
  * @returns {{ grid: Uint8Array, width, height, tileset, restarts, seed }}
  *          grid[y*width+x] = tile index into tileset.tiles.
@@ -192,9 +384,16 @@ export function collapse({ tileset, width, height, seed, priors = null, maxResta
     if (priors && priors.length !== cellCount * T) {
         throw new Error(`priors length ${priors.length} ≠ cells×tiles ${cellCount * T}`);
     }
-    const allowed = adjacencyMasks(tileset);
     const baseWeights = tileset.tiles.map(t => t.weight);
-    const fullMask = (1 << T) - 1;
+
+    // Per-family tile masks: a cell whose whole domain sits inside one of
+    // these is an OBLIGATED line cell (a tip that must continue or cap).
+    const familyMasks = [];
+    for (const famId of Object.keys(tileset.families)) {
+        let mask = 0;
+        tileset.tiles.forEach((t, i) => { if (t.classId === famId) mask |= 1 << i; });
+        familyMasks.push(mask);
+    }
 
     // Per-cell starting domain: tiles whose effective weight is > 0.
     const startDomain = new Uint32Array(cellCount);
@@ -215,7 +414,9 @@ export function collapse({ tileset, width, height, seed, priors = null, maxResta
     for (let attempt = 0; attempt <= maxRestarts; attempt += 1) {
         const rand = mulberry32(attempt === 0 ? seed : hashSeed(seed, 'restart', attempt));
         const domain = startDomain.slice();
-        const result = attemptCollapse({ domain, width, height, allowed, effW, rand, seed, attempt });
+        const result = attemptCollapse({
+            domain, width, height, masks: tileset.masks, familyMasks, effW, rand, seed, attempt,
+        });
         if (result) {
             return { grid: result, width, height, tileset, restarts: attempt, seed };
         }
@@ -223,16 +424,15 @@ export function collapse({ tileset, width, height, seed, priors = null, maxResta
     throw new Error(`WFC failed after ${maxRestarts} restarts — tileset over-constrained for these priors`);
 }
 
-function attemptCollapse({ domain, width, height, allowed, effW, rand, seed, attempt }) {
+function attemptCollapse({ domain, width, height, masks, familyMasks, effW, rand, seed, attempt }) {
     const cellCount = width * height;
     const collapsed = new Uint8Array(cellCount);      // 1 = done
     const grid = new Uint8Array(cellCount);
     // Cached per-cell entropy. Recomputed ONLY when a cell's domain shrinks —
     // domains shrink at most (tiles−1) times per cell over the whole solve, so
     // the log-weight work is bounded, and the min-scan below is a plain float
-    // sweep. This is what keeps a 48² solve in the tens of milliseconds; the
-    // naive rescan recomputed entropy (with a PRNG call per cell!) every step
-    // and cost ~500 ms, which is a visible stall on a patch rebuild.
+    // sweep. This is what keeps a 48² solve fast; the naive rescan recomputed
+    // entropy (with a PRNG call per cell!) every step and cost ~500 ms.
     const entropy = new Float64Array(cellCount);
     const queue = [];
     let remaining = cellCount;
@@ -267,31 +467,44 @@ function attemptCollapse({ domain, width, height, allowed, effW, rand, seed, att
             if (w > 0) { sumW += w; sumWLog += w * Math.log(w); }
             m &= ~(1 << t);
         }
-        entropy[c] = Math.log(sumW) - sumWLog / sumW + jitter(c);
+        let h = Math.log(sumW) - sumWLog / sumW + jitter(c);
+        // OBLIGATED line cells collapse first. Shannon entropy is
+        // scale-invariant in the weights, so a frontier cell dominated by the
+        // background class scores LOWER than a forced family tip (which still
+        // has 3–4 live variants) — left alone, the background frontier races
+        // around the tip and boxes the line in after 2–3 cells. Measured:
+        // mean chains of ~2.5 without this bias, ~12 with it. Depth-first
+        // line growth is the whole point of the port families.
+        for (const famMask of familyMasks) {
+            if ((domain[c] & ~famMask) === 0) { h -= 8; break; }
+        }
+        entropy[c] = h;
     };
 
     // Propagate a domain change at `cell` to its 4-neighborhood until stable.
+    // The union masks are PER DIRECTION — that is what carries the port rules
+    // that make linear classes grow as lines.
     const propagateFrom = (cell) => {
         queue.length = 0;
         queue.push(cell);
         while (queue.length) {
             const c = queue.pop();
-            // Union of what c's remaining tiles allow beside them.
-            let allowMask = 0;
-            let m = domain[c];
-            while (m) {
-                const t = 31 - Math.clz32(m);
-                allowMask |= allowed[t];
-                m &= ~(1 << t);
-            }
             const x = c % width;
             const y = (c - x) / width;
-            const neighbors = [];
-            if (x > 0) neighbors.push(c - 1);
-            if (x < width - 1) neighbors.push(c + 1);
-            if (y > 0) neighbors.push(c - width);
-            if (y < height - 1) neighbors.push(c + width);
-            for (const nb of neighbors) {
+            for (let dir = 0; dir < 4; dir += 1) {
+                let nb = -1;
+                if (dir === 0 && y > 0) nb = c - width;             // N
+                else if (dir === 1 && x < width - 1) nb = c + 1;    // E
+                else if (dir === 2 && y < height - 1) nb = c + width; // S
+                else if (dir === 3 && x > 0) nb = c - 1;            // W
+                if (nb < 0) continue;
+                let allowMask = 0;
+                let m = domain[c];
+                while (m) {
+                    const t = 31 - Math.clz32(m);
+                    allowMask |= masks[t * 4 + dir];
+                    m &= ~(1 << t);
+                }
                 const next = domain[nb] & allowMask;
                 if (next === domain[nb]) continue;
                 if (next === 0) return false;         // contradiction
@@ -307,7 +520,10 @@ function attemptCollapse({ domain, width, height, allowed, effW, rand, seed, att
     };
 
     // Seed pass: prime the entropy cache; settle + propagate anything the
-    // priors already narrowed.
+    // priors already narrowed. This is also what structurally prevents a
+    // line segment from ever pointing an open port at a cell whose priors
+    // exclude the family — the segment is pruned from the boundary cell's
+    // domain before the first collapse.
     for (let c = 0; c < cellCount; c += 1) {
         if (bitCount(domain[c]) === 1) {
             if (!collapsed[c]) settle(c);
@@ -316,7 +532,7 @@ function attemptCollapse({ domain, width, height, allowed, effW, rand, seed, att
         }
     }
     for (let c = 0; c < cellCount; c += 1) {
-        if (collapsed[c] && !propagateFrom(c)) return null;
+        if (!propagateFrom(c)) return null;
     }
 
     while (remaining > 0) {
@@ -354,9 +570,10 @@ function attemptCollapse({ domain, width, height, allowed, effW, rand, seed, att
 }
 
 // ── Priors from real measurements ────────────────────────────────────────────
-// Both functions return a Float32Array in TILESET ORDER, non-negative, with at
-// least one strictly positive entry. They are pure functions of physical
-// numbers so the node gate can pin the geology without a browser.
+// Both functions return a Float32Array in CLASS ORDER (tileset.classes),
+// non-negative, with at least one strictly positive entry. They are pure
+// functions of physical numbers so the node gate can pin the geology without
+// a browser. Expand to per-tile priors with expandClassPriors().
 
 const clamp01 = v => Math.min(1, Math.max(0, v));
 const smooth = (a, b, v) => {
@@ -370,7 +587,7 @@ const smooth = (a, b, v) => {
  */
 export function marsClassPriors({ elevationM, slopeDeg, latDeg }) {
     const absLat = Math.abs(latDeg);
-    const p = new Float32Array(MARS_TILESET.tiles.length);
+    const p = new Float32Array(MARS_TILESET.classes.length);
     const polar = smooth(70, 80, absLat);
     const lowland = smooth(1000, -2500, elevationM);     // deepens toward northern plains / Hellas
     const highland = smooth(-500, 2000, elevationM);
@@ -387,7 +604,10 @@ export function marsClassPriors({ elevationM, slopeDeg, latDeg }) {
     p[0] = 0.55 * flat * (0.4 + 0.6 * lowland) + 0.10;               // plains
     p[1] = 0.75 * highland * (0.3 + 0.7 * steep) * (1 - polar) + 0.06; // cratered
     p[2] = 0.70 * flat * lowland * (1 - summit) * (1 - capIce);      // dunes
-    p[3] = 0.60 * steep * lowland * (1 - polar) + 0.03;              // channel
+    // Channel is a LINEAR family: this coefficient sets how often chains
+    // SEED (their length is fixed by the family's tip ratios), so it runs
+    // lower than the old blob-class value.
+    p[3] = 0.30 * steep * lowland * (1 - polar) + 0.015;             // channel
     p[4] = 0.55 * steep * (1 - polar) * (1 - summit) * smooth(-4500, -500, elevationM); // chaos
     p[5] = 0.85 * summit + 0.02;                                     // lava
     p[6] = 2.20 * capIce;                                            // ice
@@ -403,7 +623,7 @@ export function marsClassPriors({ elevationM, slopeDeg, latDeg }) {
  *        swirlBoost — 0..1, set near known swirls (Reiner Gamma) only.
  */
 export function moonClassPriors({ albedo, latDeg, craterDistNorm = Infinity, swirlBoost = 0 }) {
-    const p = new Float32Array(MOON_TILESET.tiles.length);
+    const p = new Float32Array(MOON_TILESET.classes.length);
     const dark = smooth(0.52, 0.30, albedo);         // maria basalt is dark
     const bright = smooth(0.38, 0.60, albedo);
     const rimBand = Number.isFinite(craterDistNorm)
@@ -417,10 +637,25 @@ export function moonClassPriors({ albedo, latDeg, craterDistNorm = Infinity, swi
     p[1] = 1.10 * bright + 0.02;                                  // highlands
     p[2] = 0.90 * rimBand + 0.05 * bright;                        // rim
     p[3] = 0.85 * ejectaBand + 0.10 * bright;                     // ejecta / rays
-    p[4] = 0.30 * dark;                                           // rille — mare interiors only
-    p[5] = 0.35 * dark;                                           // wrinkle ridge
+    // Rille/wrinkle are LINEAR families: these coefficients set seeding rate
+    // only — chain length is fixed by the family tip ratios in the tileset.
+    p[4] = 0.12 * dark;                                           // rille — mare interiors only
+    p[5] = 0.15 * dark;                                           // wrinkle ridge
     p[6] = dark * (0.02 + 1.6 * clamp01(swirlBoost));             // swirl
     return p;
+}
+
+/**
+ * Write a CLASS-ordered prior vector into a per-TILE priors array at
+ * cellIndex. Every variant of a linear family gets its class's prior — the
+ * seg/bend/end mix is carried by tile weights, not priors.
+ */
+export function expandClassPriors(tileset, classVector, priors, cellIndex) {
+    const T = tileset.tiles.length;
+    const base = cellIndex * T;
+    for (let t = 0; t < T; t += 1) {
+        priors[base + t] = classVector[tileset.classOfTile[t]];
+    }
 }
 
 // ── Geo-referenced cell layout ───────────────────────────────────────────────
@@ -550,13 +785,17 @@ export function sampleClass(result, u, v) {
     return { ...out, color: out.color.slice(), tile: result.tileset.tiles[out.tileIndex] };
 }
 
-/** Fraction of cells carrying each tile id — legends + tests read this. */
+/**
+ * Fraction of cells carrying each CLASS id (family variants aggregate into
+ * their class) — legends + tests read this.
+ */
 export function classShares(result) {
-    const counts = new Array(result.tileset.tiles.length).fill(0);
-    for (const t of result.grid) counts[t] += 1;
+    const { tileset } = result;
+    const counts = new Array(tileset.classes.length).fill(0);
+    for (const t of result.grid) counts[tileset.classOfTile[t]] += 1;
     const shares = {};
-    result.tileset.tiles.forEach((tile, i) => {
-        shares[tile.id] = counts[i] / result.grid.length;
+    tileset.classes.forEach((cls, i) => {
+        shares[cls.id] = counts[i] / result.grid.length;
     });
     return shares;
 }
