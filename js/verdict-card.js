@@ -49,6 +49,8 @@ import { computeVerdict, sunAltitudeDeg, issMagEstimate, fmtClock, factorForecas
 import { makePanelDraggable, resetPanelPosition } from './draggable-panel.js';
 import { compass16 } from './sun-altitude.js';
 import { telemetry } from './telemetry.js';
+import { AQI_STALE_AFTER_MS } from './air-quality-feed.js';
+import { AQI_POLLUTANTS } from './aqi-scale.js';
 
 const STYLE_ID = 'ev-verdict-styles';
 const MIN_RENDER_MS = 5_000;          // throttle re-renders
@@ -313,6 +315,13 @@ function ensureStyles() {
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/** Compact age for staleness labels: "3 h", "1 h". Sub-hour reads "<1 h". */
+const hoursAgo = (ms) => {
+    if (!Number.isFinite(ms)) return '';
+    const h = Math.floor(ms / 3_600_000);
+    return h < 1 ? '<1 h' : `${h} h`;
+};
 
 function distKm(lat1, lon1, lat2, lon2) {
     const R = 6371, d = Math.PI / 180;
@@ -693,6 +702,18 @@ export class VerdictCard {
                 pollutants: air.pollutants || null,
                 pollutionUnits: air.pollutionUnits || {},
                 airSource: air.airSource || null,
+                // Temporal provenance — the chip marks an aged AQI and the
+                // pollution snapshot prints the hour it actually used.
+                aqiValidAt: air.aqiValidAt ?? null,
+                aqiAgeMs: air.aqiAgeMs ?? null,
+                aqiMethod: air.aqiMethod ?? null,
+                aqiUpstream24h: air.aqiUpstream24h ?? null,
+                aqiNowcast: air.aqiNowcast ?? null,
+                aqiDominant: air.aqiDominant ?? null,
+                pollutantsValidAt: air.pollutantsValidAt ?? null,
+                pollutantsAgeMs: air.pollutantsAgeMs ?? null,
+                stale: air.stale ?? false,
+                aligned: air.aligned ?? null,
             } : null,
             // Flux-rope ensemble summary (Phase 4 outlook row) — the page
             // fills this asynchronously and refresh()es; null renders no row.
@@ -944,12 +965,26 @@ export class VerdictCard {
         <div class="ev-verdict-detail" data-ev="detail" data-ev-detail="${esc(id)}">${head}
             ${this._detailSvg(fc, inputs, tz)}
             <div class="ev-verdict-dsum">${esc(fc.summary || '')}</div>
-            ${id === 'aqi' ? this._renderPollutionSnapshot(inputs.air) : ''}
+            ${id === 'aqi' ? this._renderPollutionSnapshot(inputs.air, tz) : ''}
         </div>`;
     }
 
-    /** Current CAMS pollutant fields retained by the existing AQ feed. */
-    _renderPollutionSnapshot(air) {
+    /**
+     * Current CAMS pollutant fields retained by the existing AQ feed.
+     *
+     * Two disclosures live here that the card used to omit, both of which
+     * made honest numbers read as dishonest ones:
+     *
+     *  1. The AQI above this grid is derived from a 24-HOUR running mean (8 h
+     *     for O₃/CO); these pollutant values are instantaneous for one model
+     *     hour. Checking one against the other by hand will not reconcile,
+     *     and a reader who tries deserves to know why.
+     *  2. The header said "current model hour" unconditionally. When the CAMS
+     *     run lagged, the feed's fallback served an older hour and nothing
+     *     here contradicted the label. It now prints the hour it actually
+     *     got, and says when the AQI came from a different one.
+     */
+    _renderPollutionSnapshot(air, tz) {
         const p = air?.pollutants;
         if (!p) return '';
         const units = air.pollutionUnits || {};
@@ -968,9 +1003,44 @@ export class VerdictCard {
             </div>`;
         }).join('');
         const label = air.airSource?.label || 'modeled air quality';
+
+        // Which hour these components are actually for.
+        const hour = Number.isFinite(air.pollutantsValidAt)
+            ? fmtClock(air.pollutantsValidAt, tz) : null;
+        const aged = Number.isFinite(air.pollutantsAgeMs)
+            && air.pollutantsAgeMs >= AQI_STALE_AFTER_MS
+            ? ` · ${hoursAgo(air.pollutantsAgeMs)} old` : '';
+        const head = hour
+            ? `Pollution components · model hour ${esc(hour)}${esc(aged)}`
+            : 'Pollution components · current model hour';
+
+        // The AQI above is a different time base from this grid, and may be
+        // from a different hour. Both get said out loud, and the note names
+        // the method actually used rather than asserting one.
+        const bases = [];
+        if (air.aligned === false && Number.isFinite(air.aqiValidAt)) {
+            bases.push(`AQI is from ${esc(fmtClock(air.aqiValidAt, tz))}`);
+        }
+        bases.push(air.aqiMethod === 'nowcast'
+            ? 'AQI is EPA NowCast (weighted trailing mean); these are hourly values'
+            : 'AQI is a 24-h running mean; these are hourly values');
+        if (air.aqiMethod === 'nowcast' && air.aqiDominant) {
+            const driver = AQI_POLLUTANTS[air.aqiDominant]?.label || air.aqiDominant;
+            bases.push(`driven by ${esc(driver)}`);
+        }
+        // When both indices exist and disagree, showing the gap is the point —
+        // it is the difference between "right now" and "averaged over a day".
+        if (air.aqiMethod === 'nowcast' && Number.isFinite(air.aqiUpstream24h)
+                && Number.isFinite(air.aqiNowcast)
+                && Math.abs(air.aqiUpstream24h - air.aqiNowcast) >= 5) {
+            bases.push(`24-h mean reads ${Math.round(air.aqiUpstream24h)}`);
+        }
+        const basisNote = `<div class="ev-verdict-pollution-note">${bases.join(' · ')}</div>`;
+
         return `<div class="ev-verdict-pollution" data-ev="pollution-breakdown">
-            <div class="ev-verdict-mini">Pollution components · current model hour</div>
+            <div class="ev-verdict-mini">${head}</div>
             <div class="ev-verdict-pollution-grid">${cells}</div>
+            ${basisNote}
             <div class="ev-verdict-pollution-note">${esc(label)} · not a ground-monitor observation</div>
         </div>`;
     }

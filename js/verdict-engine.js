@@ -28,7 +28,11 @@
  *     air:      { aqi, uvNow, uvPeak, uvPeakHour, aqiHourly:[{time, aqi}],
  *                 pollutants:{pm25,pm10,ozone,nitrogenDioxide,sulphurDioxide,
  *                             carbonMonoxide,aerosolOpticalDepth,dust},
- *                 pollutionUnits, airSource }
+ *                 pollutionUnits, airSource,
+ *                 // temporal provenance from js/air-quality-feed.js; all
+ *                 // optional, absent means "assume current and aligned"
+ *                 aqiValidAt, aqiAgeMs, pollutantsValidAt, pollutantsAgeMs,
+ *                 stale, aligned }
  *     loc:      { lat, lon, name, tz }
  *     fluxRope: { pHit, p10, p20, arrivalP10Ms, arrivalP50Ms, arrivalP90Ms,
  *                 minBzP50 }        // flux-rope ensemble summary (Phase 4) —
@@ -246,6 +250,13 @@ export function aqiCategory(aqi) {
     if (aqi <= 150) return 'sensitive';
     if (aqi <= 200) return 'unhealthy';
     return aqi <= 300 ? 'very unhealthy' : 'hazardous';
+}
+
+/** Compact age for staleness labels: "3 h", "<1 h". Pure — no ambient time. */
+export function ageWord(ms) {
+    if (!isNum(ms)) return '';
+    const h = Math.floor(ms / HOUR_MS);
+    return h < 1 ? '<1 h' : `${h} h`;
 }
 
 /** chip state for AQI: help ≤50, watch 51-100, block >100 */
@@ -637,7 +648,12 @@ function buildFactors(inputs, now, moonNow) {
         {
             id: 'aqi', icon: '🍃', name: 'AQI',
             val: isNum(air.aqi) ? String(Math.round(air.aqi)) : '--',
-            cat: aqiCategory(air.aqi) || '--',
+            // An aged value keeps its category but says how old it is. The
+            // feed's fallback can serve an earlier model hour when the CAMS
+            // run lags; before this the chip rendered it as the current one.
+            cat: aqiCategory(air.aqi)
+                ? aqiCategory(air.aqi) + (air.stale ? ` · ${ageWord(air.aqiAgeMs)} old` : '')
+                : '--',
             state: aqiState(air.aqi),
         },
         {
