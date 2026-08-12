@@ -10,6 +10,8 @@
  * silently substituted for one another.
  */
 
+import { aqiColor, aqiFromConcentration, NO_DATA_RGB } from './aqi-scale.js';
+
 export const AIR_QUALITY_FRAME_SCHEMA = 'pp.air-quality.frame.v1';
 export const AIR_HOUR_MS = 3_600_000;
 
@@ -253,13 +255,32 @@ export function normalizeAirNowFrame(text, {
         if (lat == null || lon == null || !inScope(lat, lon, scope)) continue;
         const rowValidMs = parseAirNowUtc(value('ValidDate'), value('ValidTime'));
         if (rowValidMs != null) validMs = rowValidMs;
-        const aqis = ['OZONE_AQI', 'PM10_AQI', 'PM25_AQI', 'NO2_AQI']
-            .map(name => finiteOrNull(value(name))).filter(v => v != null && v >= 0);
+        // Per-pollutant sub-indices are retained alongside the composite. The
+        // composite is the MAX (EPA's definition), so without the parts you
+        // cannot tell which pollutant drove it — and you cannot compare
+        // like-for-like against a PM2.5-only calculation. These are AirNow's
+        // published NowCast-based AQI values, which is what makes
+        // js/aqi-validation.js possible without a second data source.
+        const subAqi = {
+            ozone: finiteOrNull(value('OZONE_AQI')),
+            pm10: finiteOrNull(value('PM10_AQI')),
+            pm25: finiteOrNull(value('PM25_AQI')),
+            nitrogenDioxide: finiteOrNull(value('NO2_AQI')),
+        };
+        for (const k of Object.keys(subAqi)) {
+            if (subAqi[k] != null && subAqi[k] < 0) subAqi[k] = null;
+        }
+        const aqis = Object.values(subAqi).filter(v => v != null);
+        const dominant = aqis.length
+            ? Object.keys(subAqi).find(k => subAqi[k] === Math.max(...aqis))
+            : null;
         const point = {
             id: value('AQSID'),
             name: value('SiteName') || value('AQSID'),
             lat, lon,
             aqi: aqis.length ? Math.max(...aqis) : null,
+            subAqi,
+            dominant,
             pm25: finiteOrNull(value('PM25')),
             pm10: finiteOrNull(value('PM10')),
             aod: null,
@@ -295,20 +316,30 @@ export function normalizeAirNowFrame(text, {
     });
 }
 
-/** EPA-category-compatible color stops, returned as normalized RGB. */
+/**
+ * Metric value → EPA category color, normalized RGB.
+ *
+ * The PM2.5 / PM10 scoring used to be a hand-rolled piecewise formula whose
+ * middle band had a 2× slope error (35 µg/m³ of PM2.5 scored 148 instead of
+ * 99 — a full category too severe) and whose top band was unbounded linear.
+ * It now routes through js/aqi-scale.js, the single source of truth for EPA
+ * breakpoints, so this function, the Pollution Lab, the heatmap, and the
+ * station layers cannot drift apart again.
+ *
+ * CAVEAT, deliberately not hidden: EPA's PM breakpoints are defined on a
+ * 24-hour mean, and most callers pass a single CAMS hour. The arithmetic
+ * below is now correct; the averaging window is a separate, tracked issue.
+ * Do not "fix" that by bending the table — fix it by feeding a proper mean.
+ *
+ * AOD is NOT an EPA pollutant and has no AQI. Its mapping is an explicitly
+ * unitless visual proxy chosen so 0.18 reads about as intense as AQI 50; it
+ * is kept unchanged here so the aerosol drape's appearance is unaffected.
+ */
 export function airQualityMetricColor(metric, value, fallback = false) {
-    if (fallback || !Number.isFinite(value)) return [0.34, 0.39, 0.46];
-    let score;
-    if (metric === 'aqi') score = value;
-    else if (metric === 'pm25') score = value <= 9 ? value / 9 * 50
-        : value <= 35.4 ? 50 + (value - 9) / 26.4 * 100 : 150 + (value - 35.4) * 2;
-    else if (metric === 'pm10') score = value <= 54 ? value / 54 * 50
-        : value <= 154 ? 50 + (value - 54) : 150 + (value - 154);
-    else score = value * 280; // AOD: 0.18≈AQI-50 visual intensity; 1.0≈280.
-    if (score <= 50) return [0.10, 0.88, 0.48];
-    if (score <= 100) return [1.00, 0.86, 0.18];
-    if (score <= 150) return [1.00, 0.49, 0.05];
-    if (score <= 200) return [1.00, 0.15, 0.18];
-    if (score <= 300) return [0.62, 0.25, 0.78];
-    return [0.55, 0.04, 0.18];
+    if (fallback || !Number.isFinite(value)) return [...NO_DATA_RGB];
+    if (metric === 'pm25' || metric === 'pm10') {
+        return aqiColor(aqiFromConcentration(metric, value));
+    }
+    if (metric === 'aqi') return aqiColor(value);
+    return aqiColor(value * 280);   // AOD visual proxy — see note above.
 }

@@ -18,7 +18,7 @@
  */
 
 import {
-    HEAT_SPECIES, buildHeatSamples, heatColor, heatAlpha, availableSpecies,
+    HEAT_SPECIES, buildHeatSamples, heatColor, heatAlpha, availableSpecies, supportFade, SUPPORT_FULL_KM, SUPPORT_NONE_KM,
 } from '../js/aqi-heatmap-layer.js';
 import { airQualityMetricColor } from '../js/air-quality-frame.js';
 
@@ -139,6 +139,39 @@ const GRID = [
     near(heatAlpha(NaN, 50, 300), 0, 1e-12, 'NaN value → transparent');
     near(heatAlpha(100, 300, 300), 0, 1e-12, 'degenerate floor≥ceil → transparent');
 }
+
+
+// ── Support fade: the picture must show where it is guessing ───────────────
+// The drape is interpolated from ~145 scattered points across the whole
+// planet. At uniform opacity a cell on Delhi and a cell 1,800 km out in the
+// Pacific look equally authoritative. Opacity now follows support.
+{
+    assert(supportFade(0) === 1, 'on a sample the field draws at full strength');
+    assert(supportFade(SUPPORT_FULL_KM) === 1, 'full strength holds to the support radius');
+    assert(supportFade(SUPPORT_NONE_KM) === 0, 'and reaches zero at the cutoff');
+    assert(supportFade(Infinity) === 0, 'no sample in range draws nothing at all');
+    assert(supportFade(1e9) === 0, 'an absurd distance draws nothing');
+    let prev = 1.0001, mono = true;
+    for (let d = 0; d <= SUPPORT_NONE_KM + 200; d += 50) {
+        const f = supportFade(d);
+        if (f > prev + 1e-9 || f < 0 || f > 1) mono = false;
+        prev = f;
+    }
+    assert(mono, 'fade is monotonic and stays within [0, 1]');
+    // Linear: opacity is proportional to remaining support, so the midpoint
+    // is exactly half. Pinned because an eased curve held ~0.98 out to 850 km
+    // and made the fade cosmetic instead of informative.
+    const mid = supportFade((SUPPORT_FULL_KM + SUPPORT_NONE_KM) / 2);
+    assert(Math.abs(mid - 0.5) < 1e-9, `midpoint fades to half (got ${mid.toFixed(3)})`);
+    const quarter = supportFade(SUPPORT_FULL_KM + (SUPPORT_NONE_KM - SUPPORT_FULL_KM) / 4);
+    assert(Math.abs(quarter - 0.75) < 1e-9, 'and a quarter of the way out, to 0.75');
+    // Just past full support the reduction must already be perceptible.
+    assert(supportFade(1000) < 0.8, 'a cell 1,000 km from any sample is clearly faded');
+    assert(supportFade(null) === 1, 'absent support data leaves opacity untouched');
+    assert(supportFade(undefined) === 1, 'undefined support leaves opacity untouched');
+    assert(SUPPORT_FULL_KM < SUPPORT_NONE_KM, 'the two radii are ordered');
+}
+
 
 if (process.exitCode) {
     console.error(`aqi-heatmap: FAILED (${checks} checks)`);

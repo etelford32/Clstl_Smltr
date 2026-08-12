@@ -23,7 +23,7 @@
 
 import {
     makeGrid, cellLat, cellLon, sampleGrid, globalMean, haversineKm,
-    idwGrid, kmeansHotspots, chooseHotspotCount, windToUV, stepTransport,
+    idwGrid, supportAt, kmeansHotspots, chooseHotspotCount, windToUV, stepTransport,
     inferSteadySources, aodFromPm25, directForcingWm2, forcingGridFromPm25,
     equilibriumDeltaT, PM25_PER_AOD, FORCING_PER_AOD_WM2,
 } from '../js/pollution-model.js';
@@ -189,6 +189,72 @@ const near = (a, b, tol, msg) => assert(Math.abs(a - b) <= tol, `${msg} (got ${a
     near(globalMean(f), FORCING_PER_AOD_WM2, 1e-6, 'uniform PM field → uniform forcing grid');
     near(aodFromPm25(NaN), 0, 1e-9, 'NaN PM2.5 → zero AOD, not NaN');
 }
+
+
+// ── IDW support: how far the nearest real sample is ────────────────────────
+// The field is painted continuously over the planet from ~145 scattered
+// points. Without this, a cell sitting on a sample and a cell 1,800 km from
+// anything render identically and read as equally measured.
+{
+    const samples = [
+        { lat: 0, lon: 0, value: 50 },
+        { lat: 40, lon: -100, value: 10 },
+    ];
+    const g = idwGrid(samples, 72, 36, { maxDistKm: 2000, background: 3 });
+
+    assert(g.sampleCount === 2, 'the grid records how many samples built it');
+    assert(g.maxDistKm === 2000, 'and the influence radius it used');
+    assert(g.nearestKm instanceof Float32Array, 'support rides the grid');
+    assert(g.nearestKm.length === 72 * 36, 'support covers every cell');
+
+    // On top of a sample the support is within a cell or so.
+    const onTop = supportAt(g, 0, 0);
+    assert(onTop < 400, `on a sample the support is tight (got ${onTop.toFixed(0)} km)`);
+
+    // Far from everything: no support, reported as Infinity rather than a
+    // large finite number that could be formatted as a plausible distance.
+    assert(supportAt(g, -60, 150) === Infinity,
+        'a cell with nothing in range has no support');
+    // ...and that cell holds the background constant, not an interpolation.
+    near(sampleGrid(g, -60, 150), 3, 1e-5,
+        'unsupported cells are exactly the background value');
+
+    // Support grows monotonically along a ray away from the sample.
+    let prev = -1, monotonic = true;
+    for (const lat of [0, 5, 10, 15, 20]) {
+        const sup = supportAt(g, lat, 0);
+        if (sup < prev) monotonic = false;
+        prev = sup;
+    }
+    assert(monotonic, 'support grows with distance from the sample');
+
+    // Widening the radius converts unsupported cells into supported ones.
+    // (-60, 150) is ~12,850 km from (0, 0), so the radius has to clear that —
+    // 9,000 km does NOT, which is the correct refusal and worth stating.
+    assert(supportAt(idwGrid(samples, 72, 36, { maxDistKm: 9000 }), -60, 150) === Infinity,
+        '9,000 km still does not reach a sample 12,850 km away');
+    const wide = idwGrid(samples, 72, 36, { maxDistKm: 20000, background: 3 });
+    assert(Number.isFinite(supportAt(wide, -60, 150)),
+        'a radius past the true separation does reach it');
+    // supportAt snaps to a cell center (see its doc comment), so the answer
+    // is the CELL's distance to the sample, not the probe point's. At 5°
+    // cells that is up to ~390 km away; pin it against the cell center so
+    // the quantization is documented rather than absorbed into a fat tolerance.
+    near(supportAt(wide, -60, 150), haversineKm(-62.5, 152.5, 0, 0), 1,
+        'reports the great-circle distance from the cell center to the sample');
+
+    // No samples at all → nothing anywhere is supported.
+    const none = idwGrid([], 12, 6, { background: 2 });
+    assert(none.sampleCount === 0, 'an empty field counts no samples');
+    assert([...none.nearestKm].every(v => v === Infinity),
+        'an empty field claims no support anywhere');
+
+    // supportAt is nearest-neighbour on purpose: interpolating the support
+    // distance would smooth away the very gap it exists to expose.
+    assert(supportAt({ w: 2, h: 1, nearestKm: null }, 0, 0) === null,
+        'a grid without support data returns null, not a fake distance');
+}
+
 
 if (process.exitCode) {
     console.error(`pollution-model: FAILED (${checks} checks)`);

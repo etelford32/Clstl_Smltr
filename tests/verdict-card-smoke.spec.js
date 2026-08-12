@@ -59,16 +59,30 @@ function wxFixture(nowMs) {
     };
 }
 
-/** Open-Meteo air-quality fixture: 48 h of a fixed AQI. */
+/**
+ * Open-Meteo air-quality fixture: 24 h history + 24 h forecast at a fixed AQI.
+ *
+ * The component values must be COHERENT with us_aqi: the card's headline is
+ * EPA NowCast rebuilt from these hourly series, so a fixture whose us_aqi and
+ * whose PM2.5 imply different indices would assert one number while exercising
+ * another. A flat 7.5 µg/m³ of PM2.5 gives NowCast weight 1 (plain mean) →
+ * 7.5 → AQI 42, matching us_aqi, with PM2.5 the dominant sub-index
+ * (pm10 16, O3 33, NO2 6, CO 1, SO2 0).
+ */
 function aqFixture(nowMs) {
     const start = Math.floor(nowMs / HOUR) * HOUR;
     const time = [], us_aqi = [], pm2_5 = [], pm10 = [], ozone = [];
     const nitrogen_dioxide = [], sulphur_dioxide = [], carbon_monoxide = [];
     const aerosol_optical_depth = [], dust = [];
-    for (let i = 0; i < 48; i++) {
-        time.push((start + i * HOUR) / 1000);
+    // 24 h of history + the current hour + 24 h of forecast, matching the
+    // real request (past_days=1). The history is REQUIRED: EPA NowCast needs
+    // 2 of the 3 most recent hours and the 8-h means need 6 of 8, so a
+    // forecast-only fixture silently exercises the upstream fallback instead
+    // of the path the card actually takes in production.
+    for (let i = 0; i < 49; i++) {
+        time.push((start + (i - 24) * HOUR) / 1000);
         us_aqi.push(42);
-        pm2_5.push(8.4); pm10.push(17.2); ozone.push(71.5);
+        pm2_5.push(7.5); pm10.push(17.2); ozone.push(71.5);
         nitrogen_dioxide.push(12.3); sulphur_dioxide.push(2.1); carbon_monoxide.push(184);
         aerosol_optical_depth.push(0.086); dust.push(4.7);
     }
@@ -262,7 +276,7 @@ test.describe('EarthView verdict card', () => {
         await expect(card.locator('[data-ev="detail"] svg')).toHaveCount(1);
         await expect(card.locator('[data-ev="detail"]')).toContainText('now 42 (good)');
         await expect(card.locator('[data-ev="pollution-breakdown"]')).toBeVisible();
-        await expect(card.locator('[data-ev-pollutant="pm25"]')).toContainText('8.4');
+        await expect(card.locator('[data-ev-pollutant="pm25"]')).toContainText('7.5');
         await expect(card.locator('[data-ev-pollutant="aerosolOpticalDepth"]')).toContainText('0.086');
         await expect(card.locator('[data-ev="pollution-breakdown"]')).toContainText('not a ground-monitor observation');
         await expect(card.locator('[data-ev-chip="aqi"]')).toHaveAttribute('aria-expanded', 'true');
