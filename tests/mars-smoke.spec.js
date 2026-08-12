@@ -380,6 +380,27 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await expect(page.locator('#pilot-relief')).toHaveText('×18');
     await expect(page.locator('#pilot-hdg')).toContainText('°');
 
+    // ── Close-range detail cascade ──
+    // Quality-gated regolith shader: strength follows the ladder's rung
+    // exactly, the HUD discloses it as synthesized whenever it is on, and
+    // both drop together at the minimal rung — fidelity traded, honesty kept.
+    const cascadeQuality = await page.evaluate(() => window.__marsLab.renderState());
+    const expectedDetail = { high: 1, medium: 1, low: 0.6, minimal: 0 }[cascadeQuality.quality];
+    expect(cascadeQuality.surfaceDetail).toBe(expectedDetail);
+    await page.evaluate(() => window.__marsLab.setQuality(0, { lock: true }));
+    await expect.poll(() => page.evaluate(() => window.__marsLab.renderState().surfaceDetail)).toBe(1);
+    await expect(page.locator('#surface-detail')).toContainText('close-range regolith synthesized');
+    await page.evaluate(() => window.__marsLab.setQuality(3, { lock: true }));
+    await expect.poll(() => page.evaluate(() => window.__marsLab.renderState().surfaceDetail)).toBe(0);
+    await expect(page.locator('#surface-detail')).not.toContainText('close-range regolith');
+    // Descend locked to LOW: cascade still on (0.6) so ramp + regolith are
+    // exercised together deterministically, but at 128² segments and 0.62
+    // pixel ratio — locking HIGH here timed the whole test out on the CI
+    // software rasteriser.
+    await page.evaluate(() => window.__marsLab.setQuality(2, { lock: true }));
+    await expect.poll(() => page.evaluate(() => window.__marsLab.renderState().surfaceDetail)).toBe(0.6);
+    await expect(page.locator('#surface-detail')).toContainText('close-range regolith synthesized');
+
     // ── True-scale-on-final ──
     // Zooming to short final ramps the 18× exaggeration down to TRUE 1×,
     // disclosed in the HUD line, the pilot cluster, and the mesh badge —
@@ -412,6 +433,8 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
         { timeout: 15_000 },
     ).toBe(18);
     await expect(page.locator('#surface-detail')).toContainText('18×');
+    // Hand the rest of the run back to the adaptive ladder (from the cheap rung).
+    await page.evaluate(() => window.__marsLab.setQuality(2, { lock: false }));
     const surfaceRender = await page.evaluate(() => window.__marsLab.renderState());
     expect(surfaceRender.depthRatio).toBeLessThan(20_000);
     expect(surfaceRender.near).toBeGreaterThan(0.0001);

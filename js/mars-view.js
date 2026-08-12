@@ -151,11 +151,14 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true,
 // decorative limb glow, and the globe's bump term all scale; the analysis
 // graticule, the terrain itself, and every readout stay at all four levels. A
 // visitor on a slow machine should get a coarser Mars, not a smaller feature set.
+// `surfaceDetail` scales the close-range regolith shader on the regional
+// patch (0 skips the noise entirely) — it is fidelity, not an instrument,
+// so the ladder may trade it away on a software rasteriser.
 const QUALITY_LEVELS = Object.freeze([
-    Object.freeze({ name: 'high',    pixelRatio: 1,    atmosphere: true,  starCount: 1700, terrainSegments: 256, globeBump: true }),
-    Object.freeze({ name: 'medium',  pixelRatio: 0.8,  atmosphere: true,  starCount: 1700, terrainSegments: 192, globeBump: true }),
-    Object.freeze({ name: 'low',     pixelRatio: 0.62, atmosphere: false, starCount: 900,  terrainSegments: 128, globeBump: false }),
-    Object.freeze({ name: 'minimal', pixelRatio: 0.5,  atmosphere: false, starCount: 500,  terrainSegments: 96,  globeBump: false }),
+    Object.freeze({ name: 'high',    pixelRatio: 1,    atmosphere: true,  starCount: 1700, terrainSegments: 256, globeBump: true,  surfaceDetail: 1 }),
+    Object.freeze({ name: 'medium',  pixelRatio: 0.8,  atmosphere: true,  starCount: 1700, terrainSegments: 192, globeBump: true,  surfaceDetail: 1 }),
+    Object.freeze({ name: 'low',     pixelRatio: 0.62, atmosphere: false, starCount: 900,  terrainSegments: 128, globeBump: false, surfaceDetail: 0.6 }),
+    Object.freeze({ name: 'minimal', pixelRatio: 0.5,  atmosphere: false, starCount: 500,  terrainSegments: 96,  globeBump: false, surfaceDetail: 0 }),
 ]);
 const maxPixelRatio = Math.min(window.devicePixelRatio || 1, window.matchMedia('(max-width: 560px)').matches ? 1.5 : 2);
 let qualityIndex = 0;
@@ -568,6 +571,131 @@ const regionalTerrainMaterial = new THREE.MeshStandardMaterial({
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
 });
+/**
+ * ═══ CLOSE-RANGE DETAIL CASCADE ════════════════════════════════════════════
+ * Below ~10 km the patch used to be a featureless wash: the Viking map is
+ * ~15 km/px, the synth classes 11 km/cell, the decorative roughness 10–100 km
+ * wavelengths — every visual channel a pilot uses on short final (ground
+ * rush, texture-gradient height cues) was empty. This injects a procedural
+ * regolith cascade into the patch material: three noise bands (~2.4 km,
+ * ~450 m, ~90 m) that each FADE IN as the view distance drops, so survey
+ * height keeps the photometric look and detail materializes on descent.
+ *
+ * The honesty rules:
+ *   - albedo/shading ONLY — no geometry, so it cannot lie about shape at
+ *     true scale, and the MOLA readouts never see it;
+ *   - pattern frequency/amplitude ride the per-vertex synth class grain
+ *     (dunes ripple, plains stay calm) — labelled synthesized in the HUD
+ *     alongside the classes that drive it;
+ *   - noise coordinates are the REFERENCE-SPHERE direction × radius —
+ *     radius-independent, so the pattern is pixel-stable across relief-ramp
+ *     steps, patch rebuilds, and recenters (world-position input would
+ *     reseed the texture on every ramp step — the surface moves radially).
+ * The mid band adds a sun-relative two-tap "lit relief" term (bright on the
+ * sun side of each bump, dark on the lee) — cheap depth without touching
+ * the normal pipeline. uDetailStrength comes from the quality ladder; 0
+ * branches the whole cascade out for software rasterisers.
+ */
+const detailUniforms = {
+    uDetailStrength: { value: QUALITY_LEVELS[0].surfaceDetail },
+    uSunDirWorld: { value: new THREE.Vector3(1, 0, 0) },
+    // World-space anchor (km) near the patch center. Noise coordinates are
+    // ANCHOR-RELATIVE: raw sphere coordinates reach ±3400 km, and dividing by
+    // a 90 m band wavelength pushes lattice values past fp precision — the
+    // noise decorrelated into white speckle (measured with the raw-noise
+    // debug view). Quantized to the same quarter-degree grid as the synth
+    // cache, so ramp steps and quality rebuilds keep the anchor and only a
+    // genuine recenter (which rebuilds all scenery anyway) moves it.
+    uDetailAnchor: { value: new THREE.Vector3(0, 0, 0) },
+};
+regionalTerrainMaterial.customProgramCacheKey = () => 'mars-regolith-detail';
+regionalTerrainMaterial.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, detailUniforms);
+    shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `
+            attribute float aDetailGrain;
+            varying vec3 vDetailWorld;
+            varying float vDetailGrain;
+            #include <common>`)
+        .replace('#include <begin_vertex>', `
+            #include <begin_vertex>
+            vDetailWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+            vDetailGrain = aDetailGrain;`);
+    shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `
+            uniform float uDetailStrength;
+            uniform vec3 uSunDirWorld;
+            uniform vec3 uDetailAnchor;
+            varying vec3 vDetailWorld;
+            varying float vDetailGrain;
+            float ppHash(vec3 p) {
+                // Wrap the lattice into a 289-cell tile BEFORE hashing: the
+                // raw coordinates reach tens of thousands of cells (sphere
+                // radius x band frequency) and fract() of such magnitudes
+                // sheds most of the fp32 mantissa — the hash degenerates
+                // into screen-scale streaks. 289 cells repeats the pattern
+                // every ~26 km at the finest band: invisible.
+                p = mod(p, 289.0);
+                p = fract(p * 0.1031);
+                p += dot(p, p.zyx + 31.32);
+                return fract((p.x + p.y) * p.z);
+            }
+            float ppNoise(vec3 p) {
+                vec3 i = floor(p);
+                vec3 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                float n000 = ppHash(i);
+                float n100 = ppHash(i + vec3(1.0, 0.0, 0.0));
+                float n010 = ppHash(i + vec3(0.0, 1.0, 0.0));
+                float n110 = ppHash(i + vec3(1.0, 1.0, 0.0));
+                float n001 = ppHash(i + vec3(0.0, 0.0, 1.0));
+                float n101 = ppHash(i + vec3(1.0, 0.0, 1.0));
+                float n011 = ppHash(i + vec3(0.0, 1.0, 1.0));
+                float n111 = ppHash(i + vec3(1.0, 1.0, 1.0));
+                return mix(
+                    mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+                    mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+                    f.z);
+            }
+            #include <common>`)
+        .replace('#include <color_fragment>', `
+            #include <color_fragment>
+            if (uDetailStrength > 0.001) {
+                vec3 radialDir = normalize(vDetailWorld);
+                // km on the reference sphere, ANCHOR-RELATIVE (see uniform
+                // note): small magnitudes keep the hash lattice coherent.
+                vec3 sph = radialDir * 3396.19 - uDetailAnchor;
+                float viewKm = length(vViewPosition) * 3396.19;
+                float freq = mix(1.0, vDetailGrain, 0.7);
+                float amp = (0.7 + 0.3 * vDetailGrain) * uDetailStrength;
+                float shade = 0.0;
+                float fade0 = 1.0 - smoothstep(60.0, 130.0, viewKm);
+                if (fade0 > 0.0) {
+                    shade += (ppNoise(sph * (freq / 2.4)) - 0.5) * 0.12 * fade0;
+                }
+                float fade1 = 1.0 - smoothstep(14.0, 32.0, viewKm);
+                if (fade1 > 0.0) {
+                    vec3 sunTangent = uSunDirWorld - radialDir * dot(uSunDirWorld, radialDir);
+                    sunTangent = normalize(sunTangent + vec3(1e-5));
+                    float bump = ppNoise(sph * (freq / 0.45)) * 0.67
+                        + ppNoise(sph * (freq / 0.19)) * 0.33;
+                    float bumpSunward = ppNoise((sph + sunTangent * 0.09) * (freq / 0.45)) * 0.67
+                        + ppNoise((sph + sunTangent * 0.05) * (freq / 0.19)) * 0.33;
+                    shade += (bump - 0.5) * 0.09 * fade1;
+                    // Lit relief: a DIRECTIONAL derivative along the sun
+                    // tangent. Kept subordinate to the isotropic terms — at
+                    // 0.5 its anisotropy dominated the whole field and the
+                    // regolith rendered as sun-axis streaks (measured).
+                    shade += (bump - bumpSunward) * 0.2 * fade1;
+                }
+                float fade2 = 1.0 - smoothstep(2.5, 7.5, viewKm);
+                if (fade2 > 0.0) {
+                    shade += (ppNoise(sph * (freq / 0.09)) - 0.5) * 0.18 * fade2;
+                }
+                diffuseColor.rgb *= clamp(1.0 + shade * amp, 0.55, 1.45);
+            }`);
+};
+
 const regionalTerrain = new THREE.Mesh(new THREE.BufferGeometry(), regionalTerrainMaterial);
 regionalTerrain.name = 'mola-regional-terrain';
 regionalTerrain.visible = false;
@@ -812,9 +940,19 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
     const elevations = new Float32Array(vertexCount);
     const indices = new Uint32Array(segments * segments * 6);
     const synth = synthEnabled ? computeRegionalSynth(latDeg, lonDeg) : null;
+    // Detail-cascade anchor: quarter-degree-quantized patch center, in the
+    // same WORLD frame as vDetailWorld (marsGroup rotation applied).
+    detailUniforms.uDetailAnchor.value
+        .copy(latLonVector(Math.round(latDeg * 4) / 4, Math.round(lonDeg * 4) / 4, 1))
+        .applyQuaternion(marsGroup.quaternion)
+        .multiplyScalar(3396.19);
     // Class tints stashed in pass 1 (where the synth is sampled for roughness
     // anyway) and applied in pass 2 on top of the hypsometric shade.
     const synthTint = synth ? new Float32Array(vertexCount * 3) : null;
+    // Per-vertex grain for the close-range detail cascade: the synth class's
+    // noise-frequency knob (dunes 2.2, plains 0.6). 1 = neutral regolith when
+    // the synth layer is off or has no data.
+    const grains = new Float32Array(vertexCount).fill(1);
 
     // Pass 1: geometry + real elevation. No per-vertex object allocation — this
     // loop runs 66,049 times on every rebuild, and rebuilds happen while the
@@ -845,6 +983,7 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
                 // Class-shaped micro-relief, still inside the existing ≤0.35 km
                 // decoration budget: plains flatten it, chaos keeps full grain.
                 roughnessKm *= Math.min(1, Math.max(0.15, synthScratch.reliefAmpM / 300));
+                grains[vertexOffset] = synthScratch.grain;
                 for (let channel = 0; channel < 3; channel += 1) {
                     const ratio = synthScratch.color[channel] / SYNTH_NEUTRAL[channel];
                     synthTint[vertexOffset * 3 + channel] = THREE.MathUtils.clamp(
@@ -903,6 +1042,7 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('aDetailGrain', new THREE.BufferAttribute(grains, 1));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.computeVertexNormals();
     geometry.computeBoundingSphere();
@@ -2237,8 +2377,13 @@ function deactivateSurfaceExplorer() {
  * written once at entry.
  */
 function updateSurfaceDetail() {
+    // The close-range regolith cascade is invented texture and says so —
+    // appended to whichever provenance line is active.
+    const regolithNote = QUALITY_LEVELS[qualityIndex].surfaceDetail > 0
+        ? ' · close-range regolith synthesized'
+        : '';
     if (!hasRelief) {
-        surfaceDetailElement.textContent = 'MOLA unavailable · smooth regional geometry · Viking/material fallback';
+        surfaceDetailElement.textContent = `MOLA unavailable · smooth regional geometry · Viking/material fallback${regolithNote}`;
         return;
     }
     // Both provenance tails are honest about the same thing: everything below
@@ -2254,7 +2399,7 @@ function updateSurfaceDetail() {
     }
     // The multiplier is LIVE (true-scale-on-final ramp); at 1× say so loudly.
     const scaleNote = regionalReliefScale === 1 ? '1× TRUE SCALE' : `${regionalReliefScale}×`;
-    surfaceDetailElement.textContent = `${REGIONAL_TERRAIN_EXTENT_KM} km MOLA patch · relief ${(regionalTerrainRelief.minElevationM / 1000).toFixed(1)} → ${(regionalTerrainRelief.maxElevationM / 1000).toFixed(1)} km at ${scaleNote} · ${regionalGridSpacingKm} km grid · ${detailNote}`;
+    surfaceDetailElement.textContent = `${REGIONAL_TERRAIN_EXTENT_KM} km MOLA patch · relief ${(regionalTerrainRelief.minElevationM / 1000).toFixed(1)} → ${(regionalTerrainRelief.maxElevationM / 1000).toFixed(1)} km at ${scaleNote} · ${regionalGridSpacingKm} km grid · ${detailNote}${regolithNote}`;
 }
 
 /**
@@ -3019,6 +3164,10 @@ function applyQuality(index) {
     // glow — the first thing worth losing, and the last thing worth keeping.
     atmosphereLayer.visible = level.atmosphere
         && Boolean(document.querySelector('[data-layer="atmosphere"]')?.checked);
+    // Close-range regolith cascade rides the ladder too: it costs noise
+    // evaluations per fragment, which is exactly what a software rasteriser
+    // cannot afford. 0 branches the whole cascade out of the shader path.
+    detailUniforms.uDetailStrength.value = level.surfaceDetail;
     // The globe's bump term costs a dFdx/dFdy pair per fragment across the whole
     // disc. Unlike the regional patch's (which was perturbing detail finer than
     // one texel and is gone for good), this one earns its keep at full quality —
@@ -3041,7 +3190,13 @@ function applyQuality(index) {
 
 let qualityWindowStart = 0;
 
+// Test/QA affordance: __marsLab.setQuality(i, { lock: true }) pins a rung so
+// visual verification of quality-gated features (the regolith cascade) is
+// possible on machines the ladder would immediately downgrade.
+let qualityLocked = false;
+
 function sampleFrame(frameMs) {
+    if (qualityLocked) return;
     // Ignore any single stall (a terrain rebuild, a tab regaining focus) —
     // those are not the steady state the ladder is trying to measure.
     if (frameMs > 500) return;
@@ -3167,6 +3322,11 @@ window.__marsLab = Object.freeze({
             shares: synthShares ? { ...synthShares } : null,
         },
     }),
+    /** Pin a quality rung (lock stops the ladder re-adjusting). QA/tests only. */
+    setQuality: (index, { lock = false } = {}) => {
+        qualityLocked = Boolean(lock);
+        applyQuality(index);
+    },
     /** Landing instruments + reticle — see the PILOT CLUSTER block. */
     pilotState: () => ({
         hdgDeg: pilot.hdgDeg,
@@ -3202,6 +3362,7 @@ window.__marsLab = Object.freeze({
         depthRatio: camera.far / camera.near,
         starsFollowCamera: starField.position.distanceTo(camera.position) < 1e-6,
         atmosphere: atmosphereLayer.visible,
+        surfaceDetail: detailUniforms.uDetailStrength.value,
     }),
     /** Ground-anchor audit: how far each surface layer floats above the terrain. */
     anchorState: () => {
@@ -3275,6 +3436,8 @@ function animate(now) {
         surfaceFillLight.position.copy(camera.position).addScaledVector(cameraRadial, -0.0001);
         skyDome.position.copy(camera.position);
         updateSurfaceSky(cameraRadial);
+        // The detail cascade's lit-relief term shades against the live sun.
+        detailUniforms.uSunDirWorld.value.copy(sun.position).normalize();
         updateReliefRamp();
         updateSurfaceReadout();
     } else {
