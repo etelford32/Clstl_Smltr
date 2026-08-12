@@ -90,6 +90,27 @@ assert.equal(airnow.points[0].aod, null, 'AirNow must not fabricate observed AOD
 
 assert.deepEqual(airQualityMetricColor('aqi', 25), [0.10, 0.88, 0.48]);
 assert.deepEqual(airQualityMetricColor('aqi', 175), [1.00, 0.15, 0.18]);
+
+// Concentration metrics must land in the EPA category their AQI implies.
+// These are the values the pre-2026-08 hand-rolled formula got wrong: it
+// scored PM2.5 35 µg/m³ as 148 (orange) when EPA says 99 (yellow), and PM10
+// 154 µg/m³ as 150 (orange) when EPA says 100 (yellow). Both are boundary
+// values, so a slope error shows up as a visible color change.
+// tests/aqi-scale.mjs owns the full breakpoint table; this pins the wiring.
+assert.deepEqual(airQualityMetricColor('pm25', 35), [1.00, 0.86, 0.18], 'PM2.5 35 µg/m³ is Moderate yellow, not orange');
+assert.deepEqual(airQualityMetricColor('pm25', 9), [0.10, 0.88, 0.48], 'PM2.5 9.0 µg/m³ is the top of Good');
+assert.deepEqual(airQualityMetricColor('pm25', 40), [1.00, 0.49, 0.05], 'PM2.5 40 µg/m³ is USG orange');
+assert.deepEqual(airQualityMetricColor('pm10', 154), [1.00, 0.86, 0.18], 'PM10 154 µg/m³ is Moderate yellow, not orange');
+assert.deepEqual(airQualityMetricColor('pm10', 200), [1.00, 0.49, 0.05], 'PM10 200 µg/m³ is USG orange');
+// The old top band was unbounded linear, so extreme values ran off the scale.
+assert.deepEqual(airQualityMetricColor('pm25', 900), [0.55, 0.04, 0.18], 'extreme PM2.5 clamps to Hazardous, not past it');
+// Invalid input must read as no-data gray, never as clean air.
+assert.deepEqual(airQualityMetricColor('pm25', NaN), [0.34, 0.39, 0.46]);
+assert.deepEqual(airQualityMetricColor('pm25', 20, true), [0.34, 0.39, 0.46], 'explicit fallback still wins');
+// AOD is not an EPA pollutant; its visual proxy is deliberately unchanged.
+assert.deepEqual(airQualityMetricColor('aod', 0.1), [0.10, 0.88, 0.48]);
+assert.deepEqual(airQualityMetricColor('aod', 0.6), [1.00, 0.15, 0.18]);
+
 assert.match(airNowHourlyUrl(now), /2026\/20260805\/HourlyAQObs_2026080515\.dat$/);
 
 console.log('air-quality-frame: all assertions passed');
