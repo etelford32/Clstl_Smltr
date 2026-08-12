@@ -250,5 +250,60 @@ test('displaced relief applies from the height raster and re-anchors every layer
     await page.locator('#lyr-bump').check();
     await expect.poll(() => page.evaluate(() => window.__moonLab.relief().active)).toBe(true);
 
+    // ── Descent mode over the fixture summit ──
+    // The Mars surface-explorer architecture, ported: local-horizon camera
+    // (with the OrbitControls orbit-axis REBUILD), clearance guard against
+    // radiusAt, instruments, reticle, WASD traverse, Esc back to orbit.
+    await page.evaluate(() => window.__moonLab.enterDescent(0, 0, 'Fixture summit'));
+    await expect.poll(() => page.evaluate(() => {
+        const d = window.__moonLab.descent();
+        return d.active && !d.tweening;
+    }), { timeout: 10_000 }).toBe(true);
+    await expect(page.locator('#descent-hud')).toBeVisible();
+    await expect(page.locator('#dh-site')).toHaveText('Fixture summit');
+    const descent = await page.evaluate(() => window.__moonLab.descent());
+    expect(descent.aglKm).toBeGreaterThan(1.1);      // never inside the clearance floor
+    expect(descent.aglKm).toBeLessThan(60);
+    expect(descent.hdgDeg).toBeGreaterThanOrEqual(0);
+    expect(descent.hdgDeg).toBeLessThan(360);
+    expect(descent.slopeDeg).toBeGreaterThanOrEqual(0);
+    expect(Math.abs(descent.sunElevDeg)).toBeLessThanOrEqual(90);
+    expect(descent.reliefApplied).toBe(true);
+    await expect(page.locator('#dh-relief')).toContainText('×4');
+    // The orbit-axis rebuild actually happened: camera.up is the target's
+    // local radial, not world +Y (target sits on the equator, so the two
+    // frames are ~90° apart — this catches a missing rebuildControls cold).
+    const frame = await page.evaluate(() => {
+        const { camera, controls } = window.__moonLab;
+        return {
+            upDotRadial: camera.up.clone().normalize()
+                .dot(controls.target.clone().normalize()),
+            minDistance: controls.minDistance,
+        };
+    });
+    expect(frame.upDotRadial).toBeGreaterThan(0.99);
+    expect(frame.minDistance).toBeLessThan(0.01);
+    // WASD traverse: a forward step moves the target north from the entry
+    // heading and the instruments keep reporting.
+    const latBefore = descent.latDeg;
+    await page.evaluate(() => window.__moonLab.nudgeDescent(1, 0));
+    const afterStep = await page.evaluate(() => window.__moonLab.descent());
+    expect(afterStep.latDeg).toBeGreaterThan(latBefore + 0.1);
+    expect(afterStep.aglKm).toBeGreaterThan(1.1);
+    // Esc returns to orbit and restores the world frame + orbit limits.
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.evaluate(() => window.__moonLab.descent().active)).toBe(false);
+    await expect(page.locator('#descent-hud')).toBeHidden();
+    const restored = await page.evaluate(() => ({
+        up: window.__moonLab.camera.up.toArray(),
+        minDistance: window.__moonLab.controls.minDistance,
+        near: window.__moonLab.camera.near,
+        radius: window.__moonLab.camera.position.length(),
+    }));
+    expect(restored.up[1]).toBeCloseTo(1, 6);
+    expect(restored.minDistance).toBeCloseTo(1.04, 6);
+    expect(restored.near).toBeCloseTo(0.001, 6);
+    expect(restored.radius).toBeGreaterThan(1.04);
+
     expect(pageErrors, `page errors: ${pageErrors.join('\n')}`).toHaveLength(0);
 });

@@ -50,6 +50,23 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 .hk { color:#556677; font-weight:600; }
 .hv { color:#aabbcc; }
 
+/* ─── Descent HUD (double-click terrain → local-horizon descent) ── */
+#descent-hud {
+    position:absolute; top:228px; left:14px; z-index:52; width:236px;
+    background:rgba(4,9,7,.88); backdrop-filter:blur(14px);
+    border:1px solid rgba(125,255,176,.24); border-radius:10px;
+    padding:10px 12px; font-family:'Courier New',monospace; color:#c9efdc;
+}
+#descent-hud[hidden] { display:none; }
+.dh-title { font-size:10px; font-weight:800; letter-spacing:.08em; color:#7dffb0;
+    margin-bottom:7px; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dh-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:4px 12px; }
+.dh { display:flex; flex-direction:column; min-width:0; }
+.dh-k { font-size:8px; color:#5d7a70; letter-spacing:.08em; }
+.dh-v { font-size:11px; color:#c9efdc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dh-v.ok { color:#7dffb0; } .dh-v.warn { color:#ffd75c; } .dh-v.alert { color:#ff8a70; }
+.dh-hint { margin-top:7px; font-size:8px; color:#556677; line-height:1.5; }
+
 /* ─── Info Panel (right) ────────────────────────────────────── */
 #info-panel {
     position:absolute; top:14px; right:14px; z-index:50;
@@ -155,6 +172,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 @media (max-width:768px) {
     #info-panel { display:none; }
     #hud { top:8px; left:8px; font-size:9px; padding:8px 10px; }
+    #descent-hud { top:auto; bottom:12px; left:8px; width:calc(100% - 320px); }
     /* keep the mode toggle clear of the HUD on narrow screens */
     #view-toggle { top:auto; bottom:14px; }
 }
@@ -228,6 +246,22 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 
     <!-- Landmark hover tooltip (positioned by the raycaster) -->
     <div id="lm-tip"></div>
+
+    <!-- Descent HUD (double-click terrain to descend; Esc returns to orbit) -->
+    <div id="descent-hud" hidden>
+        <div class="dh-title">Descent — <span id="dh-site">—</span></div>
+        <div class="dh-grid">
+            <div class="dh"><span class="dh-k">LAT · LON</span><span class="dh-v" id="dh-loc">—</span></div>
+            <div class="dh"><span class="dh-k">HDG</span><span class="dh-v" id="dh-hdg">—</span></div>
+            <div class="dh"><span class="dh-k">AGL</span><span class="dh-v" id="dh-agl">—</span></div>
+            <div class="dh"><span class="dh-k">V/S</span><span class="dh-v" id="dh-vs">—</span></div>
+            <div class="dh"><span class="dh-k">GND</span><span class="dh-v" id="dh-gnd">—</span></div>
+            <div class="dh"><span class="dh-k">SLOPE</span><span class="dh-v" id="dh-slope">—</span></div>
+            <div class="dh"><span class="dh-k">SUN</span><span class="dh-v" id="dh-sun">—</span></div>
+            <div class="dh"><span class="dh-k">RELIEF</span><span class="dh-v" id="dh-relief">—</span></div>
+        </div>
+        <div class="dh-hint">drag look · wheel altitude · WASD traverse · 2 km reticle · Esc to orbit</div>
+    </div>
 
     <!-- Info Panel -->
     <div id="info-panel">
@@ -459,6 +493,7 @@ import {
     reliefSamplerFromImage, radiusAtFactory, displaceSphereGeometry,
     restoreSphereGeometry, MOON_RELIEF_EXAGGERATION,
 } from './js/moon-relief.js';
+import { destinationLatLon } from './js/terrain-wfc.js';
 import { LandingSites } from './js/moon-landing-sites.js';
 import { MoonInterior, INTERIOR_PALETTE } from './js/moon-interior.js';
 import {
@@ -490,13 +525,39 @@ const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 0.001, 200);
 camera.position.set(0, 0.5, 3.2);
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping    = true;
-controls.dampingFactor    = 0.06;
-controls.minDistance       = 1.04;
-controls.maxDistance        = 12.0;
-controls.autoRotate        = true;
-controls.autoRotateSpeed   = 0.15;
+/**
+ * ═══ WHY `controls` IS A `let` AND GETS REBUILT ═══════════════════════════
+ * OrbitControls captures its orbit axis from camera.up ONCE, at construction
+ * (vendored r160) — the same trap CLAUDE.md documents for the Mars surface
+ * explorer and the Stage. Descent mode sets camera.up to the LOCAL RADIAL;
+ * without a rebuild every polar limit would still be measured against world
+ * +Y and dragging would swing the camera through the terrain. Everything
+ * reads `controls` through this binding, and __moonLab exposes it through a
+ * getter so external references never go stale.
+ */
+let controls = createControls({ descent: false });
+
+function createControls({ descent }) {
+    const next = new OrbitControls(camera, renderer.domElement);
+    next.enableDamping = true;
+    next.dampingFactor = 0.06;
+    // Orbit limits per mode: descent may dolly to ~2.6 km of the ground
+    // target; orbit view keeps the historical 1.04 floor (which the 4×
+    // relief summit deliberately stays under — pinned in moon-relief.mjs).
+    next.minDistance = descent ? 0.0015 : 1.04;
+    next.maxDistance = descent ? 0.35 : 12.0;
+    next.autoRotate = descent ? false : (document.getElementById('lyr-rotate')?.checked ?? true);
+    next.autoRotateSpeed = 0.15;
+    return next;
+}
+
+function rebuildControls({ descent }) {
+    const target = controls.target.clone();
+    controls.dispose();
+    controls = createControls({ descent });
+    controls.target.copy(target);
+    controls.update();
+}
 
 function onResize() {
     const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -583,9 +644,9 @@ moon.loadTextures(renderer).then(() => {
     // views cross-link, and the reason the tileset has a swirl class at all.
     synthesizeLandmark('Reiner Gamma');
     // Real displaced relief from the height raster, when it can be read back.
-    const reliefSampler = reliefSamplerFromImage(moon.moonU.u_bump.value.image);
-    if (reliefSampler) {
-        moonRadiusAt = radiusAtFactory(reliefSampler);
+    moonReliefSampler = reliefSamplerFromImage(moon.moonU.u_bump.value.image);
+    if (moonReliefSampler) {
+        moonRadiusAt = radiusAtFactory(moonReliefSampler);
         if (document.getElementById('lyr-bump').checked) applyMoonRelief();
     }
 });
@@ -699,7 +760,17 @@ const landmarks = new MoonLandmarks(moon.moonMesh);
 // Browser-gate hook (tests/moon-surface-smoke.spec.js) — the spec projects
 // a marker to screen space and hovers it deterministically. Same pattern
 // as window.__swSync / window.__swStage on the dashboard pages.
-try { window.__moonLab = { camera, renderer, landmarks }; } catch {}
+try {
+    window.__moonLab = {
+        camera,
+        renderer,
+        landmarks,
+        // Getter, not a value: descent mode REBUILDS the OrbitControls
+        // instance (orbit-axis capture — see `let controls`), and a captured
+        // reference would go stale.
+        get controls() { return controls; },
+    };
+} catch {}
 
 // ── Info-panel population ────────────────────────────────────────
 (function renderArtemisPanel() {
@@ -933,8 +1004,9 @@ renderer.domElement.addEventListener('pointerleave', () => {
 let viewMode = 'surface';
 
 function setViewMode(mode) {
-    viewMode = mode;
     const surface = mode === 'surface';
+    if (!surface) exitDescent();
+    viewMode = mode;
     moon.moonMesh.visible = surface;
     if (moon._radMesh) {
         moon._radMesh.visible = surface && document.getElementById('lyr-rad-ring').checked
@@ -1197,7 +1269,8 @@ document.getElementById('lyr-natail').addEventListener('change', e => {
     exosphere.setTailVisible(e.target.checked);
 });
 document.getElementById('lyr-rotate').addEventListener('change', e => {
-    controls.autoRotate = e.target.checked;
+    // Descent forces auto-rotate off; the checkbox is re-read on exit.
+    if (!descentState.active) controls.autoRotate = e.target.checked;
 });
 
 // Lat/lon grid
@@ -1268,6 +1341,7 @@ function buildGrid(radiusAt) {
 //  taint or an aborted texture keeps the smooth sphere honestly.
 // ═══════════════════════════════════════════════════════════════
 let moonRadiusAt = null;      // ground-radius fn once relief data exists
+let moonReliefSampler = null; // 1× nominal elevation sampler (descent slope)
 let moonReliefStats = null;   // { minRadius, maxRadius } while APPLIED
 
 function applyMoonRelief() {
@@ -1276,6 +1350,7 @@ function applyMoonRelief() {
     landmarks.setRadiusAt(moonRadiusAt);
     landingSites.setRadiusAt(moonRadiusAt);
     buildGrid(moonRadiusAt);
+    updateDescentReticle(true);
 }
 
 function clearMoonRelief() {
@@ -1285,7 +1360,337 @@ function clearMoonRelief() {
     landingSites.setRadiusAt(null);
     buildGrid(null);
     moonReliefStats = null;
+    updateDescentReticle(true);
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  DESCENT MODE — the Mars surface-explorer architecture, ported
+//  onto the displaced relief. Double-click terrain to descend to a
+//  local-horizon camera; Esc returns to orbit. Instruments live in
+//  #descent-hud; the 2 km reticle marks (and scales) the target.
+//  Moon-specific trap handled here: the mesh SPINS in surface view,
+//  so descent pauses the spin via an accumulator (moonSpin) — a
+//  camera anchored over a lat/lon would otherwise watch the ground
+//  slide out from underneath it.
+// ═══════════════════════════════════════════════════════════════
+const MOON_R_KM = 1737.4;
+const DESCENT_EYE_ALT_KM = 6;
+const DESCENT_LOOKBACK_KM = 30;
+const DESCENT_MIN_AGL_KM = 1.2;
+const DESCENT_STEP_KM = 8;
+const DESCENT_READOUT_MS = 125;
+
+let moonSpin = 0;   // accumulated body rotation — frozen while descending
+const descentState = {
+    active: false, latDeg: 0, lonDeg: 0, site: '—', tween: null,
+    hdgDeg: null, aglKm: null, vsMs: 0, gsKms: 0,
+    slopeDeg: null, sunElevDeg: null,
+    samples: [], lastReadoutAt: 0,
+};
+const descentControlUp = new THREE.Vector3(0, 1, 0);
+const dhElements = Object.fromEntries(
+    ['site', 'loc', 'hdg', 'agl', 'vs', 'gnd', 'slope', 'sun', 'relief']
+        .map(k => [k, document.getElementById(`dh-${k}`)]),
+);
+const descentHudElement = document.getElementById('descent-hud');
+
+function moonWorldFromLatLon(latDeg, lonDeg, r) {
+    const p = latLonToXYZ(latDeg, lonDeg, r);
+    return new THREE.Vector3(p.x, p.y, p.z).applyQuaternion(moon.moonMesh.quaternion);
+}
+
+const _descInvQ = new THREE.Quaternion();
+function moonLatLonFromWorld(v) {
+    const local = v.clone()
+        .applyQuaternion(_descInvQ.copy(moon.moonMesh.quaternion).invert())
+        .normalize();
+    return {
+        latDeg: Math.asin(THREE.MathUtils.clamp(local.y, -1, 1)) * 180 / Math.PI,
+        lonDeg: Math.atan2(-local.z, local.x) * 180 / Math.PI,
+    };
+}
+
+function moonGroundRadius(latDeg, lonDeg) {
+    return moonRadiusAt ? moonRadiusAt(latDeg, lonDeg) : 1;
+}
+
+/** TRUE slope from the nominal 1× heights — never the drawn 4× geometry. */
+function moonSlopeAt(latDeg, lonDeg) {
+    if (!moonReliefSampler) return { slopeDeg: 0, downBearingDeg: null };
+    const east = destinationLatLon(latDeg, lonDeg, 1, 0, MOON_R_KM);
+    const west = destinationLatLon(latDeg, lonDeg, -1, 0, MOON_R_KM);
+    const north = destinationLatLon(latDeg, lonDeg, 0, 1, MOON_R_KM);
+    const south = destinationLatLon(latDeg, lonDeg, 0, -1, MOON_R_KM);
+    const dEast = (moonReliefSampler.elevationAt(east.latDeg, east.lonDeg)
+        - moonReliefSampler.elevationAt(west.latDeg, west.lonDeg)) / 2000;
+    const dNorth = (moonReliefSampler.elevationAt(north.latDeg, north.lonDeg)
+        - moonReliefSampler.elevationAt(south.latDeg, south.lonDeg)) / 2000;
+    return {
+        slopeDeg: Math.atan(Math.hypot(dEast, dNorth)) * 180 / Math.PI,
+        downBearingDeg: (Math.atan2(-dEast, -dNorth) * 180 / Math.PI + 360) % 360,
+    };
+}
+
+// Landing reticle: 2 km ring + north tick + center cross, DRAPED via the same
+// ground function as every other anchored layer. Parented to the moon mesh so
+// it stays welded to its lat/lon (the frozen spin keeps world math simple).
+const descentReticle = new THREE.Group();
+descentReticle.name = 'moon-descent-reticle';
+const descentReticleMat = new THREE.LineBasicMaterial({
+    color: 0x7dffb0, transparent: true, opacity: 0.85, depthWrite: false,
+});
+const descentRing = new THREE.Line(new THREE.BufferGeometry(), descentReticleMat);
+const descentMarks = new THREE.LineSegments(new THREE.BufferGeometry(), descentReticleMat);
+descentReticle.add(descentRing, descentMarks);
+descentReticle.visible = false;
+descentReticle.renderOrder = 5;
+moon.moonMesh.add(descentReticle);
+let descentReticleAt = null;
+
+function updateDescentReticle(force = false) {
+    if (!descentState.active) {
+        descentReticle.visible = false;
+        descentReticleAt = null;
+        return;
+    }
+    const { latDeg, lonDeg } = descentState;
+    if (!force && descentReticleAt) {
+        const dLat = Math.abs(latDeg - descentReticleAt.latDeg);
+        const dLon = Math.abs(lonDeg - descentReticleAt.lonDeg) * Math.cos(latDeg * Math.PI / 180);
+        if (Math.hypot(dLat, dLon) * (MOON_R_KM * Math.PI / 180) < 0.15) return;
+    }
+    descentReticleAt = { latDeg, lonDeg };
+    const groundPoint = (eastKm, northKm) => {
+        const ll = destinationLatLon(latDeg, lonDeg, eastKm, northKm, MOON_R_KM);
+        const p = latLonToXYZ(ll.latDeg, ll.lonDeg, moonGroundRadius(ll.latDeg, ll.lonDeg) + 0.0005);
+        return new THREE.Vector3(p.x, p.y, p.z);
+    };
+    const ringPoints = [];
+    for (let i = 0; i <= 48; i += 1) {
+        const bearing = (i / 48) * Math.PI * 2;
+        ringPoints.push(groundPoint(Math.sin(bearing) * 2, Math.cos(bearing) * 2));
+    }
+    descentRing.geometry.dispose();
+    descentRing.geometry = new THREE.BufferGeometry().setFromPoints(ringPoints);
+    descentMarks.geometry.dispose();
+    descentMarks.geometry = new THREE.BufferGeometry().setFromPoints([
+        groundPoint(0, 2), groundPoint(0, 2.8),          // north tick
+        groundPoint(-0.3, 0), groundPoint(0.3, 0),       // center cross
+        groundPoint(0, -0.3), groundPoint(0, 0.3),
+    ]);
+    descentReticle.visible = true;
+}
+
+function enterDescent(latDeg, lonDeg, site = null) {
+    const wasActive = descentState.active;
+    descentState.latDeg = latDeg;
+    descentState.lonDeg = lonDeg;
+    descentState.site = site
+        || `${Math.abs(latDeg).toFixed(1)}°${latDeg >= 0 ? 'N' : 'S'} ${Math.abs(lonDeg).toFixed(1)}°${lonDeg >= 0 ? 'E' : 'W'}`;
+    descentState.samples.length = 0;
+    descentState.active = true;
+    if (!wasActive) {
+        // Tight depth range while coincident ground layers are on screen —
+        // the orbit view's 200/0.001 ratio would z-fight the draped reticle.
+        camera.near = 0.0005;
+        camera.far = 12;
+        camera.updateProjectionMatrix();
+        descentHudElement.hidden = false;
+        if (_lmTip) _lmTip.style.display = 'none';
+    }
+    const fromPosition = camera.position.clone();
+    const fromTarget = controls.target.clone();
+    const targetWorld = moonWorldFromLatLon(latDeg, lonDeg, moonGroundRadius(latDeg, lonDeg));
+    const eyeLL = destinationLatLon(latDeg, lonDeg, 0, -DESCENT_LOOKBACK_KM, MOON_R_KM);
+    const eyeWorld = moonWorldFromLatLon(
+        eyeLL.latDeg, eyeLL.lonDeg,
+        moonGroundRadius(eyeLL.latDeg, eyeLL.lonDeg) + DESCENT_EYE_ALT_KM / MOON_R_KM,
+    );
+    // Local vertical becomes the orbit axis — and OrbitControls only reads
+    // camera.up at construction, hence the rebuild (see `let controls`).
+    camera.up.copy(targetWorld).normalize();
+    descentControlUp.copy(camera.up);
+    rebuildControls({ descent: true });
+    controls.target.copy(fromTarget);
+    descentState.tween = {
+        started: performance.now(), duration: 1100,
+        fromPosition, toPosition: eyeWorld,
+        fromTarget, toTarget: targetWorld,
+    };
+    dhElements.site.textContent = descentState.site;
+    updateDescentReticle(true);
+}
+
+function exitDescent() {
+    if (!descentState.active) return;
+    descentState.active = false;
+    descentState.tween = null;
+    descentHudElement.hidden = true;
+    updateDescentReticle();
+    camera.near = 0.001;
+    camera.far = 200;
+    camera.updateProjectionMatrix();
+    camera.up.set(0, 1, 0);
+    // Pull back to the standard orbit distance along the current bearing.
+    camera.position.normalize().multiplyScalar(3.2);
+    rebuildControls({ descent: false });
+    controls.target.set(0, 0, 0);
+    controls.update();
+}
+
+/** WASD ground step with parallel transport (the Mars moveSurfaceBy math). */
+function nudgeDescent(forwardSteps, rightSteps) {
+    if (!descentState.active || descentState.tween) return;
+    const oldTarget = controls.target.clone();
+    const radial = oldTarget.clone().normalize();
+    let forward = oldTarget.clone().sub(camera.position);
+    forward.addScaledVector(radial, -forward.dot(radial));
+    if (forward.lengthSq() < 1e-10) forward.set(0, 1, 0).addScaledVector(radial, -radial.y);
+    forward.normalize();
+    const right = new THREE.Vector3().crossVectors(forward, radial).normalize();
+    const move = forward.multiplyScalar(forwardSteps * DESCENT_STEP_KM)
+        .addScaledVector(right, rightSteps * DESCENT_STEP_KM);
+    const distanceKm = move.length();
+    if (distanceKm < 1e-9) return;
+    const angle = distanceKm / MOON_R_KM;
+    const direction = move.normalize();
+    const newRadial = radial.clone().multiplyScalar(Math.cos(angle))
+        .addScaledVector(direction, Math.sin(angle)).normalize();
+    const ll = moonLatLonFromWorld(newRadial);
+    const newTarget = moonWorldFromLatLon(ll.latDeg, ll.lonDeg, moonGroundRadius(ll.latDeg, ll.lonDeg));
+    const transport = new THREE.Quaternion().setFromUnitVectors(radial, newTarget.clone().normalize());
+    const offset = camera.position.clone().sub(oldTarget).applyQuaternion(transport);
+    controls.target.copy(newTarget);
+    camera.position.copy(newTarget).add(offset);
+    camera.up.copy(newTarget).normalize();
+    descentState.latDeg = ll.latDeg;
+    descentState.lonDeg = ll.lonDeg;
+    // Rebuild the orbit frame once the local vertical has drifted enough.
+    if (camera.up.angleTo(descentControlUp) > 1.5 * Math.PI / 180) {
+        descentControlUp.copy(camera.up);
+        rebuildControls({ descent: true });
+    }
+    updateDescentReticle();
+    updateDescentReadout(true);
+}
+
+function updateDescentTween(nowMs) {
+    const tween = descentState.tween;
+    if (!tween) return;
+    const t = Math.min(1, (nowMs - tween.started) / tween.duration);
+    const eased = t * t * (3 - 2 * t);
+    camera.position.lerpVectors(tween.fromPosition, tween.toPosition, eased);
+    controls.target.lerpVectors(tween.fromTarget, tween.toTarget, eased);
+    camera.lookAt(controls.target);
+    if (t >= 1) descentState.tween = null;
+}
+
+function enforceDescentClearance() {
+    const camLL = moonLatLonFromWorld(camera.position);
+    const minRadius = moonGroundRadius(camLL.latDeg, camLL.lonDeg) + DESCENT_MIN_AGL_KM / MOON_R_KM;
+    if (camera.position.length() < minRadius) camera.position.setLength(minRadius);
+}
+
+function updateDescentPolarLimit() {
+    const orbitRadius = camera.position.distanceTo(controls.target);
+    if (!(orbitRadius > 0)) return;
+    // cos(maxPolar) = minAGL / orbitRadius — the eye stays above the target's
+    // tangent plane by at least the clearance floor (the Mars anti-burrow fix).
+    controls.maxPolarAngle = Math.acos(
+        THREE.MathUtils.clamp((DESCENT_MIN_AGL_KM / MOON_R_KM) / orbitRadius, 0.02, 0.98),
+    );
+}
+
+const DESCENT_CARDINALS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const descentCardinal = (deg) => DESCENT_CARDINALS[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+
+function updateDescentReadout(force = false) {
+    const now = performance.now();
+    if (!force && now - descentState.lastReadoutAt < DESCENT_READOUT_MS) return;
+    descentState.lastReadoutAt = now;
+    const radial = controls.target.clone().normalize();
+    const north = new THREE.Vector3(0, 1, 0).addScaledVector(radial, -radial.y).normalize();
+    const east = new THREE.Vector3().crossVectors(north, radial).normalize();
+    const forward = controls.target.clone().sub(camera.position);
+    forward.addScaledVector(radial, -forward.dot(radial));
+    if (forward.lengthSq() > 1e-10) {
+        forward.normalize();
+        descentState.hdgDeg = (Math.atan2(forward.dot(east), forward.dot(north)) * 180 / Math.PI + 360) % 360;
+    }
+    const camLL = moonLatLonFromWorld(camera.position);
+    const aglKm = Math.max(0,
+        (camera.position.length() - moonGroundRadius(camLL.latDeg, camLL.lonDeg)) * MOON_R_KM);
+    // The motion window starts AFTER the entry flight: sampling through the
+    // tween read the orbit→surface drop as a −2,000 km/s vertical speed.
+    if (descentState.tween) {
+        descentState.samples.length = 0;
+        descentState.vsMs = 0;
+        descentState.gsKms = 0;
+    }
+    descentState.samples.push({ t: now, latDeg: descentState.latDeg, lonDeg: descentState.lonDeg, aglKm });
+    while (descentState.samples.length > 2 && now - descentState.samples[0].t > 1200) descentState.samples.shift();
+    const oldest = descentState.samples[0];
+    const dt = (now - oldest.t) / 1000;
+    if (dt > 0.2) {
+        const dLat = descentState.latDeg - oldest.latDeg;
+        const dLon = (descentState.lonDeg - oldest.lonDeg) * Math.cos(descentState.latDeg * Math.PI / 180);
+        descentState.gsKms = Math.hypot(dLat, dLon) * (MOON_R_KM * Math.PI / 180) / dt;
+        descentState.vsMs = (aglKm - oldest.aglKm) * 1000 / dt;
+    }
+    descentState.aglKm = aglKm;
+    const slope = moonSlopeAt(descentState.latDeg, descentState.lonDeg);
+    descentState.slopeDeg = slope.slopeDeg;
+    descentState.sunElevDeg = Math.asin(THREE.MathUtils.clamp(radial.dot(sunDir), -1, 1)) * 180 / Math.PI;
+
+    dhElements.loc.textContent = `${Math.abs(descentState.latDeg).toFixed(2)}°${descentState.latDeg >= 0 ? 'N' : 'S'} ${Math.abs(descentState.lonDeg).toFixed(2)}°${descentState.lonDeg >= 0 ? 'E' : 'W'}`;
+    dhElements.hdg.textContent = descentState.hdgDeg == null
+        ? '—'
+        : `${String(Math.round(descentState.hdgDeg) % 360).padStart(3, '0')}° ${descentCardinal(descentState.hdgDeg)}`;
+    dhElements.agl.textContent = `${aglKm < 10 ? aglKm.toFixed(2) : aglKm.toFixed(1)} km`;
+    dhElements.agl.className = `dh-v${aglKm < 2.5 ? ' warn' : ''}`;
+    dhElements.vs.textContent = Math.abs(descentState.vsMs) < 1
+        ? '0 m/s'
+        : `${descentState.vsMs > 0 ? '↑' : '↓'} ${Math.abs(descentState.vsMs) >= 1000 ? `${(Math.abs(descentState.vsMs) / 1000).toFixed(1)} km/s` : `${Math.abs(descentState.vsMs).toFixed(0)} m/s`}`;
+    dhElements.gnd.textContent = descentState.gsKms < 0.005 ? '—' : `${descentState.gsKms.toFixed(1)} km/s`;
+    if (!moonReliefSampler) {
+        dhElements.slope.textContent = '—';
+        dhElements.slope.className = 'dh-v';
+    } else {
+        const down = slope.slopeDeg >= 0.3 && slope.downBearingDeg != null
+            ? ` ↓${descentCardinal(slope.downBearingDeg)}`
+            : '';
+        dhElements.slope.textContent = `${slope.slopeDeg.toFixed(1)}°${down}`;
+        dhElements.slope.className = `dh-v ${slope.slopeDeg < 5 ? 'ok' : slope.slopeDeg < 15 ? 'warn' : 'alert'}`;
+    }
+    dhElements.sun.textContent = `${descentState.sunElevDeg >= 0 ? '+' : '−'}${Math.abs(descentState.sunElevDeg).toFixed(0)}°`;
+    dhElements.sun.className = `dh-v${descentState.sunElevDeg < 5 ? ' warn' : ''}`;
+    dhElements.relief.textContent = moonReliefStats ? `×${MOON_RELIEF_EXAGGERATION} drawn` : 'smooth (no data)';
+    dhElements.relief.className = `dh-v${moonReliefStats ? '' : ' warn'}`;
+}
+
+// Double-click anywhere on the terrain to descend there (a hovered landmark
+// names the site). Esc + WASD are handled on window while descending.
+renderer.domElement.addEventListener('dblclick', (ev) => {
+    if (viewMode !== 'surface') return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    _lmPointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    _lmPointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    _lmRaycaster.setFromCamera(_lmPointer, camera);
+    const hit = _lmRaycaster.intersectObject(moon.moonMesh, false)[0];
+    if (!hit) return;
+    const lm = _landmarkAtEvent(ev);
+    const ll = moonLatLonFromWorld(hit.point);
+    enterDescent(ll.latDeg, ll.lonDeg, lm ? lm.name : null);
+});
+window.addEventListener('keydown', (ev) => {
+    if (!descentState.active) return;
+    if (ev.key === 'Escape') { exitDescent(); return; }
+    const key = ev.key.toLowerCase();
+    if (key === 'w') nudgeDescent(1, 0);
+    else if (key === 's') nudgeDescent(-1, 0);
+    else if (key === 'a') nudgeDescent(0, -1);
+    else if (key === 'd') nudgeDescent(0, 1);
+});
 
 // Browser-gate hook, part 2 (tests/moon-surface-smoke.spec.js): the graticule
 // convention + parenting fix and the terrain synth are asserted through these.
@@ -1302,6 +1707,23 @@ try {
             ...(moonReliefStats || {}),
         }),
         radiusAt: (latDeg, lonDeg) => (moonRadiusAt ? moonRadiusAt(latDeg, lonDeg) : null),
+        descent: () => ({
+            active: descentState.active,
+            latDeg: descentState.latDeg,
+            lonDeg: descentState.lonDeg,
+            site: descentState.site,
+            aglKm: descentState.aglKm,
+            hdgDeg: descentState.hdgDeg,
+            vsMs: descentState.vsMs,
+            gsKms: descentState.gsKms,
+            slopeDeg: descentState.slopeDeg,
+            sunElevDeg: descentState.sunElevDeg,
+            tweening: Boolean(descentState.tween),
+            reliefApplied: Boolean(moonReliefStats),
+        }),
+        enterDescent,
+        exitDescent,
+        nudgeDescent,
     });
 } catch {}
 
@@ -1318,9 +1740,21 @@ function animate() {
     const dt = Math.min(0.1, t - _lastT);
     _lastT = t;
 
-    // Slow Moon rotation (synchronous — same face toward Earth).
+    // Slow Moon rotation (synchronous — same face toward Earth), via an
+    // ACCUMULATOR so descent mode can freeze it without a jump: a camera
+    // anchored over a lat/lon would otherwise watch the ground slide away.
     // The cutaway does NOT rotate — the wedge stays put and the camera orbits.
-    if (viewMode === 'surface') moon.moonMesh.rotation.y = t * 0.02;
+    if (viewMode === 'surface' && !descentState.active) moonSpin += dt * 0.02;
+    moon.moonMesh.rotation.y = moonSpin;
+
+    if (descentState.active) {
+        updateDescentTween(performance.now());
+        if (!descentState.tween) {
+            updateDescentPolarLimit();
+            enforceDescentClearance();
+        }
+        updateDescentReadout();
+    }
 
     // Update shader time
     moon.update(t);
@@ -1343,7 +1777,9 @@ function animate() {
         _updateExoPanel();
     }
 
-    controls.update();
+    // The descent entry tween drives camera + target directly; OrbitControls
+    // would recompute the camera from its own spherical state and fight it.
+    if (!descentState.tween) controls.update();
     renderer.render(scene, camera);
 }
 
