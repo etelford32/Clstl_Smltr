@@ -255,13 +255,32 @@ export function normalizeAirNowFrame(text, {
         if (lat == null || lon == null || !inScope(lat, lon, scope)) continue;
         const rowValidMs = parseAirNowUtc(value('ValidDate'), value('ValidTime'));
         if (rowValidMs != null) validMs = rowValidMs;
-        const aqis = ['OZONE_AQI', 'PM10_AQI', 'PM25_AQI', 'NO2_AQI']
-            .map(name => finiteOrNull(value(name))).filter(v => v != null && v >= 0);
+        // Per-pollutant sub-indices are retained alongside the composite. The
+        // composite is the MAX (EPA's definition), so without the parts you
+        // cannot tell which pollutant drove it — and you cannot compare
+        // like-for-like against a PM2.5-only calculation. These are AirNow's
+        // published NowCast-based AQI values, which is what makes
+        // js/aqi-validation.js possible without a second data source.
+        const subAqi = {
+            ozone: finiteOrNull(value('OZONE_AQI')),
+            pm10: finiteOrNull(value('PM10_AQI')),
+            pm25: finiteOrNull(value('PM25_AQI')),
+            nitrogenDioxide: finiteOrNull(value('NO2_AQI')),
+        };
+        for (const k of Object.keys(subAqi)) {
+            if (subAqi[k] != null && subAqi[k] < 0) subAqi[k] = null;
+        }
+        const aqis = Object.values(subAqi).filter(v => v != null);
+        const dominant = aqis.length
+            ? Object.keys(subAqi).find(k => subAqi[k] === Math.max(...aqis))
+            : null;
         const point = {
             id: value('AQSID'),
             name: value('SiteName') || value('AQSID'),
             lat, lon,
             aqi: aqis.length ? Math.max(...aqis) : null,
+            subAqi,
+            dominant,
             pm25: finiteOrNull(value('PM25')),
             pm10: finiteOrNull(value('PM10')),
             aod: null,

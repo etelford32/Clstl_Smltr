@@ -86,6 +86,15 @@ assert.equal(airnow.points.length, 1);
 assert.equal(airnow.points[0].name, 'Downtown, North');
 assert.equal(airnow.points[0].aqi, 61);
 assert.equal(airnow.points[0].pm25, 13.2);
+// Per-pollutant sub-indices ride alongside the composite. The composite is
+// the MAX, so without the parts you cannot say which pollutant drove it —
+// and js/aqi-validation.js needs the PM2.5 one specifically to compare
+// like-for-like against a PM2.5 NowCast.
+assert.deepEqual(airnow.points[0].subAqi,
+    { ozone: 42, pm10: 30, pm25: 61, nitrogenDioxide: 10 });
+assert.equal(airnow.points[0].dominant, 'pm25', 'the driving pollutant is named');
+assert.equal(airnow.points[0].aqi, Math.max(...Object.values(airnow.points[0].subAqi)),
+    'the composite stays the max of its parts');
 assert.equal(airnow.points[0].aod, null, 'AirNow must not fabricate observed AOD');
 
 assert.deepEqual(airQualityMetricColor('aqi', 25), [0.10, 0.88, 0.48]);

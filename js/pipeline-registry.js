@@ -317,6 +317,13 @@ export const PIPELINES = [
       warnAgeS:  2 * 3600, critAgeS: 6 * 3600,
       notes: 'CAMS sampled at OpenAQ monitors → obs−model residual per station + bias/rmse. Shows where the model is WRONG — the physics-first skill surface. Amber until OPENAQ_API_KEY is set (shares the stations-intl key).' },
 
+    { id: 'air-quality-nowcast-validation', label: 'NowCast vs AirNow (index check)',
+      endpoint: '/api/air-quality/nowcast-validation',
+      category: 'environment', upstream: 'EPA AirNow HourlyAQObs (12 files)',
+      cadence_s: 3_600, prewarm: 'cold',
+      warnAgeS:  6 * 3600, critAgeS: 24 * 3600,
+      notes: 'Recomputes EPA NowCast from AirNow PM2.5 series and diffs it against AirNow\'s own published PM25_AQI across every US monitor. Checks our INDEX MATH against the authority — distinct from the residuals row, which checks the MODEL against reality. Keyless. Cold-tier: 12 × ~2 MB upstream GETs, CDN-cached 1 h.' },
+
     { id: 'air-quality-centers', label: 'City pollution centers (CAMS)',
       endpoint: '/api/air-quality/centers',
       category: 'environment', upstream: 'Open-Meteo · CAMS Global',
