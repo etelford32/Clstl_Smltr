@@ -55,6 +55,40 @@ const REGIONAL_SYNTH_CELLS = 48;
 // photometric base readable underneath the geology.
 const SYNTH_TINT_STRENGTH = 0.55;
 
+/**
+ * ═══ TRUE-SCALE-ON-FINAL ══════════════════════════════════════════════════
+ * 18× exaggeration is right for a 55 km survey and WRONG for judging a
+ * landing: a pilot reads SHAPE, and every slope on final looked 18× steeper
+ * than reality. Below ~50 km of orbit range the patch's vertical scale ramps
+ * down, reaching TRUE 1× by 14 km — sightseeing keeps its drama, short final
+ * gets honest slopes, and the pilot cluster + HUD disclose the live
+ * multiplier the whole way down.
+ *
+ * The ramp is driven by ORBIT RANGE (camera→target), NOT by altitude above
+ * terrain: changing the scale moves the drawn ground, so an AGL-driven
+ * controller would feed back through the very surface it displaces and
+ * oscillate. Range is exaggeration-independent. The scale is quantized to
+ * steps and the patch rebuilds only on a step change (a rebuild costs
+ * ~40 ms — continuous rescale would jank the whole zoom).
+ *
+ * Decorative roughness compresses with the ramp (see rebuildRegionalTerrain):
+ * at true scale the patch shows MOLA and nothing else.
+ */
+const RELIEF_RAMP_TRUE_RANGE_KM = 14;
+const RELIEF_RAMP_FULL_RANGE_KM = 50;
+const RELIEF_SCALE_STEPS = Object.freeze([1, 2, 3, 5, 8, 12, REGIONAL_RELIEF_EXAGGERATION]);
+let regionalReliefScale = REGIONAL_RELIEF_EXAGGERATION;
+
+function reliefScaleForRange(rangeKm) {
+    const blend = THREE.MathUtils.smoothstep(rangeKm, RELIEF_RAMP_TRUE_RANGE_KM, RELIEF_RAMP_FULL_RANGE_KM);
+    const target = 1 + (REGIONAL_RELIEF_EXAGGERATION - 1) * blend;
+    let best = RELIEF_SCALE_STEPS[0];
+    for (const step of RELIEF_SCALE_STEPS) {
+        if (Math.abs(step - target) < Math.abs(best - target)) best = step;
+    }
+    return best;
+}
+
 // Surface-explorer camera framing. Eye altitude and look-ahead are chosen so the
 // horizon lands in the upper third of a 36° frame: at 9 km the horizon is 247 km
 // out and 4.2° below local horizontal, while the camera is pitched 9.3° down.
@@ -449,9 +483,10 @@ function reliefRadiusAtLatLon(latDeg, lonDeg, offset = 0, exaggeration = RELIEF_
     return SURFACE_RADIUS + elevationAtLatLon(latDeg, lonDeg) / MARS_RADIUS_M * scale + offset;
 }
 
-/** Radius of the regional patch, which carries its own vertical exaggeration. */
+/** Radius of the regional patch, which carries its own vertical exaggeration —
+ *  the LIVE ramped value, not the constant (see TRUE-SCALE-ON-FINAL above). */
 function regionalRadiusAtLatLon(latDeg, lonDeg, offset = 0) {
-    return reliefRadiusAtLatLon(latDeg, lonDeg, offset, REGIONAL_RELIEF_EXAGGERATION);
+    return reliefRadiusAtLatLon(latDeg, lonDeg, offset, regionalReliefScale);
 }
 
 /**
@@ -556,6 +591,62 @@ surfaceTrail.name = 'surface-exploration-trail';
 surfaceTrail.visible = false;
 marsGroup.add(surfaceTrail);
 let surfaceTrailLocations = [];
+
+// ═══ LANDING RETICLE ════════════════════════════════════════════════════════
+// The orbit target is the single most important point in surface mode — it is
+// where every camera gesture pivots and where a landing would happen — and it
+// used to be invisible. The reticle drapes a fixed 2 km ring over the terrain
+// at the target (a SCALE ANCHOR: the ring is always 2 km, so terrain reads in
+// physical units), plus a north tick and a center cross. Anchored through
+// anchorRadiusAtLatLon like every other ground layer, re-seated by
+// refreshSurfaceAnchors, and offset above the patch + trail so it never
+// z-fights either.
+const RETICLE_RADIUS_KM = 2;
+const RETICLE_OFFSET = SURFACE_PATCH_OFFSET + 0.0003;
+const RETICLE_SEGMENTS = 64;
+const landingReticle = new THREE.Group();
+landingReticle.name = 'landing-reticle';
+const reticleMaterial = new THREE.LineBasicMaterial({
+    color: 0x7dffb0, transparent: true, opacity: 0.8, depthWrite: false,
+});
+const reticleRing = new THREE.Line(new THREE.BufferGeometry(), reticleMaterial);
+// North tick + center cross share one LineSegments (3 disjoint strokes).
+const reticleMarks = new THREE.LineSegments(new THREE.BufferGeometry(), reticleMaterial);
+landingReticle.add(reticleRing, reticleMarks);
+landingReticle.renderOrder = 5;
+reticleRing.renderOrder = 5;
+reticleMarks.renderOrder = 5;
+landingReticle.visible = false;
+marsGroup.add(landingReticle);
+let reticleAt = null;
+
+function updateLandingReticle(force = false) {
+    if (!surfaceModeActive || !surfaceLocation) {
+        landingReticle.visible = false;
+        reticleAt = null;
+        return;
+    }
+    if (!force && reticleAt && greatCircleDistanceKm(reticleAt, surfaceLocation) < 0.15) return;
+    reticleAt = { latDeg: surfaceLocation.latDeg, lonDeg: surfaceLocation.lonDeg };
+    const groundPoint = (eastKm, northKm) => {
+        const p = destinationLatLon(reticleAt.latDeg, reticleAt.lonDeg, eastKm, northKm);
+        return latLonVector(p.latDeg, p.lonDeg, anchorRadiusAtLatLon(p.latDeg, p.lonDeg, RETICLE_OFFSET));
+    };
+    const ringPoints = [];
+    for (let i = 0; i <= RETICLE_SEGMENTS; i += 1) {
+        const bearing = (i / RETICLE_SEGMENTS) * Math.PI * 2;
+        ringPoints.push(groundPoint(Math.sin(bearing) * RETICLE_RADIUS_KM, Math.cos(bearing) * RETICLE_RADIUS_KM));
+    }
+    reticleRing.geometry.dispose();
+    reticleRing.geometry = new THREE.BufferGeometry().setFromPoints(ringPoints);
+    reticleMarks.geometry.dispose();
+    reticleMarks.geometry = new THREE.BufferGeometry().setFromPoints([
+        groundPoint(0, RETICLE_RADIUS_KM), groundPoint(0, RETICLE_RADIUS_KM + 0.9),   // north tick
+        groundPoint(-0.3, 0), groundPoint(0.3, 0),                                    // center cross
+        groundPoint(0, -0.3), groundPoint(0, 0.3),
+    ]);
+    landingReticle.visible = true;
+}
 
 function destinationLatLon(latDeg, lonDeg, eastKm, northKm) {
     const distanceKm = Math.hypot(eastKm, northKm);
@@ -742,7 +833,11 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
             elevationSum += elevationM;
             if (elevationM < minElevationM) minElevationM = elevationM;
             if (elevationM > maxElevationM) maxElevationM = elevationM;
-            let roughnessKm = visualRegionalRoughnessKm(eastKm, northKm);
+            // Decoration compresses with the true-scale ramp: at 1× the patch
+            // shows MOLA and nothing else — invented texture has no business
+            // on a surface being read for landing slopes.
+            let roughnessKm = visualRegionalRoughnessKm(eastKm, northKm)
+                * (regionalReliefScale / REGIONAL_RELIEF_EXAGGERATION);
             if (synth) {
                 // Synth grid row 0 is the NORTH edge; this loop's northIndex 0
                 // is the SOUTH edge, hence the v flip.
@@ -1307,6 +1402,7 @@ function refreshSurfaceAnchors() {
     placeSurfaceMarker(roverLayer, mission.position.lat_deg, mission.position.lon_deg);
     placeSurfaceMarker(landingLayer, mission.landing_site.lat_deg, mission.landing_site.lon_deg);
     placeSurfaceMarker(routeCursor, selectedRoutePoint.lat_deg, selectedRoutePoint.lon_deg);
+    updateLandingReticle(true);
 }
 
 function selectRouteSol(requestedSol) {
@@ -1803,6 +1899,15 @@ const surfaceExplorer = document.querySelector('#surface-explorer');
 const surfaceLocationElement = document.querySelector('#surface-location');
 const surfaceAltitudeElement = document.querySelector('#surface-altitude');
 const surfaceDetailElement = document.querySelector('#surface-detail');
+const pilotElements = {
+    hdg: document.querySelector('#pilot-hdg'),
+    agl: document.querySelector('#pilot-agl'),
+    vs: document.querySelector('#pilot-vs'),
+    gs: document.querySelector('#pilot-gs'),
+    slope: document.querySelector('#pilot-slope'),
+    sun: document.querySelector('#pilot-sun'),
+    relief: document.querySelector('#pilot-relief'),
+};
 const meshStatusElement = document.querySelector('#mars-mesh-status');
 const globalMeshStatus = meshStatusElement.textContent;
 const surfaceLightButton = document.querySelector('#surface-light');
@@ -1926,10 +2031,16 @@ function greatCircleDistanceKm(a, b) {
     return 2 * MARS_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(haversine)));
 }
 
-function updateSurfaceTrail(location, { reset = false } = {}) {
+function updateSurfaceTrail(location, { reset = false, reanchor = false } = {}) {
     if (reset) surfaceTrailLocations = [];
-    surfaceTrailLocations.push({ latDeg: location.latDeg, lonDeg: location.lonDeg });
-    if (surfaceTrailLocations.length > 180) surfaceTrailLocations.shift();
+    // A re-anchor (relief scale changed under the trail) re-maps the stored
+    // traverse onto the new radii WITHOUT recording a point — the true-scale
+    // ramp is not a traverse event, and appending here put 12 phantom points
+    // on the trail per zoom sweep.
+    if (!reanchor) {
+        surfaceTrailLocations.push({ latDeg: location.latDeg, lonDeg: location.lonDeg });
+        if (surfaceTrailLocations.length > 180) surfaceTrailLocations.shift();
+    }
     const points = surfaceTrailLocations.map(point => latLonVector(
         point.latDeg,
         point.lonDeg,
@@ -1949,6 +2060,106 @@ function formatCoordinate(value, positive, negative) {
 const SURFACE_READOUT_INTERVAL_MS = 125;
 let lastSurfaceReadoutAt = 0;
 
+/**
+ * ═══ PILOT CLUSTER ══════════════════════════════════════════════════════════
+ * The instruments a landing needs that the science readouts don't carry:
+ * heading, AGL, vertical speed, ground speed, TRUE slope under the target,
+ * sun elevation, and the live relief multiplier. Updated on the same 8 Hz
+ * cadence as the surface readout. Two honesty rules:
+ *   - SLOPE is computed from the raw MOLA field at 1× — never from the drawn
+ *     (exaggerated) geometry — because it exists to answer "could I land on
+ *     that", colored by landability (<5° ok, <15° caution, else alert).
+ *   - AGL is the distance to the DRAWN ground (what you'd hit); with the
+ *     true-scale ramp the two meanings converge exactly where precision
+ *     starts to matter.
+ */
+const pilot = {
+    hdgDeg: null, aglKm: null, vsMs: 0, gsKms: 0,
+    slopeDeg: null, slopeDownBearingDeg: null, sunElevDeg: null,
+    samples: [],            // { t, latDeg, lonDeg, aglKm } sliding ~1.2 s window
+    slopeAt: null,          // cache key for the 4-tap MOLA slope sample
+};
+const CARDINALS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const cardinalFor = (deg) => CARDINALS[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+const formatRate = (ms) => (Math.abs(ms) >= 1000
+    ? `${(ms / 1000).toFixed(1)} km/s`
+    : `${ms.toFixed(0)} m/s`);
+
+/** TRUE ground slope from the MOLA field: 4 taps 1 km out, central diffs. */
+function trueSlopeAt(latDeg, lonDeg) {
+    const east = destinationLatLon(latDeg, lonDeg, 1, 0);
+    const west = destinationLatLon(latDeg, lonDeg, -1, 0);
+    const north = destinationLatLon(latDeg, lonDeg, 0, 1);
+    const south = destinationLatLon(latDeg, lonDeg, 0, -1);
+    const dEast = (elevationAtLatLon(east.latDeg, east.lonDeg) - elevationAtLatLon(west.latDeg, west.lonDeg)) / 2000;
+    const dNorth = (elevationAtLatLon(north.latDeg, north.lonDeg) - elevationAtLatLon(south.latDeg, south.lonDeg)) / 2000;
+    return {
+        slopeDeg: Math.atan(Math.hypot(dEast, dNorth)) * 180 / Math.PI,
+        // downhill bearing: opposite the gradient
+        downBearingDeg: (Math.atan2(-dEast, -dNorth) * 180 / Math.PI + 360) % 360,
+    };
+}
+
+function updatePilotCluster(target, altitudeKm, nowMs) {
+    // Heading: camera forward projected on the target's tangent plane.
+    const radial = controls.target.clone().normalize();
+    const frame = tangentFrame(radial);
+    const forward = controls.target.clone().sub(camera.position);
+    forward.addScaledVector(radial, -forward.dot(radial));
+    if (forward.lengthSq() > 1e-10) {
+        forward.normalize();
+        pilot.hdgDeg = (Math.atan2(forward.dot(frame.east), forward.dot(frame.north)) * 180 / Math.PI + 360) % 360;
+    }
+    pilot.aglKm = altitudeKm;
+
+    // Ground speed + vertical speed over a ~1.2 s sliding window.
+    pilot.samples.push({ t: nowMs, latDeg: target.latDeg, lonDeg: target.lonDeg, aglKm: altitudeKm });
+    while (pilot.samples.length > 2 && nowMs - pilot.samples[0].t > 1200) pilot.samples.shift();
+    const oldest = pilot.samples[0];
+    const dt = (nowMs - oldest.t) / 1000;
+    if (dt > 0.2) {
+        pilot.gsKms = greatCircleDistanceKm(oldest, target) / dt;
+        pilot.vsMs = (altitudeKm - oldest.aglKm) * 1000 / dt;
+    }
+
+    // True slope under the target, re-sampled when it moves > ~200 m.
+    if (!pilot.slopeAt || greatCircleDistanceKm(pilot.slopeAt, target) > 0.2) {
+        pilot.slopeAt = { latDeg: target.latDeg, lonDeg: target.lonDeg };
+        const slope = hasRelief ? trueSlopeAt(target.latDeg, target.lonDeg) : { slopeDeg: 0, downBearingDeg: null };
+        pilot.slopeDeg = slope.slopeDeg;
+        pilot.slopeDownBearingDeg = slope.downBearingDeg;
+    }
+
+    pilot.sunElevDeg = Math.asin(THREE.MathUtils.clamp(
+        sun.position.clone().normalize().dot(radial), -1, 1,
+    )) * 180 / Math.PI;
+
+    if (!pilotElements.hdg) return;
+    pilotElements.hdg.textContent = pilot.hdgDeg == null
+        ? '—'
+        : `${String(Math.round(pilot.hdgDeg) % 360).padStart(3, '0')}° ${cardinalFor(pilot.hdgDeg)}`;
+    pilotElements.agl.textContent = `${altitudeKm < 10 ? altitudeKm.toFixed(2) : altitudeKm.toFixed(1)} km`;
+    pilotElements.agl.className = `pi-v${altitudeKm < 3 ? ' warn' : ''}`;
+    pilotElements.vs.textContent = Math.abs(pilot.vsMs) < 1
+        ? '0 m/s'
+        : `${pilot.vsMs > 0 ? '↑' : '↓'} ${formatRate(Math.abs(pilot.vsMs))}`;
+    pilotElements.gs.textContent = pilot.gsKms < 0.005 ? '—' : `${formatRate(pilot.gsKms * 1000)}`;
+    if (pilot.slopeDeg == null || !hasRelief) {
+        pilotElements.slope.textContent = '—';
+        pilotElements.slope.className = 'pi-v';
+    } else {
+        const down = pilot.slopeDeg >= 0.3 && pilot.slopeDownBearingDeg != null
+            ? ` ↓${cardinalFor(pilot.slopeDownBearingDeg)}`
+            : '';
+        pilotElements.slope.textContent = `${pilot.slopeDeg.toFixed(1)}°${down}`;
+        pilotElements.slope.className = `pi-v ${pilot.slopeDeg < 5 ? 'ok' : pilot.slopeDeg < 15 ? 'warn' : 'alert'}`;
+    }
+    pilotElements.sun.textContent = `${pilot.sunElevDeg >= 0 ? '+' : '−'}${Math.abs(pilot.sunElevDeg).toFixed(0)}°`;
+    pilotElements.sun.className = `pi-v${pilot.sunElevDeg < 5 ? ' warn' : ''}`;
+    pilotElements.relief.textContent = regionalReliefScale === 1 ? '×1 TRUE' : `×${regionalReliefScale}`;
+    pilotElements.relief.className = `pi-v${regionalReliefScale === 1 ? ' ok' : ''}`;
+}
+
 function updateSurfaceReadout({ force = false } = {}) {
     if (!surfaceModeActive || !surfaceLocation) return;
     const now = performance.now();
@@ -1959,15 +2170,17 @@ function updateSurfaceReadout({ force = false } = {}) {
     const cameraLocation = worldVectorLatLon(camera.position);
     const surfaceRadius = anchorRadiusAtLatLon(cameraLocation.latDeg, cameraLocation.lonDeg);
     const altitudeKm = Math.max(0, (camera.position.length() - surfaceRadius) * MARS_RADIUS_KM);
-    // MOLA elevation stays TRUE here. The patch is drawn at 18× exaggeration,
-    // but the number a viewer reads off the HUD is the real areoid height —
-    // never scale this to match what the geometry looks like.
+    // MOLA elevation stays TRUE here. The patch is drawn exaggerated, but the
+    // number a viewer reads off the HUD is the real areoid height — never
+    // scale this to match what the geometry looks like.
     const elevationKm = elevationAtLatLon(target.latDeg, target.lonDeg) / 1000;
     surfaceLocationElement.textContent = `${formatCoordinate(target.latDeg, 'N', 'S')} · ${formatCoordinate(target.lonDeg, 'E', 'W')}`;
     surfaceAltitudeElement.textContent = `Eye ${altitudeKm.toFixed(1)} km · MOLA ${elevationKm >= 0 ? '+' : '−'}${Math.abs(elevationKm).toFixed(1)} km`;
     surfaceExplorer.dataset.lat = target.latDeg.toFixed(6);
     surfaceExplorer.dataset.lon = target.lonDeg.toFixed(6);
     surfaceExplorer.dataset.altitudeKm = altitudeKm.toFixed(3);
+    updatePilotCluster(target, altitudeKm, now);
+    updateLandingReticle();
 }
 
 function setSurfaceLight(enabled) {
@@ -1991,6 +2204,9 @@ function setSurfaceGrid(enabled) {
 function deactivateSurfaceExplorer() {
     if (!surfaceModeActive) return;
     surfaceModeActive = false;
+    // Back to survey scale so the next entry starts at the documented 18×.
+    regionalReliefScale = REGIONAL_RELIEF_EXAGGERATION;
+    updateLandingReticle();
     app.classList.remove('is-surface-mode');
     surfaceExplorer.hidden = true;
     regionalTerrain.visible = false;
@@ -2036,7 +2252,9 @@ function updateSurfaceDetail() {
         const topLabel = MARS_TILESET.classes.find(cls => cls.id === topId).label.toLowerCase();
         detailNote = `WFC geology synth ${Math.round(topShare * 100)}% ${topLabel} · synthesized below ${Math.round(REGIONAL_TERRAIN_EXTENT_KM / REGIONAL_SYNTH_CELLS)} km`;
     }
-    surfaceDetailElement.textContent = `${REGIONAL_TERRAIN_EXTENT_KM} km MOLA patch · relief ${(regionalTerrainRelief.minElevationM / 1000).toFixed(1)} → ${(regionalTerrainRelief.maxElevationM / 1000).toFixed(1)} km at ${REGIONAL_RELIEF_EXAGGERATION}× · ${regionalGridSpacingKm} km grid · ${detailNote}`;
+    // The multiplier is LIVE (true-scale-on-final ramp); at 1× say so loudly.
+    const scaleNote = regionalReliefScale === 1 ? '1× TRUE SCALE' : `${regionalReliefScale}×`;
+    surfaceDetailElement.textContent = `${REGIONAL_TERRAIN_EXTENT_KM} km MOLA patch · relief ${(regionalTerrainRelief.minElevationM / 1000).toFixed(1)} → ${(regionalTerrainRelief.maxElevationM / 1000).toFixed(1)} km at ${scaleNote} · ${regionalGridSpacingKm} km grid · ${detailNote}`;
 }
 
 /**
@@ -2048,6 +2266,42 @@ function updateSurfaceDetail() {
  * higher and looking further ahead puts the horizon in the upper third and
  * gives the sky dome somewhere to be.
  */
+/**
+ * True-scale-on-final controller — called every frame in surface mode. Reads
+ * the orbit range, quantizes it to a scale step, and rebuilds the patch ONLY
+ * when the step changes. Skipped mid-tween: entry flights sweep the range
+ * through the ramp bands and would fire rebuild hitches inside the animation.
+ */
+function updateReliefRamp() {
+    if (!surfaceModeActive || !regionalTerrainCenter || cameraTween) return;
+    const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_KM;
+    const next = reliefScaleForRange(rangeKm);
+    if (next === regionalReliefScale) return;
+    regionalReliefScale = next;
+    const previousTarget = controls.target.clone();
+    rebuildRegionalTerrain(regionalTerrainCenter.latDeg, regionalTerrainCenter.lonDeg);
+    // Re-seat the orbit pivot onto the RE-SCALED ground and carry the camera
+    // by the same shift, so range and clearance survive the step. Without
+    // this, a scale-down at a below-datum site (Jezero draws at −2.6 km × 18)
+    // RAISES the drawn ground tens of km toward the camera, the clearance
+    // guard eats the margin, and the zoom stalls mid-ramp (measured: stuck
+    // at ×8, never reaching true scale).
+    const location = surfaceLocation || regionalTerrainCenter;
+    const newTarget = worldSurfacePoint(location.latDeg, location.lonDeg);
+    camera.position.add(newTarget.clone().sub(previousTarget));
+    controls.target.copy(newTarget);
+    // Every ground-anchored layer re-seats onto the new vertical scale; the
+    // trail re-anchors WITHOUT reset (updateSurfaceTrail re-maps its stored
+    // locations — wiping the traverse on every zoom step would be hostile).
+    refreshSurfaceAnchors();
+    if (surfaceLocation) updateSurfaceTrail(surfaceLocation, { reanchor: true });
+    updateSurfaceDetail();
+    meshStatusElement.textContent = hasRelief
+        ? `regional MOLA · 66k vertices · ${regionalReliefScale}× relief${regionalReliefScale === 1 ? ' (true scale)' : ''}`
+        : 'regional smooth-terrain fallback';
+    updateSurfaceReadout({ force: true });
+}
+
 function surfaceCameraPlacement(latDeg, lonDeg, headingRad = 0) {
     const target = worldSurfacePoint(latDeg, lonDeg);
     const radial = target.clone().normalize();
@@ -2076,6 +2330,10 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
     if (surfaceModeActive) setSurfacePresentation(false);
     surfaceModeActive = true;
     surfaceLocation = { latDeg, lonDeg };
+    // Fresh motion window: V/S and ground speed must not read the flight-in
+    // tween (or a previous visit) as pilot motion.
+    pilot.samples.length = 0;
+    pilot.slopeAt = null;
     app.classList.add('is-surface-mode');
     surfaceExplorer.hidden = false;
     rebuildRegionalTerrain(latDeg, lonDeg);
@@ -2898,6 +3156,7 @@ window.__marsLab = Object.freeze({
         skyVisible: skyDome.visible,
         skyOpacity: skyDomeMaterial.uniforms.uOpacity.value,
         reliefExaggeration: REGIONAL_RELIEF_EXAGGERATION,
+        reliefScaleNow: regionalReliefScale,
         patchRelief: { ...regionalTerrainRelief },
         hasRelief,
         synth: {
@@ -2907,6 +3166,18 @@ window.__marsLab = Object.freeze({
             restarts: synthResult?.restarts ?? null,
             shares: synthShares ? { ...synthShares } : null,
         },
+    }),
+    /** Landing instruments + reticle — see the PILOT CLUSTER block. */
+    pilotState: () => ({
+        hdgDeg: pilot.hdgDeg,
+        aglKm: pilot.aglKm,
+        vsMs: pilot.vsMs,
+        gsKms: pilot.gsKms,
+        slopeDeg: pilot.slopeDeg,
+        slopeDownBearingDeg: pilot.slopeDownBearingDeg,
+        sunElevDeg: pilot.sunElevDeg,
+        reliefScaleNow: regionalReliefScale,
+        reticle: reticleAt ? { ...reticleAt, radiusKm: RETICLE_RADIUS_KM, visible: landingReticle.visible } : null,
     }),
     /** Solar geometry, so a test can ask whether the focused point is in daylight. */
     sunState: () => {
@@ -3004,6 +3275,7 @@ function animate(now) {
         surfaceFillLight.position.copy(camera.position).addScaledVector(cameraRadial, -0.0001);
         skyDome.position.copy(camera.position);
         updateSurfaceSky(cameraRadial);
+        updateReliefRamp();
         updateSurfaceReadout();
     } else {
         updateGridFade(camera.position.length());

@@ -196,6 +196,12 @@ button{color:inherit}
 .surface-telemetry strong{overflow:hidden;color:#e7fbff;font:600 .57rem var(--mono);text-overflow:ellipsis;white-space:nowrap}
 .surface-telemetry output{margin-top:3px;color:#8da7aa;font:500 .51rem var(--mono);white-space:nowrap}
 .surface-detail{grid-column:1/-1;overflow:hidden;color:#667d80;font:.48rem var(--mono);letter-spacing:.01em;text-overflow:ellipsis;white-space:nowrap}
+.pilot-cluster{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,1fr);gap:3px 8px;padding:5px 7px;border:1px solid rgba(125,255,176,.16);border-radius:8px;background:rgba(9,13,11,.5)}
+.pi{display:flex;flex-direction:column;gap:1px;min-width:0}
+.pi-k{color:#5d7a70;font:.44rem var(--mono);letter-spacing:.08em}
+.pi-v{color:#c9efdc;font:.58rem var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pi-v.ok{color:#7dffb0}.pi-v.warn{color:#ffd75c}.pi-v.alert{color:#ff8a70}
+.surface-explorer.collapsed .pilot-cluster{display:none}
 .is-surface-mode .mission-panel{top:166px;max-height:calc(100% - 352px)}
 .is-surface-mode .mars-viewport{background:radial-gradient(ellipse at 50% 76%,#9a3d1d 0,#4a160d 38%,#190807 72%,#070303 100%)}
 .is-surface-mode .vignette{background:linear-gradient(180deg,rgba(19,7,4,.08),transparent 45%,rgba(5,2,1,.42))}
@@ -320,6 +326,16 @@ button{color:inherit}
         <button class="surface-move" id="surface-grid" type="button" aria-label="Toggle terrain analysis grid" aria-pressed="true" title="Hide 8 km terrain analysis grid">#</button>
       </div>
       <div class="surface-telemetry"><strong id="surface-location">18.426°N · 77.225°E</strong><output id="surface-altitude" aria-live="polite">Eye — km · MOLA — km</output></div>
+      <div class="pilot-cluster" id="pilot-cluster" role="group" aria-label="Pilot instruments">
+        <div class="pi"><span class="pi-k">HDG</span><span class="pi-v" id="pilot-hdg">—</span></div>
+        <div class="pi"><span class="pi-k">AGL</span><span class="pi-v" id="pilot-agl">—</span></div>
+        <div class="pi"><span class="pi-k">V/S</span><span class="pi-v" id="pilot-vs">—</span></div>
+        <div class="pi"><span class="pi-k">GND</span><span class="pi-v" id="pilot-gs">—</span></div>
+        <div class="pi"><span class="pi-k">SLOPE</span><span class="pi-v" id="pilot-slope">—</span></div>
+        <div class="pi"><span class="pi-k">SUN</span><span class="pi-v" id="pilot-sun">—</span></div>
+        <div class="pi"><span class="pi-k">RELIEF</span><span class="pi-v" id="pilot-relief">—</span></div>
+        <div class="pi"><span class="pi-k">RETICLE</span><span class="pi-v" id="pilot-reticle">2 km ring</span></div>
+      </div>
       <span class="surface-detail" id="surface-detail">MOLA regional terrain · loading source resolution</span>
     </div>
     <div class="mesh-badge" id="mars-mesh-badge"><strong>MESH</strong> <span id="mars-mesh-status">loading surface assets…</span></div>

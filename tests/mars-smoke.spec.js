@@ -358,6 +358,60 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await page.locator('[data-layer="synth"]').check({ force: true });
     await expect.poll(() => page.evaluate(() => window.__marsLab.layerIsVisible('synth'))).toBe(true);
     await expect(page.locator('#surface-detail')).toContainText('WFC geology synth');
+
+    // ── Pilot cluster + landing reticle ──
+    // The instruments a landing needs: heading, AGL, true slope (from raw
+    // MOLA, never the drawn geometry), sun elevation, live relief multiplier;
+    // and the 2 km reticle riding the orbit target as a scale anchor.
+    const pilotEntry = await page.evaluate(() => window.__marsLab.pilotState());
+    expect(pilotEntry.reliefScaleNow).toBe(18);
+    expect(pilotEntry.aglKm).toBeGreaterThan(5);
+    expect(pilotEntry.hdgDeg).toBeGreaterThanOrEqual(0);
+    expect(pilotEntry.hdgDeg).toBeLessThan(360);
+    expect(pilotEntry.slopeDeg).toBeGreaterThanOrEqual(0);
+    expect(pilotEntry.slopeDeg).toBeLessThan(45);
+    expect(Math.abs(pilotEntry.sunElevDeg)).toBeLessThanOrEqual(90);
+    expect(pilotEntry.reticle.visible).toBe(true);
+    expect(pilotEntry.reticle.radiusKm).toBe(2);
+    const reticleTarget = await page.evaluate(() => window.__marsLab.surfaceState().location);
+    expect(Math.abs(pilotEntry.reticle.latDeg - reticleTarget.latDeg)).toBeLessThan(0.05);
+    expect(Math.abs(pilotEntry.reticle.lonDeg - reticleTarget.lonDeg)).toBeLessThan(0.05);
+    await expect(page.locator('#pilot-agl')).toContainText('km');
+    await expect(page.locator('#pilot-relief')).toHaveText('×18');
+    await expect(page.locator('#pilot-hdg')).toContainText('°');
+
+    // ── True-scale-on-final ──
+    // Zooming to short final ramps the 18× exaggeration down to TRUE 1×,
+    // disclosed in the HUD line, the pilot cluster, and the mesh badge —
+    // and zooming back out restores the survey scale for the rest of the run.
+    const viewportBox = await page.locator('#mars-viewport').boundingBox();
+    const viewCenter = {
+        x: viewportBox.x + viewportBox.width / 2,
+        y: viewportBox.y + viewportBox.height / 2,
+    };
+    await page.mouse.move(viewCenter.x, viewCenter.y);
+    for (let i = 0; i < 26; i += 1) {
+        await page.mouse.wheel(0, -240);
+        await page.waitForTimeout(70);
+    }
+    await expect.poll(
+        () => page.evaluate(() => window.__marsLab.pilotState().reliefScaleNow),
+        { timeout: 15_000 },
+    ).toBe(1);
+    await expect(page.locator('#surface-detail')).toContainText('1× TRUE SCALE');
+    await expect(page.locator('#pilot-relief')).toContainText('TRUE');
+    await expect(page.locator('#mars-mesh-status')).toContainText('true scale');
+    // The ramp rebuild keeps the synth layer live.
+    await expect.poll(() => page.evaluate(() => window.__marsLab.surfaceState().synth.active)).toBe(true);
+    for (let i = 0; i < 26; i += 1) {
+        await page.mouse.wheel(0, 240);
+        await page.waitForTimeout(70);
+    }
+    await expect.poll(
+        () => page.evaluate(() => window.__marsLab.pilotState().reliefScaleNow),
+        { timeout: 15_000 },
+    ).toBe(18);
+    await expect(page.locator('#surface-detail')).toContainText('18×');
     const surfaceRender = await page.evaluate(() => window.__marsLab.renderState());
     expect(surfaceRender.depthRatio).toBeLessThan(20_000);
     expect(surfaceRender.near).toBeGreaterThan(0.0001);
