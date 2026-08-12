@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import {
     computeVerdict, auroraVerdict, magneticLatitude, boundaryForKp,
     aqiCategory, aqiState, uvState, moonPhase, weatherGlyph,
-    sunAltitudeDeg, issMagEstimate, stormOutlook, factorForecast,
+    sunAltitudeDeg, issMagEstimate, stormOutlook, factorForecast, ageWord,
 } from '../js/verdict-engine.js';
 
 let n = 0;
@@ -152,6 +152,29 @@ function mkInputs(over = {}) {
     assert.equal(byId.uv.state, 'block', 'UV chip state follows the peak (9)');
     assert.match(byId.uv.cat, /^pk 9/);
     ok('six factor chips match prototype grammar');
+
+    // An aged AQI keeps its category and its chip state, but says how old it
+    // is. The CAMS fallback can serve an earlier model hour when the run
+    // lags; the chip used to render that as the current hour with no marker.
+    const staleV = computeVerdict(mkInputs({
+        air: { aqi: 42, uvNow: 2, uvPeak: 9, uvPeakHour: null,
+            stale: true, aqiAgeMs: 5 * HOUR },
+    }), NOW);
+    const staleAqi = staleV.factors.find(f => f.id === 'aqi');
+    assert.equal(staleAqi.val, '42', 'the value itself is unchanged');
+    assert.equal(staleAqi.cat, 'good · 5 h old', 'age rides the category line');
+    assert.equal(staleAqi.state, aqiState(42), 'staleness does not alter the chip state');
+    // Sub-hour lag reads "<1 h" rather than "0 h".
+    const freshish = computeVerdict(mkInputs({
+        air: { aqi: 42, uvNow: 2, uvPeak: 9, uvPeakHour: null,
+            stale: true, aqiAgeMs: 20 * 60_000 },
+    }), NOW).factors.find(f => f.id === 'aqi');
+    assert.equal(freshish.cat, 'good · <1 h old');
+    // Absent provenance must behave exactly as before — no marker, no throw.
+    assert.equal(byId.aqi.cat, 'good', 'no staleness fields → unchanged label');
+    assert.equal(ageWord(null), '');
+    assert.equal(ageWord(3 * HOUR), '3 h');
+    ok('an aged AQI is marked on the chip instead of passing as current');
 
     // Quiet Kp + mid-latitude → aurora NO with distance copy in the sky rows.
     assert.equal(v.skyEvents[0].id, 'aurora');

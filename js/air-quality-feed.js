@@ -21,6 +21,18 @@
  *
  * Cache: 15 min per ~1 km location bucket. setLocation() to a new spot
  * bypasses the timer and refetches immediately.
+ *
+ * TEMPORAL PROVENANCE — read before rendering any of these numbers:
+ *   - `aqi` is Open-Meteo's composite `us_aqi`, which EPA defines on a
+ *     24-HOUR RUNNING MEAN of PM (8 h for O₃/CO). The `pollutants` beside it
+ *     are INSTANTANEOUS values for one model hour. They are different time
+ *     bases and will not reconcile against the EPA table by hand; anything
+ *     showing them together must say so.
+ *   - `aqiValidAt` / `pollutantsValidAt` are the model hours actually used.
+ *     They can differ (see the note in normalizeAirQuality) — `aligned` says
+ *     whether they did.
+ *   - `stale` is set once either is AQI_STALE_AFTER_MS behind. Values older
+ *     than AQI_MAX_AGE_MS are dropped, not served as current.
  */
 
 import { CAMS_PROVENANCE } from './air-quality-frame.js';
@@ -29,6 +41,23 @@ const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const AIR_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
 const REFRESH_MS = 15 * 60 * 1000;
 const HOUR_MS = 3_600_000;
+
+/**
+ * Staleness bounds for the "newest usable past hour" fallbacks below.
+ *
+ * These used to be UNBOUNDED: if the current model hour was missing, the
+ * search walked back through the whole `past_days=1` window and could return
+ * a value up to ~30 h old, which the card then labelled "current model hour".
+ * Nothing in the returned state said how old it was, so neither the UI nor a
+ * consumer could tell.
+ *
+ * STALE_AFTER_MS is one CAMS native cycle (CAMS_PROVENANCE.nativeCadenceHours
+ * = 3): past that, the value is still worth showing but must be disclosed as
+ * aged. MAX_AGE_MS is the refusal point — beyond it the number is not "air
+ * quality now" under any reading, so it is dropped rather than dressed up.
+ */
+export const AQI_STALE_AFTER_MS = 3 * HOUR_MS;
+export const AQI_MAX_AGE_MS = 12 * HOUR_MS;
 
 const HOURLY_VARS = 'temperature_2m,precipitation_probability,cloud_cover,uv_index';
 const DAILY_VARS = 'temperature_2m_max,temperature_2m_min,weather_code,cloud_cover_mean,precipitation_probability_max';
@@ -80,6 +109,12 @@ export class AirQualityFeed {
             pollutionHourly: [],     // 24 h recent + 72 h forecast; AQI + pollutant fields
             pollutionUnits: {},      // app-facing field name → upstream unit
             airSource: AIR_QUALITY_SOURCE,
+            aqiValidAt: null,        // ms — the model hour the AQI came from
+            aqiAgeMs: null,          // ms behind now
+            pollutantsValidAt: null, // ms — may differ from aqiValidAt
+            pollutantsAgeMs: null,
+            stale: false,            // either exceeds AQI_STALE_AFTER_MS
+            aligned: null,           // AQI and pollutants share an hour?
             uvNow: null,
             uvPeak: null,
             uvPeakHour: null,        // ms
@@ -204,6 +239,12 @@ export class AirQualityFeed {
             next.pollutionHourly = normalized.pollutionHourly;
             next.pollutionUnits = normalized.pollutionUnits;
             next.airSource = AIR_QUALITY_SOURCE;
+            next.aqiValidAt = normalized.aqiValidAt;
+            next.aqiAgeMs = normalized.aqiAgeMs;
+            next.pollutantsValidAt = normalized.pollutantsValidAt;
+            next.pollutantsAgeMs = normalized.pollutantsAgeMs;
+            next.stale = normalized.stale;
+            next.aligned = normalized.aligned;
         }
 
         next.status = 'live';
@@ -232,7 +273,12 @@ export function normalizeAirQuality(payload = {}, nowMs = Date.now()) {
     const units = payload.hourly_units || {};
 
     // Current model hour; if the upstream run lags, use the newest available
-    // hour at or before now. Never substitute a future forecast for "now".
+    // hour at or before now. Never substitute a future forecast for "now",
+    // and never reach further back than AQI_MAX_AGE_MS — see the constant.
+    const usable = (i) => {
+        const t = times[i] * 1000;
+        return t <= nowMs && nowMs - t <= AQI_MAX_AGE_MS;
+    };
     let currentIdx = -1;
     for (let i = 0; i < times.length; i++) {
         const t = times[i] * 1000;
@@ -243,7 +289,7 @@ export function normalizeAirQuality(payload = {}, nowMs = Date.now()) {
     }
     if (currentIdx < 0) {
         for (let i = times.length - 1; i >= 0; i--) {
-            if (times[i] * 1000 <= nowMs && hasAirValue(aq, i)) {
+            if (usable(i) && hasAirValue(aq, i)) {
                 currentIdx = i;
                 break;
             }
@@ -254,11 +300,16 @@ export function normalizeAirQuality(payload = {}, nowMs = Date.now()) {
     // published later than the component concentrations: the chip may use
     // the newest past AQI while the pollutant grid stays on one aligned
     // current model hour. Provenance remains modeled for both.
+    //
+    // That split is deliberate, but it means the AQI and the pollutant grid
+    // rendered beside it can be from DIFFERENT hours. Both valid times ride
+    // the result now, plus `aligned`, so a consumer showing them together can
+    // say so instead of implying one consistent snapshot.
     let aqiIdx = currentIdx >= 0 && Number.isFinite(aq.us_aqi?.[currentIdx])
         ? currentIdx : -1;
     if (aqiIdx < 0) {
         for (let i = times.length - 1; i >= 0; i--) {
-            if (times[i] * 1000 <= nowMs && Number.isFinite(aq.us_aqi?.[i])) {
+            if (usable(i) && Number.isFinite(aq.us_aqi?.[i])) {
                 aqiIdx = i;
                 break;
             }
@@ -285,6 +336,12 @@ export function normalizeAirQuality(payload = {}, nowMs = Date.now()) {
         pollutionUnits[appName] = units[upstreamName] || defaultUnit(appName);
     }
 
+    const aqiValidAt = aqiIdx >= 0 ? times[aqiIdx] * 1000 : null;
+    const pollutantsValidAt = currentIdx >= 0 ? times[currentIdx] * 1000 : null;
+    const ageOf = (t) => (t == null ? null : Math.max(0, nowMs - t));
+    const aqiAgeMs = ageOf(aqiValidAt);
+    const pollutantsAgeMs = ageOf(pollutantsValidAt);
+
     return {
         aqi: aqiIdx >= 0 ? numOrNull(aq.us_aqi?.[aqiIdx]) : null,
         aqiHourly: pollutionHourly
@@ -293,6 +350,16 @@ export function normalizeAirQuality(payload = {}, nowMs = Date.now()) {
         pollutants,
         pollutionHourly,
         pollutionUnits,
+        // Temporal provenance. Without these the card could render a value
+        // hours old under a "current model hour" label with nothing to
+        // contradict it — see AQI_STALE_AFTER_MS.
+        aqiValidAt,
+        aqiAgeMs,
+        pollutantsValidAt,
+        pollutantsAgeMs,
+        stale: [aqiAgeMs, pollutantsAgeMs]
+            .some(age => age != null && age >= AQI_STALE_AFTER_MS),
+        aligned: aqiIdx >= 0 && currentIdx >= 0 ? aqiIdx === currentIdx : null,
     };
 }
 
