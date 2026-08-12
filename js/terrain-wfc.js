@@ -582,10 +582,14 @@ const smooth = (a, b, v) => {
 };
 
 /**
- * Mars: priors from REAL MOLA elevation, local slope, and latitude.
- * @param {object} m  { elevationM, slopeDeg, latDeg }
+ * Mars: priors from REAL MOLA elevation, local slope, and latitude — plus an
+ * optional DRAINAGE term (0..1) from flowAccumulation: where upstream area
+ * has genuinely converged, channels seed hard regardless of how gentle the
+ * local floor is. Callers normalize accumulation themselves (convergence
+ * thresholds ≥ grid size — a plane's parallel drainage must score 0).
+ * @param {object} m  { elevationM, slopeDeg, latDeg, drainage? }
  */
-export function marsClassPriors({ elevationM, slopeDeg, latDeg }) {
+export function marsClassPriors({ elevationM, slopeDeg, latDeg, drainage = 0 }) {
     const absLat = Math.abs(latDeg);
     const p = new Float32Array(MARS_TILESET.classes.length);
     const polar = smooth(70, 80, absLat);
@@ -604,10 +608,12 @@ export function marsClassPriors({ elevationM, slopeDeg, latDeg }) {
     p[0] = 0.55 * flat * (0.4 + 0.6 * lowland) + 0.10;               // plains
     p[1] = 0.75 * highland * (0.3 + 0.7 * steep) * (1 - polar) + 0.06; // cratered
     p[2] = 0.70 * flat * lowland * (1 - summit) * (1 - capIce);      // dunes
-    // Channel is a LINEAR family: this coefficient sets how often chains
-    // SEED (their length is fixed by the family's tip ratios), so it runs
-    // lower than the old blob-class value.
-    p[3] = 0.30 * steep * lowland * (1 - polar) + 0.015;             // channel
+    // Channel is a LINEAR family: these coefficients set how often chains
+    // SEED (their length is fixed by the family's tip ratios). The slope
+    // term finds hillside tributaries; the drainage term is what puts a
+    // TRUNK down a flat valley floor — local slope cannot see that.
+    p[3] = 0.30 * steep * lowland * (1 - polar) + 0.015
+        + 1.2 * clamp01(drainage) * (1 - polar);                     // channel
     p[4] = 0.55 * steep * (1 - polar) * (1 - summit) * smooth(-4500, -500, elevationM); // chaos
     p[5] = 0.85 * summit + 0.02;                                     // lava
     p[6] = 2.20 * capIce;                                            // ice
@@ -643,6 +649,35 @@ export function moonClassPriors({ albedo, latDeg, craterDistNorm = Infinity, swi
     p[5] = 0.15 * dark;                                           // wrinkle ridge
     p[6] = dark * (0.02 + 1.6 * clamp01(swirlBoost));             // swirl
     return p;
+}
+
+/**
+ * The Mars channel ROUTING recipe — one copy, used verbatim by the Mars page
+ * and pinned by the kernel test so the two cannot drift:
+ *   axis     — the D8 ROUTED direction where one exists (on a flat filled
+ *              valley floor that is the spill path, exactly where the raw
+ *              gradient fails); gradient axis as the border fallback.
+ *   strength — slope ramp (0.06–0.6°, gentle floors still steer) OR the
+ *              accumulation ramp, whichever is stronger: a trunk keeps its
+ *              heading even where the floor is nearly flat.
+ *   drainageNorm — convergence-thresholded accumulation for the PRIOR.
+ *              Thresholds scale with the grid edge (≥ cells) because D8 on a
+ *              plane degenerates to parallel columns with accumulation up to
+ *              ≈ cells without any real channeling — convergence, not path
+ *              length, is what makes a channel.
+ */
+export function marsChannelRouting(field, drain, i, cells) {
+    const acc = drain.accumulation[i];
+    const routed = drain.dirEast[i] !== 0 || drain.dirNorth[i] !== 0;
+    return {
+        axisEast: routed ? drain.dirEast[i] : field.axisEast[i],
+        axisNorth: routed ? drain.dirNorth[i] : field.axisNorth[i],
+        strength: Math.max(
+            0.85 * smooth(0.06, 0.6, field.slopeDeg[i]),
+            0.85 * smooth(cells * 0.8, cells * 2.5, acc),
+        ),
+        drainageNorm: smooth(cells * 1.0, cells * 4.0, acc),
+    };
 }
 
 /**
@@ -761,6 +796,138 @@ export function slopeField(elevations, cells, spacingM) {
         }
     }
     return { axisEast, axisNorth, slopeDeg, wallSlopeDeg };
+}
+
+/**
+ * Drainage accumulation over a cells×cells elevation grid (row 0 north, same
+ * layout as regionGrid) — the piece local slope cannot provide: WHERE water
+ * actually collects. Three classic stages, all deterministic:
+ *
+ *   1. Priority-flood depression filling (Barnes 2014) with an epsilon step,
+ *      so closed pits fill to their spill level and filled flats drain
+ *      toward the spill instead of stalling. Filled elevations are Float64 —
+ *      float32 cannot resolve the epsilon against multi-km elevations.
+ *   2. D8 steepest descent on the FILLED surface (drop over distance,
+ *      diagonals ÷√2). The flood guarantees every interior cell a strictly
+ *      lower neighbor; border cells without one drain off-map.
+ *   3. Upstream-area accumulation in decreasing filled-elevation order
+ *      (a valid topological order, since downstream is strictly lower).
+ *
+ * Invariant (pinned by the test): every unit of area exits the map exactly
+ * once — the accumulation of off-map-draining cells sums to cells².
+ *
+ * Consumers should threshold accumulation against CONVERGENCE, not path
+ * length: on a perfect tilted plane D8 degenerates to parallel columns whose
+ * accumulation grows linearly (max ≈ cells) without any real channeling, so
+ * "trunk" thresholds belong at ≥ cells — see the Mars page's recipe.
+ *
+ * @returns {{ accumulation: Float32Array, dirEast: Float32Array,
+ *             dirNorth: Float32Array, downstream: Int32Array, filled: Float64Array }}
+ *          accumulation in CELLS (own cell included); dirEast/dirNorth is the
+ *          unit routed-flow direction, (0,0) where flow exits the map.
+ */
+export function flowAccumulation(elevations, cells, spacingM) {
+    const n = cells * cells;
+    const filled = new Float64Array(n);
+    const visited = new Uint8Array(n);
+    const EPS = 1e-3;                                 // metres per flood step
+
+    // Binary min-heap over (filled elevation, index) — index tie-break keeps
+    // the flood order fully deterministic even on exactly-equal elevations.
+    const heap = [];
+    const less = (a, b) => filled[a] < filled[b] || (filled[a] === filled[b] && a < b);
+    const heapPush = (c) => {
+        heap.push(c);
+        let i = heap.length - 1;
+        while (i > 0) {
+            const p = (i - 1) >> 1;
+            if (!less(heap[i], heap[p])) break;
+            [heap[i], heap[p]] = [heap[p], heap[i]];
+            i = p;
+        }
+    };
+    const heapPop = () => {
+        const top = heap[0];
+        const last = heap.pop();
+        if (heap.length) {
+            heap[0] = last;
+            let i = 0;
+            for (;;) {
+                const l = 2 * i + 1;
+                const r = l + 1;
+                let m = i;
+                if (l < heap.length && less(heap[l], heap[m])) m = l;
+                if (r < heap.length && less(heap[r], heap[m])) m = r;
+                if (m === i) break;
+                [heap[i], heap[m]] = [heap[m], heap[i]];
+                i = m;
+            }
+        }
+        return top;
+    };
+
+    for (let c = 0; c < n; c += 1) {
+        const x = c % cells;
+        const y = (c - x) / cells;
+        if (x === 0 || y === 0 || x === cells - 1 || y === cells - 1) {
+            filled[c] = elevations[c];
+            visited[c] = 1;
+            heapPush(c);
+        }
+    }
+    const NB8 = [-1, 1, -cells, cells, -cells - 1, -cells + 1, cells - 1, cells + 1];
+    const inBounds = (c, k) => {
+        const x = c % cells;
+        if ((k === 0 || k === 4 || k === 6) && x === 0) return false;         // west-ish
+        if ((k === 1 || k === 5 || k === 7) && x === cells - 1) return false; // east-ish
+        const nb = c + NB8[k];
+        return nb >= 0 && nb < n;
+    };
+    while (heap.length) {
+        const c = heapPop();
+        for (let k = 0; k < 8; k += 1) {
+            if (!inBounds(c, k)) continue;
+            const nb = c + NB8[k];
+            if (visited[nb]) continue;
+            visited[nb] = 1;
+            filled[nb] = Math.max(elevations[nb], filled[c] + EPS);
+            heapPush(nb);
+        }
+    }
+
+    // D8 on the filled surface.
+    const downstream = new Int32Array(n).fill(-1);
+    const dirEast = new Float32Array(n);
+    const dirNorth = new Float32Array(n);
+    const DIAG = Math.SQRT1_2;
+    // dx (east+), dy (south+ = row+), inverse distance weight per NB8 slot.
+    const DX8 = [-1, 1, 0, 0, -1, 1, -1, 1];
+    const DY8 = [0, 0, -1, 1, -1, -1, 1, 1];
+    const W8 = [1, 1, 1, 1, DIAG, DIAG, DIAG, DIAG];
+    for (let c = 0; c < n; c += 1) {
+        let bestK = -1;
+        let bestDrop = 0;
+        for (let k = 0; k < 8; k += 1) {
+            if (!inBounds(c, k)) continue;
+            const drop = (filled[c] - filled[c + NB8[k]]) * W8[k];
+            if (drop > bestDrop) { bestDrop = drop; bestK = k; }
+        }
+        if (bestK >= 0) {
+            downstream[c] = c + NB8[bestK];
+            const len = Math.hypot(DX8[bestK], DY8[bestK]);
+            dirEast[c] = DX8[bestK] / len;
+            dirNorth[c] = -DY8[bestK] / len;          // row+ is SOUTH
+        }
+    }
+
+    // Accumulate high → low (strictly valid order on the filled surface).
+    const order = Array.from({ length: n }, (_, i) => i)
+        .sort((a, b) => (filled[b] - filled[a]) || (a - b));
+    const accumulation = new Float32Array(n).fill(1);
+    for (const c of order) {
+        if (downstream[c] >= 0) accumulation[downstream[c]] += accumulation[c];
+    }
+    return { accumulation, dirEast, dirNorth, downstream, filled };
 }
 
 // ── Geo-referenced cell layout ───────────────────────────────────────────────

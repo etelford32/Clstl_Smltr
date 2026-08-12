@@ -28,7 +28,7 @@ import assert from 'node:assert/strict';
 import {
     MARS_TILESET, MOON_TILESET, buildTileset, validateTileset, collapse,
     marsClassPriors, moonClassPriors, expandClassPriors, expandClassPriorsFlow,
-    slopeField, hashSeed, mulberry32, regionSeed,
+    slopeField, flowAccumulation, marsChannelRouting, hashSeed, mulberry32, regionSeed,
     destinationLatLon, localOffsetKm, regionGrid, sampleClass, classShares,
 } from '../js/terrain-wfc.js';
 
@@ -294,16 +294,19 @@ function uniformClassPriors(tileset, cells, override = {}) {
             elev[i] = elevFn(eastKm, northKm);
         }
         const field = slopeField(elev, cells, stepM);
+        const drain = flowAccumulation(elev, cells, stepM);
         const priors = new Float32Array(cells * cells * T);
         for (let i = 0; i < cells * cells; i += 1) {
-            const v = marsClassPriors({ elevationM: elev[i], slopeDeg: field.wallSlopeDeg[i], latDeg: 12 });
-            // The page's recipe: axis from central differences; strength ramps
-            // over the CENTRAL slope with a gentle saturation (real outflow
-            // floors tilt only ~0.1–0.3° and should still steer) and a 0.06°
-            // floor so numerically-flat ground stays isotropic.
-            const strength = 0.85 * smoothstep(0.06, 0.6, field.slopeDeg[i]);
+            // THE page recipe, via the shared kernel helper: routed axis,
+            // slope-or-accumulation strength, convergence-thresholded
+            // drainage for the prior.
+            const routing = marsChannelRouting(field, drain, i, cells);
+            const v = marsClassPriors({
+                elevationM: elev[i], slopeDeg: field.wallSlopeDeg[i], latDeg: 12,
+                drainage: routing.drainageNorm,
+            });
             expandClassPriorsFlow(MARS_TILESET, v, priors, i, {
-                channel: { axisEast: field.axisEast[i], axisNorth: field.axisNorth[i], strength },
+                channel: { axisEast: routing.axisEast, axisNorth: routing.axisNorth, strength: routing.strength },
             });
         }
         return collapse({ tileset: MARS_TILESET, width: cells, height: cells, seed, priors });
@@ -348,6 +351,172 @@ function uniformClassPriors(tileset, cells, override = {}) {
     assert.ok(wallNs >= 2 * Math.max(1, wallEw),
         `wall channels dive down-slope into the valley (ns ${wallNs}, ew ${wallEw})`);
     ok(`flow priors: fall-line alignment (${nsTilt.ns}:${nsTilt.ew} NS-tilt, ${ewTilt.ns}:${ewTilt.ew} EW-tilt), valley walls ${wallNs}:${wallEw} down-slope`);
+}
+
+// ── 5d. Drainage accumulation: pits fill, area is conserved, trunks form ─────
+{
+    const cells = 48;
+    const extentKm = 120;
+    const stepM = extentKm / cells * 1000;
+    const localKm = (idx) => ({
+        eastKm: ((idx % cells + 0.5) / cells - 0.5) * extentKm,
+        northKm: (0.5 - (Math.floor(idx / cells) + 0.5) / cells) * extentKm,
+    });
+    const buildElev = (fn) => {
+        const elev = new Float32Array(cells * cells);
+        for (let i = 0; i < cells * cells; i += 1) {
+            const { eastKm, northKm } = localKm(i);
+            elev[i] = fn(eastKm, northKm);
+        }
+        return elev;
+    };
+    const exitSum = (drain) => {
+        let sum = 0;
+        for (let i = 0; i < cells * cells; i += 1) {
+            if (drain.downstream[i] < 0) sum += drain.accumulation[i];
+        }
+        return sum;
+    };
+    const assertNoCycles = (drain) => {
+        for (let start = 0; start < cells * cells; start += 1) {
+            let c = start;
+            let steps = 0;
+            while (drain.downstream[c] >= 0) {
+                c = drain.downstream[c];
+                steps += 1;
+                assert.ok(steps <= cells * cells, `drainage cycle from cell ${start}`);
+            }
+        }
+    };
+
+    // Plane falling south: D8 runs straight down-column, so accumulation at
+    // row r is exactly r+1 — and every unit of area exits once.
+    const plane = flowAccumulation(buildElev((e, n) => -2500 + n * 40), cells, stepM);
+    for (const col of [0, 17, 47]) {
+        for (const row of [0, 5, 30, 47]) {
+            near(plane.accumulation[row * cells + col], row + 1, 1e-6,
+                `plane accumulation grows down-column (row ${row}, col ${col})`);
+        }
+    }
+    assertNoCycles(plane);
+    near(exitSum(plane), cells * cells, 1e-3, 'plane: all area exits exactly once');
+
+    // Closed bowl punched into the same plane: priority-flood must fill it so
+    // the interior still drains to the border — no stalls, no cycles, same
+    // conservation invariant.
+    const bowl = flowAccumulation(buildElev((e, n) =>
+        -2500 + n * 40 + 900 * Math.exp(-((e + 10) ** 2 + (n - 8) ** 2) / 180) * -1), cells, stepM);
+    assertNoCycles(bowl);
+    near(exitSum(bowl), cells * cells, 1e-3, 'bowl: depression fills and drains');
+
+    // Routed directions are unit vectors (or zero at map exits).
+    for (let i = 0; i < cells * cells; i += 1) {
+        const len = Math.hypot(plane.dirEast[i], plane.dirNorth[i]);
+        assert.ok(len < 1e-9 || Math.abs(len - 1) < 1e-6, 'routed dir is unit or zero');
+    }
+
+    // Convergence thresholds: a plane's parallel drainage must NOT read as
+    // channel trunk (max accumulation ≈ cells sits below the cells·1..4 ramp).
+    const field = slopeField(buildElev((e, n) => -2500 + n * 40), cells, stepM);
+    let maxNorm = 0;
+    for (let i = 0; i < cells * cells; i += 1) {
+        maxNorm = Math.max(maxNorm, marsChannelRouting(field, plane, i, cells).drainageNorm);
+    }
+    near(maxNorm, 0, 1e-9, 'parallel plane drainage scores zero trunk-ness');
+    ok('flowAccumulation: exact plane growth, pit filling, conservation, convergence gating');
+}
+
+// ── 5e. The payoff: a trunk channel runs along the flat valley floor ─────────
+{
+    // Same shared harness as 5c (full routing recipe). V-valley running
+    // east-west with a gentle eastward floor tilt: the walls converge ~24
+    // cells of upstream area per column into the floor, so accumulation
+    // crosses the convergence threshold almost immediately and a TRUNK forms
+    // along ground that is nearly flat — the thing local slope alone could
+    // not do (5c only pinned the wall tributaries).
+    const cells = 48;
+    const extentKm = 120;
+    const NS = MARS_TILESET.tiles.findIndex(t => t.id === 'channel:ns');
+    const EW = MARS_TILESET.tiles.findIndex(t => t.id === 'channel:ew');
+    const channelClass = classIndex(MARS_TILESET, 'channel');
+    const localKm = (idx) => ({
+        eastKm: ((idx % cells + 0.5) / cells - 0.5) * extentKm,
+        northKm: (0.5 - (Math.floor(idx / cells) + 0.5) / cells) * extentKm,
+    });
+    // Rebuild the 5c harness inline (kept separate so 5c's pins stay exactly
+    // as they were when this group is edited).
+    const T = MARS_TILESET.tiles.length;
+    const stepM = extentKm / cells * 1000;
+    const elev = new Float32Array(cells * cells);
+    for (let i = 0; i < cells * cells; i += 1) {
+        const { eastKm, northKm } = localKm(i);
+        elev[i] = -3000 + Math.abs(northKm) * 45 - eastKm * 6;
+    }
+    const field = slopeField(elev, cells, stepM);
+    const drain = flowAccumulation(elev, cells, stepM);
+    const priors = new Float32Array(cells * cells * T);
+    for (let i = 0; i < cells * cells; i += 1) {
+        const routing = marsChannelRouting(field, drain, i, cells);
+        const v = marsClassPriors({
+            elevationM: elev[i], slopeDeg: field.wallSlopeDeg[i], latDeg: 12,
+            drainage: routing.drainageNorm,
+        });
+        expandClassPriorsFlow(MARS_TILESET, v, priors, i, {
+            channel: { axisEast: routing.axisEast, axisNorth: routing.axisNorth, strength: routing.strength },
+        });
+    }
+    const valley = collapse({ tileset: MARS_TILESET, width: cells, height: cells, seed: 33, priors });
+    assertAdjacencyHolds(valley);
+
+    // Floor band: |north| ≤ 2 km — the two TRUE floor rows only. One row
+    // further out is already wall (169 m up at 45 m/km), whose legitimate
+    // NS tributaries would pollute the trunk-orientation count.
+    let floorChannels = 0;
+    let floorEw = 0;
+    let floorNs = 0;
+    for (let i = 0; i < cells * cells; i += 1) {
+        if (Math.abs(localKm(i).northKm) > 2) continue;
+        if (MARS_TILESET.classOfTile[valley.grid[i]] !== channelClass) continue;
+        floorChannels += 1;
+        if (valley.grid[i] === EW) floorEw += 1;
+        else if (valley.grid[i] === NS) floorNs += 1;
+    }
+    assert.ok(floorChannels >= 20, `trunk occupies the floor (${floorChannels} channel cells in band)`);
+    assert.ok(floorEw >= 2 * Math.max(1, floorNs),
+        `trunk runs ALONG the flat floor (ew ${floorEw}, ns ${floorNs})`);
+
+    // The trunk is one connected chain of respectable length, not fragments:
+    // largest channel component touching the floor band.
+    const seen = new Uint8Array(cells * cells);
+    let largestFloorChain = 0;
+    for (let start = 0; start < cells * cells; start += 1) {
+        if (seen[start] || MARS_TILESET.classOfTile[valley.grid[start]] !== channelClass) continue;
+        const stack = [start];
+        seen[start] = 1;
+        let size = 0;
+        let touchesFloor = false;
+        while (stack.length) {
+            const c = stack.pop();
+            size += 1;
+            if (Math.abs(localKm(c).northKm) <= 2) touchesFloor = true;
+            const x = c % cells;
+            const y = (c - x) / cells;
+            for (const nb of [
+                y > 0 ? c - cells : -1, y < cells - 1 ? c + cells : -1,
+                x > 0 ? c - 1 : -1, x < cells - 1 ? c + 1 : -1,
+            ]) {
+                if (nb >= 0 && !seen[nb]
+                    && MARS_TILESET.classOfTile[valley.grid[nb]] === channelClass) {
+                    seen[nb] = 1;
+                    stack.push(nb);
+                }
+            }
+        }
+        if (touchesFloor) largestFloorChain = Math.max(largestFloorChain, size);
+    }
+    assert.ok(largestFloorChain >= 15,
+        `the trunk is a connected chain (largest floor component ${largestFloorChain} cells)`);
+    ok(`drainage trunk: ${floorChannels} floor channel cells (${floorEw}:${floorNs} along:across), largest chain ${largestFloorChain}`);
 }
 
 // ── 6. Priors: hard constraints are respected ────────────────────────────────

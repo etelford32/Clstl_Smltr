@@ -16,7 +16,8 @@ import { fetchMarsSkyEphemeris } from './horizons.js';
 import { MarsSky } from './mars-sky.js';
 import {
     MARS_TILESET, collapse as collapseWfc, marsClassPriors, expandClassPriorsFlow,
-    slopeField, regionSeed, regionGrid as wfcRegionGrid, sampleClassInto, classShares,
+    slopeField, flowAccumulation, marsChannelRouting,
+    regionSeed, regionGrid as wfcRegionGrid, sampleClassInto, classShares,
 } from './terrain-wfc.js';
 
 const SURFACE_RADIUS = 1;
@@ -639,27 +640,30 @@ function computeRegionalSynth(latDeg, lonDeg) {
     const tileCount = MARS_TILESET.tiles.length;
     const priors = new Float32Array(cellCount * tileCount);
     const stepM = region.spacingKm * 1000;
-    // FLOW-AWARE priors: the channel family's variants are steered along the
-    // measured MOLA fall line. slopeField gives two different derivatives on
-    // purpose — the flow AXIS from central differences (at a resolved valley
-    // floor the walls cancel and the along-valley direction survives; forward
-    // differences would point channels at the walls) and the prior's slope
-    // from max one-sided differences (so channels still SEED in valley floors
-    // flanked by steep walls). Strength saturates by 0.6° because real
-    // outflow floors tilt only ~0.1–0.3° and should still steer; below 0.06°
-    // the ground is numerically flat and stays isotropic.
+    // FLOW-ROUTED priors: channels follow the measured MOLA water routing.
+    // slopeField gives the gradient two ways on purpose (central-difference
+    // AXIS so valley floors read along-valley, one-sided WALL slope so
+    // channels still seed in floors), and flowAccumulation adds the piece
+    // local slope cannot see — priority-flood pit filling, D8 routing, and
+    // upstream-area accumulation, so tributaries converge into trunks that
+    // run down real valleys. The recipe combining them is the kernel's
+    // marsChannelRouting (ONE copy, pinned by tests/terrain-wfc.mjs — do not
+    // re-derive it here).
     const flow = slopeField(elevations, cells, stepM);
+    const drain = flowAccumulation(elevations, cells, stepM);
     const flowSpec = { channel: { axisEast: 0, axisNorth: 0, strength: 0 } };
     for (let i = 0; i < cellCount; i += 1) {
-        flowSpec.channel.axisEast = flow.axisEast[i];
-        flowSpec.channel.axisNorth = flow.axisNorth[i];
-        flowSpec.channel.strength = 0.85 * THREE.MathUtils.smoothstep(flow.slopeDeg[i], 0.06, 0.6);
+        const routing = marsChannelRouting(flow, drain, i, cells);
+        flowSpec.channel.axisEast = routing.axisEast;
+        flowSpec.channel.axisNorth = routing.axisNorth;
+        flowSpec.channel.strength = routing.strength;
         expandClassPriorsFlow(
             MARS_TILESET,
             marsClassPriors({
                 elevationM: elevations[i],
                 slopeDeg: flow.wallSlopeDeg[i],
                 latDeg: region.latDeg[i],
+                drainage: routing.drainageNorm,
             }),
             priors,
             i,
