@@ -2297,9 +2297,12 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
        loc-panel stays off-screen so the globe is unobstructed. */
     #loc-panel:not(.panel-open) { transform: translateY(110%); }
     /* Same default-hidden rule for storm-watch — power users tap the
-       🌀 dock button to surface it. Without this rule the panel would
-       appear stuck mid-screen before tap because its desktop default
-       position doesn't translate to the mobile sheet layout. */
+       🌀 dock button to surface it. NOTE: the AUTHORITATIVE mobile-sheet
+       rules for #storm-watch-panel live in js/storm-watch-panel.js's
+       injected stylesheet — that <style> is appended at mount time, so
+       it wins every equal-specificity tie against this static block
+       (which is exactly why its desktop rules used to break this sheet
+       layout). The rules here remain as a pre-mount fallback only. */
     #storm-watch-panel:not(.panel-open) { transform: translateY(110%); }
 
     /* Show close button on mobile */
@@ -14719,9 +14722,13 @@ attachExtremesSection(stormWatchPanel.element, {
 // quick tap still toggles minimise as before. Stored positions are
 // re-clamped to the viewport on resize/orientation change so a phone
 // in portrait never strands a panel off-screen.
+// raiseOnGrab: these panels share corners with each other and with the
+// verdict card (which opts in from verdict-card.js) — grabbing any of
+// them brings it to the front of that stack for the session. Without
+// this, a panel buried under a taller neighbour stays buried.
 ['layer-panel', 'info-panel', 'wx-panel', 'loc-panel', 'storm-watch-panel'].forEach(id => {
     const panel = document.getElementById(id);
-    if (panel) makePanelDraggable(panel);
+    if (panel) makePanelDraggable(panel, { raiseOnGrab: true });
 });
 
 // Resize persistence — only the wx-panel currently advertises CSS

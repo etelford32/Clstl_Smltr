@@ -126,6 +126,19 @@ export function globalMean(grid) {
  * Shepard IDW with a hard influence radius: cells with no sample within
  * `maxDistKm` fall back to `background` instead of borrowing a value from
  * another continent. Exact at (within a cell of) each sample location.
+ *
+ * SUPPORT — read this before rendering the result as if it were data.
+ *
+ * The returned grid carries `nearestKm`, a Float32Array of the great-circle
+ * distance from each cell to the nearest CONTRIBUTING sample, and `sampleCount`.
+ * This exists because the field is drawn continuously over the whole planet
+ * from roughly 145 scattered points: a cell 900 km from the nearest sample
+ * and a cell sitting on top of one look identical once painted, and cells
+ * beyond `maxDistKm` are pure `background` — a constant, not a measurement.
+ *
+ * Consumers MUST NOT present a value without consulting its support. Use
+ * `supportAt(grid, lat, lon)` for a point probe. Cells with no sample in
+ * range report `Infinity`, which is the honest answer, not a large number.
  */
 export function idwGrid(samples, w, h, {
     power = 2,
@@ -133,10 +146,15 @@ export function idwGrid(samples, w, h, {
     background = 0,
 } = {}) {
     const grid = makeGrid(w, h, background);
+    // Distance to the nearest sample, per cell. Infinity where nothing is in
+    // range — that cell holds `background` and is not an interpolated value.
+    grid.nearestKm = new Float32Array(w * h).fill(Infinity);
     const pts = samples.filter(s =>
         Number.isFinite(s.lat) && Number.isFinite(s.lon) && Number.isFinite(s.value));
+    grid.sampleCount = pts.length;
+    grid.maxDistKm = maxDistKm;
     if (!pts.length) return grid;
-    const { data } = grid;
+    const { data, nearestKm } = grid;
     for (let y = 0; y < h; y++) {
         const lat = cellLat(y, h);
         for (let x = 0; x < w; x++) {
@@ -156,10 +174,28 @@ export function idwGrid(samples, w, h, {
                 // field doesn't step discontinuously at maxDistKm.
                 const t = Math.min(1, nearest / maxDistKm);
                 data[y * w + x] = (num / den) * (1 - t * t) + background * t * t;
+                nearestKm[y * w + x] = nearest;
             }
         }
     }
     return grid;
+}
+
+/**
+ * Distance in km from (lat, lon) to the nearest sample that supports the
+ * interpolated value there, or Infinity where the field is background only.
+ *
+ * Deliberately NEAREST-NEIGHBOUR, not bilinear: interpolating a support
+ * distance would smooth the very gap it exists to expose, and would report
+ * finite support for a cell that has none.
+ */
+export function supportAt(grid, lat, lon) {
+    if (!grid?.nearestKm) return null;
+    const { w, h, nearestKm } = grid;
+    const y = Math.max(0, Math.min(h - 1, Math.round((90 - lat) * h / 180 - 0.5)));
+    const xRaw = Math.round(((lon + 180) / 360) * w - 0.5);
+    const x = ((xRaw % w) + w) % w;
+    return nearestKm[y * w + x];
 }
 
 // ── 2. Hotspot identification — deterministic weighted k-means ─────────────
@@ -421,7 +457,7 @@ export function equilibriumDeltaT(forcingWm2, lambda = CLIMATE_SENSITIVITY_K_PER
 
 export default {
     makeGrid, cellLat, cellLon, haversineKm, sampleGrid, rowAreaWeight,
-    globalMean, idwGrid, kmeansHotspots, chooseHotspotCount, windToUV,
+    globalMean, idwGrid, supportAt, kmeansHotspots, chooseHotspotCount, windToUV,
     stepTransport, inferSteadySources, aodFromPm25, directForcingWm2,
     forcingGridFromPm25, equilibriumDeltaT,
     PM25_PER_AOD, FORCING_PER_AOD_WM2, CLIMATE_SENSITIVITY_K_PER_WM2,

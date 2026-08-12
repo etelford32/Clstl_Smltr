@@ -77,6 +77,10 @@ body {
     background: rgba(2, 10, 20, .92); border: 1px solid var(--pl-border); border-radius: 7px;
     padding: 6px 10px; font-size: .68rem; white-space: nowrap; color: var(--pl-text); }
 #pl-hover b { color: #f0f6ff; }
+/* Support disclosure: how far the nearest real sample is from the cursor.
+   Dim so it reads as provenance, not as another measurement. */
+#pl-hover .pl-support { color: var(--pl-dim); font-size: .62rem; }
+#pl-hover .pl-nodata { color: var(--pl-warn); }
 #pl-demo-badge { position: absolute; top: 10px; right: 10px; display: none; z-index: 6;
     background: rgba(120, 60, 0, .85); border: 1px solid var(--pl-warn); color: var(--pl-warn);
     border-radius: 7px; padding: 4px 10px; font-size: .68rem; font-weight: 700; letter-spacing: .06em; }
@@ -263,12 +267,13 @@ body {
 
 <script type="module">
 import {
-    makeGrid, cellLat, cellLon, sampleGrid, globalMean, idwGrid,
+    makeGrid, cellLat, cellLon, sampleGrid, globalMean, idwGrid, supportAt,
     kmeansHotspots, chooseHotspotCount, windToUV, stepTransport,
     inferSteadySources, haversineKm, PM25_PER_AOD, FORCING_PER_AOD_WM2,
     CLIMATE_SENSITIVITY_K_PER_WM2, equilibriumDeltaT,
 } from './js/pollution-model.js';
 import { airQualityMetricColor } from './js/air-quality-frame.js';
+import { concentrationFromAqi } from './js/aqi-scale.js';
 
 // ── Model grid: 72×36 (5°), matching the GFS wind grid 1:1 ────────────────
 const W = 72, H = 36, N = W * H;
@@ -412,10 +417,22 @@ async function loadFires() {
 
 // ── Field + cluster building ───────────────────────────────────────────────
 function cityPm(c) {
-    // PM2.5 preferred; AQI/2 is a rough stand-in when CAMS omits PM at a
-    // metro (keeps the city visible rather than silently dropping it).
-    return Number.isFinite(c.pm25) ? c.pm25
-        : Number.isFinite(c.aqi) ? c.aqi / 2 : null;
+    // PM2.5 preferred. When CAMS omits PM at a metro we invert the reported
+    // AQI through the EPA PM2.5 table instead of dropping the city.
+    //
+    // This used to be `aqi / 2`, which is not the inverse of anything: it ran
+    // 2.8× high at clean-air levels (AQI 50 → 25 µg/m³ when EPA says 9.0) and
+    // 0.67× low at hazardous ones. It fed the IDW field, the k-means weights,
+    // AND the radiative-forcing numbers, so the error propagated into every
+    // figure on the page.
+    //
+    // Caveat kept honest: us_aqi is a COMPOSITE (the worst sub-index across
+    // pollutants), so inverting it through the PM2.5 table yields the PM2.5
+    // that would alone produce that AQI — an upper bound when ozone or NO₂
+    // was the actual driver. That is a bounded, documented approximation;
+    // `aqi / 2` was neither.
+    if (Number.isFinite(c.pm25)) return c.pm25;
+    return Number.isFinite(c.aqi) ? concentrationFromAqi('pm25', c.aqi) : null;
 }
 
 function rebuildField() {
@@ -462,7 +479,7 @@ function renderClusterList() {
         <div class="pl-cluster${i === selectedCluster ? ' sel' : ''}" data-i="${i}">
             <span class="rank">${i + 1}</span>
             <span class="name">${c.label}</span>
-            <span class="val" style="color:${cssAqiColor(c.meanValue * 2)}">${c.meanValue?.toFixed(0) ?? '—'} µg/m³</span>
+            <span class="val" style="color:${cssPmColor(c.meanValue)}">${c.meanValue?.toFixed(0) ?? '—'} µg/m³</span>
             <span class="rank">${c.count}⛁</span>
         </div>`).join('');
     host.querySelectorAll('.pl-cluster').forEach(el => {
@@ -475,9 +492,20 @@ function renderClusterList() {
     });
 }
 
-function cssAqiColor(aqiLike) {
-    const [r, g, b] = airQualityMetricColor('aqi', aqiLike);
-    return `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
+const cssRgb = ([r, g, b]) =>
+    `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
+
+/**
+ * Color a PM2.5 concentration (µg/m³) by its EPA PM2.5 sub-index.
+ *
+ * Everything drawn on this map — the IDW field, the city dots, the cluster
+ * readouts — is PM2.5, so all three go through this one call and the legend
+ * describes a single quantity. Previously the field used the pm25 scale
+ * while the dots and clusters used `airQualityMetricColor('aqi', pm * 2)`,
+ * so the same concentration drew two different colors on one canvas.
+ */
+function cssPmColor(pm25) {
+    return cssRgb(airQualityMetricColor('pm25', pm25));
 }
 
 // ── Climate numbers (excess-over-guideline forcing) ────────────────────────
@@ -600,10 +628,19 @@ function drawWind() {
 
 function drawCities() {
     for (const c of state.cities) {
+        // Dots carry the same quantity as the field beneath them (PM2.5), so
+        // color and radius both come from cityPm(). The city's composite AQI
+        // is still reported verbatim in the hover readout, labelled as such —
+        // it is a different number and the page must not conflate them.
         const pm = cityPm(c);
         const x = px(c.lon), y = py(c.lat);
-        ctx.fillStyle = cssAqiColor(Number.isFinite(c.aqi) ? c.aqi : (pm ?? 0) * 2);
-        const r = 2 + 3.5 * Math.min(1, (Number.isFinite(c.aqi) ? c.aqi : 0) / 300);
+        // A city with neither PM2.5 nor an AQI now draws no-data gray. It used
+        // to fall through `(pm ?? 0) * 2` → 0 and render as healthy green.
+        ctx.fillStyle = cssPmColor(pm);
+        // Radius tracks severity on the same scale the color does: 2 px at
+        // clean air, saturating at 5.5 px at 125.4 µg/m³ — the top of the
+        // Unhealthy band, where the EPA table's slope changes.
+        const r = 2 + 3.5 * Math.min(1, (Number.isFinite(pm) ? pm : 0) / 125.4);
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = 'rgba(0,0,0,.5)';
         ctx.lineWidth = 0.75;
@@ -656,7 +693,7 @@ function renderLegend() {
         ? [['#2a5ac8', 'stronger cooling (more negative W/m²)'], ['#04101e', '≈ no excess aerosol']]
         : [['#19e07a', 'good'], ['#ffdc2e', 'moderate'], ['#ff7d0d', 'unhealthy (sens.)'], ['#ff272e', 'unhealthy'], ['#9e40c7', 'very unhealthy']];
     document.getElementById('pl-legend').innerHTML =
-        `<div>${state.mode === 'forcing' ? 'direct forcing (excess over WHO 5 µg/m³)' : 'PM2.5 (EPA AQI color stops)'}</div>`
+        `<div>${state.mode === 'forcing' ? 'direct forcing (excess over WHO 5 µg/m³)' : 'PM2.5 · EPA sub-index color — field, cities and clusters alike'}</div>`
         + rows.map(([c, t]) => `<div class="row"><i style="background:${c}"></i>${t}</div>`).join('');
 }
 
@@ -675,10 +712,31 @@ canvas.addEventListener('mousemove', e => {
         const d = haversineKm(lat, lon, c.lat, c.lon);
         if (d < nd) { nd = d; nearest = c; }
     }
+    // SUPPORT — how far the nearest real sample is. The field is drawn
+    // continuously over the whole planet from ~145 scattered points, so a
+    // bare "PM2.5 14.3 µg/m³" at one decimal reads as a measurement wherever
+    // the cursor happens to be. Precision now follows support, and beyond the
+    // influence radius the value is named for what it is: a background
+    // constant, not an observation.
+    const supportKm = supportAt(state.liveField, lat, lon);
+    const unsupported = !Number.isFinite(supportKm);
+    const value = unsupported
+        ? `<span class="pl-nodata">no sample within ${Math.round(state.liveField?.maxDistKm ?? 2500).toLocaleString()} km — showing clean-air background</span>`
+        // Coarse support gets coarse precision: one decimal implies a
+        // resolution 900 km of interpolation does not have.
+        : `PM2.5 ${supportKm > 250 ? Math.round(v) : v.toFixed(1)} µg/m³`
+            + ` · forcing ${forcing.toFixed(1)} W/m²`;
+    const supportNote = unsupported ? ''
+        : `<br><span class="pl-support">nearest sample ${Math.round(supportKm).toLocaleString()} km`
+            + `${supportKm > 250 ? ' · interpolated' : ''}</span>`;
+
     hover.innerHTML =
         `<b>${Math.abs(lat).toFixed(1)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(1)}°${lon >= 0 ? 'E' : 'W'}</b>`
-        + (nearest && nd < 400 ? ` · ${nearest.name}${Number.isFinite(nearest.aqi) ? ` (AQI ${Math.round(nearest.aqi)})` : ''}` : '')
-        + `<br>PM2.5 ${v.toFixed(1)} µg/m³ · forcing ${forcing.toFixed(1)} W/m²`;
+        // The city's us_aqi is the COMPOSITE index (worst sub-index across
+        // pollutants); the PM2.5 on the next line is one component of it.
+        // Labelling it keeps a reader from reading them as the same number.
+        + (nearest && nd < 400 ? ` · ${nearest.name}${Number.isFinite(nearest.aqi) ? ` (composite AQI ${Math.round(nearest.aqi)})` : ''}` : '')
+        + `<br>${value}${supportNote}`;
     hover.style.display = 'block';
     hover.style.left = Math.min(e.clientX - rect.left + 14, rect.width - 200) + 'px';
     hover.style.top = Math.min(e.clientY - rect.top + 12, rect.height - 46) + 'px';
