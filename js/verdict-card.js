@@ -50,6 +50,7 @@ import { makePanelDraggable, resetPanelPosition } from './draggable-panel.js';
 import { compass16 } from './sun-altitude.js';
 import { telemetry } from './telemetry.js';
 import { AQI_STALE_AFTER_MS } from './air-quality-feed.js';
+import { AQI_POLLUTANTS } from './aqi-scale.js';
 
 const STYLE_ID = 'ev-verdict-styles';
 const MIN_RENDER_MS = 5_000;          // throttle re-renders
@@ -705,6 +706,10 @@ export class VerdictCard {
                 // pollution snapshot prints the hour it actually used.
                 aqiValidAt: air.aqiValidAt ?? null,
                 aqiAgeMs: air.aqiAgeMs ?? null,
+                aqiMethod: air.aqiMethod ?? null,
+                aqiUpstream24h: air.aqiUpstream24h ?? null,
+                aqiNowcast: air.aqiNowcast ?? null,
+                aqiDominant: air.aqiDominant ?? null,
                 pollutantsValidAt: air.pollutantsValidAt ?? null,
                 pollutantsAgeMs: air.pollutantsAgeMs ?? null,
                 stale: air.stale ?? false,
@@ -1009,13 +1014,27 @@ export class VerdictCard {
             ? `Pollution components · model hour ${esc(hour)}${esc(aged)}`
             : 'Pollution components · current model hour';
 
-        // The AQI above may be from a different hour than this grid, and is
-        // in any case a different time base. Both get said out loud.
+        // The AQI above is a different time base from this grid, and may be
+        // from a different hour. Both get said out loud, and the note names
+        // the method actually used rather than asserting one.
         const bases = [];
         if (air.aligned === false && Number.isFinite(air.aqiValidAt)) {
             bases.push(`AQI is from ${esc(fmtClock(air.aqiValidAt, tz))}`);
         }
-        bases.push('AQI is a 24-h running mean; these are hourly values');
+        bases.push(air.aqiMethod === 'nowcast'
+            ? 'AQI is EPA NowCast (weighted trailing mean); these are hourly values'
+            : 'AQI is a 24-h running mean; these are hourly values');
+        if (air.aqiMethod === 'nowcast' && air.aqiDominant) {
+            const driver = AQI_POLLUTANTS[air.aqiDominant]?.label || air.aqiDominant;
+            bases.push(`driven by ${esc(driver)}`);
+        }
+        // When both indices exist and disagree, showing the gap is the point —
+        // it is the difference between "right now" and "averaged over a day".
+        if (air.aqiMethod === 'nowcast' && Number.isFinite(air.aqiUpstream24h)
+                && Number.isFinite(air.aqiNowcast)
+                && Math.abs(air.aqiUpstream24h - air.aqiNowcast) >= 5) {
+            bases.push(`24-h mean reads ${Math.round(air.aqiUpstream24h)}`);
+        }
         const basisNote = `<div class="ev-verdict-pollution-note">${bases.join(' · ')}</div>`;
 
         return `<div class="ev-verdict-pollution" data-ev="pollution-breakdown">

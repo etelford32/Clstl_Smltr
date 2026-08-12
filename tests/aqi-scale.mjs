@@ -20,6 +20,11 @@ import {
     AQI_POLLUTANTS,
     aqiColor,
     aqiFromConcentration,
+    nowcastAqi,
+    nowcastPm,
+    nowcastWeight,
+    realtimeConcentration,
+    trailingMean,
     categoryForAqi,
     compositeAqi,
     concentrationFromAqi,
@@ -260,6 +265,148 @@ import {
     assert.equal(aqiFromConcentration('pm25', -5), null, 'negative concentration rejected');
     assert.equal(aqiFromConcentration('nonsense', 20), null, 'unknown pollutant rejected');
     assert.ok(subIndex('nonsense', 20).note, 'and says so');
+}
+
+// ── NowCast ────────────────────────────────────────────────────────────────
+const HOUR = 3_600_000;
+const NOW = Date.UTC(2026, 7, 12, 14, 20);          // 14:20 → current hour 14:00
+/** Build a trailing series: v[0] is the current hour, v[1] an hour ago, … */
+const trail = (values, gapAt = -1) => values
+    .map((value, i) => (i === gapAt ? null : { time: NOW - i * HOUR, value }))
+    .filter(Boolean);
+
+{
+    // Weight factor = min/max, floored at 0.5.
+    assert.equal(nowcastWeight([10, 10, 10]), 1, 'a flat window is a plain mean');
+    assert.ok(Math.abs(nowcastWeight([5, 10]) - 0.5) < 1e-12, 'min/max = 0.5');
+    assert.equal(nowcastWeight([1, 100]), 0.5, 'steep windows floor at 0.5');
+    assert.equal(nowcastWeight([0, 0, 0]), 1, 'an all-zero window does not divide by zero');
+    assert.equal(nowcastWeight([]), null);
+
+    // A 12-hour window, most recent hour first, worked through the EPA
+    // definition by hand so this pins arithmetic and not just self-consistency:
+    //   min 8.6 / max 47.4 = 0.181  → w floors to 0.5
+    //   Σ cᵢ·0.5ⁱ = 78.38799 ,  Σ 0.5ⁱ = 2 − 2⁻¹¹ = 1.99951172
+    //   NowCast   = 78.38799 / 1.99951172 = 39.2036…
+    const epa = [34.9, 43.6, 45.2, 47.4, 43.6, 33.0, 28.6, 20.5, 15.7, 12.4, 10.2, 8.6];
+    const nc = nowcastPm(trail(epa), { nowMs: NOW });
+    assert.ok(nc.valid, 'the worked example is valid');
+    assert.equal(nc.hoursUsed, 12);
+    assert.equal(nc.weight, 0.5, 'this window is steep enough to floor the weight');
+    assert.ok(Math.abs(nc.value - 39.2036) < 1e-3,
+        `hand-computed NowCast = 39.2036 (got ${nc.value.toFixed(4)})`);
+    // The flat 12-h mean is 28.64 — NowCast leads it on a window that rose
+    // and is now easing, which is the entire reason EPA publishes it.
+    const flatMean = epa.reduce((a, b) => a + b, 0) / epa.length;
+    assert.ok(Math.abs(flatMean - 28.6417) < 1e-3, 'flat mean cross-check');
+    assert.ok(nc.value > flatMean, 'NowCast leads the flat mean here');
+
+    // The whole point: a plume in the newest hour must move the number now.
+    const quiet = nowcastPm(trail(new Array(12).fill(8)), { nowMs: NOW });
+    const plume = nowcastPm(trail([200, ...new Array(11).fill(8)]), { nowMs: NOW });
+    assert.equal(quiet.value, 8, 'a flat window returns the flat value');
+    assert.ok(plume.value > 100,
+        `a fresh plume dominates immediately (got ${plume.value.toFixed(1)})`);
+    // Under the 24-h flat mean the same plume would barely register.
+    const flat24 = (200 + 8 * 11) / 12;
+    assert.ok(plume.value > 3 * flat24, 'NowCast reacts far faster than a flat mean');
+
+    // A flat window makes NowCast equal to the plain mean, by construction.
+    const flatSeries = trail([20, 20, 20, 20, 20, 20]);
+    assert.ok(Math.abs(nowcastPm(flatSeries, { nowMs: NOW }).value - 20) < 1e-12);
+
+    // EPA validity: 2 of the 3 most recent hours must be present.
+    const gapAtNow = nowcastPm(trail([10, 10, 10, 10], 0), { nowMs: NOW });
+    assert.equal(gapAtNow.valid, true, 'a gap at hour 0 still passes on hours 1 and 2');
+    const oneRecent = [{ time: NOW, value: 10 }, { time: NOW - 6 * HOUR, value: 10 }];
+    const bad = nowcastPm(oneRecent, { nowMs: NOW });
+    assert.equal(bad.valid, false, 'only one of the last three hours → not reported');
+    assert.equal(bad.value, null);
+    assert.match(bad.reason, /2 of the 3 most recent/);
+    assert.equal(nowcastPm([], { nowMs: NOW }).valid, false);
+
+    // Forecast rows must never contribute to a "now" value.
+    const future = [{ time: NOW + 2 * HOUR, value: 500 }, { time: NOW, value: 10 },
+        { time: NOW - HOUR, value: 10 }];
+    assert.equal(nowcastPm(future, { nowMs: NOW }).value, 10,
+        'a future hour is excluded from NowCast');
+
+    // Only the window's hours count; older rows fall out.
+    const long = trail(new Array(30).fill(0).map((_, i) => (i < 12 ? 10 : 999)));
+    assert.equal(nowcastPm(long, { nowMs: NOW }).value, 10, 'hours beyond the window are dropped');
+}
+
+{
+    // Straight trailing means for the flat-averaged pollutants. EPA wants 75%
+    // of the window present — 6 of 8 hours here.
+    const m = trailingMean(trail([0.06, 0.055, 0.05, 0.045, 0.04, 0.035]), { nowMs: NOW, hours: 8 });
+    assert.ok(m.valid, '6 of 8 hours is a valid 8-h mean');
+    assert.ok(Math.abs(m.value - 0.0475) < 1e-12, 'mean over present hours');
+    assert.equal(m.hoursUsed, 6);
+    // 4 of 8 is not an 8-hour average, and must not be scored as one.
+    const thin = trailingMean(trail([0.06, 0.05, 0.04, 0.03]), { nowMs: NOW, hours: 8 });
+    assert.equal(thin.valid, false, '4 of 8 hours fails the 75% rule');
+    assert.equal(thin.value, null);
+    assert.match(thin.reason, /needs 6 hours, has 4/);
+    // A 1-hour pollutant needs exactly its one hour.
+    assert.equal(trailingMean(trail([20]), { nowMs: NOW, hours: 1 }).valid, true);
+    // 24-h SO₂ needs 18 hours.
+    assert.match(trailingMean(trail(new Array(10).fill(5)), { nowMs: NOW, hours: 24 }).reason,
+        /needs 18 hours, has 10/);
+    // The current hour is required — a mean of only stale hours is not "now".
+    const stale = trailingMean([{ time: NOW - 5 * HOUR, value: 0.06 }], { nowMs: NOW, hours: 8 });
+    assert.equal(stale.valid, false);
+    assert.match(stale.reason, /current hour is missing/);
+
+    // Dispatch comes from the registry, not a switch statement.
+    assert.equal(realtimeConcentration('pm25', trail([10, 10, 10]), { nowMs: NOW }).method, 'nowcast');
+    assert.equal(realtimeConcentration('o3_8h', trail([0.05, 0.05]), { nowMs: NOW }).method, 'mean');
+    assert.equal(realtimeConcentration('o3_8h', trail([0.05]), { nowMs: NOW }).windowHours, 8);
+    assert.equal(realtimeConcentration('no2', trail([20]), { nowMs: NOW }).windowHours, 1);
+    assert.equal(realtimeConcentration('nope', trail([1]), { nowMs: NOW }).valid, false);
+
+    // Units are converted before averaging, not after. Needs 6 of 8 hours.
+    const o3 = realtimeConcentration('o3_8h', trail(new Array(8).fill(140)),
+        { nowMs: NOW, unit: 'µg/m³' });
+    assert.ok(o3.valid, 'a full 8-h window is valid');
+    assert.ok(Math.abs(o3.value - 0.0713125) < 1e-6, 'µg/m³ → ppm happens inside the average');
+}
+
+{
+    // Composite NowCast: worst sub-index wins and names itself.
+    const series = {
+        pm25: trail([30, 28, 26, 24, 20, 18, 15, 12, 10, 9, 8, 8]),
+        o3_8h: trail([60, 58, 55, 52, 50, 48, 45, 44]),
+        no2: trail([40]),
+    };
+    const nc = nowcastAqi(series, { nowMs: NOW, unit: 'µg/m³' });
+    assert.ok(isFinite(nc.aqi), 'a composite is produced');
+    assert.equal(nc.dominant, 'pm25', 'PM2.5 drives this one');
+    assert.equal(nc.category.key, categoryForAqi(nc.aqi).key);
+    assert.ok(nc.methods.pm25.method === 'nowcast' && nc.methods.pm25.windowHours === 12,
+        'the method used rides the result');
+    assert.ok(nc.methods.o3_8h.method === 'mean');
+
+    // A pollutant that fails its validity rule is skipped with a reason, and
+    // must not silently drag the composite down.
+    const partial = nowcastAqi({
+        pm25: [{ time: NOW - 8 * HOUR, value: 300 }],       // fails 2-of-3
+        no2: trail([40]),
+    }, { nowMs: NOW, unit: 'µg/m³' });
+    assert.equal(partial.dominant, 'no2', 'the invalid PM2.5 is excluded, not zero-filled');
+    assert.ok(partial.notes.some(n => /pm25/.test(n)), 'and the exclusion is reported');
+
+    // Nothing usable → null, never 0.
+    assert.equal(nowcastAqi({}, { nowMs: NOW }).aqi, null);
+    assert.equal(nowcastAqi({ pm25: [] }, { nowMs: NOW }).aqi, null);
+
+    // NowCast vs the flat 24-h table on the same plume: the whole reason for
+    // this code. A fresh smoke hour must not be averaged into invisibility.
+    const smoke = trail([180, 12, 10, 9, 9, 8, 8, 8, 8, 8, 8, 8]);
+    const ncSmoke = nowcastAqi({ pm25: smoke }, { nowMs: NOW, unit: 'µg/m³' });
+    const flat = smoke.reduce((a, s) => a + s.value, 0) / smoke.length;
+    assert.ok(ncSmoke.aqi > aqiFromConcentration('pm25', flat) + 40,
+        `NowCast AQI ${ncSmoke.aqi} clears the flat-mean AQI by a wide margin`);
 }
 
 console.log('aqi-scale: all assertions passed');

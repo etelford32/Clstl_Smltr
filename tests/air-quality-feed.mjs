@@ -30,7 +30,22 @@ const payload = {
 };
 
 const out = normalizeAirQuality(payload, now);
-assert.equal(out.aqi, 42, 'current hour AQI selected');
+// The headline is now EPA NowCast rebuilt from the hourly components, not
+// upstream's 24-h-mean composite. Both are kept so they can be compared.
+//   PM2.5 trail (newest first) 8.4, 5.2, 4.1 → w = min/max = 0.488 → floors
+//   to 0.5 → (8.4 + 5.2·0.5 + 4.1·0.25) / 1.75 = 6.871 → trunc 6.8 → AQI 38.
+assert.equal(out.aqi, 38, 'headline AQI is the NowCast composite');
+assert.equal(out.aqiMethod, 'nowcast');
+assert.equal(out.aqiNowcast, 38);
+assert.equal(out.aqiUpstream24h, 42, 'upstream 24-h composite is retained');
+assert.equal(out.aqiDominant, 'pm25', 'and the driving pollutant is named');
+assert.equal(out.aqiMethods.pm25.method, 'nowcast');
+// This fixture only carries 3 past hours, so the 8-h ozone mean fails EPA's
+// 75%-completeness rule (6 of 8) and is excluded WITH a reason rather than
+// scored from a partial window. NowCast needs only 2 of the 3 most recent
+// hours, so PM2.5 still reports — the two rules are different on purpose.
+assert.equal(out.aqiMethods.o3_8h, undefined, 'a partial 8-h window is not an 8-h mean');
+assert.ok(out.aqiNotes.some(n => /o3_8h/.test(n)), 'and the exclusion is reported');
 assert.equal(out.pollutants.pm25, 8.4, 'current PM2.5 retained');
 assert.equal(out.pollutants.aerosolOpticalDepth, 0.086, 'current AOD retained');
 assert.equal(out.pollutionHourly.length, 4, 'full aligned series retained');
@@ -47,7 +62,12 @@ const lagged = normalizeAirQuality({ hourly: {
     us_aqi: [null, null, 99],
     pm2_5: [3, 7, 20],
 }}, now);
-assert.equal(lagged.aqi, null);
+// NowCast is computed from COMPONENTS, so it still produces a number when
+// upstream's composite is absent for every past hour — a strict improvement
+// over returning null. PM2.5 7, 3 → w = 0.5 → 5.667 → trunc 5.6 → AQI 31.
+assert.equal(lagged.aqiUpstream24h, null, 'no past us_aqi to fall back on');
+assert.equal(lagged.aqi, 31, 'NowCast fills in from the component series');
+assert.equal(lagged.aqiMethod, 'nowcast');
 assert.equal(lagged.pollutants.pm25, 7);
 
 const splitCadence = normalizeAirQuality({ hourly: {
@@ -55,7 +75,9 @@ const splitCadence = normalizeAirQuality({ hourly: {
     us_aqi: [37, null],
     pm2_5: [5, 8],
 }}, now);
-assert.equal(splitCadence.aqi, 37, 'latest past AQI survives a component-only current hour');
+// PM2.5 8, 5 → w = 5/8 = 0.625 → (8 + 5·0.625)/1.625 = 6.846 → 6.8 → AQI 38.
+assert.equal(splitCadence.aqi, 38, 'NowCast spans the split cadence');
+assert.equal(splitCadence.aqiUpstream24h, 37, 'the latest past us_aqi is still kept');
 assert.equal(splitCadence.pollutants.pm25, 8, 'pollutants remain aligned to the current hour');
 
 // ── Temporal provenance ────────────────────────────────────────────────────
@@ -64,15 +86,18 @@ assert.equal(splitCadence.pollutants.pm25, 8, 'pollutants remain aligned to the 
 // nothing in the state to contradict it.
 {
     assert.equal(out.aqiValidAt, t0, 'AQI carries the model hour it came from');
+    assert.equal(out.upstreamValidAt, t0, 'the upstream composite carries its own');
     assert.equal(out.pollutantsValidAt, t0, 'pollutants carry theirs');
     assert.equal(out.aqiAgeMs, now - t0, 'age is measured against the caller clock');
     assert.equal(out.stale, false, 'the current hour is not stale');
     assert.equal(out.aligned, true, 'AQI and pollutants share an hour here');
 
-    // The deliberate split-cadence case must report itself as unaligned.
-    assert.equal(splitCadence.aligned, false,
-        'AQI from an earlier hour than the pollutants is flagged, not hidden');
-    assert.equal(splitCadence.aqiValidAt, t0 - HOUR);
+    // With NowCast the headline and the pollutant grid share the current hour
+    // by construction, so this case is aligned even though the UPSTREAM
+    // composite came from the earlier hour — which upstreamValidAt records.
+    assert.equal(splitCadence.aligned, true, 'NowCast anchors on the current hour');
+    assert.equal(splitCadence.aqiValidAt, t0);
+    assert.equal(splitCadence.upstreamValidAt, t0 - HOUR, 'the split is still visible');
     assert.equal(splitCadence.pollutantsValidAt, t0);
 
     // A lagging run inside the stale window: still served, but disclosed.
@@ -81,7 +106,11 @@ assert.equal(splitCadence.pollutants.pm25, 8, 'pollutants remain aligned to the 
         time: [(t0 - lagHours * HOUR) / 1000],
         us_aqi: [88], pm2_5: [30],
     } }, now);
+    // One stale hour cannot satisfy NowCast's 2-of-3 rule, so this correctly
+    // falls back to the upstream composite and says so.
     assert.equal(laggy.aqi, 88, 'an aged value is still shown — a blank card is worse');
+    assert.equal(laggy.aqiMethod, 'upstream-24h', 'NowCast declines, upstream carries it');
+    assert.equal(laggy.aqiNowcast, null, 'and NowCast reports nothing rather than guessing');
     assert.equal(laggy.stale, true, 'but it is marked stale');
     assert.ok(laggy.aqiAgeMs >= AQI_STALE_AFTER_MS, 'and carries its age');
 
@@ -91,6 +120,8 @@ assert.equal(splitCadence.pollutants.pm25, 8, 'pollutants remain aligned to the 
         us_aqi: [88], pm2_5: [30],
     } }, now);
     assert.equal(ancient.aqi, null, 'past AQI_MAX_AGE_MS the AQI is dropped');
+    assert.equal(ancient.aqiMethod, null, 'with no method to claim');
+    assert.equal(ancient.aqiNowcast, null, 'NowCast window excludes it too');
     assert.equal(ancient.pollutants.pm25, null, 'and so are the pollutants');
     assert.equal(ancient.aqiValidAt, null);
     assert.equal(ancient.aligned, null, 'alignment is unknown, not false, with no rows');
@@ -100,6 +131,7 @@ assert.equal(splitCadence.pollutants.pm25, 8, 'pollutants remain aligned to the 
         time: [(t0 + 2 * HOUR) / 1000], us_aqi: [55], pm2_5: [12],
     } }, now);
     assert.equal(futureOnly.aqi, null, 'a forecast hour is not the current hour');
+    assert.equal(futureOnly.aqiNowcast, null, 'NowCast never reaches into the forecast');
     assert.equal(futureOnly.aqiValidAt, null);
     // ...but it still rides the series, which is what the chart consumes.
     assert.equal(futureOnly.pollutionHourly.length, 1, 'forecast rows stay in the series');

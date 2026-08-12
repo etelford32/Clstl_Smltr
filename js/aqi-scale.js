@@ -30,9 +30,9 @@
  * For real-time reporting from hourly data, EPA uses NowCast (a weighted
  * trailing mean that reacts faster than a flat 24 h average), which is what
  * AirNow publishes. This module deliberately does NOT silently substitute one
- * for the other: callers pass a properly averaged concentration and say which
- * window it came from. Wiring the site's hourly feeds to NowCast is tracked
- * separately; see the AQI review notes.
+ * for the other: `subIndex`/`aqiFromConcentration` take an already-averaged
+ * concentration, and `nowcastAqi` takes raw hourly series and does the
+ * averaging itself. Pick the one that matches the data you hold.
  *
  * Reference: 40 CFR Part 58 Appendix G, and EPA-454/B-24-002 "Technical
  * Assistance Document for the Reporting of Daily Air Quality". The PM2.5
@@ -81,6 +81,7 @@ export const MOLAR_VOLUME_25C = 24.45;
 export const AQI_POLLUTANTS = Object.freeze({
     pm25: Object.freeze({
         label: 'PM2.5', epaUnit: 'µg/m³', averagingHours: 24, decimals: 1, molarMass: null,
+        realtime: Object.freeze({ method: 'nowcast', hours: 12 }),
         breakpoints: Object.freeze([
             [0.0,   9.0,     0,  50],
             [9.1,   35.4,   51, 100],
@@ -92,6 +93,7 @@ export const AQI_POLLUTANTS = Object.freeze({
     }),
     pm10: Object.freeze({
         label: 'PM10', epaUnit: 'µg/m³', averagingHours: 24, decimals: 0, molarMass: null,
+        realtime: Object.freeze({ method: 'nowcast', hours: 12 }),
         breakpoints: Object.freeze([
             [0,   54,    0,  50],
             [55,  154,  51, 100],
@@ -107,6 +109,7 @@ export const AQI_POLLUTANTS = Object.freeze({
     // EPA's "take the larger" rule.
     o3_8h: Object.freeze({
         label: 'O₃ (8 h)', epaUnit: 'ppm', averagingHours: 8, decimals: 3, molarMass: 48.00,
+        realtime: Object.freeze({ method: 'mean', hours: 8 }),
         breakpoints: Object.freeze([
             [0.000, 0.054,   0,  50],
             [0.055, 0.070,  51, 100],
@@ -117,6 +120,7 @@ export const AQI_POLLUTANTS = Object.freeze({
     }),
     o3_1h: Object.freeze({
         label: 'O₃ (1 h)', epaUnit: 'ppm', averagingHours: 1, decimals: 3, molarMass: 48.00,
+        realtime: Object.freeze({ method: 'mean', hours: 1 }),
         reportsFrom: 101,
         breakpoints: Object.freeze([
             [0.125, 0.164, 101, 150],
@@ -127,6 +131,7 @@ export const AQI_POLLUTANTS = Object.freeze({
     }),
     co: Object.freeze({
         label: 'CO', epaUnit: 'ppm', averagingHours: 8, decimals: 1, molarMass: 28.010,
+        realtime: Object.freeze({ method: 'mean', hours: 8 }),
         breakpoints: Object.freeze([
             [0.0,   4.4,   0,  50],
             [4.5,   9.4,  51, 100],
@@ -141,6 +146,7 @@ export const AQI_POLLUTANTS = Object.freeze({
     // the 24-hour value, and this module says so rather than guessing.
     so2_1h: Object.freeze({
         label: 'SO₂ (1 h)', epaUnit: 'ppb', averagingHours: 1, decimals: 0, molarMass: 64.066,
+        realtime: Object.freeze({ method: 'mean', hours: 1 }),
         reportsTo: 200,
         breakpoints: Object.freeze([
             [0,   35,    0,  50],
@@ -151,6 +157,7 @@ export const AQI_POLLUTANTS = Object.freeze({
     }),
     so2_24h: Object.freeze({
         label: 'SO₂ (24 h)', epaUnit: 'ppb', averagingHours: 24, decimals: 0, molarMass: 64.066,
+        realtime: Object.freeze({ method: 'mean', hours: 24 }),
         reportsFrom: 201,
         breakpoints: Object.freeze([
             [305, 604,  201, 300],
@@ -159,6 +166,7 @@ export const AQI_POLLUTANTS = Object.freeze({
     }),
     no2: Object.freeze({
         label: 'NO₂', epaUnit: 'ppb', averagingHours: 1, decimals: 0, molarMass: 46.0055,
+        realtime: Object.freeze({ method: 'mean', hours: 1 }),
         breakpoints: Object.freeze([
             [0,    53,   0,  50],
             [54,   100, 51, 100],
@@ -349,6 +357,157 @@ export function compositeAqi(readings = {}, { unit } = {}) {
     return { aqi, dominant, category: aqi == null ? null : categoryForAqi(aqi), subIndices, notes };
 }
 
+// ── Real-time reporting: NowCast ───────────────────────────────────────────
+//
+// The EPA tables above are defined on 24-hour means (PM) and 8-hour means
+// (O₃/CO). Those are DAILY reporting definitions. For a "right now" number
+// from hourly data, AirNow publishes NowCast: a trailing weighted mean whose
+// weight collapses toward the most recent hour when concentrations are moving
+// fast, so a smoke plume shows up in an hour instead of being buried under
+// eleven clean ones.
+//
+// PM2.5 and PM10 use the weighted scheme (EPA-454/B-24-002). O₃ and CO use
+// straight running means over their EPA windows; NO₂ and SO₂ are 1-hour
+// pollutants and need no averaging. Each pollutant's `realtime` descriptor
+// above records which applies, so this dispatches from data, not a switch.
+
+const HOUR = 3_600_000;
+
+/** Bucket [{time, value}] into hours-ago 0..hours-1 relative to nowMs. */
+function trailingHours(samples, nowMs, hours) {
+    const nowHour = Math.floor(nowMs / HOUR) * HOUR;
+    const slots = new Array(hours).fill(null);
+    for (const s of Array.isArray(samples) ? samples : []) {
+        const t = Number(s?.time);
+        const v = Number(s?.value);
+        if (!Number.isFinite(t) || !Number.isFinite(v) || v < 0) continue;
+        const i = Math.round((nowHour - Math.floor(t / HOUR) * HOUR) / HOUR);
+        // i === 0 is the current hour; negatives are forecast rows and are
+        // never eligible for a "now" value.
+        if (i >= 0 && i < hours && slots[i] == null) slots[i] = v;
+    }
+    return slots;
+}
+
+/**
+ * EPA NowCast weight factor: w = min/max over the window, floored at 0.5.
+ * (EPA states it as 1 − (max−min)/max, which is algebraically min/max.)
+ * A flat window gives w = 1 (plain mean); a violently rising one gives 0.5,
+ * which puts ~50% of the weight on the most recent hour.
+ */
+export function nowcastWeight(values) {
+    const v = values.filter(x => Number.isFinite(x));
+    if (!v.length) return null;
+    const max = Math.max(...v);
+    if (max <= 0) return 1;            // all-zero window: plain mean, no 0/0
+    return Math.max(0.5, Math.min(1, Math.min(...v) / max));
+}
+
+/**
+ * NowCast over a trailing window. Returns the concentration, not an AQI.
+ *
+ * EPA validity rule: at least 2 of the 3 most recent hours must be present.
+ * Below that the value is not reported — a NowCast built from one stale hour
+ * is exactly the kind of number this whole review has been removing.
+ */
+export function nowcastPm(samples, { nowMs, hours = 12 } = {}) {
+    const slots = trailingHours(samples, nowMs, hours);
+    const recent = slots.slice(0, 3).filter(v => v != null).length;
+    if (recent < 2) {
+        return { value: null, valid: false, hoursUsed: 0,
+            reason: 'NowCast needs 2 of the 3 most recent hours' };
+    }
+    const w = nowcastWeight(slots.filter(v => v != null));
+    let num = 0, den = 0, used = 0;
+    for (let i = 0; i < slots.length; i++) {
+        if (slots[i] == null) continue;
+        const wi = w ** i;
+        num += slots[i] * wi;
+        den += wi;
+        used++;
+    }
+    if (!(den > 0)) {
+        return { value: null, valid: false, hoursUsed: 0, reason: 'no usable hours' };
+    }
+    return { value: num / den, valid: true, hoursUsed: used, weight: w, reason: null };
+}
+
+/**
+ * Straight trailing mean over `hours`, for the pollutants EPA averages flat.
+ *
+ * Completeness matters as much as it does for NowCast: EPA requires 75% of
+ * the hours in an averaging window (6 of 8 for O₃/CO, 18 of 24 for SO₂) for
+ * the average to be valid. Without that rule a single hour would be returned
+ * as an "8-hour average" and scored against the 8-hour table — which is how
+ * a lone ozone reading ends up impersonating a full window.
+ */
+export function trailingMean(samples, { nowMs, hours = 8 } = {}) {
+    const slots = trailingHours(samples, nowMs, hours);
+    const present = slots.filter(v => v != null);
+    if (slots[0] == null) {
+        return { value: null, valid: false, hoursUsed: 0,
+            reason: 'the current hour is missing' };
+    }
+    const required = hours === 1 ? 1 : Math.ceil(0.75 * hours);
+    if (present.length < required) {
+        return { value: null, valid: false, hoursUsed: present.length,
+            reason: `a ${hours}-h mean needs ${required} hours, has ${present.length}` };
+    }
+    return {
+        value: present.reduce((a, b) => a + b, 0) / present.length,
+        valid: true, hoursUsed: present.length, reason: null,
+    };
+}
+
+/**
+ * Real-time concentration for one pollutant, dispatched on its `realtime`
+ * descriptor. `samples` are [{time, value}] in `unit` (default: EPA unit).
+ */
+export function realtimeConcentration(pollutantKey, samples, { nowMs, unit } = {}) {
+    const spec = AQI_POLLUTANTS[pollutantKey];
+    if (!spec) return { value: null, valid: false, hoursUsed: 0, reason: `unknown pollutant "${pollutantKey}"` };
+    const rt = spec.realtime ?? { method: 'mean', hours: spec.averagingHours };
+    const converted = (Array.isArray(samples) ? samples : []).map(s => ({
+        time: s?.time,
+        value: unit ? toEpaUnit(pollutantKey, Number(s?.value), unit) : Number(s?.value),
+    }));
+    const out = rt.method === 'nowcast'
+        ? nowcastPm(converted, { nowMs, hours: rt.hours })
+        : trailingMean(converted, { nowMs, hours: rt.hours });
+    return { ...out, method: rt.method, windowHours: rt.hours };
+}
+
+/**
+ * Composite NowCast AQI from per-pollutant hourly series.
+ *
+ * @param {object} series  { pm25: [{time, value}], o3_8h: [...], ... } —
+ *                         raw hourly concentrations, NOT pre-averaged.
+ * @param {object} opts    { nowMs, unit }  unit may be a string or a
+ *                         per-pollutant map, same as compositeAqi.
+ * @returns {{aqi, dominant, category, subIndices, methods, notes}}
+ */
+export function nowcastAqi(series = {}, { nowMs, unit } = {}) {
+    const subIndices = {};
+    const methods = {};
+    const notes = [];
+    let aqi = null, dominant = null;
+
+    for (const key of Object.keys(AQI_POLLUTANTS)) {
+        if (!Array.isArray(series[key]) || !series[key].length) continue;
+        const u = typeof unit === 'object' && unit !== null ? unit[key] : unit;
+        const rt = realtimeConcentration(key, series[key], { nowMs, unit: u });
+        if (!rt.valid) { if (rt.reason) notes.push(`${key}: ${rt.reason}`); continue; }
+        const r = subIndex(key, rt.value);
+        if (r.note) notes.push(`${key}: ${r.note}`);
+        if (r.aqi == null) continue;
+        subIndices[key] = r.aqi;
+        methods[key] = { method: rt.method, windowHours: rt.windowHours, hoursUsed: rt.hoursUsed };
+        if (aqi == null || r.aqi > aqi) { aqi = r.aqi; dominant = key; }
+    }
+
+    return { aqi, dominant, category: aqi == null ? null : categoryForAqi(aqi), subIndices, methods, notes };
+}
+
 /** AQI → its EPA category object (null for non-finite / negative input). */
 export function categoryForAqi(aqi) {
     if (!Number.isFinite(aqi) || aqi < 0) return null;
@@ -369,4 +528,5 @@ export default {
     AQI_MAX, AQI_CATEGORIES, AQI_POLLUTANTS, NO_DATA_RGB, MOLAR_VOLUME_25C,
     truncate, toEpaUnit, fromEpaUnit, subIndex, aqiFromConcentration,
     concentrationFromAqi, compositeAqi, categoryForAqi, aqiColor,
+    nowcastWeight, nowcastPm, trailingMean, realtimeConcentration, nowcastAqi,
 };

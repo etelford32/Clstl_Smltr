@@ -23,19 +23,45 @@
  * bypasses the timer and refetches immediately.
  *
  * TEMPORAL PROVENANCE — read before rendering any of these numbers:
- *   - `aqi` is Open-Meteo's composite `us_aqi`, which EPA defines on a
- *     24-HOUR RUNNING MEAN of PM (8 h for O₃/CO). The `pollutants` beside it
- *     are INSTANTANEOUS values for one model hour. They are different time
- *     bases and will not reconcile against the EPA table by hand; anything
- *     showing them together must say so.
- *   - `aqiValidAt` / `pollutantsValidAt` are the model hours actually used.
- *     They can differ (see the note in normalizeAirQuality) — `aligned` says
- *     whether they did.
+ *   - `aqi` is EPA NowCast, rebuilt here from the hourly component series via
+ *     js/aqi-scale.js. NowCast is the REAL-TIME index AirNow publishes: a
+ *     trailing weighted mean whose weight collapses toward the newest hour
+ *     when concentrations move fast, so a smoke plume registers within an
+ *     hour instead of being buried under eleven clean ones.
+ *   - `aqiUpstream24h` is Open-Meteo's `us_aqi`, EPA's DAILY definition
+ *     (24-h running mean for PM, 8 h for O₃/CO). It is correct for what it
+ *     is and is retained deliberately — the two disagreeing is a signal, not
+ *     a bug, and comparing them is the site's stated thesis.
+ *   - `aqiMethod` says which one `aqi` currently holds. NowCast needs 2 of
+ *     the 3 most recent hours; when it declines, the upstream composite
+ *     carries the value and the method records that.
+ *   - `pollutants` are still INSTANTANEOUS single-hour values. They are a
+ *     different time base from either index and will not reconcile against
+ *     the EPA table by hand; anything showing them together must say so.
+ *   - `aqiValidAt` / `pollutantsValidAt` are the model hours actually used;
+ *     `upstreamValidAt` is the hour us_aqi was published for. `aligned` says
+ *     whether the headline and the pollutant grid share an hour.
  *   - `stale` is set once either is AQI_STALE_AFTER_MS behind. Values older
  *     than AQI_MAX_AGE_MS are dropped, not served as current.
  */
 
 import { CAMS_PROVENANCE } from './air-quality-frame.js';
+import { nowcastAqi } from './aqi-scale.js';
+
+/**
+ * App-facing pollutant field → the EPA sub-index it feeds. `us_aqi` from
+ * upstream is a 24-h-mean composite; NowCast rebuilds the composite from
+ * these hourly series instead. Dust and AOD have no EPA table and are
+ * excluded on purpose — they are reported, never scored.
+ */
+const NOWCAST_FIELDS = Object.freeze({
+    pm25: 'pm25',
+    pm10: 'pm10',
+    ozone: 'o3_8h',
+    nitrogenDioxide: 'no2',
+    sulphurDioxide: 'so2_1h',
+    carbonMonoxide: 'co',
+});
 
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const AIR_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
@@ -109,7 +135,15 @@ export class AirQualityFeed {
             pollutionHourly: [],     // 24 h recent + 72 h forecast; AQI + pollutant fields
             pollutionUnits: {},      // app-facing field name → upstream unit
             airSource: AIR_QUALITY_SOURCE,
+            aqiMethod: null,         // 'nowcast' | 'upstream-24h'
+            aqiUpstream24h: null,    // Open-Meteo's 24-h-mean composite
+            aqiNowcast: null,        // our EPA NowCast composite
+            aqiDominant: null,       // pollutant driving the NowCast
+            aqiSubIndices: {},       // per-pollutant NowCast sub-indices
+            aqiMethods: {},          // per-pollutant window actually used
+            aqiNotes: [],            // pollutants skipped, and why
             aqiValidAt: null,        // ms — the model hour the AQI came from
+            upstreamValidAt: null,   // ms — the hour us_aqi was published for
             aqiAgeMs: null,          // ms behind now
             pollutantsValidAt: null, // ms — may differ from aqiValidAt
             pollutantsAgeMs: null,
@@ -239,7 +273,15 @@ export class AirQualityFeed {
             next.pollutionHourly = normalized.pollutionHourly;
             next.pollutionUnits = normalized.pollutionUnits;
             next.airSource = AIR_QUALITY_SOURCE;
+            next.aqiMethod = normalized.aqiMethod;
+            next.aqiUpstream24h = normalized.aqiUpstream24h;
+            next.aqiNowcast = normalized.aqiNowcast;
+            next.aqiDominant = normalized.aqiDominant;
+            next.aqiSubIndices = normalized.aqiSubIndices;
+            next.aqiMethods = normalized.aqiMethods;
+            next.aqiNotes = normalized.aqiNotes;
             next.aqiValidAt = normalized.aqiValidAt;
+            next.upstreamValidAt = normalized.upstreamValidAt;
             next.aqiAgeMs = normalized.aqiAgeMs;
             next.pollutantsValidAt = normalized.pollutantsValidAt;
             next.pollutantsAgeMs = normalized.pollutantsAgeMs;
@@ -336,14 +378,45 @@ export function normalizeAirQuality(payload = {}, nowMs = Date.now()) {
         pollutionUnits[appName] = units[upstreamName] || defaultUnit(appName);
     }
 
-    const aqiValidAt = aqiIdx >= 0 ? times[aqiIdx] * 1000 : null;
+    // NowCast — the real-time composite, rebuilt from the hourly component
+    // series. Upstream's us_aqi is EPA's DAILY definition (24-h running mean
+    // for PM); NowCast is the REAL-TIME one AirNow publishes, and it is what
+    // a user comparing against their phone actually sees. Both are kept: the
+    // upstream value rides as aqiUpstream24h so the two can be compared,
+    // which is the site's whole "show where the model and reality differ"
+    // thesis rather than a silent swap.
+    const nowcastSeries = {};
+    for (const [field, pollutant] of Object.entries(NOWCAST_FIELDS)) {
+        const rows = pollutionHourly
+            .filter(row => row[field] != null)
+            .map(row => ({ time: row.time, value: row[field] }));
+        if (rows.length) nowcastSeries[pollutant] = rows;
+    }
+    const nowcast = nowcastAqi(nowcastSeries, { nowMs, unit: 'µg/m³' });
+
+    const upstreamValidAt = aqiIdx >= 0 ? times[aqiIdx] * 1000 : null;
     const pollutantsValidAt = currentIdx >= 0 ? times[currentIdx] * 1000 : null;
+    // NowCast is anchored on the trailing window ending at the current model
+    // hour, so its valid time is the pollutants' hour — not the (possibly
+    // older) hour the upstream composite happened to be published for.
+    const aqiValidAt = nowcast.aqi != null ? pollutantsValidAt : upstreamValidAt;
     const ageOf = (t) => (t == null ? null : Math.max(0, nowMs - t));
     const aqiAgeMs = ageOf(aqiValidAt);
     const pollutantsAgeMs = ageOf(pollutantsValidAt);
 
+    const upstream24h = aqiIdx >= 0 ? numOrNull(aq.us_aqi?.[aqiIdx]) : null;
+
     return {
-        aqi: aqiIdx >= 0 ? numOrNull(aq.us_aqi?.[aqiIdx]) : null,
+        // The headline number is NowCast when it is computable, and the
+        // upstream 24-h composite otherwise. `aqiMethod` says which, always.
+        aqi: nowcast.aqi ?? upstream24h,
+        aqiMethod: nowcast.aqi != null ? 'nowcast' : (upstream24h != null ? 'upstream-24h' : null),
+        aqiUpstream24h: upstream24h,
+        aqiNowcast: nowcast.aqi,
+        aqiDominant: nowcast.dominant,
+        aqiSubIndices: nowcast.subIndices,
+        aqiMethods: nowcast.methods,
+        aqiNotes: nowcast.notes,
         aqiHourly: pollutionHourly
             .filter(row => row.aqi != null)
             .map(row => ({ time: row.time, aqi: row.aqi })),
@@ -355,11 +428,16 @@ export function normalizeAirQuality(payload = {}, nowMs = Date.now()) {
         // contradict it — see AQI_STALE_AFTER_MS.
         aqiValidAt,
         aqiAgeMs,
+        upstreamValidAt,
         pollutantsValidAt,
         pollutantsAgeMs,
         stale: [aqiAgeMs, pollutantsAgeMs]
             .some(age => age != null && age >= AQI_STALE_AFTER_MS),
-        aligned: aqiIdx >= 0 && currentIdx >= 0 ? aqiIdx === currentIdx : null,
+        // With NowCast the headline and the pollutant grid share the current
+        // hour by construction, so they are aligned whenever both exist.
+        aligned: nowcast.aqi != null
+            ? (pollutantsValidAt != null ? true : null)
+            : (aqiIdx >= 0 && currentIdx >= 0 ? aqiIdx === currentIdx : null),
     };
 }
 
