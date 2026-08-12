@@ -150,7 +150,7 @@ hindcast, and this repo already has a hindcast discipline
 
 | phase | deliverable | needs |
 |---|---|---|
-| S1 | `/api/pollution/sources` — Climate TRACE slice, cron-cached, registered in `pipeline-registry.js` | nothing |
+| S1 | ✅ **built, upstream unverified** — `/api/pollution/sources` + `js/pollution-sources.js` + `tests/pollution-sources.mjs`, registered cold-tier | nothing |
 | S2 | Globe + Pollution Lab source markers, sector-colored, CC BY attribution visible | S1 |
 | S3 | `/api/pollution/tropomi` — NO₂ column tiles/statistics for a bounded scope | Copernicus OAuth creds |
 | S4 | Observation drape with per-cell **age**, faded by `supportFade` (§2.1a) | S3 |
@@ -180,10 +180,23 @@ These were bought with real bugs; do not relearn them.
 
 ## 8. Open questions
 
-- Climate TRACE API v4 is beta and its exact endpoint shapes were not
-  verifiable from the build sandbox (all egress blocked). S1 starts with a
-  fixture-tested normalizer, same pattern as `normalizeOpenAq`, so an
-  upstream shape change fails loudly rather than silently.
+- **S1's first deployed run is the discovery step.** The endpoint path,
+  envelope shape and field spellings are all guesses resolved at runtime.
+  `/api/pollution/sources` reports `pathTried`, `arrayPath`, `fieldMap` and
+  `stats` on success, and on failure returns `freshness:'stale'` with a
+  `reason` naming the keys it actually received and the constant to edit
+  (`ARRAY_KEYS` / `CANDIDATES` / `GAS_KEYS` in `js/pollution-sources.js`).
+  Read that response, then delete the losing rungs of `PATH_LADDER` and
+  trim `CANDIDATES` to what is real. Keep the resolver — it is what turns
+  the next upstream rename into an amber row instead of silent corruption.
+
+- **Climate TRACE is a GREENHOUSE-GAS inventory, not an air-quality one.**
+  It reports CO2/CH4/N2O/CO2e; the site's AQ surfaces are PM2.5/NO2/SO2/O3.
+  A coal plant emits both, so the inventory is excellent for WHERE the large
+  emitters are and HOW BIG they are — but a CO2e tonnage must never be
+  colored on the EPA AQI scale, and the §4 reconciliation against TROPOMI
+  NO2 is a CO-LOCATION argument, not a mass balance. `gases` is carried
+  generically so whatever species the upstream reports survives unconverted.
 - Sector taxonomy: Climate TRACE has many sectors. Which appear on the globe
   by default is a product call, not a technical one.
 - Whether the reconciliation residual is a public surface or an internal

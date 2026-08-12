@@ -331,6 +331,13 @@ export const PIPELINES = [
       warnAgeS:  2 * 3600, critAgeS: 6 * 3600,
       notes: 'One batched request: current AQI/PM for the top ~100 major-cities.js metros. Powers the EarthView Pollution Centers layer + Pollution Lab. 200 + freshness:stale + empty list when CAMS is down.' },
 
+    { id: 'pollution-sources', label: 'Emission sources (Climate TRACE)',
+      endpoint: '/api/pollution/sources',
+      category: 'environment', upstream: 'Climate TRACE API (beta)',
+      cadence_s: 21_600, prewarm: 'cold',
+      warnAgeS: 12 * 3600, critAgeS: 48 * 3600,
+      notes: 'Facility-level GHG inventory — the "who emits, where" half of POLLUTION_SOURCES_PLAN.md. Provenance kind is `inventory`, a THIRD kind beside model and observation: estimated and satellite-derived, never a monitor reading, and NOT an air-quality measurement. UPSTREAM SHAPE IS UNVERIFIED (beta API): the normalizer resolves fields at runtime and degrades to stale with a reason naming the keys it actually received plus the constant to edit. CC BY 4.0 — keep `attribution` visible. Cold tier and 6 h CDN cache because Climate TRACE asks users to keep volume low.' },
+
     { id: 'wildfire-events',    label: 'Active wildfire events',
       endpoint: '/api/wildfires/events',
       category: 'environment', upstream: 'NASA EONET v3',
