@@ -388,7 +388,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
                 <label class="lyr"><input type="checkbox" id="lyr-rad-ring" checked> GCR/SEP Flux Shell</label>
                 <label class="lyr"><input type="checkbox" id="lyr-exo" checked> Exosphere Glow</label>
                 <label class="lyr"><input type="checkbox" id="lyr-natail" checked> Sodium Tail</label>
-                <label class="lyr"><input type="checkbox" id="lyr-bump" checked> Terrain Relief</label>
+                <label class="lyr" title="Real displaced geometry from the LRO-derived height raster, drawn at 4× — plus the shader bump term"><input type="checkbox" id="lyr-bump" checked> Terrain Relief (4×)</label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthshine" checked> Earthshine</label>
                 <label class="lyr"><input type="checkbox" id="lyr-grid"> Lat/Lon Grid</label>
                 <label class="lyr"><input type="checkbox" id="lyr-rotate" checked> Auto-Rotate</label>
@@ -433,6 +433,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
                 <div>Stern (1999) — The lunar atmosphere, Rev. Geophys. 37</div>
                 <div>Smith et al. (1999) — the Leonid-storm sodium tail spike</div>
                 <div>IAU Gazetteer of Planetary Nomenclature — landmark positions</div>
+                <div>Relief — LRO-derived height raster (Wikimedia); displaced geometry drawn at 4×, gray levels mapped to the nominal ±10 km lunar span</div>
             </div>
         </div>
     </div>
@@ -454,6 +455,10 @@ import {
 import {
     synthesizeLandmarkRegion, drawSynthMap, synthLegend, albedoSamplerFromImage,
 } from './js/moon-terrain-synth.js';
+import {
+    reliefSamplerFromImage, radiusAtFactory, displaceSphereGeometry,
+    restoreSphereGeometry, MOON_RELIEF_EXAGGERATION,
+} from './js/moon-relief.js';
 import { LandingSites } from './js/moon-landing-sites.js';
 import { MoonInterior, INTERIOR_PALETTE } from './js/moon-interior.js';
 import {
@@ -577,6 +582,12 @@ moon.loadTextures(renderer).then(() => {
     // Default site: Reiner Gamma — the one feature the surface AND interior
     // views cross-link, and the reason the tileset has a swirl class at all.
     synthesizeLandmark('Reiner Gamma');
+    // Real displaced relief from the height raster, when it can be read back.
+    const reliefSampler = reliefSamplerFromImage(moon.moonU.u_bump.value.image);
+    if (reliefSampler) {
+        moonRadiusAt = radiusAtFactory(reliefSampler);
+        if (document.getElementById('lyr-bump').checked) applyMoonRelief();
+    }
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -1170,7 +1181,11 @@ document.getElementById('lyr-rad-ring').addEventListener('change', e => {
     if (moon._radMesh) moon._radMesh.visible = e.target.checked;
 });
 document.getElementById('lyr-bump').addEventListener('change', e => {
+    // One toggle, both relief mechanisms: the shader bump term AND the real
+    // displaced geometry (when the height raster was readable).
     moon.moonU.u_bump_strength.value = e.target.checked ? 1.0 : 0.0;
+    if (e.target.checked) applyMoonRelief();
+    else clearMoonRelief();
 });
 document.getElementById('lyr-earthshine').addEventListener('change', e => {
     moon.setEarthshine(e.target.checked ? 0.3 : 0.0);
@@ -1202,34 +1217,74 @@ document.getElementById('lyr-grid').addEventListener('change', e => {
 //      surface view, so the grid DRIFTED across the surface. It is now a
 //      child of moon.moonMesh, like the landmarks and landing sites.
 // The equator and prime meridian draw brighter so coordinates are readable.
-{
-    const R = 1.001;
-    const mat = new THREE.LineBasicMaterial({ color: 0x334455, opacity: 0.3, transparent: true });
-    const originMat = new THREE.LineBasicMaterial({ color: 0x4a6a95, opacity: 0.5, transparent: true });
+// Rebuildable: with displaced relief active the grid DRAPES over the terrain
+// (each vertex at its own point's ground radius + clearance) instead of
+// slicing through mountains.
+const GRID_CLEAR = 0.001;
+const gridMat = new THREE.LineBasicMaterial({ color: 0x334455, opacity: 0.3, transparent: true });
+const gridOriginMat = new THREE.LineBasicMaterial({ color: 0x4a6a95, opacity: 0.5, transparent: true });
+
+function buildGrid(radiusAt) {
+    for (const child of [...gridGroup.children]) {
+        child.geometry.dispose();
+        gridGroup.remove(child);
+    }
+    const gridPoint = (lat, lon) => {
+        const ground = radiusAt ? radiusAt(lat, lon) : 1;
+        const p = latLonToXYZ(lat, lon, ground + GRID_CLEAR);
+        return new THREE.Vector3(p.x, p.y, p.z);
+    };
     for (let lon = -180; lon < 180; lon += 30) {
         const pts = [];
-        for (let lat = -90; lat <= 90; lat += 2) {
-            const p = latLonToXYZ(lat, lon, R);
-            pts.push(new THREE.Vector3(p.x, p.y, p.z));
-        }
+        for (let lat = -90; lat <= 90; lat += 2) pts.push(gridPoint(lat, lon));
         gridGroup.add(new THREE.Line(
             new THREE.BufferGeometry().setFromPoints(pts),
-            lon === 0 ? originMat : mat,
+            lon === 0 ? gridOriginMat : gridMat,
         ));
     }
     for (let lat = -60; lat <= 60; lat += 30) {
         const pts = [];
-        for (let lon = 0; lon <= 360; lon += 2) {
-            const p = latLonToXYZ(lat, lon, R);
-            pts.push(new THREE.Vector3(p.x, p.y, p.z));
-        }
+        for (let lon = 0; lon <= 360; lon += 2) pts.push(gridPoint(lat, lon));
         gridGroup.add(new THREE.Line(
             new THREE.BufferGeometry().setFromPoints(pts),
-            lat === 0 ? originMat : mat,
+            lat === 0 ? gridOriginMat : gridMat,
         ));
     }
+}
+
+{
+    buildGrid(null);
     gridGroup.visible = false;
     moon.moonMesh.add(gridGroup);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  REAL DISPLACED RELIEF (js/moon-relief.js)
+//  The sphere was geometrically smooth — all apparent relief was
+//  shader fakery. When the LRO-derived height raster can be read
+//  back, the actual vertices displace (4×, disclosed) and EVERY
+//  ground-anchored layer re-seats through the same radiusAt:
+//  landmark rings/dots, landing sites, and the graticule. CORS
+//  taint or an aborted texture keeps the smooth sphere honestly.
+// ═══════════════════════════════════════════════════════════════
+let moonRadiusAt = null;      // ground-radius fn once relief data exists
+let moonReliefStats = null;   // { minRadius, maxRadius } while APPLIED
+
+function applyMoonRelief() {
+    if (!moonRadiusAt || moonReliefStats) return;
+    moonReliefStats = displaceSphereGeometry(moon.moonMesh.geometry, moonRadiusAt);
+    landmarks.setRadiusAt(moonRadiusAt);
+    landingSites.setRadiusAt(moonRadiusAt);
+    buildGrid(moonRadiusAt);
+}
+
+function clearMoonRelief() {
+    if (!moonReliefStats) return;
+    restoreSphereGeometry(moon.moonMesh.geometry);
+    landmarks.setRadiusAt(null);
+    landingSites.setRadiusAt(null);
+    buildGrid(null);
+    moonReliefStats = null;
 }
 
 // Browser-gate hook, part 2 (tests/moon-surface-smoke.spec.js): the graticule
@@ -1240,6 +1295,13 @@ try {
         gridGroup,
         terrainSynth: () => (_synthState ? { ..._synthState } : null),
         synthesizeLandmark,
+        relief: () => ({
+            active: Boolean(moonReliefStats),
+            dataReady: Boolean(moonRadiusAt),
+            exaggeration: MOON_RELIEF_EXAGGERATION,
+            ...(moonReliefStats || {}),
+        }),
+        radiusAt: (latDeg, lonDeg) => (moonRadiusAt ? moonRadiusAt(latDeg, lonDeg) : null),
     });
 } catch {}
 

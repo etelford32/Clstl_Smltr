@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { LANDMARKS, LANDMARK_CATEGORIES } from '../js/moon-landmarks-data.js';
 import { SPECIES } from '../js/moon-exosphere-model.js';
+
+const BUMP_FIXTURE = readFileSync(new URL('./fixtures/moon-bump-test.png', import.meta.url));
 
 /**
  * moon-surface-smoke.spec.js — the Moon page's exosphere + landmarks +
@@ -170,4 +173,82 @@ test('moon exosphere, landmarks, and dynamo mechanisms boot and respond', async 
     // Still no errors after the whole dance
     expect(pageErrors, `late page errors: ${pageErrors.join('\n')}`).toHaveLength(0);
     expect(shaderErrors, `late shader errors: ${shaderErrors.join('\n')}`).toHaveLength(0);
+
+    // With every texture aborted the height raster never arrived, so the
+    // relief layer must report inactive AND no-data — the smooth sphere is
+    // the honest state, never invented terrain.
+    expect(await page.evaluate(() => window.__moonLab.relief())).toMatchObject({
+        active: false,
+        dataReady: false,
+        exaggeration: 4,
+    });
+});
+
+test('displaced relief applies from the height raster and re-anchors every layer', async ({ page }) => {
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+
+    // Deterministic relief: serve the checked-in 64×32 fixture as the bump
+    // raster (bright disk at lat 0/lon 0, dark disk at lon −90°, gray 96
+    // elsewhere); keep the photo texture aborted.
+    await page.route('**://upload.wikimedia.org/**', (route) => (
+        route.request().url().includes('Moon_bump')
+            ? route.fulfill({ status: 200, contentType: 'image/png', body: BUMP_FIXTURE })
+            : route.abort()
+    ));
+
+    await page.goto('/moon.html');
+    await expect(page.locator('#loading')).toHaveClass(/done/, { timeout: 30_000 });
+    await expect.poll(() => page.evaluate(() => window.__moonLab.relief())).toMatchObject({
+        active: true,
+        dataReady: true,
+        exaggeration: 4,
+    });
+
+    // The drawn span matches the fixture through the nominal ±10 km mapping,
+    // and never crosses the camera's 1.04 floor.
+    const relief = await page.evaluate(() => window.__moonLab.relief());
+    expect(relief.maxRadius).toBeGreaterThan(1.015);   // bright disk ≈ gray 250
+    expect(relief.minRadius).toBeLessThan(0.99);       // dark disk ≈ gray 10
+    expect(relief.maxRadius).toBeLessThan(1.03);
+    const probes = await page.evaluate(() => ({
+        summit: window.__moonLab.radiusAt(0, 0),
+        pit: window.__moonLab.radiusAt(0, -90),
+        background: window.__moonLab.radiusAt(45, 90),
+    }));
+    expect(probes.summit).toBeGreaterThan(1.015);
+    expect(probes.pit).toBeLessThan(0.99);
+    expect(Math.abs(probes.background - 0.9963)).toBeLessThan(0.004);   // gray 96
+
+    // Every ground-anchored layer re-seats through the SAME radiusAt:
+    // a landmark dot sits its clearance above ITS OWN ground…
+    const anchor = await page.evaluate(() => {
+        const { landmarks, radiusAt } = window.__moonLab;
+        const hit = landmarks.hitTargets.find(h => h.userData.landmark.name === 'Copernicus');
+        const lm = hit.userData.landmark;
+        return { r: hit.position.length(), ground: radiusAt(lm.latDeg, lm.lonDeg) };
+    });
+    expect(Math.abs(anchor.r - (anchor.ground + 0.008))).toBeLessThan(2e-3);
+    // …and the graticule DRAPES: the lon-0 meridian's equator vertex rides
+    // the summit disk instead of the smooth 1.001 shell.
+    const gridRadius = await page.evaluate(() => {
+        const meridian0 = window.__moonLab.gridGroup.children[6];
+        const positions = meridian0.geometry.attributes.position;
+        return Math.hypot(positions.getX(45), positions.getY(45), positions.getZ(45));
+    });
+    expect(Math.abs(gridRadius - (probes.summit + 0.001))).toBeLessThan(2e-3);
+
+    // The Terrain Relief toggle round-trips to the exact smooth sphere.
+    await page.locator('#lyr-bump').uncheck();
+    await expect.poll(() => page.evaluate(() => window.__moonLab.relief().active)).toBe(false);
+    const smoothGrid = await page.evaluate(() => {
+        const meridian0 = window.__moonLab.gridGroup.children[6];
+        const positions = meridian0.geometry.attributes.position;
+        return Math.hypot(positions.getX(45), positions.getY(45), positions.getZ(45));
+    });
+    expect(Math.abs(smoothGrid - 1.001)).toBeLessThan(1e-6);
+    await page.locator('#lyr-bump').check();
+    await expect.poll(() => page.evaluate(() => window.__moonLab.relief().active)).toBe(true);
+
+    expect(pageErrors, `page errors: ${pageErrors.join('\n')}`).toHaveLength(0);
 });
