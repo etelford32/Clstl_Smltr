@@ -14,6 +14,11 @@ import { MarsLandmarks } from './mars-landmarks.js?v=20260809-live';
 import { MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
 import { fetchMarsSkyEphemeris } from './horizons.js';
 import { MarsSky } from './mars-sky.js';
+import {
+    MARS_TILESET, collapse as collapseWfc, marsClassPriors, expandClassPriorsFlow,
+    slopeField, flowAccumulation, marsChannelRouting,
+    regionSeed, regionGrid as wfcRegionGrid, sampleClassInto, classShares,
+} from './terrain-wfc.js';
 
 const SURFACE_RADIUS = 1;
 const RELIEF_EXAGGERATION = 5;
@@ -35,6 +40,54 @@ const SURFACE_PATCH_OFFSET = 0.00012;
 // 18× makes the same MOLA data legible. The MOLA readout in the surface HUD
 // still reports TRUE elevation, and the exaggeration is printed on-screen.
 const REGIONAL_RELIEF_EXAGGERATION = 18;
+
+// Geology synth (WFC) grid over the regional patch. 48 cells across 520 km is
+// ~10.8 km per cell — deliberately AT the bundled MOLA raster's real sample
+// spacing (4 px/°, ~15 km at Jezero), so the synthesized class map never
+// pretends to more resolution than the data that seeds it. The synth layer is
+// decoration in the same sense as the decorative roughness it modulates: it is
+// labelled "synthesized" in the surface HUD, and the MOLA readouts stay true.
+// Cell count does NOT ride the quality ladder — the ladder trades fidelity,
+// and a 48² collapse costs ~15 ms, which is noise inside a 66k-vertex rebuild.
+const REGIONAL_SYNTH_CELLS = 48;
+// How far the class tint pulls the vertex color away from the neutral
+// hypsometric ramp. 1 would replace the Viking albedo outright; 0.55 keeps the
+// photometric base readable underneath the geology.
+const SYNTH_TINT_STRENGTH = 0.55;
+
+/**
+ * ═══ TRUE-SCALE-ON-FINAL ══════════════════════════════════════════════════
+ * 18× exaggeration is right for a 55 km survey and WRONG for judging a
+ * landing: a pilot reads SHAPE, and every slope on final looked 18× steeper
+ * than reality. Below ~50 km of orbit range the patch's vertical scale ramps
+ * down, reaching TRUE 1× by 14 km — sightseeing keeps its drama, short final
+ * gets honest slopes, and the pilot cluster + HUD disclose the live
+ * multiplier the whole way down.
+ *
+ * The ramp is driven by ORBIT RANGE (camera→target), NOT by altitude above
+ * terrain: changing the scale moves the drawn ground, so an AGL-driven
+ * controller would feed back through the very surface it displaces and
+ * oscillate. Range is exaggeration-independent. The scale is quantized to
+ * steps and the patch rebuilds only on a step change (a rebuild costs
+ * ~40 ms — continuous rescale would jank the whole zoom).
+ *
+ * Decorative roughness compresses with the ramp (see rebuildRegionalTerrain):
+ * at true scale the patch shows MOLA and nothing else.
+ */
+const RELIEF_RAMP_TRUE_RANGE_KM = 14;
+const RELIEF_RAMP_FULL_RANGE_KM = 50;
+const RELIEF_SCALE_STEPS = Object.freeze([1, 2, 3, 5, 8, 12, REGIONAL_RELIEF_EXAGGERATION]);
+let regionalReliefScale = REGIONAL_RELIEF_EXAGGERATION;
+
+function reliefScaleForRange(rangeKm) {
+    const blend = THREE.MathUtils.smoothstep(rangeKm, RELIEF_RAMP_TRUE_RANGE_KM, RELIEF_RAMP_FULL_RANGE_KM);
+    const target = 1 + (REGIONAL_RELIEF_EXAGGERATION - 1) * blend;
+    let best = RELIEF_SCALE_STEPS[0];
+    for (const step of RELIEF_SCALE_STEPS) {
+        if (Math.abs(step - target) < Math.abs(best - target)) best = step;
+    }
+    return best;
+}
 
 // Surface-explorer camera framing. Eye altitude and look-ahead are chosen so the
 // horizon lands in the upper third of a 36° frame: at 9 km the horizon is 247 km
@@ -98,11 +151,14 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true,
 // decorative limb glow, and the globe's bump term all scale; the analysis
 // graticule, the terrain itself, and every readout stay at all four levels. A
 // visitor on a slow machine should get a coarser Mars, not a smaller feature set.
+// `surfaceDetail` scales the close-range regolith shader on the regional
+// patch (0 skips the noise entirely) — it is fidelity, not an instrument,
+// so the ladder may trade it away on a software rasteriser.
 const QUALITY_LEVELS = Object.freeze([
-    Object.freeze({ name: 'high',    pixelRatio: 1,    atmosphere: true,  starCount: 1700, terrainSegments: 256, globeBump: true }),
-    Object.freeze({ name: 'medium',  pixelRatio: 0.8,  atmosphere: true,  starCount: 1700, terrainSegments: 192, globeBump: true }),
-    Object.freeze({ name: 'low',     pixelRatio: 0.62, atmosphere: false, starCount: 900,  terrainSegments: 128, globeBump: false }),
-    Object.freeze({ name: 'minimal', pixelRatio: 0.5,  atmosphere: false, starCount: 500,  terrainSegments: 96,  globeBump: false }),
+    Object.freeze({ name: 'high',    pixelRatio: 1,    atmosphere: true,  starCount: 1700, terrainSegments: 256, globeBump: true,  surfaceDetail: 1 }),
+    Object.freeze({ name: 'medium',  pixelRatio: 0.8,  atmosphere: true,  starCount: 1700, terrainSegments: 192, globeBump: true,  surfaceDetail: 1 }),
+    Object.freeze({ name: 'low',     pixelRatio: 0.62, atmosphere: false, starCount: 900,  terrainSegments: 128, globeBump: false, surfaceDetail: 0.6 }),
+    Object.freeze({ name: 'minimal', pixelRatio: 0.5,  atmosphere: false, starCount: 500,  terrainSegments: 96,  globeBump: false, surfaceDetail: 0 }),
 ]);
 const maxPixelRatio = Math.min(window.devicePixelRatio || 1, window.matchMedia('(max-width: 560px)').matches ? 1.5 : 2);
 let qualityIndex = 0;
@@ -430,9 +486,10 @@ function reliefRadiusAtLatLon(latDeg, lonDeg, offset = 0, exaggeration = RELIEF_
     return SURFACE_RADIUS + elevationAtLatLon(latDeg, lonDeg) / MARS_RADIUS_M * scale + offset;
 }
 
-/** Radius of the regional patch, which carries its own vertical exaggeration. */
+/** Radius of the regional patch, which carries its own vertical exaggeration —
+ *  the LIVE ramped value, not the constant (see TRUE-SCALE-ON-FINAL above). */
 function regionalRadiusAtLatLon(latDeg, lonDeg, offset = 0) {
-    return reliefRadiusAtLatLon(latDeg, lonDeg, offset, REGIONAL_RELIEF_EXAGGERATION);
+    return reliefRadiusAtLatLon(latDeg, lonDeg, offset, regionalReliefScale);
 }
 
 /**
@@ -514,6 +571,202 @@ const regionalTerrainMaterial = new THREE.MeshStandardMaterial({
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
 });
+/**
+ * ═══ CLOSE-RANGE DETAIL CASCADE ════════════════════════════════════════════
+ * Below ~10 km the patch used to be a featureless wash: the Viking map is
+ * ~15 km/px, the synth classes 11 km/cell, the decorative roughness 10–100 km
+ * wavelengths — every visual channel a pilot uses on short final (ground
+ * rush, texture-gradient height cues) was empty. This injects a procedural
+ * regolith cascade into the patch material: three noise bands (~2.4 km,
+ * ~450 m, ~90 m) that each FADE IN as the view distance drops, so survey
+ * height keeps the photometric look and detail materializes on descent.
+ *
+ * The honesty rules:
+ *   - albedo/shading ONLY — no geometry, so it cannot lie about shape at
+ *     true scale, and the MOLA readouts never see it;
+ *   - pattern frequency/amplitude ride the per-vertex synth class grain
+ *     (dunes ripple, plains stay calm) — labelled synthesized in the HUD
+ *     alongside the classes that drive it;
+ *   - noise coordinates are the REFERENCE-SPHERE direction × radius —
+ *     radius-independent, so the pattern is pixel-stable across relief-ramp
+ *     steps, patch rebuilds, and recenters (world-position input would
+ *     reseed the texture on every ramp step — the surface moves radially).
+ * The mid band adds a sun-relative two-tap "lit relief" term (bright on the
+ * sun side of each bump, dark on the lee) — cheap depth without touching
+ * the normal pipeline. uDetailStrength comes from the quality ladder; 0
+ * branches the whole cascade out for software rasterisers.
+ */
+const detailUniforms = {
+    uDetailStrength: { value: QUALITY_LEVELS[0].surfaceDetail },
+    uSunDirWorld: { value: new THREE.Vector3(1, 0, 0) },
+    // World-space anchor (km) near the patch center. Noise coordinates are
+    // ANCHOR-RELATIVE: raw sphere coordinates reach ±3400 km, and dividing by
+    // a 90 m band wavelength pushes lattice values past fp precision — the
+    // noise decorrelated into white speckle (measured with the raw-noise
+    // debug view). Quantized to the same quarter-degree grid as the synth
+    // cache, so ramp steps and quality rebuilds keep the anchor and only a
+    // genuine recenter (which rebuilds all scenery anyway) moves it.
+    uDetailAnchor: { value: new THREE.Vector3(0, 0, 0) },
+    // Tangent frame at the anchor: the crater field scatters circles on a 2D
+    // chart q = (sph·east, sph·north). Same quantization/stability story as
+    // the anchor itself.
+    uDetailEast: { value: new THREE.Vector3(1, 0, 0) },
+    uDetailNorth: { value: new THREE.Vector3(0, 1, 0) },
+};
+regionalTerrainMaterial.customProgramCacheKey = () => 'mars-regolith-detail';
+regionalTerrainMaterial.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, detailUniforms);
+    shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `
+            attribute float aDetailGrain;
+            attribute float aDetailCrater;
+            varying vec3 vDetailWorld;
+            varying float vDetailGrain;
+            varying float vDetailCrater;
+            #include <common>`)
+        .replace('#include <begin_vertex>', `
+            #include <begin_vertex>
+            vDetailWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+            vDetailGrain = aDetailGrain;
+            vDetailCrater = aDetailCrater;`);
+    shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `
+            uniform float uDetailStrength;
+            uniform vec3 uSunDirWorld;
+            uniform vec3 uDetailAnchor;
+            uniform vec3 uDetailEast;
+            uniform vec3 uDetailNorth;
+            varying vec3 vDetailWorld;
+            varying float vDetailGrain;
+            varying float vDetailCrater;
+            float ppHash(vec3 p) {
+                // Wrap the lattice into a 289-cell tile BEFORE hashing: the
+                // raw coordinates reach tens of thousands of cells (sphere
+                // radius x band frequency) and fract() of such magnitudes
+                // sheds most of the fp32 mantissa — the hash degenerates
+                // into screen-scale streaks. 289 cells repeats the pattern
+                // every ~26 km at the finest band: invisible.
+                p = mod(p, 289.0);
+                p = fract(p * 0.1031);
+                p += dot(p, p.zyx + 31.32);
+                return fract((p.x + p.y) * p.z);
+            }
+            float ppNoise(vec3 p) {
+                vec3 i = floor(p);
+                vec3 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                float n000 = ppHash(i);
+                float n100 = ppHash(i + vec3(1.0, 0.0, 0.0));
+                float n010 = ppHash(i + vec3(0.0, 1.0, 0.0));
+                float n110 = ppHash(i + vec3(1.0, 1.0, 0.0));
+                float n001 = ppHash(i + vec3(0.0, 0.0, 1.0));
+                float n101 = ppHash(i + vec3(1.0, 0.0, 1.0));
+                float n011 = ppHash(i + vec3(0.0, 1.0, 1.0));
+                float n111 = ppHash(i + vec3(1.0, 1.0, 1.0));
+                return mix(
+                    mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+                    mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+                    f.z);
+            }
+            // Scattered impact craters on the 2D surface chart q (km): one
+            // candidate per jittered grid cell of spacing L, existence gated
+            // by the per-vertex class density. Analytic bowl + raised-rim
+            // profile; shading is the SIGNED radial slope lit against the
+            // sun's tangent direction (near inner wall dark, far wall lit,
+            // outer flank reversed) plus a bright ejecta collar and a dark
+            // floor — the standard lunar/martian look, driven by the actual
+            // sun vector.
+            float craterField(vec2 q, float L, float seedZ, float density, vec2 sunT2) {
+                vec2 base = floor(q / L);
+                float shade = 0.0;
+                for (int dx = -1; dx <= 1; dx += 1) {
+                    for (int dy = -1; dy <= 1; dy += 1) {
+                        vec2 cell = base + vec2(float(dx), float(dy));
+                        float h = ppHash(vec3(cell * 0.7311, seedZ));
+                        if (h > density) continue;
+                        vec2 center = (cell + 0.5 + 0.8 * (vec2(fract(h * 127.1), fract(h * 311.7)) - 0.5)) * L;
+                        float r = L * mix(0.14, 0.34, fract(h * 43.7));
+                        vec2 offset = q - center;
+                        float d = length(offset);
+                        if (d > r * 1.6) continue;
+                        float x = d / r;
+                        float slope;
+                        float alb;
+                        if (x < 0.85) {
+                            slope = 1.9 * x;                                  // bowl wall rises outward
+                            alb = -0.09 * (1.0 - x);                          // dark floor
+                        } else if (x < 1.05) {
+                            slope = mix(1.6, -1.6, (x - 0.85) / 0.2);         // over the rim crest
+                            alb = 0.10;                                       // bright rim
+                        } else {
+                            slope = -1.5 * (1.6 - x) / 0.55;                  // outer flank decays
+                            alb = 0.05 * (1.6 - x) / 0.55;                    // ejecta collar
+                        }
+                        vec2 rd = offset / max(d, 1e-5);
+                        shade += -slope * dot(rd, sunT2) * 0.6 + alb;
+                    }
+                }
+                return shade;
+            }
+            #include <common>`)
+        .replace('#include <color_fragment>', `
+            #include <color_fragment>
+            if (uDetailStrength > 0.001) {
+                vec3 radialDir = normalize(vDetailWorld);
+                // km on the reference sphere, ANCHOR-RELATIVE (see uniform
+                // note): small magnitudes keep the hash lattice coherent.
+                vec3 sph = radialDir * 3396.19 - uDetailAnchor;
+                float viewKm = length(vViewPosition) * 3396.19;
+                float freq = mix(1.0, vDetailGrain, 0.7);
+                float amp = (0.7 + 0.3 * vDetailGrain) * uDetailStrength;
+                vec3 sunTangent = uSunDirWorld - radialDir * dot(uSunDirWorld, radialDir);
+                sunTangent = normalize(sunTangent + vec3(1e-5));
+                float shade = 0.0;
+                float fade0 = 1.0 - smoothstep(60.0, 130.0, viewKm);
+                if (fade0 > 0.0) {
+                    shade += (ppNoise(sph * (freq / 2.4)) - 0.5) * 0.12 * fade0;
+                }
+                float fade1 = 1.0 - smoothstep(14.0, 32.0, viewKm);
+                if (fade1 > 0.0) {
+                    float bump = ppNoise(sph * (freq / 0.45)) * 0.67
+                        + ppNoise(sph * (freq / 0.19)) * 0.33;
+                    float bumpSunward = ppNoise((sph + sunTangent * 0.09) * (freq / 0.45)) * 0.67
+                        + ppNoise((sph + sunTangent * 0.05) * (freq / 0.19)) * 0.33;
+                    shade += (bump - 0.5) * 0.09 * fade1;
+                    // Lit relief: a DIRECTIONAL derivative along the sun
+                    // tangent. Kept subordinate to the isotropic terms — at
+                    // 0.5 its anisotropy dominated the whole field and the
+                    // regolith rendered as sun-axis streaks (measured).
+                    shade += (bump - bumpSunward) * 0.2 * fade1;
+                }
+                float fade2 = 1.0 - smoothstep(2.5, 7.5, viewKm);
+                if (fade2 > 0.0) {
+                    shade += (ppNoise(sph * (freq / 0.09)) - 0.5) * 0.18 * fade2;
+                }
+                // Crater field on the tangent chart, three size decades. The
+                // largest (rims 0.5–1.2 km) reads from survey height; the
+                // smallest (~50–110 m) only on short final, and only above
+                // the ladder's low rung.
+                vec2 q = vec2(dot(sph, uDetailEast), dot(sph, uDetailNorth));
+                vec2 sunT2 = vec2(dot(sunTangent, uDetailEast), dot(sunTangent, uDetailNorth));
+                sunT2 = normalize(sunT2 + vec2(1e-5));
+                float craterDensity = vDetailCrater * 0.75;
+                float cfade0 = 1.0 - smoothstep(70.0, 150.0, viewKm);
+                if (cfade0 > 0.0) {
+                    shade += craterField(q, 3.4, 17.0, craterDensity, sunT2) * cfade0;
+                }
+                float cfade1 = 1.0 - smoothstep(18.0, 42.0, viewKm);
+                if (cfade1 > 0.0) {
+                    shade += craterField(q, 1.1, 29.0, craterDensity, sunT2) * cfade1;
+                }
+                float cfade2 = 1.0 - smoothstep(3.0, 10.0, viewKm);
+                if (cfade2 > 0.0 && uDetailStrength > 0.8) {
+                    shade += craterField(q, 0.32, 47.0, craterDensity * 0.9, sunT2) * cfade2;
+                }
+                diffuseColor.rgb *= clamp(1.0 + shade * amp, 0.45, 1.55);
+            }`);
+};
+
 const regionalTerrain = new THREE.Mesh(new THREE.BufferGeometry(), regionalTerrainMaterial);
 regionalTerrain.name = 'mola-regional-terrain';
 regionalTerrain.visible = false;
@@ -537,6 +790,62 @@ surfaceTrail.name = 'surface-exploration-trail';
 surfaceTrail.visible = false;
 marsGroup.add(surfaceTrail);
 let surfaceTrailLocations = [];
+
+// ═══ LANDING RETICLE ════════════════════════════════════════════════════════
+// The orbit target is the single most important point in surface mode — it is
+// where every camera gesture pivots and where a landing would happen — and it
+// used to be invisible. The reticle drapes a fixed 2 km ring over the terrain
+// at the target (a SCALE ANCHOR: the ring is always 2 km, so terrain reads in
+// physical units), plus a north tick and a center cross. Anchored through
+// anchorRadiusAtLatLon like every other ground layer, re-seated by
+// refreshSurfaceAnchors, and offset above the patch + trail so it never
+// z-fights either.
+const RETICLE_RADIUS_KM = 2;
+const RETICLE_OFFSET = SURFACE_PATCH_OFFSET + 0.0003;
+const RETICLE_SEGMENTS = 64;
+const landingReticle = new THREE.Group();
+landingReticle.name = 'landing-reticle';
+const reticleMaterial = new THREE.LineBasicMaterial({
+    color: 0x7dffb0, transparent: true, opacity: 0.8, depthWrite: false,
+});
+const reticleRing = new THREE.Line(new THREE.BufferGeometry(), reticleMaterial);
+// North tick + center cross share one LineSegments (3 disjoint strokes).
+const reticleMarks = new THREE.LineSegments(new THREE.BufferGeometry(), reticleMaterial);
+landingReticle.add(reticleRing, reticleMarks);
+landingReticle.renderOrder = 5;
+reticleRing.renderOrder = 5;
+reticleMarks.renderOrder = 5;
+landingReticle.visible = false;
+marsGroup.add(landingReticle);
+let reticleAt = null;
+
+function updateLandingReticle(force = false) {
+    if (!surfaceModeActive || !surfaceLocation) {
+        landingReticle.visible = false;
+        reticleAt = null;
+        return;
+    }
+    if (!force && reticleAt && greatCircleDistanceKm(reticleAt, surfaceLocation) < 0.15) return;
+    reticleAt = { latDeg: surfaceLocation.latDeg, lonDeg: surfaceLocation.lonDeg };
+    const groundPoint = (eastKm, northKm) => {
+        const p = destinationLatLon(reticleAt.latDeg, reticleAt.lonDeg, eastKm, northKm);
+        return latLonVector(p.latDeg, p.lonDeg, anchorRadiusAtLatLon(p.latDeg, p.lonDeg, RETICLE_OFFSET));
+    };
+    const ringPoints = [];
+    for (let i = 0; i <= RETICLE_SEGMENTS; i += 1) {
+        const bearing = (i / RETICLE_SEGMENTS) * Math.PI * 2;
+        ringPoints.push(groundPoint(Math.sin(bearing) * RETICLE_RADIUS_KM, Math.cos(bearing) * RETICLE_RADIUS_KM));
+    }
+    reticleRing.geometry.dispose();
+    reticleRing.geometry = new THREE.BufferGeometry().setFromPoints(ringPoints);
+    reticleMarks.geometry.dispose();
+    reticleMarks.geometry = new THREE.BufferGeometry().setFromPoints([
+        groundPoint(0, RETICLE_RADIUS_KM), groundPoint(0, RETICLE_RADIUS_KM + 0.9),   // north tick
+        groundPoint(-0.3, 0), groundPoint(0.3, 0),                                    // center cross
+        groundPoint(0, -0.3), groundPoint(0, 0.3),
+    ]);
+    landingReticle.visible = true;
+}
 
 function destinationLatLon(latDeg, lonDeg, eastKm, northKm) {
     const distanceKm = Math.hypot(eastKm, northKm);
@@ -577,6 +886,108 @@ function visualRegionalRoughnessKm(eastKm, northKm) {
 }
 
 /**
+ * Wave-function-collapse geology synth for the regional patch.
+ *
+ * The kernel lives in js/terrain-wfc.js (node-gated by tests/terrain-wfc.mjs);
+ * this function only feeds it MEASURED priors: real MOLA elevation and local
+ * slope sampled at each synth cell's accurate great-circle coordinates. The
+ * collapsed class map then (a) tints the patch's vertex colors so dune fields,
+ * channel floors, and polar ice read as different ground, and (b) shapes the
+ * decorative roughness amplitude so smooth plains actually render smooth while
+ * chaos terrain keeps its full grain. Deterministic per site: the seed is
+ * quantized from the patch center, so revisiting Jezero always grows the same
+ * geology. No MOLA sampler ⇒ no synth — the layer refuses to invent classes
+ * with nothing real to seed them.
+ */
+let synthEnabled = true;
+let synthResult = null;
+let synthShares = null;
+let synthKey = '';
+// Scratch for the per-vertex hot path — sampleClassInto allocates nothing.
+const synthScratch = { color: [0, 0, 0], reliefAmpM: 0, grain: 0, tileIndex: 0 };
+// The class tint is normalized so 'plains' ≈ no change: the Viking base map
+// already looks like plains nearly everywhere, and an un-normalized tint would
+// re-color the whole patch instead of marking the exceptions.
+const SYNTH_NEUTRAL = MARS_TILESET.classes.find(cls => cls.id === 'plains').color;
+
+// Crater areal saturation per geology class, indexed by TILE for the per-
+// vertex attribute fill (family variants inherit their class's value).
+const CRATER_DENSITY_BY_CLASS = {
+    cratered: 1.0, lava: 0.6, plains: 0.5, ice: 0.35, chaos: 0.4, channel: 0.25, dunes: 0.12,
+};
+const CRATER_DENSITY_BY_TILE = MARS_TILESET.tiles.map(
+    tile => CRATER_DENSITY_BY_CLASS[tile.classId] ?? 0.5,
+);
+
+function computeRegionalSynth(latDeg, lonDeg) {
+    if (!molaSampler) return null;
+    // Same quarter-degree quantization as regionSeed: rebuilds triggered by the
+    // quality ladder (same center) hit the cache; a real traverse (patch
+    // recenters after ~114 km) re-collapses.
+    const key = `${Math.round(latDeg * 4)}:${Math.round(lonDeg * 4)}`;
+    if (synthResult && synthKey === key) return synthResult;
+    const cells = REGIONAL_SYNTH_CELLS;
+    const region = wfcRegionGrid({
+        centerLatDeg: latDeg, centerLonDeg: lonDeg,
+        extentKm: REGIONAL_TERRAIN_EXTENT_KM, cells, radiusKm: MARS_RADIUS_KM,
+    });
+    const cellCount = cells * cells;
+    const elevations = new Float32Array(cellCount);
+    for (let i = 0; i < cellCount; i += 1) {
+        elevations[i] = elevationAtLatLon(region.latDeg[i], region.lonDeg[i]);
+    }
+    const tileCount = MARS_TILESET.tiles.length;
+    const priors = new Float32Array(cellCount * tileCount);
+    const stepM = region.spacingKm * 1000;
+    // FLOW-ROUTED priors: channels follow the measured MOLA water routing.
+    // slopeField gives the gradient two ways on purpose (central-difference
+    // AXIS so valley floors read along-valley, one-sided WALL slope so
+    // channels still seed in floors), and flowAccumulation adds the piece
+    // local slope cannot see — priority-flood pit filling, D8 routing, and
+    // upstream-area accumulation, so tributaries converge into trunks that
+    // run down real valleys. The recipe combining them is the kernel's
+    // marsChannelRouting (ONE copy, pinned by tests/terrain-wfc.mjs — do not
+    // re-derive it here).
+    const flow = slopeField(elevations, cells, stepM);
+    const drain = flowAccumulation(elevations, cells, stepM);
+    const flowSpec = { channel: { axisEast: 0, axisNorth: 0, strength: 0 } };
+    for (let i = 0; i < cellCount; i += 1) {
+        const routing = marsChannelRouting(flow, drain, i, cells);
+        flowSpec.channel.axisEast = routing.axisEast;
+        flowSpec.channel.axisNorth = routing.axisNorth;
+        flowSpec.channel.strength = routing.strength;
+        expandClassPriorsFlow(
+            MARS_TILESET,
+            marsClassPriors({
+                elevationM: elevations[i],
+                slopeDeg: flow.wallSlopeDeg[i],
+                latDeg: region.latDeg[i],
+                drainage: routing.drainageNorm,
+            }),
+            priors,
+            i,
+            flowSpec,
+        );
+    }
+    try {
+        synthResult = collapseWfc({
+            tileset: MARS_TILESET, width: cells, height: cells,
+            seed: regionSeed('mars', latDeg, lonDeg), priors,
+        });
+        synthShares = classShares(synthResult);
+        synthKey = key;
+    } catch (error) {
+        // Over-constrained priors are a kernel bug, not a page failure — the
+        // patch simply renders without the synth layer.
+        console.warn('[Mars] geology synth failed; rendering without it', error);
+        synthResult = null;
+        synthShares = null;
+        synthKey = '';
+    }
+    return synthResult;
+}
+
+/**
  * Hypsometric tint from the REAL MOLA elevation.
  *
  * This replaces a tint driven by the decorative roughness above, which meant
@@ -608,6 +1019,31 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
     const colors = new Float32Array(vertexCount * 3);
     const elevations = new Float32Array(vertexCount);
     const indices = new Uint32Array(segments * segments * 6);
+    const synth = synthEnabled ? computeRegionalSynth(latDeg, lonDeg) : null;
+    // Detail-cascade anchor: quarter-degree-quantized patch center, in the
+    // same WORLD frame as vDetailWorld (marsGroup rotation applied). The
+    // tangent frame rides along for the crater chart.
+    const anchorLat = Math.round(latDeg * 4) / 4;
+    const anchorLon = Math.round(lonDeg * 4) / 4;
+    const anchorDir = latLonVector(anchorLat, anchorLon, 1);
+    const anchorFrame = tangentFrame(anchorDir);
+    detailUniforms.uDetailAnchor.value
+        .copy(anchorDir).applyQuaternion(marsGroup.quaternion).multiplyScalar(3396.19);
+    detailUniforms.uDetailEast.value
+        .copy(anchorFrame.east).applyQuaternion(marsGroup.quaternion);
+    detailUniforms.uDetailNorth.value
+        .copy(anchorFrame.north).applyQuaternion(marsGroup.quaternion);
+    // Class tints stashed in pass 1 (where the synth is sampled for roughness
+    // anyway) and applied in pass 2 on top of the hypsometric shade.
+    const synthTint = synth ? new Float32Array(vertexCount * 3) : null;
+    // Per-vertex grain for the close-range detail cascade: the synth class's
+    // noise-frequency knob (dunes 2.2, plains 0.6). 1 = neutral regolith when
+    // the synth layer is off or has no data.
+    const grains = new Float32Array(vertexCount).fill(1);
+    // Per-vertex crater saturation for the cascade's crater field: ancient
+    // cratered highlands keep ~4 Gyr of impacts, dune fields bury almost all
+    // of theirs, channel floors were resurfaced. 0.5 = neutral.
+    const craterDensities = new Float32Array(vertexCount).fill(0.5);
 
     // Pass 1: geometry + real elevation. No per-vertex object allocation — this
     // loop runs 66,049 times on every rebuild, and rebuilds happen while the
@@ -626,7 +1062,28 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
             elevationSum += elevationM;
             if (elevationM < minElevationM) minElevationM = elevationM;
             if (elevationM > maxElevationM) maxElevationM = elevationM;
-            const visualRoughness = visualRegionalRoughnessKm(eastKm, northKm) / MARS_RADIUS_KM;
+            // Decoration compresses with the true-scale ramp: at 1× the patch
+            // shows MOLA and nothing else — invented texture has no business
+            // on a surface being read for landing slopes.
+            let roughnessKm = visualRegionalRoughnessKm(eastKm, northKm)
+                * (regionalReliefScale / REGIONAL_RELIEF_EXAGGERATION);
+            if (synth) {
+                // Synth grid row 0 is the NORTH edge; this loop's northIndex 0
+                // is the SOUTH edge, hence the v flip.
+                sampleClassInto(synth, eastIndex / segments, 1 - northIndex / segments, synthScratch);
+                // Class-shaped micro-relief, still inside the existing ≤0.35 km
+                // decoration budget: plains flatten it, chaos keeps full grain.
+                roughnessKm *= Math.min(1, Math.max(0.15, synthScratch.reliefAmpM / 300));
+                grains[vertexOffset] = synthScratch.grain;
+                craterDensities[vertexOffset] = CRATER_DENSITY_BY_TILE[synthScratch.tileIndex];
+                for (let channel = 0; channel < 3; channel += 1) {
+                    const ratio = synthScratch.color[channel] / SYNTH_NEUTRAL[channel];
+                    synthTint[vertexOffset * 3 + channel] = THREE.MathUtils.clamp(
+                        1 + SYNTH_TINT_STRENGTH * (ratio - 1), 0.35, 1.9,
+                    );
+                }
+            }
+            const visualRoughness = roughnessKm / MARS_RADIUS_KM;
             const radius = regionalRadiusAtLatLon(
                 location.latDeg,
                 location.lonDeg,
@@ -651,9 +1108,15 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
     const spanM = Math.max(220, (maxElevationM - minElevationM) / 2);
     for (let index = 0; index < vertexCount; index += 1) {
         const shade = hypsometricShade(elevations[index], midpointM, spanM);
-        colors[index * 3] = shade;
-        colors[index * 3 + 1] = shade * 0.945;
-        colors[index * 3 + 2] = shade * 0.9;
+        if (synthTint) {
+            colors[index * 3] = shade * synthTint[index * 3];
+            colors[index * 3 + 1] = shade * 0.945 * synthTint[index * 3 + 1];
+            colors[index * 3 + 2] = shade * 0.9 * synthTint[index * 3 + 2];
+        } else {
+            colors[index * 3] = shade;
+            colors[index * 3 + 1] = shade * 0.945;
+            colors[index * 3 + 2] = shade * 0.9;
+        }
     }
 
     let indexOffset = 0;
@@ -671,6 +1134,8 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('aDetailGrain', new THREE.BufferAttribute(grains, 1));
+    geometry.setAttribute('aDetailCrater', new THREE.BufferAttribute(craterDensities, 1));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.computeVertexNormals();
     geometry.computeBoundingSphere();
@@ -1170,6 +1635,7 @@ function refreshSurfaceAnchors() {
     placeSurfaceMarker(roverLayer, mission.position.lat_deg, mission.position.lon_deg);
     placeSurfaceMarker(landingLayer, mission.landing_site.lat_deg, mission.landing_site.lon_deg);
     placeSurfaceMarker(routeCursor, selectedRoutePoint.lat_deg, selectedRoutePoint.lon_deg);
+    updateLandingReticle(true);
 }
 
 function selectRouteSol(requestedSol) {
@@ -1603,6 +2069,14 @@ function setLayer(name, enabled) {
             rebuildRegionalTerrain(regionalTerrainCenter.latDeg, regionalTerrainCenter.lonDeg);
             updateSurfaceTrail(surfaceLocation || regionalTerrainCenter, { reset: true });
         }
+    } else if (name === 'synth') {
+        // Deliberately does NOT touch reliefEnabled — the synth layer modulates
+        // decoration and tint only; the anchor stack must not move with it.
+        synthEnabled = Boolean(enabled);
+        if (surfaceModeActive && regionalTerrainCenter) {
+            rebuildRegionalTerrain(regionalTerrainCenter.latDeg, regionalTerrainCenter.lonDeg);
+            updateSurfaceDetail();
+        }
     } else if (name === 'grid') gridLayer.visible = enabled;
     // The quality ladder can drop the limb shell entirely; the layer switch must
     // not turn it back on underneath that decision.
@@ -1632,6 +2106,7 @@ function layerIsVisible(name) {
             : reliefMars.visible;
     }
     if (name === 'regional-terrain') return regionalTerrain.visible;
+    if (name === 'synth') return synthEnabled;
     if (name === 'grid') return gridLayer.visible;
     if (name === 'atmosphere') return atmosphereLayer.visible;
     if (name === 'terminator') return terminatorLayer.visible;
@@ -1657,6 +2132,15 @@ const surfaceExplorer = document.querySelector('#surface-explorer');
 const surfaceLocationElement = document.querySelector('#surface-location');
 const surfaceAltitudeElement = document.querySelector('#surface-altitude');
 const surfaceDetailElement = document.querySelector('#surface-detail');
+const pilotElements = {
+    hdg: document.querySelector('#pilot-hdg'),
+    agl: document.querySelector('#pilot-agl'),
+    vs: document.querySelector('#pilot-vs'),
+    gs: document.querySelector('#pilot-gs'),
+    slope: document.querySelector('#pilot-slope'),
+    sun: document.querySelector('#pilot-sun'),
+    relief: document.querySelector('#pilot-relief'),
+};
 const meshStatusElement = document.querySelector('#mars-mesh-status');
 const globalMeshStatus = meshStatusElement.textContent;
 const surfaceLightButton = document.querySelector('#surface-light');
@@ -1780,10 +2264,16 @@ function greatCircleDistanceKm(a, b) {
     return 2 * MARS_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(haversine)));
 }
 
-function updateSurfaceTrail(location, { reset = false } = {}) {
+function updateSurfaceTrail(location, { reset = false, reanchor = false } = {}) {
     if (reset) surfaceTrailLocations = [];
-    surfaceTrailLocations.push({ latDeg: location.latDeg, lonDeg: location.lonDeg });
-    if (surfaceTrailLocations.length > 180) surfaceTrailLocations.shift();
+    // A re-anchor (relief scale changed under the trail) re-maps the stored
+    // traverse onto the new radii WITHOUT recording a point — the true-scale
+    // ramp is not a traverse event, and appending here put 12 phantom points
+    // on the trail per zoom sweep.
+    if (!reanchor) {
+        surfaceTrailLocations.push({ latDeg: location.latDeg, lonDeg: location.lonDeg });
+        if (surfaceTrailLocations.length > 180) surfaceTrailLocations.shift();
+    }
     const points = surfaceTrailLocations.map(point => latLonVector(
         point.latDeg,
         point.lonDeg,
@@ -1803,6 +2293,106 @@ function formatCoordinate(value, positive, negative) {
 const SURFACE_READOUT_INTERVAL_MS = 125;
 let lastSurfaceReadoutAt = 0;
 
+/**
+ * ═══ PILOT CLUSTER ══════════════════════════════════════════════════════════
+ * The instruments a landing needs that the science readouts don't carry:
+ * heading, AGL, vertical speed, ground speed, TRUE slope under the target,
+ * sun elevation, and the live relief multiplier. Updated on the same 8 Hz
+ * cadence as the surface readout. Two honesty rules:
+ *   - SLOPE is computed from the raw MOLA field at 1× — never from the drawn
+ *     (exaggerated) geometry — because it exists to answer "could I land on
+ *     that", colored by landability (<5° ok, <15° caution, else alert).
+ *   - AGL is the distance to the DRAWN ground (what you'd hit); with the
+ *     true-scale ramp the two meanings converge exactly where precision
+ *     starts to matter.
+ */
+const pilot = {
+    hdgDeg: null, aglKm: null, vsMs: 0, gsKms: 0,
+    slopeDeg: null, slopeDownBearingDeg: null, sunElevDeg: null,
+    samples: [],            // { t, latDeg, lonDeg, aglKm } sliding ~1.2 s window
+    slopeAt: null,          // cache key for the 4-tap MOLA slope sample
+};
+const CARDINALS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const cardinalFor = (deg) => CARDINALS[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+const formatRate = (ms) => (Math.abs(ms) >= 1000
+    ? `${(ms / 1000).toFixed(1)} km/s`
+    : `${ms.toFixed(0)} m/s`);
+
+/** TRUE ground slope from the MOLA field: 4 taps 1 km out, central diffs. */
+function trueSlopeAt(latDeg, lonDeg) {
+    const east = destinationLatLon(latDeg, lonDeg, 1, 0);
+    const west = destinationLatLon(latDeg, lonDeg, -1, 0);
+    const north = destinationLatLon(latDeg, lonDeg, 0, 1);
+    const south = destinationLatLon(latDeg, lonDeg, 0, -1);
+    const dEast = (elevationAtLatLon(east.latDeg, east.lonDeg) - elevationAtLatLon(west.latDeg, west.lonDeg)) / 2000;
+    const dNorth = (elevationAtLatLon(north.latDeg, north.lonDeg) - elevationAtLatLon(south.latDeg, south.lonDeg)) / 2000;
+    return {
+        slopeDeg: Math.atan(Math.hypot(dEast, dNorth)) * 180 / Math.PI,
+        // downhill bearing: opposite the gradient
+        downBearingDeg: (Math.atan2(-dEast, -dNorth) * 180 / Math.PI + 360) % 360,
+    };
+}
+
+function updatePilotCluster(target, altitudeKm, nowMs) {
+    // Heading: camera forward projected on the target's tangent plane.
+    const radial = controls.target.clone().normalize();
+    const frame = tangentFrame(radial);
+    const forward = controls.target.clone().sub(camera.position);
+    forward.addScaledVector(radial, -forward.dot(radial));
+    if (forward.lengthSq() > 1e-10) {
+        forward.normalize();
+        pilot.hdgDeg = (Math.atan2(forward.dot(frame.east), forward.dot(frame.north)) * 180 / Math.PI + 360) % 360;
+    }
+    pilot.aglKm = altitudeKm;
+
+    // Ground speed + vertical speed over a ~1.2 s sliding window.
+    pilot.samples.push({ t: nowMs, latDeg: target.latDeg, lonDeg: target.lonDeg, aglKm: altitudeKm });
+    while (pilot.samples.length > 2 && nowMs - pilot.samples[0].t > 1200) pilot.samples.shift();
+    const oldest = pilot.samples[0];
+    const dt = (nowMs - oldest.t) / 1000;
+    if (dt > 0.2) {
+        pilot.gsKms = greatCircleDistanceKm(oldest, target) / dt;
+        pilot.vsMs = (altitudeKm - oldest.aglKm) * 1000 / dt;
+    }
+
+    // True slope under the target, re-sampled when it moves > ~200 m.
+    if (!pilot.slopeAt || greatCircleDistanceKm(pilot.slopeAt, target) > 0.2) {
+        pilot.slopeAt = { latDeg: target.latDeg, lonDeg: target.lonDeg };
+        const slope = hasRelief ? trueSlopeAt(target.latDeg, target.lonDeg) : { slopeDeg: 0, downBearingDeg: null };
+        pilot.slopeDeg = slope.slopeDeg;
+        pilot.slopeDownBearingDeg = slope.downBearingDeg;
+    }
+
+    pilot.sunElevDeg = Math.asin(THREE.MathUtils.clamp(
+        sun.position.clone().normalize().dot(radial), -1, 1,
+    )) * 180 / Math.PI;
+
+    if (!pilotElements.hdg) return;
+    pilotElements.hdg.textContent = pilot.hdgDeg == null
+        ? '—'
+        : `${String(Math.round(pilot.hdgDeg) % 360).padStart(3, '0')}° ${cardinalFor(pilot.hdgDeg)}`;
+    pilotElements.agl.textContent = `${altitudeKm < 10 ? altitudeKm.toFixed(2) : altitudeKm.toFixed(1)} km`;
+    pilotElements.agl.className = `pi-v${altitudeKm < 3 ? ' warn' : ''}`;
+    pilotElements.vs.textContent = Math.abs(pilot.vsMs) < 1
+        ? '0 m/s'
+        : `${pilot.vsMs > 0 ? '↑' : '↓'} ${formatRate(Math.abs(pilot.vsMs))}`;
+    pilotElements.gs.textContent = pilot.gsKms < 0.005 ? '—' : `${formatRate(pilot.gsKms * 1000)}`;
+    if (pilot.slopeDeg == null || !hasRelief) {
+        pilotElements.slope.textContent = '—';
+        pilotElements.slope.className = 'pi-v';
+    } else {
+        const down = pilot.slopeDeg >= 0.3 && pilot.slopeDownBearingDeg != null
+            ? ` ↓${cardinalFor(pilot.slopeDownBearingDeg)}`
+            : '';
+        pilotElements.slope.textContent = `${pilot.slopeDeg.toFixed(1)}°${down}`;
+        pilotElements.slope.className = `pi-v ${pilot.slopeDeg < 5 ? 'ok' : pilot.slopeDeg < 15 ? 'warn' : 'alert'}`;
+    }
+    pilotElements.sun.textContent = `${pilot.sunElevDeg >= 0 ? '+' : '−'}${Math.abs(pilot.sunElevDeg).toFixed(0)}°`;
+    pilotElements.sun.className = `pi-v${pilot.sunElevDeg < 5 ? ' warn' : ''}`;
+    pilotElements.relief.textContent = regionalReliefScale === 1 ? '×1 TRUE' : `×${regionalReliefScale}`;
+    pilotElements.relief.className = `pi-v${regionalReliefScale === 1 ? ' ok' : ''}`;
+}
+
 function updateSurfaceReadout({ force = false } = {}) {
     if (!surfaceModeActive || !surfaceLocation) return;
     const now = performance.now();
@@ -1813,15 +2403,17 @@ function updateSurfaceReadout({ force = false } = {}) {
     const cameraLocation = worldVectorLatLon(camera.position);
     const surfaceRadius = anchorRadiusAtLatLon(cameraLocation.latDeg, cameraLocation.lonDeg);
     const altitudeKm = Math.max(0, (camera.position.length() - surfaceRadius) * MARS_RADIUS_KM);
-    // MOLA elevation stays TRUE here. The patch is drawn at 18× exaggeration,
-    // but the number a viewer reads off the HUD is the real areoid height —
-    // never scale this to match what the geometry looks like.
+    // MOLA elevation stays TRUE here. The patch is drawn exaggerated, but the
+    // number a viewer reads off the HUD is the real areoid height — never
+    // scale this to match what the geometry looks like.
     const elevationKm = elevationAtLatLon(target.latDeg, target.lonDeg) / 1000;
     surfaceLocationElement.textContent = `${formatCoordinate(target.latDeg, 'N', 'S')} · ${formatCoordinate(target.lonDeg, 'E', 'W')}`;
     surfaceAltitudeElement.textContent = `Eye ${altitudeKm.toFixed(1)} km · MOLA ${elevationKm >= 0 ? '+' : '−'}${Math.abs(elevationKm).toFixed(1)} km`;
     surfaceExplorer.dataset.lat = target.latDeg.toFixed(6);
     surfaceExplorer.dataset.lon = target.lonDeg.toFixed(6);
     surfaceExplorer.dataset.altitudeKm = altitudeKm.toFixed(3);
+    updatePilotCluster(target, altitudeKm, now);
+    updateLandingReticle();
 }
 
 function setSurfaceLight(enabled) {
@@ -1845,6 +2437,9 @@ function setSurfaceGrid(enabled) {
 function deactivateSurfaceExplorer() {
     if (!surfaceModeActive) return;
     surfaceModeActive = false;
+    // Back to survey scale so the next entry starts at the documented 18×.
+    regionalReliefScale = REGIONAL_RELIEF_EXAGGERATION;
+    updateLandingReticle();
     app.classList.remove('is-surface-mode');
     surfaceExplorer.hidden = true;
     regionalTerrain.visible = false;
@@ -1875,11 +2470,29 @@ function deactivateSurfaceExplorer() {
  * written once at entry.
  */
 function updateSurfaceDetail() {
+    // The close-range regolith cascade is invented texture and says so —
+    // appended to whichever provenance line is active.
+    const regolithNote = QUALITY_LEVELS[qualityIndex].surfaceDetail > 0
+        ? ' · close-range regolith + craters synthesized'
+        : '';
     if (!hasRelief) {
-        surfaceDetailElement.textContent = 'MOLA unavailable · smooth regional geometry · Viking/material fallback';
+        surfaceDetailElement.textContent = `MOLA unavailable · smooth regional geometry · Viking/material fallback${regolithNote}`;
         return;
     }
-    surfaceDetailElement.textContent = `${REGIONAL_TERRAIN_EXTENT_KM} km MOLA patch · relief ${(regionalTerrainRelief.minElevationM / 1000).toFixed(1)} → ${(regionalTerrainRelief.maxElevationM / 1000).toFixed(1)} km at ${REGIONAL_RELIEF_EXAGGERATION}× · ${regionalGridSpacingKm} km grid · sub-sample roughness is illustrative`;
+    // Both provenance tails are honest about the same thing: everything below
+    // the MOLA sample spacing is synthesized. With the WFC layer on, the HUD
+    // names the leading class so the viewer knows what the tint is claiming.
+    let detailNote = 'sub-sample roughness is illustrative';
+    if (synthEnabled && synthResult && synthShares) {
+        const [topId, topShare] = Object.entries(synthShares).sort((a, b) => b[1] - a[1])[0];
+        // shares are keyed by CLASS id — linear families have no tile named
+        // after the class, so this lookup must go through classes.
+        const topLabel = MARS_TILESET.classes.find(cls => cls.id === topId).label.toLowerCase();
+        detailNote = `WFC geology synth ${Math.round(topShare * 100)}% ${topLabel} · synthesized below ${Math.round(REGIONAL_TERRAIN_EXTENT_KM / REGIONAL_SYNTH_CELLS)} km`;
+    }
+    // The multiplier is LIVE (true-scale-on-final ramp); at 1× say so loudly.
+    const scaleNote = regionalReliefScale === 1 ? '1× TRUE SCALE' : `${regionalReliefScale}×`;
+    surfaceDetailElement.textContent = `${REGIONAL_TERRAIN_EXTENT_KM} km MOLA patch · relief ${(regionalTerrainRelief.minElevationM / 1000).toFixed(1)} → ${(regionalTerrainRelief.maxElevationM / 1000).toFixed(1)} km at ${scaleNote} · ${regionalGridSpacingKm} km grid · ${detailNote}${regolithNote}`;
 }
 
 /**
@@ -1891,6 +2504,42 @@ function updateSurfaceDetail() {
  * higher and looking further ahead puts the horizon in the upper third and
  * gives the sky dome somewhere to be.
  */
+/**
+ * True-scale-on-final controller — called every frame in surface mode. Reads
+ * the orbit range, quantizes it to a scale step, and rebuilds the patch ONLY
+ * when the step changes. Skipped mid-tween: entry flights sweep the range
+ * through the ramp bands and would fire rebuild hitches inside the animation.
+ */
+function updateReliefRamp() {
+    if (!surfaceModeActive || !regionalTerrainCenter || cameraTween) return;
+    const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_KM;
+    const next = reliefScaleForRange(rangeKm);
+    if (next === regionalReliefScale) return;
+    regionalReliefScale = next;
+    const previousTarget = controls.target.clone();
+    rebuildRegionalTerrain(regionalTerrainCenter.latDeg, regionalTerrainCenter.lonDeg);
+    // Re-seat the orbit pivot onto the RE-SCALED ground and carry the camera
+    // by the same shift, so range and clearance survive the step. Without
+    // this, a scale-down at a below-datum site (Jezero draws at −2.6 km × 18)
+    // RAISES the drawn ground tens of km toward the camera, the clearance
+    // guard eats the margin, and the zoom stalls mid-ramp (measured: stuck
+    // at ×8, never reaching true scale).
+    const location = surfaceLocation || regionalTerrainCenter;
+    const newTarget = worldSurfacePoint(location.latDeg, location.lonDeg);
+    camera.position.add(newTarget.clone().sub(previousTarget));
+    controls.target.copy(newTarget);
+    // Every ground-anchored layer re-seats onto the new vertical scale; the
+    // trail re-anchors WITHOUT reset (updateSurfaceTrail re-maps its stored
+    // locations — wiping the traverse on every zoom step would be hostile).
+    refreshSurfaceAnchors();
+    if (surfaceLocation) updateSurfaceTrail(surfaceLocation, { reanchor: true });
+    updateSurfaceDetail();
+    meshStatusElement.textContent = hasRelief
+        ? `regional MOLA · 66k vertices · ${regionalReliefScale}× relief${regionalReliefScale === 1 ? ' (true scale)' : ''}`
+        : 'regional smooth-terrain fallback';
+    updateSurfaceReadout({ force: true });
+}
+
 function surfaceCameraPlacement(latDeg, lonDeg, headingRad = 0) {
     const target = worldSurfacePoint(latDeg, lonDeg);
     const radial = target.clone().normalize();
@@ -1919,6 +2568,10 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
     if (surfaceModeActive) setSurfacePresentation(false);
     surfaceModeActive = true;
     surfaceLocation = { latDeg, lonDeg };
+    // Fresh motion window: V/S and ground speed must not read the flight-in
+    // tween (or a previous visit) as pilot motion.
+    pilot.samples.length = 0;
+    pilot.slopeAt = null;
     app.classList.add('is-surface-mode');
     surfaceExplorer.hidden = false;
     rebuildRegionalTerrain(latDeg, lonDeg);
@@ -2604,6 +3257,10 @@ function applyQuality(index) {
     // glow — the first thing worth losing, and the last thing worth keeping.
     atmosphereLayer.visible = level.atmosphere
         && Boolean(document.querySelector('[data-layer="atmosphere"]')?.checked);
+    // Close-range regolith cascade rides the ladder too: it costs noise
+    // evaluations per fragment, which is exactly what a software rasteriser
+    // cannot afford. 0 branches the whole cascade out of the shader path.
+    detailUniforms.uDetailStrength.value = level.surfaceDetail;
     // The globe's bump term costs a dFdx/dFdy pair per fragment across the whole
     // disc. Unlike the regional patch's (which was perturbing detail finer than
     // one texel and is gone for good), this one earns its keep at full quality —
@@ -2626,7 +3283,13 @@ function applyQuality(index) {
 
 let qualityWindowStart = 0;
 
+// Test/QA affordance: __marsLab.setQuality(i, { lock: true }) pins a rung so
+// visual verification of quality-gated features (the regolith cascade) is
+// possible on machines the ladder would immediately downgrade.
+let qualityLocked = false;
+
 function sampleFrame(frameMs) {
+    if (qualityLocked) return;
     // Ignore any single stall (a terrain rebuild, a tab regaining focus) —
     // those are not the steady state the ladder is trying to measure.
     if (frameMs > 500) return;
@@ -2741,8 +3404,33 @@ window.__marsLab = Object.freeze({
         skyVisible: skyDome.visible,
         skyOpacity: skyDomeMaterial.uniforms.uOpacity.value,
         reliefExaggeration: REGIONAL_RELIEF_EXAGGERATION,
+        reliefScaleNow: regionalReliefScale,
         patchRelief: { ...regionalTerrainRelief },
         hasRelief,
+        synth: {
+            enabled: synthEnabled,
+            active: Boolean(synthEnabled && synthResult),
+            cells: REGIONAL_SYNTH_CELLS,
+            restarts: synthResult?.restarts ?? null,
+            shares: synthShares ? { ...synthShares } : null,
+        },
+    }),
+    /** Pin a quality rung (lock stops the ladder re-adjusting). QA/tests only. */
+    setQuality: (index, { lock = false } = {}) => {
+        qualityLocked = Boolean(lock);
+        applyQuality(index);
+    },
+    /** Landing instruments + reticle — see the PILOT CLUSTER block. */
+    pilotState: () => ({
+        hdgDeg: pilot.hdgDeg,
+        aglKm: pilot.aglKm,
+        vsMs: pilot.vsMs,
+        gsKms: pilot.gsKms,
+        slopeDeg: pilot.slopeDeg,
+        slopeDownBearingDeg: pilot.slopeDownBearingDeg,
+        sunElevDeg: pilot.sunElevDeg,
+        reliefScaleNow: regionalReliefScale,
+        reticle: reticleAt ? { ...reticleAt, radiusKm: RETICLE_RADIUS_KM, visible: landingReticle.visible } : null,
     }),
     /** Solar geometry, so a test can ask whether the focused point is in daylight. */
     sunState: () => {
@@ -2767,6 +3455,7 @@ window.__marsLab = Object.freeze({
         depthRatio: camera.far / camera.near,
         starsFollowCamera: starField.position.distanceTo(camera.position) < 1e-6,
         atmosphere: atmosphereLayer.visible,
+        surfaceDetail: detailUniforms.uDetailStrength.value,
     }),
     /** Ground-anchor audit: how far each surface layer floats above the terrain. */
     anchorState: () => {
@@ -2840,6 +3529,9 @@ function animate(now) {
         surfaceFillLight.position.copy(camera.position).addScaledVector(cameraRadial, -0.0001);
         skyDome.position.copy(camera.position);
         updateSurfaceSky(cameraRadial);
+        // The detail cascade's lit-relief term shades against the live sun.
+        detailUniforms.uSunDirWorld.value.copy(sun.position).normalize();
+        updateReliefRamp();
         updateSurfaceReadout();
     } else {
         updateGridFade(camera.position.length());
