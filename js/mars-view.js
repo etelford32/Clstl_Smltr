@@ -607,6 +607,11 @@ const detailUniforms = {
     // cache, so ramp steps and quality rebuilds keep the anchor and only a
     // genuine recenter (which rebuilds all scenery anyway) moves it.
     uDetailAnchor: { value: new THREE.Vector3(0, 0, 0) },
+    // Tangent frame at the anchor: the crater field scatters circles on a 2D
+    // chart q = (sph·east, sph·north). Same quantization/stability story as
+    // the anchor itself.
+    uDetailEast: { value: new THREE.Vector3(1, 0, 0) },
+    uDetailNorth: { value: new THREE.Vector3(0, 1, 0) },
 };
 regionalTerrainMaterial.customProgramCacheKey = () => 'mars-regolith-detail';
 regionalTerrainMaterial.onBeforeCompile = (shader) => {
@@ -614,20 +619,26 @@ regionalTerrainMaterial.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
         .replace('#include <common>', `
             attribute float aDetailGrain;
+            attribute float aDetailCrater;
             varying vec3 vDetailWorld;
             varying float vDetailGrain;
+            varying float vDetailCrater;
             #include <common>`)
         .replace('#include <begin_vertex>', `
             #include <begin_vertex>
             vDetailWorld = (modelMatrix * vec4(position, 1.0)).xyz;
-            vDetailGrain = aDetailGrain;`);
+            vDetailGrain = aDetailGrain;
+            vDetailCrater = aDetailCrater;`);
     shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `
             uniform float uDetailStrength;
             uniform vec3 uSunDirWorld;
             uniform vec3 uDetailAnchor;
+            uniform vec3 uDetailEast;
+            uniform vec3 uDetailNorth;
             varying vec3 vDetailWorld;
             varying float vDetailGrain;
+            varying float vDetailCrater;
             float ppHash(vec3 p) {
                 // Wrap the lattice into a 289-cell tile BEFORE hashing: the
                 // raw coordinates reach tens of thousands of cells (sphere
@@ -657,6 +668,46 @@ regionalTerrainMaterial.onBeforeCompile = (shader) => {
                     mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
                     f.z);
             }
+            // Scattered impact craters on the 2D surface chart q (km): one
+            // candidate per jittered grid cell of spacing L, existence gated
+            // by the per-vertex class density. Analytic bowl + raised-rim
+            // profile; shading is the SIGNED radial slope lit against the
+            // sun's tangent direction (near inner wall dark, far wall lit,
+            // outer flank reversed) plus a bright ejecta collar and a dark
+            // floor — the standard lunar/martian look, driven by the actual
+            // sun vector.
+            float craterField(vec2 q, float L, float seedZ, float density, vec2 sunT2) {
+                vec2 base = floor(q / L);
+                float shade = 0.0;
+                for (int dx = -1; dx <= 1; dx += 1) {
+                    for (int dy = -1; dy <= 1; dy += 1) {
+                        vec2 cell = base + vec2(float(dx), float(dy));
+                        float h = ppHash(vec3(cell * 0.7311, seedZ));
+                        if (h > density) continue;
+                        vec2 center = (cell + 0.5 + 0.8 * (vec2(fract(h * 127.1), fract(h * 311.7)) - 0.5)) * L;
+                        float r = L * mix(0.14, 0.34, fract(h * 43.7));
+                        vec2 offset = q - center;
+                        float d = length(offset);
+                        if (d > r * 1.6) continue;
+                        float x = d / r;
+                        float slope;
+                        float alb;
+                        if (x < 0.85) {
+                            slope = 1.9 * x;                                  // bowl wall rises outward
+                            alb = -0.09 * (1.0 - x);                          // dark floor
+                        } else if (x < 1.05) {
+                            slope = mix(1.6, -1.6, (x - 0.85) / 0.2);         // over the rim crest
+                            alb = 0.10;                                       // bright rim
+                        } else {
+                            slope = -1.5 * (1.6 - x) / 0.55;                  // outer flank decays
+                            alb = 0.05 * (1.6 - x) / 0.55;                    // ejecta collar
+                        }
+                        vec2 rd = offset / max(d, 1e-5);
+                        shade += -slope * dot(rd, sunT2) * 0.6 + alb;
+                    }
+                }
+                return shade;
+            }
             #include <common>`)
         .replace('#include <color_fragment>', `
             #include <color_fragment>
@@ -668,6 +719,8 @@ regionalTerrainMaterial.onBeforeCompile = (shader) => {
                 float viewKm = length(vViewPosition) * 3396.19;
                 float freq = mix(1.0, vDetailGrain, 0.7);
                 float amp = (0.7 + 0.3 * vDetailGrain) * uDetailStrength;
+                vec3 sunTangent = uSunDirWorld - radialDir * dot(uSunDirWorld, radialDir);
+                sunTangent = normalize(sunTangent + vec3(1e-5));
                 float shade = 0.0;
                 float fade0 = 1.0 - smoothstep(60.0, 130.0, viewKm);
                 if (fade0 > 0.0) {
@@ -675,8 +728,6 @@ regionalTerrainMaterial.onBeforeCompile = (shader) => {
                 }
                 float fade1 = 1.0 - smoothstep(14.0, 32.0, viewKm);
                 if (fade1 > 0.0) {
-                    vec3 sunTangent = uSunDirWorld - radialDir * dot(uSunDirWorld, radialDir);
-                    sunTangent = normalize(sunTangent + vec3(1e-5));
                     float bump = ppNoise(sph * (freq / 0.45)) * 0.67
                         + ppNoise(sph * (freq / 0.19)) * 0.33;
                     float bumpSunward = ppNoise((sph + sunTangent * 0.09) * (freq / 0.45)) * 0.67
@@ -692,7 +743,27 @@ regionalTerrainMaterial.onBeforeCompile = (shader) => {
                 if (fade2 > 0.0) {
                     shade += (ppNoise(sph * (freq / 0.09)) - 0.5) * 0.18 * fade2;
                 }
-                diffuseColor.rgb *= clamp(1.0 + shade * amp, 0.55, 1.45);
+                // Crater field on the tangent chart, three size decades. The
+                // largest (rims 0.5–1.2 km) reads from survey height; the
+                // smallest (~50–110 m) only on short final, and only above
+                // the ladder's low rung.
+                vec2 q = vec2(dot(sph, uDetailEast), dot(sph, uDetailNorth));
+                vec2 sunT2 = vec2(dot(sunTangent, uDetailEast), dot(sunTangent, uDetailNorth));
+                sunT2 = normalize(sunT2 + vec2(1e-5));
+                float craterDensity = vDetailCrater * 0.75;
+                float cfade0 = 1.0 - smoothstep(70.0, 150.0, viewKm);
+                if (cfade0 > 0.0) {
+                    shade += craterField(q, 3.4, 17.0, craterDensity, sunT2) * cfade0;
+                }
+                float cfade1 = 1.0 - smoothstep(18.0, 42.0, viewKm);
+                if (cfade1 > 0.0) {
+                    shade += craterField(q, 1.1, 29.0, craterDensity, sunT2) * cfade1;
+                }
+                float cfade2 = 1.0 - smoothstep(3.0, 10.0, viewKm);
+                if (cfade2 > 0.0 && uDetailStrength > 0.8) {
+                    shade += craterField(q, 0.32, 47.0, craterDensity * 0.9, sunT2) * cfade2;
+                }
+                diffuseColor.rgb *= clamp(1.0 + shade * amp, 0.45, 1.55);
             }`);
 };
 
@@ -839,6 +910,15 @@ const synthScratch = { color: [0, 0, 0], reliefAmpM: 0, grain: 0, tileIndex: 0 }
 // re-color the whole patch instead of marking the exceptions.
 const SYNTH_NEUTRAL = MARS_TILESET.classes.find(cls => cls.id === 'plains').color;
 
+// Crater areal saturation per geology class, indexed by TILE for the per-
+// vertex attribute fill (family variants inherit their class's value).
+const CRATER_DENSITY_BY_CLASS = {
+    cratered: 1.0, lava: 0.6, plains: 0.5, ice: 0.35, chaos: 0.4, channel: 0.25, dunes: 0.12,
+};
+const CRATER_DENSITY_BY_TILE = MARS_TILESET.tiles.map(
+    tile => CRATER_DENSITY_BY_CLASS[tile.classId] ?? 0.5,
+);
+
 function computeRegionalSynth(latDeg, lonDeg) {
     if (!molaSampler) return null;
     // Same quarter-degree quantization as regionSeed: rebuilds triggered by the
@@ -941,11 +1021,18 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
     const indices = new Uint32Array(segments * segments * 6);
     const synth = synthEnabled ? computeRegionalSynth(latDeg, lonDeg) : null;
     // Detail-cascade anchor: quarter-degree-quantized patch center, in the
-    // same WORLD frame as vDetailWorld (marsGroup rotation applied).
+    // same WORLD frame as vDetailWorld (marsGroup rotation applied). The
+    // tangent frame rides along for the crater chart.
+    const anchorLat = Math.round(latDeg * 4) / 4;
+    const anchorLon = Math.round(lonDeg * 4) / 4;
+    const anchorDir = latLonVector(anchorLat, anchorLon, 1);
+    const anchorFrame = tangentFrame(anchorDir);
     detailUniforms.uDetailAnchor.value
-        .copy(latLonVector(Math.round(latDeg * 4) / 4, Math.round(lonDeg * 4) / 4, 1))
-        .applyQuaternion(marsGroup.quaternion)
-        .multiplyScalar(3396.19);
+        .copy(anchorDir).applyQuaternion(marsGroup.quaternion).multiplyScalar(3396.19);
+    detailUniforms.uDetailEast.value
+        .copy(anchorFrame.east).applyQuaternion(marsGroup.quaternion);
+    detailUniforms.uDetailNorth.value
+        .copy(anchorFrame.north).applyQuaternion(marsGroup.quaternion);
     // Class tints stashed in pass 1 (where the synth is sampled for roughness
     // anyway) and applied in pass 2 on top of the hypsometric shade.
     const synthTint = synth ? new Float32Array(vertexCount * 3) : null;
@@ -953,6 +1040,10 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
     // noise-frequency knob (dunes 2.2, plains 0.6). 1 = neutral regolith when
     // the synth layer is off or has no data.
     const grains = new Float32Array(vertexCount).fill(1);
+    // Per-vertex crater saturation for the cascade's crater field: ancient
+    // cratered highlands keep ~4 Gyr of impacts, dune fields bury almost all
+    // of theirs, channel floors were resurfaced. 0.5 = neutral.
+    const craterDensities = new Float32Array(vertexCount).fill(0.5);
 
     // Pass 1: geometry + real elevation. No per-vertex object allocation — this
     // loop runs 66,049 times on every rebuild, and rebuilds happen while the
@@ -984,6 +1075,7 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
                 // decoration budget: plains flatten it, chaos keeps full grain.
                 roughnessKm *= Math.min(1, Math.max(0.15, synthScratch.reliefAmpM / 300));
                 grains[vertexOffset] = synthScratch.grain;
+                craterDensities[vertexOffset] = CRATER_DENSITY_BY_TILE[synthScratch.tileIndex];
                 for (let channel = 0; channel < 3; channel += 1) {
                     const ratio = synthScratch.color[channel] / SYNTH_NEUTRAL[channel];
                     synthTint[vertexOffset * 3 + channel] = THREE.MathUtils.clamp(
@@ -1043,6 +1135,7 @@ function rebuildRegionalTerrain(latDeg, lonDeg) {
     geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute('aDetailGrain', new THREE.BufferAttribute(grains, 1));
+    geometry.setAttribute('aDetailCrater', new THREE.BufferAttribute(craterDensities, 1));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.computeVertexNormals();
     geometry.computeBoundingSphere();
@@ -2380,7 +2473,7 @@ function updateSurfaceDetail() {
     // The close-range regolith cascade is invented texture and says so —
     // appended to whichever provenance line is active.
     const regolithNote = QUALITY_LEVELS[qualityIndex].surfaceDetail > 0
-        ? ' · close-range regolith synthesized'
+        ? ' · close-range regolith + craters synthesized'
         : '';
     if (!hasRelief) {
         surfaceDetailElement.textContent = `MOLA unavailable · smooth regional geometry · Viking/material fallback${regolithNote}`;

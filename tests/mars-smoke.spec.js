@@ -389,7 +389,7 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     expect(cascadeQuality.surfaceDetail).toBe(expectedDetail);
     await page.evaluate(() => window.__marsLab.setQuality(0, { lock: true }));
     await expect.poll(() => page.evaluate(() => window.__marsLab.renderState().surfaceDetail)).toBe(1);
-    await expect(page.locator('#surface-detail')).toContainText('close-range regolith synthesized');
+    await expect(page.locator('#surface-detail')).toContainText('close-range regolith + craters synthesized');
     await page.evaluate(() => window.__marsLab.setQuality(3, { lock: true }));
     await expect.poll(() => page.evaluate(() => window.__marsLab.renderState().surfaceDetail)).toBe(0);
     await expect(page.locator('#surface-detail')).not.toContainText('close-range regolith');
@@ -399,7 +399,7 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     // software rasteriser.
     await page.evaluate(() => window.__marsLab.setQuality(2, { lock: true }));
     await expect.poll(() => page.evaluate(() => window.__marsLab.renderState().surfaceDetail)).toBe(0.6);
-    await expect(page.locator('#surface-detail')).toContainText('close-range regolith synthesized');
+    await expect(page.locator('#surface-detail')).toContainText('close-range regolith + craters synthesized');
 
     // ── True-scale-on-final ──
     // Zooming to short final ramps the 18× exaggeration down to TRUE 1×,
