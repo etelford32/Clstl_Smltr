@@ -17,7 +17,10 @@ import { APOLLO_SITES, ARTEMIS_III_CANDIDATES, latLonToXYZ } from './artemis-dat
 const APOLLO_COLOR          = 0xffae44;  // amber — continuity with Apollo programme aesthetic
 const ARTEMIS_COLOR         = 0x44ccff;  // cyan  — forward-looking
 const MARKER_RADIUS         = 0.008;     // proportional to moon radius 1.0
-const MARKER_ALT            = 1.006;     // raised above surface to avoid z-fight
+// Clearance ABOVE the local ground: without a radiusAt callback the ground is
+// the unit sphere, reproducing the historical fixed 1.006; with displaced
+// relief (js/moon-relief.js) the marker rides the terrain.
+const MARKER_CLEAR          = 0.006;
 const HALO_RADIUS_MULT      = 2.6;
 
 function _markerGeometry() {
@@ -37,53 +40,69 @@ function _haloMaterial(color) {
 }
 
 function _placeMarker(group, lat, lon, color, userData = {}) {
-    const p = latLonToXYZ(lat, lon, MARKER_ALT);
-
     const dot = new THREE.Mesh(
         _markerGeometry(),
         new THREE.MeshBasicMaterial({ color }),
     );
-    dot.position.set(p.x, p.y, p.z);
     dot.userData = userData;
     group.add(dot);
 
     // Sprite halo doubles the visible footprint without bloating geometry
     const sprite = new THREE.Sprite(_haloMaterial(color));
-    sprite.position.set(p.x, p.y, p.z);
     sprite.scale.setScalar(MARKER_RADIUS * HALO_RADIUS_MULT * 2);
     sprite.userData = userData;
     group.add(sprite);
 
-    return { dot, sprite };
+    return { lat, lon, dot, sprite };
 }
 
 export class LandingSites {
     /**
      * @param {THREE.Object3D} parent — the MoonSkin.moonMesh (unit sphere,
      *                                    spins with lunar rotation)
+     * @param {{ radiusAt?: (latDeg, lonDeg) => number }} [options]
      */
-    constructor(parent) {
+    constructor(parent, { radiusAt = null } = {}) {
         this._apollo  = new THREE.Group();
         this._artemis = new THREE.Group();
         this._apollo.name  = 'landing-sites:apollo';
         this._artemis.name = 'landing-sites:artemis3';
+        this._radiusAt = radiusAt;
+        this._markers = [];
 
         for (const s of APOLLO_SITES) {
-            _placeMarker(this._apollo, s.lat, s.lon, APOLLO_COLOR, {
+            this._markers.push(_placeMarker(this._apollo, s.lat, s.lon, APOLLO_COLOR, {
                 site: s.id, label: s.mission, region: s.region, kind: 'apollo',
-            });
+            }));
         }
         for (const s of ARTEMIS_III_CANDIDATES) {
-            _placeMarker(this._artemis, s.lat, s.lon, ARTEMIS_COLOR, {
+            this._markers.push(_placeMarker(this._artemis, s.lat, s.lon, ARTEMIS_COLOR, {
                 site: s.id, label: s.name, region: s.note, kind: 'artemis3',
-            });
+            }));
         }
+        this._anchorAll();
 
         parent.add(this._apollo);
         parent.add(this._artemis);
 
         this._apolloVisible  = true;
         this._artemisVisible = true;
+    }
+
+    _anchorAll() {
+        for (const marker of this._markers) {
+            const p = latLonToXYZ(marker.lat, marker.lon, 1);
+            const ground = this._radiusAt ? this._radiusAt(marker.lat, marker.lon) : 1;
+            const r = ground + MARKER_CLEAR;
+            marker.dot.position.set(p.x * r, p.y * r, p.z * r);
+            marker.sprite.position.copy(marker.dot.position);
+        }
+    }
+
+    /** Swap the ground function (relief applied/cleared) and re-seat markers. */
+    setRadiusAt(radiusAt) {
+        this._radiusAt = radiusAt || null;
+        this._anchorAll();
     }
 
     setApolloVisible(visible)  { this._apollo.visible  = !!visible; this._apolloVisible  = !!visible; }

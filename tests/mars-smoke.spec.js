@@ -339,6 +339,102 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     // Jezero's 520 km patch carries several km of genuine MOLA relief; if this
     // collapses, the hypsometric ramp and the HUD span are both reading noise.
     expect(surfaceState.patchRelief.spanM).toBeGreaterThan(1_000);
+    // WFC geology synth: on by default, seeded from the same MOLA raster, and
+    // honest in the HUD about being synthesized. Shares must sum to 1 — a
+    // partial grid means the collapse died mid-solve.
+    expect(surfaceState.synth.active).toBe(true);
+    expect(surfaceState.synth.cells).toBe(48);
+    const synthShareTotal = Object.values(surfaceState.synth.shares)
+        .reduce((sum, share) => sum + share, 0);
+    expect(Math.abs(synthShareTotal - 1)).toBeLessThan(1e-9);
+    await expect(page.locator('#surface-detail')).toContainText('WFC geology synth');
+    await expect(page.locator('#surface-detail')).toContainText('synthesized');
+    // Toggling the layer off restores the pre-synth provenance line and stops
+    // tinting — without touching the anchor stack (relief stays on).
+    await page.locator('[data-layer="synth"]').uncheck({ force: true });
+    await expect.poll(() => page.evaluate(() => window.__marsLab.layerIsVisible('synth'))).toBe(false);
+    await expect(page.locator('#surface-detail')).toContainText('sub-sample roughness is illustrative');
+    await expect.poll(() => page.evaluate(() => window.__marsLab.layerIsVisible('relief'))).toBe(true);
+    await page.locator('[data-layer="synth"]').check({ force: true });
+    await expect.poll(() => page.evaluate(() => window.__marsLab.layerIsVisible('synth'))).toBe(true);
+    await expect(page.locator('#surface-detail')).toContainText('WFC geology synth');
+
+    // ── Pilot cluster + landing reticle ──
+    // The instruments a landing needs: heading, AGL, true slope (from raw
+    // MOLA, never the drawn geometry), sun elevation, live relief multiplier;
+    // and the 2 km reticle riding the orbit target as a scale anchor.
+    const pilotEntry = await page.evaluate(() => window.__marsLab.pilotState());
+    expect(pilotEntry.reliefScaleNow).toBe(18);
+    expect(pilotEntry.aglKm).toBeGreaterThan(5);
+    expect(pilotEntry.hdgDeg).toBeGreaterThanOrEqual(0);
+    expect(pilotEntry.hdgDeg).toBeLessThan(360);
+    expect(pilotEntry.slopeDeg).toBeGreaterThanOrEqual(0);
+    expect(pilotEntry.slopeDeg).toBeLessThan(45);
+    expect(Math.abs(pilotEntry.sunElevDeg)).toBeLessThanOrEqual(90);
+    expect(pilotEntry.reticle.visible).toBe(true);
+    expect(pilotEntry.reticle.radiusKm).toBe(2);
+    const reticleTarget = await page.evaluate(() => window.__marsLab.surfaceState().location);
+    expect(Math.abs(pilotEntry.reticle.latDeg - reticleTarget.latDeg)).toBeLessThan(0.05);
+    expect(Math.abs(pilotEntry.reticle.lonDeg - reticleTarget.lonDeg)).toBeLessThan(0.05);
+    await expect(page.locator('#pilot-agl')).toContainText('km');
+    await expect(page.locator('#pilot-relief')).toHaveText('×18');
+    await expect(page.locator('#pilot-hdg')).toContainText('°');
+
+    // ── Close-range detail cascade ──
+    // Quality-gated regolith shader: strength follows the ladder's rung
+    // exactly, the HUD discloses it as synthesized whenever it is on, and
+    // both drop together at the minimal rung — fidelity traded, honesty kept.
+    const cascadeQuality = await page.evaluate(() => window.__marsLab.renderState());
+    const expectedDetail = { high: 1, medium: 1, low: 0.6, minimal: 0 }[cascadeQuality.quality];
+    expect(cascadeQuality.surfaceDetail).toBe(expectedDetail);
+    await page.evaluate(() => window.__marsLab.setQuality(0, { lock: true }));
+    await expect.poll(() => page.evaluate(() => window.__marsLab.renderState().surfaceDetail)).toBe(1);
+    await expect(page.locator('#surface-detail')).toContainText('close-range regolith + craters synthesized');
+    await page.evaluate(() => window.__marsLab.setQuality(3, { lock: true }));
+    await expect.poll(() => page.evaluate(() => window.__marsLab.renderState().surfaceDetail)).toBe(0);
+    await expect(page.locator('#surface-detail')).not.toContainText('close-range regolith');
+    // Descend locked to LOW: cascade still on (0.6) so ramp + regolith are
+    // exercised together deterministically, but at 128² segments and 0.62
+    // pixel ratio — locking HIGH here timed the whole test out on the CI
+    // software rasteriser.
+    await page.evaluate(() => window.__marsLab.setQuality(2, { lock: true }));
+    await expect.poll(() => page.evaluate(() => window.__marsLab.renderState().surfaceDetail)).toBe(0.6);
+    await expect(page.locator('#surface-detail')).toContainText('close-range regolith + craters synthesized');
+
+    // ── True-scale-on-final ──
+    // Zooming to short final ramps the 18× exaggeration down to TRUE 1×,
+    // disclosed in the HUD line, the pilot cluster, and the mesh badge —
+    // and zooming back out restores the survey scale for the rest of the run.
+    const viewportBox = await page.locator('#mars-viewport').boundingBox();
+    const viewCenter = {
+        x: viewportBox.x + viewportBox.width / 2,
+        y: viewportBox.y + viewportBox.height / 2,
+    };
+    await page.mouse.move(viewCenter.x, viewCenter.y);
+    for (let i = 0; i < 26; i += 1) {
+        await page.mouse.wheel(0, -240);
+        await page.waitForTimeout(70);
+    }
+    await expect.poll(
+        () => page.evaluate(() => window.__marsLab.pilotState().reliefScaleNow),
+        { timeout: 15_000 },
+    ).toBe(1);
+    await expect(page.locator('#surface-detail')).toContainText('1× TRUE SCALE');
+    await expect(page.locator('#pilot-relief')).toContainText('TRUE');
+    await expect(page.locator('#mars-mesh-status')).toContainText('true scale');
+    // The ramp rebuild keeps the synth layer live.
+    await expect.poll(() => page.evaluate(() => window.__marsLab.surfaceState().synth.active)).toBe(true);
+    for (let i = 0; i < 26; i += 1) {
+        await page.mouse.wheel(0, 240);
+        await page.waitForTimeout(70);
+    }
+    await expect.poll(
+        () => page.evaluate(() => window.__marsLab.pilotState().reliefScaleNow),
+        { timeout: 15_000 },
+    ).toBe(18);
+    await expect(page.locator('#surface-detail')).toContainText('18×');
+    // Hand the rest of the run back to the adaptive ladder (from the cheap rung).
+    await page.evaluate(() => window.__marsLab.setQuality(2, { lock: false }));
     const surfaceRender = await page.evaluate(() => window.__marsLab.renderState());
     expect(surfaceRender.depthRatio).toBeLessThan(20_000);
     expect(surfaceRender.near).toBeGreaterThan(0.0001);
@@ -628,6 +724,9 @@ test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks'
     await expect.poll(() => page.evaluate(() => window.__marsLab.surfaceState())).toMatchObject({
         active: true,
         hasRelief: false,
+        // No MOLA ⇒ no geology synth: the WFC layer refuses to invent classes
+        // with nothing measured to seed them, even while its toggle stays on.
+        synth: { enabled: true, active: false },
     });
     await expect.poll(() => page.evaluate(() => {
         const state = window.__marsLab.surfaceState();
@@ -686,6 +785,11 @@ test('Mars UI remains interactive while the 3D engine is still starting', async 
     await weatherCollapse.click();
     await expect(page.locator('.weather-grid')).toBeVisible();
 
+    // The dock clicks above scroll the page; at 720 px that can park the layer
+    // switches under the sticky nav, where a force-click hits the nav's Sign Up
+    // anchor instead of the checkbox. Reset scroll — the assertion is about the
+    // pending-layer queue, not about clicking through the nav.
+    await page.evaluate(() => window.scrollTo(0, 0));
     await page.locator('[data-layer="grid"]').uncheck({ force: true });
     await expect(page.locator('[data-layer="grid"]')).not.toBeChecked();
     await expect(app).toHaveAttribute('data-pending-layers', 'true');
