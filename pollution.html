@@ -77,6 +77,10 @@ body {
     background: rgba(2, 10, 20, .92); border: 1px solid var(--pl-border); border-radius: 7px;
     padding: 6px 10px; font-size: .68rem; white-space: nowrap; color: var(--pl-text); }
 #pl-hover b { color: #f0f6ff; }
+/* Support disclosure: how far the nearest real sample is from the cursor.
+   Dim so it reads as provenance, not as another measurement. */
+#pl-hover .pl-support { color: var(--pl-dim); font-size: .62rem; }
+#pl-hover .pl-nodata { color: var(--pl-warn); }
 #pl-demo-badge { position: absolute; top: 10px; right: 10px; display: none; z-index: 6;
     background: rgba(120, 60, 0, .85); border: 1px solid var(--pl-warn); color: var(--pl-warn);
     border-radius: 7px; padding: 4px 10px; font-size: .68rem; font-weight: 700; letter-spacing: .06em; }
@@ -263,7 +267,7 @@ body {
 
 <script type="module">
 import {
-    makeGrid, cellLat, cellLon, sampleGrid, globalMean, idwGrid,
+    makeGrid, cellLat, cellLon, sampleGrid, globalMean, idwGrid, supportAt,
     kmeansHotspots, chooseHotspotCount, windToUV, stepTransport,
     inferSteadySources, haversineKm, PM25_PER_AOD, FORCING_PER_AOD_WM2,
     CLIMATE_SENSITIVITY_K_PER_WM2, equilibriumDeltaT,
@@ -708,13 +712,31 @@ canvas.addEventListener('mousemove', e => {
         const d = haversineKm(lat, lon, c.lat, c.lon);
         if (d < nd) { nd = d; nearest = c; }
     }
+    // SUPPORT — how far the nearest real sample is. The field is drawn
+    // continuously over the whole planet from ~145 scattered points, so a
+    // bare "PM2.5 14.3 µg/m³" at one decimal reads as a measurement wherever
+    // the cursor happens to be. Precision now follows support, and beyond the
+    // influence radius the value is named for what it is: a background
+    // constant, not an observation.
+    const supportKm = supportAt(state.liveField, lat, lon);
+    const unsupported = !Number.isFinite(supportKm);
+    const value = unsupported
+        ? `<span class="pl-nodata">no sample within ${Math.round(state.liveField?.maxDistKm ?? 2500).toLocaleString()} km — showing clean-air background</span>`
+        // Coarse support gets coarse precision: one decimal implies a
+        // resolution 900 km of interpolation does not have.
+        : `PM2.5 ${supportKm > 250 ? Math.round(v) : v.toFixed(1)} µg/m³`
+            + ` · forcing ${forcing.toFixed(1)} W/m²`;
+    const supportNote = unsupported ? ''
+        : `<br><span class="pl-support">nearest sample ${Math.round(supportKm).toLocaleString()} km`
+            + `${supportKm > 250 ? ' · interpolated' : ''}</span>`;
+
     hover.innerHTML =
         `<b>${Math.abs(lat).toFixed(1)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(1)}°${lon >= 0 ? 'E' : 'W'}</b>`
         // The city's us_aqi is the COMPOSITE index (worst sub-index across
         // pollutants); the PM2.5 on the next line is one component of it.
         // Labelling it keeps a reader from reading them as the same number.
         + (nearest && nd < 400 ? ` · ${nearest.name}${Number.isFinite(nearest.aqi) ? ` (composite AQI ${Math.round(nearest.aqi)})` : ''}` : '')
-        + `<br>PM2.5 ${v.toFixed(1)} µg/m³ · forcing ${forcing.toFixed(1)} W/m²`;
+        + `<br>${value}${supportNote}`;
     hover.style.display = 'block';
     hover.style.left = Math.min(e.clientX - rect.left + 14, rect.width - 200) + 'px';
     hover.style.top = Math.min(e.clientY - rect.top + 12, rect.height - 46) + 'px';

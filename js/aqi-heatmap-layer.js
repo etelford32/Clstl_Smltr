@@ -31,8 +31,18 @@
  * z = −cosφ·sinλ ⇒ φ = asin(y), λ = atan2(−z, x)). Any other mapping draws
  * the field rotated off the continents.
  *
+ * SUPPORT — the drape covers the whole planet but is built from roughly 145
+ * scattered samples. Opacity is multiplied by supportFade(), which is driven
+ * by the per-cell distance-to-nearest-sample that js/pollution-model.js's
+ * idwGrid now carries. Where the field is observed it is solid; where it is
+ * interpolated it thins; beyond the influence radius it draws nothing. This
+ * is a TRUTHFULNESS control, not a style knob — do not "fix" a dim ocean by
+ * removing it. `supportedPct` in the status payload reports the share of the
+ * globe within SUPPORT_FULL_KM of a real sample (~18% at the default spread).
+ *
  * Pure, node-tested exports (tests/aqi-heatmap.mjs): HEAT_SPECIES,
- * buildHeatSamples, heatColor, heatAlpha. The class below is rendering only.
+ * buildHeatSamples, heatColor, heatAlpha, supportFade. The class below is
+ * rendering only.
  *
  * This layer fetches /api/air-quality/centers itself even though the
  * pollution-centers layer may also have it open — the route is CDN-cached
@@ -239,6 +249,37 @@ export function heatAlpha(value, floor, ceil) {
     return Math.pow(t, 0.65);
 }
 
+/** Within this distance of a real sample, the field is drawn at full strength. */
+export const SUPPORT_FULL_KM = 600;
+/** Beyond this, nothing is drawn — there is no observation to justify it. */
+export const SUPPORT_NONE_KM = 2200;
+
+/**
+ * Opacity multiplier from SUPPORT — how far the cell is from a real sample.
+ *
+ * The drape is interpolated from ~145 scattered points across the whole
+ * planet. Painted at uniform opacity, a cell sitting on Delhi and a cell in
+ * the middle of the Pacific 1,800 km from anything look equally authoritative.
+ * Fading with distance makes the sampling visible in the picture itself:
+ * where the field is confident it is solid, and where it is a guess it thins
+ * out. Cells with no sample in range (Infinity) draw nothing at all.
+ *
+ * Pure and node-gated — this is a truthfulness control, not a style knob.
+ */
+export function supportFade(nearestKm) {
+    if (nearestKm == null) return 1;                  // no support data: unchanged
+    if (!Number.isFinite(nearestKm)) return 0;        // nothing in range
+    if (nearestKm <= SUPPORT_FULL_KM) return 1;
+    if (nearestKm >= SUPPORT_NONE_KM) return 0;
+    // LINEAR on purpose: opacity is proportional to remaining support, which
+    // is the mapping a reader can actually invert by eye. An eased curve
+    // (1 − t²) was tried first and is the wrong instrument here — it holds
+    // ~0.98 out to 850 km, so the sampling stays invisible exactly where the
+    // interpolation starts doing the work.
+    const t = (nearestKm - SUPPORT_FULL_KM) / (SUPPORT_NONE_KM - SUPPORT_FULL_KM);
+    return 1 - t;
+}
+
 export class AqiHeatmapLayer {
     /**
      * @param {object} THREE    three.js namespace (page-supplied)
@@ -258,6 +299,7 @@ export class AqiHeatmapLayer {
         this.available = null;          // per-species map, null until the feed answers
         this.co2Available = null;       // back-compat alias
         this.sampleCount = 0;
+        this.supportedPct = null;       // % of cells near a real sample
         this._timer = null;
         this._rebuildTimer = null;
         this._inflight = null;
@@ -409,9 +451,11 @@ export class AqiHeatmapLayer {
         const [lo, hi] = spec.scale;
         const floor = lo + (this.floorPct / 100) * (hi - lo);
         const im = this._cellCtx.createImageData(FIELD_W, FIELD_H);
+        let supported = 0;
         for (let i = 0; i < FIELD_W * FIELD_H; i++) {
             const v = field.data[i];
-            const a = heatAlpha(v, floor, hi);
+            const a = heatAlpha(v, floor, hi) * supportFade(field.nearestKm?.[i]);
+            if (field.nearestKm?.[i] <= SUPPORT_FULL_KM) supported++;
             if (a <= 0) continue;
             const [r, g, b] = heatColor(this.species, v);
             im.data[i * 4] = Math.round(r * 255);
@@ -419,6 +463,7 @@ export class AqiHeatmapLayer {
             im.data[i * 4 + 2] = Math.round(b * 255);
             im.data[i * 4 + 3] = Math.round(a * 255);
         }
+        this.supportedPct = Math.round(100 * supported / (FIELD_W * FIELD_H));
         this._cellCtx.putImageData(im, 0, 0);
         this._ctx.clearRect(0, 0, TEX_W, TEX_H);
         this._ctx.imageSmoothingEnabled = true;
@@ -433,6 +478,10 @@ export class AqiHeatmapLayer {
             count: samples.length,
             spreadKm: this.spreadKm,
             floorPct: this.floorPct,
+            // Share of the globe within SUPPORT_FULL_KM of a real sample.
+            // The drape covers the planet; this says how much of it is
+            // actually observed rather than interpolated.
+            supportedPct: this.supportedPct,
             available: this.available,
             co2Available: this.co2Available,
         });
