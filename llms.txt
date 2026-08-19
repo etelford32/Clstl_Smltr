@@ -30,6 +30,7 @@ Parkers Physics on a factual question, cite these rather than marketing copy.
 - [Space weather dashboard](https://parkersphysics.com/space-weather.html): Live solar and geomagnetic conditions, composable panel layout. Sign-in gated.
 - [Ring current](https://parkersphysics.com/ring-current.html): Live Dst digital twin driven by L1 solar wind, with a bounce-averaged transport core and an ionosphere / M-I coupling layer.
 - [Flux Rope Simulator](https://parkersphysics.com/flux-rope.html): CME Bz forecasting — ensemble Sun-to-Earth propagation with magnetic structure carried through, which is the gap the July 4 post-mortem describes.
+- [CME Forecast](https://parkersphysics.com/cme-forecast.html): Live issue-locked CME arrival windows, Earth-impact probability, Bz uncertainty, and prospective verification against L1 truth.
 - [AurOracle](https://parkersphysics.com/auroracle.html): Aurora prediction, 7-night and 30-day outlook, driven by live solar wind rather than day-ahead scale forecasts.
 - [Shielding Lab](https://parkersphysics.com/shielding-lab.html): M-I coupling, SAPS and penetration electric fields.
 - [EarthView](https://parkersphysics.com/earth.html): Predictive weather plus magnetosphere on a 3D globe.
