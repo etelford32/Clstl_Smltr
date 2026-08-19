@@ -126,3 +126,47 @@ expects geodetic latitude and west-positive Mars longitude, so the shared
 adapter converts latitude on the IAU_MARS reference ellipsoid and reverses the
 longitude sign before constructing `SITE_COORD`. Failed requests never produce
 a synthetic sky position; the layer reports the affected body as unavailable.
+
+## Surface climate field (`js/mars-atmosphere-model.js`)
+
+**This one is not a feed.** The "Surface climate field" layer is MODELLED, and
+the page says so on the layer row, in the provenance note under the controls,
+and in `MARS_CLIMATE_MODEL.summary`. It is here because it is the only thing on
+mars.html that renders numbers no instrument produced, and that deserves the
+same accounting as a feed.
+
+What it is: a 1-D surface energy balance (thermal-inertia diurnal wave over a
+hydrostatic CO₂ column) evaluated per point from latitude, MOLA elevation, Ls,
+local true solar time, albedo and thermal inertia. It is **not** a GCM — no
+dynamics, no advection, no water cycle, and therefore **no winds**.
+
+| Input | Comes from | Degrades to |
+|-------|-----------|-------------|
+| Season (Ls) | `/api/mars/ephemeris` (JPL Horizons) | the analytic Ls model, ~11° worse near solstice |
+| Elevation | the bundled MOLA raster, same sampler the relief uses | 0 m, i.e. datum pressure everywhere |
+| Albedo → thermal inertia | luminance measured off the bundled Viking mosaic | a stated uniform albedo, disclosed in the provenance line |
+| Dust opacity τ | seasonal climatology in the kernel | — (it has no live source; see below) |
+
+**Two known gaps, both deliberate and both disclosed on the page:**
+
+1. **Thermal inertia is a proxy, not a measurement.** It is derived from
+   basemap albedo through the MGS-TES albedo/inertia anti-correlation. The real
+   fix is to bundle the TES global thermal-inertia raster (8 px/°, PDS / USGS
+   Astrogeology) under `assets/mars/` and sample it exactly as MOLA is sampled.
+   `surfaceClimate` already takes `thermalInertia` as an explicit argument for
+   this reason — adopting the raster changes one call site in
+   `js/mars-climate-layer.js`, not the kernel.
+2. **Dust opacity is a climatology, not an observation.** Real τ is episodic:
+   global dust events are the whole story and a seasonal curve cannot know
+   about them. The kernel's `dustOpacity` is pinned by
+   `tests/mars-atmosphere-model.mjs` against the τ bands
+   `api/mars/weather.js` already advertises, so the page cannot ship two
+   disagreeing dust models. A live τ source (MCS or MARCI-derived) would be a
+   genuine feed and would belong in the table above.
+
+**Validation lives in the test, not in prose.** `tests/mars-atmosphere-model.mjs`
+scores the model against Viking Lander 1, Curiosity/REMS, the bundled MEDA
+sol-1133 record (read from `PERSEVERANCE_MEDA_SNAPSHOT`, so refreshing that
+snapshot re-scores the model), and the Hellas/Olympus column pressures. Measured
+residuals are in the kernel header. If you change the physics, that gate tells
+you what you broke.
