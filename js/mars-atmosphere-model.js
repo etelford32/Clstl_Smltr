@@ -550,19 +550,22 @@ function diurnalResponse(forcingAmplitudeWM2, meanTempK, thermalInertia) {
 }
 
 /**
- * Full surface state at one point and one instant.
+ * Everything about a point that does NOT depend on time of day.
  *
- * `localTrueSolarTime` is TRUE solar time — pass local mean solar time through
- * localTrueSolarTimeHours() first (Mars' equation of time reaches 50 minutes).
- * `albedo` and `thermalInertia` are inputs, not derived here, so the caller
- * decides whether they came from a measured raster or from the basemap proxy.
+ * Split out because a renderer sweeping the globe re-evaluates the field on
+ * every tick of a sol clock, and only the last few lines of surfaceClimate
+ * actually move with the hour. Caching THIS per pixel and re-running only the
+ * diurnal term is what takes a 512×256 field from ~250 ms per frame to ~5 ms
+ * (js/mars-climate-layer.js). It is also a third of the allocations, which
+ * matters at 131 k calls.
+ *
+ * surfaceClimate calls straight through to it, so there is exactly one copy of
+ * this physics. Do not inline a second one into the renderer.
  */
-export function surfaceClimate({
+export function columnProfile({
     latDeg,
-    lonDeg = 0,
     elevationM = 0,
     lsDeg = 0,
-    localTrueSolarTime = 12,
     albedo = 0.20,
     thermalInertia = null,
     opacity = null,
@@ -585,6 +588,47 @@ export function surfaceClimate({
     const { amplitudeK, lagRad } = diurnalResponse(
         absorbedScale * sky.amplitude, meanK, inertia,
     );
+
+    return {
+        sky,
+        pressurePa,
+        frostPointK,
+        meanSurfaceTempK: meanK,
+        columnTempK: columnK,
+        diurnalAmplitudeK: amplitudeK,
+        lagRad,
+        opacity: tau,
+        thermalInertia: inertia,
+        irradianceWM2: irradiance,
+        transmission,
+    };
+}
+
+/**
+ * Full surface state at one point and one instant.
+ *
+ * `localTrueSolarTime` is TRUE solar time — pass local mean solar time through
+ * localTrueSolarTimeHours() first (Mars' equation of time reaches 50 minutes).
+ * `albedo` and `thermalInertia` are inputs, not derived here, so the caller
+ * decides whether they came from a measured raster or from the basemap proxy.
+ */
+export function surfaceClimate({
+    latDeg,
+    lonDeg = 0,
+    elevationM = 0,
+    lsDeg = 0,
+    localTrueSolarTime = 12,
+    albedo = 0.20,
+    thermalInertia = null,
+    opacity = null,
+    harmonics = null,
+} = {}) {
+    const profile = columnProfile({ latDeg, elevationM, lsDeg, albedo, thermalInertia, opacity, harmonics });
+    const {
+        sky, pressurePa, frostPointK, columnTempK: columnK,
+        meanSurfaceTempK: meanK, diurnalAmplitudeK: amplitudeK, lagRad,
+        opacity: tau, thermalInertia: inertia, irradianceWM2: irradiance, transmission,
+    } = profile;
 
     const h = hourAngleRad(localTrueSolarTime);
     const rawSurfaceK = meanK + amplitudeK * Math.cos(h - lagRad);

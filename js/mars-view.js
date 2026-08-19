@@ -7,6 +7,8 @@ import {
     estimatedMissionSol,
     formatMarsClock,
     localMeanSolarTimeHours,
+    marsCoordinatedTimeHours,
+    marsSolarLongitude,
     marsSubsolarPoint,
     observationFreshness,
 } from './mars-mission-state.js?v=20260809-live';
@@ -19,6 +21,11 @@ import {
     slopeField, flowAccumulation, marsChannelRouting,
     regionSeed, regionGrid as wfcRegionGrid, sampleClassInto, classShares,
 } from './terrain-wfc.js';
+import {
+    createClimateField, legendFor, CLIMATE_FIELDS, CLIMATE_FIELD_ORDER,
+    formatK, formatPa, formatDensity,
+} from './mars-climate-layer.js';
+import { dustOpacity, MARS_CLIMATE_MODEL } from './mars-atmosphere-model.js';
 
 const SURFACE_RADIUS = 1;
 const RELIEF_EXAGGERATION = 5;
@@ -422,7 +429,18 @@ for (const texture of [surfaceTexture, molaTexture]) {
     texture.needsUpdate = true;
 }
 
-function createRasterSampler(texture) {
+/**
+ * @param {THREE.Texture} texture
+ * @param {{ luminance?: boolean }} [options] `luminance: true` samples
+ *   perceptual brightness across RGB instead of the red channel alone, and
+ *   returns 2nd/98th-percentile `stats` for normalizing it. Needed for the
+ *   Viking colour mosaic, whose red channel carries almost no contrast on a
+ *   rust-coloured planet — reading albedo off it would flatten the very
+ *   dark/bright distinction the thermal-inertia proxy depends on. The MOLA
+ *   path keeps the red-channel default; that raster is greyscale, and changing
+ *   how it is read would move every elevation on the page.
+ */
+function createRasterSampler(texture, { luminance = false } = {}) {
     const image = texture?.image;
     if (!image?.width || !image?.height) return null;
     const sampler = document.createElement('canvas');
@@ -431,9 +449,50 @@ function createRasterSampler(texture) {
     const context = sampler.getContext('2d', { willReadFrequently: true });
     context.drawImage(image, 0, 0);
     const pixels = context.getImageData(0, 0, sampler.width, sampler.height).data;
+
+    // Precomputed luminance plane + its percentile range. Built once (~20 ms on
+    // the 2048×1024 mosaic) because the alternative is three multiplies and an
+    // add per bilinear tap, four taps per sample, on a path that runs 131k
+    // times per climate-field prepare.
+    let luma = null;
+    let stats = null;
+    if (luminance) {
+        const count = sampler.width * sampler.height;
+        luma = new Uint8Array(count);
+        const histogram = new Uint32Array(256);
+        for (let i = 0; i < count; i += 1) {
+            const o = i * 4;
+            const value = (pixels[o] * 0.2126 + pixels[o + 1] * 0.7152 + pixels[o + 2] * 0.0722) | 0;
+            luma[i] = value;
+            histogram[value] += 1;
+        }
+        // Percentiles rather than min/max: a handful of specular or nodata
+        // pixels would otherwise set the whole albedo stretch.
+        const percentile = (fraction) => {
+            const target = count * fraction;
+            let running = 0;
+            for (let v = 0; v < 256; v += 1) {
+                running += histogram[v];
+                if (running >= target) return v;
+            }
+            return 255;
+        };
+        stats = { p2: percentile(0.02), p98: percentile(0.98) };
+        if (stats.p98 <= stats.p2) stats = { p2: 0, p98: 255 };
+    }
+
     return {
         width: sampler.width,
         height: sampler.height,
+        stats,
+        /** Relative brightness in [0,1] across the percentile range. Only
+         *  meaningful on a luminance sampler. */
+        brightness(u, v) {
+            if (!stats) return 0.5;
+            return THREE.MathUtils.clamp(
+                (this.sample(u, v) - stats.p2) / (stats.p98 - stats.p2), 0, 1,
+            );
+        },
         sample(u, v) {
             const wrappedU = ((u % 1) + 1) % 1;
             const clampedV = THREE.MathUtils.clamp(v, 0, 1);
@@ -445,7 +504,9 @@ function createRasterSampler(texture) {
             const y1 = Math.min(y0 + 1, sampler.height - 1);
             const tx = x - x0;
             const ty = y - y0;
-            const channel = (px, py) => pixels[(py * sampler.width + px) * 4];
+            const channel = luma
+                ? (px, py) => luma[py * sampler.width + px]
+                : (px, py) => pixels[(py * sampler.width + px) * 4];
             const top = THREE.MathUtils.lerp(channel(x0, y0), channel(x1, y0), tx);
             const bottom = THREE.MathUtils.lerp(channel(x0, y1), channel(x1, y1), tx);
             return THREE.MathUtils.lerp(top, bottom, ty);
@@ -458,6 +519,17 @@ try {
     molaSampler = createRasterSampler(molaTexture);
 } catch (error) {
     console.warn('[Mars] MOLA pixels could not be sampled; regional terrain will use smooth geometry', error);
+}
+
+// Albedo, MEASURED off the Viking mosaic — the same pattern as the Moon's
+// terrain synth. This feeds the climate layer's thermal-inertia proxy. A CORS
+// taint on the canvas makes getImageData throw; the climate layer then falls
+// back to a stated uniform albedo and SAYS SO rather than inventing a texture.
+let albedoSampler = null;
+try {
+    albedoSampler = createRasterSampler(surfaceTexture, { luminance: true });
+} catch (error) {
+    console.warn('[Mars] Viking pixels could not be sampled; thermal inertia will use a uniform albedo', error);
 }
 
 function latLonUv(latDeg, lonDeg) {
@@ -1339,6 +1411,103 @@ const atmosphereLayer = new THREE.Mesh(new THREE.SphereGeometry(1.075, 128, 64),
 marsGroup.add(atmosphereLayer);
 
 /**
+ * ═══ CLIMATE FIELD ════════════════════════════════════════════════════════
+ * The modelled surface atmosphere, painted onto a shell just above the globe.
+ * Physics lives in js/mars-atmosphere-model.js; pixels in js/mars-climate-layer.js.
+ * Neither knows about three.js — this is the only place the two meet.
+ *
+ * The shell SHARES the globe's geometries rather than carrying its own sphere,
+ * so the field follows the real MOLA displacement instead of floating over it,
+ * and swaps with the relief toggle exactly as smoothMars/reliefMars do. It is
+ * scaled radially rather than offset, which on a sphere-derived mesh is the
+ * same thing and costs no geometry.
+ *
+ * MeshBasicMaterial, NOT Standard: this is an analysis overlay, and lighting it
+ * would multiply the field by the very day/night term it already encodes —
+ * the night side would go black exactly where the temperature data is most
+ * interesting. The terminator you can see on it is the physics, not the lamp.
+ */
+const CLIMATE_SHELL_SCALE = 1.0016;   // ≈ 5 km above the datum; clears the 5× relief
+const climateFieldTexture = (() => {
+    const field = createClimateField({
+        width: 512,
+        height: 256,
+        elevationAt: elevationAtLatLon,
+        // Null when the Viking canvas is CORS-tainted. The layer then states a
+        // uniform albedo instead of inventing terrain-shaped thermal inertia.
+        brightnessAt: albedoSampler
+            ? (lat, lon) => { const { u, v } = latLonUv(lat, lon); return albedoSampler.brightness(u, v); }
+            : null,
+    });
+    const texture = new THREE.DataTexture(field.pixels, field.width, field.height, THREE.RGBAFormat);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    return { field, texture };
+})();
+const climateField = climateFieldTexture.field;
+
+const climateMaterial = new THREE.MeshBasicMaterial({
+    map: climateFieldTexture.texture,
+    transparent: true,
+    opacity: 0.94,
+    depthWrite: false,
+});
+const climateShell = new THREE.Mesh(reliefGeometry, climateMaterial);
+climateShell.scale.setScalar(CLIMATE_SHELL_SCALE);
+climateShell.renderOrder = 1;
+climateShell.visible = false;
+marsGroup.add(climateShell);
+
+/**
+ * Sol clock state.
+ *
+ * `climateClock.offsetHours` is a user-driven offset from the live Mars
+ * Coordinated Time, and `climateClock.lsOverride` likewise for the season.
+ * BOTH default to null, meaning "follow the live feeds" — the page is a
+ * real-time instrument first and a sandbox second, so a reload must return to
+ * now rather than to wherever the scrubber was left.
+ */
+const climateClock = {
+    offsetHours: 0,
+    lsOverride: null,
+    field: 'surface-temp',
+    enabled: false,
+    /** Ls actually in force: the scrubber if the user moved it, else the live
+     *  Horizons value, else the analytic model. Never a stale cached number. */
+    lsDeg() {
+        if (this.lsOverride != null) return this.lsOverride;
+        if (Number.isFinite(liveLsDeg)) return liveLsDeg;
+        return marsSolarLongitude(new Date());
+    },
+    mtcHours() {
+        return (marsCoordinatedTimeHours(new Date()) + this.offsetHours + 24) % 24;
+    },
+    isLive() { return this.lsOverride == null && this.offsetHours === 0; },
+};
+
+/** Live areocentric Ls from /api/mars/ephemeris; null until it answers. */
+let liveLsDeg = null;
+
+/**
+ * Repaint the field. Cheap by construction — prepare() short-circuits unless
+ * the season moved, and paint() is the ~3 ms path.
+ *
+ * Returns early when the shell is hidden because there is nothing to paint
+ * into. The readouts do NOT go through here: sampleAt takes its season
+ * explicitly and reads the rasters directly, so surface mode keeps live
+ * numbers in the pilot cluster while the globe shell is put away.
+ */
+function refreshClimateField() {
+    if (!climateShell.visible) return;
+    climateField.prepare(climateClock.lsDeg());
+    climateField.paint(climateClock.field, climateClock.mtcHours());
+    climateFieldTexture.texture.needsUpdate = true;
+}
+
+/**
  * Martian sky dome for the surface explorer.
  *
  * Surface mode used to hide every celestial layer and render nothing above the
@@ -1913,6 +2082,12 @@ function applyEphemerisUi(payload) {
 
     const lsDeg = Number.isFinite(payload?.ls_deg) ? payload.ls_deg : null;
     if (lsDeg != null) {
+        // The climate field's season. Horizons is worth ~11° of Ls over the
+        // analytic model near the solstices, and Ls moves BOTH the seasonal
+        // CO₂ pressure cycle and the solar declination, so this is the single
+        // largest accuracy input the layer has.
+        liveLsDeg = lsDeg;
+        applyClimateChange();
         document.querySelector('#header-season').textContent = `LS ${Math.round(lsDeg)}°`;
         document.querySelector('#weather-season').textContent = `Ls ${Math.round(lsDeg)}°`;
         document.querySelector('#weather-season-detail').textContent = payload.season
@@ -2050,6 +2225,203 @@ function updateMarsClock() {
     }
 }
 
+// ── Climate controls ────────────────────────────────────────────────────────
+// The field selector, sol clock and season scrubber. All three feed
+// climateClock and then repaint; none of them touch the physics.
+const climateElements = {
+    controls: document.querySelector('#climate-controls'),
+    field: document.querySelector('#climate-field'),
+    legend: document.querySelector('#climate-legend'),
+    legendNote: document.querySelector('#climate-legend-note'),
+    sol: document.querySelector('#climate-sol'),
+    solOutput: document.querySelector('#climate-sol-output'),
+    ls: document.querySelector('#climate-ls'),
+    lsOutput: document.querySelector('#climate-ls-output'),
+    now: document.querySelector('#climate-now'),
+    readout: document.querySelector('#climate-readout'),
+    extremes: document.querySelector('#climate-extremes'),
+    provenance: document.querySelector('#climate-provenance'),
+};
+
+/** Mars season names, north-hemisphere convention, from Ls. */
+function seasonLabel(lsDeg) {
+    const ls = ((lsDeg % 360) + 360) % 360;
+    if (ls < 90) return 'northern spring';
+    if (ls < 180) return 'northern summer';
+    if (ls < 270) return 'northern autumn';
+    return 'northern winter';
+}
+
+/**
+ * Redraw the legend for the active field.
+ *
+ * Tick labels sit in their own row UNDER the swatch strip rather than inside
+ * the swatches. Printed on top of the colours they were unreadable at the cold
+ * end of every ramp — dark text on dark blue — and no single label colour can
+ * work across a ramp that spans near-black to near-white by design.
+ */
+function renderClimateLegend() {
+    const legend = legendFor(climateClock.field);
+    if (!legend || !climateElements.legend) return;
+    // Absolute temperatures are shown in °C; the frost field is a DIFFERENCE,
+    // so it stays in kelvin (a 20 K margin is 20 K, not −253 °C).
+    const asCelsius = legend.field.unit === 'K' && legend.field.id !== 'frost';
+    const tick = (value) => Math.round(asCelsius ? value - 273.15 : value);
+    climateElements.legend.innerHTML =
+        `<div class="climate-legend-bar">${
+            legend.swatches.map(s => `<span style="background:${s.css}"></span>`).join('')
+        }</div><div class="climate-legend-ticks">${
+            legend.swatches.map(s => `<small>${tick(s.value)}</small>`).join('')
+        }</div>`;
+    const unit = asCelsius ? '°C' : legend.field.unit;
+    if (climateElements.legendNote) {
+        climateElements.legendNote.textContent = `${legend.field.label} · ${unit} · ${legend.note}`;
+    }
+}
+
+/**
+ * Push climateClock's state onto the controls and the readouts.
+ *
+ * Called after every control change AND when the live Ls arrives, so a
+ * Horizons response that lands after boot moves the season slider under the
+ * user rather than leaving it showing the analytic value it started on.
+ */
+function syncClimateControls() {
+    if (!climateElements.controls) return;
+    const lsDeg = climateClock.lsDeg();
+    const mtc = climateClock.mtcHours();
+    const tau = dustOpacity(lsDeg);
+
+    if (climateElements.ls) climateElements.ls.value = String(Math.round(lsDeg));
+    if (climateElements.sol) climateElements.sol.value = String(climateClock.offsetHours);
+    if (climateElements.lsOutput) {
+        const provenance = climateClock.lsOverride != null ? 'scrubbed'
+            : (Number.isFinite(liveLsDeg) ? 'JPL Horizons' : 'analytic model');
+        climateElements.lsOutput.textContent =
+            `Ls ${Math.round(lsDeg)}° · ${seasonLabel(lsDeg)} · τ ≈ ${tau.toFixed(2)} · ${provenance}`;
+    }
+    if (climateElements.solOutput) {
+        const siteLmst = (mtc + mission.latest_drive.position.lon_deg / 15 + 24) % 24;
+        const offset = climateClock.offsetHours;
+        const drift = offset === 0 ? 'live' : `${offset > 0 ? '+' : ''}${offset.toFixed(2)} h from now`;
+        climateElements.solOutput.textContent = `Jezero ${formatMarsClock(siteLmst)} LMST · ${drift}`;
+    }
+    if (climateElements.now) {
+        climateElements.now.disabled = climateClock.isLive();
+        climateElements.now.textContent = climateClock.isLive() ? 'Live' : 'Return to live';
+    }
+
+    // Point readout at the location the user is actually looking at.
+    const target = surfaceModeActive && surfaceLocation
+        ? surfaceLocation
+        : { latDeg: mission.latest_drive.position.lat_deg, lonDeg: mission.latest_drive.position.lon_deg };
+    const point = climateField.sampleAt(target.latDeg, target.lonDeg, mtc, { lsDeg, opacity: tau });
+    if (climateElements.readout) {
+        const frost = point.frosted
+            ? '<strong class="climate-frost">CO₂ frost on the ground</strong>'
+            : `${(point.surfaceTempK - point.frostPointK).toFixed(0)} K above CO₂ frost`;
+        climateElements.readout.innerHTML = [
+            `<span><em>Air</em> ${formatK(point.airTempK)}</span>`,
+            `<span><em>Ground</em> ${formatK(point.surfaceTempK)}</span>`,
+            `<span><em>Pressure</em> ${formatPa(point.pressurePa)}</span>`,
+            `<span><em>Density</em> ${formatDensity(point.densityKgM3)}</span>`,
+            `<span><em>Sound</em> ${point.speedOfSoundMS.toFixed(0)} m/s</span>`,
+            // Full width: "131 K above CO₂ frost" does not fit a half-width
+            // cell, and truncating the frost state is the one value here that
+            // matters operationally.
+            `<span class="climate-readout-wide"><em>Frost</em> ${frost}</span>`,
+        ].join('');
+    }
+
+    const extremes = climateField.extremes();
+    if (climateElements.extremes && extremes) {
+        const field = CLIMATE_FIELDS[climateClock.field];
+        const render = (value) => (field.unit === 'K' && field.id !== 'frost'
+            ? formatK(value)
+            : (field.id === 'pressure' ? formatPa(value) : `${value.toFixed(0)} K`));
+        // Same N/S/E/W convention as the surface readout — a bare signed pair
+        // reads as a bug next to "18.4°N · 77.2°E" three panels away. Rounded
+        // to whole degrees on purpose: this is the position of a cell in a
+        // 512×256 grid, so it is only good to ~0.7°, and formatCoordinate's
+        // three decimals would claim 400× the precision the field has.
+        const hemisphere = (value, positive, negative) =>
+            `${Math.abs(value).toFixed(0)}°${value < 0 ? negative : positive}`;
+        const where = (at) =>
+            `${hemisphere(at.latDeg, 'N', 'S')} ${hemisphere(at.lonDeg, 'E', 'W')}`;
+        const ratio = field.id === 'pressure' && extremes.min > 0
+            ? ` · ${(extremes.max / extremes.min).toFixed(1)}× across the planet`
+            : '';
+        climateElements.extremes.textContent =
+            `Planet-wide now: ${render(extremes.min)} at ${where(extremes.minAt)} → `
+            + `${render(extremes.max)} at ${where(extremes.maxAt)}${ratio}`;
+    }
+
+    if (climateElements.provenance) {
+        const inertia = point.albedoIsProxy
+            ? 'thermal inertia proxied from Viking basemap albedo'
+            : 'uniform albedo (Viking pixels unreadable)';
+        climateElements.provenance.innerHTML =
+            `<strong>Modelled, not observed:</strong> ${MARS_CLIMATE_MODEL.label} — `
+            + `fitted to ${MARS_CLIMATE_MODEL.fittedTo}, checked against ${MARS_CLIMATE_MODEL.validatedAgainst}. `
+            + `Lander pressures within ${MARS_CLIMATE_MODEL.residuals.landerPressurePercent}%, `
+            + `MEDA air temperature within ${MARS_CLIMATE_MODEL.residuals.medaAirTemperatureK} K. `
+            + `Dust opacity is a seasonal climatology, and ${inertia}. No winds: this model has no dynamics.`;
+    }
+}
+
+function applyClimateChange() {
+    refreshClimateField();
+    syncClimateControls();
+}
+
+function wireClimateControls() {
+    const { field, sol, ls, now } = climateElements;
+    if (field) {
+        field.innerHTML = CLIMATE_FIELD_ORDER
+            .map(id => `<option value="${id}">${CLIMATE_FIELDS[id].label}</option>`).join('');
+        field.value = climateClock.field;
+        field.addEventListener('change', () => {
+            climateClock.field = CLIMATE_FIELDS[field.value] ? field.value : 'surface-temp';
+            renderClimateLegend();
+            applyClimateChange();
+        });
+    }
+    // The sol clock rides 'input' — it is the cheap paint path (~3 ms) and is
+    // meant to be dragged. The season rides 'change' as well as a debounced
+    // 'input': moving Ls re-runs prepare (~123 ms), which cannot keep up with a
+    // drag, so it settles instead of stuttering.
+    if (sol) {
+        sol.addEventListener('input', () => {
+            climateClock.offsetHours = Number(sol.value);
+            applyClimateChange();
+        });
+    }
+    if (ls) {
+        let seasonTimer = 0;
+        const commitSeason = () => {
+            climateClock.lsOverride = Number(ls.value);
+            applyClimateChange();
+        };
+        ls.addEventListener('input', () => {
+            window.clearTimeout(seasonTimer);
+            seasonTimer = window.setTimeout(commitSeason, 110);
+        });
+        ls.addEventListener('change', () => {
+            window.clearTimeout(seasonTimer);
+            commitSeason();
+        });
+    }
+    if (now) {
+        now.addEventListener('click', () => {
+            climateClock.offsetHours = 0;
+            climateClock.lsOverride = null;
+            applyClimateChange();
+        });
+    }
+    renderClimateLegend();
+    syncClimateControls();
+}
+
 function setLayer(name, enabled) {
     if (name === 'imagery') {
         surfaceMaterial.map = enabled ? surfaceTexture : null;
@@ -2077,6 +2449,18 @@ function setLayer(name, enabled) {
             rebuildRegionalTerrain(regionalTerrainCenter.latDeg, regionalTerrainCenter.lonDeg);
             updateSurfaceDetail();
         }
+    } else if (name === 'climate') {
+        climateClock.enabled = Boolean(enabled);
+        // Same hazard as setGlobeVisibility: while the explorer is up the shell
+        // is force-hidden, so writing .visible directly would pop it back into
+        // a surface scene and then be clobbered on exit. The pending value goes
+        // in the restore map instead.
+        if (surfaceModeActive) surfaceVisibilityRestore.set(climateShell, Boolean(enabled));
+        else climateShell.visible = Boolean(enabled);
+        // The field covers the Viking imagery, so its season and sol-clock
+        // controls only mean anything while it is up.
+        climateElements.controls?.toggleAttribute('hidden', !enabled);
+        if (enabled) applyClimateChange();
     } else if (name === 'grid') gridLayer.visible = enabled;
     // The quality ladder can drop the limb shell entirely; the layer switch must
     // not turn it back on underneath that decision.
@@ -2104,6 +2488,13 @@ function layerIsVisible(name) {
         return surfaceModeActive
             ? Boolean(surfaceVisibilityRestore.get(reliefMars))
             : reliefMars.visible;
+    }
+    // Like 'relief': while the explorer is up the shell is force-hidden, so the
+    // honest answer is the pending value in the restore map.
+    if (name === 'climate') {
+        return surfaceModeActive
+            ? Boolean(surfaceVisibilityRestore.get(climateShell))
+            : climateShell.visible;
     }
     if (name === 'regional-terrain') return regionalTerrain.visible;
     if (name === 'synth') return synthEnabled;
@@ -2140,7 +2531,33 @@ const pilotElements = {
     slope: document.querySelector('#pilot-slope'),
     sun: document.querySelector('#pilot-sun'),
     relief: document.querySelector('#pilot-relief'),
+    // Climate instruments. Modelled values, badged as such in the surface HUD's
+    // detail line — a pilot cluster that mixes measured and modelled numbers
+    // without saying which is which is worse than one that omits them.
+    press: document.querySelector('#pilot-press'),
+    dens: document.querySelector('#pilot-dens'),
+    tair: document.querySelector('#pilot-tair'),
 };
+
+/** Throttle for the surface climate readouts: the kernel is cheap per point,
+ *  but this runs inside the 8 Hz surface readout, and the field genuinely does
+ *  not move between two consecutive frames of a walk. */
+let lastClimateSampleAt = 0;
+let lastClimateSample = null;
+
+function climateAtSurface(target, nowMs) {
+    if (lastClimateSample && nowMs - lastClimateSampleAt < 900
+        && greatCircleDistanceKm(lastClimateSample.at, target) < 2) {
+        return lastClimateSample.point;
+    }
+    const point = climateField.sampleAt(
+        target.latDeg, target.lonDeg, climateClock.mtcHours(),
+        { lsDeg: climateClock.lsDeg(), opacity: dustOpacity(climateClock.lsDeg()) },
+    );
+    lastClimateSampleAt = nowMs;
+    lastClimateSample = { at: { latDeg: target.latDeg, lonDeg: target.lonDeg }, point };
+    return point;
+}
 const meshStatusElement = document.querySelector('#mars-mesh-status');
 const globalMeshStatus = meshStatusElement.textContent;
 const surfaceLightButton = document.querySelector('#surface-light');
@@ -2202,7 +2619,7 @@ function applyCameraRange() {
 const surfaceOccludedObjects = [
     gridLayer, atmosphereLayer, terminatorLayer, sky.group,
     routeLayer, waypointsLayer, roverLayer, landingLayer,
-    reliefMars, smoothMars,
+    reliefMars, smoothMars, climateShell,
 ];
 for (const group of Object.values(landmarks.categoryGroups)) surfaceOccludedObjects.push(group);
 const surfaceVisibilityRestore = new Map();
@@ -2227,6 +2644,11 @@ function setSurfacePresentation(enabled) {
  * in the restore map instead.
  */
 function setGlobeVisibility(wantRelief) {
+    // The climate shell shares whichever globe geometry is showing, so the
+    // field tracks the real displacement instead of floating over it. Swap it
+    // here rather than in setLayer('relief') — this is the one function that
+    // knows which sphere is current, and a second opinion would drift.
+    climateShell.geometry = wantRelief ? reliefGeometry : smoothGeometry;
     if (surfaceModeActive) {
         surfaceVisibilityRestore.set(reliefMars, wantRelief);
         surfaceVisibilityRestore.set(smoothMars, !wantRelief);
@@ -2391,6 +2813,16 @@ function updatePilotCluster(target, altitudeKm, nowMs) {
     pilotElements.sun.className = `pi-v${pilot.sunElevDeg < 5 ? ' warn' : ''}`;
     pilotElements.relief.textContent = regionalReliefScale === 1 ? '×1 TRUE' : `×${regionalReliefScale}`;
     pilotElements.relief.className = `pi-v${regionalReliefScale === 1 ? ' ok' : ''}`;
+
+    if (pilotElements.press) {
+        const climate = climateAtSurface(target, nowMs);
+        pilotElements.press.textContent = formatPa(climate.pressurePa);
+        pilotElements.dens.textContent = formatDensity(climate.densityKgM3);
+        pilotElements.tair.textContent = formatK(climate.airTempK);
+        // CO₂ frost on the ground is an operational fact, not a curiosity: it
+        // changes the surface you are about to land on.
+        pilotElements.tair.className = `pi-v${climate.frosted ? ' alert' : ''}`;
+    }
 }
 
 function updateSurfaceReadout({ force = false } = {}) {
@@ -3330,10 +3762,22 @@ applyMissionUi(mission);
 applyBundledWeather({}, 'Checking the shared adapter');
 updateMarsClock();
 updateIllumination();
+wireClimateControls();
 window.setInterval(updateMarsClock, 1000);
 window.setInterval(() => {
     sky.updateTime();
     updateIllumination();
+}, 15_000);
+// The climate field is anchored to real Mars Coordinated Time, so it drifts
+// with the planet's rotation whether or not anyone touches the scrubber.
+// Repainting on the same 15 s cadence as the terminator keeps the two in step;
+// Mars turns 0.0625° in that time, so nothing visibly jumps. Deliberately NOT
+// per-frame: paint is ~3 ms, which is a tenth of a 60 fps budget spent on a
+// field that moves imperceptibly between frames.
+window.setInterval(() => {
+    if (!climateShell.visible) return;
+    refreshClimateField();
+    syncClimateControls();
 }, 15_000);
 loadMarsFeed();
 loadTraverseHistory();
@@ -3385,6 +3829,48 @@ window.__marsLab = Object.freeze({
         landmark: landmarks.highlighted?.name || null,
         skyBody: sky.highlighted || null,
     }),
+    /**
+     * Climate layer state, for tests/mars-smoke.spec.js.
+     *
+     * `sampleAt` is exposed so the browser gate can check the rendered readouts
+     * against the kernel through the SAME path the page uses — a second
+     * evaluation in the test would only prove the test agrees with itself.
+     */
+    climateState: () => ({
+        visible: climateShell.visible,
+        enabled: climateClock.enabled,
+        field: climateClock.field,
+        lsDeg: climateClock.lsDeg(),
+        mtcHours: climateClock.mtcHours(),
+        offsetHours: climateClock.offsetHours,
+        lsOverride: climateClock.lsOverride,
+        live: climateClock.isLive(),
+        liveLsDeg,
+        opacity: dustOpacity(climateClock.lsDeg()),
+        /** True when thermal inertia came from the Viking mosaic rather than a
+         *  uniform fallback. The provenance line depends on this. */
+        albedoMeasured: Boolean(albedoSampler),
+        extremes: climateField.extremes(),
+        timings: climateField.timings(),
+        season: climateField.seasonState(),
+    }),
+    climateSampleAt: (latDeg, lonDeg) => climateField.sampleAt(
+        latDeg, lonDeg, climateClock.mtcHours(),
+        { lsDeg: climateClock.lsDeg(), opacity: dustOpacity(climateClock.lsDeg()) },
+    ),
+    setClimateField: (id) => {
+        if (!CLIMATE_FIELDS[id]) return false;
+        climateClock.field = id;
+        if (climateElements.field) climateElements.field.value = id;
+        renderClimateLegend();
+        applyClimateChange();
+        return true;
+    },
+    setClimateClock: ({ offsetHours = null, lsDeg = null } = {}) => {
+        if (offsetHours != null) climateClock.offsetHours = offsetHours;
+        if (lsDeg != null) climateClock.lsOverride = lsDeg;
+        applyClimateChange();
+    },
     /** Surface camera limits — the constraint that stops it burrowing. */
     surfaceLimits: () => ({
         minDistanceKm: controls.minDistance * MARS_RADIUS_KM,
