@@ -1,11 +1,15 @@
 # Far-Side Watch — architecture & runbook
 
-> The nowcast→forecast jump. Parker's CME nowcast warns *hours* ahead;
-> Far-Side Watch extends the horizon to *days-to-weeks* by detecting active
-> regions on the **far side** of the Sun and forecasting their east-limb
+> The nowcast→forecast jump. The Parkers Physics CME forecast warns *hours*
+> ahead; Far-Side Watch extends the horizon to *days-to-weeks* by detecting
+> active regions on the **far side** of the Sun and forecasting their east-limb
 > emergence. The product is not the map — it's the **measured warning
 > horizon** (detection rate, lead time, false-alarm rate). That triplet is the
 > SBIR pitch and the operator demo.
+>
+> Write the brand out. Bare "Parker" means Eugene Parker everywhere else in
+> this repo (Parker spiral, Parker 1958), which is the wrong association on a
+> solar-physics page.
 
 ## Where it lives
 
@@ -29,6 +33,12 @@ same detection/tracking/ETA helpers and renderers later without copy-paste.
 
 ## The package (`js/farside/`)
 
+- **`farside-clock.js`** — the simulation clock (`simBounds`, `advanceEpoch`,
+  `epochToFraction`, `emergenceMarkers`). Pure, no ambient time. The scrub
+  window is [−7 d, +one full synodic rotation]; the forward half is exactly
+  `SYNODIC_PERIOD_DAYS` **on purpose**, because `emergenceETA` returns a
+  forward distance mod 360 — so every region on the watch list is guaranteed
+  to have its emergence tick somewhere on the bar.
 - **`carrington.js`** — Carrington-frame geometry. `carringtonL0(date)` (Meeus
   ch. 29, ~0.1°), `emergenceETA(lonFeat, L0)`, `limbLongitudes(L0)`,
   `SYNODIC_DEG_PER_DAY = 13.199`. Pure, dependency-free.
@@ -49,6 +59,72 @@ same detection/tracking/ETA helpers and renderers later without copy-paste.
   the shared `user-alert` window CustomEvent (no edit to `js/alert-engine.js`).
 - **`farside-render.js`** — Canvas2D `renderFlatMap()` (Carrington image + limb
   markers + tracks) and `renderTopDown()` (rotation schematic, east-limb horizon).
+
+## The rotation simulation (page + clock)
+
+Far-Side Watch is a forecast **about rotation**, so the page lets you drive it:
+play/pause, a scrubber over the whole window, speed presets, `Now`, space and
+←/→ keys. Everything — the flat map's limb markers, the 3D globe's
+orientation, every lead time in the watch list — re-derives from one
+`setEpoch(ms)` in `js/farside-watch.js`.
+
+**The clock moves the observer, not the data.** The phase-shift field is an
+OBSERVATION and is held fixed while L0 sweeps past it at the synodic rate.
+That is the product, not a simplification of it: a far-side forecast is
+exactly "given where this region is now, rotation puts it on the east limb in
+N days". Synthesizing an evolving future field would draw regions growing and
+decaying on evidence nobody has.
+
+Three things are load-bearing:
+
+1. **Two instants, never one.** `farside-feed.js` takes both an `anchorMs`
+   (the session's reference now, which pins planted regions in Carrington
+   longitude) and a `whenMs` (the observed instant, which sets L0 and the
+   noise seed). Re-deriving the anchor from `whenMs` drags the regions along
+   with the observer: CMD never changes, ETAs never count down, nothing ever
+   crosses the limb — and the page still renders perfectly. `tests/farside-sim.mjs`
+   pins it, including a deliberate proof that the wrong anchoring *does* move
+   things, so the guard is not a tautology.
+2. **The globe's rotation IS the forecast.** `FarSideGlobe.setEpoch()` sets
+   orientation from `carringtonL0(ms)`. It used to free-run at an
+   "illustrative" 3.2°/s unrelated to the L0 its markers were placed from, so
+   within a second a marker labelled "~10.1 d" was nowhere near where a
+   10.1-day lead puts it. Do not reintroduce a spin term — animate the clock.
+3. **Never simulate an alert.** `dispatchEmergenceAlerts` and the CSV export
+   read the **anchor** projection. An alert is a claim about now; firing one
+   because someone dragged the clock into next week would be a fabricated
+   warning.
+
+Cost model (why it scrubs at 60 fps): detect + link runs ONCE per observation;
+per frame only `projectTracks()` over a handful of tracks, three limb lines,
+and one group rotation. `farside-track.js` splits a track's time-invariant
+half (position, strength, frames) from its viewing-time half (CMD, lead time,
+emergence date) — `projectTrack()` is the single implementation of the latter,
+so the watch list, the scrubber ticks and the globe cannot quote three
+slightly different answers.
+
+**Accuracy of the projection.** `emergenceETA` advances at the constant
+`SYNODIC_DEG_PER_DAY`, while `carringtonL0` is the true Meeus ephemeris whose
+rate breathes with Earth's orbital eccentricity. The residual is bounded and
+measured in `tests/farside-clock.mjs`: **≤ 1.02° ≈ 1.9 h** at worst over two
+years of anchors and the full circle of longitudes — comfortably inside the
+±0.5 d floor the watch list already quotes as its band.
+
+## Fixed: the 0°/360° seam bug (2026-08)
+
+`detectSignatures()` flood-filled with longitude wrapping but computed the
+blob centroid as an **arithmetic mean of column indices**. A region straddling
+the seam has columns near 355 *and* near 5, whose linear mean is ~180° — the
+opposite side of the Sun. Nothing crashed and the map looked fine; the
+region's east-limb emergence forecast was simply up to **half a rotation
+(~13.6 d) wrong**, silently, for any region near Carrington longitude 0.
+
+Centroid and bbox are circular now (`atan2` over strength-weighted unit
+vectors). `tests/farside-detect.mjs` pins it, including a rotational-
+equivariance sweep: shift the whole field by k degrees and every detected
+longitude must shift by exactly k — no longitude is special. The synthetic
+demo field deliberately plants a region within a few degrees of Carrington 0
+so the realistic path exercises it too.
 
 ## Data sources (honest priority order)
 
@@ -105,7 +181,7 @@ in the network policy) for live data:
 - **Phase 3 (tracking + ETA)** ✅ — synodic projection, confidence band; runs on
   both fresh maps and the cron's stored detection history.
 - **Phase 4 (product surface)** ✅ — page panel, rotation view, emergence alert,
-  CSV export. Globe overlay on the Solar Physics Engine: import from
+  CSV export, and the **driveable rotation simulation** (see above). Globe overlay on the Solar Physics Engine: import from
   `js/farside/index.js` (deferred).
 - **Phase 5 (validation = the moat)** ✅ — `js/farside/farside-validate.js`.
   `runBacktest(frames, truth)` is a pure evaluator over detection frames (the
@@ -140,8 +216,25 @@ soonest emergence are visible to everyone; the full watch list, the emergence
 alert, and CSV/REST export unlock on **sign-up** (`/signup.html?from=far-side-watch`).
 Full historical/operator export is the **Advanced** tier (`planToTier → PRO`).
 
-## Smoke test
+## Tests
 
-The pure data path runs under Node (stub `globalThis.window`):
-`carringtonL0` → `getMapSeries('gong')` → `detectSignatures` → `farSideWatchList`
-→ `buildEmergenceAlerts`. Render functions need a browser (Canvas2D).
+Run after ANY edit to `js/farside/*` or `js/farside-watch.js`:
+
+```
+node tests/farside-clock.mjs      # scrub window, playback, emergence ticks,
+                                  #   and the constant-rate error bound
+node tests/farside-detect.mjs     # seam safety + rotational equivariance
+node tests/farside-sim.mjs        # regions pinned / observer moves; crossing
+                                  #   instant invariant under re-projection
+npx playwright test tests/far-side-watch.spec.js
+```
+
+All three node gates are pure — no DOM, no network, no ambient time. The
+browser gate needs no stubbing: with `farside_maps` unpopulated the page runs
+on the labelled synthetic field, and the spec asserts the simulation contract
+(clock does not free-run, a tick runs its region out to CMD = −90, playback
+starts and stops, the 3D view owns its canvas).
+
+Render functions need a browser (Canvas2D / WebGL); `farside-globe.js` stays
+out of the `js/farside/index.js` barrel so the node gates can import the barrel
+without a `three` resolver.

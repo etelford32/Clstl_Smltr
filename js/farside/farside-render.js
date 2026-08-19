@@ -32,18 +32,64 @@ function fitCanvas(canvas) {
     return { ctx, w, h };
 }
 
-/** Diverging colour ramp: signatures (negative z) → warm; quiet → deep violet. */
-function colorFor(z) {
+/**
+ * Diverging colour ramp: signatures (negative z) → warm; quiet → deep violet.
+ *
+ * Returns raw channels, not a CSS string. The flat map writes 64 800 pixels
+ * per field build, and the previous `rgb(...)` string + `.match(/\d+/g)`
+ * round-trip per pixel cost ~40 ms a paint — fine for a once-per-load
+ * snapshot, far too slow once the page became a scrubbable simulation.
+ *
+ * Exported because js/farside/farside-globe.js paints the SAME field onto the
+ * photosphere texture and had its own copy of these coefficients; two ramps
+ * that drift apart would tint the flat map and the globe differently for
+ * identical data.
+ */
+export function rampRGB(z) {
     if (z <= 0) {
         const t = Math.min(-z / 4, 1);                 // 0 quiet → 1 strong signature
-        const r = Math.round(40 + 215 * t);
-        const g = Math.round(20 + 150 * Math.pow(t, 1.3));
-        const b = Math.round(60 + 30 * (1 - t));
-        return `rgb(${r},${g},${b})`;
+        return [
+            Math.round(40 + 215 * t),
+            Math.round(20 + 150 * Math.pow(t, 1.3)),
+            Math.round(60 + 30 * (1 - t)),
+        ];
     }
     const t = Math.min(z / 4, 1);                      // positive → slightly lighter cool
     const v = Math.round(18 + 26 * t);
-    return `rgb(${v},${v},${Math.round(40 + 30 * t)})`;
+    return [v, v, Math.round(40 + 30 * t)];
+}
+
+/**
+ * The field as an offscreen canvas at native grid resolution, memoized on the
+ * map object.
+ *
+ * A synthetic map's noise is seeded by its 12 h slot, so the field is constant
+ * within a slot while L0 moves continuously — the simulation re-derives limb
+ * markers and ETAs every frame but only needs a new bitmap when the slot
+ * turns over. Caching per map object gets that for free: one map object IS
+ * one slot.
+ */
+function fieldCanvas(map) {
+    if (map._fieldCanvas) return map._fieldCanvas;
+    const { nLon, nLat } = map.grid;
+    const data = map.data;
+    const cvs = document.createElement('canvas');
+    cvs.width = nLon; cvs.height = nLat;
+    const ctx = cvs.getContext('2d');
+    const img = ctx.createImageData(nLon, nLat);
+    for (let r = 0; r < nLat; r++) {
+        const srcRow = (nLat - 1 - r) * nLon;   // flip latitude so +90 is the top
+        for (let c = 0; c < nLon; c++) {
+            const [rr, gg, bb] = rampRGB(data[srcRow + c]);
+            const o = (r * nLon + c) * 4;
+            img.data[o] = rr; img.data[o + 1] = gg; img.data[o + 2] = bb; img.data[o + 3] = 255;
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+    try {
+        Object.defineProperty(map, '_fieldCanvas', { value: cvs, enumerable: false });
+    } catch { /* frozen map object — just pay the rebuild */ }
+    return cvs;
 }
 
 /**
@@ -54,35 +100,19 @@ function colorFor(z) {
  */
 export function renderFlatMap(canvas, map, opts = {}) {
     const { ctx, w, h } = fitCanvas(canvas);
-    const { nLon, nLat, latMin } = map.grid;
-    const data = map.data;
 
-    // Field via an offscreen ImageData scaled to the canvas.
-    const img = ctx.createImageData(nLon, nLat);
-    for (let r = 0; r < nLat; r++) {
-        // Flip latitude so +90 is at the top.
-        const srcRow = (nLat - 1 - r) * nLon;
-        for (let c = 0; c < nLon; c++) {
-            const col = colorFor(data[srcRow + c]);
-            const m = col.match(/\d+/g);
-            const o = (r * nLon + c) * 4;
-            img.data[o] = +m[0]; img.data[o + 1] = +m[1]; img.data[o + 2] = +m[2]; img.data[o + 3] = 255;
-        }
-    }
-    // Blit through a temp canvas so we can scale.
-    const tmp = document.createElement('canvas');
-    tmp.width = nLon; tmp.height = nLat;
-    tmp.getContext('2d').putImageData(img, 0, 0);
     ctx.imageSmoothingEnabled = true;
     ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(tmp, 0, 0, w, h);
+    ctx.drawImage(fieldCanvas(map), 0, 0, w, h);
 
     const lonToX = (lon) => (lon / 360) * w;
     const latToY = (lat) => ((90 - lat) / 180) * h;
 
-    // Limb markers.
+    // Limb markers. `opts.L0` lets the simulation sweep the sub-Earth point
+    // across a field bitmap that is only rebuilt once per 12 h slot; it
+    // defaults to the map's own L0 so a plain snapshot render is unchanged.
     if (opts.showLimbs !== false) {
-        const limb = limbLongitudes(map.L0);
+        const limb = limbLongitudes(opts.L0 ?? map.L0);
         const mark = (lon, color, label, dashed) => {
             const x = lonToX(lon);
             ctx.save();
