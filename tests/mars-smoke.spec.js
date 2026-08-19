@@ -806,3 +806,176 @@ test('Mars UI remains interactive while the 3D engine is still starting', async 
     await expect(page.locator('#ui-panels-toggle')).toHaveAttribute('aria-pressed', 'false');
     expect(errors).toEqual([]);
 });
+
+/**
+ * The modelled climate field — js/mars-atmosphere-model.js rendered through
+ * js/mars-climate-layer.js.
+ *
+ * The kernel's physics is gated in node (tests/mars-atmosphere-model.mjs) and
+ * the pixel buffer in tests/mars-climate-layer.mjs. What can only be checked
+ * here is the wiring: that the layer consumes the LIVE Horizons season rather
+ * than the analytic model, that the scrubbers actually move the field, that
+ * the readouts agree with the kernel through the same call the page makes, and
+ * that the shell obeys surface mode's visibility-restore contract.
+ */
+test('Mars climate field renders, scrubs, and states that it is modelled', async ({ page }) => {
+    test.slow();
+    const errors = collectPageErrors(page);
+    await page.route('**/api/mars/weather', route => route.fulfill({
+        status: 200, contentType: 'application/json', body: JSON.stringify(weatherPayload),
+    }));
+    await page.route('**/api/mars/ephemeris', route => route.fulfill({
+        status: 200, contentType: 'application/json', body: JSON.stringify(ephemerisPayload),
+    }));
+    await page.route('**/api/mars/route', route => route.fulfill({
+        status: 200, contentType: 'application/json', body: JSON.stringify({ points: [] }),
+    }));
+    // Fulfilled, not aborted: the sky layer is irrelevant here, but an aborted
+    // request is a console error, and this test asserts a clean console.
+    await page.route('**/api/horizons?**', route => {
+        const command = new URL(route.request().url()).searchParams.get('COMMAND').replaceAll("'", '');
+        return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ result: horizonsObserverResult(command) }),
+        });
+    });
+
+    await page.goto('/mars.html');
+    await page.waitForFunction(() => window.__marsReady === true, null, { timeout: 120_000 });
+
+    const climateToggle = page.locator('[data-layer="climate"]');
+    const controls = page.locator('#climate-controls');
+
+    // Off by default: the field covers the Viking imagery, so it must be an
+    // opt-in analysis view rather than what the page opens on.
+    await expect(climateToggle).not.toBeChecked();
+    await expect(controls).toBeHidden();
+    expect(await page.evaluate(() => window.__marsLab.climateState().visible)).toBe(false);
+
+    await climateToggle.check({ force: true });
+    await expect(controls).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.__marsLab.climateState().visible)).toBe(true);
+
+    // THE LIVE-SEASON PIN. The mocked Horizons payload says Ls 168.43. If the
+    // layer ever falls back to the analytic model here, the field would still
+    // look entirely plausible while being up to ~11° of Ls wrong — which moves
+    // both the CO2 pressure cycle and the solar declination.
+    const state = await page.evaluate(() => window.__marsLab.climateState());
+    expect(state.lsDeg).toBeCloseTo(168.43, 2);
+    expect(state.liveLsDeg).toBeCloseTo(168.43, 2);
+    expect(state.live).toBe(true);
+    await expect(page.locator('#climate-ls-output')).toContainText('JPL Horizons');
+    await expect(page.locator('#climate-ls-output')).toContainText('Ls 168°');
+
+    // Legend: a colour bar and a matching row of tick labels.
+    await expect(page.locator('.climate-legend-bar span')).toHaveCount(6);
+    await expect(page.locator('.climate-legend-ticks small')).toHaveCount(6);
+    await expect(page.locator('#climate-legend-note')).toContainText('Ground temperature');
+
+    // Readouts must agree with the kernel through the SAME path the page uses.
+    const roverSample = await page.evaluate(() => {
+        const mission = window.__marsLab.climateState();
+        return { mission, point: window.__marsLab.climateSampleAt(18.4264, 77.2246) };
+    });
+    expect(Number.isFinite(roverSample.point.pressurePa)).toBe(true);
+    await expect(page.locator('#climate-readout')).toContainText(
+        `${roverSample.point.pressurePa.toFixed(0)} Pa`,
+    );
+
+    // ── The pressure field finds Mars' own extremes ─────────────────────────
+    await page.selectOption('#climate-field', 'pressure');
+    await expect.poll(() => page.evaluate(() => window.__marsLab.climateState().field)).toBe('pressure');
+    const pressure = await page.evaluate(() => window.__marsLab.climateState().extremes);
+    // Nothing tells the layer where Olympus Mons or Hellas are — it reads MOLA
+    // and the barometric column, and these land where they land.
+    expect(pressure.max / pressure.min).toBeGreaterThan(13);
+    expect(pressure.max / pressure.min).toBeLessThan(19);
+    expect(pressure.minAt.latDeg).toBeGreaterThan(5);      // Olympus Mons ~18.6°N
+    expect(pressure.minAt.latDeg).toBeLessThan(30);
+    expect(pressure.maxAt.latDeg).toBeLessThan(-15);       // Hellas ~42°S
+    await expect(page.locator('#climate-extremes')).toContainText('across the planet');
+
+    // ── The sol clock moves the field ───────────────────────────────────────
+    await page.evaluate(() => window.__marsLab.setClimateField('surface-temp'));
+    const dayside = await page.evaluate(() => window.__marsLab.climateSampleAt(0, 0).surfaceTempK);
+    await page.evaluate(() => window.__marsLab.setClimateClock({ offsetHours: 12 }));
+    const nightside = await page.evaluate(() => window.__marsLab.climateSampleAt(0, 0).surfaceTempK);
+    // Half a sol later the same point must have swung tens of kelvin. Mars'
+    // diurnal range is the largest signal in this field; a scrubber that moved
+    // it by single digits would mean the phase term had been lost.
+    expect(Math.abs(nightside - dayside)).toBeGreaterThan(25);
+    await expect(page.locator('#climate-sol-output')).toContainText('from now');
+    await expect(page.locator('#climate-now')).toBeEnabled();
+
+    await page.locator('#climate-now').click();
+    await expect.poll(() => page.evaluate(() => window.__marsLab.climateState().live)).toBe(true);
+    await expect(page.locator('#climate-sol-output')).toContainText('live');
+    await expect(page.locator('#climate-now')).toBeDisabled();
+
+    // ── The season scrubber grows and retreats the polar cap ────────────────
+    await page.evaluate(() => window.__marsLab.setClimateClock({ lsDeg: 150 }));
+    const southWinter = await page.evaluate(() => window.__marsLab.climateSampleAt(-85, 0));
+    await page.evaluate(() => window.__marsLab.setClimateClock({ lsDeg: 270 }));
+    const southSummer = await page.evaluate(() => window.__marsLab.climateSampleAt(-85, 0));
+    expect(southWinter.frosted).toBe(true);
+    expect(southWinter.surfaceTempK).toBeLessThan(160);   // held at the CO2 frost point
+    expect(southSummer.frosted).toBe(false);
+    expect(southSummer.surfaceTempK).toBeGreaterThan(200);
+    await expect(page.locator('#climate-ls-output')).toContainText('scrubbed');
+
+    // ── The prepare/paint split must survive in a real browser ──────────────
+    // node timings do not prove this: the texture upload only happens here.
+    await page.evaluate(() => {
+        for (let i = 0; i < 6; i += 1) window.__marsLab.setClimateClock({ offsetHours: i });
+    });
+    const timings = await page.evaluate(() => window.__marsLab.climateState().timings);
+    // Generous, because CI runs on a software rasteriser — this is a guard
+    // against time-independent work leaking into paint, not a perf budget.
+    expect(timings.paintMs).toBeLessThan(60);
+
+    // ── Provenance ──────────────────────────────────────────────────────────
+    const provenance = page.locator('#climate-provenance');
+    await expect(provenance).toContainText('Modelled, not observed');
+    await expect(provenance).toContainText('Viking Lander 1');
+    // The single most important disclosure on this layer: it has no dynamics,
+    // so nothing here is a wind forecast.
+    await expect(provenance).toContainText('No winds');
+    await expect(climateToggle.locator('xpath=ancestor::div[@class="layer-row"]'))
+        .toContainText('modelled, not observed');
+
+    // ── Surface mode: numbers, not a tint, and no visibility pop ────────────
+    await page.evaluate(() => window.__marsLab.setClimateClock({ offsetHours: 0, lsDeg: 168.43 }));
+    await page.locator('#camera-surface').click();
+    await expect.poll(
+        () => page.evaluate(() => window.__marsLab.surfaceState().active),
+        { timeout: 30_000 },
+    ).toBe(true);
+    // The globe shell is force-hidden with the rest of the globe...
+    expect(await page.evaluate(() => window.__marsLab.climateState().visible)).toBe(false);
+    // ...but the layer is still logically ON, reported from the restore map.
+    expect(await page.evaluate(() => window.__marsLab.layerIsVisible('climate'))).toBe(true);
+
+    // THE RESTORE-MAP REGRESSION. Toggling the layer during surface mode must
+    // write the pending value, not `.visible` — otherwise the shell pops into
+    // the surface scene and is then clobbered on exit. Same hazard the globe
+    // meshes carry, same fix.
+    await climateToggle.uncheck({ force: true });
+    expect(await page.evaluate(() => window.__marsLab.climateState().visible)).toBe(false);
+    await climateToggle.check({ force: true });
+    expect(await page.evaluate(() => window.__marsLab.climateState().visible)).toBe(false);
+
+    // The pilot cluster carries the kernel's numbers instead of a colour wash.
+    await expect(page.locator('#pilot-press')).not.toHaveText('—');
+    await expect(page.locator('#pilot-dens')).not.toHaveText('—');
+    await expect(page.locator('#pilot-tair')).toContainText('°C');
+
+    // Leaving surface mode restores the shell, because the layer is still on.
+    await page.locator('#camera-global').click();
+    await expect.poll(
+        () => page.evaluate(() => window.__marsLab.climateState().visible),
+        { timeout: 30_000 },
+    ).toBe(true);
+
+    expect(errors).toEqual([]);
+});

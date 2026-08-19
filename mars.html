@@ -129,6 +129,32 @@ button{color:inherit}
 .sky-focus:hover,.sky-focus:focus-visible{color:#fff}
 .sky-focus:focus-visible{outline:1px solid var(--cyan);outline-offset:4px;border-radius:3px}
 .layer-desc{display:block;margin-top:3px;color:#77665f;font-size:.59rem;line-height:1.25}
+/* Climate field controls. Live inside the layers panel, revealed by the
+   climate toggle — the season and sol-clock scrubbers only mean something
+   while the field they drive is on screen. */
+.climate-controls{padding:9px 5px 12px;border-top:1px solid rgba(255,255,255,.045)}
+.climate-controls[hidden]{display:none}
+.climate-label{display:block;margin-bottom:5px;color:var(--faint);font:600 .5rem var(--display);letter-spacing:.14em;text-transform:uppercase}
+.climate-select{width:100%;padding:7px 8px;border:1px solid rgba(255,173,114,.22);border-radius:7px;background:rgba(255,122,61,.06);color:#e9d4c8;font:600 .64rem var(--display)}
+.climate-legend{margin-top:9px}
+.climate-legend-bar{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;height:14px;border-radius:4px;overflow:hidden}
+.climate-legend-ticks{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;margin-top:3px}
+.climate-legend-ticks small{color:#9b8578;font:600 .47rem var(--mono);text-align:center}
+.climate-legend-note{margin:5px 0 0;color:#77665f;font-size:.56rem;line-height:1.32}
+.climate-scrub{margin-top:10px}
+.climate-scrub-head{display:flex;justify-content:space-between;gap:8px;align-items:baseline;margin-bottom:3px}
+.climate-scrub-head label{color:var(--faint);font:600 .5rem var(--display);letter-spacing:.14em;text-transform:uppercase}
+.climate-scrub-head output{color:#c8b3a6;font:.53rem var(--mono);text-align:right}
+.climate-scrub input[type=range]{width:100%}
+.climate-now{width:100%;margin-top:10px}
+.climate-now:disabled{opacity:.45;cursor:default}
+.climate-readout{display:grid;grid-template-columns:1fr 1fr;gap:3px 10px;margin-top:11px;padding:8px;border:1px solid rgba(255,173,114,.16);border-radius:8px;background:rgba(20,11,8,.5)}
+.climate-readout span{overflow:hidden;color:#e6d3c7;font:.58rem var(--mono);text-overflow:ellipsis;white-space:nowrap}
+.climate-readout em{color:#8a7266;font-style:normal}
+.climate-readout-wide{grid-column:1/-1}
+.climate-frost{color:#9fd0ee}
+.climate-extremes{margin:7px 0 0;color:#8a7266;font:.55rem var(--mono);line-height:1.4}
+.climate-provenance{font-size:.6rem}
 .switch{position:relative;width:34px;height:18px;flex:0 0 auto}
 .switch input{position:absolute;opacity:0;pointer-events:none}
 .switch-track{position:absolute;inset:0;border-radius:999px;background:#261914;border:1px solid rgba(255,255,255,.11);cursor:pointer;transition:.18s}
@@ -246,7 +272,7 @@ button{color:inherit}
   .mars-header{top:16px;left:14px;right:14px;width:auto;transform:none}.mars-header p{display:none}.mission-strip{margin-top:7px;gap:8px}.mission-strip span+span{padding-left:8px}
   .mission-panel,.layers-panel,.data-dock{position:relative;inset:auto;width:auto;max-height:none;margin:0 12px}
   .mission-panel .metric-grid{grid-template-columns:repeat(4,1fr)}
-  .layers-panel .panel-body{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.layers-panel .layer-group-title,.layers-panel .source-mini{grid-column:1/-1}
+  .layers-panel .panel-body{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.layers-panel .layer-group-title,.layers-panel .source-mini,.layers-panel .climate-controls{grid-column:1/-1}
   .data-dock{min-height:0}.camera-dock{left:12px;right:auto;top:122px;width:min(334px,calc(100% - 24px))}.camera-readout{display:none}.surface-explorer{left:12px;top:188px;width:min(334px,calc(100% - 24px))}.is-surface-mode .mission-panel{top:auto;max-height:none}.landmark-card{bottom:16px}
   .mars-render-fallback{padding-top:92px}.mars-render-fallback-copy{bottom:20px}
 }
@@ -335,6 +361,9 @@ button{color:inherit}
         <div class="pi"><span class="pi-k">SUN</span><span class="pi-v" id="pilot-sun">—</span></div>
         <div class="pi"><span class="pi-k">RELIEF</span><span class="pi-v" id="pilot-relief">—</span></div>
         <div class="pi"><span class="pi-k">RETICLE</span><span class="pi-v" id="pilot-reticle">2 km ring</span></div>
+        <div class="pi"><span class="pi-k">PRESS</span><span class="pi-v" id="pilot-press">—</span></div>
+        <div class="pi"><span class="pi-k">DENS</span><span class="pi-v" id="pilot-dens">—</span></div>
+        <div class="pi"><span class="pi-k">T·AIR</span><span class="pi-v" id="pilot-tair">—</span></div>
       </div>
       <span class="surface-detail" id="surface-detail">MOLA regional terrain · loading source resolution</span>
     </div>
@@ -395,6 +424,26 @@ button{color:inherit}
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">#</span><div class="layer-name">Coordinate grid<span class="layer-desc">30° planetocentric</span></div><label class="switch"><input type="checkbox" data-layer="grid" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◌</span><div class="layer-name">Thin atmosphere<span class="layer-desc">visual CO₂ limb</span></div><label class="switch"><input type="checkbox" data-layer="atmosphere" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◐</span><div class="layer-name">Day/night terminator<span class="layer-desc" id="terminator-source">season + MTC fallback while JPL loads</span></div><label class="switch"><input type="checkbox" data-layer="terminator" checked><span class="switch-track"></span></label></div>
+      <div class="layer-group-title">Climate · modelled</div>
+      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◍</span><div class="layer-name">Surface climate field<span class="layer-desc">1-D energy balance over MOLA + Viking albedo · temperature, pressure, CO₂ frost · modelled, not observed</span></div><label class="switch"><input id="climate-toggle" type="checkbox" data-layer="climate"><span class="switch-track"></span></label></div>
+      <div class="climate-controls" id="climate-controls" hidden>
+        <label class="climate-label" for="climate-field">Field</label>
+        <select id="climate-field" class="climate-select"></select>
+        <div class="climate-legend" id="climate-legend" aria-hidden="true"></div>
+        <p class="climate-legend-note" id="climate-legend-note"></p>
+        <div class="climate-scrub">
+          <div class="climate-scrub-head"><label for="climate-sol">Sol clock</label><output id="climate-sol-output" for="climate-sol">live</output></div>
+          <input type="range" id="climate-sol" min="-12" max="12" step="0.25" value="0">
+        </div>
+        <div class="climate-scrub">
+          <div class="climate-scrub-head"><label for="climate-ls">Season</label><output id="climate-ls-output" for="climate-ls">Ls —°</output></div>
+          <input type="range" id="climate-ls" min="0" max="359" step="1" value="0">
+        </div>
+        <button class="action-btn climate-now" type="button" id="climate-now">Live</button>
+        <div class="climate-readout" id="climate-readout" aria-live="polite"></div>
+        <p class="climate-extremes" id="climate-extremes"></p>
+        <p class="provenance-note climate-provenance" id="climate-provenance"></p>
+      </div>
       <div class="layer-group-title" id="sky-feed-title">Mars sky · loading JPL Horizons</div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">☉</span><button class="layer-name sky-focus" type="button" data-sky-focus="sun" aria-label="Locate Sun in the Mars sky">Sun<span class="layer-desc" id="sky-sun-status">waiting for Mars topocentric position</span></button><label class="switch"><input type="checkbox" data-layer="sky-sun" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">⊕</span><button class="layer-name sky-focus" type="button" data-sky-focus="earth" aria-label="Locate Earth in the Mars sky">Earth<span class="layer-desc" id="sky-earth-status">waiting for Mars topocentric position</span></button><label class="switch"><input type="checkbox" data-layer="sky-earth" checked><span class="switch-track"></span></label></div>
