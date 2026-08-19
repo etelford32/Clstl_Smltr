@@ -95,6 +95,7 @@ const NAV_DROPDOWNS = [
             { href: 'shielding-lab.html', label: 'Shielding Lab', sub: 'M–I coupling · SAPS + penetration E-fields', tier: 'public', icon: 'shield', badge: 'NEW', id: 'shielding-lab' },
             { href: 'flux-rope.html', label: 'Flux Rope Simulator', sub: 'CME Bz forecasting · ensemble Sun→Earth', tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'flux-rope' },
             { href: 'flux-rope-live.html', label: 'Compounding Watch', sub: 'Real-time CME trains · interaction physics + measured noise', tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'flux-rope-live' },
+            { href: 'cme-forecast.html', label: 'CME Forecast', sub: 'Locked arrivals · uncertainty + live skill', tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'cme-forecast' },
             { href: 'far-side-watch.html', label: 'Far-Side Watch', sub: 'Regions rotating in · days-to-weeks horizon', tier: 'public', icon: 'far-side', badge: 'NEW', id: 'far-side-watch' },
             { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: 'sun' },
             { section: 'Planetary systems' },

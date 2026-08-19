@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CME Forecast — 7-Day Arrival Windows · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/cme-forecast.html">
+<meta name="description" content="Parker's live CME forecast: issue-locked Earth-arrival windows, impact probabilities, magnetic-field uncertainty, and prospective verification against L1 truth.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/cme-forecast.html">
+<meta property="og:title" content="CME Forecast — forecasts locked before impact">
+<meta property="og:description" content="A live seven-day corridor of CME arrival windows, impact probabilities, Bz uncertainty, and the truth markers that score Parker after passage.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/flux-rope.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Parkers Physics CME forecast visualization">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="CME Forecast — Parkers Physics">
+<meta name="twitter:description" content="Issue-locked CME arrival windows and prospective skill, scored later against L1 truth.">
+<meta name="twitter:image" content="https://parkersphysics.com/static/og/flux-rope.jpg">
+
+<!-- Canonical navigation owns all nav presentation. Page CSS stays cmef-
+     namespaced so it cannot silently drift the shared site shell. -->
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<style>
+*, *::before, *::after { box-sizing:border-box; }
+:root {
+    --cmef-bg:#020711;
+    --cmef-surface:rgba(8,17,31,.84);
+    --cmef-surface-solid:#08111f;
+    --cmef-line:rgba(146,177,214,.17);
+    --cmef-line-hi:rgba(146,177,214,.30);
+    --cmef-text:#edf4ff;
+    --cmef-copy:#a9b8cd;
+    --cmef-muted:#6f7f98;
+    --cmef-cyan:#57d9ff;
+    --cmef-mint:#72f5bd;
+    --cmef-amber:#ffc96c;
+    --cmef-violet:#b277ff;
+    --cmef-red:#ff7694;
+}
+html { scroll-behavior:smooth; background:var(--cmef-bg); }
+body {
+    margin:0; min-height:100vh; overflow-x:hidden;
+    color:var(--cmef-text); background:
+        radial-gradient(70% 50% at 78% 8%, rgba(31,107,149,.15), transparent 68%),
+        radial-gradient(55% 42% at 16% 24%, rgba(102,61,163,.12), transparent 72%),
+        var(--cmef-bg);
+    font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+body::before {
+    content:""; position:fixed; inset:0; z-index:-1; pointer-events:none; opacity:.45;
+    background-image:
+        radial-gradient(circle at 15% 20%, rgba(255,255,255,.5) 0 1px, transparent 1.5px),
+        radial-gradient(circle at 72% 31%, rgba(108,210,255,.45) 0 1px, transparent 1.5px),
+        radial-gradient(circle at 43% 76%, rgba(255,255,255,.35) 0 1px, transparent 1.5px);
+    background-size:211px 211px, 307px 307px, 389px 389px;
+}
+.cmef-page { width:min(1440px,100%); margin:0 auto; padding:0 28px 84px; }
+.cmef-hero { padding:clamp(46px,8vw,104px) 0 28px; }
+.cmef-kicker { display:flex; align-items:center; gap:12px; color:var(--cmef-cyan); font:700 11px/1.2 ui-monospace,"SFMono-Regular",Menlo,monospace; letter-spacing:.17em; text-transform:uppercase; }
+.cmef-kicker::before { content:""; width:34px; height:1px; background:var(--cmef-cyan); box-shadow:0 0 14px rgba(87,217,255,.8); }
+.cmef-hero-grid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(290px,.75fr); align-items:end; gap:48px; margin-top:24px; }
+.cmef-hero h1 { margin:0; max-width:900px; font-size:clamp(3.5rem,8vw,7.8rem); line-height:.84; letter-spacing:-.075em; font-weight:760; }
+.cmef-hero h1 span { display:block; color:transparent; -webkit-text-stroke:1px rgba(225,240,255,.62); }
+.cmef-intro { margin:0 0 8px; max-width:570px; color:var(--cmef-copy); font-size:clamp(1rem,1.5vw,1.22rem); line-height:1.7; }
+.cmef-intro strong { color:var(--cmef-text); font-weight:650; }
+.cmef-feed { display:flex; align-items:center; gap:10px; margin-top:24px; min-height:30px; color:var(--cmef-muted); font:600 11px/1.4 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.075em; }
+.cmef-feed-dot { width:8px; height:8px; flex:0 0 auto; border-radius:50%; background:var(--cmef-amber); box-shadow:0 0 0 4px rgba(255,201,108,.10),0 0 14px rgba(255,201,108,.45); }
+.cmef-feed-dot[data-mode="live"] { background:var(--cmef-mint); box-shadow:0 0 0 4px rgba(114,245,189,.10),0 0 14px rgba(114,245,189,.48); }
+.cmef-feed-dot[data-mode="error"] { background:var(--cmef-red); box-shadow:0 0 0 4px rgba(255,118,148,.10),0 0 14px rgba(255,118,148,.48); }
+.cmef-refresh { margin-left:auto; border:0; padding:6px 0; color:var(--cmef-cyan); background:transparent; font:inherit; text-transform:uppercase; letter-spacing:inherit; cursor:pointer; }
+.cmef-refresh:hover { color:#b9efff; }
+.cmef-refresh:disabled { color:var(--cmef-muted); cursor:wait; }
+
+.cmef-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border:1px solid var(--cmef-line); background:rgba(4,12,24,.54); backdrop-filter:blur(16px); }
+.cmef-stat { min-height:112px; padding:22px 24px; border-right:1px solid var(--cmef-line); }
+.cmef-stat:last-child { border-right:0; }
+.cmef-stat-label { display:block; color:var(--cmef-muted); font:700 10px/1.3 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.13em; }
+.cmef-stat-value { display:block; margin-top:10px; color:var(--cmef-text); font:650 clamp(1.5rem,2.8vw,2.25rem)/1 ui-monospace,"SFMono-Regular",Menlo,monospace; letter-spacing:-.055em; }
+.cmef-stat:first-child .cmef-stat-value { color:var(--cmef-cyan); }
+.cmef-stat:nth-child(3) .cmef-stat-value { color:var(--cmef-mint); }
+.cmef-stat:nth-child(4) .cmef-stat-value { color:var(--cmef-violet); }
+.cmef-stat-note { display:block; margin-top:8px; color:var(--cmef-muted); font-size:.72rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+.cmef-chart-panel { position:relative; margin-top:18px; border:1px solid var(--cmef-line); background:linear-gradient(155deg,rgba(10,23,41,.9),rgba(3,9,19,.92)); box-shadow:0 28px 80px rgba(0,0,0,.28); overflow:hidden; }
+.cmef-chart-panel::before { content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(90deg,rgba(87,217,255,.035),transparent 35%,rgba(178,119,255,.03)); }
+.cmef-chart-head { position:relative; display:flex; align-items:flex-start; justify-content:space-between; gap:24px; padding:24px 26px 0; }
+.cmef-chart-title { margin:0; font-size:.78rem; line-height:1.4; letter-spacing:.14em; text-transform:uppercase; }
+.cmef-chart-subtitle { margin:6px 0 0; color:var(--cmef-muted); font-size:.78rem; line-height:1.5; }
+.cmef-range { display:inline-flex; border:1px solid var(--cmef-line); background:rgba(2,7,17,.55); padding:3px; }
+.cmef-range button { min-width:58px; border:0; padding:7px 10px; color:var(--cmef-muted); background:transparent; font:700 10px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.08em; cursor:pointer; }
+.cmef-range button:hover { color:var(--cmef-text); }
+.cmef-range button.active { color:#03111b; background:var(--cmef-cyan); box-shadow:0 0 18px rgba(87,217,255,.20); }
+.cmef-chart-shell { position:relative; height:clamp(390px,45vw,560px); min-height:390px; }
+.cmef-chart-shell canvas { display:block; width:100%; height:100%; cursor:crosshair; }
+.cmef-tooltip { position:absolute; z-index:2; width:220px; transform:translateX(-50%); padding:10px 12px; pointer-events:none; border:1px solid var(--cmef-line-hi); background:rgba(3,10,21,.96); box-shadow:0 12px 34px rgba(0,0,0,.36); }
+.cmef-tooltip strong,.cmef-tooltip span { display:block; }
+.cmef-tooltip strong { color:var(--cmef-text); font-size:.75rem; }
+.cmef-tooltip span { margin-top:4px; color:var(--cmef-copy); font:500 10px/1.35 ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.cmef-chart-foot { position:relative; display:flex; justify-content:space-between; gap:24px; padding:0 26px 22px; color:var(--cmef-muted); font-size:.7rem; }
+.cmef-legend { display:flex; flex-wrap:wrap; gap:18px; }
+.cmef-legend span { display:flex; align-items:center; gap:7px; }
+.cmef-key { display:inline-block; width:18px; height:6px; border:1px solid var(--cmef-cyan); background:rgba(87,217,255,.16); border-radius:99px; }
+.cmef-key.median { width:7px; height:7px; background:var(--cmef-cyan); border:0; }
+.cmef-key.truth { width:7px; height:7px; background:#fff; border:0; border-radius:0; transform:rotate(45deg); }
+.cmef-lock-note { text-align:right; max-width:430px; }
+.cmef-sr-summary { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+
+.cmef-calendar { margin-top:14px; border:1px solid var(--cmef-line); background:rgba(5,13,25,.78); overflow:hidden; }
+.cmef-calendar-head { display:flex; align-items:center; justify-content:space-between; gap:18px; min-height:58px; padding:10px 14px 10px 18px; border-bottom:1px solid var(--cmef-line); }
+.cmef-calendar-title { display:flex; align-items:baseline; gap:12px; min-width:0; }
+.cmef-calendar-title h2 { margin:0; font-size:.75rem; line-height:1; text-transform:uppercase; letter-spacing:.13em; }
+.cmef-calendar-title span { color:var(--cmef-muted); font:600 10px/1.2 ui-monospace,"SFMono-Regular",Menlo,monospace; white-space:nowrap; }
+.cmef-calendar-nav { display:flex; align-items:center; gap:4px; }
+.cmef-calendar-nav button { min-height:34px; border:1px solid var(--cmef-line); padding:0 11px; color:var(--cmef-copy); background:rgba(2,7,17,.58); font:700 9px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.06em; cursor:pointer; }
+.cmef-calendar-nav button:hover { color:var(--cmef-cyan); border-color:rgba(87,217,255,.42); }
+.cmef-calendar-scroll { overflow-x:auto; scrollbar-width:thin; scrollbar-color:rgba(87,217,255,.32) transparent; }
+.cmef-calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(96px,1fr)); min-width:672px; }
+.cmef-day { position:relative; min-width:0; min-height:108px; padding:13px 13px 11px; border:0; border-right:1px solid var(--cmef-line); color:var(--cmef-copy); background:transparent; text-align:left; font:inherit; cursor:pointer; }
+.cmef-day:last-child { border-right:0; }
+.cmef-day:hover { background:rgba(87,217,255,.045); }
+.cmef-day.has-window { background:linear-gradient(160deg,rgba(87,217,255,.065),rgba(178,119,255,.025)); }
+.cmef-day.is-selected { background:linear-gradient(160deg,rgba(87,217,255,.15),rgba(87,217,255,.035)); box-shadow:inset 0 -2px 0 var(--cmef-cyan); }
+.cmef-day.is-today::before { content:"NOW"; position:absolute; top:8px; right:9px; color:var(--cmef-amber); font:700 7px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; letter-spacing:.08em; }
+.cmef-day-top { display:flex; align-items:center; gap:5px; color:var(--cmef-copy); font:700 9px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.08em; }
+.cmef-day-top small { color:var(--cmef-muted); font:inherit; }
+.cmef-day > strong { display:block; margin-top:9px; color:var(--cmef-text); font:600 1.55rem/1 ui-monospace,"SFMono-Regular",Menlo,monospace; letter-spacing:-.06em; }
+.cmef-day-signal { display:block; margin-top:8px; color:var(--cmef-muted); font:600 9px/1.2 ui-monospace,"SFMono-Regular",Menlo,monospace; white-space:nowrap; }
+.cmef-day.has-window .cmef-day-signal { color:var(--cmef-cyan); }
+.cmef-day-foot { display:flex; align-items:center; justify-content:space-between; min-height:10px; margin-top:7px; }
+.cmef-day-foot b { color:var(--cmef-mint); font:700 9px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.cmef-day-dots { display:flex; gap:3px; }
+.cmef-day-dots i { width:5px; height:5px; border-radius:50%; background:var(--cmef-dot); box-shadow:0 0 7px var(--cmef-dot); }
+.cmef-calendar-detail { padding:18px; border-top:1px solid var(--cmef-line); background:linear-gradient(120deg,rgba(9,24,40,.86),rgba(4,11,22,.92)); }
+.cmef-calendar-detail[hidden] { display:none; }
+.cmef-day-detail-head { display:flex; align-items:center; justify-content:space-between; gap:18px; padding-bottom:14px; }
+.cmef-day-detail-label { color:var(--cmef-cyan); font:700 8px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.13em; }
+.cmef-day-detail-head h3 { margin:5px 0 0; font-size:1rem; letter-spacing:-.015em; }
+.cmef-day-detail-count { padding:5px 8px; border:1px solid rgba(87,217,255,.42); color:var(--cmef-cyan); font:700 8px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.08em; }
+.cmef-day-detail-count.quiet { color:var(--cmef-muted); border-color:var(--cmef-line-hi); }
+.cmef-day-events { display:grid; gap:8px; }
+.cmef-day-event { display:grid; grid-template-columns:minmax(190px,1.1fr) minmax(330px,1.8fr); gap:18px; padding:15px 16px; border:1px solid var(--cmef-line); background:rgba(3,10,21,.66); }
+.cmef-day-event.is-selected { border-color:rgba(87,217,255,.46); }
+.cmef-day-event-main span,.cmef-day-event-main strong { display:block; }
+.cmef-day-event-title { color:var(--cmef-amber); font-size:.72rem; font-weight:750; }
+.cmef-day-event-main strong { margin-top:7px; color:var(--cmef-text); font:650 .92rem/1.2 ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.cmef-day-event-main > span:last-child { margin-top:5px; color:var(--cmef-muted); font:500 9px/1.4 ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.cmef-day-event-metrics { display:grid; grid-template-columns:repeat(6,minmax(58px,1fr)); gap:8px; align-content:center; }
+.cmef-day-event-metrics span { color:var(--cmef-muted); font:600 7px/1.3 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.04em; }
+.cmef-day-event-metrics b { display:block; margin-bottom:4px; color:var(--cmef-text); font-size:.7rem; text-transform:none; letter-spacing:-.02em; }
+.cmef-day-event-lock { grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; gap:14px; padding-top:9px; border-top:1px solid var(--cmef-line); color:var(--cmef-muted); font:500 8px/1.4 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.045em; }
+.cmef-day-event-lock button { border:0; padding:3px 0; color:var(--cmef-cyan); background:transparent; font:700 8px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.06em; cursor:pointer; }
+.cmef-day-quiet { display:flex; align-items:center; gap:18px; min-height:78px; padding:14px 16px; border:1px dashed var(--cmef-line-hi); }
+.cmef-day-quiet-mark { color:var(--cmef-muted); font-size:2rem; font-weight:200; }
+.cmef-day-quiet strong { color:var(--cmef-text); font-size:.8rem; }
+.cmef-day-quiet p { margin:5px 0 0; max-width:800px; color:var(--cmef-muted); font-size:.72rem; line-height:1.55; }
+
+.cmef-section { padding-top:clamp(70px,9vw,124px); }
+.cmef-section-head { display:grid; grid-template-columns:minmax(0,.7fr) minmax(300px,1.3fr); gap:42px; align-items:end; padding-bottom:26px; border-bottom:1px solid var(--cmef-line); }
+.cmef-section-index { color:var(--cmef-cyan); font:700 11px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; letter-spacing:.14em; }
+.cmef-section h2 { margin:10px 0 0; font-size:clamp(2rem,4.5vw,4rem); line-height:.98; letter-spacing:-.045em; }
+.cmef-section-copy { margin:0; color:var(--cmef-copy); line-height:1.7; max-width:680px; }
+.cmef-section-copy strong { color:var(--cmef-text); }
+.cmef-event-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; padding-top:20px; }
+.cmef-event-card { position:relative; border:1px solid var(--cmef-line); background:var(--cmef-surface); transition:border-color .18s ease,transform .18s ease; }
+.cmef-event-card:hover { border-color:var(--cmef-line-hi); transform:translateY(-2px); }
+.cmef-event-card.is-selected { border-color:rgba(87,217,255,.58); box-shadow:inset 3px 0 0 var(--cmef-cyan),0 0 28px rgba(87,217,255,.06); }
+.cmef-event-select { display:block; width:100%; padding:24px; border:0; color:inherit; background:transparent; text-align:left; font:inherit; cursor:pointer; }
+.cmef-event-heading { display:flex; align-items:center; justify-content:space-between; gap:14px; color:var(--cmef-text); font-size:.84rem; font-weight:700; }
+.cmef-event-sun { color:var(--cmef-amber); }
+.cmef-state { padding:5px 8px; border:1px solid currentColor; color:var(--cmef-cyan); font:700 9px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.08em; white-space:nowrap; }
+.cmef-state.verified { color:var(--cmef-mint); }
+.cmef-state.window { color:var(--cmef-amber); }
+.cmef-state.miss { color:var(--cmef-red); }
+.cmef-arrival-time { display:block; margin-top:24px; color:var(--cmef-text); font:600 clamp(1.25rem,2.5vw,2rem)/1.1 ui-monospace,"SFMono-Regular",Menlo,monospace; letter-spacing:-.045em; }
+.cmef-arrival-window { display:block; margin-top:8px; color:var(--cmef-muted); font:500 10px/1.5 ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.cmef-event-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-top:24px; padding-top:18px; border-top:1px solid var(--cmef-line); color:var(--cmef-muted); font:600 9px/1.4 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.07em; }
+.cmef-event-metrics b { display:block; margin-bottom:5px; color:var(--cmef-text); font-size:.9rem; letter-spacing:-.03em; text-transform:none; }
+.cmef-severity-line { display:block; margin-top:16px; color:var(--cmef-violet); font:600 10px/1.5 ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.cmef-truth-line { display:block; margin-top:20px; color:var(--cmef-copy); font-size:.75rem; }
+.cmef-issued { display:block; margin-top:8px; color:var(--cmef-muted); font:500 9px/1.4 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.05em; }
+.cmef-empty { grid-column:1/-1; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:240px; border:1px dashed var(--cmef-line-hi); color:var(--cmef-copy); text-align:center; }
+.cmef-empty strong { color:var(--cmef-text); }
+.cmef-empty span { margin-top:8px; max-width:520px; font-size:.82rem; }
+
+.cmef-skill-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; padding-top:20px; }
+.cmef-skill-card { padding:24px; border:1px solid var(--cmef-line); background:var(--cmef-surface); }
+.cmef-skill-card.primary { border-color:rgba(87,217,255,.38); background:linear-gradient(145deg,rgba(20,49,66,.72),var(--cmef-surface)); }
+.cmef-skill-head { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.cmef-skill-head strong { font:700 .85rem/1 ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.cmef-skill-head span { color:var(--cmef-cyan); font:700 9px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; letter-spacing:.12em; }
+.cmef-skill-values { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin-top:24px; }
+.cmef-skill-values span { color:var(--cmef-muted); font:600 9px/1.4 ui-monospace,"SFMono-Regular",Menlo,monospace; text-transform:uppercase; letter-spacing:.05em; }
+.cmef-skill-values b { display:block; margin-bottom:4px; color:var(--cmef-text); font-size:1.12rem; letter-spacing:-.04em; text-transform:none; }
+.cmef-skill-empty { grid-column:1/-1; display:flex; align-items:center; gap:24px; min-height:170px; padding:30px; border:1px dashed var(--cmef-line-hi); background:rgba(8,17,31,.46); }
+.cmef-skill-empty strong { display:block; color:var(--cmef-text); }
+.cmef-skill-empty p { margin:7px 0 0; color:var(--cmef-copy); line-height:1.6; }
+.cmef-skill-orbit { position:relative; width:58px; height:58px; flex:0 0 auto; border:1px solid rgba(87,217,255,.35); border-radius:50%; }
+.cmef-skill-orbit::before { content:""; position:absolute; width:8px; height:8px; top:4px; left:25px; border-radius:50%; background:var(--cmef-cyan); box-shadow:0 0 12px var(--cmef-cyan); }
+
+.cmef-method { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; margin-top:20px; background:var(--cmef-line); border:1px solid var(--cmef-line); }
+.cmef-method article { min-height:230px; padding:28px; background:var(--cmef-surface-solid); }
+.cmef-method-number { color:var(--cmef-cyan); font:700 10px/1 ui-monospace,"SFMono-Regular",Menlo,monospace; letter-spacing:.12em; }
+.cmef-method h3 { margin:52px 0 10px; font-size:1rem; }
+.cmef-method p { margin:0; color:var(--cmef-copy); font-size:.82rem; line-height:1.7; }
+.cmef-links { display:flex; flex-wrap:wrap; gap:12px; margin-top:26px; }
+.cmef-link { display:inline-flex; align-items:center; gap:12px; min-height:44px; padding:0 17px; border:1px solid var(--cmef-line-hi); color:var(--cmef-text); text-decoration:none; font-size:.78rem; font-weight:700; }
+.cmef-link:hover { border-color:var(--cmef-cyan); color:var(--cmef-cyan); }
+.cmef-link.primary { border-color:var(--cmef-cyan); color:#03111b; background:var(--cmef-cyan); }
+.cmef-link.primary:hover { background:#9deaff; }
+.cmef-footer { display:flex; justify-content:space-between; gap:24px; margin-top:92px; padding-top:22px; border-top:1px solid var(--cmef-line); color:var(--cmef-muted); font:500 10px/1.6 ui-monospace,"SFMono-Regular",Menlo,monospace; }
+.cmef-footer a { color:var(--cmef-copy); text-decoration:none; }
+.cmef-footer a:hover { color:var(--cmef-cyan); }
+
+@media (max-width:900px) {
+    .cmef-hero-grid,.cmef-section-head { grid-template-columns:1fr; gap:24px; }
+    .cmef-hero h1 { font-size:clamp(3.6rem,15vw,6.8rem); }
+    .cmef-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .cmef-stat:nth-child(2) { border-right:0; }
+    .cmef-stat:nth-child(-n+2) { border-bottom:1px solid var(--cmef-line); }
+    .cmef-method { grid-template-columns:1fr; }
+    .cmef-method article { min-height:190px; }
+    .cmef-method h3 { margin-top:32px; }
+    .cmef-day-event { grid-template-columns:1fr; }
+    .cmef-day-event-lock { grid-column:auto; }
+}
+@media (max-width:680px) {
+    .cmef-page { padding:0 14px 54px; }
+    .cmef-hero { padding-top:42px; }
+    .cmef-hero h1 { font-size:clamp(3.15rem,17vw,5.2rem); }
+    .cmef-stats { grid-template-columns:1fr 1fr; }
+    .cmef-stat { min-height:100px; padding:18px 15px; }
+    .cmef-stat-value { font-size:1.35rem; }
+    .cmef-chart-head { display:block; padding:20px 16px 0; }
+    .cmef-range { margin-top:15px; width:100%; }
+    .cmef-range button { flex:1; min-width:0; }
+    .cmef-chart-shell { height:420px; }
+    .cmef-chart-foot { display:block; padding:0 16px 18px; }
+    .cmef-lock-note { margin-top:12px; text-align:left; }
+    .cmef-calendar-head { align-items:flex-start; padding:12px; }
+    .cmef-calendar-title { display:block; }
+    .cmef-calendar-title span { display:block; margin-top:6px; }
+    .cmef-calendar-nav button { min-height:32px; padding:0 8px; }
+    .cmef-calendar-nav button:nth-child(2) { display:none; }
+    .cmef-calendar-detail { padding:14px 12px; }
+    .cmef-day-detail-head { align-items:flex-end; }
+    .cmef-day-event { padding:14px 12px; }
+    .cmef-day-event-metrics { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .cmef-day-event-lock { align-items:flex-start; flex-direction:column; }
+    .cmef-event-list { grid-template-columns:1fr; }
+    .cmef-event-select { padding:20px 17px; }
+    .cmef-event-metrics { gap:7px; }
+    .cmef-event-metrics b { font-size:.78rem; }
+    .cmef-skill-empty { align-items:flex-start; }
+    .cmef-footer { display:block; }
+}
+@media (prefers-reduced-motion:reduce) {
+    html { scroll-behavior:auto; }
+    .cmef-event-card { transition:none; }
+}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://parkersphysics.com/cme-forecast.html#app",
+  "name": "CME Forecast",
+  "description": "Live issue-locked CME Earth-arrival windows, impact probabilities, magnetic-field uncertainty, and prospective verification against L1 observations.",
+  "url": "https://parkersphysics.com/cme-forecast.html",
+  "image": "https://parkersphysics.com/static/og/flux-rope.jpg",
+  "applicationCategory": "EducationalApplication",
+  "applicationSubCategory": "Space weather forecasting",
+  "operatingSystem": "Web Browser",
+  "browserRequirements": "Requires JavaScript",
+  "isAccessibleForFree": true,
+  "publisher": {
+    "@id": "https://parkersphysics.com/#org"
+  },
+  "inLanguage": "en-US"
+}
+</script>
+</head>
+<body>
+
+<!-- js/nav.js populates this shell; it does not create one. -->
+<nav></nav>
+
+<main class="cmef-page">
+    <header class="cmef-hero">
+        <div class="cmef-kicker">Operational space weather · Earth line</div>
+        <div class="cmef-hero-grid">
+            <h1>CME <span>Forecast</span></h1>
+            <div>
+                <p class="cmef-intro"><strong>Earth-arrival windows, locked before impact.</strong> Parker carries magnetic structure from the Sun toward L1, publishes uncertainty up front, then leaves the forecast unchanged while nature decides the score.</p>
+                <div class="cmef-feed" role="status" aria-live="polite">
+                    <span class="cmef-feed-dot" id="cmef-feed-dot" data-mode="loading" aria-hidden="true"></span>
+                    <span id="cmef-feed-label">Connecting to issue-time ledger…</span>
+                    <button class="cmef-refresh" id="cmef-refresh" type="button">Refresh data</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <section class="cmef-stats" aria-label="Current CME forecast summary">
+        <div class="cmef-stat"><span class="cmef-stat-label">CME windows active</span><span class="cmef-stat-value" id="cmef-active-count">—</span><span class="cmef-stat-note">unresolved, issue-locked events</span></div>
+        <div class="cmef-stat"><span class="cmef-stat-label">Next median arrival</span><span class="cmef-stat-value" id="cmef-next-countdown">—</span><span class="cmef-stat-note" id="cmef-next-window">Waiting for forecast feed</span></div>
+        <div class="cmef-stat"><span class="cmef-stat-label">Next P(Earth hit)</span><span class="cmef-stat-value" id="cmef-next-phit">—</span><span class="cmef-stat-note">ensemble impact probability</span></div>
+        <div class="cmef-stat"><span class="cmef-stat-label">Strongest Bz p50</span><span class="cmef-stat-value" id="cmef-bz">—</span><span class="cmef-stat-note">southward is more geoeffective</span></div>
+    </section>
+
+    <section class="cmef-chart-panel" aria-labelledby="cmef-chart-title">
+        <div class="cmef-chart-head">
+            <div>
+                <h2 class="cmef-chart-title" id="cmef-chart-title">Earth-arrival corridor · UTC</h2>
+                <p class="cmef-chart-subtitle">Bands are forecast windows. Circles are median arrivals. Diamonds appear only after L1 truth resolves.</p>
+            </div>
+            <div class="cmef-range" aria-label="Chart time range">
+                <button type="button" data-cmef-range="48h" aria-pressed="false">48 h</button>
+                <button class="active" type="button" data-cmef-range="7d" aria-pressed="true">7 days</button>
+                <button type="button" data-cmef-range="30d" aria-pressed="false">30 days</button>
+            </div>
+        </div>
+        <div class="cmef-chart-shell" id="cmef-chart-shell">
+            <canvas id="cmef-timeline" aria-label="CME forecast arrival timeline" aria-describedby="cmef-chart-summary"></canvas>
+            <div class="cmef-tooltip" id="cmef-tooltip" hidden></div>
+        </div>
+        <p class="cmef-sr-summary" id="cmef-chart-summary"></p>
+        <div class="cmef-chart-foot">
+            <div class="cmef-legend" aria-label="Chart legend"><span><i class="cmef-key"></i>Forecast window</span><span><i class="cmef-key median"></i>Median</span><span><i class="cmef-key truth"></i>L1 truth</span></div>
+            <div class="cmef-lock-note">A window is evidence only if it existed before the outcome. Every row here comes from the immutable issue-time ledger.</div>
+        </div>
+    </section>
+
+    <section class="cmef-calendar" aria-labelledby="cmef-calendar-title">
+        <div class="cmef-calendar-head">
+            <div class="cmef-calendar-title"><h2 id="cmef-calendar-title">7-day forecast calendar</h2><span id="cmef-calendar-range">UTC</span></div>
+            <div class="cmef-calendar-nav" aria-label="Move forecast calendar">
+                <button id="cmef-calendar-prev" type="button" aria-label="Previous seven days">←</button>
+                <button id="cmef-calendar-today" type="button">Today</button>
+                <button id="cmef-calendar-next" type="button" aria-label="Next seven days">→</button>
+            </div>
+        </div>
+        <div class="cmef-calendar-scroll">
+            <div class="cmef-calendar-grid" id="cmef-calendar-grid" aria-label="Daily CME arrival outlook"></div>
+        </div>
+        <div class="cmef-calendar-detail" id="cmef-calendar-detail" aria-live="polite" hidden></div>
+    </section>
+
+    <section class="cmef-section" aria-labelledby="cmef-ledger-title">
+        <div class="cmef-section-head">
+            <div><span class="cmef-section-index">01 / FORECAST LEDGER</span><h2 id="cmef-ledger-title">What Parker has committed to.</h2></div>
+            <p class="cmef-section-copy">Each card is a forecast artifact captured before passage: a median arrival, an uncertainty window, <strong>P(Earth hit)</strong>, and magnetic-field quantiles. Select a card to locate it in the hero chart.</p>
+        </div>
+        <div class="cmef-event-list" id="cmef-event-list" aria-live="polite"></div>
+    </section>
+
+    <section class="cmef-section" aria-labelledby="cmef-skill-title">
+        <div class="cmef-section-head">
+            <div><span class="cmef-section-index">02 / PROSPECTIVE SKILL</span><h2 id="cmef-skill-title">Skill shown, not claimed.</h2></div>
+            <p class="cmef-section-copy">Scores grow only when a previously locked forecast meets a resolved L1 outcome. Hindcasts can develop the method; <strong>they do not count as live forecasting evidence.</strong></p>
+        </div>
+        <div class="cmef-skill-grid" id="cmef-skill-grid"></div>
+    </section>
+
+    <section class="cmef-section" aria-labelledby="cmef-method-title">
+        <div class="cmef-section-head">
+            <div><span class="cmef-section-index">03 / VERIFICATION LOOP</span><h2 id="cmef-method-title">A forecast nature can audit.</h2></div>
+            <p class="cmef-section-copy">The page is the public end of a simple discipline: issue, freeze, observe. That separation is what makes “within one week” measurable instead of retrospective.</p>
+        </div>
+        <div class="cmef-method">
+            <article><span class="cmef-method-number">T+00 · ISSUE</span><h3>Model the CME train.</h3><p>Solar eruption geometry and flux-rope uncertainty become an ensemble of Earth-line trajectories, arrival times, and Bz outcomes.</p></article>
+            <article><span class="cmef-method-number">T+01 · LOCK</span><h3>Capture the artifact.</h3><p>The JSON record is timestamped and retained. Forecast values cannot be replaced after an arrival begins or the truth becomes known.</p></article>
+            <article><span class="cmef-method-number">T+02 · SCORE</span><h3>Resolve at L1.</h3><p>Observed shock time and magnetic field attach later. Arrival error, hit skill, and Bz calibration update from that paired record.</p></article>
+        </div>
+        <div class="cmef-links">
+            <a class="cmef-link primary" href="flux-rope-live.html">Open the Compounding Watch <span aria-hidden="true">→</span></a>
+            <a class="cmef-link" href="flux-rope.html">Explore the flux-rope model</a>
+            <a class="cmef-link" href="space-weather.html">View current space weather</a>
+        </div>
+    </section>
+
+    <footer class="cmef-footer">
+        <span>Forecast source: Parkers Physics /api/cme/skill · truth source: near-Earth L1 observations</span>
+        <span><a href="privacy.html">Privacy</a></span>
+    </footer>
+</main>
+
+<script type="module" src="js/cme-forecast-page.js"></script>
+<script type="module">import { initNav } from "./js/nav.js?v=20260819"; initNav("cme-forecast");</script>
+</body>
+</html>
