@@ -157,6 +157,12 @@ function summarizeTrack(track, latestL0, latestTimestamp) {
         frames: pts.length,
         firstSeen: first.t, lastSeen: last.t,
         peakStrength, latestStrength: last.strength,
+        // Latest apparent footprint. Carried on the summary because the
+        // flare climatology ranks regions BY SIZE and would otherwise have to
+        // reach into `points` and pick a frame itself — two consumers, two
+        // choices of frame, two different answers.
+        areaDeg2: last.areaDeg2 ?? null,
+        peakAreaDeg2: Math.max(...pts.map((p) => p.areaDeg2 ?? 0)) || null,
         trend, confidence: meanConf,
         strong: isStrong(last),
         etaBandDays: bandDays,

@@ -51,7 +51,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { carringtonL0 } from './carrington.js';
-import { rampRGB } from './farside-render.js';
+import { fieldCanvas } from './farside-render.js';
 
 const DEG = Math.PI / 180;
 const R = 1;                         // Sun radius in scene units
@@ -67,24 +67,15 @@ function surface(lonDeg, latDeg) {
     return new THREE.Vector3(-Math.cos(lon) * cl, Math.sin(lat), Math.sin(lon) * cl);
 }
 
-/** Build a CanvasTexture from the far-side phase-shift field (equirectangular). */
+/**
+ * Build a CanvasTexture from the far-side phase-shift field.
+ *
+ * The pixel loop lives in farside-render.fieldCanvas — one implementation of
+ * the ramp and the latitude flip, memoized per map, shared with the flat map
+ * and the 3D corridor.
+ */
 function fieldTexture(map) {
-    const { nLon, nLat } = map.grid;
-    const data = map.data;
-    const cvs = document.createElement('canvas');
-    cvs.width = nLon; cvs.height = nLat;
-    const ctx = cvs.getContext('2d');
-    const img = ctx.createImageData(nLon, nLat);
-    for (let r = 0; r < nLat; r++) {
-        const srcRow = (nLat - 1 - r) * nLon;     // flip so +90 lat is the top row
-        for (let c = 0; c < nLon; c++) {
-            const [rr, gg, bb] = rampRGB(data[srcRow + c]);
-            const o = (r * nLon + c) * 4;
-            img.data[o] = rr; img.data[o + 1] = gg; img.data[o + 2] = bb; img.data[o + 3] = 255;
-        }
-    }
-    ctx.putImageData(img, 0, 0);
-    const tex = new THREE.CanvasTexture(cvs);
+    const tex = new THREE.CanvasTexture(fieldCanvas(map));
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     return tex;

@@ -35,6 +35,7 @@ const state = {
     selectedId: null,
     calendarMonthMs: null,
     selectedDayMs: null,
+    corridor: null,        // lazily mounted 3D panel (see bindViewTabs)
     updatedAt: null,
     hitAreas: [],
     refreshTimer: null,
@@ -592,6 +593,9 @@ function selectForecastEvent(eventId, { scrollToCard = false, scrollToChart = fa
     state.selectedDayMs = utcDayStart(event.predictedMs);
     delete $('cmef-calendar-detail').dataset.userCollapsed;
     ensureCalendarDayVisible(state.selectedDayMs);
+    // The corridor draws the SELECTED event's arrival window, so its scrubber
+    // ticks move with the selection.
+    state.corridor?.refreshTicks?.();
     renderEvents();
     renderCalendar();
     drawChart();
@@ -731,6 +735,11 @@ function renderCalendar() {
             state.selectedDayMs = collapsing ? null : dayStartMs;
             if (collapsing) $('cmef-calendar-detail').dataset.userCollapsed = 'true';
             else delete $('cmef-calendar-detail').dataset.userCollapsed;
+            // Picking a day sets the corridor's clock to that day's midpoint,
+            // so the calendar doubles as the 3D view's time index. Noon, not
+            // midnight: a day's arrivals cluster nowhere in particular and the
+            // midpoint is the least misleading single instant to stand at.
+            if (!collapsing) state.corridor?.setEpoch?.(dayStartMs + 12 * HOUR_MS);
             renderCalendar();
         });
     });
@@ -866,6 +875,64 @@ function bindRangeControls() {
     });
 }
 
+/**
+ * Left-panel view switch: the month calendar, or the 3D Sun→Earth corridor.
+ *
+ * The corridor module is imported on FIRST OPEN, never at load. It pulls in
+ * three.js, the far-side package and the flux-rope provider (which runs a
+ * WASM ensemble), and a visitor who only wants the calendar should not pay
+ * for any of that. The mount is fail-quiet: if it cannot start, the tab says
+ * so and the calendar is untouched.
+ *
+ * The corridor is told which ledger event to draw an arrival window for by
+ * reading state.selectedId on every frame rather than being pushed a value —
+ * one source of truth, so the scene and the ledger cannot disagree about
+ * what is selected.
+ */
+function bindViewTabs() {
+    const tabs = [...document.querySelectorAll('[data-cmef-view]')];
+    if (!tabs.length) return;
+    const panes = {
+        calendar: $('cmef-view-calendar'),
+        corridor: $('cmef-view-corridor'),
+    };
+    const calNav = $('cmef-cal-nav');
+
+    const show = async (name) => {
+        for (const tab of tabs) {
+            tab.setAttribute('aria-selected', String(tab.dataset.cmefView === name));
+        }
+        for (const [key, pane] of Object.entries(panes)) {
+            if (pane) pane.hidden = key !== name;
+        }
+        // Month paging belongs to the calendar only.
+        if (calNav) calNav.style.visibility = name === 'calendar' ? '' : 'hidden';
+        $('cmef-calendar-title').textContent =
+            name === 'corridor' ? 'Sun → Earth corridor' : 'Arrival calendar';
+        if (name !== 'corridor' || state.corridor) return;
+
+        state.corridor = 'loading';
+        try {
+            const { mountCorridor } = await import('./corridor/corridor-panel.js');
+            state.corridor = mountCorridor('cmef-corridor-host', {
+                getEvent: () => state.events.find((e) => e.id === state.selectedId) ?? null,
+            }) || 'failed';
+        } catch (error) {
+            state.corridor = 'failed';
+            console.info('cme-forecast: 3D corridor unavailable', error?.message ?? error);
+        }
+        if (state.corridor === 'failed') {
+            $('cmef-corridor-host').innerHTML =
+                '<p class="cmef-empty" style="margin:10px"><strong>3D corridor unavailable.</strong>'
+                + '<span>The calendar and the issue-locked ledger are unaffected.</span></p>';
+        }
+    };
+
+    for (const tab of tabs) {
+        tab.addEventListener('click', () => show(tab.dataset.cmefView));
+    }
+}
+
 function bindCalendarControls() {
     // Month paging deliberately PRESERVES the selected day: a calendar that
     // wiped your selection every time you looked at next month would blank
@@ -921,6 +988,7 @@ export async function initCmeForecastPage() {
     renderCalendar();
     bindRangeControls();
     bindCalendarControls();
+    bindViewTabs();
     bindChartPointer();
     $('cmef-refresh').addEventListener('click', () => loadForecasts({ manual: true }));
     state.resizeObserver = new ResizeObserver(drawChart);

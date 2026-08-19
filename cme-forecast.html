@@ -149,6 +149,20 @@ body {
 .cmef-main { display:grid; grid-template-columns:minmax(0,1.62fr) minmax(300px,.85fr); gap:8px; flex:1; min-height:0; }
 .cmef-rail { display:flex; flex-direction:column; gap:8px; min-height:0; }
 
+/* ── Left-panel view tabs (calendar ⇄ 3D corridor) ──────────────────── */
+.cmef-viewtabs { display:inline-flex; padding:2px; border:1px solid var(--cmef-line);
+    border-radius:var(--cmef-r-sm); background:rgba(4,6,20,.5); }
+.cmef-viewtabs button { border:0; border-radius:4px; padding:3px 9px; color:var(--cmef-faint);
+    background:transparent; cursor:pointer; white-space:nowrap;
+    font:700 .58rem/1.3 var(--cmef-mono); text-transform:uppercase; letter-spacing:.05em; }
+.cmef-viewtabs button:hover { color:var(--cmef-text); }
+.cmef-viewtabs button[aria-selected="true"] { color:#04121b; background:var(--cmef-blue); }
+/* Both views are flex children of the panel and must be free to shrink —
+   without min-height:0 the 3D canvas's own height wins and the panel grows
+   past the fold, taking the one-screen layout with it. */
+.cmef-view { display:flex; flex-direction:column; flex:1; min-height:0; }
+.cmef-view[hidden] { display:none; }
+
 /* ── The calendar ───────────────────────────────────────────────────── */
 .cmef-cal-month { font:700 .78rem/1 var(--cmef-mono); color:var(--cmef-text); letter-spacing:.02em; }
 .cmef-cal-nav { display:flex; align-items:center; gap:3px; margin-left:auto; }
@@ -345,6 +359,17 @@ body {
   "inLanguage": "en-US"
 }
 </script>
+<!-- Three.js (vendored) for the 3D corridor. Loaded on every visit but the
+     corridor module itself is dynamically imported only when the 3D view is
+     first opened, so the calendar path pays nothing for it. -->
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
 </head>
 <body>
 
@@ -381,22 +406,33 @@ body {
             <div class="cmef-panel-head">
                 <h2 id="cmef-calendar-title">Arrival calendar</h2>
                 <span class="cmef-cal-month" id="cmef-calendar-range">UTC</span>
-                <div class="cmef-cal-nav">
+                <div class="cmef-viewtabs" role="tablist" aria-label="Left panel view">
+                    <button type="button" role="tab" data-cmef-view="calendar" aria-selected="true">Calendar</button>
+                    <button type="button" role="tab" data-cmef-view="corridor" aria-selected="false">3D corridor</button>
+                </div>
+                <div class="cmef-cal-nav" id="cmef-cal-nav">
                     <button id="cmef-calendar-prev" type="button" aria-label="Previous month">‹</button>
                     <button id="cmef-calendar-today" type="button">Today</button>
                     <button id="cmef-calendar-next" type="button" aria-label="Next month">›</button>
                 </div>
             </div>
-            <div class="cmef-cal-dow" aria-hidden="true">
-                <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+
+            <div class="cmef-view" id="cmef-view-calendar">
+                <div class="cmef-cal-dow" aria-hidden="true">
+                    <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                </div>
+                <div class="cmef-cal-grid" id="cmef-calendar-grid" aria-label="Daily CME arrival outlook, UTC"></div>
+                <div class="cmef-cal-legend">
+                    <span><i class="pending"></i>In flight</span>
+                    <span><i class="window"></i>Window open</span>
+                    <span><i class="verified"></i>Verified at L1</span>
+                    <span><i class="edge"></i>Window edge</span>
+                    <span class="cmef-lock-note">Every window here comes from the immutable issue-time ledger.</span>
+                </div>
             </div>
-            <div class="cmef-cal-grid" id="cmef-calendar-grid" aria-label="Daily CME arrival outlook, UTC"></div>
-            <div class="cmef-cal-legend">
-                <span><i class="pending"></i>In flight</span>
-                <span><i class="window"></i>Window open</span>
-                <span><i class="verified"></i>Verified at L1</span>
-                <span><i class="edge"></i>Window edge</span>
-                <span class="cmef-lock-note">Every window here comes from the immutable issue-time ledger.</span>
+
+            <div class="cmef-view" id="cmef-view-corridor" hidden>
+                <div id="cmef-corridor-host" style="flex:1; min-height:0;"></div>
             </div>
         </section>
 

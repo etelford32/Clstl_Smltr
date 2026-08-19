@@ -126,6 +126,21 @@ longitude must shift by exactly k — no longitude is special. The synthetic
 demo field deliberately plants a region within a few degrees of Carrington 0
 so the realistic path exercises it too.
 
+## Downstream: the 3D corridor on cme-forecast.html
+
+`js/corridor/*` reuses this package to put the tracked source regions on a Sun
+in the CME forecast's 3D Sun→Earth corridor, alongside the compounding rope
+train and the issue-locked arrival window — the "globe overlay on another
+engine" this package was kept DOM-free for. It consumes `projectTracks` and
+`farside-clock` directly, so the two pages cannot disagree about where a
+region is or what time it is. Details in `CME_CORRIDOR_3D.md`.
+
+Two things there depend on this package's contracts: `summarizeTrack` now
+carries `areaDeg2` (the flare climatology ranks regions by size and must not
+pick its own frame out of `points`), and `farside-render.fieldCanvas` is
+exported so the flat map, the far-side globe and the corridor share ONE
+field→bitmap implementation.
+
 ## Data sources (honest priority order)
 
 1. **GONG far-side** seismic holography — always available, 12-hourly, free,

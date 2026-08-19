@@ -68,8 +68,13 @@ export function rampRGB(z) {
  * markers and ETAs every frame but only needs a new bitmap when the slot
  * turns over. Caching per map object gets that for free: one map object IS
  * one slot.
+ *
+ * Exported because the 3D views paint the SAME field onto a photosphere
+ * texture. Three copies of this loop existed; they are now one, so a change
+ * to the ramp or the latitude flip cannot tint the flat map, the far-side
+ * globe and the corridor differently for identical data.
  */
-function fieldCanvas(map) {
+export function fieldCanvas(map) {
     if (map._fieldCanvas) return map._fieldCanvas;
     const { nLon, nLat } = map.grid;
     const data = map.data;
