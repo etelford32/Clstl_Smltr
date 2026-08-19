@@ -2,7 +2,7 @@
 // and browser-independent; cme-forecast-page.spec.js covers the rendered UI.
 
 import assert from 'node:assert/strict';
-import { cmeEventsForUtcDay, normalizeCmePayload } from '../js/cme-forecast-page.js';
+import { addUtcMonths, cmeEventsForUtcDay, monthGridDays, normalizeCmePayload, utcMonthStart } from '../js/cme-forecast-page.js';
 
 const row = (overrides = {}) => ({
     issued_at: '2026-08-19T01:00:00Z',
@@ -39,7 +39,7 @@ const row = (overrides = {}) => ({
 
 {
     // A baseline-only event is valid input to /api/cme/skill but is not a
-    // Parker forecast. It stays out of the public forecast corridor.
+    // Parkers Physics forecast. It stays out of the public corridor.
     const normalized = normalizeCmePayload({ data: {
         events: [{ event_id: 'BASELINE-ONLY', forecasts: { 'dbm-v1': row() } }],
     } });
@@ -78,4 +78,42 @@ const row = (overrides = {}) => ({
     assert.equal(cmeEventsForUtcDay(normalized.events, aug24).length, 0);
 }
 
-console.log('✓ CME Forecast payload contract');
+// ── Month grid ───────────────────────────────────────────────────────────
+// The calendar's geometry, not its payload. These pin the two properties the
+// single-screen layout depends on: a FIXED 42-cell grid (a variable row count
+// would change the page height month to month) and Sunday-first alignment.
+{
+    const aug = utcMonthStart(Date.parse('2026-08-19T13:45:00Z'));
+    assert.equal(new Date(aug).toISOString(), '2026-08-01T00:00:00.000Z');
+    // Idempotent: a month start is already its own month start.
+    assert.equal(utcMonthStart(aug), aug);
+
+    const days = monthGridDays(aug);
+    assert.equal(days.length, 42, 'always six weeks');
+    // 2026-08-01 is a Saturday, so the grid opens on Sunday 2026-07-26.
+    assert.equal(new Date(days[0]).toISOString(), '2026-07-26T00:00:00.000Z');
+    assert.equal(new Date(days[41]).toISOString(), '2026-09-05T00:00:00.000Z');
+    days.forEach((ms, i) => {
+        assert.equal(new Date(ms).getUTCDay(), i % 7, 'columns stay Sun..Sat');
+        assert.equal(ms % 86_400e3, 0, 'every cell is a UTC midnight');
+    });
+    // Six weeks even for a 28-day February that starts on a Sunday.
+    const feb = utcMonthStart(Date.parse('2027-02-10T00:00:00Z'));
+    assert.equal(monthGridDays(feb).length, 42);
+    assert.equal(new Date(monthGridDays(feb)[0]).getUTCDay(), 0);
+}
+
+{
+    // Month paging has to cross year boundaries and clamp long months.
+    const dec = utcMonthStart(Date.parse('2026-12-14T00:00:00Z'));
+    assert.equal(new Date(addUtcMonths(dec, 1)).toISOString(), '2027-01-01T00:00:00.000Z');
+    assert.equal(new Date(addUtcMonths(dec, -1)).toISOString(), '2026-11-01T00:00:00.000Z');
+    assert.equal(new Date(addUtcMonths(dec, 13)).toISOString(), '2028-01-01T00:00:00.000Z');
+    // Round trip: forward then back lands where it started, every month.
+    for (let i = 0; i < 24; i++) {
+        const m = addUtcMonths(dec, i);
+        assert.equal(addUtcMonths(addUtcMonths(m, 1), -1), m);
+    }
+}
+
+console.log('✓ CME Forecast payload + calendar contract');
