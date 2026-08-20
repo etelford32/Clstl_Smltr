@@ -54,8 +54,17 @@ body {
 .pl-pip.warn i { background: var(--pl-warn); }
 .pl-pip.err i { background: #ff5555; }
 
-.pl-main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; max-width: 1340px; margin: 12px auto 0; padding: 0 22px; }
-.pl-map-wrap { position: relative; border: 1px solid var(--pl-border); border-radius: 12px; overflow: hidden; background: #030910; }
+.pl-main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; max-width: 1340px; margin: 12px auto 0; padding: 0 22px;
+    /* start, not the default stretch: the side column is taller than the map,
+       and a stretched map wrapper grows a slab of dead background under the
+       timebar — and drags the absolutely-positioned layer/legend chips down
+       into it, off the map they annotate. */
+    align-items: start; }
+.pl-map-wrap { border: 1px solid var(--pl-border); border-radius: 12px; overflow: hidden; background: #030910; }
+/* The positioning context for every on-map overlay. It wraps ONLY the canvas,
+   so the chips stay pinned to the map's own corners no matter what is stacked
+   below it. */
+.pl-map-stage { position: relative; }
 #pl-map { display: block; width: 100%; height: auto; cursor: crosshair; }
 
 .pl-hud { position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
@@ -88,6 +97,34 @@ body {
     background: rgba(4, 10, 18, .8); border: 1px solid var(--pl-border); border-radius: 7px;
     padding: 4px 10px; font-size: .7rem; color: var(--pl-accent); }
 
+/* ── Time machine ──────────────────────────────────────────────────────
+   The timeline strip lives INSIDE .pl-map-wrap, under the canvas, so it is
+   the same width as the map it scrubs. A scrubber narrower than its own
+   field reads as a caption; this one reads as an axis. */
+.pl-timebar { border-top: 1px solid var(--pl-border); background: rgba(3, 9, 17, .72); padding: 7px 10px 4px; }
+.pl-timebar-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: .7rem; margin-bottom: 4px; }
+.pl-timebar-row .grow { flex: 1 1 auto; }
+.pl-btn.sm { padding: 3px 8px; font-size: .68rem; }
+.pl-btn[disabled] { opacity: .38; cursor: not-allowed; }
+.pl-stamp { font-variant-numeric: tabular-nums; color: #f0f6ff; letter-spacing: .02em; }
+.pl-stamp .lead { color: var(--pl-dim); }
+.pl-stamp.fc { color: var(--pl-warn); }
+#pl-timeline { display: block; width: 100%; height: 96px; outline: none; cursor: ew-resize; touch-action: none; }
+#pl-timeline:focus-visible { box-shadow: inset 0 0 0 1px var(--pl-accent); border-radius: 6px; }
+.pl-speed { display: inline-flex; align-items: center; gap: 5px; color: var(--pl-dim); }
+.pl-speed input[type=range] { width: 84px; accent-color: var(--pl-accent); }
+
+#pl-series { display: block; width: 100%; height: 152px; touch-action: none; cursor: crosshair; }
+#pl-diurnal { display: block; width: 100%; height: 60px; margin-top: 6px; }
+.pl-srows { display: flex; flex-direction: column; gap: 2px; margin-top: 7px; font-size: .68rem; }
+.pl-srows .r { display: flex; align-items: baseline; gap: 6px; padding: 1px 3px; border-radius: 4px; }
+.pl-srows .r:hover { background: rgba(20, 50, 80, .35); }
+.pl-srows i { width: 11px; height: 3px; border-radius: 2px; flex: none; align-self: center; }
+.pl-srows .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-srows .vv { font-variant-numeric: tabular-nums; color: #f0f6ff; }
+.pl-srows .vv.gap { color: var(--pl-warn); font-size: .6rem; }
+canvas.pl-spark { width: 54px; height: 15px; flex: none; align-self: center; }
+
 .pl-side { display: flex; flex-direction: column; gap: 12px; }
 .pl-panel { background: var(--pl-panel); border: 1px solid var(--pl-border); border-radius: 12px; padding: 13px 15px; }
 .pl-panel h2 { margin: 0 0 4px; font-size: .78rem; letter-spacing: .1em; text-transform: uppercase; color: var(--pl-accent); }
@@ -119,6 +156,8 @@ body {
     .pl-main { grid-template-columns: 1fr; }
     .pl-hero { padding-top: 74px; }
     .pl-legend { display: none; }
+    #pl-timeline { height: 84px; }
+    #pl-series { height: 132px; }
 }
 </style>
 </head>
@@ -132,8 +171,9 @@ body {
     <p class="pl-tagline">
         Live CAMS air-quality samples over the world's ~100 largest metros, an unsupervised
         machine-learning pass (weighted k-means) that identifies today's pollution centers,
-        a wind-driven PM2.5 transport simulation on real GFS winds, and a disclosed
-        aerosol radiative-forcing estimate of what that haze does to the planet's energy budget.
+        a scrubbable six-day CAMS history you can play back hour by hour, a wind-driven
+        PM2.5 transport simulation on real GFS winds, and a disclosed aerosol
+        radiative-forcing estimate of what that haze does to the planet's energy budget.
         Modeled data, inspectable math — every constant is on this page.
     </p>
     <div class="pl-pips">
@@ -141,15 +181,18 @@ body {
         <span class="pl-pip" id="pip-grid"><i></i>background grid (CAMS)</span>
         <span class="pl-pip" id="pip-wind"><i></i>winds (GFS 10 m)</span>
         <span class="pl-pip" id="pip-fires"><i></i>wildfires (EONET)</span>
+        <span class="pl-pip" id="pip-history"><i></i>history window (CAMS)</span>
     </div>
 </header>
 
 <main class="pl-main">
     <section class="pl-map-wrap">
+        <div class="pl-map-stage">
         <canvas id="pl-map" width="1440" height="720"></canvas>
         <div class="pl-hud">
             <button class="pl-btn on" id="btn-mode-pm">PM2.5 field</button>
             <button class="pl-btn" id="btn-mode-forcing">Radiative forcing</button>
+            <button class="pl-btn" id="btn-mode-anomaly" disabled title="This hour minus the window mean — where the air is unusually bad, or unusually clean">&#916; vs window</button>
             <button class="pl-btn" id="btn-play">▶ Run transport</button>
             <button class="pl-btn" id="btn-reset" title="Restore the live field and rewind the sim clock">⟲ Reset to live</button>
         </div>
@@ -164,9 +207,62 @@ body {
         </div>
         <div class="pl-legend" id="pl-legend"></div>
         <div id="pl-hover"></div>
+        </div>
+
+        <!-- Time machine. The strip IS the scrubber (click / drag / arrow
+             keys); the buttons are conveniences over the same index. -->
+        <div class="pl-timebar">
+            <div class="pl-timebar-row">
+                <button class="pl-btn sm" id="btn-time-play" disabled title="Play the CAMS history window hour by hour">&#9654; Play history</button>
+                <button class="pl-btn sm" id="btn-time-step-back" disabled title="Back one hour">&#9664;&#9664;</button>
+                <button class="pl-btn sm" id="btn-time-step-fwd" disabled title="Forward one hour">&#9654;&#9654;</button>
+                <button class="pl-btn sm" id="btn-time-now" disabled title="Jump to the current hour">now</button>
+                <button class="pl-btn sm" id="btn-time-peak" disabled title="Jump to the dirtiest hour in the window">worst hour</button>
+                <span class="pl-speed">
+                    <label for="rng-time-speed">rate</label>
+                    <input type="range" id="rng-time-speed" min="2" max="24" step="2" value="10" disabled>
+                    <output id="out-time-speed">10 h/s</output>
+                </span>
+                <span class="grow"></span>
+                <span class="pl-stamp" id="pl-time-stamp"><span class="lead">history</span> loading&hellip;</span>
+            </div>
+            <canvas id="pl-timeline" tabindex="0" role="slider"
+                    aria-label="Pollution history scrubber"
+                    aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></canvas>
+        </div>
     </section>
 
     <aside class="pl-side">
+        <div class="pl-panel" id="panel-timeseries">
+            <h2>Time series</h2>
+            <p class="pl-sub">
+                CAMS PM2.5 for the dirtiest metros in the window.
+                Solid is hindcast, dashed past the amber rule is forecast, and a
+                break in a line is a missing CAMS hour — never a drop to zero.
+                Click the chart to seek; the readout follows the scrubber.
+                The statistics below describe the scrubber's own curve:
+                population-weighted mean exposure across every metro in the
+                window, which is a very different number from the planet's
+                area-weighted mean in the climate panel.
+            </p>
+            <canvas id="pl-series"></canvas>
+            <div class="pl-srows" id="pl-series-rows"></div>
+            <div class="pl-stat"><span class="k">mean exposure (pop-wt)</span><span class="v" id="st-win-mean">—</span></div>
+            <div class="pl-stat"><span class="k">peak exposure</span><span class="v" id="st-win-peak">—</span></div>
+            <div class="pl-stat"><span class="k">trend (hindcast only)</span><span class="v" id="st-win-trend">—</span></div>
+            <p class="pl-sub" style="margin:9px 0 0">
+                Diurnal composite for <b id="pl-diurnal-who">—</b>, binned by
+                <em>local solar</em> hour (UTC + lon/15) — not UTC, which would
+                average Delhi's rush hour against Los Angeles' night.
+            </p>
+            <canvas id="pl-diurnal"></canvas>
+            <div class="pl-note" id="pl-history-note">
+                Six days of CAMS: five back, one ahead, hourly, on one shared
+                axis. Past hours are the model's hindcast, not station
+                observations — the same provenance contract as the live field.
+            </div>
+        </div>
+
         <div class="pl-panel" id="panel-hotspots">
             <h2>Pollution centers</h2>
             <p class="pl-sub">
@@ -207,6 +303,11 @@ body {
             <div class="pl-note">
                 Winds are the current GFS snapshot held constant through the run —
                 this explores dispersal patterns, it is not a forecast.
+                <b>Scrubbing does not move the winds.</b> Launching a run from an
+                earlier hour advects that hour's field with <em>today's</em> wind
+                field, because the site keeps one live GFS grid and no wind
+                history: the result is a dispersal experiment, never a hindcast
+                of what actually happened.
             </div>
         </div>
 
@@ -244,6 +345,22 @@ body {
         live, the page runs on a clearly-badged bundled sample rather than pretending.
     </p>
     <p>
+        <b>History window.</b> The scrubber runs on
+        <code>/api/air-quality/history</code>: one batched CAMS request returns
+        an hourly PM2.5 series for the top 60 metros plus the sparse global
+        background grid, resampled server-side onto a single shared time axis so
+        frame <i>i</i> means the same instant for every site. Past hours are CAMS
+        hindcast and future hours are CAMS forecast; the response marks the split
+        and every chart on this page draws the forecast tail dashed. Missing
+        hours arrive as nulls and stay nulls — statistics skip them and lines
+        break at them, because a gap painted as clean air is invisible once
+        rendered. Interpolating 145 frames would cost seconds of trig, so the
+        inverse-distance weights are factored out once into a sparse operator
+        (<code>buildIdwOperator</code>) and each frame is a matrix–vector
+        product; it is bit-identical to the one-shot path, which the unit test
+        asserts exactly.
+    </p>
+    <p>
         <b>Machine learning.</b> Pollution centers are found by weighted k-means with
         farthest-point seeding and spherical centroids — deterministic on its input, so a
         reload gives identical clusters for identical data. The cluster count comes from a
@@ -268,10 +385,18 @@ body {
 <script type="module">
 import {
     makeGrid, cellLat, cellLon, sampleGrid, globalMean, idwGrid, supportAt,
-    kmeansHotspots, chooseHotspotCount, windToUV, stepTransport,
+    buildIdwOperator, kmeansHotspots, chooseHotspotCount, windToUV, stepTransport,
     inferSteadySources, haversineKm, PM25_PER_AOD, FORCING_PER_AOD_WM2,
     CLIMATE_SENSITIVITY_K_PER_WM2, equilibriumDeltaT,
 } from './js/pollution-model.js';
+import {
+    buildHistory, frameValues, globalMeanSeries, exposureSeries, seriesStats,
+    linearTrendPerDay, diurnalProfile, rankSites, peakFrame, latestFinite,
+} from './js/pollution-timeseries.js';
+import {
+    TimelineStrip, SeriesChart, drawSparkline, drawDiurnal,
+    SERIES_COLORS, MAX_SERIES, fmtStamp,
+} from './js/pollution-timeline.js';
 import { airQualityMetricColor } from './js/air-quality-frame.js';
 import { concentrationFromAqi } from './js/aqi-scale.js';
 
@@ -286,7 +411,12 @@ const state = {
     fires: [],
     wind: { u: new Float32Array(N), v: new Float32Array(N) },
     windLabel: 'no wind data',
-    liveField: null,      // field as observed (kernel grid)
+    // OBSERVED field for the hour currently selected — the live sample by
+    // default, a scrubbed CAMS history hour once the time machine is driving.
+    // The transport sim launches from it and the hover support probe reads it,
+    // so it must always describe the hour the map claims to be showing.
+    liveField: null,
+    nowField: null,       // the live-now field, kept so ⟲ can restore it
     field: null,          // field currently displayed / evolved
     clusters: [],
     kAuto: true,
@@ -297,9 +427,34 @@ const state = {
     diffusion: true,
     playing: false,
     simHours: 0,
-    mode: 'pm',           // 'pm' | 'forcing'
+    mode: 'pm',           // 'pm' | 'forcing' | 'anomaly'
     demo: false,
+    // ── Time machine ───────────────────────────────────────────────────────
+    time: {
+        history: null,    // buildHistory() result, or null when unavailable
+        operator: null,   // buildIdwOperator over history.sites — built ONCE
+        mean: null,       // area-weighted global mean per frame (climate panel's number)
+        exposure: null,   // population-weighted metro mean — the SEEK signal
+        meanField: null,  // window-mean field, the Δ mode's reference
+        index: 0,
+        active: false,    // true once the map shows a scrubbed hour
+        playing: false,
+        rate: 10,         // frames (hours) per real second
+        frameDebt: 0,
+        seriesSites: [],  // site indices holding a SERIES_COLORS slot
+    },
 };
+
+// Playback and the transport sim both write state.field, so they are mutually
+// exclusive by construction: starting either stops the other. Two writers on
+// one field is how a scrub turns into a race.
+function stopTransport() {
+    if (!state.playing) return;
+    state.playing = false;
+    const b = document.getElementById('btn-play');
+    b.textContent = '\u25b6 Run transport';
+    b.classList.remove('on');
+}
 
 // ── Status pips ────────────────────────────────────────────────────────────
 function pip(id, cls, title) {
@@ -415,6 +570,19 @@ async function loadFires() {
     pip('pip-fires', 'live', `${state.fires.length} open EONET wildfire events`);
 }
 
+async function loadHistory() {
+    const body = await fetchJson('/api/air-quality/history');
+    const hist = buildHistory(body);
+    if (!hist.ok) throw new Error(body.error ?? hist.reason ?? 'unavailable');
+    state.time.history = hist;
+    const days = ((hist.count - 1) * hist.stepHours / 24).toFixed(1);
+    // 'degraded' is a real upstream state, not an error: some hours came back.
+    // It gets amber, not green — a half-empty scrub is not a healthy feed.
+    pip('pip-history', hist.freshness === 'live' ? 'live' : 'warn',
+        `${hist.count} frames · ${days} d · ${hist.sites.length} sites`
+        + ` · ${Math.round(hist.coverage * 100)}% coverage`);
+}
+
 // ── Field + cluster building ───────────────────────────────────────────────
 function cityPm(c) {
     // PM2.5 preferred. When CAMS omits PM at a metro we invert the reported
@@ -435,32 +603,65 @@ function cityPm(c) {
     return Number.isFinite(c.aqi) ? concentrationFromAqi('pm25', c.aqi) : null;
 }
 
+/** IDW settings — ONE place, so the live field and every scrubbed frame are
+    interpolated identically. A frame built with different settings than the
+    live field would step visibly the moment you touched the scrubber. */
+const FIELD_OPTS = { background: 3, maxDistKm: 2500 };
+
 function rebuildField() {
     const samples = [
         ...state.cities.map(c => ({ lat: c.lat, lon: c.lon, value: cityPm(c) }))
             .filter(s => s.value != null),
         ...state.gridSamples,
     ];
-    state.liveField = idwGrid(samples, W, H, { background: 3, maxDistKm: 2500 });
-    state.field = { w: W, h: H, data: state.liveField.data.slice() };
+    state.nowField = idwGrid(samples, W, H, FIELD_OPTS);
+    state.liveField = state.nowField;
+    state.field = { w: W, h: H, data: state.nowField.data.slice() };
     state.simHours = 0;
 }
 
-function rebuildClusters() {
-    const pts = state.cities
+/**
+ * City points for the clustering pass, for whichever hour is selected.
+ * Live sample when the time machine is idle; the history frame's city series
+ * when it is driving — so the pollution centers MIGRATE as you scrub, which
+ * is the whole point of animating them.
+ */
+function cityPointsForFrame() {
+    const t = state.time;
+    if (t.active && t.history) {
+        const pts = [];
+        for (const si of t.history.cityIndex) {
+            const v = t.history.series[si][t.index];
+            if (!Number.isFinite(v) || v <= 0) continue;
+            const site = t.history.sites[si];
+            pts.push({ lat: site.lat, lon: site.lon, weight: v, value: v, name: site.name });
+        }
+        return pts;
+    }
+    return state.cities
         .map(c => ({ lat: c.lat, lon: c.lon, weight: cityPm(c), value: cityPm(c), name: c.name }))
         .filter(p => p.weight != null && p.weight > 0);
+}
+
+function rebuildClusters() {
+    const pts = cityPointsForFrame();
     if (!pts.length) { state.clusters = []; renderClusterList(); return; }
+    // k is chosen ONCE per input set and then HELD across a scrub. Re-running
+    // the variance elbow per frame makes the cluster count flicker between 4
+    // and 6 during playback, and a count that changes every 100 ms is
+    // unreadable as an animation — the migration is the signal, not the k.
     const k = state.kAuto ? chooseHotspotCount(pts, { kMax: 10 }) : state.k;
     state.k = k;
     const clusters = kmeansHotspots(pts, { k });
     // Name each center after its heaviest member city.
     for (const cl of clusters) {
-        let best = null;
+        let best = null, bestIdx = -1;
         for (const mi of cl.members) {
-            if (!best || pts[mi].weight > best.weight) best = pts[mi];
+            if (!best || pts[mi].weight > best.weight) { best = pts[mi]; bestIdx = mi; }
         }
         cl.label = best ? `${best.name} region` : '—';
+        cl.leadName = best?.name ?? null;
+        cl.leadIdx = bestIdx;
     }
     state.clusters = clusters;
     renderClusterList();
@@ -475,10 +676,12 @@ function renderClusterList() {
         host.innerHTML = '<div class="pl-sub">no live city samples — nothing to cluster</div>';
         return;
     }
+    const hist = state.time.history;
     host.innerHTML = state.clusters.map((c, i) => `
         <div class="pl-cluster${i === selectedCluster ? ' sel' : ''}" data-i="${i}">
             <span class="rank">${i + 1}</span>
             <span class="name">${c.label}</span>
+            ${hist ? `<canvas class="pl-spark" data-spark="${i}"></canvas>` : ''}
             <span class="val" style="color:${cssPmColor(c.meanValue)}">${c.meanValue?.toFixed(0) ?? '—'} µg/m³</span>
             <span class="rank">${c.count}⛁</span>
         </div>`).join('');
@@ -488,6 +691,47 @@ function renderClusterList() {
             selectedCluster = selectedCluster === i ? -1 : i;
             renderClusterList();
             draw();
+        });
+    });
+    drawClusterSparks();
+}
+
+/**
+ * A sparkline per pollution center, showing its lead city's whole window.
+ *
+ * The LEAD CITY, not a cluster mean: cluster membership changes as the field
+ * evolves, so a "cluster series" would be a series of different things and its
+ * shape would be an artefact of k-means reshuffling rather than of the air.
+ * The lead city is a fixed, nameable object with a real series.
+ *
+ * All sparklines share ONE y-scale (the max across the centers shown), because
+ * per-row autoscaling makes a clean city's noise look like a dirty city's
+ * storm — the classic sparkline lie.
+ */
+function drawClusterSparks() {
+    const hist = state.time.history;
+    if (!hist) return;
+    const host = document.getElementById('pl-cluster-list');
+    const byName = new Map();
+    for (const si of hist.cityIndex) byName.set(hist.sites[si].name, si);
+    const picked = state.clusters.map(c => byName.get(c.leadName));
+    let max = 0;
+    for (const si of picked) {
+        if (si == null) continue;
+        for (let i = 0; i < hist.count; i++) {
+            const v = hist.series[si][i];
+            if (Number.isFinite(v)) max = Math.max(max, v);
+        }
+    }
+    host.querySelectorAll('canvas[data-spark]').forEach(cv => {
+        const si = picked[Number(cv.dataset.spark)];
+        if (si == null) return;
+        cv.title = `${hist.sites[si].name} · whole window`;
+        drawSparkline(cv, hist.series[si], {
+            color: cssPmColor(latestFinite(hist.series[si], state.time.index + 1) ?? 0),
+            nowIndex: hist.nowIndex,
+            markIndex: state.time.index,
+            max: max || null,
         });
     });
 }
@@ -578,10 +822,26 @@ function drawField() {
     if (!f) return;
     const im = cellCtx.createImageData(W, H);
     const forcingMode = state.mode === 'forcing';
+    const anomalyMode = state.mode === 'anomaly' && !!state.time.meanField;
+    const ref = state.time.meanField;
+    // Diverging scale, FIXED for the whole window (see buildTimeMachine): a
+    // per-frame autoscale would repaint the same anomaly a different colour
+    // every hour, and the animation would encode its own normalisation
+    // instead of the air.
+    const anomScale = state.time.anomScale || 20;
     for (let i = 0; i < N; i++) {
         const v = f.data[i];
         let r, g, b, a;
-        if (forcingMode) {
+        if (anomalyMode) {
+            // Two hues + a neutral (here: transparent) midpoint. Warm = worse
+            // than this window's mean, cool = cleaner than it. Never a rainbow,
+            // and never the EPA scale — that one answers a different question.
+            const d = v - ref.data[i];
+            const mag = Math.min(1, Math.abs(d) / anomScale);
+            if (d >= 0) { r = 230; g = 103; b = 103; }
+            else { r = 57; g = 135; b = 229; }
+            a = Math.round(225 * Math.pow(mag, 0.7));
+        } else if (forcingMode) {
             // Cooling scale: deeper blue = stronger negative forcing.
             const excess = Math.max(0, v - CLEAN_BASELINE);
             const mag = Math.min(1, (excess / PM25_PER_AOD) * -FORCING_PER_AOD_WM2 / 12);
@@ -689,12 +949,274 @@ function draw() {
 }
 
 function renderLegend() {
-    const rows = state.mode === 'forcing'
-        ? [['#2a5ac8', 'stronger cooling (more negative W/m²)'], ['#04101e', '≈ no excess aerosol']]
-        : [['#19e07a', 'good'], ['#ffdc2e', 'moderate'], ['#ff7d0d', 'unhealthy (sens.)'], ['#ff272e', 'unhealthy'], ['#9e40c7', 'very unhealthy']];
+    const scale = Math.round(state.time.anomScale || 20);
+    const spec = {
+        forcing: {
+            title: 'direct forcing (excess over WHO 5 µg/m³)',
+            rows: [['#2a5ac8', 'stronger cooling (more negative W/m²)'], ['#04101e', '≈ no excess aerosol']],
+        },
+        anomaly: {
+            title: `this hour − window mean · full colour at ±${scale} µg/m³`,
+            rows: [['#e66767', `dirtier than the window mean`], ['#243044', 'at the window mean'], ['#3987e5', 'cleaner than the window mean']],
+        },
+        pm: {
+            title: 'PM2.5 · EPA sub-index color — field, cities and clusters alike',
+            rows: [['#19e07a', 'good'], ['#ffdc2e', 'moderate'], ['#ff7d0d', 'unhealthy (sens.)'], ['#ff272e', 'unhealthy'], ['#9e40c7', 'very unhealthy']],
+        },
+    }[state.mode] ?? null;
+    const use = spec ?? { title: '', rows: [] };
     document.getElementById('pl-legend').innerHTML =
-        `<div>${state.mode === 'forcing' ? 'direct forcing (excess over WHO 5 µg/m³)' : 'PM2.5 · EPA sub-index color — field, cities and clusters alike'}</div>`
-        + rows.map(([c, t]) => `<div class="row"><i style="background:${c}"></i>${t}</div>`).join('');
+        `<div>${use.title}</div>`
+        + use.rows.map(([c, t]) => `<div class="row"><i style="background:${c}"></i>${t}</div>`).join('');
+}
+
+// ── Time machine ───────────────────────────────────────────────────────────
+//
+// ONE seek entry point (setTimeIndex). The strip, the chart, the ◀◀/▶▶/now/
+// worst-hour buttons, the keyboard, and the playback loop all route through it,
+// so the map field, the clusters, the climate numbers, the charts and the aria
+// state can never be showing different hours.
+
+let timeline = null, seriesChart = null;
+/** Metros the window actually carried, for the chart's coverage disclosure. */
+let rankedCityCount = 0;
+
+function buildTimeMachine() {
+    const hist = state.time.history;
+    const stampEl = document.getElementById('pl-time-stamp');
+    const strip = document.getElementById('pl-timeline');
+
+    timeline = new TimelineStrip(strip, { onSeek: i => setTimeIndex(i, { source: 'strip' }) });
+    seriesChart = new SeriesChart(document.getElementById('pl-series'), {
+        onHover: i => renderSeriesRows(i ?? state.time.index, i != null),
+        onSeek: i => setTimeIndex(i, { source: 'chart' }),
+    });
+
+    if (!hist) {
+        stampEl.innerHTML = '<span class="lead">history</span> unavailable';
+        timeline.draw();
+        seriesChart.draw();
+        drawDiurnal(document.getElementById('pl-diurnal'), null);
+        document.getElementById('pl-history-note').textContent =
+            'The CAMS history window did not load, so the scrubber is idle. The live '
+            + 'field, the clustering, the transport sim and the climate estimate are '
+            + 'unaffected — they never depended on it.';
+        return;
+    }
+
+    // ONE operator over the history's own sites, reused by every frame. This
+    // is the whole reason a 145-frame scrub is affordable: see the
+    // buildIdwOperator header in js/pollution-model.js.
+    const op = buildIdwOperator(hist.sites, W, H, FIELD_OPTS);
+    state.time.operator = op;
+    state.time.mean = globalMeanSeries(hist, op, { background: FIELD_OPTS.background });
+    state.time.exposure = exposureSeries(hist);
+
+    // Window-mean field + a FIXED diverging scale for the Δ mode. The scale is
+    // the 95th percentile of |site value − site window mean| over the whole
+    // window, so it is set by the data once and never moves under the animation.
+    const meanVals = new Float32Array(hist.sites.length);
+    const devs = [];
+    for (let sIdx = 0; sIdx < hist.sites.length; sIdx++) {
+        const st = seriesStats(hist.series[sIdx]);
+        meanVals[sIdx] = st.mean == null ? NaN : st.mean;
+        if (st.mean == null) continue;
+        for (let i = 0; i < hist.count; i++) {
+            const v = hist.series[sIdx][i];
+            if (Number.isFinite(v)) devs.push(Math.abs(v - st.mean));
+        }
+    }
+    devs.sort((a, b) => a - b);
+    state.time.meanField = op.apply(meanVals, { background: FIELD_OPTS.background });
+    state.time.anomScale = devs.length
+        ? Math.max(5, devs[Math.floor(devs.length * 0.95)])
+        : 20;
+
+    // Series slots: the six dirtiest metros of the window, colour frozen to the
+    // CITY (not to its rank) so a later re-render cannot repaint the survivors.
+    const ranked = rankSites(hist, { kind: 'city', metric: 'mean' });
+    rankedCityCount = ranked.length;
+    state.time.seriesSites = ranked.slice(0, MAX_SERIES).map(r => r.siteIndex);
+
+    timeline.setData(hist, state.time.exposure, state.time.mean);
+    strip.setAttribute('aria-valuemax', String(hist.count - 1));
+    seriesChart.setData(hist, state.time.seriesSites.map((si, i) => ({
+        label: hist.sites[si].name ?? `site ${si}`,
+        values: hist.series[si],
+        color: SERIES_COLORS[i],
+        siteIndex: si,
+    })));
+
+    for (const id of ['btn-time-play', 'btn-time-step-back', 'btn-time-step-fwd',
+        'btn-time-now', 'btn-time-peak', 'rng-time-speed']) {
+        document.getElementById(id).disabled = false;
+    }
+    // The Δ mode has no meaning without a window to compare against.
+    document.getElementById('btn-mode-anomaly').disabled = false;
+
+    state.time.index = hist.nowIndex;
+    strip.setAttribute('aria-valuenow', String(hist.nowIndex));
+    strip.setAttribute('aria-valuetext', `${fmtStamp(hist.times[hist.nowIndex])} (current hour)`);
+    renderWindowStats();
+    renderSeriesRows(hist.nowIndex, false);
+    renderDiurnal();
+    updateTimeStamp();
+    drawClusterSparks();
+}
+
+/**
+ * Seek to a frame. `activate` false leaves the map on the live field (used for
+ * the initial render, where the scrubber is parked at `now` but the page is
+ * still showing the live sample it just fetched).
+ */
+function setTimeIndex(index, { source = 'api', activate = true } = {}) {
+    const hist = state.time.history;
+    if (!hist) return;
+    const i = Math.max(0, Math.min(hist.count - 1, Math.round(index)));
+    const changed = i !== state.time.index;
+    state.time.index = i;
+    if (activate) {
+        if (!state.time.active) state.time.active = true;
+        stopTransport();
+        applyFrame(i);
+    }
+    if (source !== 'strip') timeline?.setIndex(i);
+    seriesChart?.setIndex(i);
+    document.getElementById('pl-timeline').setAttribute('aria-valuenow', String(i));
+    document.getElementById('pl-timeline').setAttribute('aria-valuetext',
+        `${fmtStamp(hist.times[i])}${i > hist.nowIndex ? ' (forecast)' : ''}`);
+    updateTimeStamp();
+    renderSeriesRows(i, false);
+    renderDiurnal();
+    // An activating seek already redrew them via rebuildClusters →
+    // renderClusterList; drawing again would be a second pass per playback
+    // frame for nothing.
+    if (changed && !activate) drawClusterSparks();
+}
+
+/** Put the scrubbed hour's field on the map and re-derive everything from it. */
+function applyFrame(i) {
+    const { history: hist, operator } = state.time;
+    if (!hist || !operator) return;
+    const grid = operator.apply(frameValues(hist, i), { background: FIELD_OPTS.background });
+    state.liveField = grid;
+    state.field = { w: W, h: H, data: grid.data.slice() };
+    state.simHours = 0;
+    document.getElementById('pl-sim-clock').textContent = 't + 0 h';
+    rebuildClusters();
+    draw();
+    updateClimate();
+}
+
+function updateTimeStamp() {
+    const el = document.getElementById('pl-time-stamp');
+    const hist = state.time.history;
+    if (!hist) return;
+    const i = state.time.index;
+    const forecast = i > hist.nowIndex;
+    const rel = Math.round((hist.times[i] - hist.times[hist.nowIndex]) / 3_600_000);
+    const lead = state.time.active
+        ? (forecast ? 'forecast' : 'hindcast')
+        : 'live now · scrubber at';
+    el.classList.toggle('fc', forecast);
+    el.innerHTML = `<span class="lead">${lead}</span> ${fmtStamp(hist.times[i])}`
+        + (rel === 0 ? '' : ` <span class="lead">(${rel > 0 ? '+' : ''}${rel} h)</span>`);
+}
+
+function renderWindowStats() {
+    const hist = state.time.history;
+    // The stats describe the curve the scrubber DRAWS — population-weighted
+    // metro exposure. Reporting the area-weighted global mean here instead
+    // would put a number in the panel that no line on the page traces.
+    const mean = state.time.exposure;
+    if (!hist || !mean) return;
+    const past = hist.nowIndex + 1;
+    const st = seriesStats(mean, { to: past });
+    const trend = linearTrendPerDay(mean, hist.times, { to: past });
+    document.getElementById('st-win-mean').textContent =
+        st.mean == null ? '—' : `${st.mean.toFixed(1)} µg/m³`;
+    document.getElementById('st-win-peak').textContent =
+        st.max == null ? '—' : `${st.max.toFixed(1)} µg/m³ · ${fmtStamp(hist.times[st.maxAt])}`;
+    // A slope is only reported when the fit has something to stand on. r² is
+    // printed beside it rather than hidden, so "+0.4/day (r² 0.02)" reads as
+    // the noise it is instead of as a finding.
+    const el = document.getElementById('st-win-trend');
+    if (trend.slopePerDay == null) {
+        el.textContent = `— (only ${trend.n} finite hours)`;
+    } else {
+        const sign = trend.slopePerDay >= 0 ? '+' : '';
+        el.textContent = `${sign}${trend.slopePerDay.toFixed(2)} µg/m³ per day`
+            + (trend.r2 == null ? '' : ` · r² ${trend.r2.toFixed(2)}`);
+    }
+}
+
+/** The chart's legend, as real text: values at `i`, gaps named as gaps. */
+function renderSeriesRows(i, hovering) {
+    const host = document.getElementById('pl-series-rows');
+    if (!seriesChart?.series?.length) { host.innerHTML = ''; return; }
+    const read = seriesChart.readout(i);
+    host.innerHTML = read.rows.map(r => `
+        <div class="r">
+            <i style="background:${r.color}"></i>
+            <span class="nm">${r.label}</span>
+            <span class="vv${r.value == null ? ' gap' : ''}">${r.value == null ? 'no CAMS hour' : `${r.value.toFixed(1)} µg/m³`}</span>
+        </div>`).join('')
+        + `<div class="r" style="color:var(--pl-dim);font-size:.62rem;margin-top:2px">
+             <span class="nm">${hovering ? 'at cursor' : 'at scrubber'} · ${fmtStamp(read.timeMs)}${read.forecast ? ' · forecast' : ''}</span>
+           </div>`
+        // The palette caps identity at six hues; the window carries far more
+        // metros than that. Say how many were left out rather than letting six
+        // lines imply the window only held six cities — a silent cap reads as
+        // full coverage.
+        + `<div class="r" style="color:var(--pl-dim);font-size:.62rem">
+             <span class="nm">showing ${read.rows.length} of ${rankedCityCount} metros, ranked by window mean</span>
+           </div>`;
+}
+
+/**
+ * Diurnal composite for the window's dirtiest metro — the one series where a
+ * 24-hour cycle is most likely to be visible above the synoptic noise.
+ */
+function renderDiurnal() {
+    const hist = state.time.history;
+    const canvas = document.getElementById('pl-diurnal');
+    const who = document.getElementById('pl-diurnal-who');
+    const si = state.time.seriesSites[0];
+    if (!hist || si == null) { who.textContent = '—'; drawDiurnal(canvas, null); return; }
+    const site = hist.sites[si];
+    who.textContent = site.name ?? 'the lead metro';
+    const profile = diurnalProfile(hist.series[si], hist.times, site.lon, { to: hist.nowIndex + 1 });
+    const utcHour = (hist.times[state.time.index] / 3_600_000) % 24;
+    const localBin = Math.floor((((utcHour + site.lon / 15) % 24) + 24) % 24);
+    drawDiurnal(canvas, profile, { markHour: localBin });
+}
+
+/** Leave history mode and put the live sample back on the map. */
+function returnToLive() {
+    state.time.playing = false;
+    setPlayButton();
+    state.time.active = false;
+    if (state.nowField) {
+        state.liveField = state.nowField;
+        state.field = { w: W, h: H, data: state.nowField.data.slice() };
+    }
+    state.simHours = 0;
+    if (state.time.history) {
+        state.time.index = state.time.history.nowIndex;
+        timeline?.setIndex(state.time.index);
+        seriesChart?.setIndex(state.time.index);
+        renderSeriesRows(state.time.index, false);
+        updateTimeStamp();
+    }
+    rebuildClusters();
+    draw();
+    updateClimate();
+}
+
+function setPlayButton() {
+    const b = document.getElementById('btn-time-play');
+    b.textContent = state.time.playing ? '❚❚ Pause history' : '▶ Play history';
+    b.classList.toggle('on', state.time.playing);
 }
 
 // ── Hover readout ──────────────────────────────────────────────────────────
@@ -730,13 +1252,22 @@ canvas.addEventListener('mousemove', e => {
         : `<br><span class="pl-support">nearest sample ${Math.round(supportKm).toLocaleString()} km`
             + `${supportKm > 250 ? ' · interpolated' : ''}</span>`;
 
+    // WHEN, not just where. Once the map can show any of 145 hours, a readout
+    // that only says "PM2.5 42" is ambiguous by exactly the amount the
+    // scrubber can move — and the forecast half of the window is a different
+    // kind of claim from the hindcast half.
+    const hist = state.time.history;
+    const when = state.time.active && hist
+        ? `<br><span class="pl-support">${state.time.index > hist.nowIndex ? 'CAMS forecast' : 'CAMS hindcast'} · ${fmtStamp(hist.times[state.time.index])}</span>`
+        : '';
+
     hover.innerHTML =
         `<b>${Math.abs(lat).toFixed(1)}°${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(1)}°${lon >= 0 ? 'E' : 'W'}</b>`
         // The city's us_aqi is the COMPOSITE index (worst sub-index across
         // pollutants); the PM2.5 on the next line is one component of it.
         // Labelling it keeps a reader from reading them as the same number.
         + (nearest && nd < 400 ? ` · ${nearest.name}${Number.isFinite(nearest.aqi) ? ` (composite AQI ${Math.round(nearest.aqi)})` : ''}` : '')
-        + `<br>${value}${supportNote}`;
+        + `<br>${value}${supportNote}${when}`;
     hover.style.display = 'block';
     hover.style.left = Math.min(e.clientX - rect.left + 14, rect.width - 200) + 'px';
     hover.style.top = Math.min(e.clientY - rect.top + 12, rect.height - 46) + 'px';
@@ -751,6 +1282,30 @@ function tick(t) {
     requestAnimationFrame(tick);
     const dt = Math.min(0.25, (t - lastT) / 1000 || 0);
     lastT = t;
+
+    // History playback runs BEFORE the transport early-return: the two are
+    // mutually exclusive (see stopTransport), and putting the scrub behind
+    // `if (!state.playing)` would make the scrubber inert whenever the
+    // transport sim happened to be paused — which is most of the time.
+    if (state.time.playing && state.time.history) {
+        state.time.frameDebt += dt * state.time.rate;
+        const steps = Math.floor(state.time.frameDebt);
+        if (steps > 0) {
+            state.time.frameDebt -= steps;
+            const last = state.time.history.count - 1;
+            let next = state.time.index + steps;
+            if (next >= last) {
+                // Stop AT the end rather than looping. A loop makes a five-day
+                // record read as a cycle, and the end of the window is the
+                // forecast horizon — a meaningful place to stop.
+                next = last;
+                state.time.playing = false;
+                setPlayButton();
+            }
+            setTimeIndex(next);
+        }
+    }
+
     if (!state.playing || !state.field) return;
     hourDebt += dt * state.speed;
     let steps = Math.min(6, Math.floor(hourDebt));      // budget per frame
@@ -778,26 +1333,81 @@ requestAnimationFrame(tick);
 // ── Controls ───────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 $('btn-play').addEventListener('click', () => {
+    if (!state.playing && state.time.playing) {
+        state.time.playing = false;              // one writer on state.field
+        setPlayButton();
+    }
     state.playing = !state.playing;
     $('btn-play').textContent = state.playing ? '❚❚ Pause' : '▶ Run transport';
     $('btn-play').classList.toggle('on', state.playing);
     $('pl-sim-clock').style.display = 'block';
 });
 $('btn-reset').addEventListener('click', () => {
-    if (!state.liveField) return;
-    state.field = { w: W, h: H, data: state.liveField.data.slice() };
-    state.simHours = 0; hourDebt = 0;
+    stopTransport();
+    hourDebt = 0;
+    // ⟲ is the ONE way back to the live sample: it rewinds the transport clock
+    // AND drops out of history mode, because "reset to live" that left the map
+    // on a scrubbed Tuesday would be lying about which of the two it undid.
+    returnToLive();
     $('pl-sim-clock').textContent = 't + 0 h';
-    draw(); updateClimate();
 });
 $('btn-mode-pm').addEventListener('click', () => setMode('pm'));
 $('btn-mode-forcing').addEventListener('click', () => setMode('forcing'));
+$('btn-mode-anomaly').addEventListener('click', () => setMode('anomaly'));
 function setMode(m) {
+    if (m === 'anomaly' && !state.time.meanField) return;   // nothing to compare to
     state.mode = m;
     $('btn-mode-pm').classList.toggle('on', m === 'pm');
     $('btn-mode-forcing').classList.toggle('on', m === 'forcing');
+    $('btn-mode-anomaly').classList.toggle('on', m === 'anomaly');
     renderLegend(); draw();
 }
+
+// ── Time-machine controls. Every one of them ends in setTimeIndex. ─────────
+$('btn-time-play').addEventListener('click', () => {
+    const hist = state.time.history;
+    if (!hist) return;
+    stopTransport();
+    state.time.playing = !state.time.playing;
+    // Replaying from the end would show one frame and stop; rewind first.
+    if (state.time.playing && state.time.index >= hist.count - 1) {
+        setTimeIndex(0);
+    } else if (state.time.playing) {
+        setTimeIndex(state.time.index);          // activates history mode
+    }
+    state.time.frameDebt = 0;
+    setPlayButton();
+});
+$('btn-time-step-back').addEventListener('click', () => setTimeIndex(state.time.index - 1));
+$('btn-time-step-fwd').addEventListener('click', () => setTimeIndex(state.time.index + 1));
+$('btn-time-now').addEventListener('click', () => {
+    state.time.playing = false; setPlayButton();
+    returnToLive();
+});
+$('btn-time-peak').addEventListener('click', () => {
+    if (!state.time.exposure) return;
+    const { index } = peakFrame(state.time.exposure, { nowIndex: state.time.history.nowIndex });
+    if (index >= 0) {
+        state.time.playing = false; setPlayButton();
+        setTimeIndex(index);
+    }
+});
+$('rng-time-speed').addEventListener('input', e => {
+    state.time.rate = Number(e.target.value);
+    $('out-time-speed').textContent = `${state.time.rate} h/s`;
+});
+// Redraw the canvas charts on resize — they are sized from their CSS box, so a
+// window change without a redraw leaves them stretched at the old aspect.
+let resizeTimer = 0;
+addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        timeline?.draw();
+        seriesChart?.draw();
+        renderDiurnal();
+        drawClusterSparks();
+    }, 120);
+});
 $('rng-k').addEventListener('input', e => {
     state.kAuto = false;
     state.k = Number(e.target.value);
@@ -833,11 +1443,13 @@ async function boot() {
         wantDemo ? Promise.reject(new Error('demo mode')) : loadGrid(),
         wantDemo ? Promise.reject(new Error('demo mode')) : loadWind(),
         wantDemo ? Promise.reject(new Error('demo mode')) : loadFires(),
+        wantDemo ? Promise.reject(new Error('demo mode')) : loadHistory(),
     ]);
-    const [rc, rg, rw, rf] = results;
+    const [rc, rg, rw, rf, rh] = results;
     if (rc.status === 'rejected') pip('pip-centers', 'err', `city feed: ${rc.reason?.message}`);
     if (rg.status === 'rejected') pip('pip-grid', 'err', `grid feed: ${rg.reason?.message}`);
     if (rf.status === 'rejected') pip('pip-fires', 'err', `wildfire feed: ${rf.reason?.message}`);
+    if (rh.status === 'rejected') pip('pip-history', 'err', `history feed: ${rh.reason?.message}`);
     if (rw.status === 'rejected') {
         state.wind = syntheticWind();
         state.windLabel = 'synthetic zonal circulation (GFS grid unavailable)';
@@ -852,9 +1464,24 @@ async function boot() {
     }
     rebuildField();
     rebuildClusters();
+    // The time machine is built AFTER the live field so the page is usable and
+    // honest even if the history request is the one that failed — the scrubber
+    // degrades to "unavailable" and nothing else on the page notices.
+    buildTimeMachine();
     renderLegend();
     draw();
     updateClimate();
+    // Test/debug hook, mirroring __marsLab / __moonLab: exposes the seek
+    // entry point and the derived series so a browser gate can drive the
+    // scrubber without synthesising pointer geometry over a canvas.
+    globalThis.__pollutionLab = {
+        state,
+        seek: i => setTimeIndex(i),
+        returnToLive,
+        get timeline() { return timeline; },
+        get seriesChart() { return seriesChart; },
+    };
+    document.body.dataset.plReady = '1';
 }
 boot();
 </script>
