@@ -4,6 +4,19 @@
 // the forecast physics in the browser and never substitutes a demo prediction:
 // every plotted window is the issue-locked record that can later be scored
 // against L1 truth.
+//
+// The surface is a real MONTH CALENDAR (Sunday-first, always 42 cells) plus
+// a rail of derived views. Two things about that are load-bearing:
+//
+//   · The grid is ALWAYS six weeks. A month-length grid would change height
+//     between February and August, and the page holds a single-screen
+//     layout (see the LAYOUT CONTRACT comment in cme-forecast.html) — a
+//     variable row count is what would make a scrollbar appear some months
+//     and not others. monthGridDays() therefore pads to 42 unconditionally.
+//   · A day cell shows a CHIP only for a median arrival that lands on that
+//     day. Days a window merely passes through get the dimmer "window edge"
+//     row instead, because painting them identically would read as many
+//     more forecast arrivals than were ever issued.
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -20,8 +33,9 @@ const state = {
     models: [],
     range: '7d',
     selectedId: null,
-    calendarStartMs: null,
+    calendarMonthMs: null,
     selectedDayMs: null,
+    corridor: null,        // lazily mounted 3D panel (see bindViewTabs)
     updatedAt: null,
     hitAreas: [],
     refreshTimer: null,
@@ -57,9 +71,12 @@ function esc(value) {
 
 function pickForecast(forecasts = {}) {
     if (forecasts['flux-rope-v1']) return ['flux-rope-v1', forecasts['flux-rope-v1']];
-    // This is Parker's public output, not a generic model browser. Baselines
-    // belong in the skill comparison below and must never be plotted as if
-    // Parker issued them.
+    // This is the Parkers Physics public output, not a generic model
+    // browser. Baselines belong in the skill comparison below and must never
+    // be plotted as if Parkers Physics issued them. (Spell the brand out:
+    // bare "Parker" reads as Eugene Parker everywhere else in this repo —
+    // Parker spiral, Parker 1958 — which is exactly the wrong association
+    // on a page about forecast provenance.)
     return [null, null];
 }
 
@@ -135,8 +152,28 @@ function utcDayStart(ms) {
     return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-function dayKey(ms) {
-    return new Date(ms).toISOString().slice(0, 10);
+/** UTC month start (day 1, 00:00Z) of the month containing ms. */
+export function utcMonthStart(ms) {
+    const d = new Date(ms);
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+}
+
+/** Shift a UTC month start by whole months (Date.UTC normalizes overflow). */
+export function addUtcMonths(monthStartMs, count) {
+    const d = new Date(monthStartMs);
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + count, 1);
+}
+
+/**
+ * The 42 UTC day-starts of a Sunday-first month grid.
+ *
+ * Always six weeks — see the module header. Plain DAY_MS arithmetic is exact
+ * here because every UTC midnight is a whole multiple of 86 400 000 ms from
+ * the epoch; there is no DST in UTC to skew a day step.
+ */
+export function monthGridDays(monthStartMs) {
+    const gridStart = monthStartMs - new Date(monthStartMs).getUTCDay() * DAY_MS;
+    return Array.from({ length: 42 }, (_, index) => gridStart + index * DAY_MS);
 }
 
 function formatDayHeading(ms) {
@@ -145,25 +182,30 @@ function formatDayHeading(ms) {
     });
 }
 
+/** Compact day label for the rail head, e.g. "Thu, Aug 20". */
+function formatDayShort(ms) {
+    return new Date(ms).toLocaleDateString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC',
+    });
+}
+
+/** Bare 24 h clock, no suffix — calendar chips have no room for one. */
+function formatClockUtc(ms) {
+    if (!Number.isFinite(ms)) return '--:--';
+    const d = new Date(ms);
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
 function formatTimeOnlyUtc(ms) {
     if (!Number.isFinite(ms)) return '—';
     const d = new Date(ms);
     return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
 }
 
-function formatCalendarRange(startMs) {
-    const endMs = startMs + 6 * DAY_MS;
-    const start = new Date(startMs);
-    const end = new Date(endMs);
-    const startMonth = start.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
-    const endMonth = end.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
-    if (start.getUTCFullYear() !== end.getUTCFullYear()) {
-        return `${startMonth} ${start.getUTCDate()}, ${start.getUTCFullYear()} – ${endMonth} ${end.getUTCDate()}, ${end.getUTCFullYear()}`;
-    }
-    if (start.getUTCMonth() !== end.getUTCMonth()) {
-        return `${startMonth} ${start.getUTCDate()} – ${endMonth} ${end.getUTCDate()}, ${end.getUTCFullYear()}`;
-    }
-    return `${startMonth} ${start.getUTCDate()}–${end.getUTCDate()}, ${end.getUTCFullYear()}`;
+function formatMonthLabel(monthStartMs) {
+    return new Date(monthStartMs).toLocaleDateString('en-US', {
+        month: 'long', year: 'numeric', timeZone: 'UTC',
+    });
 }
 
 /** Forecast windows that touch one UTC calendar day. */
@@ -220,7 +262,7 @@ function visibleEvents() {
     return state.events
         .filter((event) => event.lateMs >= start && event.earlyMs <= end)
         .sort((a, b) => a.predictedMs - b.predictedMs)
-        .slice(0, 10);
+        .slice(0, 8);
 }
 
 function roundedRect(ctx, x, y, width, height, radius) {
@@ -246,40 +288,56 @@ function drawDiamond(ctx, x, y, radius, fill) {
 function drawEmptyChart(ctx, width, height, message) {
     ctx.clearRect(0, 0, width, height);
     const glow = ctx.createRadialGradient(width * .52, height * .45, 0, width * .52, height * .45, width * .45);
-    glow.addColorStop(0, 'rgba(66, 214, 255, .10)');
-    glow.addColorStop(1, 'rgba(66, 214, 255, 0)');
+    glow.addColorStop(0, 'rgba(79, 195, 247, .10)');
+    glow.addColorStop(1, 'rgba(79, 195, 247, 0)');
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, width, height);
-    ctx.strokeStyle = 'rgba(153, 173, 204, .12)';
+    ctx.strokeStyle = 'rgba(144, 164, 200, .12)';
     ctx.setLineDash([4, 8]);
     ctx.beginPath();
-    ctx.moveTo(48, height / 2);
-    ctx.lineTo(width - 48, height / 2);
+    ctx.moveTo(24, height / 2);
+    ctx.lineTo(width - 24, height / 2);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = '#aebbd1';
+    ctx.fillStyle = '#cdd5e4';
     ctx.textAlign = 'center';
-    ctx.font = '600 15px system-ui, sans-serif';
-    ctx.fillText(message, width / 2, height / 2 - 8);
-    ctx.fillStyle = '#66758d';
-    ctx.font = '12px ui-monospace, monospace';
-    ctx.fillText('No synthetic forecast is substituted.', width / 2, height / 2 + 18);
+    ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
+    ctx.fillText(message, width / 2, height / 2 - 6);
+    ctx.fillStyle = '#69718c';
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.fillText('No synthetic forecast is substituted.', width / 2, height / 2 + 11);
 }
 
+// House accent set (flux-rope-live.html / operations.html / status.html).
+// Canvas cannot read CSS custom properties, so these mirror the --cmef-*
+// tokens in cme-forecast.html by hand — change both together.
 function chartColors(event) {
     const kind = statusClass(event);
-    if (kind === 'verified') return { strong: '#72f5bd', soft: 'rgba(114,245,189,.18)' };
-    if (kind === 'miss') return { strong: '#ff7694', soft: 'rgba(255,118,148,.16)' };
-    if (kind === 'window') return { strong: '#ffc96c', soft: 'rgba(255,201,108,.20)' };
-    return { strong: '#57d9ff', soft: 'rgba(87,217,255,.18)' };
+    if (kind === 'verified') return { strong: '#7fe6c3', soft: 'rgba(127,230,195,.20)' };
+    if (kind === 'miss') return { strong: '#ff6b8a', soft: 'rgba(255,107,138,.18)' };
+    if (kind === 'window') return { strong: '#ffb454', soft: 'rgba(255,180,84,.22)' };
+    return { strong: '#4fc3f7', soft: 'rgba(79,195,247,.20)' };
 }
 
 function drawChart() {
     const canvas = $('cmef-timeline');
     if (!canvas) return;
+    // Size the shell to the row count FIRST — the canvas is measured from
+    // its laid-out box, so reading bounds before this would draw at the
+    // previous height and leave the last row outside the visible area.
+    const shell = $('cmef-chart-shell');
+    const rows = String(Math.max(1, visibleEvents().length));
+    // Write only on change: the ResizeObserver watches this element, and an
+    // unconditional write would re-enter drawChart on every frame it fires.
+    if (shell && shell.style.getPropertyValue('--cmef-rows') !== rows) {
+        shell.style.setProperty('--cmef-rows', rows);
+    }
     const bounds = canvas.getBoundingClientRect();
-    const width = Math.max(320, bounds.width);
-    const height = Math.max(320, bounds.height);
+    // Floors, not defaults: the corridor is a RAIL panel now (~152 px tall,
+    // ~330 px wide). The old 320 px height floor over-drew a canvas the CSS
+    // had already sized down, so every row landed outside the visible box.
+    const width = Math.max(260, bounds.width);
+    const height = Math.max(96, bounds.height);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const pixelWidth = Math.round(width * dpr);
     const pixelHeight = Math.round(height * dpr);
@@ -304,28 +362,30 @@ function drawChart() {
     }
 
     const { start, end } = eventWindow();
-    const narrow = width < 620;
-    const margin = { left: narrow ? 24 : 124, right: narrow ? 28 : 66, top: 48, bottom: 48 };
+    // "narrow" is the rail case: no room for a left label gutter, so the
+    // event id moves into the row itself and only the P(hit) column stays.
+    const narrow = width < 560;
+    const margin = { left: narrow ? 8 : 116, right: narrow ? 38 : 58, top: 18, bottom: 20 };
     const plotWidth = width - margin.left - margin.right;
     const plotHeight = height - margin.top - margin.bottom;
     const x = (ms) => margin.left + ((ms - start) / (end - start)) * plotWidth;
     const rowHeight = plotHeight / events.length;
 
     // Vertical time grid.
-    const ticks = narrow ? 4 : 7;
+    const ticks = narrow ? 3 : 6;
     ctx.lineWidth = 1;
     for (let i = 0; i <= ticks; i++) {
         const tickMs = start + (i / ticks) * (end - start);
         const tx = margin.left + (i / ticks) * plotWidth;
         ctx.strokeStyle = i === 0 || i === ticks ? 'rgba(151,177,211,.14)' : 'rgba(151,177,211,.09)';
         ctx.beginPath();
-        ctx.moveTo(tx, margin.top - 8);
-        ctx.lineTo(tx, height - margin.bottom + 6);
+        ctx.moveTo(tx, margin.top - 6);
+        ctx.lineTo(tx, height - margin.bottom + 4);
         ctx.stroke();
-        ctx.fillStyle = '#71819a';
-        ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.fillStyle = '#69718c';
+        ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
         ctx.textAlign = i === 0 ? 'left' : i === ticks ? 'right' : 'center';
-        ctx.fillText(formatCompactUtc(tickMs), tx, height - 17);
+        ctx.fillText(formatCompactUtc(tickMs), tx, height - 6);
     }
 
     state.hitAreas = [];
@@ -336,7 +396,7 @@ function drawChart() {
         const startX = clamp(x(event.earlyMs), margin.left, margin.left + plotWidth);
         const endX = clamp(x(event.lateMs), margin.left, margin.left + plotWidth);
         const medianX = clamp(x(event.predictedMs), margin.left, margin.left + plotWidth);
-        const bandHeight = clamp(rowHeight * .24, 8, 14);
+        const bandHeight = clamp(rowHeight * .3, 5, 11);
 
         ctx.strokeStyle = 'rgba(151,177,211,.08)';
         ctx.beginPath();
@@ -345,16 +405,22 @@ function drawChart() {
         ctx.stroke();
 
         if (!narrow) {
-            ctx.fillStyle = event.id === state.selectedId ? '#f4f8ff' : '#aebbd1';
-            ctx.font = `${event.id === state.selectedId ? 700 : 600} 11px system-ui, sans-serif`;
+            ctx.fillStyle = event.id === state.selectedId ? '#eef3fb' : '#8b94ad';
+            ctx.font = `${event.id === state.selectedId ? 700 : 600} 10px "Segoe UI", system-ui, sans-serif`;
             ctx.textAlign = 'right';
-            ctx.fillText(shortId(event), margin.left - 14, cy + 4);
+            ctx.fillText(shortId(event), margin.left - 10, cy + 3.5);
+        } else if (rowHeight >= 22) {
+            // Rail case: the id rides just above its own band.
+            ctx.fillStyle = event.id === state.selectedId ? '#eef3fb' : '#8b94ad';
+            ctx.font = `${event.id === state.selectedId ? 700 : 600} 9px "Segoe UI", system-ui, sans-serif`;
+            ctx.textAlign = 'left';
+            ctx.fillText(shortId(event), margin.left + 1, cy - bandHeight / 2 - 3);
         }
 
         const gradient = ctx.createLinearGradient(startX, 0, endX, 0);
-        gradient.addColorStop(0, 'rgba(87,217,255,.05)');
+        gradient.addColorStop(0, 'rgba(79,195,247,.05)');
         gradient.addColorStop(.5, colors.soft);
-        gradient.addColorStop(1, 'rgba(178,119,255,.07)');
+        gradient.addColorStop(1, 'rgba(199,146,234,.07)');
         roundedRect(ctx, startX, cy - bandHeight / 2, Math.max(3, endX - startX), bandHeight, bandHeight / 2);
         ctx.fillStyle = gradient;
         ctx.fill();
@@ -365,16 +431,16 @@ function drawChart() {
 
         if (event.id === state.selectedId) {
             ctx.beginPath();
-            ctx.arc(medianX, cy, 10, 0, Math.PI * 2);
+            ctx.arc(medianX, cy, 8, 0, Math.PI * 2);
             ctx.fillStyle = colors.soft;
             ctx.fill();
         }
         ctx.beginPath();
-        ctx.arc(medianX, cy, event.earlyMs <= nowMs && event.lateMs >= nowMs ? 5.5 : 4.5, 0, Math.PI * 2);
+        ctx.arc(medianX, cy, event.earlyMs <= nowMs && event.lateMs >= nowMs ? 4.5 : 3.5, 0, Math.PI * 2);
         ctx.fillStyle = colors.strong;
         ctx.fill();
-        ctx.strokeStyle = '#06101c';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#080a1c';
+        ctx.lineWidth = 1.5;
         ctx.stroke();
 
         if (event.truthShockMs !== null && event.truthShockMs >= start && event.truthShockMs <= end) {
@@ -386,14 +452,14 @@ function drawChart() {
             ctx.lineTo(truthX, cy);
             ctx.stroke();
             ctx.setLineDash([]);
-            drawDiamond(ctx, truthX, cy, 4, '#f7fbff');
+            drawDiamond(ctx, truthX, cy, 3.2, '#f2f6ff');
         }
 
         const probability = Number.isFinite(event.pHit) ? `${Math.round(event.pHit * 100)}%` : '—';
         ctx.fillStyle = colors.strong;
-        ctx.font = '700 11px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.font = '700 10px ui-monospace, SFMono-Regular, Menlo, monospace';
         ctx.textAlign = 'left';
-        ctx.fillText(probability, margin.left + plotWidth + 12, cy + 4);
+        ctx.fillText(probability, margin.left + plotWidth + 8, cy + 3.5);
 
         state.hitAreas.push({
             id: event.id,
@@ -410,18 +476,20 @@ function drawChart() {
     // obscure where the forecast stands at this instant.
     if (nowMs >= start && nowMs <= end) {
         const nowX = x(nowMs);
-        ctx.strokeStyle = '#ffc96c';
+        ctx.strokeStyle = '#ffb454';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([3, 5]);
         ctx.beginPath();
-        ctx.moveTo(nowX, margin.top - 14);
-        ctx.lineTo(nowX, height - margin.bottom + 6);
+        ctx.moveTo(nowX, margin.top - 4);
+        ctx.lineTo(nowX, height - margin.bottom + 4);
         ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = '#ffc96c';
-        ctx.font = '700 10px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.fillStyle = '#ffb454';
+        ctx.font = '700 9px ui-monospace, SFMono-Regular, Menlo, monospace';
+        // Clamped so the label cannot be clipped by either edge of a rail
+        // canvas that is only ~330 px wide.
         ctx.textAlign = 'center';
-        ctx.fillText('NOW', nowX, margin.top - 23);
+        ctx.fillText('NOW', clamp(nowX, 14, width - 14), margin.top - 8);
     }
     canvas.dataset.ready = 'true';
 }
@@ -458,17 +526,24 @@ function renderChartSummary() {
     ).join(' ');
 }
 
+/**
+ * The ledger tape: one compact card per committed forecast.
+ *
+ * This used to be twelve 260 px-tall cards in a two-column grid a full
+ * screen below the calendar. The content is unchanged — median arrival,
+ * P(hit), Bz p50, and the resolved L1 outcome — but a horizontal tape puts
+ * every event in view at once, which is what a ledger is for.
+ */
 function renderEvents() {
     const list = $('cmef-event-list');
     const ordered = [...state.events].sort((a, b) => {
         const aResolved = a.truth ? 1 : 0;
         const bResolved = b.truth ? 1 : 0;
         return aResolved - bResolved || a.predictedMs - b.predictedMs;
-    }).slice(0, 12);
+    }).slice(0, 14);
     if (!ordered.length) {
-        list.innerHTML = `<div class="cmef-empty">
-            <strong>No forecast records available.</strong>
-            <span>This surface does not manufacture demo arrivals when the issue-time ledger is unavailable.</span>
+        list.innerHTML = `<div class="cmef-tape-empty">
+            <span><strong>No forecast records available.</strong> This surface does not manufacture demo arrivals when the issue-time ledger is unavailable.</span>
         </div>`;
         return;
     }
@@ -477,38 +552,23 @@ function renderEvents() {
         const status = eventStatus(event);
         const kind = statusClass(event);
         const selected = event.id === state.selectedId;
-        const widthHours = (event.lateMs - event.earlyMs) / HOUR_MS;
         const errorHours = event.truthShockMs === null ? null : (event.predictedMs - event.truthShockMs) / HOUR_MS;
-        const pHit = Number.isFinite(event.pHit) ? `${Math.round(event.pHit * 100)}%` : 'Not issued';
-        const bz = Number.isFinite(event.minBzP50) ? `${event.minBzP50.toFixed(0)} nT` : 'Not issued';
-        const truth = event.truth
+        const pHit = Number.isFinite(event.pHit) ? `${Math.round(event.pHit * 100)}% hit` : 'P(hit) not issued';
+        const bz = Number.isFinite(event.minBzP50) ? `${event.minBzP50.toFixed(0)} nT` : 'Bz not issued';
+        const outcome = event.truth
             ? event.truth.arrived === false
-                ? 'L1 truth: no arrival observed'
-                : `L1 shock ${formatUtc(event.truthShockMs)}${Number.isFinite(errorHours) ? ` · error ${errorHours >= 0 ? '+' : ''}${errorHours.toFixed(1)} h` : ''}`
-            : 'Outcome pending · forecast remains locked';
-        const severity = [
-            Number.isFinite(event.p10) ? `P(Bz ≤ −10 nT) ${Math.round(event.p10 * 100)}%` : null,
-            Number.isFinite(event.p20) ? `P(Bz ≤ −20 nT) ${Math.round(event.p20 * 100)}%` : null,
-            Number.isFinite(event.minBzP5) ? `Bz p05 ${event.minBzP5.toFixed(0)} nT` : null,
-        ].filter(Boolean).join(' · ');
-        return `<article class="cmef-event-card ${selected ? 'is-selected' : ''}" data-event-id="${esc(event.id)}">
-            <button class="cmef-event-select" type="button" data-select-event="${esc(event.id)}" aria-pressed="${selected}">
-                <span class="cmef-event-heading">
-                    <span><span class="cmef-event-sun">☉</span> ${esc(shortId(event))}</span>
-                    <span class="cmef-state ${kind}">${esc(status)}</span>
-                </span>
-                <span class="cmef-arrival-time">${esc(formatUtc(event.predictedMs))}</span>
-                <span class="cmef-arrival-window">${esc(formatUtc(event.earlyMs))} → ${esc(formatUtc(event.lateMs))} · ${widthHours.toFixed(0)} h band</span>
-                <span class="cmef-event-metrics">
-                    <span><b>${esc(pHit)}</b>P(Earth hit)</span>
-                    <span><b>${esc(bz)}</b>min Bz p50</span>
-                    <span><b>${Number.isFinite(event.speedKms) ? `${event.speedKms.toFixed(0)} km/s` : '—'}</b>speed</span>
-                </span>
-                ${severity ? `<span class="cmef-severity-line">${esc(severity)}</span>` : ''}
-                <span class="cmef-truth-line">${esc(truth)}</span>
-                <span class="cmef-issued">Locked ${esc(formatUtc(event.issuedMs))} · ${esc(event.modelId)}</span>
-            </button>
-        </article>`;
+                ? 'no L1 arrival'
+                : Number.isFinite(errorHours)
+                    ? `L1 error ${errorHours >= 0 ? '+' : ''}${errorHours.toFixed(1)} h`
+                    : 'resolved at L1'
+            : 'Outcome pending';
+        return `<button class="cmef-ledger-card ${selected ? 'is-selected' : ''}" type="button"
+                data-event-id="${esc(event.id)}" data-select-event="${esc(event.id)}"
+                style="--cmef-card:${esc(chartColors(event).strong)}" aria-pressed="${selected}">
+            <span class="cmef-ledger-top"><span aria-hidden="true">\u2609</span> ${esc(shortId(event))}<em>${esc(status)}</em></span>
+            <span class="cmef-ledger-time">${esc(formatUtc(event.predictedMs))}</span>
+            <span class="cmef-ledger-sub">${esc(pHit)} \u00b7 ${esc(bz)} \u00b7 ${esc(outcome)}</span>
+        </button>`;
     }).join('');
 
     list.querySelectorAll('[data-select-event]').forEach((button) => {
@@ -518,10 +578,11 @@ function renderEvents() {
     });
 }
 
+/** Pull the calendar to the month that actually shows this day. */
 function ensureCalendarDayVisible(dayStartMs) {
-    const calendarEnd = state.calendarStartMs + 7 * DAY_MS;
-    if (dayStartMs < state.calendarStartMs || dayStartMs >= calendarEnd) {
-        state.calendarStartMs = dayStartMs;
+    const grid = monthGridDays(state.calendarMonthMs ?? utcMonthStart(dayStartMs));
+    if (dayStartMs < grid[0] || dayStartMs > grid[grid.length - 1]) {
+        state.calendarMonthMs = utcMonthStart(dayStartMs);
     }
 }
 
@@ -532,104 +593,138 @@ function selectForecastEvent(eventId, { scrollToCard = false, scrollToChart = fa
     state.selectedDayMs = utcDayStart(event.predictedMs);
     delete $('cmef-calendar-detail').dataset.userCollapsed;
     ensureCalendarDayVisible(state.selectedDayMs);
+    // The corridor draws the SELECTED event's arrival window, so its scrubber
+    // ticks move with the selection.
+    state.corridor?.refreshTicks?.();
     renderEvents();
     renderCalendar();
     drawChart();
     if (scrollToCard) {
-        document.querySelector(`[data-event-id="${CSS.escape(event.id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        document.querySelector(`[data-event-id="${CSS.escape(event.id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     }
     if (scrollToChart) {
-        $('cmef-chart-shell')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        $('cmef-chart-shell')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 }
 
+/**
+ * The rail's selected-day panel. The day heading and the window count live
+ * in the panel HEAD (outside the re-rendered body) so the panel keeps its
+ * shape while the body swaps.
+ */
 function renderCalendarDetail(dayStartMs, events) {
     const detail = $('cmef-calendar-detail');
+    const dayLabel = $('cmef-detail-day');
+    const count = $('cmef-detail-count');
+
     if (dayStartMs === null) {
-        detail.hidden = true;
-        detail.innerHTML = '';
-        return;
-    }
-    detail.hidden = false;
-    const heading = formatDayHeading(dayStartMs);
-    if (!events.length) {
-        detail.innerHTML = `<div class="cmef-day-detail-head">
-                <div><span class="cmef-day-detail-label">Daily outlook · UTC</span><h3>${esc(heading)}</h3></div>
-                <span class="cmef-day-detail-count quiet">Quiet corridor</span>
-            </div>
-            <div class="cmef-day-quiet">
-                <span class="cmef-day-quiet-mark" aria-hidden="true">○</span>
-                <div><strong>No issue-locked CME arrival window intersects this day.</strong>
-                <p>That is a quiet Parker forecast, not a guarantee of quiet space weather. Solar eruptions and upstream conditions can still change after this ledger update.</p></div>
-            </div>`;
+        dayLabel.textContent = '\u2014';
+        count.textContent = 'None';
+        count.className = 'cmef-detail-count quiet';
+        detail.innerHTML = `<div class="cmef-day-quiet">
+            <strong>No day selected.</strong>
+            <p>Pick a day in the calendar to see the issue-locked arrival windows that intersect it.</p>
+        </div>`;
         return;
     }
 
-    const items = events.map((event) => {
+    dayLabel.textContent = formatDayShort(dayStartMs);
+    if (!events.length) {
+        count.textContent = 'Quiet';
+        count.className = 'cmef-detail-count quiet';
+        detail.innerHTML = `<div class="cmef-day-quiet">
+            <strong>No issue-locked CME arrival window intersects ${esc(formatDayHeading(dayStartMs))}.</strong>
+            <p>That is a quiet Parkers Physics forecast, not a guarantee of quiet space weather. Solar eruptions and upstream conditions can still change after this ledger update.</p>
+        </div>`;
+        return;
+    }
+
+    count.textContent = `${events.length} ${events.length === 1 ? 'window' : 'windows'}`;
+    count.className = 'cmef-detail-count';
+    detail.innerHTML = events.map((event) => {
         const medianHere = utcDayStart(event.predictedMs) === dayStartMs;
+        const errorHours = event.truthShockMs === null ? null : (event.predictedMs - event.truthShockMs) / HOUR_MS;
         const truthText = event.truth
             ? event.truth.arrived === false
-                ? 'Resolved · no L1 arrival'
-                : `L1 truth ${formatTimeOnlyUtc(event.truthShockMs)}`
-            : 'Outcome pending';
+                ? 'Resolved \u00b7 no L1 arrival'
+                : `L1 truth ${formatTimeOnlyUtc(event.truthShockMs)}${Number.isFinite(errorHours) ? ` \u00b7 error ${errorHours >= 0 ? '+' : ''}${errorHours.toFixed(1)} h` : ''}`
+            : 'Outcome pending \u00b7 forecast remains locked';
         return `<article class="cmef-day-event ${event.id === state.selectedId ? 'is-selected' : ''}">
-            <div class="cmef-day-event-main">
-                <span class="cmef-day-event-title"><span aria-hidden="true">☉</span> ${esc(shortId(event))}</span>
-                <strong>${medianHere ? `Median ${esc(formatTimeOnlyUtc(event.predictedMs))}` : `Window overlap · median ${esc(formatUtc(event.predictedMs))}`}</strong>
-                <span>${esc(formatCompactUtc(event.earlyMs))}–${esc(formatCompactUtc(event.lateMs))} window · ${esc(truthText)}</span>
+            <div class="cmef-day-event-top">
+                <strong><span aria-hidden="true">\u2609</span> ${esc(shortId(event))}</strong>
+                <span class="cmef-state ${statusClass(event)}">${esc(eventStatus(event))}</span>
             </div>
-            <div class="cmef-day-event-metrics">
-                <span><b>${Number.isFinite(event.pHit) ? `${Math.round(event.pHit * 100)}%` : '—'}</b>P(hit)</span>
-                <span><b>${Number.isFinite(event.minBzP50) ? `${event.minBzP50.toFixed(0)} nT` : '—'}</b>Bz p50</span>
-                <span><b>${Number.isFinite(event.p10) ? `${Math.round(event.p10 * 100)}%` : '—'}</b>P(Bz ≤ −10)</span>
-                <span><b>${Number.isFinite(event.p20) ? `${Math.round(event.p20 * 100)}%` : '—'}</b>P(Bz ≤ −20)</span>
-                <span><b>${Number.isFinite(event.minBzP5) ? `${event.minBzP5.toFixed(0)} nT` : '—'}</b>Bz p05</span>
-                <span><b>${Number.isFinite(event.speedKms) ? `${event.speedKms.toFixed(0)} km/s` : '—'}</b>speed</span>
+            <span class="cmef-day-event-time">${medianHere
+                ? `Median ${esc(formatTimeOnlyUtc(event.predictedMs))}`
+                : `Median ${esc(formatUtc(event.predictedMs))}`}</span>
+            <span class="cmef-day-event-band">${esc(formatCompactUtc(event.earlyMs))}\u2013${esc(formatCompactUtc(event.lateMs))} window${medianHere ? '' : ' \u00b7 overlaps this day'}</span>
+            <div class="cmef-metrics">
+                <span><b>${Number.isFinite(event.pHit) ? `${Math.round(event.pHit * 100)}%` : '\u2014'}</b>P(hit)</span>
+                <span><b>${Number.isFinite(event.minBzP50) ? `${event.minBzP50.toFixed(0)} nT` : '\u2014'}</b>Bz p50</span>
+                <span><b>${Number.isFinite(event.minBzP5) ? `${event.minBzP5.toFixed(0)} nT` : '\u2014'}</b>Bz p05</span>
+                <span><b>${Number.isFinite(event.p10) ? `${Math.round(event.p10 * 100)}%` : '\u2014'}</b>P(Bz \u2264 \u221210)</span>
+                <span><b>${Number.isFinite(event.p20) ? `${Math.round(event.p20 * 100)}%` : '\u2014'}</b>P(Bz \u2264 \u221220)</span>
+                <span><b>${Number.isFinite(event.speedKms) ? `${event.speedKms.toFixed(0)}` : '\u2014'}</b>km/s</span>
             </div>
-            <div class="cmef-day-event-lock">
-                <span>Issued ${esc(formatUtc(event.issuedMs))} · ${esc(event.modelId)}</span>
+            <div class="cmef-day-event-foot">
+                <span class="cmef-truth">${esc(truthText)}</span>
+                <span>Issued ${esc(formatUtc(event.issuedMs))} \u00b7 ${esc(event.modelId)}</span>
                 <button type="button" data-calendar-event="${esc(event.id)}">Locate in chart</button>
             </div>
         </article>`;
     }).join('');
 
-    detail.innerHTML = `<div class="cmef-day-detail-head">
-            <div><span class="cmef-day-detail-label">Daily outlook · UTC</span><h3>${esc(heading)}</h3></div>
-            <span class="cmef-day-detail-count">${events.length} ${events.length === 1 ? 'window' : 'windows'}</span>
-        </div>
-        <div class="cmef-day-events">${items}</div>`;
     detail.querySelectorAll('[data-calendar-event]').forEach((button) => {
         button.addEventListener('click', () => selectForecastEvent(button.dataset.calendarEvent, { scrollToChart: true }));
     });
 }
 
+/**
+ * The month grid itself.
+ *
+ * A cell carries a CHIP per median arrival landing on that day (time +
+ * P(hit), tinted by forecast state), and a single dim "window edge" row
+ * when the day is only crossed by somebody else's uncertainty band. The
+ * two are deliberately not drawn alike — see the module header.
+ */
 function renderCalendar() {
     const grid = $('cmef-calendar-grid');
     if (!grid) return;
     const today = utcDayStart(Date.now());
-    if (state.calendarStartMs === null) state.calendarStartMs = today;
-    const days = Array.from({ length: 7 }, (_, index) => state.calendarStartMs + index * DAY_MS);
-    $('cmef-calendar-range').textContent = formatCalendarRange(state.calendarStartMs);
-    grid.innerHTML = days.map((dayStartMs) => {
+    if (state.calendarMonthMs === null) state.calendarMonthMs = utcMonthStart(today);
+    const monthStart = state.calendarMonthMs;
+    const shownMonth = new Date(monthStart).getUTCMonth();
+    $('cmef-calendar-range').textContent = formatMonthLabel(monthStart);
+
+    grid.innerHTML = monthGridDays(monthStart).map((dayStartMs) => {
         const events = cmeEventsForUtcDay(state.events, dayStartMs);
-        const medianCount = events.filter((event) => utcDayStart(event.predictedMs) === dayStartMs).length;
-        const maxHit = events.reduce((best, event) => Number.isFinite(event.pHit) ? Math.max(best, event.pHit) : best, -1);
+        const medians = events.filter((event) => utcDayStart(event.predictedMs) === dayStartMs);
+        const edges = events.length - medians.length;
+        const outside = new Date(dayStartMs).getUTCMonth() !== shownMonth;
         const selected = state.selectedDayMs === dayStartMs;
         const date = new Date(dayStartMs);
-        const weekday = date.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
-        const month = date.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
-        const signal = medianCount
-            ? `${medianCount} ${medianCount === 1 ? 'arrival' : 'arrivals'}`
-            : events.length
-                ? `${events.length} window ${events.length === 1 ? 'edge' : 'edges'}`
-                : 'Quiet';
-        const dots = events.slice(0, 3).map((event) => `<i style="--cmef-dot:${esc(chartColors(event).strong)}"></i>`).join('');
-        return `<button class="cmef-day ${events.length ? 'has-window' : ''} ${dayStartMs === today ? 'is-today' : ''} ${selected ? 'is-selected' : ''}"
-                type="button" data-calendar-day="${dayStartMs}" aria-expanded="${selected}" aria-controls="cmef-calendar-detail">
-            <span class="cmef-day-top"><span>${esc(weekday)}</span><small>${esc(month)}</small></span>
-            <strong>${date.getUTCDate()}</strong>
-            <span class="cmef-day-signal">${esc(signal)}</span>
-            <span class="cmef-day-foot"><span class="cmef-day-dots">${dots}</span><b>${maxHit >= 0 ? `${Math.round(maxHit * 100)}%` : ''}</b></span>
+
+        const chips = medians.slice(0, 2).map((event) => {
+            const probability = Number.isFinite(event.pHit) ? `${Math.round(event.pHit * 100)}%` : '';
+            return `<span class="cmef-chip" style="--cmef-chip:${esc(chartColors(event).strong)}"><i></i><span class="cmef-chip-time">${esc(formatClockUtc(event.predictedMs))}</span><b>${probability}</b></span>`;
+        });
+        if (medians.length > 2) {
+            chips.push(`<span class="cmef-chip-more">+${medians.length - 2} more</span>`);
+        } else if (edges > 0) {
+            // "edge", not "window edge": a phone day cell is ~52 px wide and
+            // the longer wording was being clipped mid-word. The calendar
+            // legend is what carries the full term.
+            chips.push(`<span class="cmef-chip is-edge"><i></i><span class="cmef-chip-time">${edges}<em> ${edges === 1 ? 'edge' : 'edges'}</em></span></span>`);
+        }
+
+        const summary = medians.length
+            ? `${medians.length} arrival${medians.length === 1 ? '' : 's'}`
+            : edges > 0 ? `${edges} window edge${edges === 1 ? '' : 's'}` : 'quiet';
+        return `<button class="cmef-day ${events.length ? 'has-window' : ''} ${outside ? 'is-outside' : ''} ${dayStartMs === today ? 'is-today' : ''} ${selected ? 'is-selected' : ''}"
+                type="button" data-calendar-day="${dayStartMs}" aria-expanded="${selected}" aria-controls="cmef-calendar-detail"
+                aria-label="${esc(formatDayHeading(dayStartMs))} \u00b7 ${esc(summary)}">
+            <span class="cmef-day-num">${date.getUTCDate()}${dayStartMs === today ? '<small>NOW</small>' : ''}</span>
+            <span class="cmef-chips">${chips.join('')}</span>
         </button>`;
     }).join('');
 
@@ -640,6 +735,11 @@ function renderCalendar() {
             state.selectedDayMs = collapsing ? null : dayStartMs;
             if (collapsing) $('cmef-calendar-detail').dataset.userCollapsed = 'true';
             else delete $('cmef-calendar-detail').dataset.userCollapsed;
+            // Picking a day sets the corridor's clock to that day's midpoint,
+            // so the calendar doubles as the 3D view's time index. Noon, not
+            // midnight: a day's arrivals cluster nowhere in particular and the
+            // midpoint is the least misleading single instant to stand at.
+            if (!collapsing) state.corridor?.setEpoch?.(dayStartMs + 12 * HOUR_MS);
             renderCalendar();
         });
     });
@@ -661,10 +761,9 @@ function modelMetric(row, names) {
 function renderSkill() {
     const panel = $('cmef-skill-grid');
     const realtime = state.models.filter((row) => row?.is_hindcast !== true);
-    const maturing = `<div class="cmef-skill-empty">
-            <span class="cmef-skill-orbit" aria-hidden="true"></span>
-            <div><strong>Prospective skill is maturing.</strong>
-            <p>The table will populate only as issue-locked forecasts resolve against L1—not from backfilled outcomes.</p></div>
+    const maturing = `<div class="cmef-empty">
+            <strong>Prospective skill is maturing.</strong>
+            <p>These rows populate only as issue-locked forecasts resolve against L1 \u2014 never from backfilled outcomes.</p>
         </div>`;
     if (!realtime.length) {
         panel.innerHTML = maturing;
@@ -679,13 +778,13 @@ function renderSkill() {
         const directHitRate = modelMetric(row, ['hit_rate', 'hits_12h_rate']);
         const hits12h = modelMetric(row, ['hits_12h']);
         const hitRate = directHitRate ?? (n > 0 && hits12h !== null ? hits12h / n : null);
-        return `<article class="cmef-skill-card ${model === 'flux-rope-v1' ? 'primary' : ''}">
-            <div class="cmef-skill-head"><strong>${esc(model)}</strong><span>${model === 'flux-rope-v1' ? 'PARKER' : 'BASELINE'}</span></div>
-            <div class="cmef-skill-values">
-                <span><b>${mae === null ? '—' : `${mae.toFixed(1)} h`}</b>arrival MAE</span>
-                <span><b>${bias === null ? '—' : `${bias >= 0 ? '+' : ''}${bias.toFixed(1)} h`}</b>timing bias</span>
-                <span><b>${hitRate === null ? '—' : `${Math.round(hitRate <= 1 ? hitRate * 100 : hitRate)}%`}</b>within 12 h</span>
-                <span><b>${n === null ? '—' : n.toFixed(0)}</b>scored</span>
+        return `<article class="cmef-skill-row ${model === 'flux-rope-v1' ? 'primary' : ''}">
+            <div class="cmef-skill-name"><strong>${esc(model)}</strong><span>${model === 'flux-rope-v1' ? 'PARKERS PHYSICS' : 'BASELINE'}</span></div>
+            <div class="cmef-skill-vals">
+                <span><b>${mae === null ? '\u2014' : `${mae.toFixed(1)} h`}</b>MAE</span>
+                <span><b>${bias === null ? '\u2014' : `${bias >= 0 ? '+' : ''}${bias.toFixed(1)} h`}</b>bias</span>
+                <span><b>${hitRate === null ? '\u2014' : `${Math.round(hitRate <= 1 ? hitRate * 100 : hitRate)}%`}</b>\u226412 h</span>
+                <span><b>${n === null ? '\u2014' : n.toFixed(0)}</b>scored</span>
             </div>
         </article>`;
     }).join('')}`;
@@ -711,9 +810,10 @@ function renderAll() {
     if (!state.selectedId || !state.events.some((event) => event.id === state.selectedId)) {
         state.selectedId = nextEvent()?.id ?? state.events[0]?.id ?? null;
     }
-    if (state.calendarStartMs === null) state.calendarStartMs = utcDayStart(Date.now());
+    if (state.calendarMonthMs === null) state.calendarMonthMs = utcMonthStart(Date.now());
     if (state.selectedDayMs === null && !$('cmef-calendar-detail')?.dataset.userCollapsed) {
-        const forecastDay = nextEvent() ? utcDayStart(nextEvent().predictedMs) : state.calendarStartMs;
+        const upcoming = nextEvent();
+        const forecastDay = upcoming ? utcDayStart(upcoming.predictedMs) : utcDayStart(Date.now());
         state.selectedDayMs = forecastDay;
         ensureCalendarDayVisible(forecastDay);
     }
@@ -775,22 +875,80 @@ function bindRangeControls() {
     });
 }
 
+/**
+ * Left-panel view switch: the month calendar, or the 3D Sun→Earth corridor.
+ *
+ * The corridor module is imported on FIRST OPEN, never at load. It pulls in
+ * three.js, the far-side package and the flux-rope provider (which runs a
+ * WASM ensemble), and a visitor who only wants the calendar should not pay
+ * for any of that. The mount is fail-quiet: if it cannot start, the tab says
+ * so and the calendar is untouched.
+ *
+ * The corridor is told which ledger event to draw an arrival window for by
+ * reading state.selectedId on every frame rather than being pushed a value —
+ * one source of truth, so the scene and the ledger cannot disagree about
+ * what is selected.
+ */
+function bindViewTabs() {
+    const tabs = [...document.querySelectorAll('[data-cmef-view]')];
+    if (!tabs.length) return;
+    const panes = {
+        calendar: $('cmef-view-calendar'),
+        corridor: $('cmef-view-corridor'),
+    };
+    const calNav = $('cmef-cal-nav');
+
+    const show = async (name) => {
+        for (const tab of tabs) {
+            tab.setAttribute('aria-selected', String(tab.dataset.cmefView === name));
+        }
+        for (const [key, pane] of Object.entries(panes)) {
+            if (pane) pane.hidden = key !== name;
+        }
+        // Month paging belongs to the calendar only.
+        if (calNav) calNav.style.visibility = name === 'calendar' ? '' : 'hidden';
+        $('cmef-calendar-title').textContent =
+            name === 'corridor' ? 'Sun → Earth corridor' : 'Arrival calendar';
+        if (name !== 'corridor' || state.corridor) return;
+
+        state.corridor = 'loading';
+        try {
+            const { mountCorridor } = await import('./corridor/corridor-panel.js');
+            state.corridor = mountCorridor('cmef-corridor-host', {
+                getEvent: () => state.events.find((e) => e.id === state.selectedId) ?? null,
+            }) || 'failed';
+        } catch (error) {
+            state.corridor = 'failed';
+            console.info('cme-forecast: 3D corridor unavailable', error?.message ?? error);
+        }
+        if (state.corridor === 'failed') {
+            $('cmef-corridor-host').innerHTML =
+                '<p class="cmef-empty" style="margin:10px"><strong>3D corridor unavailable.</strong>'
+                + '<span>The calendar and the issue-locked ledger are unaffected.</span></p>';
+        }
+    };
+
+    for (const tab of tabs) {
+        tab.addEventListener('click', () => show(tab.dataset.cmefView));
+    }
+}
+
 function bindCalendarControls() {
+    // Month paging deliberately PRESERVES the selected day: a calendar that
+    // wiped your selection every time you looked at next month would blank
+    // the rail, and the rail head still names the date it is showing.
     $('cmef-calendar-prev').addEventListener('click', () => {
-        state.calendarStartMs -= 7 * DAY_MS;
-        state.selectedDayMs = null;
-        $('cmef-calendar-detail').dataset.userCollapsed = 'true';
+        state.calendarMonthMs = addUtcMonths(state.calendarMonthMs, -1);
         renderCalendar();
     });
     $('cmef-calendar-next').addEventListener('click', () => {
-        state.calendarStartMs += 7 * DAY_MS;
-        state.selectedDayMs = null;
-        $('cmef-calendar-detail').dataset.userCollapsed = 'true';
+        state.calendarMonthMs = addUtcMonths(state.calendarMonthMs, 1);
         renderCalendar();
     });
     $('cmef-calendar-today').addEventListener('click', () => {
-        state.calendarStartMs = utcDayStart(Date.now());
-        state.selectedDayMs = state.calendarStartMs;
+        const today = utcDayStart(Date.now());
+        state.calendarMonthMs = utcMonthStart(today);
+        state.selectedDayMs = today;
         delete $('cmef-calendar-detail').dataset.userCollapsed;
         renderCalendar();
     });
@@ -826,10 +984,11 @@ function bindChartPointer() {
 }
 
 export async function initCmeForecastPage() {
-    state.calendarStartMs = utcDayStart(Date.now());
+    state.calendarMonthMs = utcMonthStart(Date.now());
     renderCalendar();
     bindRangeControls();
     bindCalendarControls();
+    bindViewTabs();
     bindChartPointer();
     $('cmef-refresh').addEventListener('click', () => loadForecasts({ manual: true }));
     state.resizeObserver = new ResizeObserver(drawChart);

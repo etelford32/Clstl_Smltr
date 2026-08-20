@@ -12,6 +12,7 @@
  */
 
 export * from './carrington.js';
+export * from './farside-clock.js';
 export * from './farside-config.js';
 export * from './farside-feed.js';
 export * from './farside-detect.js';
