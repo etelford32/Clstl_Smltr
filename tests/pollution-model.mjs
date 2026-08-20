@@ -8,7 +8,10 @@
  *      (that identity is what makes uniform fields advect exactly).
  *   2. IDW — exact-ish on a sample, bounded by the sample range, and remote
  *      cells fall back to background instead of borrowing another
- *      continent's smog.
+ *      continent's smog. The precomputed operator (buildIdwOperator, which
+ *      makes the Pollution Lab's 145-frame scrub affordable) is pinned
+ *      BIT-IDENTICAL to the one-shot path — an approximate match would let a
+ *      scrubbed frame disagree with the live field it sits beside.
  *   3. k-means — deterministic across calls, finds two well-separated
  *      hotspot blobs, spherical centroids don't tear across the
  *      antimeridian, chooseHotspotCount lands on 2 for a 2-blob world.
@@ -23,7 +26,7 @@
 
 import {
     makeGrid, cellLat, cellLon, sampleGrid, globalMean, haversineKm,
-    idwGrid, supportAt, kmeansHotspots, chooseHotspotCount, windToUV, stepTransport,
+    idwGrid, buildIdwOperator, supportAt, kmeansHotspots, chooseHotspotCount, windToUV, stepTransport,
     inferSteadySources, aodFromPm25, directForcingWm2, forcingGridFromPm25,
     equilibriumDeltaT, PM25_PER_AOD, FORCING_PER_AOD_WM2,
 } from '../js/pollution-model.js';
@@ -256,8 +259,70 @@ const near = (a, b, tol, msg) => assert(Math.abs(a - b) <= tol, `${msg} (got ${a
 }
 
 
+// ── 6. IDW operator — the history scrub's fast path ─────────────────────────
+{
+    // Deterministic pseudo-random sites so a failure is reproducible.
+    let seed = 987654321;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    const W = 36, H = 18;
+    const sites = [];
+    for (let i = 0; i < 60; i++) sites.push({ lat: rnd() * 160 - 80, lon: rnd() * 360 - 180 });
+
+    for (const opts of [
+        { background: 3, maxDistKm: 2500 },
+        { background: 0, maxDistKm: 2500 },
+        { background: 5, maxDistKm: 600 },     // sparse support: many bg-only cells
+        { background: 3, maxDistKm: 2500, power: 3 },
+    ]) {
+        const op = buildIdwOperator(sites, W, H, opts);
+        let mismatches = 0, supportMismatches = 0;
+        for (let frame = 0; frame < 3; frame++) {
+            const values = sites.map(() => rnd() * 150);
+            const oneShot = idwGrid(sites.map((s2, i) => ({ ...s2, value: values[i] })), W, H, opts);
+            const viaOp = op.apply(values, opts);
+            for (let i = 0; i < W * H; i++) {
+                // Object.is, not a tolerance: the operator reproduces the
+                // ORIGINAL arithmetic order, so exact equality is the contract.
+                if (!Object.is(oneShot.data[i], viaOp.data[i])) mismatches++;
+                if (!Object.is(oneShot.nearestKm[i], viaOp.nearestKm[i])) supportMismatches++;
+            }
+        }
+        const tag = `bg=${opts.background} maxDist=${opts.maxDistKm} power=${opts.power ?? 2}`;
+        assert(mismatches === 0, `operator is bit-identical to idwGrid (${tag}, ${mismatches} cells differ)`);
+        assert(supportMismatches === 0, `operator reports identical support (${tag})`);
+    }
+
+    // A gap at one site must not poison the cells that site contributes to:
+    // its weight is dropped, the denominator shrinks, the neighbours carry it.
+    const op = buildIdwOperator(sites, W, H, { background: 3 });
+    const withGap = sites.map(() => 40);
+    withGap[0] = NaN;
+    const gapped = op.apply(withGap, { background: 3 });
+    assert([...gapped.data].every(Number.isFinite),
+        'a NaN sample leaves every cell finite (gaps drop weight, they do not poison)');
+    // Renormalization check. With every surviving value equal to 40 AND the
+    // background set to 40, every cell must come out at 40 — supported cells
+    // through the weighted mean, edge cells through the background fade,
+    // unsupported cells through the fill. Any cell that misses means the
+    // dropped weight came out of the numerator but not the denominator, which
+    // is exactly how a gap turns into a spurious dip.
+    const flat = buildIdwOperator(sites, W, H, { background: 40 }).apply(withGap, { background: 40 });
+    let worst = 0;
+    for (let i = 0; i < W * H; i++) worst = Math.max(worst, Math.abs(flat.data[i] - 40));
+    assert(worst < 1e-3,
+        `dropping a gap renormalizes: a uniform 40 µg/m³ world stays 40 (worst cell off by ${worst})`);
+
+    // An operator over no sites is background everywhere and unsupported.
+    const empty = buildIdwOperator([], W, H, { background: 7 });
+    const eg = empty.apply([], { background: 7 });
+    assert([...eg.data].every(v => v === 7), 'an operator with no sites yields pure background');
+    assert([...eg.nearestKm].every(v => v === Infinity), 'an operator with no sites claims no support');
+    assert(empty.nnz === 0, 'an operator with no sites stores no weights');
+}
+
+
 if (process.exitCode) {
     console.error(`pollution-model: FAILED (${checks} checks)`);
 } else {
-    console.log(`pollution-model: ${checks} checks passed — grids, IDW, k-means, transport, climate estimates`);
+    console.log(`pollution-model: ${checks} checks passed — grids, IDW (+ operator), k-means, transport, climate estimates`);
 }
