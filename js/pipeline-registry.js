@@ -331,6 +331,13 @@ export const PIPELINES = [
       warnAgeS:  2 * 3600, critAgeS: 6 * 3600,
       notes: 'One batched request: current AQI/PM for the top ~100 major-cities.js metros. Powers the EarthView Pollution Centers layer + Pollution Lab. 200 + freshness:stale + empty list when CAMS is down.' },
 
+    { id: 'air-quality-history', label: 'CAMS PM2.5 history window',
+      endpoint: '/api/air-quality/history',
+      category: 'environment', upstream: 'Open-Meteo · CAMS Global',
+      cadence_s: 3_600, prewarm: 'medium',
+      warnAgeS:  3 * 3600, critAgeS: 12 * 3600,
+      notes: 'The Pollution Lab time machine: one batched multi-hour request returns a PM2.5 series for the top 60 metros PLUS the sparse global background grid, resampled onto ONE shared time axis (window.nowIndex splits reanalysis from forecast). PM2.5 only on purpose — AQI is derived client-side through our own EPA table. Partial upstream stays 200 but reports coverage<1 and drops to freshness:degraded below 0.5, so a history that scrubs to blank frames cannot score green.' },
+
     { id: 'pollution-sources', label: 'Emission sources (Climate TRACE)',
       endpoint: '/api/pollution/sources',
       category: 'environment', upstream: 'Climate TRACE API (beta)',
