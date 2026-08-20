@@ -57,11 +57,14 @@
  * physics — it is asking "what does SWPC say about the Earth-side region
  * that is the same size rank as this far-side one?".
  *
- * Field-name note: the upstream spellings could not be verified from the
- * build environment (services.swpc.noaa.gov is unreachable behind the
- * egress proxy), so `readProbability` accepts the documented spelling and
- * the obvious variants and returns null rather than guessing when none is
- * present. A null result must render as "unavailable", never as zero.
+ * /api/noaa/regions relays those fields and normalizes their names (see
+ * api/_lib/noaa-regions.js), so in practice this module reads one stable
+ * shape. It still accepts the obvious variants, because the route's own
+ * candidate list could not be verified against the live feed from the build
+ * environment (services.swpc.noaa.gov is unreachable behind the egress
+ * proxy) — the route reports what it actually matched in `field_map`, and a
+ * probability that never arrives stays null here. A null result must render
+ * as "unavailable", never as zero.
  */
 
 import { SYNODIC_PERIOD_DAYS } from './carrington.js';

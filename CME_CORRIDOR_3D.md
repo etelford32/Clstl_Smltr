@@ -123,21 +123,44 @@ size currently carry an N% daily chance of an M-class flare".
   into the most flare-prone one and inverted the entire size ordering.
 - It never touches any number in the CME arrival forecast.
 
-**Unverified upstream field names.** `services.swpc.noaa.gov` is unreachable
-behind this build environment's egress proxy, so the exact spellings of the
-per-region probability fields could not be confirmed. `readProbability`
-accepts the documented name plus obvious variants and returns `null` when none
-is present. **Confirm against the live feed before trusting the chip**: if the
-names differ, the chip reads `flare base rate · down` and no caption prints —
-honest, but the feature is off. `api/noaa/regions.js` currently does not relay
-the probability fields either; it needs them added for this to light up in
-production.
+### The relay
+
+`api/noaa/regions.js` relays SWPC's per-region C/M/X (and proton)
+probabilities; field resolution lives in the pure `api/_lib/noaa-regions.js`
+(node: `tests/noaa-regions.mjs`). Values are relayed **as published** — whole
+percents — because the percent-vs-fraction call has to be made once over the
+whole feed, and that decision already lives in `detectProbabilityScale`.
+
+**The upstream key spellings could not be verified from the build
+environment** (`services.swpc.noaa.gov` is blocked by the network egress
+proxy). Rather than guess one name and fail silently, each field resolves from
+a candidate list and the route reports what it matched:
+
+```
+curl -s https://parkersphysics.com/api/noaa/regions | jq '.data.field_map, .data.unmapped_keys, .data.probability_coverage'
+```
+
+- `field_map` — which upstream key fed each output field, or `null`.
+- `unmapped_keys` — upstream keys nothing claimed. If a probability entry is
+  `null` while the real name shows up here, add it to the head of
+  `FIELD_CANDIDATES` and drop the candidates that never hit.
+- `probability_coverage` — fraction of regions carrying both an area and an
+  M-class probability. This is the number to watch; it reads 0 both when SWPC
+  stops publishing and when our candidate list is wrong, and `field_map`
+  separates the two.
+
+When no probability field matches at all the route emits top-level
+`freshness: 'stale'` plus a `note`, so `status.html` flags it rather than
+scoring a content-free 200 as healthy — and the corridor logs the note to the
+console. Until it matches, the chip reads `flare base rate · down` and no
+caption prints: honest, but the feature is off.
 
 ## Tests
 
 ```
 node tests/corridor-model.mjs        # frame identity, train assembly, windows
 node tests/flare-climatology.mjs     # rank transform, Poisson, and the refusals
+node tests/noaa-regions.mjs          # the relay, its diagnostics, and the handoff
 npx playwright test tests/cme-corridor.spec.js
 ```
 

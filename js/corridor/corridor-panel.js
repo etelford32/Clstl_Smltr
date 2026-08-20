@@ -355,7 +355,8 @@ function build(el, opts) {
         // Flare base rate — context only, and allowed to be absent.
         try {
             const res = await fetch('/api/noaa/regions', { headers: { accept: 'application/json' } });
-            const rows = res.ok ? (await res.json())?.data?.regions : null;
+            const payload = res.ok ? await res.json() : null;
+            const rows = payload?.data?.regions;
             if (rows?.length) {
                 state.tracks = attachFlareClimatology(state.tracks, rows);
                 // Null for every track means the feed answered but carried no
@@ -363,6 +364,13 @@ function build(el, opts) {
                 state.feeds.regions = state.tracks.some((t) => t.flare) ? 'live' : 'down';
             } else {
                 state.feeds.regions = 'down';
+            }
+            // The route self-reports a schema mismatch (api/_lib/noaa-regions.js).
+            // Surface it: "no probabilities matched" and "SWPC is down" look
+            // identical from the chip alone, and only one of them is our bug.
+            if (payload?.data?.note) {
+                console.info('[corridor] flare base rate:', payload.data.note,
+                    'unmapped upstream keys:', payload.data.unmapped_keys);
             }
         } catch (e) {
             state.feeds.regions = 'down';
