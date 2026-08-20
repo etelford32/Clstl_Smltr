@@ -140,45 +140,139 @@ export function globalMean(grid) {
  * `supportAt(grid, lat, lon)` for a point probe. Cells with no sample in
  * range report `Infinity`, which is the honest answer, not a large number.
  */
-export function idwGrid(samples, w, h, {
+export function idwGrid(samples, w, h, opts = {}) {
+    const pts = (samples ?? []).filter(s =>
+        Number.isFinite(s.lat) && Number.isFinite(s.lon) && Number.isFinite(s.value));
+    const op = buildIdwOperator(pts, w, h, opts);
+    return op.apply(pts.map(p => p.value), opts);
+}
+
+/**
+ * Precompute the IDW weights for a FIXED set of sample POSITIONS, so a series
+ * of fields measured at the same places can be built without re-deriving the
+ * geometry each time.
+ *
+ * WHY THIS EXISTS. The Pollution Lab scrubs ~145 hourly frames of CAMS
+ * history, all sampled at the same ~105 sites. Calling `idwGrid` per frame
+ * recomputes 2,592 cells × 145 haversines = 376k trig-heavy distances per
+ * frame — ~45 M for the window, seconds of blocked main thread. But every one
+ * of those distances is a function of POSITION ONLY: the weights, the
+ * denominator, and the edge fade are identical for every hour. Factor them
+ * out once and each frame becomes a sparse matrix–vector product (~26k
+ * multiply-adds), which is roughly two orders of magnitude cheaper.
+ *
+ * `idwGrid` is a one-shot call through this operator, so there is exactly ONE
+ * interpolation implementation on the page and the scrubbed frames cannot
+ * drift from the live one. The arithmetic is kept in the ORIGINAL order —
+ * accumulate `num`, divide by `den`, then fade — so a frame built through the
+ * operator is bit-identical to the same frame built by `idwGrid`, which
+ * tests/pollution-model.mjs asserts exactly rather than approximately.
+ *
+ * Sample values are ignored here; pass them to `apply`.
+ *
+ * @param {{lat:number, lon:number}[]} sites
+ * @returns {{ w, h, sampleCount, maxDistKm, nearestKm: Float32Array,
+ *             apply(values: ArrayLike<number>, opts?: {background?: number}): object }}
+ */
+export function buildIdwOperator(sites, w, h, {
     power = 2,
     maxDistKm = 2500,
-    background = 0,
 } = {}) {
-    const grid = makeGrid(w, h, background);
-    // Distance to the nearest sample, per cell. Infinity where nothing is in
-    // range — that cell holds `background` and is not an interpolated value.
-    grid.nearestKm = new Float32Array(w * h).fill(Infinity);
-    const pts = samples.filter(s =>
-        Number.isFinite(s.lat) && Number.isFinite(s.lon) && Number.isFinite(s.value));
-    grid.sampleCount = pts.length;
-    grid.maxDistKm = maxDistKm;
-    if (!pts.length) return grid;
-    const { data, nearestKm } = grid;
-    for (let y = 0; y < h; y++) {
-        const lat = cellLat(y, h);
-        for (let x = 0; x < w; x++) {
-            const lon = cellLon(x, w);
-            let num = 0, den = 0, nearest = Infinity;
-            for (const p of pts) {
-                const d = haversineKm(lat, lon, p.lat, p.lon);
-                if (d < nearest) nearest = d;
-                if (d > maxDistKm) continue;
-                // +1 km softening keeps the weight finite on top of a sample.
-                const wgt = 1 / Math.pow(d + 1, power);
-                num += wgt * p.value;
-                den += wgt;
-            }
-            if (den > 0) {
-                // Fade toward background near the influence edge so the
-                // field doesn't step discontinuously at maxDistKm.
-                const t = Math.min(1, nearest / maxDistKm);
-                data[y * w + x] = (num / den) * (1 - t * t) + background * t * t;
-                nearestKm[y * w + x] = nearest;
+    const n = w * h;
+    const pts = (sites ?? []).filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lon));
+    const nearestKm = new Float32Array(n).fill(Infinity);
+    // CSR sparse rows: cell i draws on sites index[start[i] … start[i+1]).
+    const start = new Int32Array(n + 1);
+    // `bgFrac` is t² — the share of the cell that comes from `background`
+    // rather than from the samples. Stored as t² (not as 1−t²) so `apply`
+    // can evaluate the ORIGINAL expression `(num/den)·(1−t²) + bg·t²`
+    // literally: reconstructing t² from a stored 1−t² loses the low bits for
+    // tiny t, and bit-identity with idwGrid is the property under test.
+    const bgFrac = new Float64Array(n);
+    const denom = new Float64Array(n);
+
+    const idx = [];
+    const wgts = [];
+    if (pts.length) {
+        for (let y = 0; y < h; y++) {
+            const lat = cellLat(y, h);
+            for (let x = 0; x < w; x++) {
+                const i = y * w + x;
+                start[i] = idx.length;
+                const lon = cellLon(x, w);
+                let den = 0, nearest = Infinity;
+                for (let p = 0; p < pts.length; p++) {
+                    const d = haversineKm(lat, lon, pts[p].lat, pts[p].lon);
+                    if (d < nearest) nearest = d;
+                    if (d > maxDistKm) continue;
+                    // +1 km softening keeps the weight finite on top of a sample.
+                    const wgt = 1 / Math.pow(d + 1, power);
+                    idx.push(p);
+                    wgts.push(wgt);
+                    den += wgt;
+                }
+                if (den > 0) {
+                    // Fade toward background near the influence edge so the
+                    // field doesn't step discontinuously at maxDistKm.
+                    const t = Math.min(1, nearest / maxDistKm);
+                    bgFrac[i] = t * t;
+                    denom[i] = den;
+                    nearestKm[i] = nearest;
+                } else {
+                    // No contributors: rewind the row so the cell is empty and
+                    // `apply` short-circuits it to pure background.
+                    idx.length = start[i];
+                    wgts.length = start[i];
+                }
             }
         }
     }
-    return grid;
+    start[n] = idx.length;
+
+    const index = Int32Array.from(idx);
+    const weight = Float64Array.from(wgts);
+
+    return {
+        w, h,
+        sampleCount: pts.length,
+        maxDistKm,
+        nearestKm,
+        /** Non-zero weight entries — the operator's real cost, worth logging. */
+        nnz: index.length,
+        /**
+         * Build one field from one value vector, aligned index-for-index with
+         * the `sites` this operator was built from. A non-finite value is
+         * treated as absent for that cell (its weight is dropped and the
+         * denominator shrinks) rather than poisoning the whole cell with NaN —
+         * a history frame with a gap at one city must still render.
+         */
+        apply(values, { background = 0 } = {}) {
+            const grid = makeGrid(w, h, background);
+            // Support is position-only, so every frame from one operator SHARES
+            // this array instead of copying 10 kB per hour. Read-only by
+            // contract — supportAt() only ever reads it.
+            grid.nearestKm = nearestKm;
+            grid.sampleCount = pts.length;
+            grid.maxDistKm = maxDistKm;
+            const { data } = grid;
+            for (let i = 0; i < n; i++) {
+                const s = start[i], e = start[i + 1];
+                if (e === s) continue;                    // background only
+                let num = 0, den = denom[i];
+                let dropped = 0;
+                for (let k = s; k < e; k++) {
+                    const v = values[index[k]];
+                    if (!Number.isFinite(v)) { dropped += weight[k]; continue; }
+                    num += weight[k] * v;
+                }
+                if (dropped) den -= dropped;
+                if (!(den > 0)) continue;                 // every contributor absent
+                const t2 = bgFrac[i];
+                data[i] = (num / den) * (1 - t2) + background * t2;
+            }
+            return grid;
+        },
+    };
 }
 
 /**

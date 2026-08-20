@@ -4,6 +4,11 @@
  *   api/wildfires/events.js     parseEvents      (NASA EONET v3 wildfires)
  *   api/air-quality/centers.js  selectCenterCities + normalizeCenters
  *                               (batched Open-Meteo CAMS city sample)
+ *   api/air-quality/history.js  buildHistorySites
+ *                               (the coordinate list the multi-hour scrub
+ *                                request is joined to BY POSITION — see the
+ *                                planWindow/normalizeHistory arithmetic in
+ *                                tests/pollution-timeseries.mjs)
  *
  * Both upstreams are keyless public feeds; these tests pin the NORMALIZERS
  * against representative payload shapes so a silent upstream format drift
@@ -17,6 +22,7 @@
 
 import { parseEvents } from '../api/wildfires/events.js';
 import { selectCenterCities, normalizeCenters } from '../api/air-quality/centers.js';
+import { buildHistorySites } from '../api/air-quality/history.js';
 import {
     normalizeOpenAq, checkParameterMeta, STATION_SPECIES,
 } from '../api/air-quality/stations-intl.js';
@@ -198,8 +204,40 @@ function assert(cond, msg) {
     assert(buildResiduals([], []).stats === null, 'no pairs → null stats, not NaN');
 }
 
+// ── History site list (api/air-quality/history.js) ──────────────────────────
+{
+    // POSITION IS THE JOIN KEY between this list and the upstream response, so
+    // the split point between cities and background must be exactly where the
+    // route says it is. Get this wrong and Delhi's series is drawn at a CAMS
+    // background cell in the Pacific — with no error anywhere.
+    const { sites, cityCount } = buildHistorySites();
+    assert(cityCount > 0 && cityCount <= 60, `history carries at most 60 metros (got ${cityCount})`);
+    assert(sites.length > cityCount, 'the background grid is appended after the cities');
+    assert(sites.slice(0, cityCount).every(s2 => s2.meta.kind === 'city'),
+        'every site before the split is a city');
+    assert(sites.slice(cityCount).every(s2 => s2.meta.kind === 'background'),
+        'every site after the split is a background cell');
+    assert(sites.every(s2 => Number.isFinite(s2.lat) && Number.isFinite(s2.lon)
+        && Math.abs(s2.lat) <= 90 && Math.abs(s2.lon) <= 180),
+        'every history coordinate is a real lat/lon');
+    assert(sites.slice(0, cityCount).every(s2 => typeof s2.meta.name === 'string' && s2.meta.name),
+        'every history city carries the name the chart labels it with');
+
+    // The cities are the SAME top-population cut the live centers feed uses,
+    // so the scrubbed field and the live field sample the same places.
+    const live = selectCenterCities().slice(0, cityCount).map(c => c.n);
+    assert(sites.slice(0, cityCount).map(s2 => s2.meta.name).join() === live.join(),
+        'history cities are the live centers feed\'s own top-N, in the same order');
+
+    // Small enough to stay one upstream request: the whole economic argument
+    // for this route is one batched fetch per CDN window.
+    const qs = `latitude=${sites.map(s2 => s2.lat).join(',')}&longitude=${sites.map(s2 => s2.lon).join(',')}`;
+    assert(qs.length < 6000, `the batched coordinate query stays small (${qs.length} chars)`);
+}
+
+
 if (process.exitCode) {
     console.error(`pollution-feeds: FAILED (${checks} checks)`);
 } else {
-    console.log(`pollution-feeds: ${checks} checks passed — EONET wildfire + CAMS city-center + OpenAQ intl normalizers`);
+    console.log(`pollution-feeds: ${checks} checks passed — EONET wildfire + CAMS city-center/history + OpenAQ intl normalizers`);
 }
