@@ -6,8 +6,20 @@
  *
  * T3 endpoint (15-minute cadence).
  * Returns the full active region list — the file is small so no slicing needed.
+ *
+ * Relays SWPC's per-region C/M/X flare probabilities (the numbers on the Solar
+ * Region Summary) alongside the position and classification fields. They are
+ * what js/farside/flare-climatology.js rank-matches a far-side detection
+ * against, and they were previously dropped on the floor here.
+ *
+ * Field resolution and the `field_map` / `unmapped_keys` diagnostics live in
+ * api/_lib/noaa-regions.js — read that header before touching the candidate
+ * lists. Values are relayed AS PUBLISHED (whole percents); the
+ * percent-vs-fraction decision belongs to the client, once, over the whole
+ * feed.
  */
 import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+import { normalizeSolarRegions, PROBABILITY_FIELDS } from '../_lib/noaa-regions.js';
 
 export const config = { runtime: 'edge' };
 
@@ -25,29 +37,36 @@ export default async function handler() {
         return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
-    if (!Array.isArray(raw)) {
-        return jsonError('parse_error', 'Unexpected solar_regions format', { source: 'NOAA SWPC' });
+    let norm;
+    try {
+        norm = normalizeSolarRegions(raw);
+    } catch (e) {
+        return jsonError('parse_error', e.message, { source: 'NOAA SWPC' });
     }
 
-    const regions = raw
-        .filter(r => r?.region ?? r?.Region)
-        .map(r => ({
-            region:           r.region             ?? r.Region    ?? null,
-            location:         r.location           ?? r.Location  ?? null,
-            latitude_deg:     r.latitude           != null ? parseFloat(r.latitude)            : null,
-            carrington_lon_deg: r.carrington_longitude != null ? parseFloat(r.carrington_longitude) : null,
-            area:             r.area               ?? r.Area      ?? null,
-            z_class:          r.z_class            ?? r.Z         ?? null,
-            mag_class:        r.mag_class          ?? r.Mag       ?? null,
-            num_spots:        r.num_spots          ?? r.Spots     ?? null,
-        }));
+    // The region list is still real and useful without probabilities (position
+    // and area drive other consumers), so this is not an error — but the flare
+    // base rate downstream is dead without them, and a 200 with no probability
+    // in it would be scored as healthy. Say so out loud.
+    const probabilitiesMissing = PROBABILITY_FIELDS.every((f) => norm.field_map[f] === null);
 
     return jsonOk({
         source:    'NOAA SWPC solar_regions via Vercel Edge',
+        ...(probabilitiesMissing && norm.region_count ? { freshness: 'stale' } : {}),
         data: {
             updated:       new Date().toISOString(),
-            region_count:  regions.length,
-            regions,
+            region_count:  norm.region_count,
+            regions:       norm.regions,
+            // Schema diagnostics — which upstream key fed each field, what we
+            // did not claim, and how much of the list is actually usable for
+            // the flare base rate. See api/_lib/noaa-regions.js.
+            field_map:            norm.field_map,
+            unmapped_keys:        norm.unmapped_keys,
+            probability_coverage: norm.probability_coverage,
+            ...(probabilitiesMissing && norm.region_count
+                ? { note: 'No per-region flare probability field matched. Compare '
+                        + 'unmapped_keys against FIELD_CANDIDATES in api/_lib/noaa-regions.js.' }
+                : {}),
         },
     }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

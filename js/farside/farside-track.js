@@ -79,6 +79,54 @@ export function buildTracks(series) {
     return buildTracksFromFrames(framesFromSeries(series));
 }
 
+/**
+ * Re-derive the VIEWING-TIME-DEPENDENT half of a track at another instant.
+ *
+ * A track's identity — where it sits in Carrington longitude, how strong it
+ * is, how many frames saw it — is a property of the observations and does not
+ * change when you move the clock. Its central-meridian distance, its lead
+ * time, and its emergence date are properties of WHERE THE OBSERVER IS, and
+ * change continuously as L0 sweeps. Splitting the two is what lets the
+ * simulation scrub at animation rates: the expensive half (detect + link) runs
+ * once, and this runs per frame over a handful of tracks.
+ *
+ * This is also the ONE place emergence timing is computed — summarizeTrack()
+ * calls straight through to it, so the watch list, the scrubber's emergence
+ * ticks, and the globe can never quote three slightly different answers.
+ *
+ * @param {object} track   summarized track (needs lon, lat, etaBandDays)
+ * @param {number} L0      sub-Earth Carrington longitude at the instant
+ * @param {number} atMs    the instant itself (ms epoch)
+ */
+export function projectTrack(track, L0, atMs) {
+    const eta = emergenceETA(track.lon, L0);
+    return {
+        ...track,
+        cmd: eta.cmd,
+        onDisc: eta.onDisc,
+        etaDays: eta.days,
+        emergenceUTC: new Date(atMs + eta.days * 86400000).toISOString(),
+    };
+}
+
+/**
+ * Project every track to `atMs`, far-side soonest-first with already-emerged
+ * regions last.
+ *
+ * On-disc regions are KEPT rather than filtered out the way watchFilter()
+ * drops them. Scrubbing a region across the limb is the payoff of the whole
+ * page; dropping it from the list at the instant it arrives would delete the
+ * event the user was watching for. They sort last and carry onDisc so the UI
+ * can say "emerged" instead of quoting the ~27 d wait for their NEXT
+ * rotation, which is what emergenceETA correctly returns once they are past
+ * the limb.
+ */
+export function projectTracks(tracks, L0, atMs) {
+    return (tracks || [])
+        .map((t) => projectTrack(t, L0, atMs))
+        .sort((a, b) => (a.onDisc ? 1 : 0) - (b.onDisc ? 1 : 0) || a.etaDays - b.etaDays);
+}
+
 /** Collapse a track's points into a single forecast record. */
 function summarizeTrack(track, latestL0, latestTimestamp) {
     const pts = track.points;
@@ -98,24 +146,29 @@ function summarizeTrack(track, latestL0, latestTimestamp) {
     const peakStrength = Math.max(...pts.map((p) => p.strength));
     const meanConf = pts.reduce((a, p) => a + p.confidence, 0) / pts.length;
 
-    const eta = emergenceETA(lonMean, latestL0);
     const bandDays = lonScatter / SYNODIC_DEG_PER_DAY + 0.5;
-    const crossing = new Date(Date.parse(latestTimestamp) + eta.days * 86400000);
 
-    return {
+    // Time-invariant half here; the ETA half comes from projectTrack so there
+    // is exactly one implementation of the emergence projection.
+    return projectTrack({
         id: track.id,
         lon: lonMean, lat: latMean,
+        lonScatter,
         frames: pts.length,
         firstSeen: first.t, lastSeen: last.t,
         peakStrength, latestStrength: last.strength,
+        // Latest apparent footprint. Carried on the summary because the
+        // flare climatology ranks regions BY SIZE and would otherwise have to
+        // reach into `points` and pick a frame itself — two consumers, two
+        // choices of frame, two different answers.
+        areaDeg2: last.areaDeg2 ?? null,
+        peakAreaDeg2: Math.max(...pts.map((p) => p.areaDeg2 ?? 0)) || null,
         trend, confidence: meanConf,
         strong: isStrong(last),
-        cmd: eta.cmd, onDisc: eta.onDisc,
-        etaDays: eta.days, etaBandDays: bandDays,
-        emergenceUTC: crossing.toISOString(),
+        etaBandDays: bandDays,
         points: pts,
         validationCase: matchValidationCase(lonMean, latMean),
-    };
+    }, latestL0, Date.parse(latestTimestamp));
 }
 
 /** Far-side, transient-rejected, soonest-first. The panel's primary data. */

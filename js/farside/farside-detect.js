@@ -11,9 +11,22 @@
  * Input is a normalized z-score map (negative = signature, see farside-feed).
  * Output is a list of detections in Carrington coordinates with a strength
  * and a confidence score in [0,1].
+ *
+ * LONGITUDE IS AN ANGLE, and every reduction over it here has to treat it as
+ * one. The flood fill has always wrapped across the 0deg/360deg seam, but the
+ * centroid used to be a plain weighted mean of column indices: a region
+ * straddling the seam has columns near 355 AND near 5, whose arithmetic mean
+ * is ~180 -- the far side of the Sun from where the region actually is. That
+ * produced a real detection at a longitude up to 180deg wrong, and therefore
+ * an east-limb emergence forecast wrong by up to half a rotation (~13.6 d),
+ * silently, for any region near Carrington longitude 0. Centroid and bbox are
+ * both computed circularly now. tests/farside-detect.mjs pins it.
  */
 
 import { DETECT } from './farside-config.js';
+import { wrap180, wrap360 } from './carrington.js';
+
+const DEG = Math.PI / 180;
 
 /**
  * @typedef {Object} Detection
@@ -64,8 +77,13 @@ export function detectSignatures(map, opts = {}) {
             stack.push([col, row]);
             visited[start] = 1;
             let area = 0, peak = 0, sum = 0;
-            let sx = 0, sy = 0, sw = 0; // strength-weighted centroid accumulators
-            let lon0 = 360, lon1 = -360, lat0 = 90, lat1 = -90;
+            // Strength-weighted centroid. Longitude accumulates as a unit
+            // vector (cos, sin) so the mean is circular; latitude is linear
+            // because it genuinely is (no seam at the poles for a belt-limited
+            // detector).
+            let sCos = 0, sSin = 0, sy = 0, sw = 0;
+            let firstCol = col, lat0 = 90, lat1 = -90;
+            let dLonMin = 0, dLonMax = 0;   // bbox as an offset from firstCol
 
             while (stack.length) {
                 const [c, r] = stack.pop();
@@ -75,9 +93,13 @@ export function detectSignatures(map, opts = {}) {
                 sum += z;
                 if (z > peak) peak = z;
                 const lat = latMin + r;
-                // Longitude centroid via weighting; bbox in raw lon to handle wrap later.
-                sx += c * z; sy += lat * z; sw += z;
-                if (c < lon0) lon0 = c; if (c > lon1) lon1 = c;
+                const a = c * DEG;
+                sCos += Math.cos(a) * z; sSin += Math.sin(a) * z;
+                sy += lat * z; sw += z;
+                // bbox: track the signed offset from the blob's first column,
+                // so a seam-crossing blob reports [355, 5] rather than [0, 359].
+                const d = wrap180(c - firstCol);
+                if (d < dLonMin) dLonMin = d; if (d > dLonMax) dLonMax = d;
                 if (lat < lat0) lat0 = lat; if (lat > lat1) lat1 = lat;
 
                 // 4-neighbours, wrapping longitude.
@@ -97,12 +119,16 @@ export function detectSignatures(map, opts = {}) {
             if (area < o.minAreaDeg2) continue; // reject specks
 
             blobs.push({
-                lon: ((sx / sw) % nLon + nLon) % nLon,
+                lon: wrap360(Math.atan2(sSin, sCos) / DEG),
                 lat: sy / sw,
                 areaDeg2: area,
                 peak,
                 strength: sum / 100,
-                bbox: { lon0, lon1, lat0, lat1 },
+                bbox: {
+                    lon0: wrap360(firstCol + dLonMin),
+                    lon1: wrap360(firstCol + dLonMax),
+                    lat0, lat1,
+                },
             });
         }
     }

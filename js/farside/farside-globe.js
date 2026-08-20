@@ -29,34 +29,32 @@
  *     exactly as the real synodic rotation would. Earth, the east-limb arc and
  *     the sub-Earth reticle live in the world frame and stay put.
  *
+ * ROTATION IS THE SIMULATION, NOT DECORATION. This view used to spin the Sun
+ * at a fixed `SPIN_DEG_PER_SEC = 3.2` "illustrative" rate, free-running and
+ * unrelated to the L0 the markers were placed from. Within a second of
+ * loading, a marker labelled "~10.1 d" was no longer anywhere near where a
+ * 10.1-day lead time puts it, and the page had to disclaim the one thing a
+ * viewer could actually watch. Orientation now comes from setEpoch(ms) →
+ * carringtonL0(ms), so the drawn rotation IS the forecast: the Sun turns at
+ * the true synodic rate under the page's clock, and a marker reaches the blue
+ * east-limb horizon exactly when its ETA reads zero. Do not reintroduce a
+ * free-running spin term — animate the clock instead.
+ *
  * Usage (mirrors space-weather-globe.js):
  *   import { FarSideGlobe } from './farside/farside-globe.js';
  *   const globe = new FarSideGlobe(canvasEl);
  *   globe.render(map, { tracks });   // (re)build for a new map / watch list
- *   globe.start();                   // begin the animation loop
+ *   globe.setEpoch(Date.now());      // orient to an instant
+ *   globe.start();                   // begin the render loop
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { carringtonL0 } from './carrington.js';
+import { fieldCanvas } from './farside-render.js';
 
 const DEG = Math.PI / 180;
 const R = 1;                         // Sun radius in scene units
-const SPIN_DEG_PER_SEC = 3.2;        // illustrative spin (real synodic is ~13°/day)
-
-/** Same diverging ramp as farside-render.colorFor, returning [r,g,b] 0–255. */
-function rampRGB(z) {
-    if (z <= 0) {
-        const t = Math.min(-z / 4, 1);
-        return [
-            Math.round(40 + 215 * t),
-            Math.round(20 + 150 * Math.pow(t, 1.3)),
-            Math.round(60 + 30 * (1 - t)),
-        ];
-    }
-    const t = Math.min(z / 4, 1);
-    const v = Math.round(18 + 26 * t);
-    return [v, v, Math.round(40 + 30 * t)];
-}
 
 /**
  * Surface unit vector for a Carrington (lon, lat), in sunGroup-local coords.
@@ -69,24 +67,15 @@ function surface(lonDeg, latDeg) {
     return new THREE.Vector3(-Math.cos(lon) * cl, Math.sin(lat), Math.sin(lon) * cl);
 }
 
-/** Build a CanvasTexture from the far-side phase-shift field (equirectangular). */
+/**
+ * Build a CanvasTexture from the far-side phase-shift field.
+ *
+ * The pixel loop lives in farside-render.fieldCanvas — one implementation of
+ * the ramp and the latitude flip, memoized per map, shared with the flat map
+ * and the 3D corridor.
+ */
 function fieldTexture(map) {
-    const { nLon, nLat } = map.grid;
-    const data = map.data;
-    const cvs = document.createElement('canvas');
-    cvs.width = nLon; cvs.height = nLat;
-    const ctx = cvs.getContext('2d');
-    const img = ctx.createImageData(nLon, nLat);
-    for (let r = 0; r < nLat; r++) {
-        const srcRow = (nLat - 1 - r) * nLon;     // flip so +90 lat is the top row
-        for (let c = 0; c < nLon; c++) {
-            const [rr, gg, bb] = rampRGB(data[srcRow + c]);
-            const o = (r * nLon + c) * 4;
-            img.data[o] = rr; img.data[o + 1] = gg; img.data[o + 2] = bb; img.data[o + 3] = 255;
-        }
-    }
-    ctx.putImageData(img, 0, 0);
-    const tex = new THREE.CanvasTexture(cvs);
+    const tex = new THREE.CanvasTexture(fieldCanvas(map));
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     return tex;
@@ -171,6 +160,11 @@ function makeLabel(text, color = '#cdd', scale = 0.42) {
     return spr;
 }
 
+/** Marker caption: lead time, or "on disc" once the region has emerged. */
+function etaLabel(t) {
+    return t.onDisc ? 'on disc' : `~${(t.etaDays ?? 0).toFixed(1)}d`;
+}
+
 export class FarSideGlobe {
     constructor(canvas) {
         this.canvas = canvas;
@@ -187,14 +181,24 @@ export class FarSideGlobe {
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
         this.camera.position.set(2.7, 1.25, 3.4);
+        // Design framing distance — the closest the auto-fit will ever place
+        // the camera. See _fitDistance().
+        this._designDist = this.camera.position.length();
+        this._userMoved = false;
 
         this.controls = new OrbitControls(this.camera, canvas);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.08;
         this.controls.enablePan = false;
         this.controls.minDistance = 2.0;
-        this.controls.maxDistance = 9.0;
+        // Roomy enough for _fitDistance() on a square-ish canvas (~9.6). At the
+        // old 9.0 cap OrbitControls.update() clamped the auto-frame straight
+        // back in, silently re-cropping Earth on exactly the aspects the fit
+        // exists to handle.
+        this.controls.maxDistance = 14.0;
         this.controls.target.set(0, 0, 0);
+        // Hand framing over to the user the moment they grab the view.
+        this.controls.addEventListener('start', () => { this._userMoved = true; });
 
         // sunGroup carries the (fixed) B0 tilt; spinGroup is the animated
         // Carrington rotation nested inside it, so the synodic spin never
@@ -255,6 +259,18 @@ export class FarSideGlobe {
         eLab.position.set(3.1, 0.32, 0);
         this.scene.add(eLab);
 
+        // Points the auto-framing must keep on screen: the far corners of the
+        // Earth caption (the outermost thing in the scene) and the Sun's limb.
+        // Taken from the sprite's real extent rather than a guessed constant,
+        // because the caption's width depends on the rendered text metrics.
+        const hw = eLab.scale.x / 2, hh = eLab.scale.y / 2;
+        this._framePoints = [
+            new THREE.Vector3(eLab.position.x + hw, eLab.position.y + hh, 0),
+            new THREE.Vector3(eLab.position.x + hw, eLab.position.y - hh, 0),
+            new THREE.Vector3(-R * 1.25, R * 1.25, 0),
+            new THREE.Vector3(-R * 1.25, -R * 1.25, 0),
+        ];
+
         const lineGeo = new THREE.BufferGeometry().setFromPoints([
             new THREE.Vector3(R * 1.05, 0, 0), new THREE.Vector3(2.92, 0, 0),
         ]);
@@ -288,11 +304,12 @@ export class FarSideGlobe {
         // Orient the Carrington frame: tilt the axis by B0, then turn so the
         // sub-Earth point (Carrington lon = L0) faces Earth at +x.
         this.sunGroup.rotation.set(0, 0, (map.B0 || 0) * DEG);   // disc-centre heliographic-latitude tilt
-        this.spinGroup.rotation.set(0, Math.PI - (map.L0 || 0) * DEG, 0);
+        this._orient(map.L0 || 0);
 
         // Detection markers (children of spinGroup so they rotate with the surface).
         if (this._markerGroup) { this.spinGroup.remove(this._markerGroup); this._disposeGroup(this._markerGroup); }
         this._markerGroup = new THREE.Group();
+        this._labels = [];
         for (const t of this._tracks) {
             const strong = !!t.strong;
             const col = strong ? 0xffd166 : 0xffccaa;
@@ -312,13 +329,106 @@ export class FarSideGlobe {
             this._markerGroup.add(glow);
 
             // ETA label, pushed slightly off the surface.
-            const lbl = makeLabel(t.onDisc ? 'on disc' : `~${(t.etaDays ?? 0).toFixed(1)}d`, strong ? '#ffd166' : '#ffd9bf', 0.3);
+            const text = etaLabel(t);
+            const lbl = makeLabel(text, strong ? '#ffd166' : '#ffd9bf', 0.3);
             lbl.position.copy(pos.clone().multiplyScalar(1.16));
             this._markerGroup.add(lbl);
+            this._labels.push({ id: t.id, sprite: lbl, text, color: strong ? '#ffd166' : '#ffd9bf' });
         }
         this.spinGroup.add(this._markerGroup);
 
         if (!this._raf) this._renderOnce();
+    }
+
+    /**
+     * Refresh marker labels in place for re-projected tracks.
+     *
+     * Only redraws a sprite whose TEXT actually changed. Playback calls this
+     * every frame, and a label reads to one decimal — regenerating four
+     * canvas textures 60 times a second to write the same four strings is
+     * pure waste, and leaks the old textures unless each is disposed.
+     */
+    _relabel(tracks) {
+        if (!this._labels?.length) return;
+        const byId = new Map(tracks.map((t) => [t.id, t]));
+        for (const entry of this._labels) {
+            const t = byId.get(entry.id);
+            if (!t) continue;
+            const text = etaLabel(t);
+            if (text === entry.text) continue;
+            const next = makeLabel(text, entry.color, 0.3);
+            entry.sprite.material.map?.dispose();
+            entry.sprite.material.dispose();
+            entry.sprite.material = next.material;
+            entry.sprite.scale.copy(next.scale);
+            entry.text = text;
+        }
+    }
+
+    /** Point the sub-Earth Carrington longitude L0 at Earth (+x). */
+    _orient(L0) {
+        this._L0 = L0;
+        this.spinGroup.rotation.set(0, Math.PI - L0 * DEG, 0);
+    }
+
+    /**
+     * Orient the Sun to a simulated instant.
+     *
+     * The ONLY way this view rotates. Tilt (B0) is refreshed too: over a full
+     * synodic rotation the disc-centre heliographic latitude moves by a
+     * degree or two, and holding it fixed would show the axis nodding back to
+     * the load-time value whenever a new map arrives.
+     *
+     * @param {number} epochMs
+     * @param {object} [opts] { tracks } — re-label markers with fresh ETAs
+     */
+    setEpoch(epochMs, opts = {}) {
+        const { L0, B0 } = carringtonL0(new Date(epochMs));
+        this.sunGroup.rotation.set(0, 0, B0 * DEG);
+        this._orient(L0);
+        if (opts.tracks) this._relabel(opts.tracks);
+        if (!this._raf) this._renderOnce();
+        return this;
+    }
+
+    /**
+     * Dolly out until everything in `_framePoints` is inside the frustum.
+     *
+     * PerspectiveCamera's `fov` is VERTICAL, so horizontal coverage shrinks as
+     * the canvas gets taller relative to its width. Earth sits way out at world
+     * x = 3.1 with a caption beyond it, and on a narrow canvas (a phone, or
+     * simply a taller panel) it slides out of shot — the sight line runs to the
+     * edge and stops, which reads as a rendering bug.
+     *
+     * Tested against the real frustum rather than solved analytically: the
+     * camera is OFF-AXIS (it looks at the origin from above and to the side),
+     * so "half the scene width over tan(hFov/2)" is not the answer and quietly
+     * under-shoots on square-ish canvases — which is exactly where the problem
+     * lives.
+     *
+     * Monotone by design: never closer than the hand-tuned design framing, only
+     * further back when the aspect demands it. Fitting a bounding sphere at the
+     * origin instead would be "correct" and would shrink the Sun to a dot,
+     * throwing away the composition this view is built around.
+     */
+    _frameToFit() {
+        if (!this._framePoints) return;
+        const dir = this.camera.position.clone().normalize();
+        const frustum = new THREE.Frustum();
+        const mat = new THREE.Matrix4();
+        let d = this._designDist;
+        for (let i = 0; i < 26; i++) {
+            this.camera.position.copy(dir).multiplyScalar(d);
+            this.camera.lookAt(this.controls.target);
+            this.camera.updateMatrixWorld();
+            frustum.setFromProjectionMatrix(mat.multiplyMatrices(
+                this.camera.projectionMatrix, this.camera.matrixWorldInverse));
+            if (this._framePoints.every((p) => frustum.containsPoint(p))) return;
+            d *= 1.07;
+            if (d > this.controls.maxDistance) { d = this.controls.maxDistance; break; }
+        }
+        this.camera.position.copy(dir).multiplyScalar(d);
+        this.camera.lookAt(this.controls.target);
     }
 
     _resize() {
@@ -327,6 +437,9 @@ export class FarSideGlobe {
         this.renderer.setSize(w, h, false);
         this.camera.aspect = w / Math.max(h, 1);
         this.camera.updateProjectionMatrix();
+        // Only auto-frame until the user takes the controls — re-dollying
+        // after someone has deliberately zoomed in would fight them.
+        if (!this._userMoved) this._frameToFit();
         if (!this._raf) this._renderOnce();
     }
 
@@ -335,15 +448,14 @@ export class FarSideGlobe {
         this.renderer.render(this.scene, this.camera);
     }
 
+    /**
+     * Render loop. It advances NOTHING — orientation belongs to setEpoch().
+     * It exists so OrbitControls damping stays smooth while the user drags.
+     */
     start() {
         if (this._raf) return this;
-        this._last = performance.now();
-        const loop = (now) => {
+        const loop = () => {
             this._raf = requestAnimationFrame(loop);
-            const dt = Math.min((now - this._last) / 1000, 0.1);
-            this._last = now;
-            // Gentle synodic spin: regions cross the +z east limb into the near side.
-            this.spinGroup.rotation.y += SPIN_DEG_PER_SEC * DEG * dt;
             this.controls.update();
             this.renderer.render(this.scene, this.camera);
         };
