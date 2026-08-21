@@ -97,7 +97,16 @@ test.describe('simulations catalog', () => {
     });
 
     test('the nav reaches the catalog and marks it active', async ({ page }) => {
-        await page.goto('/index.html', { waitUntil: 'load' });
+        // 1600, not the config's default 1280 — the bar collapses to the
+        // burger at ≤1280 (js/nav-styles.css), so the link is inside a closed
+        // panel at the default size. tests/nav-responsive.spec.js covers the
+        // burger path.
+        await page.setViewportSize({ width: 1600, height: 900 });
+        // pricing.html, not index.html: the home page runs a live 3D
+        // magnetosphere and its `load` event trails the nav by tens of
+        // seconds. Any page mounts the same nav.
+        await page.goto('/pricing.html', { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('nav a.nav-item[href="/simulations.html"]');
         const link = page.locator('nav a.nav-item[href="/simulations.html"]');
         await expect(link).toHaveCount(1);
         await expect(link).toHaveText('Simulations');
@@ -105,23 +114,5 @@ test.describe('simulations catalog', () => {
         await link.click();
         await page.waitForURL('**/simulations.html');
         await expect(page.locator('nav a.nav-item[href="/simulations.html"]')).toHaveClass(/active/);
-    });
-
-    test('the nav bar keeps Sign Up on-screen at common desktop widths', async ({ page }) => {
-        // Regression gate for the 2026-08 measurement: the bar is
-        // flex-wrap:nowrap over a body that does not scroll horizontally, so
-        // anything past the right edge is UNREACHABLE, not merely clipped. The
-        // 320px PRO promo used to hold its full width down to 1280px and push
-        // "Sign Up Free" off-screen at 1440. See the note on the 1700px
-        // breakpoint in js/nav-styles.css.
-        await page.goto('/simulations.html', { waitUntil: 'load' });
-        await page.waitForSelector('.nav-signup');
-
-        for (const width of [1440, 1600, 1920]) {
-            await page.setViewportSize({ width, height: 900 });
-            const right = await page.evaluate(() =>
-                document.querySelector('.nav-signup').getBoundingClientRect().right);
-            expect(right, `Sign Up is off-screen at ${width}px`).toBeLessThanOrEqual(width);
-        }
     });
 });

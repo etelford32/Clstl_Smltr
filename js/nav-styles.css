@@ -77,19 +77,19 @@ nav {
  * viewport — the primary conversion CTA was off-screen on the single most
  * common laptop width, and had been for as long as the bar has had seven
  * dropdowns. A 320px marketing pill must not evict the button it is trying to
- * drive traffic to. Collapsing to the compact "PRO" chip frees 238px, which
- * clears 1440px and up.
+ * drive traffic to. Collapsing to the compact "PRO" chip frees 238px.
  *
- * NOT FIXED, and deliberately so: 1025–1366px still overflows (measured: 62px
- * signed out, 88px signed in, at 1366). The promo is already fully collapsed
- * there, so no further squeezing is available — closing that band needs a
- * structural call nobody has made yet (raise the 1024px burger breakpoint,
- * let `.nav-menu` scroll, or carry fewer than seven dropdowns). Don't "fix" it
- * by re-lowering this threshold; that trades a visible CTA for promo copy.
+ * This is the top tier of a three-tier ladder; the other two live below:
+ *   ≥1520px          full bar, chip promo (full promo text from 1700)
+ *   1281–1519px      compact bar, no promo chip
+ *   ≤1280px          burger
+ * Together they cover every width in every auth state. Don't re-lower this
+ * threshold on its own; that trades a visible CTA for promo copy.
  *
- * If you add another top-level nav item, re-measure: the check is that
- * `.nav-signup`'s right edge stays inside the viewport at 1440/1600/1920.
- * tests/simulations-catalog.spec.js pins exactly that.
+ * If you add another top-level nav item, re-measure: the check is that the
+ * last element's right edge stays inside the viewport at 1281/1440/1520/1920,
+ * signed out AND as admin (the widest bar — bell + SUPER badge + Sign Out).
+ * tests/nav-responsive.spec.js pins exactly that.
  */
 @media (max-width: 1700px) {
     .nav-pro-text { display: none; }
@@ -248,7 +248,9 @@ nav {
     border-radius: 5px; color: #fff; padding: 8px 9px;
     cursor: pointer; line-height: 0; transition: background .2s;
     flex-direction: column; gap: 4px; align-items: center; justify-content: center;
-    width: 40px; height: 36px;
+    /* 44×44 is the WCAG 2.5.8 minimum. It was 40×36, and this is the one
+       control every mobile visitor has to hit before anything else works. */
+    width: 44px; height: 44px;
 }
 .burger-line {
     display: block; width: 18px; height: 2px;
@@ -260,8 +262,50 @@ nav {
 .nav-burger.open .burger-line:nth-child(2) { opacity: 0; }
 .nav-burger.open .burger-line:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
 
-/* ── Mobile / Tablet (<=1024px) ─────────────────────────────────────────── */
-@media (max-width: 1024px) {
+/* ── Compact desktop (1281–1440px) ──────────────────────────────────────────
+ *
+ * The band between "burger" and "everything fits comfortably". The bar carries
+ * a brand, Home, Simulations, seven dropdowns, up to three utility links, the
+ * PRO chip and two auth buttons; at 1281px that is ~130px more than the
+ * viewport signed out and ~160px signed in, and because the row is
+ * `flex-wrap: nowrap` over a non-scrolling body the excess is UNREACHABLE, not
+ * merely ugly.
+ *
+ * Rather than drop a link, tighten everything: smaller gaps and padding, a
+ * slightly smaller face, a smaller brand mark, and no PRO chip (the Pricing
+ * link beside it goes to the same page — the chip is the redundant one). That
+ * buys ~280px, which covers every signed-in state across the whole band.
+ * Nothing is hidden that is not duplicated elsewhere in the bar.
+ *
+ * The band ends at 1519 rather than the ~1480 where the full-size bar starts
+ * fitting, because these widths were measured with the FALLBACK face: this
+ * repo's Google Fonts link does not resolve in the CI sandbox, so nav text was
+ * laid out in system-ui rather than Space Grotesk. The margin absorbs that
+ * uncertainty. Re-measure with fonts served before narrowing it.
+ * ─────────────────────────────────────────────────────────────────────────── */
+@media (min-width: 1281px) and (max-width: 1519px) {
+    nav { padding: 0 10px; gap: 4px; }
+    .nav-menu { gap: 2px; }
+    .nav-brand { font-size: .85rem; gap: 6px; }
+    .nav-logo-img { height: 26px; }
+    .nav-item, .nav-drop-btn { padding: 5px 7px; font-size: .73rem; }
+    .nav-utility-links { gap: 7px; }
+    .nav-util-link { font-size: .67rem; }
+    .nav-pro-promo { display: none; }
+}
+
+/* ── Mobile / Tablet / small laptop (<=1280px) ──────────────────────────────
+ *
+ * Was 1024px. Raised because the full bar cannot fit below ~1280px in any
+ * signed-in state — measured overflow ran from +12px at 1400 to +413px at
+ * 1025, and everything past the right edge is unreachable. A burger at 1280
+ * is a real trade (a 1280×800 laptop now taps to open the menu) but the
+ * alternative was a nav whose last items simply did not exist for the user.
+ *
+ * MOBILE_NAV_MAX in js/nav.js MUST match this 1280 — it gates whether hover
+ * logic may run. tests/nav-responsive.spec.js asserts they agree.
+ * ─────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 1280px) {
     .nav-burger { display: flex; }
     .nav-spacer, .nav-auth-sep { display: none; }
 
@@ -270,8 +314,16 @@ nav {
         flex-direction: row; flex-wrap: wrap; gap: 14px;
         padding: 10px 14px 4px; border-top: 1px solid rgba(255,255,255,.06); margin-top: 6px;
     }
-    .nav-util-link { font-size: .82rem; color: #aab; }
-    .nav-pro-promo { width: 100%; justify-content: center; padding: 9px 12px; font-size: .72rem; }
+    /* 44px minimum touch target (WCAG 2.5.8). These were 15px (Pricing) and
+       34px (the PRO chip) — the two smallest hit areas in the whole menu. */
+    .nav-util-link {
+        font-size: .82rem; color: #aab;
+        display: flex; align-items: center; min-height: 44px;
+    }
+    .nav-pro-promo {
+        width: 100%; justify-content: center; padding: 9px 12px;
+        font-size: .72rem; min-height: 44px; max-width: none;
+    }
     .nav-pro-text { display: inline; }
     .nav-pro-promo::after { content: none; }
 
@@ -281,8 +333,13 @@ nav {
         background: rgba(3,1,14,.98); backdrop-filter: blur(18px);
         border-bottom: 1px solid rgba(255,255,255,.1);
         padding: 8px 12px 14px; gap: 3px; z-index: 700;
-        max-height: calc(100vh - 50px); overflow-y: auto;
+        overflow-y: auto; overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
+        /* 100dvh tracks the *dynamic* viewport, so the menu is not left
+           overflowing behind a mobile browser's collapsing URL bar. The vh
+           line stays as the fallback for engines without dvh. */
+        max-height: calc(100vh - 50px);
+        max-height: calc(100dvh - 50px);
         /* Safe area for notched phones */
         padding-bottom: max(14px, env(safe-area-inset-bottom));
     }
@@ -295,23 +352,36 @@ nav {
         min-height: 44px; display: flex; align-items: center; justify-content: space-between;
     }
 
-    /* Mobile: dropdowns expand inline as accordion */
+    /* Mobile: dropdowns expand inline as an accordion.
+     *
+     * This animates `grid-template-rows: 0fr → 1fr` against the single
+     * `.nav-drop-inner` child, which resolves to the CONTENT height — there is
+     * no ceiling to outgrow.
+     *
+     * It replaces `max-height: 600px`, commented "large enough for any
+     * dropdown content". It was not: Space Weather carries 18 links and 3
+     * section headers, 1015px of content, so its bottom 415px — everything
+     * from the planetary systems down through Galaxy — was unreachable on
+     * every phone. That is the failure mode of a magic number that no test
+     * watches; tests/nav-responsive.spec.js now measures rendered vs content
+     * height for every dropdown so it cannot come back. */
     .nav-drop-menu {
         position: static; opacity: 1; visibility: visible; pointer-events: auto;
         transform: none; box-shadow: none;
         border: none; border-radius: 0;
         background: transparent; backdrop-filter: none; min-width: 0;
         margin-top: 0;
-        /* Accordion animation via max-height */
-        max-height: 0; overflow: hidden; padding: 0;
-        transition: max-height .3s ease, padding .3s ease;
+        display: grid; grid-template-rows: 0fr;
+        overflow: hidden; padding: 0;
+        transition: grid-template-rows .28s ease;
     }
+    /* min-height:0 is load-bearing: without it the child refuses to shrink
+       below its content and the collapsed state stays full height. */
+    .nav-drop-inner { min-height: 0; overflow: hidden; }
     .nav-drop-menu::before { display: none; }
 
-    .nav-drop.open .nav-drop-menu {
-        max-height: 600px; /* large enough for any dropdown content */
-        padding: 4px 0 4px 12px;
-    }
+    .nav-drop.open .nav-drop-menu { grid-template-rows: 1fr; }
+    .nav-drop.open .nav-drop-inner { padding: 4px 0 4px 12px; }
 
     .nav-drop-link {
         padding: 10px 12px;
@@ -326,6 +396,17 @@ nav {
     .nav-drop.open .nav-drop-btn:not(.active) {
         background: rgba(255,255,255,.08);
         border-color: rgba(255,200,0,.2);
+    }
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────── */
+/* The accordion and dropdown reveals are decoration; honour the OS setting.
+   Kept as transition:none rather than a shortened duration so the panel state
+   is instantaneous and cannot be mid-animation when a test or a user reads it. */
+@media (prefers-reduced-motion: reduce) {
+    .nav-drop-menu, .nav-drop-inner, .nav-caret, .burger-line, .nav-item,
+    .nav-drop-btn, .nav-drop-link, .nav-pro-promo {
+        transition: none !important;
     }
 }
 

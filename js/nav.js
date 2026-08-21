@@ -249,8 +249,47 @@ function _tierRequired(tier) {
 // have happened.
 let _globalListenersBound = false;
 
+// Width at or below which the bar collapses to the burger. MUST stay in sync
+// with the `@media (max-width: 1280px)` block in js/nav-styles.css — the CSS
+// decides what the user sees, this decides whether hover logic may run, and a
+// mismatch means hover handlers firing on an accordion (or not firing on a
+// bar). tests/nav-responsive.spec.js pins the two together.
+const MOBILE_NAV_MAX = 1280;
+
+// Timestamp of the last touchstart, used to ignore the COMPATIBILITY mouse
+// events browsers synthesize after a tap. See _canHover().
+let _lastTouchAt = 0;
+
 function _getBurger() { return document.getElementById('nav-burger'); }
 function _getMenu()   { return document.getElementById('nav-menu');  }
+
+/**
+ * May the hover-to-open dropdown behaviour run right now?
+ *
+ * THREE gates, and all three earned their place:
+ *
+ *  1. Not in burger mode. Below MOBILE_NAV_MAX the dropdowns are accordions
+ *     inside a panel; hover has no meaning there.
+ *  2. The device actually hovers. `(hover: hover) and (pointer: fine)` is
+ *     false on phones and tablets, so the whole hover path is dead code on
+ *     touch — which is the only way to be sure it cannot interfere.
+ *  3. The last input was not a touch.
+ *
+ * Gate 3 alone used to be the whole check, and it did not work. After a tap,
+ * browsers synthesize a compatibility `mousemove`, which set the flag back to
+ * 'false' BEFORE the click landed. The sequence measured on a real tap was:
+ * touchstart (flag→true) → mouseover → mouseenter (correctly skipped) →
+ * mousemove (flag→false) → click → openDrop() → mouseleave → scheduleClose().
+ * So every tap on a dropdown opened it and then closed it ~250ms later, and
+ * the mobile menu's dropdowns could not be opened at all. Hence the 800ms
+ * quiet period in the touchstart/mousemove listeners below: a mousemove that
+ * arrives on the heels of a touch is the browser talking, not the user.
+ */
+function _canHover() {
+    if (window.innerWidth <= MOBILE_NAV_MAX) return false;
+    if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return false;
+    return document.body.dataset.ppLastWasTouch !== 'true';
+}
 
 function _closeAll() {
     const menu = _getMenu();
@@ -367,9 +406,16 @@ export function initNav(activeId = '') {
             return itemId === activeId || itemId.startsWith(activeId) || activeId.startsWith(itemId);
         });
 
-        html += `<div class="nav-drop">`;
+        html += `<div class="nav-drop" data-drop="${dd.id}">`;
         html += `<button class="nav-drop-btn${anyActive ? ' active' : ''}" aria-haspopup="true" aria-expanded="false">${dd.label} <span class="nav-caret">&#9662;</span></button>`;
-        html += `<div class="nav-drop-menu" role="menu">`;
+        // `.nav-drop-inner` exists for the MOBILE accordion: the panel
+        // animates `grid-template-rows: 0fr → 1fr`, which needs exactly one
+        // grid child to size against. That replaced a `max-height: 600px`
+        // hack that silently clipped the Space Weather menu — 1015px of
+        // content, so its last 7 links were unreachable on every phone.
+        // role="none" keeps the wrapper out of the a11y tree so the links
+        // stay direct menuitem children of role="menu".
+        html += `<div class="nav-drop-menu" role="menu"><div class="nav-drop-inner" role="none">`;
 
         for (const item of dd.items) {
             if (item.section) {
@@ -413,7 +459,7 @@ export function initNav(activeId = '') {
             }
         }
 
-        html += `</div></div>`;
+        html += `</div></div></div>`;   // .nav-drop-inner / .nav-drop-menu / .nav-drop
     }
 
     // Spacer + auth
@@ -476,7 +522,42 @@ export function initNav(activeId = '') {
     }
 
     html += '</div>';
+
+    // ── Preserve the open menu across a re-render ────────────────────────
+    //
+    // initNav() re-runs on `auth-changed`, which lands ~2-3s after load once
+    // the Supabase session resolves — comfortably after a mobile visitor has
+    // tapped the burger. `nav.innerHTML = html` then replaces the menu, so
+    // the .open class went with it: the panel vanished mid-use, the burger
+    // reverted to aria-expanded="false", and — the real damage —
+    // `document.body.style.overflow` stayed 'hidden' because only _closeAll()
+    // ever clears it. Nothing reopened the menu, so nothing ever cleared the
+    // lock: the page was left permanently unscrollable on touch.
+    //
+    // Snapshot before, restore after, keyed by dropdown id rather than index
+    // so tier gating cannot shift the mapping.
+    const _prevMenu = document.getElementById('nav-menu');
+    const _wasOpen = !!_prevMenu?.classList.contains('open');
+    const _openDropIds = _wasOpen
+        ? [...nav.querySelectorAll('.nav-drop.open')].map(d => d.dataset.drop)
+        : [];
+
     nav.innerHTML = html;
+
+    if (_wasOpen) {
+        const menuEl = document.getElementById('nav-menu');
+        const burgerEl = document.getElementById('nav-burger');
+        menuEl?.classList.add('open');
+        burgerEl?.classList.add('open');
+        burgerEl?.setAttribute('aria-expanded', 'true');
+        document.body.style.overflow = 'hidden';
+        for (const id of _openDropIds) {
+            const drop = nav.querySelector(`.nav-drop[data-drop="${id}"]`);
+            if (!drop) continue;
+            drop.classList.add('open');
+            drop.querySelector('.nav-drop-btn')?.setAttribute('aria-expanded', 'true');
+        }
+    }
 
     // ── Event handlers ────────────────────────────────────────────────────
 
@@ -507,7 +588,11 @@ export function initNav(activeId = '') {
         if (e.target.closest('.nav-drop-link') || e.target.closest('.nav-item')) {
             // Only close on mobile — on desktop, dropdown link clicks
             // navigate normally and the menu goes away with the page.
-            if (window.innerWidth <= 1024) _closeAll();
+            // MOBILE_NAV_MAX, not a second hardcoded breakpoint: this used to
+            // say 1024 and silently disagreed with the CSS the moment the
+            // burger threshold moved, leaving the panel open over the page a
+            // visitor had just navigated to.
+            if (window.innerWidth <= MOBILE_NAV_MAX) _closeAll();
         }
     });
 
@@ -518,9 +603,14 @@ export function initNav(activeId = '') {
         // Track whether last interaction was touch (for hybrid devices).
         // Attached to document (not nav) so the flag survives re-renders.
         document.addEventListener('touchstart', () => {
+            _lastTouchAt = Date.now();
             document.body.dataset.ppLastWasTouch = 'true';
         }, { passive: true });
         document.addEventListener('mousemove', () => {
+            // Ignore the compatibility mousemove a browser fires just after a
+            // tap — treating it as "the user picked up a mouse" is what broke
+            // dropdowns on touch. See _canHover() for the measured sequence.
+            if (Date.now() - _lastTouchAt < 800) return;
             document.body.dataset.ppLastWasTouch = 'false';
         }, { passive: true });
 
@@ -566,21 +656,22 @@ export function initNav(activeId = '') {
             }, 250);
         }
 
-        // Desktop: hover with 250ms grace period
+        // Desktop: hover with 250ms grace period. _canHover() is what keeps
+        // this entire path off touch devices and out of the burger menu.
         drop.addEventListener('mouseenter', () => {
-            if (document.body.dataset.ppLastWasTouch !== 'true') openDrop();
+            if (_canHover()) openDrop();
         });
         drop.addEventListener('mouseleave', () => {
-            if (document.body.dataset.ppLastWasTouch !== 'true') scheduleClose();
+            if (_canHover()) scheduleClose();
         });
 
         // Keep open when hovering the dropdown menu itself
         if (dropMenu) {
             dropMenu.addEventListener('mouseenter', () => {
-                if (document.body.dataset.ppLastWasTouch !== 'true') clearTimeout(closeTimer);
+                if (_canHover()) clearTimeout(closeTimer);
             });
             dropMenu.addEventListener('mouseleave', () => {
-                if (document.body.dataset.ppLastWasTouch !== 'true') scheduleClose();
+                if (_canHover()) scheduleClose();
             });
         }
 

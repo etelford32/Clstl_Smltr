@@ -112,6 +112,35 @@ function loadBaseline() {
   }
 }
 
+/**
+ * The burger breakpoint is defined TWICE and both copies matter.
+ *
+ * js/nav-styles.css decides what the visitor sees; js/nav.js's MOBILE_NAV_MAX
+ * decides whether hover logic may run and whether tapping a link dismisses the
+ * panel. When they disagreed (CSS at 1280, JS still reading a hardcoded 1024)
+ * the panel stayed open over the page a visitor had just navigated to, on
+ * every width in between — no error, nothing in a diff.
+ *
+ * Cheap textual check, run in CI, so the pair cannot drift apart again.
+ * tests/nav-responsive.spec.js proves the behaviour; this proves the constant.
+ */
+function breakpointDrift() {
+  const js = readFileSync(join(ROOT, 'js', 'nav.js'), 'utf8');
+  const css = readFileSync(join(ROOT, 'js', 'nav-styles.css'), 'utf8');
+  const jsMax = js.match(/const MOBILE_NAV_MAX\s*=\s*(\d+)/)?.[1];
+  if (!jsMax) return 'js/nav.js no longer defines MOBILE_NAV_MAX';
+  if (!css.includes(`@media (max-width: ${jsMax}px)`)) {
+    return `js/nav.js MOBILE_NAV_MAX is ${jsMax}, but js/nav-styles.css has no `
+      + `@media (max-width: ${jsMax}px) burger block`;
+  }
+  const stray = js.match(/innerWidth\s*<=\s*(\d+)/g)?.filter(m => !m.includes(jsMax));
+  if (stray?.length) {
+    return `js/nav.js compares innerWidth against a breakpoint that is not `
+      + `MOBILE_NAV_MAX (${stray.join(', ')}) — use the constant`;
+  }
+  return null;
+}
+
 const pages = walk(ROOT).sort();
 const current = {};
 for (const p of pages) {
@@ -150,9 +179,17 @@ for (const [p, allowed] of Object.entries(baseline)) {
   }
 }
 
+const drift = breakpointDrift();
+
 console.log(`nav-lint: scanned ${pages.length} site pages`);
 console.log(`  compliant: ${pages.length - Object.keys(current).length}`);
 console.log(`  known debt (baseline): ${Object.keys(baseline).length}`);
+console.log(`  breakpoint sync: ${drift ? '✗' : 'ok'}`);
+
+if (drift) {
+  console.error(`\n❌ nav-lint FAILED — burger breakpoint drift:\n  ✗ ${drift}`);
+  process.exit(1);
+}
 
 if (notices.length) {
   console.log('\nNotices (non-blocking — baseline can shrink):');
