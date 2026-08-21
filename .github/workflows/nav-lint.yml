@@ -24,3 +24,14 @@ jobs:
           node-version: '22'
       - name: nav structural lint
         run: node scripts/lint-nav.mjs
+
+      # Same failure class as nav drift, one level up: a simulation that ships
+      # without a catalog entry is invisible on simulations.html and nothing
+      # errors. Eight of them accumulated that way before 2026-08. This gate
+      # fails when a root *.html is neither catalogued nor explicitly listed as
+      # a non-simulation, when js/nav.js links a page the catalog omits, or
+      # when simulations.html is stale against js/simulations-catalog.js.
+      # Kept in this job so the existing `nav-structural-lint` required check
+      # covers it without touching branch protection.
+      - name: simulations catalog gate
+        run: node tests/simulations-catalog.mjs
