@@ -63,8 +63,35 @@ nav {
 .nav-pro-text { overflow: hidden; text-overflow: ellipsis; }
 .nav-pro-arrow { opacity: .8; }
 
-/* Hide promo text on tighter desktops, keep the chip */
-@media (max-width: 1280px) {
+/* Hide promo text on tighter desktops, keep the chip.
+ *
+ * The threshold is 1700px, not the 1280px it used to be, because the bar is
+ * `flex-wrap: nowrap` and everything in it except `.nav-utility-links` is
+ * `flex-shrink: 0`. Once the row exceeds the viewport there is nothing left to
+ * squeeze, so the tail simply renders past the right edge — and `nav` is
+ * `overflow: visible` over a body that does not scroll horizontally, so the
+ * overflow is not merely ugly, it is UNREACHABLE.
+ *
+ * Measured signed-out on index.html (Chromium, 2026-08): the promo held its
+ * full 320px while "Sign Up Free" rendered at x=1435..1549 in a 1440px
+ * viewport — the primary conversion CTA was off-screen on the single most
+ * common laptop width, and had been for as long as the bar has had seven
+ * dropdowns. A 320px marketing pill must not evict the button it is trying to
+ * drive traffic to. Collapsing to the compact "PRO" chip frees 238px, which
+ * clears 1440px and up.
+ *
+ * NOT FIXED, and deliberately so: 1025–1366px still overflows (measured: 62px
+ * signed out, 88px signed in, at 1366). The promo is already fully collapsed
+ * there, so no further squeezing is available — closing that band needs a
+ * structural call nobody has made yet (raise the 1024px burger breakpoint,
+ * let `.nav-menu` scroll, or carry fewer than seven dropdowns). Don't "fix" it
+ * by re-lowering this threshold; that trades a visible CTA for promo copy.
+ *
+ * If you add another top-level nav item, re-measure: the check is that
+ * `.nav-signup`'s right edge stays inside the viewport at 1440/1600/1920.
+ * tests/simulations-catalog.spec.js pins exactly that.
+ */
+@media (max-width: 1700px) {
     .nav-pro-text { display: none; }
     .nav-pro-promo::after { content: 'PRO'; font-weight: 800; letter-spacing: .08em; }
 }

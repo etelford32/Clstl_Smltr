@@ -345,6 +345,20 @@ export function initNav(activeId = '') {
     // Home link
     html += `<a href="/index.html" class="nav-item${activeId === 'home' ? ' active' : ''}">Home</a>`;
 
+    // Catalog link — the complete index of every simulation we ship.
+    //
+    // Deliberately a FLAT LINK and not an eighth dropdown. The dropdowns
+    // below are a curated menu: each one is a screen's worth of the pages
+    // worth surfacing in that area, and six simulations are omitted from
+    // them entirely (the arcade game, the older black-hole labs, the WASM
+    // proving ground). simulations.html is the other thing — the full grid,
+    // all of them, generated from js/simulations-catalog.js. Nesting the
+    // whole catalog inside a menu would just be a worse version of the page.
+    //
+    // tests/simulations-catalog.mjs pins this link, so a nav refactor
+    // cannot orphan the catalog page without failing the gate.
+    html += `<a href="/simulations.html" class="nav-item${activeId === 'simulations' ? ' active' : ''}">Simulations</a>`;
+
     // Dropdown menus
     for (const dd of NAV_DROPDOWNS) {
         const anyActive = dd.items.some(i => {
