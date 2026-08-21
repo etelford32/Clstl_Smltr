@@ -277,11 +277,25 @@ nav {
  * buys ~280px, which covers every signed-in state across the whole band.
  * Nothing is hidden that is not duplicated elsewhere in the bar.
  *
- * The band ends at 1519 rather than the ~1480 where the full-size bar starts
- * fitting, because these widths were measured with the FALLBACK face: this
- * repo's Google Fonts link does not resolve in the CI sandbox, so nav text was
- * laid out in system-ui rather than Space Grotesk. The margin absorbs that
- * uncertainty. Re-measure with fonts served before narrowing it.
+ * The band ends at 1519, not the ~1480 where the full bar starts fitting,
+ * because 1520 is where the FULL-size bar (padding restored, PRO chip back)
+ * has room. Headroom measured as menu width − intrinsic row width, worst case
+ * (admin, the widest bar):
+ *
+ *              1281   1366   1440   1519 | 1520   1600
+ *   fallback   +16    +101   +175   +254 | +49    +129
+ *   Grotesk    +76    +161   +235   +314 | +117   +197
+ *
+ * Note the drop across the 1519|1520 seam — that is the compact tier ending.
+ * Both faces matter: only 6 of 84 pages load the webfont, so on the other 78
+ * the nav really does lay out in the fallback stack, and that is the row to
+ * design against. Space Grotesk is the NARROWER of the two, so the webfont
+ * pages get ~60px of margin for free.
+ *
+ * The thinnest margin in the whole ladder is admin + fallback at 1281px:
+ * +16px. One more top-level item, or a longer label, spends it. The Linux
+ * DejaVu fallback measured here is wider than Segoe UI or SF Pro, so real
+ * users have more room than that — but treat +16 as the budget.
  * ─────────────────────────────────────────────────────────────────────────── */
 @media (min-width: 1281px) and (max-width: 1519px) {
     nav { padding: 0 10px; gap: 4px; }
