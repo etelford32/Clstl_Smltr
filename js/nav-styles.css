@@ -14,6 +14,35 @@ nav {
        satellite-operator microsite) and looks different per page. */
     font-family: 'Space Grotesk', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
+/* ── Secondary <nav> elements are NOT the bar ────────────────────────────────
+ *
+ * The rule above selects the bare `nav` element, so it claims EVERY <nav> on
+ * the page — and pages use the element semantically for footer link columns,
+ * breadcrumbs, in-page section switchers. Each of those was being painted as a
+ * second sticky 50px flex bar at z-index 600.
+ *
+ * Measured on simulations.html (2026-08-25, before this reset): all three
+ * footer columns were 50px tall with their titles pulled inline beside the
+ * links, and 3 of 5 / 4 of 6 / 3 of 5 links rendered outside their own box.
+ * The site-wide count was 12 pages with a secondary <nav>. On the new section
+ * hubs it was worse than cosmetic: the in-page section switcher is a <nav>, so
+ * it became a sticky z-600 bar that painted OVER the open dropdown panel.
+ *
+ * A page cannot fix this for itself — scripts/lint-nav.mjs forbids pages from
+ * styling `nav` or `.nav-*`, and rightly so. It has to be fixed here.
+ *
+ * Scoped by ancestor rather than by narrowing the `nav` rule above: the site
+ * bar is a top-level element on all 84 pages and is never inside any of these,
+ * so this cannot reach it, and no page markup has to change. */
+:is(header, main, section, article, aside, footer, form) nav {
+    position: static; z-index: auto;
+    height: auto; min-height: 0;
+    display: block; padding: 0; gap: normal;
+    background: none; backdrop-filter: none;
+    border-bottom: none;
+    font-family: inherit;
+}
+
 .nav-brand {
     display: flex; align-items: center; gap: 8px;
     font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
@@ -99,7 +128,14 @@ nav {
 /* Hover only on devices with a real pointer (not touch) */
 @media (hover: hover) and (pointer: fine) {
     .nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color: #fff; }
-    .nav-drop-btn:hover { background: rgba(255,255,255,.16); color: #fff; }
+    /* Hovering EITHER half lights BOTH — they are one chip visually, so
+       highlighting only the piece under the pointer reads as two buttons that
+       happen to touch. The `:not(.active)` keeps the orange active gradient
+       from being overpainted by the grey hover fill. */
+    .nav-drop:hover .nav-drop-btn:not(.active),
+    .nav-drop:hover .nav-drop-btn:not(.active) + .nav-drop-toggle {
+        background: rgba(255,255,255,.16); color: #fff;
+    }
 }
 
 /* Auth buttons */
@@ -144,18 +180,48 @@ nav {
 }
 
 /* ── Dropdown menus ──────────────────────────────────────────────────────── */
-.nav-drop { position: relative; flex-shrink: 0; }
+/* TWO CONTROLS, ONE CHIP.
+ *
+ * `.nav-drop-btn` is a LINK to the section's hub page; `.nav-drop-toggle` is
+ * the menu disclosure button beside it. They are drawn as a single segmented
+ * chip — the link keeps the left radius, the caret the right — with a hairline
+ * between them so the split is discoverable rather than a surprise.
+ *
+ * Why split at all: a control that both navigates and opens a menu has no
+ * honest touch behaviour (either the menu or the link becomes unreachable).
+ * Two controls give both a real target, and in burger mode both get a full
+ * 44px row. See the SPLIT TOP-LEVEL CONTROLS note in js/nav.js. */
+.nav-drop { position: relative; flex-shrink: 0; display: inline-flex; align-items: stretch; }
 .nav-drop-btn {
-    padding: 5px 10px; background: rgba(255,255,255,.07);
-    border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+    padding: 5px 8px 5px 10px; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.12); border-right: none;
+    border-radius: 5px 0 0 5px;
     color: #ccc; font-size: .8rem; cursor: pointer; font-family: inherit;
+    text-decoration: none; display: inline-flex; align-items: center;
     transition: background .2s, border-color .2s, color .2s; white-space: nowrap;
 }
-.nav-drop-btn.active { background: linear-gradient(45deg, #ff8c00, #ffd700); border-color: #ff8c00; color: #000; font-weight: 600; }
+.nav-drop-toggle {
+    padding: 5px 7px 5px 5px; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.12);
+    border-left: 1px solid rgba(255,255,255,.10);
+    border-radius: 0 5px 5px 0;
+    color: #ccc; font-size: .8rem; cursor: pointer; font-family: inherit;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background .2s, border-color .2s, color .2s;
+}
+/* The active state paints BOTH halves. `.active` stays on `.nav-drop-btn`
+   rather than moving to the wrapper because 15 pages still carry inline nav
+   CSS keyed to `.nav-drop-btn.active` (see scripts/nav-lint-baseline.json);
+   the adjacent-sibling rule extends it to the caret without breaking them. */
+.nav-drop-btn.active,
+.nav-drop-btn.active + .nav-drop-toggle {
+    background: linear-gradient(45deg, #ff8c00, #ffd700); border-color: #ff8c00; color: #000; font-weight: 600;
+}
+.nav-drop-btn.active + .nav-drop-toggle { border-left-color: rgba(0,0,0,.18); }
 
 /* Caret indicator */
 .nav-caret {
-    display: inline-block; font-size: .6em; margin-left: 2px;
+    display: inline-block; font-size: .6em;
     transition: transform .25s ease; vertical-align: middle;
 }
 .nav-drop.open .nav-caret { transform: rotate(180deg); }
@@ -170,6 +236,32 @@ nav {
     opacity: 0; visibility: hidden; pointer-events: none;
     transform: translateY(-6px);
     transition: opacity .2s ease, visibility .2s ease, transform .2s ease;
+}
+
+/* VERTICAL BACKSTOP — the desktop twin of the mobile accordion's
+ * `max-height: 600px` bug, and it was live until 2026-08-25.
+ *
+ * The panel is `position: absolute` under a 50px bar inside a `nav` that is
+ * `overflow: visible`, on a body that does not scroll to reach it. So a panel
+ * taller than the screen is neither clipped nor scrollable — its tail simply
+ * does not exist for the user. "Space Weather" had reached 18 links / 1110px,
+ * and measured on 2026-08-25 its bottom links were unreachable on every common
+ * display: 7 gone at 1366×768, 5 at 1536×864, 4 at 1440×900, 2 at 1920×1080.
+ *
+ * The real fix is editorial — menus are capped at ~10 links, with the section
+ * hub pages carrying the rest (js/site-sections.js). This is the seatbelt: an
+ * overrun degrades to a scroll instead of silently hiding links.
+ *
+ * It goes on `.nav-drop-inner`, NOT on `.nav-drop-menu`, because the menu owns
+ * the `::before` hover bridge at `top: -12px` — a scroll container would clip
+ * that negative offset away and drop the pointer between the chip and the
+ * panel. 80px = the 50px bar, the panel's 18px of vertical padding, and a 12px
+ * breathing gap. dvh tracks mobile browsers' collapsing chrome; the vh line is
+ * the fallback for engines without it. */
+.nav-drop-inner {
+    max-height: calc(100vh - 80px);
+    max-height: calc(100dvh - 80px);
+    overflow-y: auto; overscroll-behavior: contain;
 }
 
 /* Invisible bridge to prevent hover loss in the gap between button and menu */
@@ -187,7 +279,8 @@ nav {
 }
 
 /* Subtle highlight on the dropdown button when menu is open */
-.nav-drop.open .nav-drop-btn:not(.active) {
+.nav-drop.open .nav-drop-btn:not(.active),
+.nav-drop.open .nav-drop-btn:not(.active) + .nav-drop-toggle {
     background: rgba(255,255,255,.14);
     border-color: rgba(255,200,0,.3);
     color: #fff;
@@ -302,7 +395,8 @@ nav {
     .nav-menu { gap: 2px; }
     .nav-brand { font-size: .85rem; gap: 6px; }
     .nav-logo-img { height: 26px; }
-    .nav-item, .nav-drop-btn { padding: 5px 7px; font-size: .73rem; }
+    .nav-item, .nav-drop-btn { padding: 5px 5px 5px 7px; font-size: .73rem; }
+    .nav-drop-toggle { padding: 5px 5px 5px 3px; font-size: .73rem; }
     .nav-utility-links { gap: 7px; }
     .nav-util-link { font-size: .67rem; }
     .nav-pro-promo { display: none; }
@@ -361,10 +455,62 @@ nav {
 
     /* Larger touch targets (WCAG 44px minimum) */
     .nav-item { padding: 12px 14px; font-size: .9rem; min-height: 44px; display: flex; align-items: center; }
-    .nav-drop-btn {
-        padding: 12px 14px; font-size: .9rem; width: 100%; text-align: left;
-        min-height: 44px; display: flex; align-items: center; justify-content: space-between;
+
+    /* The split chip becomes a full-width row: the label takes the space and
+       navigates to the section hub, the caret is a fixed 52px column that
+       expands the accordion. Both clear 44px, so neither is a near-miss — and
+       a visitor who wants "everything in Local Space" taps the label rather
+       than hunting the menu for a link that (by design) is not in it.
+     *
+     * THE LAYOUT MODE HERE IS LOAD-BEARING — do not carry the desktop one
+     * over. On desktop `.nav-drop` is an inline-flex row of exactly TWO items,
+     * because the panel is `position: absolute` and out of flow. In burger
+     * mode the panel comes back INTO flow as an accordion and becomes a third
+     * item in that row.
+     *
+     * Measured on an iPhone 14 (390px, first menu, transition settled):
+     *
+     *   display: flex           panel 213x719 at x=165 — laid out BESIDE the
+     *                           caret, in the chip's own row. Broken.
+     *   flex-wrap: wrap         panel 366x584 at x=12, below the row. Works.
+     *   grid (below)            panel 366x584 at x=12, below the row. Works.
+     *
+     * So the wrap would do; the explicit grid is preferred because it STATES
+     * the placement instead of relying on source order and a wrap point, and
+     * because `minmax(0, 1fr)` pins the label column against long labels. Row 2
+     * must be spelled out either way — leave placement implicit and the panel
+     * lands back in row 1, which is the broken flex case again.
+     *
+     * The row stays auto-sized from content, which is what the accordion's
+     * `grid-template-rows: 0fr → 1fr` needs to expand against. If you change
+     * this block, measure AFTER the .28s transition: read it at t=0 and every
+     * variant looks collapsed, which is a false negative that cost a debug
+     * cycle here. */
+    .nav-drop {
+        display: grid; width: 100%;
+        grid-template-columns: minmax(0, 1fr) 52px;
+        align-content: start;
     }
+    .nav-drop .nav-drop-btn    { grid-column: 1; grid-row: 1; }
+    .nav-drop .nav-drop-toggle { grid-column: 2; grid-row: 1; }
+    .nav-drop .nav-drop-menu   { grid-column: 1 / -1; grid-row: 2; }
+    .nav-drop-btn {
+        padding: 12px 14px; font-size: .9rem; text-align: left;
+        min-height: 44px; display: flex; align-items: center;
+        min-width: 0;
+    }
+    .nav-drop-toggle {
+        padding: 12px; min-height: 44px;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .nav-drop-toggle .nav-caret { font-size: .8em; }
+
+    /* The desktop viewport backstop must not apply here: on mobile the panel
+       is an accordion inside `.nav-menu`, which is the thing that scrolls.
+       Leaving a max-height on the inner wrapper would cap the accordion at
+       roughly one screen and clip the longest menus — which is the original
+       `max-height: 600px` bug, reintroduced from the other end. */
+    .nav-drop-inner { max-height: none; overflow: hidden; overscroll-behavior: auto; }
 
     /* Mobile: dropdowns expand inline as an accordion.
      *
@@ -419,7 +565,7 @@ nav {
    is instantaneous and cannot be mid-animation when a test or a user reads it. */
 @media (prefers-reduced-motion: reduce) {
     .nav-drop-menu, .nav-drop-inner, .nav-caret, .burger-line, .nav-item,
-    .nav-drop-btn, .nav-drop-link, .nav-pro-promo {
+    .nav-drop-btn, .nav-drop-toggle, .nav-drop-link, .nav-pro-promo {
         transition: none !important;
     }
 }

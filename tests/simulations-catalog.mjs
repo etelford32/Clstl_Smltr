@@ -46,6 +46,7 @@ import {
     simulationsByCategory,
 } from '../js/simulations-catalog.js';
 import { applyRegions } from '../scripts/build-simulations-page.mjs';
+import { renderCard } from '../scripts/catalog-render.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PAGE = join(ROOT, 'simulations.html');
@@ -179,6 +180,29 @@ const ok = (label, fn) => { fn(); checks++; void label; };
     const cardCount = (committed.match(/class="sim-card"/g) || []).length;
     ok('card count', () => assert.equal(cardCount, SIM_COUNT,
         `simulations.html renders ${cardCount} cards for ${SIM_COUNT} simulations`));
+
+    // No stray text between a card's tags.
+    //
+    // `renderCard` briefly took an `indent` parameter with a default, and
+    // `sims.map(renderCard)` fed map's INDEX argument into it — so every line
+    // of every card was prefixed with a bare `0`, `1`, `2`… which the browser
+    // rendered as loose digits scattered across the grid. The page looked
+    // wrong and every gate stayed green: the drift check compares the
+    // committed file against the generator, and the generator was emitting the
+    // same wrong bytes, so the two agreed with each other.
+    //
+    // Comparing the two call styles is what actually catches it — a helper
+    // that changes its output when passed through `map` is the bug itself.
+    ok('renderCard ignores map() extras', () => assert.equal(
+        [SIMULATIONS[0]].map(renderCard)[0], renderCard(SIMULATIONS[0]),
+        'renderCard() produces different markup via `map(renderCard)` than via `renderCard(sim)` — '
+        + 'it is reading map\'s index/array arguments. Keep its signature to one parameter.'));
+
+    const strayText = committed
+        .split('\n')
+        .filter(line => /^\s*[^\s<]/.test(line) && /<(a class="sim-card"|span class="sim-card|span class="sim-tier)/.test(line));
+    ok('no stray text in cards', () => assert.deepEqual(strayText, [],
+        `these generated card lines start with text outside a tag:\n${strayText.slice(0, 5).join('\n')}`));
 
     // The headline quotes the count. It has been wrong before.
     ok('headline count', () => assert.ok(

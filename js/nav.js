@@ -2,11 +2,13 @@
  * nav.js — Shared navigation component with rich dropdowns + tier gating
  *
  * Generates a full navigation bar with:
- *   - Logo + brand
- *   - Dropdown menus: Earth, Space Weather, Hindcast Lab, Field Notes, Stars,
- *     Black Holes, Simulators — Hindcast Lab holds the interactive replay
- *     page for each validation-database event; Field Notes holds all the
- *     writing (event post-mortems + the hindcast papers). Run vs read.
+ *   - Logo + brand (which IS the home link — there is no separate "Home"
+ *     item; it was redundant with the brand and cost bar width the ladder
+ *     could not spare)
+ *   - Five section dropdowns from js/site-sections.js — Space Weather,
+ *     Earth & Orbit, Local Space, Deep Space, Research — plus a flat link to
+ *     the full catalog. Menu CONTENTS live in NAV_ITEMS below; the top level
+ *     lives in js/site-sections.js.
  *   - Tier-gated items (public, free, advanced) where 'advanced' ≡ PRO
  *     (Advanced + Institution + Enterprise). See auth.isPro().
  *   - Auth state (Sign In / Dashboard / Admin badge)
@@ -15,6 +17,24 @@
  *   - Mobile burger with full menu expansion + accordion dropdowns
  *   - Robust hover with delay for desktop, touch-aware for hybrid devices
  *   - Keyboard support (Escape, Tab focus management)
+ *
+ * SPLIT TOP-LEVEL CONTROLS
+ * ────────────────────────
+ * Each section renders as TWO controls that read as one chip:
+ *
+ *     <a class="nav-drop-btn" href="/local-space.html">Local Space</a>
+ *     <button class="nav-drop-toggle" aria-expanded>▾</button>
+ *
+ * The label navigates to the section's hub page; the caret opens the menu.
+ * Before this the top-level items were bare <button>s that only toggled, so
+ * "Space Weather" led nowhere and the menu had to carry the whole section —
+ * which is how it grew to 18 links and ran off the bottom of the screen.
+ *
+ * A link that also opens a menu on click is the pattern that breaks on touch
+ * (you can never reach the menu, or you can never follow the link). Splitting
+ * the two gives both a real target — two 44px hit areas in burger mode — and,
+ * just as importantly, leaves the scarred hover/touch detection below
+ * completely untouched: the toggle behaves exactly as the old button did.
  */
 
 // Side-effect import: OAuth/OTP misland sentinel. Runs first so a token that
@@ -39,6 +59,11 @@ import './telemetry.js';
 // only ever sees the ~2% of visitors who accept the cookie banner.
 import './page-flow.js';
 import { glyph } from './glyphs.js';
+// The top-level structure — id, label and hub href per section. This module is
+// the single source shared with js/simulations-catalog.js and the hub-page
+// builder, so the bar, the catalog page and the hubs cannot disagree about
+// what the sections are or what they are called.
+import { SITE_SECTIONS } from './site-sections.js';
 
 // Root-absolute so the shared nav renders identically from any directory
 // depth — pages under /satellite-operator/ etc. would otherwise 404 the
@@ -67,131 +92,132 @@ function navIcon(icon) {
 
 // ── Navigation Structure ─────────────────────────────────────────────────────
 
-const NAV_DROPDOWNS = [
-    {
-        label: 'Earth',
-        id: 'earth-menu',
-        items: [
-            { href: 'earth.html',             label: 'EarthView',           sub: 'Predictive weather + magnetosphere',   tier: 'public',   icon: 'earth' },
-            { href: 'pollution.html',         label: 'Pollution Lab',       sub: 'Live AQI · hotspot ML · climate forcing', tier: 'public', icon: 'atmosphere', badge: 'NEW', id: 'pollution' },
-            { href: 'moon.html',              label: 'Moon',                sub: 'Lunar radiation environment',          tier: 'public',   icon: 'moon' },
-            { href: 'colony.html',            label: 'Lunar Colony',        sub: 'Strategy game · the real Sun attacks', tier: 'public',   icon: 'moon', badge: 'NEW', id: 'colony' },
-            { href: 'operations.html',        label: 'Operations',          sub: 'Fleet & debris analysis console',      tier: 'public',   icon: 'operations', badge: 'PRO PREVIEW', id: 'operations' },
-            { href: 'satellites.html',        label: 'Satellites',          sub: 'Real-time orbital tracking',           tier: 'public', icon: 'satellite' },
-            { href: 'launch-planner.html',    label: 'Launch Planner',      sub: 'SpaceX/Blue Origin launches + weather', tier: 'public', icon: 'rocket', id: 'launch-planner' },
-            { href: 'upper-atmosphere.html',  label: 'Upper Atmosphere',    sub: 'Thermosphere + exosphere simulator',    tier: 'public', icon: 'atmosphere', id: 'upper-atmosphere' },
-            { href: 'satellite-designer.html', label: 'Satellite Designer', sub: 'Build a craft · fly drag vs thrust',     tier: 'public', icon: 'satellite', badge: 'NEW', id: 'satellite-designer' },
-            { href: 'spaceship-designer.html', label: 'Space Ship Designer', sub: 'Build a rocket · fly it to orbit in 3D', tier: 'public', icon: 'rocket', badge: 'NEW', id: 'spaceship-designer' },
-        ],
-    },
-    {
-        label: 'Space Weather',
-        id: 'space-weather',
-        items: [
-            { section: 'Live space weather' },
-            { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',   tier: 'public', icon: 'space-weather', id: 'weather' },
-            { href: 'auroracle.html', label: 'AurOracle', sub: 'Predict the aurora · 7-night + 30-day outlook', tier: 'public', icon: 'aurora', badge: 'NEW', id: 'auroracle' },
-            { href: 'ring-current.html', label: 'Ring Current', sub: 'Live Dst digital twin · L1-driven forecast', tier: 'public', icon: 'magnet', badge: 'NEW', id: 'ring-current' },
-            { href: 'shielding-lab.html', label: 'Shielding Lab', sub: 'M–I coupling · SAPS + penetration E-fields', tier: 'public', icon: 'shield', badge: 'NEW', id: 'shielding-lab' },
-            { href: 'flux-rope.html', label: 'Flux Rope Simulator', sub: 'CME Bz forecasting · ensemble Sun→Earth', tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'flux-rope' },
-            { href: 'flux-rope-live.html', label: 'Compounding Watch', sub: 'Real-time CME trains · interaction physics + measured noise', tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'flux-rope-live' },
-            { href: 'cme-forecast.html', label: 'CME Forecast', sub: 'Locked arrivals · uncertainty + live skill', tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'cme-forecast' },
-            { href: 'far-side-watch.html', label: 'Far-Side Watch', sub: 'Regions rotating in · days-to-weeks horizon', tier: 'public', icon: 'far-side', badge: 'NEW', id: 'far-side-watch' },
-            { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: 'sun' },
-            { section: 'Planetary systems' },
-            { href: 'mars.html',               label: 'Real-Time Mars', sub: 'Perseverance + MEDA on a NASA terrain globe', tier: 'public', icon: 'planet', badge: 'NEW', id: 'mars' },
-            { href: 'solar-system.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: 'solar-system', id: 'solar' },
-            { href: 'jupiter-system.html', label: 'Jupiter System', sub: 'Galilean moons · 4:2:1 Laplace resonance', tier: 'public', icon: 'planet', id: 'jupiter-system' },
-            { href: 'saturn-system.html', label: 'Saturn System', sub: 'Moon-sculpted rings · Cassini Division · live density waves', tier: 'public', icon: 'planet', badge: 'NEW', id: 'saturn-system' },
-            { href: 'uranus-system.html', label: 'Uranus System', sub: 'Tipped 98° · ε-ring shepherds · crowded moons', tier: 'public', icon: 'planet-ice', badge: 'NEW', id: 'uranus-system' },
-            { href: 'neptune-system.html', label: 'Neptune System', sub: 'Retrograde Triton · rings & arcs · J₂ N-body', tier: 'public', icon: 'planet-ice', badge: 'NEW', id: 'neptune-system' },
-            { section: 'Missions & maps' },
-            { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: 'probe', id: 'missions' },
-            { href: 'mission-planner.html', label: 'Mission Planner', sub: 'Launch rockets · plan Moon & Mars trips', tier: 'public', icon: 'target', badge: 'NEW', id: 'mission-planner' },
-            { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',           tier: 'free',   icon: 'galaxy' },
-        ],
-    },
-    {
-        // Hindcast Lab — the validation database: the INTERACTIVE replay
-        // page for each event. Events land here as their runs complete
-        // (HINDCAST_BACKLOG.md order: Gannon → St. Patrick's → Feb 2022
-        // Starlink → Sep 2017).
-        //
-        // The write-up papers used to be nested here as ↳ links under each
-        // event. They moved to Field Notes (2026-07-25, author's call) so
-        // there is exactly ONE place to find the writing: this dropdown is
-        // "run the simulation", Field Notes is "read the analysis". Each
-        // event's replay page still links its own paper in-page, so the
-        // event→paper path survives; it just isn't duplicated in the nav.
-        label: 'Hindcast Lab',
-        id: 'hindcast-lab',
-        items: [
-            { section: 'May 2024 · Gannon superstorm (G5)' },
-            { href: 'gannon-superstorm.html', label: 'Gannon Superstorm', sub: '72 h replay · MHD-corrected density vs the Ap ceiling', tier: 'public', icon: 'storm', id: 'gannon-superstorm' },
-            { section: "Mar 2015 · St. Patrick's Day (G4)" },
-            { href: 'st-patrick-storm.html', label: "St. Patrick's Storm", sub: 'Two-step main phase · the community benchmark', tier: 'public', icon: 'storm-two-step', badge: 'NEW', id: 'st-patrick-storm' },
-        ],
-    },
-    {
-        // Field Notes — the writing surface: event post-mortems, hindcast
-        // papers, method notes. The two hindcast papers appear here AND
-        // nested under their events in Hindcast Lab above; that duplication
-        // is deliberate (event-first vs reading-first entry points) — do
-        // not "de-duplicate" it away.
-        //
-        // ACTIVE-ID NOTE: the hub's id is 'field-notes', NOT 'blog'. The
-        // active-item match below is a prefix match in both directions
-        // (`_hid.startsWith(activeId) || activeId.startsWith(_hid)`), so an
-        // id of 'blog' would light up every 'blog-*' post at once.
-        label: 'Field Notes',
-        id: 'field-notes',
-        items: [
-            { href: 'blog.html', label: 'All Field Notes', sub: 'Post-mortems, hindcasts, methods', tier: 'public', icon: 'notebook', id: 'field-notes' },
-            { section: 'Latest' },
-            { href: 'blog-why-aurora-forecasts-miss.html', label: 'NOAA said G1. Earth got G3.', sub: 'July 4 2026 · the Bz gap', tier: 'public', icon: 'chart-down', badge: 'NEW', id: 'blog-why-aurora-forecasts-miss' },
-            { section: 'Hindcast papers' },
-            { href: 'blog-gannon-hindcast.html', label: 'The Index That Lied', sub: 'Gannon G5 · EN/ES/FR', tier: 'public', icon: 'paper', id: 'blog-gannon-hindcast' },
-            { href: 'blog-stpatrick-hindcast.html', label: 'The Storm Every Model Takes', sub: "St. Patrick's 2015 · EN/ES/FR", tier: 'public', icon: 'paper', id: 'blog-stpatrick-hindcast' },
-        ],
-    },
-    {
-        label: 'Stars',
-        id: 'stars',
-        items: [
-            { href: 'sirius.html',     label: 'Sirius Binary',    sub: 'A1V + white dwarf system',    tier: 'public', icon: 'star-binary' },
-            { href: 'betelgeuse.html', label: 'Betelgeuse',       sub: 'Red supergiant · M1-2 Ia',    tier: 'public', icon: 'star-red' },
-            { href: 'vega.html',       label: 'Vega',             sub: 'Rapid rotator · A0V',          tier: 'public', icon: 'star-bright' },
-            { href: 'achernar.html',   label: 'Achernar',         sub: 'Oblate Be star · B6Vep',       tier: 'public', icon: 'star-oblate' },
-            { href: 'wr102.html',      label: 'WR-102',           sub: 'Wolf-Rayet · hottest known',   tier: 'free',   icon: 'star-wr' },
-            { href: 'sirius-planetary.html',     label: 'Sirius Planetary', sub: '3D stellar system simulator',  tier: 'free',   icon: 'planet' },
-        ],
-    },
-    {
-        label: 'Black Holes',
-        id: 'black-holes',
-        items: [
-            { href: 'ton618.html',           label: 'TON 618',             sub: 'Research observatory · 6.6×10¹⁰ M☉', tier: 'public', icon: 'black-hole', id: 'ton618' },
-            { href: 'blackhole-observatory.html', label: 'Black Hole Observatory', sub: 'Three UMBH systems · one canvas · τ-synced', tier: 'public', icon: 'observatory', badge: 'NEW', id: 'blackhole-observatory' },
-            { href: 'sagittarius.html',      label: 'Sagittarius A*',      sub: 'Galactic center · live',              tier: 'public', icon: 'black-hole-core', id: 'sagittarius' },
-            { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',          tier: 'public', icon: 'accretion' },
-        ],
-    },
-    {
-        label: 'Simulators',
-        id: 'simulators',
-        items: [
-            { href: 'tiga.html',              label: 'TIGA · Geomagnetic',   sub: 'Core → field → live nowcast with a posterior', tier: 'public', icon: 'dynamo', badge: 'NEW', id: 'tiga' },
-            { href: 'solar-fluid.html',       label: 'Solar Fluid',          sub: 'Navier-Stokes MHD solver',        tier: 'public', icon: 'fluid' },
-            { href: 'stellar-wind.html',      label: 'Stellar Wind',         sub: 'Parker spiral + wind stream',     tier: 'public', icon: 'wind' },
-            { href: 'star2d.html',            label: '2D Stellar Modeler',   sub: 'HR diagram + classification',     tier: 'public', icon: 'chart' },
-            { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: 'microscope' },
-            { href: 'gravity-lab.html',       label: 'Gravity Lab',          sub: 'Live N-body · moons & resonances', tier: 'public', icon: 'gravity', badge: 'NEW', id: 'gravity-lab' },
-            { href: 'accretion-disc.html',    label: 'Accretion Disc',       sub: 'α-disc + pebble accretion + Theia → Moon', tier: 'public', icon: 'accretion', badge: 'NEW', id: 'accretion-disc' },
-            { href: 'time-machine.html',      label: 'Orbital Time Machine', sub: 'N-body propagation · ±10 kyr to ±1 Myr', tier: 'public', icon: 'hourglass', badge: 'IN DEV', id: 'time-machine' },
-            { href: 'rust.html',              label: 'Rust/WASM Engine',     sub: 'WebAssembly compute module',      tier: 'free',   icon: 'engine' },
-        ],
-    },
-];
+/**
+ * Per-section menu contents.
+ *
+ * THE TOP LEVEL LIVES IN js/site-sections.js, not here. This object owns only
+ * the CURATED item list for each section — the id, label and hub href come
+ * from there, so the menu, the hub page and simulations.html cannot disagree
+ * about what a section is called or where it lives.
+ *
+ * CURATED IS THE POINT — AND THERE IS A HARD CAP
+ * ──────────────────────────────────────────────
+ * A dropdown panel hangs off a 50px bar and is `position: absolute` inside a
+ * `nav` with `overflow: visible`. Nothing scrolls it and nothing clips it, so
+ * whatever does not fit the viewport is simply UNREACHABLE — the same failure
+ * the mobile accordion had with `max-height: 600px`, on the vertical axis.
+ *
+ * That was live: "Space Weather" had grown to 18 links and 1110px, and on a
+ * 1366×768 laptop its bottom SEVEN links (Jupiter, Saturn, Uranus, Neptune,
+ * Space Missions, Mission Planner, Galaxy) could not be reached at all.
+ *
+ * So: **at most ~10 links and ~3 section headers per menu**, which lands under
+ * ~700px and clears the 768px-tall laptop that is the floor. `.nav-drop-menu`
+ * now also carries a `max-height` + `overflow-y: auto` backstop so a future
+ * overrun degrades to a scroll instead of vanishing, but the backstop is the
+ * seatbelt, not the design. tests/nav-responsive.spec.js measures every panel
+ * against the viewport and fails on one link below the fold.
+ *
+ * Anything that does not make the cut is NOT lost — it is on the section's hub
+ * page, which is what the top-level label now links to, and in the full
+ * catalog at simulations.html. Deciding what to leave out is a real editorial
+ * choice; making the menu longer is not an option.
+ */
+const NAV_ITEMS = {
+    'space-weather': [
+        { section: 'Live conditions' },
+        { href: 'space-weather.html', label: 'Live Console',    sub: 'Composable dashboard · solar & geomagnetic', tier: 'public', icon: 'space-weather', id: 'weather' },
+        { href: 'sun.html',           label: 'The Sun',         sub: 'Real-time solar surface view',               tier: 'public', icon: 'sun' },
+        { href: 'auroracle.html',     label: 'AurOracle',       sub: 'Predict the aurora · 7-night + 30-day',      tier: 'public', icon: 'aurora', badge: 'NEW', id: 'auroracle' },
+        { section: 'Forecasting' },
+        { href: 'cme-forecast.html',   label: 'CME Forecast',         sub: 'Locked arrivals · uncertainty + live skill',   tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'cme-forecast' },
+        { href: 'flux-rope-live.html', label: 'Compounding Watch',    sub: 'Real-time CME trains · interaction physics',   tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'flux-rope-live' },
+        { href: 'flux-rope.html',      label: 'Flux Rope Simulator',  sub: 'CME Bz forecasting · ensemble Sun→Earth',      tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'flux-rope' },
+        { href: 'far-side-watch.html', label: 'Far-Side Watch',       sub: 'Regions rotating in · days-to-weeks horizon',  tier: 'public', icon: 'far-side', badge: 'NEW', id: 'far-side-watch' },
+        { section: 'Geospace response' },
+        { href: 'ring-current.html',   label: 'Ring Current',   sub: 'Live Dst digital twin · L1-driven forecast',  tier: 'public', icon: 'magnet', badge: 'NEW', id: 'ring-current' },
+        { href: 'shielding-lab.html',  label: 'Shielding Lab',  sub: 'M–I coupling · SAPS + penetration E-fields',  tier: 'public', icon: 'shield', badge: 'NEW', id: 'shielding-lab' },
+        { href: 'tiga.html',           label: 'TIGA · Geomagnetic', sub: 'Core → field → nowcast with a posterior', tier: 'public', icon: 'dynamo', badge: 'NEW', id: 'tiga' },
+    ],
+
+    'earth-orbit': [
+        { section: 'Earth systems' },
+        { href: 'earth.html',            label: 'EarthView',        sub: 'Predictive weather + magnetosphere',      tier: 'public', icon: 'earth' },
+        { href: 'pollution.html',        label: 'Pollution Lab',    sub: 'Live AQI · hotspot ML · climate forcing', tier: 'public', icon: 'atmosphere', badge: 'NEW', id: 'pollution' },
+        { href: 'upper-atmosphere.html', label: 'Upper Atmosphere', sub: 'Thermosphere + exosphere simulator',      tier: 'public', icon: 'atmosphere', id: 'upper-atmosphere' },
+        { section: 'Orbital operations' },
+        { href: 'operations.html',     label: 'Operations',     sub: 'Fleet & debris analysis console',       tier: 'public', icon: 'operations', badge: 'PRO PREVIEW', id: 'operations' },
+        { href: 'satellites.html',     label: 'Satellites',     sub: 'Real-time orbital tracking',            tier: 'public', icon: 'satellite' },
+        { href: 'launch-planner.html', label: 'Launch Planner', sub: 'SpaceX/Blue Origin launches + weather', tier: 'public', icon: 'rocket', id: 'launch-planner' },
+        { section: 'Build & fly' },
+        { href: 'satellite-designer.html', label: 'Satellite Designer',  sub: 'Build a craft · fly drag vs thrust',     tier: 'public', icon: 'satellite', badge: 'NEW', id: 'satellite-designer' },
+        { href: 'spaceship-designer.html', label: 'Space Ship Designer', sub: 'Build a rocket · fly it to orbit in 3D', tier: 'public', icon: 'rocket', badge: 'NEW', id: 'spaceship-designer' },
+    ],
+
+    'local-space': [
+        { section: 'Worlds' },
+        { href: 'moon.html',   label: 'The Moon',        sub: 'Radiation, interior, and a real relief surface', tier: 'public', icon: 'moon' },
+        { href: 'mars.html',   label: 'Real-Time Mars',  sub: 'Perseverance + MEDA on a NASA terrain globe',    tier: 'public', icon: 'planet', badge: 'NEW', id: 'mars' },
+        { href: 'colony.html', label: 'Lunar Colony',    sub: 'Strategy game · the real Sun attacks',           tier: 'public', icon: 'moon', badge: 'NEW', id: 'colony' },
+        { section: 'Planetary systems' },
+        { href: 'solar-system.html',   label: 'Solar System',   sub: '31 moons · live Galilean N-body',                tier: 'public', icon: 'solar-system', id: 'solar' },
+        { href: 'jupiter-system.html', label: 'Jupiter System', sub: 'Galilean moons · 4:2:1 Laplace resonance',       tier: 'public', icon: 'planet', id: 'jupiter-system' },
+        { href: 'saturn-system.html',  label: 'Saturn System',  sub: 'Moon-sculpted rings · live density waves',       tier: 'public', icon: 'planet', badge: 'NEW', id: 'saturn-system' },
+        { href: 'uranus-system.html',  label: 'Uranus System',  sub: 'Tipped 98° · ε-ring shepherds · crowded moons',  tier: 'public', icon: 'planet-ice', badge: 'NEW', id: 'uranus-system' },
+        { href: 'neptune-system.html', label: 'Neptune System', sub: 'Retrograde Triton · rings & arcs · J₂ N-body',   tier: 'public', icon: 'planet-ice', badge: 'NEW', id: 'neptune-system' },
+        { section: 'Maps & missions' },
+        { href: 'missions.html',     label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: 'probe', id: 'missions' },
+        { href: 'galactic-map.html', label: 'Galaxy Map',     sub: '3D Milky Way star map',           tier: 'free',   icon: 'galaxy' },
+    ],
+
+    'deep-space': [
+        { section: 'Stars' },
+        { href: 'sirius.html',     label: 'Sirius Binary', sub: 'A1V + white dwarf system',   tier: 'public', icon: 'star-binary' },
+        { href: 'betelgeuse.html', label: 'Betelgeuse',    sub: 'Red supergiant · M1-2 Ia',   tier: 'public', icon: 'star-red' },
+        { href: 'vega.html',       label: 'Vega',          sub: 'Rapid rotator · A0V',        tier: 'public', icon: 'star-bright' },
+        { href: 'achernar.html',   label: 'Achernar',      sub: 'Oblate Be star · B6Vep',     tier: 'public', icon: 'star-oblate' },
+        { href: 'wr102.html',      label: 'WR-102',        sub: 'Wolf-Rayet · hottest known', tier: 'free',   icon: 'star-wr' },
+        { section: 'Black holes' },
+        { href: 'ton618.html',                label: 'TON 618',                sub: 'Research observatory · 6.6×10¹⁰ M☉', tier: 'public', icon: 'black-hole', id: 'ton618' },
+        { href: 'blackhole-observatory.html', label: 'Black Hole Observatory', sub: 'Three UMBH systems · one canvas',     tier: 'public', icon: 'observatory', badge: 'NEW', id: 'blackhole-observatory' },
+        { href: 'sagittarius.html',           label: 'Sagittarius A*',         sub: 'Galactic center · live',              tier: 'public', icon: 'black-hole-core', id: 'sagittarius' },
+        { href: 'black-hole-fluid.html',      label: 'Black Hole Accretion',   sub: 'Fluid dynamics simulation',           tier: 'public', icon: 'accretion' },
+    ],
+
+    // Research keeps the 2026-07-25 "run vs read" split the author asked for —
+    // it is now two labelled sections inside one menu instead of two top-level
+    // items. The Hindcast Lab section is the interactive replay for each
+    // validation-database event (they land in HINDCAST_BACKLOG.md order);
+    // Field Notes is the writing. Each event's replay page still links its own
+    // paper in-page, so the event→paper path survives without duplicating it
+    // in the menu.
+    //
+    // ACTIVE-ID NOTE: the Field Notes hub's id is 'field-notes', NOT 'blog'.
+    // The active-item match below is a prefix match in both directions, so an
+    // id of 'blog' would light up every 'blog-*' post at once.
+    research: [
+        { section: 'Hindcast Lab' },
+        { href: 'gannon-superstorm.html', label: 'Gannon Superstorm',  sub: 'May 2024 G5 · 72 h replay vs the Ap ceiling', tier: 'public', icon: 'storm', id: 'gannon-superstorm' },
+        { href: 'st-patrick-storm.html',  label: "St. Patrick's Storm", sub: 'Mar 2015 G4 · the community benchmark',      tier: 'public', icon: 'storm-two-step', badge: 'NEW', id: 'st-patrick-storm' },
+        { section: 'Field Notes' },
+        { href: 'blog.html',                          label: 'All Field Notes',           sub: 'Post-mortems, hindcasts, methods', tier: 'public', icon: 'notebook', id: 'field-notes' },
+        { href: 'blog-why-aurora-forecasts-miss.html', label: 'NOAA said G1. Earth got G3.', sub: 'July 4 2026 · the Bz gap',      tier: 'public', icon: 'chart-down', badge: 'NEW', id: 'blog-why-aurora-forecasts-miss' },
+        { href: 'blog-gannon-hindcast.html',           label: 'The Index That Lied',        sub: 'Gannon G5 · EN/ES/FR',           tier: 'public', icon: 'paper', id: 'blog-gannon-hindcast' },
+        { href: 'blog-stpatrick-hindcast.html',        label: 'The Storm Every Model Takes', sub: "St. Patrick's 2015 · EN/ES/FR", tier: 'public', icon: 'paper', id: 'blog-stpatrick-hindcast' },
+        { section: 'Engine & methods' },
+        { href: 'rust.html', label: 'Rust/WASM Engine', sub: 'WebAssembly compute module', tier: 'free', icon: 'engine' },
+    ],
+};
+
+// The top level: one dropdown per site section, in js/site-sections.js order.
+// `href` is the section's hub page — the label is a real link now, not just a
+// menu toggle. See the markup notes in initNav().
+const NAV_DROPDOWNS = SITE_SECTIONS.map(section => ({
+    id: section.id,
+    label: section.label,
+    href: section.href,
+    items: NAV_ITEMS[section.id] || [],
+}));
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -300,7 +326,7 @@ function _closeAll() {
     document.body.style.overflow = '';
     document.querySelectorAll('nav .nav-drop.open').forEach(d => {
         d.classList.remove('open');
-        d.querySelector('.nav-drop-btn')?.setAttribute('aria-expanded', 'false');
+        d.querySelector('.nav-drop-toggle')?.setAttribute('aria-expanded', 'false');
     });
 }
 
@@ -368,8 +394,11 @@ export function initNav(activeId = '') {
         window.addEventListener('auth-changed', () => initNav(activeId));
     }
 
+    // The brand IS the home link, and carries aria-current on the home page.
+    // There used to be a separate "Home" nav-item beside it; it pointed at the
+    // same URL and cost ~60px of a bar that had 16px of headroom at 1281px.
     let html = `
-        <a href="/index.html" class="nav-brand" aria-label="Parkers Physics home">
+        <a href="/index.html" class="nav-brand" aria-label="Parkers Physics home"${activeId === 'home' ? ' aria-current="page"' : ''}>
             <img src="${LOGO_IMG}" class="nav-logo-img" alt="Parkers Physics">
             Parkers Physics
         </a>
@@ -381,33 +410,27 @@ export function initNav(activeId = '') {
         <div class="nav-menu" id="nav-menu">
     `;
 
-    // Home link
-    html += `<a href="/index.html" class="nav-item${activeId === 'home' ? ' active' : ''}">Home</a>`;
-
-    // Catalog link — the complete index of every simulation we ship.
-    //
-    // Deliberately a FLAT LINK and not an eighth dropdown. The dropdowns
-    // below are a curated menu: each one is a screen's worth of the pages
-    // worth surfacing in that area, and six simulations are omitted from
-    // them entirely (the arcade game, the older black-hole labs, the WASM
-    // proving ground). simulations.html is the other thing — the full grid,
-    // all of them, generated from js/simulations-catalog.js. Nesting the
-    // whole catalog inside a menu would just be a worse version of the page.
-    //
-    // tests/simulations-catalog.mjs pins this link, so a nav refactor
-    // cannot orphan the catalog page without failing the gate.
-    html += `<a href="/simulations.html" class="nav-item${activeId === 'simulations' ? ' active' : ''}">Simulations</a>`;
-
-    // Dropdown menus
+    // Dropdown menus — one per section, from js/site-sections.js.
     for (const dd of NAV_DROPDOWNS) {
-        const anyActive = dd.items.some(i => {
+        // The hub page itself is active (activeId is the section id, which is
+        // what each generated hub passes to initNav). Exact match, not the
+        // prefix match used for items: 'space-weather' is both a section id
+        // and a page basename, and a prefix match would light the section up
+        // from unrelated ids that happen to share a stem.
+        const sectionActive = activeId === dd.id;
+        const anyActive = sectionActive || dd.items.some(i => {
             if (i.section) return false;
             const itemId = i.id || i.href.replace('.html', '');
             return itemId === activeId || itemId.startsWith(activeId) || activeId.startsWith(itemId);
         });
 
         html += `<div class="nav-drop" data-drop="${dd.id}">`;
-        html += `<button class="nav-drop-btn${anyActive ? ' active' : ''}" aria-haspopup="true" aria-expanded="false">${dd.label} <span class="nav-caret">&#9662;</span></button>`;
+        // Two controls, one chip. See the SPLIT TOP-LEVEL CONTROLS note in the
+        // file header: the label is a real link to the section hub, the caret
+        // is the menu disclosure. Keeping them separate is what lets the touch
+        // path stay identical to the old bare-button behaviour.
+        html += `<a href="/${dd.href}" class="nav-drop-btn${anyActive ? ' active' : ''}"${sectionActive ? ' aria-current="page"' : ''}>${dd.label}</a>`;
+        html += `<button type="button" class="nav-drop-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="navdrop-${dd.id}" aria-label="${dd.label} menu"><span class="nav-caret">&#9662;</span></button>`;
         // `.nav-drop-inner` exists for the MOBILE accordion: the panel
         // animates `grid-template-rows: 0fr → 1fr`, which needs exactly one
         // grid child to size against. That replaced a `max-height: 600px`
@@ -415,7 +438,7 @@ export function initNav(activeId = '') {
         // content, so its last 7 links were unreachable on every phone.
         // role="none" keeps the wrapper out of the a11y tree so the links
         // stay direct menuitem children of role="menu".
-        html += `<div class="nav-drop-menu" role="menu"><div class="nav-drop-inner" role="none">`;
+        html += `<div class="nav-drop-menu" id="navdrop-${dd.id}" role="menu"><div class="nav-drop-inner" role="none">`;
 
         for (const item of dd.items) {
             if (item.section) {
@@ -461,6 +484,24 @@ export function initNav(activeId = '') {
 
         html += `</div></div></div>`;   // .nav-drop-inner / .nav-drop-menu / .nav-drop
     }
+
+    // Catalog link — the complete index of every simulation we ship.
+    //
+    // Deliberately a FLAT LINK and not a sixth dropdown. The five dropdowns
+    // above are curated: each is capped at ~10 links so the panel fits the
+    // screen, so between them they omit roughly a third of the catalog.
+    // simulations.html is the other thing — the full grid, all 55, generated
+    // from js/simulations-catalog.js. Nesting the whole catalog inside a menu
+    // would just be a worse version of the page, and a menu that could not
+    // fit on a laptop is precisely the bug this restructure fixed.
+    //
+    // Last in the row on purpose: it is the fallback for "I know we have one
+    // of these somewhere", which is a different intent from browsing a
+    // section, and it reads as the end of the list rather than a peer of it.
+    //
+    // tests/simulations-catalog.mjs pins this link, so a nav refactor cannot
+    // orphan the catalog page without failing the gate.
+    html += `<a href="/simulations.html" class="nav-item${activeId === 'simulations' ? ' active' : ''}">Simulations</a>`;
 
     // Spacer + auth
     html += '<span class="nav-spacer"></span>';
@@ -555,7 +596,7 @@ export function initNav(activeId = '') {
             const drop = nav.querySelector(`.nav-drop[data-drop="${id}"]`);
             if (!drop) continue;
             drop.classList.add('open');
-            drop.querySelector('.nav-drop-btn')?.setAttribute('aria-expanded', 'true');
+            drop.querySelector('.nav-drop-toggle')?.setAttribute('aria-expanded', 'true');
         }
     }
 
@@ -585,7 +626,16 @@ export function initNav(activeId = '') {
     });
 
     menu?.addEventListener('click', e => {
-        if (e.target.closest('.nav-drop-link') || e.target.closest('.nav-item')) {
+        // `.nav-drop-btn` is in this list because it is a LINK now (to the
+        // section hub), not the menu toggle it used to be. Without it, tapping
+        // a section label in burger mode navigated away and left the panel
+        // open over the page that had just loaded — the exact symptom the
+        // MOBILE_NAV_MAX note below describes, reintroduced by a new element.
+        // The caret (`.nav-drop-toggle`) is deliberately NOT here: it opens
+        // the accordion, so closing the whole panel on it would make the
+        // section menus unreachable on touch.
+        if (e.target.closest('.nav-drop-link') || e.target.closest('.nav-item')
+            || e.target.closest('.nav-drop-btn')) {
             // Only close on mobile — on desktop, dropdown link clicks
             // navigate normally and the menu goes away with the page.
             // MOBILE_NAV_MAX, not a second hardcoded breakpoint: this used to
@@ -623,7 +673,7 @@ export function initNav(activeId = '') {
         document.addEventListener('keydown', e => {
             if (e.key !== 'Escape') return;
             _closeAll();
-            const openBtn = document.querySelector('nav .nav-drop.open .nav-drop-btn');
+            const openBtn = document.querySelector('nav .nav-drop.open .nav-drop-toggle');
             if (openBtn) openBtn.focus();
             else _getBurger()?.focus();
         });
@@ -631,7 +681,7 @@ export function initNav(activeId = '') {
 
     // ── Dropdown hover (desktop) + click (touch/mobile) ──────────────────
     nav.querySelectorAll('.nav-drop').forEach(drop => {
-        const btn = drop.querySelector('.nav-drop-btn');
+        const btn = drop.querySelector('.nav-drop-toggle');
         const dropMenu = drop.querySelector('.nav-drop-menu');
         let closeTimer = null;
 
@@ -641,7 +691,7 @@ export function initNav(activeId = '') {
             nav.querySelectorAll('.nav-drop.open').forEach(d => {
                 if (d !== drop) {
                     d.classList.remove('open');
-                    d.querySelector('.nav-drop-btn')?.setAttribute('aria-expanded', 'false');
+                    d.querySelector('.nav-drop-toggle')?.setAttribute('aria-expanded', 'false');
                 }
             });
             drop.classList.add('open');
