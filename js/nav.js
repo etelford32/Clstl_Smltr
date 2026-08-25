@@ -97,7 +97,7 @@ const NAV_DROPDOWNS = [
             { href: 'flux-rope-live.html', label: 'Compounding Watch', sub: 'Real-time CME trains · interaction physics + measured noise', tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'flux-rope-live' },
             { href: 'cme-forecast.html', label: 'CME Forecast', sub: 'Locked arrivals · uncertainty + live skill', tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'cme-forecast' },
             { href: 'far-side-watch.html', label: 'Far-Side Watch', sub: 'Regions rotating in · days-to-weeks horizon', tier: 'public', icon: 'far-side', badge: 'NEW', id: 'far-side-watch' },
-            { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: 'sun' },
+            { href: 'sun.html',           label: 'Sun Watch',      sub: 'Live 3D Sun · flares · CMEs · coronal holes', tier: 'public', icon: 'sun' },
             { section: 'Planetary systems' },
             { href: 'mars.html',               label: 'Real-Time Mars', sub: 'Perseverance + MEDA on a NASA terrain globe', tier: 'public', icon: 'planet', badge: 'NEW', id: 'mars' },
             { href: 'solar-system.html',       label: 'Solar System',   sub: '31 moons · live Galilean N-body', tier: 'public', icon: 'solar-system', id: 'solar' },

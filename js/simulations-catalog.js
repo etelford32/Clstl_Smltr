@@ -140,9 +140,9 @@ export const SIMULATIONS = [
     { id: 'far-side-watch', href: 'far-side-watch.html', title: 'Far-Side Watch', category: 'space-weather',
       tier: 'public', icon: 'far-side', badge: 'NEW',
       blurb: 'Active regions rotating into view — the days-to-weeks warning horizon.' },
-    { id: 'sun', href: 'sun.html', title: 'The Sun', category: 'space-weather',
+    { id: 'sun', href: 'sun.html', title: 'Sun Watch', category: 'space-weather',
       tier: 'public', icon: 'sun',
-      blurb: 'The solar surface in real time — flux, flares, and active regions.' },
+      blurb: 'The live Sun in 3D — DONKI flares & CMEs, per-region flare odds, coronal holes, solar cycle.' },
 
     // ── Hindcast Lab ────────────────────────────────────────────────────────
     { id: 'gannon-superstorm', href: 'gannon-superstorm.html', title: 'Gannon Superstorm', category: 'hindcast',
