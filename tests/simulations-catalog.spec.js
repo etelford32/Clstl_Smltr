@@ -20,7 +20,9 @@
  */
 import { test, expect } from '@playwright/test';
 
-const EXPECTED_SECTIONS = 8;
+// One section per top-level nav section (js/site-sections.js), so the catalog
+// page and the bar group things the same way.
+const EXPECTED_SECTIONS = 5;
 
 test.describe('simulations catalog', () => {
     test('renders a 3-column grid of every simulation', async ({ page }) => {
@@ -84,9 +86,9 @@ test.describe('simulations catalog', () => {
 
         // A category chip filters to exactly that section.
         await page.fill('#sim-search', '');
-        await page.click('[data-chip="black-holes"]');
+        await page.click('[data-chip="deep-space"]');
         expect(await liveSections()).toBe(1);
-        await expect(page.locator('.sim-section[data-section="black-holes"]')).toBeVisible();
+        await expect(page.locator('.sim-section[data-section="deep-space"]')).toBeVisible();
 
         // No match → the empty state, and reset restores everything.
         await page.fill('#sim-search', 'qqqzzz');
