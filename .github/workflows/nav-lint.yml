@@ -35,3 +35,20 @@ jobs:
       # covers it without touching branch protection.
       - name: simulations catalog gate
         run: node tests/simulations-catalog.mjs
+
+      # The top-level architecture itself (js/site-sections.js): section and
+      # group shape, every simulation filed under a group that exists, and the
+      # MENU CAP — at most ~10 links per dropdown. That cap is not cosmetic. A
+      # panel is absolutely positioned under a 50px bar with nothing to scroll
+      # it, so a menu taller than the screen loses its tail silently; the Space
+      # Weather menu reached 18 links and cost 7 of them on a 1366x768 laptop.
+      # This is the cheap early warning (milliseconds, no browser);
+      # tests/nav-responsive.spec.js measures the real rendered height.
+      - name: site sections gate
+        run: node tests/site-sections.mjs
+
+      # The five section hub pages are generated whole-file from
+      # js/site-sections.js. A hand-edit or a stale bake would otherwise ship a
+      # page that disagrees with the menu pointing at it.
+      - name: section hub pages are in sync
+        run: node scripts/build-section-pages.mjs --check

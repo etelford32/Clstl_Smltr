@@ -1,0 +1,137 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Parkers Physics — Catalog & section-hub styles
+   ══════════════════════════════════════════════════════════════════════════
+   Shared by simulations.html (the complete index) and the five section hub
+   pages baked by scripts/build-section-pages.mjs. It was inline in
+   simulations.html until the hubs arrived; six copies of the same 95 lines is
+   how a design system starts drifting per page.
+
+   The `.sim-*` prefix is historical — these rules dress the card grid on every
+   one of those pages, not just the catalog. `.hub-*` rules are the parts only
+   a section hub uses (the section switcher and the prev/next footer).
+
+   Nav chrome lives in js/nav-styles.css and must NOT be duplicated here:
+   scripts/lint-nav.mjs fails any page that styles `nav` or `.nav-*` itself.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Parkers Physics design tokens (marketing palette) ─────────────────── */
+:root{
+  --font-display:'Orbitron','Segoe UI',system-ui,sans-serif;
+  --font-sans:'Space Grotesk','Segoe UI',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,monospace;
+  --tracking-cyber:.18em;
+  --black-void:#02000a;--black-panel:#07021a;--black-elev-1:#0d0626;
+  --uv-500:#9d3aff;--uv-400:#b765ff;--uv-300:#d29aff;
+  --pink-500:#ff1f9c;--pink-400:#ff5cb8;
+  --lightning-spark:#4ddbff;
+  --status-ok:#2eff9e;--status-warn:#ffd23f;
+  --fg-1:#f5f0ff;--fg-2:#cdc4f0;--fg-3:#9d92c8;--fg-4:#6f6695;--fg-5:#48426e;
+  --grad-uv-pink:linear-gradient(135deg,#9d3aff,#ff1f9c);
+  --grad-headline:linear-gradient(135deg,#f5f8ff,#c5b8ff 45%,#ff1f9c);
+  --glow-uv-sm:0 0 10px rgba(157,58,255,.4);
+  --glow-uv-md:0 0 22px rgba(157,58,255,.55),0 0 50px rgba(91,30,255,.35);
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{overflow-y:auto;scroll-behavior:smooth}
+body{min-height:100vh;overflow-x:hidden;background:#03010e;color:var(--fg-2);font-family:var(--font-sans)}
+a{text-decoration:none;color:inherit}
+img{display:block}
+.skip-link{position:absolute;left:-9999px;top:0;background:#ffd700;color:#000;padding:8px 16px;font-weight:700;border-radius:0 0 6px 6px;z-index:9999}
+.skip-link:focus{left:16px}
+
+/* ── PAGE HEADER ─────────────────────────────────────────────────────────── */
+.sim-hero{padding:88px 24px 34px;text-align:center;background:radial-gradient(ellipse at 50% 0%,#12042e 0%,#03010e 70%)}
+.sim-hero-label{font-family:var(--font-display);font-size:.72rem;text-transform:uppercase;letter-spacing:var(--tracking-cyber);color:var(--uv-400);font-weight:700;margin-bottom:14px;text-shadow:var(--glow-uv-sm)}
+.sim-hero h1{font-family:var(--font-display);font-weight:800;font-size:clamp(1.6rem,4.4vw,2.8rem);letter-spacing:.04em;line-height:1.15;text-transform:uppercase;background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:16px}
+.sim-hero-sub{font-size:1rem;color:var(--fg-3);line-height:1.7;max-width:640px;margin:0 auto}
+.sim-hero-sub a{color:var(--uv-300);border-bottom:1px solid rgba(210,154,255,.35)}
+.sim-hero-sub a:hover{color:var(--pink-400);border-bottom-color:rgba(255,92,184,.5)}
+
+/* ── FILTER TOOLBAR ──────────────────────────────────────────────────────── */
+/* Progressive enhancement only: every card is real markup in the document,
+   so with JS off the toolbar simply does nothing and the full grid shows. */
+.sim-toolbar{max-width:1160px;margin:0 auto;padding:8px 24px 4px;display:flex;flex-direction:column;gap:14px;align-items:center}
+.sim-search{position:relative;width:min(420px,100%)}
+.sim-search-label{position:absolute;left:-9999px}
+.sim-search input{width:100%;padding:11px 16px;border-radius:999px;border:1px solid rgba(154,133,255,.22);background:rgba(13,6,38,.65);color:var(--fg-1);font-family:var(--font-sans);font-size:.9rem;transition:border-color .2s,box-shadow .2s}
+.sim-search input::placeholder{color:var(--fg-5)}
+.sim-search input:focus{outline:none;border-color:rgba(183,101,255,.6);box-shadow:var(--glow-uv-sm)}
+.sim-chips{display:flex;flex-wrap:wrap;gap:7px;justify-content:center}
+.sim-chip{font-family:var(--font-display);font-size:.62rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:6px 13px;border-radius:999px;cursor:pointer;background:rgba(13,6,38,.6);border:1px solid rgba(154,133,255,.18);color:var(--fg-3);transition:color .2s,border-color .2s,background .2s}
+.sim-chip:hover{color:var(--fg-1);border-color:rgba(183,101,255,.45)}
+.sim-chip.is-on{background:var(--grad-uv-pink);border-color:transparent;color:#fff;box-shadow:var(--glow-uv-sm)}
+.sim-empty{max-width:1160px;margin:26px auto 0;padding:0 24px;text-align:center;color:var(--fg-3);font-size:.9rem}
+.sim-empty button{background:none;border:none;color:var(--uv-300);font-family:inherit;font-size:inherit;cursor:pointer;text-decoration:underline}
+
+/* ── CATEGORY SECTIONS ───────────────────────────────────────────────────── */
+.sim-section{padding:34px 24px 6px}
+.sim-inner{max-width:1160px;margin:0 auto}
+.sim-section-head{margin-bottom:20px}
+.sim-section-title{font-family:var(--font-display);font-size:1.05rem;font-weight:800;letter-spacing:.08em;color:var(--fg-1);text-transform:uppercase;margin-bottom:7px}
+.sim-section-note{font-size:.86rem;color:var(--fg-4);line-height:1.6;max-width:640px}
+.sim-section-count{font-family:var(--font-mono);font-size:.68rem;color:var(--fg-5);letter-spacing:.08em;margin-top:6px}
+
+/* THE GRID — 3 across on desktop, 2 on tablet, 1 on phone. */
+.sim-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}
+@media(max-width:1000px){.sim-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.sim-grid{grid-template-columns:1fr}}
+
+.sim-card{display:flex;flex-direction:column;gap:9px;background:linear-gradient(180deg,rgba(13,6,38,.5),rgba(7,2,26,.8));border:1px solid rgba(154,133,255,.14);border-radius:12px;padding:16px 18px 18px;transition:transform .2s,border-color .2s,box-shadow .2s}
+.sim-card:hover{transform:translateY(-3px);border-color:rgba(183,101,255,.45);box-shadow:var(--glow-uv-md)}
+.sim-card:focus-visible{outline:2px solid var(--uv-400);outline-offset:3px}
+.sim-card-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sim-card-icon{display:flex;color:var(--uv-300);opacity:.85}
+.sim-card-title{display:block;font-family:var(--font-display);font-size:.84rem;font-weight:700;color:var(--fg-1);letter-spacing:.05em;text-transform:uppercase;line-height:1.35}
+.sim-card-blurb{display:block;font-size:.83rem;color:var(--fg-3);line-height:1.6}
+.sim-card[hidden]{display:none}
+
+.sim-badge{font-family:var(--font-display);font-size:.5rem;font-weight:700;letter-spacing:.14em;padding:2px 6px;border-radius:999px;margin-left:6px;vertical-align:middle;top:-1px;position:relative;white-space:nowrap}
+.sim-badge-new{background:rgba(255,31,156,.14);color:var(--pink-400);border:1px solid rgba(255,92,184,.34)}
+.sim-badge-note{background:rgba(77,219,255,.12);color:var(--lightning-spark);border:1px solid rgba(77,219,255,.3)}
+.sim-tier{font-family:var(--font-display);font-size:.55rem;font-weight:700;text-transform:uppercase;letter-spacing:var(--tracking-cyber);padding:3px 8px;border-radius:999px;flex-shrink:0;white-space:nowrap}
+.sim-tier.public{background:rgba(46,255,158,.10);color:var(--status-ok);border:1px solid rgba(46,255,158,.30)}
+.sim-tier.free{background:rgba(77,219,255,.10);color:var(--lightning-spark);border:1px solid rgba(77,219,255,.30)}
+
+/* ── FOOTER ──────────────────────────────────────────────────────────────── */
+footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60px 24px 32px;margin-top:56px}
+.footer-inner{max-width:1160px;margin:0 auto}
+.footer-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px;margin-bottom:48px}
+@media(max-width:768px){.footer-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.footer-grid{grid-template-columns:1fr}}
+.footer-brand-logo{height:36px;width:auto;border-radius:50%;margin-bottom:12px}
+.footer-brand-name{font-size:1rem;font-weight:700;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:8px}
+.footer-tagline{font-size:.8rem;color:#556;line-height:1.6;margin-bottom:14px}
+.footer-attribution{font-size:.68rem;color:#445;line-height:1.8;font-family:monospace}
+.footer-col-title{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:#778;font-weight:700;margin-bottom:14px}
+.footer-links{display:flex;flex-direction:column;gap:8px}
+.footer-links a{font-size:.83rem;color:#556;transition:color .2s}
+.footer-links a:hover{color:#ffb830}
+
+@media(max-width:640px){.sim-section{padding:28px 16px 4px}.sim-hero{padding:64px 16px 28px}.sim-toolbar{padding:8px 16px 4px}}
+@media(prefers-reduced-motion:reduce){.sim-card{transition:none}.sim-card:hover{transform:none}}
+
+/* ── SECTION HUBS ────────────────────────────────────────────────────────── */
+/* The switcher strip: every hub links every other hub, so the top-level
+   structure is legible from any page in it without going back to the menu. */
+.hub-count{font-family:var(--font-mono);font-size:.72rem;color:var(--fg-4);letter-spacing:.06em;margin-top:18px}
+.hub-count a{color:var(--uv-300);border-bottom:1px solid rgba(210,154,255,.35)}
+.hub-count a:hover{color:var(--pink-400);border-bottom-color:rgba(255,92,184,.5)}
+.hub-switch{max-width:1160px;margin:0 auto;padding:10px 24px 0;display:flex;flex-wrap:wrap;gap:7px;justify-content:center}
+.hub-switch a{font-family:var(--font-display);font-size:.62rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:8px 13px;border-radius:999px;background:rgba(13,6,38,.6);border:1px solid rgba(154,133,255,.18);color:var(--fg-3);transition:color .2s,border-color .2s,background .2s;display:inline-flex;align-items:center;min-height:36px}
+.hub-switch a:hover{color:var(--fg-1);border-color:rgba(183,101,255,.45)}
+.hub-switch a[aria-current="page"]{background:var(--grad-uv-pink);border-color:transparent;color:#fff;box-shadow:var(--glow-uv-sm)}
+
+/* Sub-group headings sit one level below the hero, so they are quieter than
+   .sim-section-title is on the catalog page. */
+.hub-group-title{font-family:var(--font-display);font-size:.95rem;font-weight:800;letter-spacing:.08em;color:var(--fg-1);text-transform:uppercase;margin-bottom:7px}
+
+/* Prev/next across the five sections — the hub equivalent of a "next chapter". */
+.hub-next{max-width:1160px;margin:44px auto 0;padding:0 24px;display:grid;grid-template-columns:1fr 1fr;gap:13px}
+@media(max-width:640px){.hub-next{grid-template-columns:1fr}}
+.hub-next-card{display:flex;flex-direction:column;gap:5px;padding:16px 18px;border-radius:12px;background:linear-gradient(180deg,rgba(13,6,38,.5),rgba(7,2,26,.8));border:1px solid rgba(154,133,255,.14);transition:border-color .2s,box-shadow .2s}
+.hub-next-card:hover{border-color:rgba(183,101,255,.45);box-shadow:var(--glow-uv-md)}
+.hub-next-card.is-next{text-align:right}
+.hub-next-dir{font-family:var(--font-mono);font-size:.64rem;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-5)}
+.hub-next-name{font-family:var(--font-display);font-size:.84rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-1)}
+.hub-next-note{font-size:.8rem;color:var(--fg-4);line-height:1.5}
+@media(max-width:640px){.hub-switch{padding:10px 16px 0}.hub-next{padding:0 16px}}

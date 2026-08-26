@@ -28,8 +28,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { glyph } from '../js/glyphs.js';
 import { SIM_CATEGORIES, SIM_COUNT, catalogSections } from '../js/simulations-catalog.js';
+// Card markup is shared with scripts/build-section-pages.mjs — the hubs and
+// the index must render the same card. See scripts/catalog-render.mjs.
+import { esc, renderCard } from './catalog-render.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PAGE = join(ROOT, 'simulations.html');
@@ -39,50 +41,6 @@ const REGIONS = [
     { name: 'HEAD', begin: '<!-- SIM-CATALOG:HEAD:BEGIN -->', end: '<!-- SIM-CATALOG:HEAD:END -->' },
     { name: 'MAIN', begin: '<!-- SIM-CATALOG:MAIN:BEGIN -->', end: '<!-- SIM-CATALOG:MAIN:END -->' },
 ];
-
-/** Escape for use in HTML text and double-quoted attribute values. */
-function esc(value) {
-    return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
-
-/**
- * Icon markup for a card.
- *
- * glyph() returns null for an unknown id (js/glyphs.js documents that as
- * deliberate). Here an unknown id is a typo in the catalog and nothing else,
- * so we throw rather than silently shipping a blank square — the drift gate
- * is the point of this whole file.
- */
-function iconMarkup(sim) {
-    const svg = glyph(sim.icon, { size: 22 });
-    if (!svg) throw new Error(`simulations-catalog: "${sim.id}" uses unknown glyph id "${sim.icon}"`);
-    return svg;
-}
-
-const TIER_LABEL = { public: 'Free', free: 'Free account' };
-
-function renderCard(sim) {
-    const badge = sim.badge
-        ? `<sup class="sim-badge sim-badge-${sim.badge === 'NEW' ? 'new' : 'note'}">${esc(sim.badge)}</sup>`
-        : '';
-    // One lowercase haystack per card so the filter never has to walk the DOM
-    // reading textContent — it just substring-matches this attribute.
-    const haystack = `${sim.title} ${sim.blurb} ${sim.id}`.toLowerCase();
-    return [
-        `      <a class="sim-card" href="${esc(sim.href)}" data-cat="${esc(sim.category)}" data-find="${esc(haystack)}">`,
-        `        <span class="sim-card-top">`,
-        `          <span class="sim-card-icon">${iconMarkup(sim)}</span>`,
-        `          <span class="sim-tier ${esc(sim.tier)}">${esc(TIER_LABEL[sim.tier])}</span>`,
-        `        </span>`,
-        `        <span class="sim-card-title">${esc(sim.title)}${badge}</span>`,
-        `        <span class="sim-card-blurb">${esc(sim.blurb)}</span>`,
-        `      </a>`,
-    ].join('\n');
-}
 
 function renderSection({ category, sims }) {
     const plural = sims.length === 1 ? 'simulation' : 'simulations';
