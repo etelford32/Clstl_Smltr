@@ -127,7 +127,7 @@ const NAV_ITEMS = {
     'space-weather': [
         { section: 'Live conditions' },
         { href: 'space-weather.html', label: 'Live Console',    sub: 'Composable dashboard · solar & geomagnetic', tier: 'public', icon: 'space-weather', id: 'weather' },
-        { href: 'sun.html',           label: 'The Sun',         sub: 'Real-time solar surface view',               tier: 'public', icon: 'sun' },
+        { href: 'sun.html',           label: 'Sun Watch',       sub: 'Live 3D Sun · flares · CMEs · coronal holes', tier: 'public', icon: 'sun' },
         { href: 'auroracle.html',     label: 'AurOracle',       sub: 'Predict the aurora · 7-night + 30-day',      tier: 'public', icon: 'aurora', badge: 'NEW', id: 'auroracle' },
         { section: 'Forecasting' },
         { href: 'cme-forecast.html',   label: 'CME Forecast',         sub: 'Locked arrivals · uncertainty + live skill',   tier: 'public', icon: 'flux-rope', badge: 'NEW', id: 'cme-forecast' },

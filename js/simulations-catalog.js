@@ -89,10 +89,10 @@ export const SIMULATIONS = [
       category: 'space-weather', group: 'live',
       tier: 'public', icon: 'aurora', badge: 'NEW',
       blurb: 'Aurora visibility for your location — 7-night and 30-day outlooks.' },
-    { id: 'sun', href: 'sun.html', title: 'The Sun',
+    { id: 'sun', href: 'sun.html', title: 'Sun Watch',
       category: 'space-weather', group: 'live',
       tier: 'public', icon: 'sun',
-      blurb: 'The solar surface in real time — flux, flares, and active regions.' },
+      blurb: 'The live Sun in 3D — DONKI flares & CMEs, per-region flare odds, coronal holes, solar cycle.' },
     // ── Forecasting ───────────────────────────────────────────────────────
     { id: 'flux-rope', href: 'flux-rope.html', title: 'Flux Rope Simulator',
       category: 'space-weather', group: 'forecast',
