@@ -114,6 +114,21 @@ export const PIPELINES = [
       cadence_s: 21_600, prewarm: 'cold',
       warnAgeS:  9 * 3600, critAgeS: 24 * 3600 },
 
+    { id: 'noaa-f107-history',  label: 'NOAA F10.7 history + 45-day',
+      endpoint: '/api/noaa/f107-history',
+      category: 'space-weather', upstream: 'NOAA SWPC',
+      cadence_s: 86_400, prewarm: 'cold',
+      warnAgeS:  36 * 3600, critAgeS: 72 * 3600,
+      notes: 'Observed + predicted F10.7 series (drag models, Sun Watch cycle tab). Shipped unmonitored until Sun Watch adopted it.' },
+
+    { id: 'hek-coronal-holes',  label: 'HEK coronal holes',
+      endpoint: '/api/hek/coronal-holes',
+      category: 'events', upstream: 'LMSAL HEK',
+      cadence_s: 21_600, prewarm: 'cold', probeTimeoutMs: 16_000,
+      freshnessExempt: true,   // data.updated only — no top-level age_seconds
+      warnAgeS:  12 * 3600, critAgeS: 48 * 3600,
+      notes: 'SPoCA/CHIMERA CH detections for space-weather.html globe + Sun Watch. HEK regularly takes >8 s cold.' },
+
     // ── Solar wind ─────────────────────────────────────────────────────────
     { id: 'solar-wind-latest',  label: 'DSCOVR/ACE latest',
       endpoint: '/api/solar-wind/latest',

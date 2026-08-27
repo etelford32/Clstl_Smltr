@@ -9,21 +9,21 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>The Sun — G2V · Parkers Physics App</title>
+<title>Sun Watch — Live Solar Activity · Parkers Physics App</title>
 <link rel="canonical" href="https://parkersphysics.com/sun.html">
-<meta name="description" content="Real-time visualization of the Sun's photosphere, corona, magnetic field, and solar flares. Live SDO and GOES X-ray data with MHD-informed flow fields.">
+<meta name="description" content="Sun Watch: the live Sun in 3D with a fused solar-activity analysis — NASA DONKI flares and CMEs, NOAA active-region flare odds, HEK coronal holes, and the F10.7 solar cycle, on a real-time photosphere/corona simulation.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Parkers Physics">
 <meta property="og:url" content="https://parkersphysics.com/sun.html">
-<meta property="og:title" content="The Sun (G2V) — Parkers Physics">
-<meta property="og:description" content="Real-time visualization of the Sun's photosphere, corona, magnetic field, and solar flares. Live SDO and GOES X-ray data with MHD-informed flow fields.">
+<meta property="og:title" content="Sun Watch — Parkers Physics">
+<meta property="og:description" content="The live Sun in 3D plus a fused solar-activity analysis: NASA DONKI flares and CMEs, NOAA active-region flare odds, HEK coronal holes, and the F10.7 solar cycle.">
 <meta property="og:image" content="https://parkersphysics.com/static/og/sun.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="The Sun (G2V) — Parkers Physics">
-<meta name="twitter:description" content="Real-time visualization of the Sun's photosphere, corona, magnetic field, and solar flares. Live SDO and GOES X-ray data with MHD-informed flow fields.">
+<meta name="twitter:title" content="Sun Watch — Parkers Physics">
+<meta name="twitter:description" content="The live Sun in 3D plus a fused solar-activity analysis: NASA DONKI flares and CMEs, NOAA active-region flare odds, HEK coronal holes, and the F10.7 solar cycle.">
 <meta name="twitter:image" content="https://parkersphysics.com/static/og/sun.jpg">
 
 <style>
@@ -679,8 +679,8 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "@id": "https://parkersphysics.com/sun.html#app",
-  "name": "The Sun (G2V)",
-  "description": "Real-time visualization of the Sun's photosphere, corona, magnetic field, and solar flares. Live SDO and GOES X-ray data with MHD-informed flow fields.",
+  "name": "Sun Watch",
+  "description": "The live Sun in 3D plus a fused solar-activity analysis: NASA DONKI flares and CMEs, NOAA active-region flare odds, HEK coronal holes, and the F10.7 solar cycle on a real-time photosphere/corona simulation.",
   "url": "https://parkersphysics.com/sun.html",
   "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
   "applicationCategory": "EducationalApplication",
@@ -696,7 +696,7 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 </script>
 </head>
 <body>
-<h1 data-seo-h1 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">The Sun — G2V Star Simulator</h1>
+<h1 data-seo-h1 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">Sun Watch — Live Solar Activity Monitor &amp; G2V Star Simulator</h1>
 
 
 <script type="importmap">
@@ -1697,6 +1697,7 @@ import { loadRealHistory } from './js/history-loader.js';
 import { SolarWeatherForecaster, solarCyclePhase } from './js/solar-weather-forecast.js';
 import { ModelValidator }     from './js/model-validation.js';
 import { SolarLSTM, normalise as lstmNormalise, denormalise as lstmDenorm, FEATURES } from './js/solar-lstm.js';
+import { initSunWatch } from './js/sun-watch.js';
 
 
 // PANEL
@@ -8092,6 +8093,7 @@ const fpsEl = document.getElementById('fps-display');
 
 // Declared here so animate() (below) can access them before the NOAA section
 let regionGroup   = null; // THREE.Group containing all AR markers
+const _sunWatchGroups = []; // Sun Watch overlay groups co-rotating with the photosphere
 let solarRotAngle = 0;    // accumulated rotation matching photosphere UV shift
 // Live-data slots — forward-declared so animate()'s first synchronous tick
 // (which reads liveXrayFlux/liveRegions/liveFlares) doesn't hit a TDZ
@@ -8218,6 +8220,9 @@ function animate() {
 
     // Rotate region marker group with the photosphere texture
     const t = uniforms.u_time.value;
+    // Sun Watch overlay groups (coronal-hole markers) ride the same solar
+    // rotation as the AR markers so the two frames can never drift apart.
+    for (const wg of _sunWatchGroups) wg.rotation.y = solarRotAngle;
     if (regionGroup) {
         regionGroup.rotation.y = solarRotAngle;
         // Drive marker animation: gentle breath on rings/cross/spike, +
@@ -10447,6 +10452,7 @@ function showRegionAnalysis(regData) {
         <div class="sap-pot-bar">
             <div class="sap-pot-fill" style="width:${pot.pct}%;background:${potCol}"></div>
         </div>
+        ${_sapSwpcProbRows(reg.num)}
         <div class="sap-divider">Recent flares (48h)</div>
         ${flareRows}
         <button class="sap-fly-btn" id="sap-fly">⊙ Fly to AR ${reg.num}</button>
@@ -10470,6 +10476,19 @@ function showRegionAnalysis(regData) {
     });
 
     _sapEl.classList.add('show');
+}
+
+// SWPC's published 24 h flare probabilities for one AR, when the Sun Watch
+// dock has the /api/noaa/regions feed loaded. Empty string otherwise — the
+// popup must render identically when the dock is absent or its feed is down.
+function _sapSwpcProbRows(regNum) {
+    const row = window.__sunWatch?.probIndex?.get?.(String(regNum));
+    if (!row || (row.pM == null && row.pX == null && row.pC == null)) return '';
+    const pct = p => p == null ? '—' : Math.round(p * 100) + '%';
+    return `
+        <div class="sap-divider">SWPC 24 h flare odds</div>
+        <div class="sap-row"><span class="sap-key">C / M / X class</span>
+            <span class="sap-val">${pct(row.pC)} / ${pct(row.pM)} / ${pct(row.pX)}</span></div>`;
 }
 
 // ── Show flare analysis popup ─────────────────────────────────────────────────
@@ -11303,6 +11322,29 @@ updateAtmospherePanel();
     }, { passive: true });
 })();
 
+// ── Sun Watch analysis dock ──────────────────────────────────────────────────
+// Fuses DONKI / SWPC-regions / HEK / F10.7 into the bottom-left dock. All
+// analysis math lives in js/sun-watch-model.js (node-gated); the dock never
+// re-polls feeds this page already runs (it consumes swpc-update and shares
+// liveFlares). Failure here must never take the 3D sun down with it.
+try {
+    initSunWatch({
+        THREE, scene,
+        flyToRegion,
+        onFlareSelect: (lat, lon, cls) => {
+            flyToRegion(lat, lon);
+            uniforms.u_flare_lat.value = lat * Math.PI / 180;
+            uniforms.u_flare_lon.value = lon * Math.PI / 180;
+            uniforms.u_flare_t.value   = 50;
+            triggerPositionFlare(lat, lon, (cls || 'C')[0].toUpperCase());
+        },
+        getLiveFlares: () => liveFlares,
+        registerRotatingGroup: (g) => { scene.add(g); _sunWatchGroups.push(g); },
+    });
+} catch (err) {
+    console.warn('[sun] Sun Watch dock failed to mount:', err);
+}
+
 // ── Test / debug handle (smoke tests, Phase-1 verification) ──────────────────
 // Mirrors window.__ua / window.__ssd. Exposes the renderer + the seven layer
 // meshes so tests can assert visibility toggles and sample frames without a
@@ -11343,6 +11385,7 @@ window.__sun = {
         corona:       coronaMesh,
     },
     get frames() { return renderer.info.render.frame; },
+    get watch() { return window.__sunWatch; },           // Sun Watch dock handle
 };
 </script>
 
@@ -11350,12 +11393,14 @@ window.__sun = {
 <section class="sim-info">
   <div class="sim-info-inner">
     <div class="sim-info-header">
-      <div class="sim-info-title">Parker Solar Physics Engine</div>
+      <div class="sim-info-title">Sun Watch · Parker Solar Physics Engine</div>
       <p class="sim-info-lead">
         A real-time 3D magnetohydrodynamic simulation of our Sun — from sub-surface convection cells
         to the heliospheric current sheet and beyond. Solar wind acceleration follows Parker's 1958
         spiral model, with live NOAA/SWPC data driving X-ray flux, active region positions, and
-        geomagnetic storm indices.
+        geomagnetic storm indices. The Sun Watch dock (bottom-left) fuses the analysis layer on
+        top: a merged NASA DONKI event timeline, SWPC per-region 24&nbsp;h flare probabilities,
+        HEK coronal-hole detections marked on the globe, and the F10.7 solar-cycle context.
       </p>
     </div>
 
