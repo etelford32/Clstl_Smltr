@@ -1133,6 +1133,10 @@ import './js/telemetry.js';
                         <input type="range" id="sl-bline-density" min="10" max="100" step="5" value="50">
                         <span class="vdisp" id="disp-bline-density" style="font-size:10px">50%</span>
                     </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-cmetrain" checked>
+                        <label for="tog-cmetrain">CME train transit (modeled)</label>
+                    </div>
                     <!-- Phase 2.3 — manual EP trigger. Hidden unless ?debug=prominence. -->
                     <div class="ctrl" id="erupt-row" style="margin-top:6px;padding-left:22px;display:none">
                         <button id="btn-erupt-nearest" class="cv-btn"
@@ -1702,6 +1706,7 @@ import { ModelValidator }     from './js/model-validation.js';
 import { SolarLSTM, normalise as lstmNormalise, denormalise as lstmDenorm, FEATURES } from './js/solar-lstm.js';
 import { initSunWatch } from './js/sun-watch.js';
 import { startFluxRopeProvider, trainStateAt, scrubMarks } from './js/sun-flux-rope.js';
+import { initSunRopeOverlay } from './js/sun-rope-overlay.js';
 
 
 // PANEL
@@ -1741,10 +1746,12 @@ document.getElementById('spd-50x').addEventListener('click',   () => setSimSpeed
 // ── 7-day SWPC scrubber + 24h LSTM forecast ──────────────────────────────
 // Timeline: enriched with Bt, By, Kp (estimated from Bz/speed coupling
 // when Kp feed unavailable).  Extended by +24h LSTM forecast zone.
-let swpcTimeline   = [];    // [{t, speed, density, bz, bt, by, kp, isForecast}] oldest → newest
+let swpcTimeline   = [];    // [{t, tMs, speed, density, bz, bt, by, kp, kpSource, isForecast}] oldest → newest
 let scrubLive      = true;  // true = follow real-time swpc-update events
 let scrubLiveIdx   = 0;     // index of the "LIVE" position (end of observed data)
 let scrubForecastStart = 0; // index where forecast zone begins
+let scrubTimeMs    = null;  // scrubbed instant [epoch ms]; null = follow the live clock
+                            // (the CME-train overlay replays its transit off this)
 
 // LSTM model — initialised below, seeded from historical data
 const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
@@ -1917,6 +1924,7 @@ document.getElementById('sl-scrub').addEventListener('input', function() {
     const zoneLbl = document.getElementById('scrub-zone-lbl');
 
     if (swpcTimeline.length === 0) {
+        scrubTimeMs = null;
         lbl.textContent = '● LIVE';
         lbl.style.color = '#44bb66';
         document.getElementById('scrub-vals').style.display = 'none';
@@ -1925,6 +1933,7 @@ document.getElementById('sl-scrub').addEventListener('input', function() {
     }
 
     if (scrubLive) {
+        scrubTimeMs = null;
         lbl.textContent = '● LIVE';
         lbl.style.color = '#44bb66';
         document.getElementById('scrub-vals').style.display = 'none';
@@ -1934,6 +1943,7 @@ document.getElementById('sl-scrub').addEventListener('input', function() {
 
     const pt = swpcTimeline[Math.min(idx, swpcTimeline.length - 1)];
     if (!pt) return;
+    scrubTimeMs = Number.isFinite(pt.tMs) ? pt.tMs : null;
 
     const d   = new Date((pt.t + (pt.t.includes('T') ? '' : 'T') + (pt.t.includes('Z') ? '' : 'Z')).replace(' ', 'T'));
     const lbl_str = d.toLocaleDateString('en-US', { month:'short', day:'numeric' })
@@ -8251,6 +8261,7 @@ const fpsEl = document.getElementById('fps-display');
 // Declared here so animate() (below) can access them before the NOAA section
 let regionGroup   = null; // THREE.Group containing all AR markers
 const _sunWatchGroups = []; // Sun Watch overlay groups co-rotating with the photosphere
+let _ropeOverlay  = null; // CME-train transit overlay (BALLISTIC — never in _sunWatchGroups)
 let solarRotAngle = 0;    // accumulated rotation matching photosphere UV shift
 // Live-data slots — forward-declared so animate()'s first synchronous tick
 // (which reads liveXrayFlux/liveRegions/liveFlares) doesn't hit a TDZ
@@ -8289,6 +8300,11 @@ function animate() {
     // Shader shifts UV.x by (u_time * 0.004 * u_rot) per time unit
     // → rotation angle per frame = dt * 0.004 * u_rot * 2π radians
     solarRotAngle += dt * 0.004 * uniforms.u_rot.value * Math.PI * 2;
+
+    // CME-train overlay follows the scrubbed instant, or the live clock at
+    // ● LIVE. Real wall-clock time on purpose — sim-speed scales the visual
+    // sun, not the modeled heliospheric transit.
+    if (_ropeOverlay) _ropeOverlay.update(scrubTimeMs ?? Date.now());
 
     // Decay flare intensity each frame (~6 s half-life at 60fps dt=0.010)
     if (uniforms.u_flare_intensity.value > 0.001) {
@@ -11513,6 +11529,24 @@ try {
     startFluxRopeProvider();
 } catch (err) {
     console.warn('[sun] flux-rope provider failed to start:', err);
+}
+
+// ── CME-train transit overlay (3D) ──────────────────────────────────────────
+// Rope fronts at the ensemble's modeled apex (±1σ ghosts) + Earth at 1 AU,
+// probing the published forecast's live kernel. Ballistic: parented to the
+// scene frame, never to the co-rotating marker groups. Compression comes
+// from the ONE scale module (stage/scale.js) and is disclosed in the legend.
+try {
+    _ropeOverlay = initSunRopeOverlay({
+        THREE, scene, host: document.getElementById('canvas-wrap'),
+    });
+    const togTrain = document.getElementById('tog-cmetrain');
+    if (togTrain) {
+        _ropeOverlay?.setVisible(togTrain.checked);
+        togTrain.addEventListener('change', (e) => _ropeOverlay?.setVisible(e.target.checked));
+    }
+} catch (err) {
+    console.warn('[sun] CME train overlay failed to mount:', err);
 }
 
 // ── Test / debug handle (smoke tests, Phase-1 verification) ──────────────────

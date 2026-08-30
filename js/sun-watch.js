@@ -420,6 +420,49 @@ export function initSunWatch(deps = {}) {
                 </span>
                 <span class="snw-age">${fmtAge(Date.parse(c.timeIso), now)}</span>
             </div>`).join('');
+
+        // Compounding measurement (js/sun-flux-rope.js measureCompounding —
+        // the §16 counterfactual). Rendered verbatim; computed nowhere here.
+        const cp = fc.compounding;
+        let cpBlock = '';
+        if (cp) {
+            const num = (v, f) => (v == null || !Number.isFinite(v)) ? '—' : f(v);
+            const sgn = (v, unit, dp = 1) =>
+                num(v, (x) => `${x > 0 ? '+' : ''}${x.toFixed(dp)} ${unit}`);
+            const pcts = (a, b, dv) =>
+                `${num(a, (x) => Math.round(x * 100) + '%')} vs ${num(b, (x) => Math.round(x * 100) + '%')}`
+                + ` (${num(dv, (x) => `${x > 0 ? '+' : ''}${Math.round(x * 100)} pts`)})`;
+            const wakeRows = cp.ropes.filter((r) => r.leader != null).map((r) => `
+                <div class="snw-detail">R${r.i} in R${r.leader}'s wake —
+                    ambient ${num(r.wakeDvKms, (x) => (x > 0 ? '+' : '') + Math.round(x))} km/s ·
+                    drag ×${num(r.gammaRatio, (x) => x.toFixed(2))} ·
+                    arrives ${num(r.deltaH, (x) => Math.abs(x).toFixed(1))} h
+                    ${r.deltaH != null && r.deltaH < 0 ? 'earlier' : 'later'}</div>`).join('');
+            cpBlock = `
+                <div class="snw-detail" style="margin-top:8px;color:#9fc0ff;letter-spacing:.06em">
+                    COMPOUNDING EFFECT · vs the same ropes run independently</div>
+                <div class="snw-kv"><span class="k">min Bz (p50)</span><span class="v">
+                    ${num(cp.on.minBzP50, (x) => x.toFixed(1))} vs ${num(cp.off.minBzP50, (x) => x.toFixed(1))} nT
+                    (${sgn(cp.delta.minBzP50, 'nT')})</span></div>
+                <div class="snw-kv"><span class="k">P(min Bz &lt; −20 nT)</span><span class="v">
+                    ${pcts(cp.on.p20, cp.off.p20, cp.delta.p20)}</span></div>
+                <div class="snw-kv"><span class="k">P(min Bz &lt; −10 nT)</span><span class="v">
+                    ${pcts(cp.on.p10, cp.off.p10, cp.delta.p10)}</span></div>
+                <div class="snw-kv"><span class="k">ensemble arrival (p50)</span><span class="v">
+                    ${sgn(cp.delta.arrivalP50H, 'h')}</span></div>
+                ${wakeRows}
+                <div class="snw-note">${esc(cp.disclosure)}.</div>`;
+        } else if (fc.train) {
+            cpBlock = `<div class="snw-note">Compounding counterfactual unavailable
+                for this run — retried on the next refresh.</div>`;
+        } else {
+            cpBlock = `<div class="snw-note">Single rope in flight — nothing to
+                compound. The §16 interaction measurement appears when ≥ 2 CMEs
+                form a train.</div>`;
+        }
+        const obsRow = fc.observedL1 ? `
+            <div class="snw-kv"><span class="k">observed min Bz so far (L1)</span>
+                <span class="v">${fc.observedL1.minBz.toFixed(1)} nT</span></div>` : '';
         $body.innerHTML = `
             <div class="snw-detail" style="padding:2px 0 1px">
                 ${fc.train
@@ -434,6 +477,8 @@ export function initSunWatch(deps = {}) {
                 <div class="snw-fc-stat"><div class="v${s.p20 > 0.3 ? ' warn' : ''}">${pctTxt(s.p20)}</div><div class="k">P(min Bz &lt; −20 nT)</div></div>
             </div>
             ${members}
+            ${obsRow}
+            ${cpBlock}
             <div class="snw-note">${esc(fc.assimNote)} · fan = ensemble 5–95% / 25–75% Bz at L1 ·
                 amber = observed DSCOVR/ACE · magnetic config is a wide prior (cone fits don't constrain it).
                 Live view: <a href="flux-rope-live.html">Compounding Watch</a> ·

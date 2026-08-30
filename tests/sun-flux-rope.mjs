@@ -14,7 +14,11 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { computeFluxRopeForecast } from '../js/flux-rope-forecast.js';
-import { trainStateAt, scrubMarks } from '../js/sun-flux-rope.js';
+import { fromArrays } from '../js/solar-wind-driver.js';
+import {
+    trainStateAt, scrubMarks, measureCompounding, observedMinBz,
+    pBelowFromMinBz, medianFinite, ropeCrossingH,
+} from '../js/sun-flux-rope.js';
 
 const wasm = await readFile(fileURLToPath(new URL('../js/flux-rope-wasm/flux_rope_core.wasm', import.meta.url)));
 
@@ -103,6 +107,76 @@ check('fixture train produces a live 2-rope forecast',
     check('no summary → no band (never a fabricated window)', none.band === null);
     const empty = scrubMarks({});
     check('empty inputs → empty track', empty.marks.length === 0 && empty.band === null);
+}
+
+// ── measureCompounding (§16 counterfactual) ──────────────────────────────────
+{
+    const cp = await measureCompounding(fc, { wasm });
+    check('compounding measurement produced for the 2-rope train', cp != null);
+    check('disclosure names the method (counterfactual, §16 off, priors)',
+        /counterfactual/.test(cp.disclosure) && /§16/.test(cp.disclosure)
+        && /unassimilated|prior/i.test(cp.disclosure));
+    check('both sides carry the full scalar set',
+        [cp.on, cp.off].every((s) => Number.isFinite(s.pHit)
+            && Number.isFinite(s.minBzP50) && Number.isFinite(s.p10)
+            && Number.isFinite(s.p20) && Number.isFinite(s.arrivalP50H)));
+    check('deltas are ON minus OFF and internally consistent',
+        Math.abs(cp.delta.minBzP50 - (cp.on.minBzP50 - cp.off.minBzP50)) < 1e-9
+        && Math.abs(cp.delta.p20 - (cp.on.p20 - cp.off.p20)) < 1e-9);
+
+    const [lead, follower] = cp.ropes;
+    check('kernel assigns the follower its §16 leader (rope 0)',
+        lead.leader === null && follower.leader === 0,
+        JSON.stringify({ lead: lead.leader, follower: follower.leader }));
+    check('lead-rope kinematics untouched by interaction (no §19 momentum)',
+        lead.deltaH != null && Math.abs(lead.deltaH) < 0.02,
+        `Δ ${lead.deltaH?.toFixed(4)} h`);
+    check('follower rides the wake: +Δv ambient, reduced drag, earlier arrival',
+        follower.wakeDvKms > 0 && follower.gammaRatio < 1 && follower.deltaH < 0,
+        `wake +${follower.wakeDvKms?.toFixed(0)} km/s · Γ×${follower.gammaRatio?.toFixed(2)} · Δarrival ${follower.deltaH?.toFixed(2)} h`);
+    check('interaction moves the ensemble somewhere (not a no-op counterfactual)',
+        [cp.delta.minBzP50, cp.delta.p20, cp.delta.arrivalP50H]
+            .some((v) => v != null && Math.abs(v) > 1e-6),
+        JSON.stringify(cp.delta));
+
+    // Determinism: same fc → bit-identical measurement.
+    const cp2 = await measureCompounding(fc, { wasm });
+    check('measurement is deterministic per train',
+        cp2.off.minBzP50 === cp.off.minBzP50 && cp2.off.p20 === cp.off.p20);
+
+    // A single rope has nothing to compound.
+    const single = await computeFluxRopeForecast({
+        sources: { cmes: [LEAD], rtsw: null, wasm }, nowMs: NOW_MS,
+    });
+    check('single-rope forecast measures null (never a fabricated delta)',
+        (await measureCompounding(single, { wasm })) === null);
+    check('idle / failed forecasts measure null',
+        (await measureCompounding({ idle: true }, { wasm })) === null
+        && (await measureCompounding(null, { wasm })) === null);
+}
+
+// ── observedMinBz + small pure helpers ───────────────────────────────────────
+{
+    const T0 = Date.parse('2026-07-20T00:00:00Z');
+    const mk = (bz) => fromArrays({
+        t: bz.map((_, i) => T0 + i * 60_000),
+        bz, v: bz.map(() => 420), n: bz.map(() => 5),
+    }, { source: 'observed' });
+    const obs = observedMinBz(mk([-2, -8, NaN, -15.5, -4, 1]), T0, T0 + 10 * 60_000);
+    check('observedMinBz finds the deepest finite dip with its epoch',
+        obs.minBz === -15.5 && obs.tMs === T0 + 3 * 60_000 && obs.n === 5);
+    check('observedMinBz respects the window (the deeper out-of-window dip is excluded)',
+        observedMinBz(mk([-20, -8, -3, -4, -5]), T0 + 60_000, T0 + 10 * 60_000).minBz === -8);
+    check('observedMinBz refuses to call <4 samples a measurement',
+        observedMinBz(mk([-9, -2, 3]), T0, T0 + 10 * 60_000) === null
+        && observedMinBz(null, T0, T0 + 1) === null);
+
+    check('pBelowFromMinBz counts misses in the denominator',
+        pBelowFromMinBz(new Float32Array([-25, -12, -3, NaN]), -20) === 0.25);
+    check('medianFinite skips non-finite entries',
+        medianFinite([NaN, 3, 1, 2, Infinity]) === 2 && medianFinite([]) === null);
+    check('ropeCrossingH returns null beyond the horizon',
+        ropeCrossingH(fc.kernel, 0, 0, { horizonH: 1 }) === null);
 }
 
 if (failures) { console.error(`\n${failures} check(s) FAILED`); process.exit(1); }
