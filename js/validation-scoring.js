@@ -277,6 +277,27 @@ export function rtEventId(donkiId) {
 }
 
 /**
+ * Make a heterogeneous row batch PostgREST-bulk-insertable: give every
+ * row the UNION of the batch's keys, absent values as explicit null.
+ *
+ * PostgREST REJECTS a bulk insert whose objects carry different key
+ * sets (PGRST102 "All object keys must match"). The mixed
+ * enlil / ballistic-v1 / dbm-v1 rows were POSTed as one such array,
+ * which threw daily and took truth resolution down with it — zero
+ * baseline forecasts and zero cme_l1_observations for four weeks
+ * while cme_events kept accreting (2026-08 postmortem).
+ *
+ * CAUTION for callers: a NOT NULL DEFAULT column (issued_at,
+ * predicted_hit) must be absent from EVERY row of the batch, or set in
+ * every row — if only some rows carry it, the fill writes explicit
+ * nulls into the rest and the insert fails on the constraint instead.
+ */
+export function uniformBatch(rows) {
+    const keys = [...new Set(rows.flatMap(r => Object.keys(r)))];
+    return rows.map(r => Object.fromEntries(keys.map(k => [k, r[k] ?? null])));
+}
+
+/**
  * Should a NEW forecast row be issued for (event, model)?
  * @param {number|null} lastPredictedMs  latest locked row's arrival (null = none yet)
  * @param {number} predictedMs           the model's current prediction
