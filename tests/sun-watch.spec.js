@@ -10,6 +10,11 @@
  *   · a dead feed shows a "down" chip and an empty section (no fabricated rows)
  *   · coronal-hole markers land in the scene and co-rotate with the AR frame
  *   · collapse → pill → expand round-trips
+ *   · the Forecast tab renders the SHARED flux-rope provider's published
+ *     result (live ensemble stats for an Earth-directed CME; the honest
+ *     "feed unavailable" state when DONKI is down) and the scrubber event
+ *     track picks up the ledger marks — both consume the ONE provider run
+ *     started by js/sun-flux-rope.js, never a second pipeline
  */
 
 import { test, expect } from '@playwright/test';
@@ -73,6 +78,11 @@ async function mockFeeds(page, { donkiDown = false } = {}) {
     await page.route('**/api/noaa/regions*', r => r.fulfill(json(NOAA_REGIONS)));
     await page.route('**/api/hek/coronal-holes*', r => r.fulfill(json(HEK_HOLES)));
     await page.route('**/api/noaa/f107-history*', r => r.fulfill(json(f107Payload())));
+    // The flux-rope provider's L1 leg: RTSW direct + same-origin mirror both
+    // return empty so runs are deterministic (prior-only fan) and never wait
+    // out a sandbox network timeout. The WASM stays same-origin static.
+    await page.route('**services.swpc.noaa.gov/**', r => r.fulfill(json([])));
+    await page.route('**/api/noaa/passthrough*', r => r.fulfill(json([])));
 }
 
 async function boot(page) {
@@ -182,6 +192,38 @@ test.describe('sun watch dock', () => {
         await page.evaluate(() => window.__sunWatch.setTab('cme'));
         await expect(page.locator('#snw-body').getByText('No CME analyses published')).toBeVisible();
         await expect(page.locator('#snw-ft .snw-chip.snw-down')).toHaveCount(1);
+    });
+
+    test('forecast tab renders the shared provider ensemble for a live CME', async ({ page }) => {
+        await mockFeeds(page);
+        await boot(page);
+        // The provider defers its first run past scene boot, then computes
+        // the 500-member ensemble in WASM — wait for the published result.
+        await page.waitForFunction(() => window.__fluxRopeForecast?.idle === false,
+            { timeout: BOOT_TIMEOUT_MS + 15_000 });
+        await page.evaluate(() => window.__sunWatch.setTab('forecast'));
+        const body = page.locator('#snw-body');
+        await expect(body.getByText('P(Earth hit)')).toBeVisible();
+        await expect(body.getByText(/P\(min Bz/).first()).toBeVisible();
+        await expect(page.locator('#snw-rope-chart')).toBeVisible();
+        // The train member row quotes the DONKI cone fit verbatim.
+        await expect(body.getByText('880 km/s')).toBeVisible();
+        // The scrubber event track consumed the same ledger — flare + CME
+        // marks are present (drawn only once the NOAA timeline also loads,
+        // but the draw list itself must not depend on that).
+        const marks = await page.evaluate(() => window.__sun.scrubTrack.marks);
+        expect(marks.some(m => m.kind === 'flare')).toBe(true);
+        expect(marks.some(m => m.kind === 'cme')).toBe(true);
+    });
+
+    test('forecast tab is honest when the provider feed is down', async ({ page }) => {
+        await mockFeeds(page, { donkiDown: true });
+        await boot(page);
+        await page.waitForFunction(() => window.__fluxRopeForecast?.failed === true,
+            { timeout: BOOT_TIMEOUT_MS + 15_000 });
+        await page.evaluate(() => window.__sunWatch.setTab('forecast'));
+        await expect(page.locator('#snw-body').getByText('Forecast feed unavailable'))
+            .toBeVisible();
     });
 
     test('collapse to pill and back', async ({ page }) => {

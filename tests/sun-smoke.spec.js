@@ -31,8 +31,14 @@ function attachConsoleRecorder(page) {
 // degrade to its procedural model. Those are expected, not page faults. Shader
 // compile errors ("THREE.WebGLProgram: Shader Error", program info logs) do NOT
 // match this filter, so they still fail the test.
+// `telemetry` + 501: /api/telemetry/log answers 501 not_configured wherever
+// SUPABASE_SERVICE_KEY is absent (any sandbox running dev-server.mjs) — the
+// same expected-degradation class as the supabase entry above. 502: the
+// same-origin /api/noaa/passthrough mirror gateways NOAA and answers 502
+// when the sandbox has no outbound network; the console text carries only
+// the status, never the URL, so the status code is the only handle.
 function isExpectedNoise(text) {
-    return /supabase|jsdelivr|unpkg|cdn|Failed to fetch|net::ERR|ERR_|CORS|swpc|noaa|donki|\bhek\b|nasa|soho|sdo|gibs|celestrak|429|404|503|net::/i
+    return /supabase|jsdelivr|unpkg|cdn|Failed to fetch|net::ERR|ERR_|CORS|swpc|noaa|donki|\bhek\b|nasa|soho|sdo|gibs|celestrak|telemetry|429|404|501|502|503|net::/i
         .test(text || '');
 }
 

@@ -8,6 +8,11 @@
  *   Timeline  — DONKI flares/CMEs/SEP/GST + SWPC GOES events, one ledger
  *   Regions   — /api/noaa/regions with per-AR C/M/X flare probabilities
  *   CMEs      — DONKI CME analysis + Enlil modeled arrivals
+ *   Forecast  — the flux-rope compounding-train ensemble (Bz fan, P(hit),
+ *               arrival window). This tab computes NOTHING: it renders the
+ *               ONE published provider result ('flux-rope-forecast' event /
+ *               window.__fluxRopeForecast, run by js/sun-flux-rope.js) —
+ *               never a second DONKI→ensemble→assimilation pipeline.
  *   Holes     — HEK coronal holes (list + optional 3D markers on the sun)
  *   Cycle     — F10.7 solar-cycle context from js/f107-history.js
  *
@@ -45,6 +50,7 @@ import {
 import { HekFeed } from './hek-feed.js';
 import * as f107 from './f107-history.js';
 import { INTERVALS } from './config.js';
+import { drawBzChart } from './flux-rope/charts.js';
 
 const REFRESH_MS = INTERVALS?.T3 ?? 900_000;   // DONKI + regions cadence
 const FETCH_TIMEOUT = 15_000;
@@ -54,6 +60,7 @@ const TABS = [
     { id: 'timeline', label: 'Timeline' },
     { id: 'regions',  label: 'Regions'  },
     { id: 'cme',      label: 'CMEs'     },
+    { id: 'forecast', label: 'Forecast' },
     { id: 'holes',    label: 'Holes'    },
     { id: 'cycle',    label: 'Cycle'    },
 ];
@@ -141,7 +148,16 @@ const CSS = `
 .snw-pill.snw-show { display:block; }
 .snw-toggle-row { display:flex; align-items:center; gap:7px; padding:4px; color:#a89678; }
 .snw-note { color:#77694e; font-size:9.5px; padding:5px 4px 1px; line-height:1.5; }
+.snw-note a { color:#ffb830; }
 canvas.snw-spark { width:100%; height:64px; display:block; margin-top:4px; }
+canvas.snw-rope-chart { width:100%; height:132px; display:block; margin:6px 0 2px; }
+.snw-fc-warn { color:#ffb454; padding:10px 4px; line-height:1.5; }
+.snw-fc-stats { display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-top:5px; }
+.snw-fc-stat { background:rgba(255,160,0,.06); border:1px solid rgba(255,160,0,.18);
+    border-radius:7px; padding:5px 8px; }
+.snw-fc-stat .v { font-size:12px; font-weight:700; color:#ffd080; }
+.snw-fc-stat .v.warn { color:#ff8866; }
+.snw-fc-stat .k { font-size:8.5px; color:#8f8168; letter-spacing:.04em; text-transform:uppercase; margin-top:1px; }
 @media (max-width:768px) {
     .snw-dock { left:8px; right:8px; width:auto; max-height:44svh; bottom:8px; }
     .snw-pill { bottom:8px; left:8px; }
@@ -174,6 +190,7 @@ export function initSunWatch(deps = {}) {
         cmeSum: { count: 0, earthCount: 0, fastest: null, nextArrival: null },
         holes: [],
         cycle: null,
+        forecast: (typeof window !== 'undefined' && window.__fluxRopeForecast) || null,
         feeds: {   // per-feed health: { atMs:number|null, error:string|null }
             donki:   { atMs: null, error: null },
             regions: { atMs: null, error: null },
@@ -275,6 +292,7 @@ export function initSunWatch(deps = {}) {
         if (state.tab === 'timeline') renderTimeline(now);
         else if (state.tab === 'regions') renderRegions();
         else if (state.tab === 'cme') renderCmes(now);
+        else if (state.tab === 'forecast') renderForecast(now);
         else if (state.tab === 'holes') renderHoles(now);
         else renderCycle();
         renderFooter(now);
@@ -359,6 +377,85 @@ export function initSunWatch(deps = {}) {
             </div>`;
         }).join('')
         + `<div class="snw-note">DONKI CME analyses (NASA CCMC). Modeled arrivals are WSA-Enlil runs, not observations. For the full ensemble forecast see <a href="cme-forecast.html" style="color:#ffb830">CME Forecast</a>.</div>`;
+    }
+
+    // Forecast tab — a pure VIEW of the shared provider's published result.
+    // The four states mirror js/flux-rope-dashboard.js: starting, failed
+    // (a broken feed must LOOK broken, never like a quiet sun), honestly
+    // idle (empty catalog vs a storm that already passed L1), and live.
+    function renderForecast(now) {
+        const fc = state.forecast;
+        if (!fc) {
+            $body.innerHTML = `<div class="snw-empty">Ensemble engine starting —<br>first run a few seconds after page load.</div>`;
+            return;
+        }
+        if (fc.failed) {
+            $body.innerHTML = `<div class="snw-fc-warn">⚠ Forecast feed unavailable —
+                ${esc(String(fc.reason).slice(0, 160))} · retrying automatically</div>`;
+            return;
+        }
+        if (fc.idle) {
+            const quietLine = fc.reason === 'cme-train-passed'
+                ? 'the last Earth-directed CME has already passed L1 — the corridor is currently clear.'
+                : 'no Earth-directed CME analyses in the last 7 days.';
+            $body.innerHTML = `<div class="snw-note" style="padding-top:10px">☀ DONKI catalog reachable · ${quietLine}
+                The ensemble engine is idle — watch the live compounding view on
+                <a href="flux-rope-live.html">Compounding Watch</a> or replay events in the
+                <a href="flux-rope.html">Flux Rope Simulator</a>.</div>`;
+            return;
+        }
+        const s = fc.summary;
+        const pctTxt = (v) => `${Math.round((v ?? 0) * 100)}%`;
+        const fmtUtc = (msVal) => new Date(msVal).toISOString().slice(5, 16).replace('T', ' ');
+        const arrTxt = s.arrivalP10Ms != null
+            ? `${fmtUtc(s.arrivalP10Ms)}–${fmtUtc(s.arrivalP90Ms)}Z`
+            : 'likely miss';
+        const members = fc.cmes.map((c, i) => `
+            <div class="snw-row">
+                <span class="snw-badge" style="color:${EVENT_COLORS.cme}">R${i}</span>
+                <span>
+                    <span class="snw-title">${esc(c.timeIso.slice(5, 16).replace('T', ' '))}Z ·
+                        ${Math.round(c.speedKms)} km/s</span>
+                    ${c.earthDirected ? '<span class="snw-earth" title="Earth-directed">⊕</span>' : ''}
+                </span>
+                <span class="snw-age">${fmtAge(Date.parse(c.timeIso), now)}</span>
+            </div>`).join('');
+        $body.innerHTML = `
+            <div class="snw-detail" style="padding:2px 0 1px">
+                ${fc.train
+                    ? `⚡ Compounding train · ${fc.cmes.length} CMEs · §16 interaction on`
+                    : 'Single Earth-directed CME'}
+                · ${fc.prior.members}-member ensemble</div>
+            <canvas class="snw-rope-chart" id="snw-rope-chart"></canvas>
+            <div class="snw-fc-stats">
+                <div class="snw-fc-stat"><div class="v">${pctTxt(fc.fan.pHit)}</div><div class="k">P(Earth hit)</div></div>
+                <div class="snw-fc-stat"><div class="v" style="font-size:10.5px">${arrTxt}</div><div class="k">arrival P10–P90 (UTC)</div></div>
+                <div class="snw-fc-stat"><div class="v${s.p10 > 0.3 ? ' warn' : ''}">${pctTxt(s.p10)}</div><div class="k">P(min Bz &lt; −10 nT)</div></div>
+                <div class="snw-fc-stat"><div class="v${s.p20 > 0.3 ? ' warn' : ''}">${pctTxt(s.p20)}</div><div class="k">P(min Bz &lt; −20 nT)</div></div>
+            </div>
+            ${members}
+            <div class="snw-note">${esc(fc.assimNote)} · fan = ensemble 5–95% / 25–75% Bz at L1 ·
+                amber = observed DSCOVR/ACE · magnetic config is a wide prior (cone fits don't constrain it).
+                Live view: <a href="flux-rope-live.html">Compounding Watch</a> ·
+                sandbox: <a href="flux-rope.html">Flux Rope Simulator</a></div>`;
+        drawRopeChart(fc, now);
+    }
+
+    function drawRopeChart(fc, now) {
+        const cv = document.getElementById('snw-rope-chart');
+        if (!cv) return;
+        drawBzChart(cv, {
+            tH: Array.from({ length: fc.grid.n }, (_, i) => i * fc.grid.dtS / 3600),
+            det: null,
+            fan: { ...fc.fan.bzPct, hitFrac: fc.fan.hitFrac },
+            obs: fc.rtsw?.length
+                ? { tH: fc.rtsw.samples.map((p) => (p.t - fc.launchMs) / 3600_000),
+                    bz: fc.rtsw.samples.map((p) => p.bz) }
+                : null,
+            launchMs: fc.launchMs,
+            cursorH: (now - fc.launchMs) / 3600_000,
+            noise: fc.noise?.ok ? fc.noise : null,
+        });
     }
 
     function renderHoles(now) {
@@ -491,6 +588,12 @@ export function initSunWatch(deps = {}) {
             nowMs: Date.now(),
         });
         state.cmeSum = cmeSummary(state.cmes, Date.now());
+        // Announce the rebuilt ledger — sun.html's scrubber event track
+        // consumes it (one fetch, two views; the track never re-polls DONKI).
+        try {
+            window.dispatchEvent(new CustomEvent('sun-watch-update',
+                { detail: { timeline: state.timeline } }));
+        } catch { /* no listeners — best-effort */ }
     }
 
     async function refreshDonki() {
@@ -574,6 +677,13 @@ export function initSunWatch(deps = {}) {
     hek.start();
     // HekFeed retries silently; mark the chip down until the first payload.
     state.feeds.hek.error = 'awaiting first HEK payload';
+
+    // The shared flux-rope provider's published result (js/sun-flux-rope.js
+    // runs the loop; this dock only renders). Consume, never re-compute.
+    window.addEventListener('flux-rope-forecast', (ev) => {
+        state.forecast = ev.detail ?? null;
+        if (state.tab === 'forecast') render();
+    }, { passive: true });
 
     // Live X-ray chip from the page's existing feed — consume, never re-poll.
     window.addEventListener('swpc-update', (ev) => {
