@@ -63,7 +63,7 @@ import { fetchWithTimeout } from '../_lib/responses.js';
 import {
     backmapRows, backmapScore, runHindcast, BACKMAP,
     detectShockArrivals, scoreCmeArrivals,
-    rtEventId, needsNewIssue, resolveEventTruth,
+    rtEventId, needsNewIssue, resolveEventTruth, uniformBatch,
 } from '../../js/validation-scoring.js';
 import { cmeTransit } from '../../js/ring-current-model.js';
 import { CmeEvent } from '../../js/cme-propagation.js';
@@ -354,13 +354,24 @@ async function lockAndResolveCme(catalog, pdynSeries, nowMs) {
                           method: 'DBM Vrsnak-2013 adaptiveGamma' } },
         ].filter(Boolean);
         for (const m of models) {
-            if (needsNewIssue(latest.get(`${eid}|${m.model_id}`) ?? null,
-                              Date.parse(m.predicted_arrival_utc))) {
+            const predMs = Date.parse(m.predicted_arrival_utc);
+            // Issue-BEFORE-arrival honesty: a row whose predicted arrival
+            // is already past is a postdiction, not a forecast — /api/cme/
+            // skill promises "locked BEFORE arrival". This matters on a
+            // recovery day (a broken run backfilled later would otherwise
+            // issue rows for CMEs that already hit) and on late DONKI
+            // revisions after passage.
+            if (!(predMs > nowMs)) continue;
+            if (needsNewIssue(latest.get(`${eid}|${m.model_id}`) ?? null, predMs)) {
                 toInsert.push({ event_id: eid, ...m });
             }
         }
     }
-    await sbInsert('cme_arrival_forecasts', toInsert);
+    // uniformBatch is LOAD-BEARING: the three models emit different key
+    // sets (enlil has no window, only dbm has speed/dst) and PostgREST
+    // rejects a mixed-key bulk insert wholesale (PGRST102) — that
+    // rejection silently zeroed this ledger for four weeks.
+    await sbInsert('cme_arrival_forecasts', uniformBatch(toInsert));
     summary.locked = toInsert.length;
 
     // 3 ── Truth resolution after passage (arrived / false-alarm /
@@ -642,6 +653,10 @@ async function runValidation(req) {
         cmeProgram = await lockAndResolveCme(catalog, pdynSeries, nowMs);
     } catch (e) {
         cmeProgram = { reason: `lock_resolve_failed: ${String(e?.message || e)}` };
+        // The response body goes to a cron nobody reads — without this
+        // line a daily ledger failure is invisible in Vercel logs (it
+        // was, for four weeks).
+        console.error('validation-rerun:', cmeProgram.reason);
     }
     let fluxRope = { reason: 'not_run' };
     try {
@@ -649,6 +664,7 @@ async function runValidation(req) {
         else fluxRope = { reason: 'no_catalog' };
     } catch (e) {
         fluxRope = { reason: `flux_rope_failed: ${String(e?.message || e)}` };
+        console.error('validation-rerun:', fluxRope.reason);
     }
     const ledger = { cmeProgram, fluxRope };
 

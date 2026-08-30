@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import {
     detectShockArrivals, scoreCmeArrivals, CME_SCORE,
-    rtEventId, needsNewIssue, resolveEventTruth,
+    rtEventId, needsNewIssue, resolveEventTruth, uniformBatch,
 } from '../js/validation-scoring.js';
 
 let n = 0;
@@ -123,6 +123,25 @@ const H = 3.6e6;
     assert.equal(resolveEventTruth({ predictedMsList: [], shocks: [],
         nowMs: 0, seriesStartMs: 0, seriesEndMs: 0 }).status, 'pending');
     ok('resolveEventTruth: arrived/pending/false-alarm + coverage guard');
+
+    // uniformBatch: PostgREST rejects a bulk insert with mixed key sets
+    // (PGRST102) — the exact enlil/ballistic/dbm shape mix that zeroed
+    // the CME ledger for four weeks. Every row must come out with the
+    // SAME keys, real values preserved (0/false included), gaps null.
+    const mixed = uniformBatch([
+        { event_id: 'E1', model_id: 'enlil', predicted_kp_max: 0 },
+        { event_id: 'E1', model_id: 'ballistic-v1',
+          arrival_window_early: 'a', arrival_window_late: 'b' },
+        { event_id: 'E1', model_id: 'dbm-v1',
+          predicted_speed_at_l1: 386, predicted_dst_min_nt: -16 },
+    ]);
+    const keySig = (r) => Object.keys(r).sort().join(',');
+    assert.equal(new Set(mixed.map(keySig)).size, 1, 'one key set across the batch');
+    assert.equal(mixed[0].predicted_kp_max, 0, 'falsy real value survives');
+    assert.equal(mixed[0].arrival_window_early, null, 'absent key filled as null');
+    assert.equal(mixed[2].predicted_dst_min_nt, -16);
+    assert.deepEqual(uniformBatch([]), []);
+    ok('uniformBatch: mixed model rows become one PostgREST-legal key set');
 }
 
 console.log(`\nvalidation-scoring: all ${n} test groups passed`);
