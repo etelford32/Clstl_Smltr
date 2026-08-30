@@ -95,6 +95,17 @@ export default async function handler(request) {
                     min_bz_p5: f.inputs.min_bz_p5 ?? null,
                     n_train: Array.isArray(f.inputs.train) ? f.inputs.train.length : 1,
                     flare: f.inputs.flare ?? null,
+                    // §16 counterfactual (trains): this rope's interaction
+                    // arrival shift + the train-level ON-vs-OFF deltas —
+                    // the compact face of the locked compounding block.
+                    wake_delta_h: f.inputs.wake?.delta_arrival_h ?? null,
+                    ...(f.inputs.compounding ? { compounding: {
+                        min_bz_p50_on: f.inputs.compounding.on?.min_bz_p50 ?? null,
+                        min_bz_p50_off: f.inputs.compounding.off?.min_bz_p50 ?? null,
+                        delta_min_bz: f.inputs.compounding.delta?.min_bz_p50 ?? null,
+                        delta_p20: f.inputs.compounding.delta?.p20 ?? null,
+                        amp_pred: f.inputs.compounding.amp_pred ?? null,
+                    } } : {}),
                 } : {}),
             }])),
             truth: truth ? {

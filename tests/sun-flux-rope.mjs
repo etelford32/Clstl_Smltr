@@ -144,6 +144,17 @@ check('fixture train produces a live 2-rope forecast',
     check('measurement is deterministic per train',
         cp2.off.minBzP50 === cp.off.minBzP50 && cp2.off.p20 === cp.off.p20);
 
+    // Ledger mode: quantileLevels emits CRPS-scorable arrival quantiles on
+    // BOTH sides (the validation cron freezes the OFF side as arrival_q_off).
+    const LEVELS = [0.1, 0.25, 0.5, 0.75, 0.9];
+    const cpq = await measureCompounding(fc, { wasm, quantileLevels: LEVELS });
+    check('quantileLevels → ordered per-side arrival quantiles + echoed levels',
+        cpq.levels.join(',') === LEVELS.join(',')
+        && cpq.on.arrivalQH.length === 5 && cpq.off.arrivalQH.length === 5
+        && cpq.on.arrivalQH.every((v, i) => i === 0 || v >= cpq.on.arrivalQH[i - 1])
+        && cpq.off.arrivalQH.every((v, i) => i === 0 || v >= cpq.off.arrivalQH[i - 1]),
+        `on p50 ${cpq.on.arrivalQH[2].toFixed(1)} h · off p50 ${cpq.off.arrivalQH[2].toFixed(1)} h`);
+
     // A single rope has nothing to compound.
     const single = await computeFluxRopeForecast({
         sources: { cmes: [LEAD], rtsw: null, wasm }, nowMs: NOW_MS,
