@@ -152,6 +152,14 @@ export const PIPELINES = [
       cadence_s: 1_800, prewarm: 'medium', probeTimeoutMs: 16_000,
       warnAgeS:  60 * 60, critAgeS: 360 * 60 },
 
+    { id: 'cme-skill',          label: 'CME forecast ledger',
+      endpoint: '/api/cme/skill',
+      category: 'events', upstream: 'Supabase (CME validation ledger)',
+      cadence_s: 86_400, prewarm: 'cold',
+      freshnessExempt: true,   // data.updated is now() per request — DB read
+      warnAgeS:  36 * 3600, critAgeS: 72 * 3600,
+      notes: 'Issue-time-locked forecasts + L1 truth for cme-forecast.html. Tables fill at validation-rerun cadence (06:30 UT). Shipped unmonitored until the 2026-08 ledger postmortem.' },
+
     { id: 'donki-flares',       label: 'DONKI flares',
       endpoint: '/api/donki/flares',
       category: 'events', upstream: 'NASA DONKI',
