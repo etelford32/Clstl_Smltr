@@ -3688,6 +3688,16 @@ import './js/telemetry.js';
              Each row follows the dead-chrome rule: visible only while its
              layer checkbox is on. -->
         <div id="wx-windlvl-legends"></div>
+        <!-- Vertical exaggeration disclosure. The troposphere is 14 km on a
+             6371 km ball; drawn true to scale the whole wind stack is one
+             sphere, so it is stretched (js/atmo-scale.js) by a factor that
+             rides camera range. A stretched stack that doesn't SAY it is
+             stretched is a lie about altitude, and people read altitude off
+             this page — so this line is not optional chrome. Written by
+             _exagDisclosure() on every change. -->
+        <div id="wind-exag-note"
+             title="Layer altitudes are real (10 m / 1.5 km / 5.6 km / 10.4 km); the SPACING between them is exaggerated so the stack is legible. The factor grows as you zoom in. Pin it with ?vexag=N or window.setVerticalExaggeration(N)."
+             style="font-size:9px;color:#7a7a96;line-height:1.35;margin:2px 0 6px;"></div>
         <!-- Convergence / uplift legend. Hidden until the "Convergence / Uplift"
              layer is toggled on (see the lyr-convergence listener). The canvas
              mirrors the overlay shader's convergenceColor() exactly, so the
@@ -4089,6 +4099,10 @@ import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
 import { computeUpliftField, UPLIFT_FULL_SCALE,
          computeVorticityField, VORT_FULL_SCALE } from './js/weather-uplift.js';
 import { cloudTopHeightKm } from './js/cloud-mosaic-core.js';
+// Vertical geometry of the whole troposphere stack — clouds AND wind — lives
+// in ONE place (js/atmo-scale.js). Never hard-code a shell radius here again.
+import * as AtmoScale from './js/atmo-scale.js';
+import { createVolumeUniforms, createVolumeMesh, marchLadder } from './js/cloud-volume.js';
 // Module singleton — already booted by the early telemetry side-effect
 // import in <head>; the named binding just gives this module a handle.
 import { telemetry } from './js/telemetry.js';
@@ -4216,13 +4230,34 @@ const R_EARTH  = 1.0;
 //   1.016   HIGH cloud deck       1.018   250 hPa jet trails
 //   1.019   aurora oval           1.022   stratosphere haze
 //   1.026   atmosphere rim        1.06    temp-volume slab top
-const R_CLOUDS     = 1.009;   // composite cloud shell (single-pass tiers)
-const R_CLOUD_LOW  = 1.006;   // split low deck (~2 km, exaggerated)
-const R_CLOUD_MID  = 1.011;   // split mid deck (~6 km)
-const R_CLOUD_HIGH = 1.016;   // split high deck / cirrus (~10 km)
-const R_AURORA = 1.019;   // aurora oval shell (above the high deck)
-const R_STRAT  = 1.022;   // stratosphere haze (between aurora and outer atm)
-const R_ATM    = 1.026;   // atmosphere rim sphere
+// ── The stack is now RAMPED, not constant (js/atmo-scale.js) ─────────────
+// Every radius above the ground derives from ONE vertical exaggeration
+// applied to ONE table of REAL altitudes, and that exaggeration rides camera
+// range: ×10 from orbit (which reproduces the historical constants listed
+// above to within ~0.003 R) easing to ×55 on close approach, where the decks
+// and wind levels fan apart into a stack the camera can fly into.
+//
+// The constants below are the FAR-VIEW values — the geometry every shell is
+// BUILT at. They are re-derived per frame in _applyAtmoScale(); nothing here
+// may be treated as fixed. The historical numbers are kept in the table above
+// as the calibration target, and tests/atmo-scale.mjs pins them.
+const _R_FAR = AtmoScale.shellRadii(AtmoScale.E_FAR);
+const R_CLOUDS     = _R_FAR.deckMid;    // composite cloud shell (single-pass tiers)
+const R_CLOUD_LOW  = _R_FAR.deckLow;    // split low deck  (1.2 km centroid)
+const R_CLOUD_MID  = _R_FAR.deckMid;    // split mid deck  (4.5 km centroid)
+const R_CLOUD_HIGH = _R_FAR.deckHigh;   // split high deck (9.5 km centroid)
+// Outer context shells. NOT on the troposphere ramp (the auroral oval's real
+// 100 km would put it past the camera's own orbit at ×55) — but they are
+// lifted only as far as they must be to stay above the marched cloud volume.
+// See AtmoScale.outerShellRadii; the base values are the historical ones.
+const R_AURORA_BASE = 1.019;
+const R_STRAT_BASE  = 1.022;
+const R_ATM_BASE    = 1.026;
+const _R_OUTER_FAR = AtmoScale.outerShellRadii(_R_FAR.volumeTop, {
+    aurora: R_AURORA_BASE, strat: R_STRAT_BASE, atm: R_ATM_BASE });
+const R_AURORA = _R_OUTER_FAR.aurora;   // aurora oval shell (above the volume)
+const R_STRAT  = _R_OUTER_FAR.strat;    // stratosphere haze
+const R_ATM    = _R_OUTER_FAR.atm;      // atmosphere rim sphere
 const R_TEMPVOL = 1.06;   // temperature volume slab top — vertically
                           // exaggerated troposphere (~11 km real ≈ 0.0017 R);
                           // temperatures inside are NOT scaled, only geometry
@@ -4362,14 +4397,19 @@ const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 0.001, 200);
 camera.position.set(0, 0.4, 3.0);
 
-// Dolly floor (Phase 3.1): just above the whole translucent shell stack —
-// high cloud deck 1.016, jet trails 1.018, aurora 1.019, stratosphere 1.022
-// (see the shell-stack table at the R_* constants). The old 1.06 floor was
-// "just above cloud layer" when the single shell sat at 1.009; the split
-// decks exist precisely to be flown over. Dynamic near-plane + proximity-
-// scaled zoomSpeed + the radial floor clamp in animate() make the last
-// 0.035 of dolly usable instead of a z-fighting cliff.
-const CAM_FLOOR = 1.025;
+// Dolly floor. Was 1.025 — "just above the whole translucent shell stack" —
+// back when the stack was a fixed 1.016/1.018/1.019/1.022 and flying into it
+// would have inverted the alpha compositing.
+//
+// Both halves of that constraint are now gone. The stack RAMPS (see the R_*
+// block), so "above the stack" is no longer a fixed number; and the clouds
+// are one raymarch that integrates front-to-back internally while the wind
+// trails are additively blended — additive blending commutes, so neither
+// cares what order the camera crosses them in. So the floor is now a GROUND
+// clearance (js/atmo-scale.js cameraFloor), and the camera descends into the
+// stack: at full fan-out 1.0040 sits below the 850 hPa shell, i.e. inside the
+// boundary layer looking up through the whole column.
+const CAM_FLOOR = AtmoScale.cameraFloor(AtmoScale.E_NEAR);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
@@ -4468,7 +4508,14 @@ function _setCloudQuality(q) {
     // relief/self-shadow pass — they're embellishment, and the tier where
     // pixels are already being sacrificed is not where to spend 6 taps.
     earthU.u_cloud_shadow.value = q > 0.83 ? 1 : 0;
-    // Split cloud shells collapse to the composite below the full tier
+    // Volumetric march budget rides the same tier. `cloudVolumeU` is a var
+    // hoisted from the block below — undefined on the init-time call.
+    if (cloudVolumeU) {
+        const ladder = marchLadder(q);
+        cloudVolumeU.u_steps.value       = ladder.primary;
+        cloudVolumeU.u_light_steps.value = ladder.light;
+    }
+    // Cloud shells collapse toward the composite below the full tier
     // (hoisted fn, guarded against the init-time call before the meshes
     // exist — see its definition next to the shell construction).
     _updateCloudShellMode();
@@ -4757,18 +4804,85 @@ var cloudShellMeshes = null;
     ];
 }
 
-// Pick composite vs split per (clouds toggle × research mode × governor
-// tier). Called from the lyr-clouds toggle, applyResearchMode, and
+// ── Volumetric cloud shell ─────────────────────────────────────────────
+// The top-tier render path: one raymarch through the whole troposphere
+// instead of three alpha decals over it. Shares the decal shader's uniform
+// ENTRY OBJECTS for every input both consume, so a single
+// `cloudU.u_cloud_layers.value = tex` write still feeds both paths and a
+// governor flip can never drop to a stale fallback. See js/cloud-volume.js.
+//
+// `var` for the same reason cloudShellMeshes is: _setCloudQuality can run
+// during module init (URL override) before this block evaluates, and var
+// hoists as undefined so the guard in _updateCloudShellMode is TDZ-safe.
+var cloudVolumeMesh = null;
+var cloudVolumeU    = null;
+{
+    cloudVolumeU = createVolumeUniforms(SUN_EQ.clone());
+    // Share the live data entries — NOT copies.
+    cloudVolumeU.u_cloud_layers = cloudU.u_cloud_layers;
+    cloudVolumeU.u_satellite    = cloudU.u_satellite;
+    cloudVolumeU.u_weather      = cloudU.u_weather;
+    cloudVolumeU.u_sun_dir      = cloudU.u_sun_dir;
+    cloudVolumeU.u_satellite_on = cloudU.u_satellite_on;
+    cloudVolumeU.u_cloud_data_strength = cloudU.u_cloud_data_strength;
+    cloudVolumeMesh = createVolumeMesh(cloudVolumeU);
+    // Between the surface and the aurora, matching where the decal shells
+    // sat. depthTest is off on this material (the march owns its occlusion),
+    // so renderOrder is the only thing sequencing it.
+    cloudVolumeMesh.renderOrder = 3.0;
+    cloudVolumeMesh.visible = false;
+    scene.add(cloudVolumeMesh);
+}
+
+// Pick volumetric vs composite vs split per (clouds toggle × research mode ×
+// governor tier). Called from the lyr-clouds toggle, applyResearchMode, and
 // _setCloudQuality — all post-init callers; the guard covers the one
 // init-time call _setCloudQuality can make before the meshes exist.
+//
+// Routing, highest first:
+//   volumetric — clouds on, research off, full governor tier
+//   split      — clouds on, research off, one tier down (the old top path)
+//   composite  — everything else, including ALL of research mode
+//
+// Research mode never gets the volumetric path: measured-only means alpha =
+// data, and a march that distributes that data through a column is asserting
+// vertical structure the Open-Meteo channels did not supply. Same reason the
+// split shells are excluded from it.
 function _updateCloudShellMode() {
     if (!cloudShellMeshes) return;
     const cloudsOn  = document.getElementById('lyr-clouds')?.checked ?? true;
     const research  = cloudU.u_research_mode.value > 0.5;
-    const split     = cloudsOn && !research && cloudU.u_quality.value > 0.83;
-    cloudMesh.visible = cloudsOn && !split;
+    const q         = cloudU.u_quality.value;
+    const volumetric = cloudsOn && !research && q > 0.83 && !_volumetricDisabled;
+    const split      = cloudsOn && !research && !volumetric && q > 0.83;
+    if (cloudVolumeMesh) cloudVolumeMesh.visible = volumetric;
+    cloudMesh.visible = cloudsOn && !volumetric && !split;
     for (const m of cloudShellMeshes) m.visible = split;
 }
+
+// Escape hatch for the volumetric path, matching the ?cloud_quality= /
+// ?cloud_strength= precedent: `earth.html?volumetric=0` or
+// window.setVolumetricClouds(false) drops to the decal shells for a
+// side-by-side comparison without touching the governor.
+var _volumetricDisabled = new URLSearchParams(location.search).get('volumetric') === '0';
+window.setVolumetricClouds = (on) => {
+    _volumetricDisabled = !on;
+    _updateCloudShellMode();
+    console.info(`[CloudDebug] volumetric clouds ${on ? 'ON' : 'OFF'} → ${window.__evCloudMode()}`);
+};
+// March budget override, decoupled from the quality tier. The tier gate
+// (q > 0.83) is what ROUTES to the volumetric path, so lowering quality to
+// make the march cheap also routes away from it — which makes the march
+// impossible to inspect on a slow rasteriser, exactly where you most want to.
+// This sets the budget without touching the routing. Also the knob to reach
+// for when profiling how much of a frame the march is actually costing.
+window.setCloudMarchSteps = (primary, light) => {
+    if (!cloudVolumeU) return;
+    cloudVolumeU.u_steps.value       = Math.max(4, Math.min(64, primary | 0));
+    cloudVolumeU.u_light_steps.value = Math.max(1, Math.min(8, light | 0));
+    console.info(`[CloudDebug] march ${cloudVolumeU.u_steps.value} primary / ` +
+                 `${cloudVolumeU.u_light_steps.value} light`);
+};
 // Initial pick — re-applying the current quality also arms the ground-
 // shadow gate (earthU.u_cloud_shadow), which defaults to 0 in the factory.
 _setCloudQuality(cloudU.u_quality.value);
@@ -4776,7 +4890,8 @@ _setCloudQuality(cloudU.u_quality.value);
 // Debug/console probe (same family as window.setCloudQuality): which cloud
 // render path is live right now. Used by tests/cloud-shells-smoke.spec.js.
 window.__evCloudMode = () =>
-    cloudMesh.visible ? 'composite'
+    cloudVolumeMesh?.visible ? 'volumetric'
+    : cloudMesh.visible ? 'composite'
     : (cloudShellMeshes?.some(m => m.visible) ? 'split' : 'off');
 
 // ── Aurora oval overlay ────────────────────────────────────────────────
@@ -6460,6 +6575,13 @@ class WindParticles {
             blending: THREE.AdditiveBlending, depthWrite: false,
         });
         this.mesh = new THREE.LineSegments(geo, mat);
+        // Three caches a bounding sphere from whatever the position buffer
+        // held on the first frustum test, but these vertices are rewritten
+        // every frame AND the shell radius now rides the exaggeration ramp
+        // (up to ~1.09 R at full fan-out). A stale ~1.003 R bound would cull
+        // the whole layer at glancing angles. It is globe-sized and always in
+        // view when the globe is, so culling it buys nothing anyway.
+        this.mesh.frustumCulled = false;
         // Surface default (2) predates the split cloud shells; pressure-
         // level instances pass a renderOrder above their deck so trails
         // aren't dimmed by cloud alpha drawn later.
@@ -6469,6 +6591,21 @@ class WindParticles {
 
     setVisible(v) { this.mesh.visible = v; }
     setWindData(buf) { this.windBuf = buf; }
+
+    /**
+     * Re-seat this level's shell. Driven per frame by _applyAtmoScale from
+     * the ONE vertical exaggeration (js/atmo-scale.js) — never hard-code a
+     * trail radius again.
+     *
+     * Free to call every frame: the trail vertex buffer is rebuilt from the
+     * lat/lon ring buffer on each update() anyway, so the next frame's
+     * geometry simply lands at the new radius. Nothing is cached against the
+     * old one, and the ring buffer stores lat/lon/speed — not positions — so
+     * a moving shell never leaves a kinked trail behind it.
+     */
+    setRadius(r) {
+        if (Number.isFinite(r) && r > 0) this._radius = r;
+    }
 
     /** True when this instance has any wind field to advect against. */
     hasData() { return this._lvlU != null || this.windBuf != null; }
@@ -6965,6 +7102,11 @@ class WindArrows {
         this.lookupFn = lookupFn;     // (lat, lon, out{u,v,s}) — uses windParticles' bilinear sampler
         this.visible  = true;          // gated by user wind-layer toggle
         this._lastBuildKey = '';       // memoise grid rebuilds when nothing changed
+        // Shell radius, re-seated per frame by _applyAtmoScale. Built at the
+        // far-view surface-wind radius plus the historical 0.0004 clearance
+        // that kept the arrows off the trails.
+        this._radius = R_EARTH * 1.007;
+        this.setRadius = (r) => { if (Number.isFinite(r) && r > 0) this._radius = r; };
 
         const vertCount = WIND_ARROW_MAX * WIND_ARROW_VERTS_EACH;
         this._pos = new Float32Array(vertCount * 3);
@@ -6981,6 +7123,13 @@ class WindArrows {
             blending: THREE.AdditiveBlending, depthWrite: false,
         });
         this.mesh = new THREE.LineSegments(geo, mat);
+        // Three caches a bounding sphere from whatever the position buffer
+        // held on the first frustum test, but these vertices are rewritten
+        // every frame AND the shell radius now rides the exaggeration ramp
+        // (up to ~1.09 R at full fan-out). A stale ~1.003 R bound would cull
+        // the whole layer at glancing angles. It is globe-sized and always in
+        // view when the globe is, so culling it buys nothing anyway.
+        this.mesh.frustumCulled = false;
         this.mesh.renderOrder = 3.35;  // above trails + split cloud shells (3.0–3.2)
         this.mesh.visible = false;
         parent.add(this.mesh);
@@ -7013,11 +7162,14 @@ class WindArrows {
         // step to avoid jitter as the camera drifts inside one cell.
         const keyLat = Math.round(focusLat / step) * step;
         const keyLon = Math.round(focusLon / step) * step;
-        const key = `${keyLat.toFixed(2)}|${keyLon.toFixed(2)}|${step.toFixed(3)}`;
+        const key = `${keyLat.toFixed(2)}|${keyLon.toFixed(2)}|${step.toFixed(3)}|${this._radius.toFixed(4)}`;
         // Strength is the appearance-only fade; recomputed every call so
         // the field smoothly fades in as the user zooms past the threshold.
         const strength = Math.min(1, (z - WIND_ARROW_FADE_IN) / 0.20);
 
+        // The shell radius is part of the build key: the exaggeration ramp
+        // moves it, and a memoised rebuild would otherwise leave the arrows
+        // behind at the previous altitude while the trails climbed away.
         if (key === this._lastBuildKey) {
             // Geometry unchanged — only restripe alpha and bail.
             this._restripeStrength(strength);
@@ -7027,7 +7179,10 @@ class WindArrows {
         this._lastBuildKey = key;
 
         const pos = this._pos, col = this._col;
-        const R   = R_EARTH * 1.007;                     // just above the split low deck (1.006)
+        // Re-seated per frame by _applyAtmoScale (js/atmo-scale.js) — the
+        // arrows annotate the SURFACE flow, so they ride just above the
+        // surface-wind shell wherever the exaggeration ramp has put it.
+        const R   = this._radius;
         const tmp = { u: 0, v: 0, s: 0 };
         const rgb = [0, 0, 0];
         let slot = 0;
@@ -13519,6 +13674,114 @@ window.addEventListener('keydown', (e) => {
     else if (e.key === 'n' || e.key === 'N') _jumpToNow();
 });
 
+// ═══════════════════════════════════════════════════════════════
+//  VERTICAL EXAGGERATION RAMP  (js/atmo-scale.js)
+//
+//  Re-seats every troposphere shell from ONE exaggeration factor driven by
+//  camera range: ×10 from orbit (the historical stack) easing to ×55 on
+//  approach, where the decks and wind levels fan into a stack you fly
+//  through. Runs once per frame, before anything reads a radius.
+//
+//  All the shells are origin-centred spheres, so "re-seat" is a uniform
+//  scale — no geometry rebuild, no vertex touch. The shader-side shells
+//  read `position` (unscaled, object space) for their sphere normal, so a
+//  uniform scale moves them without disturbing a single UV.
+//
+//  DRIVEN BY CAMERA DISTANCE, NEVER BY ALTITUDE ABOVE THE STACK. See the
+//  ramp note in js/atmo-scale.js: distance-to-centre is user input, so
+//  E = f(distance) is a pure function. An AGL-driven ramp would feed back
+//  through the shells it displaces — the bug the Mars page had to unwind.
+//
+//  Exaggeration is never silent: _exagDisclosure writes the live factor
+//  into the wind legend every time it moves.
+// ═══════════════════════════════════════════════════════════════
+let _atmoExag      = AtmoScale.E_FAR;
+let _atmoRadii     = AtmoScale.shellRadii(AtmoScale.E_FAR);
+let _exagOverride  = null;   // ?vexag= / window.setVerticalExaggeration()
+{
+    const p = new URLSearchParams(location.search).get('vexag');
+    if (p !== null) {
+        const n = Number(p);
+        if (Number.isFinite(n) && n >= 1 && n <= 400) _exagOverride = n;
+    }
+}
+window.setVerticalExaggeration = (n) => {
+    _exagOverride = (n === null || n === undefined) ? null
+                  : Math.max(1, Math.min(400, Number(n) || 1));
+    console.info(`[AtmoScale] vertical exaggeration ${
+        _exagOverride === null ? 'AUTO (camera-ramped)' : '×' + _exagOverride}`);
+};
+window.getVerticalExaggeration = () => _atmoExag;
+
+let _atmoSeeded = false;
+function _applyAtmoScale() {
+    const exag = _exagOverride ?? AtmoScale.exaggerationAt(camera.position.length());
+    // Sub-1% moves are invisible and would churn 10+ matrix updates a frame
+    // for nothing; the ramp is smooth, so a deadband costs no visible easing.
+    //
+    // The FIRST call must bypass the deadband. _atmoExag is seeded to E_FAR
+    // and the camera starts at globe distance, so the deadband matches on
+    // frame 1 and every uniform + mesh scale below would stay at its factory
+    // default — which left the volumetric carrier mesh at radius 1.0, i.e.
+    // inside the planet, painting the whole disc. Silent, and it looked like
+    // a shader bug rather than a wiring one.
+    if (_atmoSeeded && Math.abs(exag - _atmoExag) < _atmoExag * 0.002) return;
+    _atmoSeeded = true;
+    _atmoExag  = exag;
+    const R = _atmoRadii = AtmoScale.shellRadii(exag);
+
+    // Cloud decks. Built at the far-view radii, so the scale is a ratio.
+    cloudMesh.scale.setScalar(R.deckMid / R_CLOUDS);
+    if (cloudShellMeshes) {
+        cloudShellMeshes[0].scale.setScalar(R.deckLow  / R_CLOUD_LOW);
+        cloudShellMeshes[1].scale.setScalar(R.deckMid  / R_CLOUD_MID);
+        cloudShellMeshes[2].scale.setScalar(R.deckHigh / R_CLOUD_HIGH);
+    }
+
+    // The marched volume takes its bounds as UNIFORMS (world units) — the
+    // carrier mesh only has to cover the silhouette, hence the 1.5% margin.
+    if (cloudVolumeU) {
+        cloudVolumeU.u_exag.value   = exag;
+        cloudVolumeU.u_r_base.value = R.volumeBase;
+        cloudVolumeU.u_r_top.value  = R.volumeTop;
+        cloudVolumeMesh.scale.setScalar(R.volumeTop * 1.015);
+    }
+
+    // Outer context shells lift only as far as they must to stay above the
+    // volume — they are not on the troposphere ramp.
+    const outer = AtmoScale.outerShellRadii(R.volumeTop, {
+        aurora: R_AURORA_BASE, strat: R_STRAT_BASE, atm: R_ATM_BASE });
+    auroraMesh.scale.setScalar(outer.aurora / R_AURORA);
+    stratMesh.scale.setScalar(outer.strat  / R_STRAT);
+    atmMesh.scale.setScalar(outer.atm      / R_ATM);
+
+    // Wind shells. The surface instance is PINNED (10 m barely moves under
+    // any exaggeration — that is the clearance floor doing its job), so it
+    // stays welded to the deck while the pressure levels fan out above it.
+    windParticles.setRadius(R.windSfc);
+    _windLevels.w850?.inst?.setRadius(R.wind850);
+    _windLevels.w500?.inst?.setRadius(R.wind500);
+    _windLevels.jet?.inst?.setRadius(R.wind250);
+    if (typeof windArrows !== 'undefined' && windArrows?.setRadius) {
+        windArrows.setRadius(R.windSfc + 0.0004);
+    }
+
+    _exagDisclosure(exag);
+}
+
+// The disclosure. An exaggerated stack that does not say it is exaggerated
+// is a lie about altitude, and this page is read by people who care about
+// altitude. Written into the wind legend header, next to the layers it
+// describes.
+let _exagShown = -1;
+function _exagDisclosure(exag) {
+    const rounded = Math.round(exag);
+    if (rounded === _exagShown) return;
+    _exagShown = rounded;
+    const el = document.getElementById('wind-exag-note');
+    if (el) el.textContent = AtmoScale.disclosureText(exag);
+}
+
 function animate() {
     requestAnimationFrame(animate);
     const t  = clock.getElapsedTime();
@@ -13591,6 +13854,11 @@ function animate() {
     if (cloudShellMeshes) {                        // split decks ride the same lock
         for (const m of cloudShellMeshes) m.rotation.y = earthMesh.rotation.y;
     }
+    // The volumetric shell is deliberately NOT rotated: its march runs in
+    // world space (concentric spheres are rotation-invariant) and only the
+    // sample direction is rotated into the Earth-fixed frame, via
+    // u_earth_rot. Rotating the carrier mesh too would double-apply it.
+    _applyAtmoScale();
 
     // ── Sun direction (still tied to simTimeMs) ─────────────────────────
     // Computed from simTimeMs's JD so the slider scrubs the day-night
@@ -13629,6 +13897,14 @@ function animate() {
     earthU.u_time.value  = t;
     cloudU.u_time.value  = t;
     auroraU.u_time.value = t;
+    if (cloudVolumeU) {
+        cloudVolumeU.u_time.value = t;
+        // The volumetric shell is not rotated as a mesh (see _applyAtmoScale)
+        // — the planet's spin reaches its march as this scalar, which the
+        // shader applies to the SAMPLE DIRECTION only.
+        cloudVolumeU.u_earth_rot.value = earthMesh.rotation.y;
+        cloudVolumeU.u_r_surface.value = R_EARTH;
+    }
 
     // ── Altitude display (camera distance → km equivalent). Write-on-change
     // only — a per-frame textContent write invalidates layout even when the
