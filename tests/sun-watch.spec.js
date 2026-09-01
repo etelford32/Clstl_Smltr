@@ -10,6 +10,11 @@
  *   · a dead feed shows a "down" chip and an empty section (no fabricated rows)
  *   · coronal-hole markers land in the scene and co-rotate with the AR frame
  *   · collapse → pill → expand round-trips
+ *   · the Forecast tab renders the SHARED flux-rope provider's published
+ *     result (live ensemble stats for an Earth-directed CME; the honest
+ *     "feed unavailable" state when DONKI is down) and the scrubber event
+ *     track picks up the ledger marks — both consume the ONE provider run
+ *     started by js/sun-flux-rope.js, never a second pipeline
  */
 
 import { test, expect } from '@playwright/test';
@@ -23,11 +28,17 @@ const DONKI_FLARES = { source: 'NASA DONKI', data: { flares: [
     { id: 'f2', peak_time: new Date(Date.now() - 20 * 3600e3).toISOString(), begin_time: null,
       flare_class: 'C3.1', location: 'S08E15', active_region: 4322, linked_cme: null },
 ] } };
+// TWO Earth-directed CMEs 5 h apart → the provider forms a 2-rope
+// compounding train, which is what the Forecast tab's measurement block
+// and the 3D transit overlay are gated on.
 const DONKI_CME = { source: 'NASA DONKI', data: { cmes: [
     { cme_id: 'cme-1', time: new Date(Date.now() - 3 * 3600e3).toISOString(),
       speed_km_s: 880, half_angle_deg: 40, latitude_deg: 4, longitude_deg: -8,
       earth_directed: true,
       enlil: { shock_arrival: new Date(Date.now() + 40 * 3600e3).toISOString(), kp_90: 5, kp_180: 7 } },
+    { cme_id: 'cme-2', time: new Date(Date.now() - 8 * 3600e3).toISOString(),
+      speed_km_s: 700, half_angle_deg: 35, latitude_deg: -2, longitude_deg: 10,
+      earth_directed: true, enlil: null },
 ] } };
 const DONKI_SEP = { source: 'NASA DONKI', data: { events: [
     { id: 's1', event_time: new Date(Date.now() - 3600e3).toISOString(),
@@ -73,6 +84,11 @@ async function mockFeeds(page, { donkiDown = false } = {}) {
     await page.route('**/api/noaa/regions*', r => r.fulfill(json(NOAA_REGIONS)));
     await page.route('**/api/hek/coronal-holes*', r => r.fulfill(json(HEK_HOLES)));
     await page.route('**/api/noaa/f107-history*', r => r.fulfill(json(f107Payload())));
+    // The flux-rope provider's L1 leg: RTSW direct + same-origin mirror both
+    // return empty so runs are deterministic (prior-only fan) and never wait
+    // out a sandbox network timeout. The WASM stays same-origin static.
+    await page.route('**services.swpc.noaa.gov/**', r => r.fulfill(json([])));
+    await page.route('**/api/noaa/passthrough*', r => r.fulfill(json([])));
 }
 
 async function boot(page) {
@@ -182,6 +198,81 @@ test.describe('sun watch dock', () => {
         await page.evaluate(() => window.__sunWatch.setTab('cme'));
         await expect(page.locator('#snw-body').getByText('No CME analyses published')).toBeVisible();
         await expect(page.locator('#snw-ft .snw-chip.snw-down')).toHaveCount(1);
+    });
+
+    test('forecast tab renders the shared provider ensemble for a live CME', async ({ page }) => {
+        await mockFeeds(page);
+        await boot(page);
+        // The provider defers its first run past scene boot, then computes
+        // the 500-member ensemble in WASM — wait for the published result.
+        await page.waitForFunction(() => window.__fluxRopeForecast?.idle === false,
+            { timeout: BOOT_TIMEOUT_MS + 15_000 });
+        await page.evaluate(() => window.__sunWatch.setTab('forecast'));
+        const body = page.locator('#snw-body');
+        await expect(body.getByText('P(Earth hit)')).toBeVisible();
+        await expect(body.getByText(/P\(min Bz/).first()).toBeVisible();
+        await expect(page.locator('#snw-rope-chart')).toBeVisible();
+        // The train member row quotes the DONKI cone fit verbatim.
+        await expect(body.getByText('880 km/s').first()).toBeVisible();
+        // The scrubber event track consumed the same ledger — flare + CME
+        // marks are present (drawn only once the NOAA timeline also loads,
+        // but the draw list itself must not depend on that).
+        const marks = await page.evaluate(() => window.__sun.scrubTrack.marks);
+        expect(marks.some(m => m.kind === 'flare')).toBe(true);
+        expect(marks.some(m => m.kind === 'cme')).toBe(true);
+    });
+
+    test('compounding measurement + 3D transit overlay for the 2-CME train', async ({ page }) => {
+        await mockFeeds(page);
+        await boot(page);
+        await page.waitForFunction(() => window.__fluxRopeForecast?.train === true
+            && window.__fluxRopeForecast?.compounding != null,
+            { timeout: BOOT_TIMEOUT_MS + 20_000 });
+        await page.evaluate(() => window.__sunWatch.setTab('forecast'));
+        const body = page.locator('#snw-body');
+        // The measurement block: ON-vs-OFF scalars + the follower's wake row
+        // + the method disclosure.
+        await expect(body.getByText('COMPOUNDING EFFECT')).toBeVisible();
+        await expect(body.getByText(/in R0's wake/)).toBeVisible();
+        await expect(body.getByText(/counterfactual/)).toBeVisible();
+        const cp = await page.evaluate(() => window.__fluxRopeForecast.compounding);
+        expect(cp.ropes).toHaveLength(2);
+        expect(cp.ropes[1].leader).toBe(0);
+
+        // 3D overlay: two rope assemblies, drawn BALLISTIC (no co-rotation)
+        // while the AR/hole marker groups do co-rotate.
+        await page.waitForFunction(() => window.__sunRopes?.state.ropeCount === 2);
+        const overlay = await page.evaluate(() => ({
+            ...window.__sunRopes.state,
+            rotY: window.__sunRopes.group.rotation.y,
+            visibleRopes: window.__sunRopes.group.children
+                .filter(c => c.visible && c.children.length === 4).length,
+        }));
+        expect(overlay.groupVisible).toBe(true);
+        expect(overlay.rotY).toBe(0);
+        expect(overlay.visibleRopes).toBeGreaterThanOrEqual(1);   // in-transit fronts drawn
+        await expect(page.locator('#sun-rope-legend')).toBeVisible();
+        await expect(page.locator('#sun-rope-legend')).toContainText('compressed');
+
+        // The panel toggle hides the whole overlay (checkbox lives in the
+        // slide-in panel, so drive it programmatically like the layer gates).
+        await page.evaluate(() => {
+            const el = document.getElementById('tog-cmetrain');
+            el.checked = false;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await page.waitForFunction(() => window.__sunRopes.state.groupVisible === false);
+        await expect(page.locator('#sun-rope-legend')).toBeHidden();
+    });
+
+    test('forecast tab is honest when the provider feed is down', async ({ page }) => {
+        await mockFeeds(page, { donkiDown: true });
+        await boot(page);
+        await page.waitForFunction(() => window.__fluxRopeForecast?.failed === true,
+            { timeout: BOOT_TIMEOUT_MS + 15_000 });
+        await page.evaluate(() => window.__sunWatch.setTab('forecast'));
+        await expect(page.locator('#snw-body').getByText('Forecast feed unavailable'))
+            .toBeVisible();
     });
 
     test('collapse to pill and back', async ({ page }) => {

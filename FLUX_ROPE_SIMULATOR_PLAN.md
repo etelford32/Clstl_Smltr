@@ -313,9 +313,37 @@ the same crate.
   oscillates mid-playback). The live-page browser gate now pre-seeds
   cookie consent (the sun-smoke idiom) — the scrub bar sits within px of
   the banner's edge and the click hit-test flaked without it.
+  ✅ COMPOUNDING SCORED AGAINST OUTCOMES (2026-08-30): the §16 interaction
+  physics itself now gets measured on real events, not just believed.
+  · js/flux-rope-compounding.js (extracted from the sun.html consumer —
+    ONE implementation shared by the page and the cron): the strict
+    counterfactual — second kernel, identical ropes/priors/seed/grid,
+    §16 OFF (kernel-documented bit-identical to the non-interacting
+    train), prior ensembles both sides, scalars from COPIED member
+    arrays (the live pMinBzBelow closure is stale post-assimilation).
+    `quantileLevels` emits per-side train-onset arrival quantiles.
+  · LOCK (validation-rerun, trains ≥ 2): per-rope `inputs.wake` (leader,
+    wake Δv, drag ratio, interaction arrival shift, INDEPENDENT-run
+    arrival UTC) + train-level `inputs.compounding` on the
+    first-arriving row (ON/OFF scalars + deltas, predicted min-Bz
+    amplification via amplificationFactor, OFF-side arrival_q_off).
+  · SCORE (flux-rope-validation.js): the SAME shock/min-Bz truth scores
+    both sides — arrival |err| ON vs OFF (gain > 0 = §16 helped), CRPS
+    gain from the two quantile sets, min-Bz gain, Brier(−20) both
+    sides, ampObs vs ampPred over the same independent baseline.
+  · AGGREGATE → validation_runs kind='flux-rope'
+    metrics.compounding: the §19–§21 FITTING SIGNALS — followerBiasOnH
+    (signed; negative with a smaller OFF bias = wake pulls followers in
+    too early, the Gannon momentum-overshoot direction ⇒ ε / wake
+    refresh DOWN; the reverse = wake too weak), preferOnFrac, and
+    ampObs/ampPred (§16 under- vs over-amplification of min Bz).
+    /api/cme/skill exposes the compact face (wake_delta_h + train
+    deltas + amp_pred) per flux-rope-v1 row. The v1.6 knobs stay
+    default-off until this evidence accumulates — fitting them from
+    fewer than a handful of scored trains would be curve-fitting noise.
   Remaining Phase 5: EEGGL/SWMF comparison runs, server-side API build;
-  ledger-driven fits of ε / wake_refresh_h / §21 knobs once events
-  accumulate.
+  the actual ε / wake_refresh_h / §21 fits once metrics.compounding has
+  accumulated enough scored trains (the evidence base now exists).
 
 ## 5. Data inputs
 

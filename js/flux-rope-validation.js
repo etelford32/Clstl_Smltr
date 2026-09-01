@@ -16,9 +16,31 @@
  * models' MAE on the same ledger), Brier for the locked storm
  * probabilities, and the §5 DBM inversion — the retrieved (Γ, w) per event
  * is the trajectory-analysis product that becomes population priors.
+ *
+ * COMPOUNDING SCORING (2026-08-30): multi-rope trains additionally lock
+ * the §16 COUNTERFACTUAL (js/flux-rope-compounding.js measureCompounding —
+ * identical ropes/priors/seed, interaction OFF) so the interaction physics
+ * itself gets scored against outcomes, not just believed:
+ *   · lock — per-rope `inputs.wake` (leader, wake Δv, drag ratio,
+ *     interaction arrival shift, and the INDEPENDENT-run arrival time) +
+ *     the train-level `inputs.compounding` block on the first-arriving row
+ *     (ON/OFF scalars, deltas, predicted min-Bz amplification, and the
+ *     OFF-side arrival quantiles so CRPS scores BOTH sides identically).
+ *   · score — per event: arrival |error| ON vs OFF (gain > 0 = §16
+ *     helped), CRPS gain, min-Bz gain, Brier(−20 nT) both sides, and
+ *     predicted vs OBSERVED amplification (amplificationFactor).
+ *   · aggregate — the §19–§21 FITTING SIGNALS: `followerBiasOnH` is the
+ *     signed arrival bias of wake-riding followers under the interacting
+ *     model (negative = §16 wake brings them in too early ⇒ the Gannon
+ *     momentum-overshoot direction: fit §19 restitution / §20 wake
+ *     refresh DOWN; positive with OFF unbiased = wake too weak);
+ *     `ampObs` vs `ampPred` says whether §16 under- or over-amplifies
+ *     min Bz on real trains. The v1.6 knobs stay default-off until this
+ *     evidence accumulates — that is the whole point of the ledger.
  */
 
-import { crpsFromQuantiles, brierScore } from './forecast-verification.js';
+import { crpsFromQuantiles, brierScore, amplificationFactor }
+    from './forecast-verification.js';
 import { dbmApexKm, dbmSpeedKms, invertGammaW, invertGamma, AU_KM, RSUN_KM }
     from './flux-rope-inversion.js';
 
@@ -94,12 +116,52 @@ export function ropeArrivalWindow({
 }
 
 /**
+ * Freeze a measureCompounding result into the ledger's snake_case
+ * `inputs.compounding` shape (pure; null passes through). Only scalars —
+ * the frozen block must replay-score without a kernel.
+ */
+export function freezeCompounding(cp) {
+    if (!cp) return null;
+    const side = (s) => ({
+        p_hit: s.pHit ?? null,
+        p10: s.p10 ?? null,
+        p20: s.p20 ?? null,
+        min_bz_p50: s.minBzP50 ?? null,
+        arrival_p50_h: s.arrivalP50H ?? null,
+    });
+    return {
+        method: cp.disclosure,
+        members: cp.members,
+        on: side(cp.on),
+        off: side(cp.off),
+        delta: {
+            min_bz_p50: cp.delta.minBzP50,
+            p10: cp.delta.p10,
+            p20: cp.delta.p20,
+            p_hit: cp.delta.pHit,
+            arrival_p50_h: cp.delta.arrivalP50H,
+        },
+        // Predicted min-Bz amplification of the interacting train over the
+        // independent superposition — the number ampObs is scored against.
+        amp_pred: amplificationFactor(
+            Math.abs(cp.on.minBzP50 ?? NaN), Math.abs(cp.off.minBzP50 ?? NaN)),
+        ...(cp.off?.arrivalQH && cp.levels
+            ? { arrival_q_off: { levels: [...cp.levels], hours: [...cp.off.arrivalQH] } }
+            : {}),
+    };
+}
+
+/**
  * Build the issue-time-locked flux-rope-v1 rows — ONE PER FLARE/CME of the
  * modeled train (trajectory ledger), each carrying the frozen inputs that
  * replay it bit-exactly (train ids + seed) plus the train-level
  * probabilistic quantities. The earliest-arriving row carries the
  * CRPS-scorable train-onset arrival quantiles (`inputs.arrivalQ`) — the
  * train's first shock is what the onset distribution predicts.
+ *
+ * `compounding` (a measureCompounding result, multi-rope trains only)
+ * additionally freezes the §16 counterfactual: per-row `inputs.wake` and
+ * the train-level `inputs.compounding` on the first-arriving row.
  *
  * All inputs are plain data (the cron extracts kernel/effective params);
  * pure and node-gated.
@@ -116,6 +178,7 @@ export function fluxRopeForecastRows({
     arrivalQH = null,     // train-onset arrival quantiles [h], ARRIVAL_Q_LEVELS
     sigmaNt, sheathDeltaNt, noiseSigmaNt = null,
     flares = [],          // parsed flares for association
+    compounding = null,   // measureCompounding result (trains ≥ 2) or null
 }) {
     const rows = [];
     let firstArrival = Infinity, firstIdx = -1;
@@ -174,6 +237,26 @@ export function fluxRopeForecastRows({
                 } : null,
                 ...(i === firstIdx && Array.isArray(arrivalQH)
                     ? { arrivalQ: { levels: ARRIVAL_Q_LEVELS, hours: arrivalQH } }
+                    : {}),
+                // §16 counterfactual freeze: THIS rope's interaction
+                // diagnostics + independent-run arrival (scored vs the same
+                // shock the ON prediction is), train-level block once.
+                ...(compounding?.ropes?.[i] ? { wake: (() => {
+                    const cr = compounding.ropes[i];
+                    return {
+                        leader: cr.leader,
+                        dv_kms: Number.isFinite(cr.wakeDvKms)
+                            ? Math.round(cr.wakeDvKms) : null,
+                        gamma_ratio: Number.isFinite(cr.gammaRatio)
+                            ? Math.round(cr.gammaRatio * 1000) / 1000 : null,
+                        delta_arrival_h: Number.isFinite(cr.deltaH)
+                            ? Math.round(cr.deltaH * 100) / 100 : null,
+                        arrival_indep_utc: Number.isFinite(cr.arrivalOffH)
+                            ? iso(launchMs + cr.arrivalOffH * 3.6e6) : null,
+                    };
+                })() } : {}),
+                ...(i === firstIdx && compounding
+                    ? { compounding: freezeCompounding(compounding) }
                     : {}),
             },
         });
@@ -251,6 +334,7 @@ export function scoreFluxRopeEvent({ forecast, truth, launchIso }) {
         brier10: null, brier20: null,
         minBzErrNt: null,
         inversion: null,
+        compounding: null,
     };
     if (truth?.arrived && Number.isFinite(truth.shockMs)) {
         const predMs = Date.parse(forecast.predicted_arrival_utc);
@@ -266,6 +350,57 @@ export function scoreFluxRopeEvent({ forecast, truth, launchIso }) {
             if (Number.isFinite(inp.p10)) out.brier10 = brierScore(inp.p10, truth.minBzNt < -10);
             if (Number.isFinite(inp.p20)) out.brier20 = brierScore(inp.p20, truth.minBzNt < -20);
             if (Number.isFinite(inp.min_bz_p50)) out.minBzErrNt = inp.min_bz_p50 - truth.minBzNt;
+        }
+        // §16 counterfactual vs OUTCOME: the same truth scores the frozen
+        // interacting and independent predictions — every "gain" is
+        // OFF-error minus ON-error, so positive = interaction helped.
+        const wk = inp.wake, cpz = inp.compounding;
+        if (wk || cpz) {
+            const c = { follower: Number.isFinite(wk?.leader) };
+            if (wk?.arrival_indep_utc) {
+                const offMs = Date.parse(wk.arrival_indep_utc);
+                if (Number.isFinite(offMs)) {
+                    c.arrivalErrOnH = out.arrivalErrH;
+                    c.arrivalErrOffH = (offMs - truth.shockMs) / 3.6e6;
+                    c.arrivalGainH = Math.abs(c.arrivalErrOffH) - Math.abs(c.arrivalErrOnH);
+                    c.deltaArrivalH = wk.delta_arrival_h ?? null;
+                }
+            }
+            if (cpz) {
+                if (cpz.arrival_q_off?.hours?.length && Number.isFinite(epochMs)) {
+                    c.crpsArrivalOffH = crpsFromQuantiles(
+                        cpz.arrival_q_off.hours,
+                        cpz.arrival_q_off.levels ?? ARRIVAL_Q_LEVELS,
+                        (truth.shockMs - epochMs) / 3.6e6);
+                    if (Number.isFinite(out.crpsArrivalH) && Number.isFinite(c.crpsArrivalOffH)) {
+                        c.crpsGainH = c.crpsArrivalOffH - out.crpsArrivalH;
+                    }
+                }
+                if (Number.isFinite(truth.minBzNt)) {
+                    if (Number.isFinite(cpz.on?.min_bz_p50)) {
+                        c.minBzErrOnNt = cpz.on.min_bz_p50 - truth.minBzNt;
+                    }
+                    if (Number.isFinite(cpz.off?.min_bz_p50)) {
+                        c.minBzErrOffNt = cpz.off.min_bz_p50 - truth.minBzNt;
+                        // Observed amplification over the SAME independent
+                        // baseline the prediction used — directly comparable
+                        // with the locked amp_pred.
+                        c.ampObs = amplificationFactor(
+                            Math.abs(truth.minBzNt), Math.abs(cpz.off.min_bz_p50));
+                        c.ampPred = Number.isFinite(cpz.amp_pred) ? cpz.amp_pred : null;
+                    }
+                    if (Number.isFinite(c.minBzErrOnNt) && Number.isFinite(c.minBzErrOffNt)) {
+                        c.minBzGainNt = Math.abs(c.minBzErrOffNt) - Math.abs(c.minBzErrOnNt);
+                    }
+                    if (Number.isFinite(cpz.on?.p20)) {
+                        c.brier20On = brierScore(cpz.on.p20, truth.minBzNt < -20);
+                    }
+                    if (Number.isFinite(cpz.off?.p20)) {
+                        c.brier20Off = brierScore(cpz.off.p20, truth.minBzNt < -20);
+                    }
+                }
+            }
+            out.compounding = c;
         }
         // Trajectory inversion: what drag environment did this CME feel?
         if (Number.isFinite(launchMs) && Number.isFinite(inp.v0_kms)) {
@@ -286,7 +421,9 @@ export function scoreFluxRopeEvent({ forecast, truth, launchIso }) {
     return out;
 }
 
-/** Aggregate a day's scored events into the validation_runs row shape. */
+/** Aggregate a day's scored events into the validation_runs row shape.
+ *  The `compounding` sub-aggregate is the §19–§21 fitting evidence — see
+ *  the header's COMPOUNDING SCORING note for how to read the biases. */
 export function aggregateFluxRopeScores(events) {
     const scored = (events ?? []).filter((e) => e && e.arrived && Number.isFinite(e.arrivalErrH));
     const n = scored.length;
@@ -294,6 +431,9 @@ export function aggregateFluxRopeScores(events) {
         const v = vals.filter(Number.isFinite);
         return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
     };
+    const cps = scored.map((e) => e.compounding).filter(Boolean);
+    const followers = cps.filter((c) => c.follower);
+    const gains = cps.map((c) => c.arrivalGainH).filter(Number.isFinite);
     return {
         n_forecasts: (events ?? []).length,
         hits: scored.filter((e) => e.hit12).length,
@@ -305,5 +445,26 @@ export function aggregateFluxRopeScores(events) {
         brier20: mean(scored.map((e) => e.brier20)),
         minBzMaeNt: mean(scored.map((e) => Math.abs(e.minBzErrNt))),
         inversions: scored.map((e) => e.inversion).filter((r) => r?.ok),
+        compounding: cps.length ? {
+            n: cps.length,
+            nFollowers: followers.length,
+            arrivalMaeOnH: mean(cps.map((c) => Math.abs(c.arrivalErrOnH))),
+            arrivalMaeOffH: mean(cps.map((c) => Math.abs(c.arrivalErrOffH))),
+            arrivalGainH: mean(gains),
+            preferOnFrac: gains.length
+                ? gains.filter((g) => g > 0).length / gains.length : null,
+            crpsGainH: mean(cps.map((c) => c.crpsGainH)),
+            minBzGainNt: mean(cps.map((c) => c.minBzGainNt)),
+            brier20On: mean(cps.map((c) => c.brier20On)),
+            brier20Off: mean(cps.map((c) => c.brier20Off)),
+            ampPred: mean(cps.map((c) => c.ampPred)),
+            ampObs: mean(cps.map((c) => c.ampObs)),
+            // Signed follower arrival bias, ON vs OFF — the §19/§20 knob
+            // error signal (negative ON bias with a smaller OFF bias =
+            // the wake brings followers in too early: momentum-overshoot
+            // direction; the reverse = wake too weak).
+            followerBiasOnH: mean(followers.map((c) => c.arrivalErrOnH)),
+            followerBiasOffH: mean(followers.map((c) => c.arrivalErrOffH)),
+        } : null,
     };
 }
