@@ -123,6 +123,29 @@ button{color:inherit}
 .layers-panel .panel-body{padding:7px 10px 12px}
 .layer-group-title{padding:10px 3px 6px;color:var(--faint);font:600 .52rem var(--display);letter-spacing:.16em;text-transform:uppercase}
 .layer-row{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:9px;padding:9px 5px;border-top:1px solid rgba(255,255,255,.045)}
+/* Feature index. The list is capped and scrolls INSIDE the panel body rather
+   than growing it: the layers panel is already max-height-constrained against
+   the viewport, so 18 uncapped rows would push the layer toggles below the
+   fold on a short laptop — the same lose-the-tail failure the nav has. */
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.feature-index{padding:2px 3px 6px}
+.feature-filter{width:100%;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.03);color:var(--ink);font:.63rem var(--sans)}
+.feature-filter::placeholder{color:var(--faint)}
+.feature-filter:focus-visible{outline:2px solid var(--cyan);outline-offset:1px}
+.feature-list{max-height:216px;margin-top:6px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:rgba(255,173,114,.42) transparent}
+.feature-item{display:grid;grid-template-columns:15px 1fr auto;align-items:center;gap:8px;width:100%;padding:6px 6px;border:0;border-radius:7px;background:none;color:var(--ink);text-align:left;cursor:pointer;font:inherit}
+/* An AUTHOR `display` beats the UA sheet's `[hidden]{display:none}` no matter
+   how specific the UA rule is, so without this line the filter set `hidden` on
+   every non-matching row and every row stayed on screen. Measured: filtering
+   for "olymp" left all 18 visible. */
+.feature-item[hidden]{display:none}
+.feature-item:hover,.feature-item:focus-visible{background:rgba(255,122,61,.12)}
+.feature-item:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}
+.feature-item[aria-current="true"]{background:rgba(255,122,61,.18)}
+.feature-dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}
+.feature-name{min-width:0;overflow:hidden;font-size:.66rem;text-overflow:ellipsis;white-space:nowrap}
+.feature-size{color:var(--faint);font:.53rem var(--mono);white-space:nowrap}
+.feature-empty{margin:8px 4px 2px;color:var(--faint);font-size:.6rem}
 .layer-glyph{display:grid;place-items:center;width:30px;height:30px;border-radius:8px;color:var(--mars-bright);background:rgba(255,122,61,.075);font-size:.84rem}
 .layer-name{font-size:.72rem;color:#e4d4cc;line-height:1.2}
 .sky-focus{min-width:0;padding:0;border:0;background:none;text-align:left;cursor:crosshair}
@@ -456,6 +479,20 @@ button{color:inherit}
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">··</span><div class="layer-name">Drive-stop points<span class="layer-desc">NASA MMGIS localizations</span></div><label class="switch"><input id="waypoints-toggle" type="checkbox" data-layer="waypoints" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◆</span><div class="layer-name">PDS science fix<span class="layer-desc">MEDA archive · sol 1726</span></div><label class="switch"><input type="checkbox" data-layer="rover" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">·</span><div class="layer-name">Landing site<span class="layer-desc">Octavia E. Butler Landing</span></div><label class="switch"><input type="checkbox" data-layer="landing" checked><span class="switch-track"></span></label></div>
+      <div class="layer-group-title">Feature index · fly to any of them</div>
+      <!-- Every landmark, reachable without hunting for it.
+           The atlas has 18 features but the globe LOD only labels priority-1
+           at mission-orbit range, so 14 of them could only be found by hovering
+           blindly over the sphere and hoping — and half the atlas is on the far
+           side at any moment. This lists all of them; picking one flies the
+           camera there and opens its card, which is also what makes the marker
+           appear. Populated from MARS_LANDMARKS by js/mars-view.js. -->
+      <div class="feature-index" id="feature-index">
+        <label class="sr-only" for="feature-filter">Filter Mars features</label>
+        <input class="feature-filter" id="feature-filter" type="search" placeholder="Filter features…" autocomplete="off" spellcheck="false">
+        <div class="feature-list" id="feature-list" role="list"></div>
+        <p class="feature-empty" id="feature-empty" hidden>No feature matches that.</p>
+      </div>
       <div class="layer-group-title">USGS / IAU landmark atlas</div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">△</span><div class="layer-name">Volcanoes<span class="layer-desc">Olympus, Tharsis, Elysium + Alba</span></div><label class="switch"><input type="checkbox" data-layer="landmark-volcano" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">≋</span><div class="layer-name">Canyons &amp; fractures<span class="layer-desc">Valles, fossae + labyrinthus</span></div><label class="switch"><input type="checkbox" data-layer="landmark-fracture" checked><span class="switch-track"></span></label></div>

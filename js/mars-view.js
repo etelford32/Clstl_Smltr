@@ -13,7 +13,7 @@ import {
     observationFreshness,
 } from './mars-mission-state.js?v=20260809-live';
 import { MarsLandmarks } from './mars-landmarks.js?v=20260809-live';
-import { MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
+import { MARS_LANDMARKS, MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
 import { fetchMarsSkyEphemeris } from './horizons.js';
 import { MarsSky } from './mars-sky.js';
 import {
@@ -3445,6 +3445,12 @@ const pointer = new THREE.Vector2();
 const pointerStarts = new Map();
 // Movement past which a pointer gesture counts as a drag rather than a click.
 const DRAG_THRESHOLD_PX = 7;
+// Double-tap-to-land window. 360 ms was tighter than the platform conventions
+// it competes with (Chromium and iOS both synthesise a double-tap out to
+// ~500 ms), so a deliberate but unhurried double-tap fell through to two
+// separate selections and the visitor got nothing.
+const DOUBLE_TAP_MS = 500;
+const DOUBLE_TAP_SLOP_PX = 32;
 
 /**
  * Right-drag translation across the terrain, in surface mode only.
@@ -3517,6 +3523,110 @@ function showLandmark(landmark) {
     landmarkCard.hidden = false;
 }
 
+/**
+ * ═══ FEATURE INDEX ═════════════════════════════════════════════════════════
+ * Every landmark, reachable without hunting for it.
+ *
+ * The atlas holds 18 features, but the globe's LOD only LABELS priority-1 at
+ * mission-orbit range (MarsLandmarks.update: maximumPriority is 1 beyond 2.45
+ * scene units), and at any moment roughly half the atlas is on the far side.
+ * So 14 of 18 features could only be found by sweeping the cursor across the
+ * sphere hoping for a hover — which is not exploration, it is a search
+ * problem the page was making the visitor solve.
+ *
+ * Picking a row flies the camera there AND opens the card. Flying is what
+ * brings the marker inside the LOD and onto the near hemisphere, so the list
+ * is also what makes the globe markers reachable at all.
+ *
+ * The list is built ONCE. Rebuilding it per filter keystroke would drop the
+ * row the visitor is arrowing through, and rebuilding it per frame would
+ * churn 18 nodes against a render loop that is already the bottleneck.
+ */
+const featureListElement = document.querySelector('#feature-list');
+const featureFilterElement = document.querySelector('#feature-filter');
+const featureEmptyElement = document.querySelector('#feature-empty');
+const featureRows = [];
+
+function buildFeatureIndex() {
+    if (!featureListElement) return;
+    // Grouped by category, and alphabetical inside a group: the atlas order is
+    // authoring order, which is meaningless to a reader looking for a name.
+    const ordered = [...MARS_LANDMARKS].sort((a, b) => (
+        a.category === b.category
+            ? a.name.localeCompare(b.name)
+            : Object.keys(MARS_LANDMARK_CATEGORIES).indexOf(a.category)
+              - Object.keys(MARS_LANDMARK_CATEGORIES).indexOf(b.category)
+    ));
+    let lastCategory = null;
+    for (const landmark of ordered) {
+        const category = MARS_LANDMARK_CATEGORIES[landmark.category];
+        if (landmark.category !== lastCategory) {
+            lastCategory = landmark.category;
+            const heading = document.createElement('div');
+            heading.className = 'layer-group-title';
+            heading.style.padding = '8px 3px 2px';
+            heading.textContent = category.label;
+            featureListElement.append(heading);
+        }
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'feature-item';
+        row.setAttribute('role', 'listitem');
+        row.style.color = `#${category.color.toString(16).padStart(6, '0')}`;
+        row.innerHTML = '<span class="feature-dot" aria-hidden="true"></span>'
+            + `<span class="feature-name"></span><span class="feature-size"></span>`;
+        row.querySelector('.feature-name').textContent = landmark.name;
+        row.querySelector('.feature-size').textContent =
+            `${landmark.diameterKm.toLocaleString(undefined, { maximumFractionDigits: 0 })} km`;
+        row.addEventListener('click', () => selectFeature(landmark));
+        featureListElement.append(row);
+        featureRows.push({ landmark, row, heading: null, haystack: `${landmark.name} ${category.label}`.toLowerCase() });
+    }
+}
+
+function selectFeature(landmark) {
+    // Card first, then the flight: showLandmark sets cardFocusAction, and
+    // focusSurfacePoint overwrites lastSurfaceFocus — doing it the other way
+    // round leaves the card's "Fly here" pointing at the previous target.
+    showLandmark(landmark);
+    focusSurfacePoint(landmark.latDeg, landmark.lonDeg, { label: landmark.name });
+    for (const entry of featureRows) {
+        entry.row.setAttribute('aria-current', String(entry.landmark === landmark));
+    }
+    // Turning the category back on is the difference between "nothing
+    // happened" and a marker appearing where the camera just flew.
+    const toggle = document.querySelector(`[data-layer="landmark-${
+        landmark.category === 'basin' || landmark.category === 'crater' ? 'basins' : landmark.category}"]`);
+    if (toggle && !toggle.checked) {
+        toggle.checked = true;
+        toggle.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+}
+
+function filterFeatureIndex(query) {
+    const needle = query.trim().toLowerCase();
+    let shown = 0;
+    for (const entry of featureRows) {
+        const match = !needle || entry.haystack.includes(needle);
+        entry.row.hidden = !match;
+        if (match) shown += 1;
+    }
+    // Category headings are only meaningful while their group has rows.
+    for (const heading of featureListElement.querySelectorAll('.layer-group-title')) {
+        let next = heading.nextElementSibling;
+        let any = false;
+        while (next && !next.classList.contains('layer-group-title')) {
+            if (!next.hidden) { any = true; break; }
+            next = next.nextElementSibling;
+        }
+        heading.hidden = !any;
+    }
+    if (featureEmptyElement) featureEmptyElement.hidden = shown > 0;
+}
+
+buildFeatureIndex();
+featureFilterElement?.addEventListener('input', event => filterFeatureIndex(event.target.value));
+
 function showSkyBody(record, key) {
     document.querySelector('#landmark-card-category').textContent = 'JPL Horizons · Mars topocentric sky';
     document.querySelector('#landmark-card-name').textContent = record.name;
@@ -3539,7 +3649,7 @@ function pickPointOfInterest(clientX, clientY) {
         return true;
     }
     const hit = raycaster.intersectObjects(landmarks.hitTargets, false)
-        .find(intersection => landmarks.isLandmarkVisible(intersection.object.userData.landmark));
+        .find(intersection => landmarks.isPickable(intersection.object.userData.landmark));
     if (!hit) return false;
     showLandmark(hit.object.userData.landmark);
     return true;
@@ -3614,7 +3724,7 @@ function updateHover(clientX, clientY) {
     }
 
     const hit = raycaster.intersectObjects(landmarks.hitTargets, false)
-        .find(intersection => landmarks.isLandmarkVisible(intersection.object.userData.landmark));
+        .find(intersection => landmarks.isPickable(intersection.object.userData.landmark));
     if (hit) {
         const landmark = hit.object.userData.landmark;
         sky.setHighlight(null);
@@ -3701,10 +3811,18 @@ canvas.addEventListener('pointerup', event => {
     }
 
     if (start.pointerType === 'touch') {
-        const now = performance.now();
+        // event.timeStamp, NOT performance.now(). Both share a time origin, but
+        // timeStamp is when the BROWSER generated the event while
+        // performance.now() here is when this handler finally ran. On a busy
+        // frame — which this page has, it drives a 66k-vertex terrain rebuild —
+        // delivery lags by hundreds of ms, so a genuine quick double-tap was
+        // measured as one slow pair and silently ignored. Measured on a
+        // software rasteriser: two taps dispatched back-to-back arrived 914 ms
+        // apart by handler clock. The window is the user's cadence, not ours.
+        const now = event.timeStamp;
         const isDoubleTap = lastTouchTap
-            && now - lastTouchTap.time < 360
-            && Math.hypot(event.clientX - lastTouchTap.x, event.clientY - lastTouchTap.y) < 28;
+            && now - lastTouchTap.time < DOUBLE_TAP_MS
+            && Math.hypot(event.clientX - lastTouchTap.x, event.clientY - lastTouchTap.y) < DOUBLE_TAP_SLOP_PX;
         if (isDoubleTap) {
             lastTouchTap = null;
             if (enterSurfaceAtClientPoint(event.clientX, event.clientY)) {
@@ -4029,6 +4147,31 @@ window.__marsLab = Object.freeze({
         rect: tileInsetUniforms.uTileRect.value.toArray(),
         bundledGsdM: BUNDLED_BASE_GSD_M,
     }),
+    /**
+     * The feature index and each landmark's current facing. The browser gate
+     * reads this to assert that a landmark behind the planet is not pickable —
+     * the hit meshes are never hidden and the globe is not in the raycast set,
+     * so picking on category visibility alone struck markers through Mars.
+     */
+    landmarkIndex: () => ({
+        rows: featureRows.length,
+        features: landmarks.list().map(entry => ({
+            name: entry.landmark.name,
+            category: entry.landmark.category,
+            latDeg: entry.landmark.latDeg,
+            lonDeg: entry.landmark.lonDeg,
+            frontFacing: entry.frontFacing,
+            visible: entry.visible,
+            pickable: landmarks.isPickable(entry.landmark),
+        })),
+    }),
+    /** Fly to a named feature the way the index does. QA/tests only. */
+    selectFeature: (name) => {
+        const landmark = MARS_LANDMARKS.find(l => l.name === name);
+        if (!landmark) return false;
+        selectFeature(landmark);
+        return true;
+    },
     /** Pin a tile layer (null returns to the footprint ladder). QA/tests only. */
     setTileLayer: (key) => {
         tileLayerPreferred = key ?? null;
