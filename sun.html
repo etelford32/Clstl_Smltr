@@ -332,6 +332,7 @@ nav {
 .scrub-val .sv { font-size:11px; font-weight:700; color:#ffd080; }
 .scrub-val .su { font-size:8px; color:#555; margin-top:1px; }
 input#sl-scrub { width:100%; margin:0; height:20px; }
+#scrub-events { width:100%; height:22px; display:block; margin:2px 0 0; }
 
 /* ── Live feed status dots ───────────────────────────────────── */
 .feed-row { display:flex; align-items:center; gap:7px; font-size:10px; color:#666; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.03); }
@@ -963,12 +964,14 @@ import './js/telemetry.js';
                             <span id="scrub-time-lbl">● LIVE</span>
                             <span class="scrub-edge">+24h</span>
                         </div>
+                        <canvas id="scrub-events" height="22"
+                            title="7-day event track — flares (upper ticks, GOES-class colors), CMEs/SEP (lower ticks), blue band = flux-rope ensemble arrival window (P10–P90)"></canvas>
                         <input type="range" id="sl-scrub" min="0" max="10079" step="1" value="10079">
                         <div class="scrub-vals" id="scrub-vals" style="display:none">
                             <div class="scrub-val"><div class="sv" id="scrub-v-speed">—</div><div class="su">km/s</div></div>
                             <div class="scrub-val"><div class="sv" id="scrub-v-dens">—</div><div class="su">n/cc</div></div>
                             <div class="scrub-val"><div class="sv" id="scrub-v-bz">—</div><div class="su">Bz nT</div></div>
-                            <div class="scrub-val"><div class="sv" id="scrub-v-kp">—</div><div class="su">Kp</div></div>
+                            <div class="scrub-val"><div class="sv" id="scrub-v-kp">—</div><div class="su" id="scrub-u-kp">Kp</div></div>
                         </div>
                         <div id="scrub-zone-lbl" style="text-align:center;font-size:9px;color:#555;margin-top:2px;display:none"></div>
                     </div>
@@ -1129,6 +1132,10 @@ import './js/telemetry.js';
                         <label style="font-size:10px;color:#777">B-line density</label>
                         <input type="range" id="sl-bline-density" min="10" max="100" step="5" value="50">
                         <span class="vdisp" id="disp-bline-density" style="font-size:10px">50%</span>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-cmetrain" checked>
+                        <label for="tog-cmetrain">CME train transit (modeled)</label>
                     </div>
                     <!-- Phase 2.3 — manual EP trigger. Hidden unless ?debug=prominence. -->
                     <div class="ctrl" id="erupt-row" style="margin-top:6px;padding-left:22px;display:none">
@@ -1698,6 +1705,8 @@ import { SolarWeatherForecaster, solarCyclePhase } from './js/solar-weather-fore
 import { ModelValidator }     from './js/model-validation.js';
 import { SolarLSTM, normalise as lstmNormalise, denormalise as lstmDenorm, FEATURES } from './js/solar-lstm.js';
 import { initSunWatch } from './js/sun-watch.js';
+import { startFluxRopeProvider, trainStateAt, scrubMarks } from './js/sun-flux-rope.js';
+import { initSunRopeOverlay } from './js/sun-rope-overlay.js';
 
 
 // PANEL
@@ -1737,10 +1746,12 @@ document.getElementById('spd-50x').addEventListener('click',   () => setSimSpeed
 // ── 7-day SWPC scrubber + 24h LSTM forecast ──────────────────────────────
 // Timeline: enriched with Bt, By, Kp (estimated from Bz/speed coupling
 // when Kp feed unavailable).  Extended by +24h LSTM forecast zone.
-let swpcTimeline   = [];    // [{t, speed, density, bz, bt, by, kp, isForecast}] oldest → newest
+let swpcTimeline   = [];    // [{t, tMs, speed, density, bz, bt, by, kp, kpSource, isForecast}] oldest → newest
 let scrubLive      = true;  // true = follow real-time swpc-update events
 let scrubLiveIdx   = 0;     // index of the "LIVE" position (end of observed data)
 let scrubForecastStart = 0; // index where forecast zone begins
+let scrubTimeMs    = null;  // scrubbed instant [epoch ms]; null = follow the live clock
+                            // (the CME-train overlay replays its transit off this)
 
 // LSTM model — initialised below, seeded from historical data
 const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
@@ -1754,10 +1765,36 @@ const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
 
     const PLASMA = 'https://services.swpc.noaa.gov/products/solar-wind/plasma-7-day.json';
     const MAG    = 'https://services.swpc.noaa.gov/products/solar-wind/mag-7-day.json';
+    const KP3H   = 'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json';
     try {
-        const [pRes, mRes] = await Promise.all([fetch(PLASMA), fetch(MAG)]);
+        // Kp is optional (its loss must not take the whole timeline down) —
+        // the other two stay load-bearing.
+        const [pRes, mRes, kRes] = await Promise.all([
+            fetch(PLASMA), fetch(MAG), fetch(KP3H).catch(() => null),
+        ]);
         if (!pRes.ok) throw new Error('plasma ' + pRes.status);
-        const [pRaw, mRaw] = await Promise.all([pRes.json(), mRes.ok ? mRes.json() : Promise.resolve(null)]);
+        const [pRaw, mRaw, kRaw] = await Promise.all([
+            pRes.json(),
+            mRes.ok ? mRes.json() : Promise.resolve(null),
+            kRes && kRes.ok ? kRes.json().catch(() => null) : Promise.resolve(null),
+        ]);
+
+        // Parse observed 3-hourly planetary Kp ([[header],[rows…]], block-
+        // start timestamps — the parseKp3h convention in api/_lib/
+        // sync-dataset-core.js). Real Kp replaces the Newell estimate
+        // wherever NOAA has a block; the estimate stays the labeled fallback.
+        let kpRows = [];
+        if (Array.isArray(kRaw) && Array.isArray(kRaw[0])) {
+            const kH = kRaw[0].map(String);
+            const kT = kH.indexOf('time_tag');
+            const kK = kH.findIndex(h => /^kp$/i.test(h));
+            if (kT >= 0 && kK >= 0) {
+                kpRows = kRaw.slice(1)
+                    .map(r => ({ t: Date.parse(String(r?.[kT]).replace(' ', 'T') + 'Z'), kp: parseFloat(r?.[kK]) }))
+                    .filter(r => Number.isFinite(r.t) && r.kp >= 0 && r.kp <= 9)
+                    .sort((a, b) => a.t - b.t);
+            }
+        }
 
         // Parse plasma (row[0] = headers)
         const pH = pRaw[0];
@@ -1788,7 +1825,10 @@ const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
             });
         }
 
-        // Build enriched timeline with estimated Kp from Bz/speed coupling
+        // Build enriched timeline: REAL 3-hourly Kp where NOAA published a
+        // block, Newell-coupling estimate otherwise (kpSource says which —
+        // the scrub readout labels the estimate honestly).
+        let kpPtr = 0;   // plasma rows are chronological — walk, don't re-search
         const observed = plasma.map(r => {
             const mag = magMap.get(String(r.t).slice(0,16));
             const bz  = mag?.bz ?? null;
@@ -1800,9 +1840,16 @@ const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
             const kpEst = Math.max(0, Math.min(9,
                 0.3 + 2.5 * (bzS / 20) + 1.5 * ((r.speed - 350) / 400)
             ));
+            const tMs = Date.parse(String(r.t).replace(' ', 'T') + 'Z');
+            while (kpPtr + 1 < kpRows.length && kpRows[kpPtr + 1].t <= tMs) kpPtr++;
+            const kpObs = kpRows.length && kpRows[kpPtr].t <= tMs
+                && tMs - kpRows[kpPtr].t < 3 * 3600e3 ? kpRows[kpPtr].kp : null;
             return {
-                t: r.t, speed: r.speed, density: r.density,
-                bz, bt, by, kp: kpEst, isForecast: false,
+                t: r.t, tMs, speed: r.speed, density: r.density,
+                bz, bt, by,
+                kp: kpObs ?? kpEst,
+                kpSource: kpObs != null ? 'obs' : 'est',
+                isForecast: false,
             };
         });
 
@@ -1838,9 +1885,10 @@ const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
         const forecasts = _lstm.forecast(24);
         const forecastPts = forecasts.map(fc => ({
             t: new Date(fc.t_ms).toISOString().replace('T', ' ').slice(0, 16),
+            tMs: fc.t_ms,
             speed: fc.raw.speed, density: fc.raw.density,
             bz: fc.raw.bz, bt: fc.raw.bt, by: 0,
-            kp: fc.raw.kp, isForecast: true,
+            kp: fc.raw.kp, kpSource: 'fc', isForecast: true,
         }));
 
         swpcTimeline = [...observed, ...forecastPts];
@@ -1850,6 +1898,8 @@ const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
         const sl = document.getElementById('sl-scrub');
         sl.max   = Math.max(0, swpcTimeline.length - 1);
         sl.value = scrubLiveIdx;   // start at live (not forecast)
+
+        rebuildScrubTrack();       // the event track now has a time axis
 
         // Mark feeds as live
         ['fd-wind','fd-imf'].forEach(id => {
@@ -1874,6 +1924,7 @@ document.getElementById('sl-scrub').addEventListener('input', function() {
     const zoneLbl = document.getElementById('scrub-zone-lbl');
 
     if (swpcTimeline.length === 0) {
+        scrubTimeMs = null;
         lbl.textContent = '● LIVE';
         lbl.style.color = '#44bb66';
         document.getElementById('scrub-vals').style.display = 'none';
@@ -1882,6 +1933,7 @@ document.getElementById('sl-scrub').addEventListener('input', function() {
     }
 
     if (scrubLive) {
+        scrubTimeMs = null;
         lbl.textContent = '● LIVE';
         lbl.style.color = '#44bb66';
         document.getElementById('scrub-vals').style.display = 'none';
@@ -1891,6 +1943,7 @@ document.getElementById('sl-scrub').addEventListener('input', function() {
 
     const pt = swpcTimeline[Math.min(idx, swpcTimeline.length - 1)];
     if (!pt) return;
+    scrubTimeMs = Number.isFinite(pt.tMs) ? pt.tMs : null;
 
     const d   = new Date((pt.t + (pt.t.includes('T') ? '' : 'T') + (pt.t.includes('Z') ? '' : 'Z')).replace(' ', 'T'));
     const lbl_str = d.toLocaleDateString('en-US', { month:'short', day:'numeric' })
@@ -1910,12 +1963,28 @@ document.getElementById('sl-scrub').addEventListener('input', function() {
         zoneLbl.style.display = '';
     }
 
+    // Flux-rope transit readout: where the modeled compounding train was
+    // (or will be) at the scrubbed instant — the provider's own kernel
+    // probes, never a second kinematic estimate. Silent when the engine
+    // is idle/failed or the train hadn't launched yet.
+    if (Number.isFinite(pt.tMs)) {
+        const ts = trainStateAt(window.__fluxRopeForecast, pt.tMs);
+        if (ts && ts.launched > 0) {
+            zoneLbl.textContent += ts.inTransit > 0
+                ? ` · ${ts.inTransit} CME${ts.inTransit > 1 ? 's' : ''} in transit (modeled)`
+                : ` · CME train past L1 (${ts.arrived})`;
+        }
+    }
+
     // Show all scrubber values
     document.getElementById('scrub-vals').style.display = 'flex';
     document.getElementById('scrub-v-speed').textContent = pt.speed?.toFixed(0) ?? '—';
     document.getElementById('scrub-v-dens').textContent  = pt.density?.toFixed(1) ?? '—';
     document.getElementById('scrub-v-bz').textContent    = pt.bz != null ? pt.bz.toFixed(1) : '—';
     document.getElementById('scrub-v-kp').textContent    = pt.kp?.toFixed(1) ?? '—';
+    // Honest units: 'Kp' only when NOAA published the 3-h block; the
+    // Bz/speed-coupling fallback is labeled as the estimate it is.
+    document.getElementById('scrub-u-kp').textContent    = pt.kpSource === 'est' ? 'Kp est' : 'Kp';
 
     // ── Drive ALL uniforms from timeline data ────────────────────────────────
     uniforms.u_wind_speed_norm.value   = Math.max(0, Math.min(1, (pt.speed   - 250) / 650));
@@ -1938,6 +2007,104 @@ document.getElementById('sl-scrub').addEventListener('input', function() {
     const tempK = 50e3 + (pt.speed - 350) * 800;  // rough T-v relationship
     uniforms.u_wind_temp_norm.value = Math.max(0, Math.min(1, (tempK - 50e3) / 450e3));
 });
+
+// ── Scrubber event track ──────────────────────────────────────────────────
+// Flare/CME/SEP ticks from the Sun Watch ledger + the flux-rope provider's
+// modeled arrival window, drawn on the SAME axis the slider walks. That
+// axis is INDEX-spaced, not time-linear (1-min plasma samples then hourly
+// LSTM points, with data gaps), so time→x goes through a binary search on
+// the timeline's own timestamps — a linear time map would misplace every
+// mark near the live/forecast seam.
+let _scrubTrack = { marks: [], band: null };
+
+function _scrubXAt(tMs, w) {
+    const n = swpcTimeline.length;
+    if (n < 2 || !Number.isFinite(tMs)) return null;
+    if (tMs <= swpcTimeline[0].tMs) return tMs < swpcTimeline[0].tMs - 3600e3 ? null : 0;
+    const last = swpcTimeline[n - 1].tMs;
+    if (tMs >= last) return tMs > last + 3600e3 ? null : w;
+    let lo = 0, hi = n - 1;
+    while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (swpcTimeline[mid].tMs <= tMs) lo = mid; else hi = mid;
+    }
+    const a = swpcTimeline[lo].tMs, b = swpcTimeline[hi].tMs;
+    const f = b > a ? (tMs - a) / (b - a) : 0;
+    return (lo + f) / (n - 1) * w;
+}
+
+function rebuildScrubTrack() {
+    const fc = window.__fluxRopeForecast;
+    _scrubTrack = scrubMarks({
+        timeline: window.__sunWatch?.state?.timeline ?? [],
+        summary: fc && !fc.idle && !fc.failed ? fc.summary : null,
+    });
+    drawScrubEvents();
+}
+
+function drawScrubEvents() {
+    const cv = document.getElementById('scrub-events');
+    if (!cv) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = Math.round(cv.clientWidth * dpr);
+    const H = Math.round((cv.clientHeight || 22) * dpr);
+    if (!W) return;                       // panel closed — redrawn on open
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    if (swpcTimeline.length < 2) return;
+    const mid = H * 0.5;
+
+    // Baseline + live/forecast seam.
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+    ctx.lineWidth = dpr;
+    ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
+    const seamX = scrubForecastStart > 0
+        ? _scrubXAt(swpcTimeline[Math.min(scrubForecastStart, swpcTimeline.length - 1)].tMs, W) : null;
+    if (seamX != null) {
+        ctx.strokeStyle = 'rgba(102,136,255,0.35)';
+        ctx.setLineDash([3 * dpr, 3 * dpr]);
+        ctx.beginPath(); ctx.moveTo(seamX, 0); ctx.lineTo(seamX, H); ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Ensemble arrival window (P10–P90 band + median tick).
+    if (_scrubTrack.band) {
+        const x0 = _scrubXAt(_scrubTrack.band.t0, W);
+        const x1 = _scrubXAt(_scrubTrack.band.t1, W);
+        if (x0 != null || x1 != null) {
+            const a = x0 ?? 0, b = x1 ?? W;
+            ctx.fillStyle = 'rgba(80,140,255,0.22)';
+            ctx.fillRect(a, dpr, Math.max(b - a, 2 * dpr), H - 2 * dpr);
+            const xm = _scrubXAt(_scrubTrack.band.t50, W);
+            if (xm != null) {
+                ctx.strokeStyle = 'rgba(120,170,255,0.9)';
+                ctx.lineWidth = dpr;
+                ctx.beginPath(); ctx.moveTo(xm, dpr); ctx.lineTo(xm, H - dpr); ctx.stroke();
+            }
+        }
+    }
+
+    // Event ticks: flares above the baseline, CMEs/SEP/GST below.
+    for (const m of _scrubTrack.marks) {
+        const x = _scrubXAt(m.t, W);
+        if (x == null) continue;
+        ctx.strokeStyle = m.color;
+        ctx.lineWidth = (m.kind === 'cme' && m.earth ? 2 : 1.25) * dpr;
+        ctx.beginPath();
+        if (m.kind === 'flare') { ctx.moveTo(x, dpr); ctx.lineTo(x, mid); }
+        else { ctx.moveTo(x, mid); ctx.lineTo(x, H - dpr); }
+        ctx.stroke();
+    }
+}
+
+window.addEventListener('sun-watch-update', rebuildScrubTrack, { passive: true });
+window.addEventListener('flux-rope-forecast', rebuildScrubTrack, { passive: true });
+window.addEventListener('resize', drawScrubEvents, { passive: true });
+// The track sits in the slide-in panel: it has zero width until the panel
+// opens, so the open button re-draws it once layout has happened.
+document.getElementById('btn-panel-open').addEventListener('click',
+    () => requestAnimationFrame(drawScrubEvents));
 
 // SDO drawer toggle
 const sdoDrawer = document.getElementById('sdo-drawer');
@@ -8094,6 +8261,7 @@ const fpsEl = document.getElementById('fps-display');
 // Declared here so animate() (below) can access them before the NOAA section
 let regionGroup   = null; // THREE.Group containing all AR markers
 const _sunWatchGroups = []; // Sun Watch overlay groups co-rotating with the photosphere
+let _ropeOverlay  = null; // CME-train transit overlay (BALLISTIC — never in _sunWatchGroups)
 let solarRotAngle = 0;    // accumulated rotation matching photosphere UV shift
 // Live-data slots — forward-declared so animate()'s first synchronous tick
 // (which reads liveXrayFlux/liveRegions/liveFlares) doesn't hit a TDZ
@@ -8132,6 +8300,11 @@ function animate() {
     // Shader shifts UV.x by (u_time * 0.004 * u_rot) per time unit
     // → rotation angle per frame = dt * 0.004 * u_rot * 2π radians
     solarRotAngle += dt * 0.004 * uniforms.u_rot.value * Math.PI * 2;
+
+    // CME-train overlay follows the scrubbed instant, or the live clock at
+    // ● LIVE. Real wall-clock time on purpose — sim-speed scales the visual
+    // sun, not the modeled heliospheric transit.
+    if (_ropeOverlay) _ropeOverlay.update(scrubTimeMs ?? Date.now());
 
     // Decay flare intensity each frame (~6 s half-life at 60fps dt=0.010)
     if (uniforms.u_flare_intensity.value > 0.001) {
@@ -11345,6 +11518,37 @@ try {
     console.warn('[sun] Sun Watch dock failed to mount:', err);
 }
 
+// ── Flux-rope compounding-train forecast (shared provider) ──────────────────
+// ONE run loop over js/flux-rope-forecast.js — the same DONKI→ensemble→
+// assimilation pipeline space-weather.html runs, never a re-implementation.
+// It publishes 'flux-rope-forecast' / window.__fluxRopeForecast; the Sun
+// Watch Forecast tab, the scrubber event track, and the in-transit readout
+// all follow the one published result. First run is deferred so the WASM
+// fetch + 500-member ensemble never competes with scene boot.
+try {
+    startFluxRopeProvider();
+} catch (err) {
+    console.warn('[sun] flux-rope provider failed to start:', err);
+}
+
+// ── CME-train transit overlay (3D) ──────────────────────────────────────────
+// Rope fronts at the ensemble's modeled apex (±1σ ghosts) + Earth at 1 AU,
+// probing the published forecast's live kernel. Ballistic: parented to the
+// scene frame, never to the co-rotating marker groups. Compression comes
+// from the ONE scale module (stage/scale.js) and is disclosed in the legend.
+try {
+    _ropeOverlay = initSunRopeOverlay({
+        THREE, scene, host: document.getElementById('canvas-wrap'),
+    });
+    const togTrain = document.getElementById('tog-cmetrain');
+    if (togTrain) {
+        _ropeOverlay?.setVisible(togTrain.checked);
+        togTrain.addEventListener('change', (e) => _ropeOverlay?.setVisible(e.target.checked));
+    }
+} catch (err) {
+    console.warn('[sun] CME train overlay failed to mount:', err);
+}
+
 // ── Test / debug handle (smoke tests, Phase-1 verification) ──────────────────
 // Mirrors window.__ua / window.__ssd. Exposes the renderer + the seven layer
 // meshes so tests can assert visibility toggles and sample frames without a
@@ -11386,6 +11590,8 @@ window.__sun = {
     },
     get frames() { return renderer.info.render.frame; },
     get watch() { return window.__sunWatch; },           // Sun Watch dock handle
+    get scrubTrack() { return _scrubTrack; },            // event-track draw list (test hook)
+    get scrubTimeline() { return swpcTimeline; },        // 7d+24h scrub data (test hook)
 };
 </script>
 

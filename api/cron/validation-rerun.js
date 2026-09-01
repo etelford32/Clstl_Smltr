@@ -70,7 +70,7 @@ import { CmeEvent } from '../../js/cme-propagation.js';
 import {
     parseDonkiFlares, fluxRopeForecastRows, arrivalQuantilesH,
     resolveBzTruth, scoreFluxRopeEvent, aggregateFluxRopeScores,
-    FLUX_ROPE_MODEL_ID,
+    FLUX_ROPE_MODEL_ID, ARRIVAL_Q_LEVELS,
 } from '../../js/flux-rope-validation.js';
 import { retrievedPopulation } from '../../js/flux-rope-inversion.js';
 
@@ -451,10 +451,12 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
     const iso = ms => new Date(ms).toISOString();
 
     // 1 ── The shared provider on the committed WASM (aurora-cron precedent).
-    const [{ computeFluxRopeForecast, trainSeed }, { rtswDriver }] = await Promise.all([
-        import('../../js/flux-rope-forecast.js'),
-        import('../../js/flux-rope-live.js'),
-    ]);
+    const [{ computeFluxRopeForecast, trainSeed }, { rtswDriver }, { measureCompounding }]
+        = await Promise.all([
+            import('../../js/flux-rope-forecast.js'),
+            import('../../js/flux-rope-live.js'),
+            import('../../js/flux-rope-compounding.js'),
+        ]);
     const wasm = await readFile(new URL('../../js/flux-rope-wasm/flux_rope_core.wasm', import.meta.url));
     const cmes = catalog.map(c => ({
         id: c.id,
@@ -488,6 +490,18 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
             wEffKms: fc.kernel.ropeWEffKms(i),
             gammaEffPerKm: fc.kernel.ropeGammaEff(i),
         }));
+        // §16 counterfactual for multi-rope trains — the SAME measurement
+        // sun.html renders, locked here so it gets SCORED after passage.
+        // Its failure degrades to "no compounding block", never a failed
+        // lock (the plain forecast rows still land).
+        let compounding = null;
+        if (fc.preset.ropes.length >= 2) {
+            try {
+                compounding = await measureCompounding(fc,
+                    { wasm, quantileLevels: ARRIVAL_Q_LEVELS });
+            } catch { compounding = null; }
+        }
+        summary.compounding = compounding != null;
         const rows = fluxRopeForecastRows({
             eventIdFor: (id) => rtEventId(id),
             cmes: fc.cmes,
@@ -502,6 +516,7 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
             sheathDeltaNt: fc.sheathDeltaNt,
             noiseSigmaNt: fc.noise?.ok ? fc.noise.sigmaNt : null,
             flares,
+            compounding,
         });
         if (rows.length) {
             const ids = rows.map(r => r.event_id);
@@ -607,6 +622,10 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
                 // Retrieved-drag population — the priors the ledger says
                 // the ensemble SHOULD be using (spec §19 feedback loop).
                 population: retrievedPopulation(agg.inversions),
+                // §16 counterfactual scored vs outcomes (trains only) —
+                // followerBiasOnH/ampObs-vs-ampPred are the §19–§21
+                // knob-fitting evidence (flux-rope-validation.js header).
+                compounding: agg.compounding,
             },
             detail: { events: scores },
         });
