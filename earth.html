@@ -4103,6 +4103,7 @@ import { cloudTopHeightKm } from './js/cloud-mosaic-core.js';
 // in ONE place (js/atmo-scale.js). Never hard-code a shell radius here again.
 import * as AtmoScale from './js/atmo-scale.js';
 import { createVolumeUniforms, createVolumeMesh, marchLadder } from './js/cloud-volume.js';
+import { WindColumns } from './js/wind-column.js';
 // Module singleton — already booted by the early telemetry side-effect
 // import in <head>; the named binding just gives this module a handle.
 import { telemetry } from './js/telemetry.js';
@@ -4217,10 +4218,18 @@ initScaleNav('earth');
 //  CONSTANTS
 // ═══════════════════════════════════════════════════════════════
 const R_EARTH  = 1.0;
-// ── Shell stack (Phase-2.5 radius audit) ──────────────────────────────────
-// Every translucent shell above the surface, bottom → top. Kept in ONE
-// place because z-order between depthWrite:false shells is renderOrder,
-// but radius still drives parallax, ray hits, and the camera floor:
+// ── Shell stack — HISTORICAL far-view radii, kept as the calibration record.
+// These were hand-tuned constants until the vertical exaggeration became a
+// camera-driven ramp (js/atmo-scale.js). They are no longer the source of
+// truth for anything above the ground: every troposphere radius is now
+// derived per frame from ONE exaggeration applied to ONE table of REAL
+// altitudes, and this list is what E_FAR is calibrated to reproduce
+// (tests/atmo-scale.mjs pins it to within ~0.003 R).
+//
+// Read the list as "what the globe view looks like", not as "where things
+// are". On approach the whole troposphere block below fans out roughly 5.5×.
+// z-order between depthWrite:false shells is still renderOrder; radius still
+// drives parallax and ray hits.
 //   1.0015  lat/lon grid          1.002   SST overlay
 //   1.0024  ocean currents        1.0028–1.0050 derived weather overlays
 //   1.003   surface wind trails   1.006   LOW cloud deck
@@ -7362,6 +7371,93 @@ const windArrows       = new WindArrows(earthMesh, (lat, lon, out) =>
     windParticles._lookupWind(lat, lon, out));
 const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
 
+// ═══════════════════════════════════════════════════════════════
+//  VERTICAL WIND-PROFILE COLUMNS
+//
+//  The four particle layers each answer "where is the air going at THIS
+//  level" and none of them answers "how does it change with height". Even
+//  after the exaggeration ramp fans the shells apart, four sheets of streaks
+//  are still four separate readings the eye has to register against each
+//  other. A column ties them into one glyph: a mast rising through every
+//  enabled level with a downwind arrow planted at each, so veering, backing
+//  and speed shear read at a glance.
+//
+//  It computes NOTHING. Every vector comes from the same per-level bilinear
+//  lookup the trails advect against (_lookupWind / _lookupLevelWind via the
+//  instances themselves), so a column can never disagree with the streaks
+//  around it. A level whose feed is down contributes no arrow at all —
+//  never a zero-length one, which would claim "calm" the feed never said.
+//
+//  Gated on TWO conditions, both necessary: close enough that the stack has
+//  visibly fanned (below that a mast is a dot), and ≥2 levels enabled
+//  (with one level there is no profile, just a redundant arrow field —
+//  windArrows already does that job better).
+// ═══════════════════════════════════════════════════════════════
+const WIND_COLUMN_FADE_IN = 0.30;   // zoom01 below this → columns hidden
+const windColumns = new WindColumns(THREE, earthMesh, {
+    maxSites: 96, levelCount: 4, renderOrder: 3.4,
+});
+
+// Per-level colour identity, reused from the trail ramps so a column's
+// arrows key to the streaks at the same altitude. Evaluated at the level's
+// own speed so the colour carries speed exactly as the trails do.
+const _colScratch = [0, 0, 0];
+const _colWind    = { u: 0, v: 0, s: 0 };
+function _columnLevelsAt(lat, lon) {
+    const levels = [];
+    // Surface first — it is the anchor the rest of the profile is read
+    // against, and it is the one level that is always present.
+    if (windParticles.mesh.visible && windParticles.hasData()) {
+        windParticles._lookupWind(lat, lon, _colWind);
+        windParticles._speedColor(_colWind.s, _colScratch);
+        levels.push({
+            key: 'sfc', radius: windParticles._radius,
+            u: _colWind.u, v: _colWind.v, speed01: _colWind.s,
+            color: _colScratch.slice(), hasData: true,
+        });
+    }
+    for (const [key, st] of Object.entries(_windLevels)) {
+        const inst = st.inst;
+        if (!inst || !inst.mesh.visible) continue;
+        const has = inst.hasData();
+        if (has) inst._lookupWind(lat, lon, _colWind);
+        st.def.ramp(has ? _colWind.s : 0, _colScratch);
+        levels.push({
+            key, radius: inst._radius,
+            u: has ? _colWind.u : 0, v: has ? _colWind.v : 0,
+            speed01: has ? _colWind.s : 0,
+            color: _colScratch.slice(), hasData: has,
+        });
+    }
+    // columnSegments needs them low → high; the registry is already in that
+    // order, but sort so a future reordering of WIND_LEVEL_DEFS cannot
+    // silently draw a mast that zig-zags through the stack.
+    levels.sort((a, b) => a.radius - b.radius);
+    return levels;
+}
+
+function _updateWindColumns() {
+    const z = windParticles.zoom01;
+    // Count only levels that are actually drawing — a mast between two
+    // disabled shells is a line to nowhere.
+    let live = (windParticles.mesh.visible && windParticles.hasData()) ? 1 : 0;
+    for (const st of Object.values(_windLevels)) {
+        if (st.inst?.mesh.visible) live++;
+    }
+    const on = z >= WIND_COLUMN_FADE_IN && live >= 2;
+    if (on !== windColumns.visible) windColumns.setVisible(on);
+    if (!on) return;
+    windColumns.update({
+        focusLat: windParticles.focusLat,
+        focusLon: windParticles.focusLon,
+        zoom01:   z,
+        // Fade in over the first slice above the threshold so the layer
+        // arrives rather than pops.
+        strength: Math.min(1, (z - WIND_COLUMN_FADE_IN) / 0.18),
+        levelsAt: _columnLevelsAt,
+    });
+}
+
 // ── Hover readout: latest weather/cloud buffers + point samplers ───────────
 // Latest TEX_W×TEX_H Float32 RGBA buffers, kept as module-level refs so the
 // hover tooltip can sample point values on every mousemove without going
@@ -7619,14 +7715,22 @@ function _sampleUpliftAt(lat, lon) {
 //  particle layer, and the wx-panel "Jet peak" row reads the fastest
 //  250 hPa cell instead of the fastest surface cell.
 //
-//  Shell radii sit just above the cloud deck each level steers
-//  (low 1.006 / mid 1.011 / high 1.016 — see the Phase-2 shell stack):
-//  surface trails 1.003, 850 → 1.008, 500 → 1.013, 250 → 1.018.
+//  Shell radii are NOT constants here any more. Each level declares its
+//  REAL geopotential altitude (altKm, from js/atmo-scale.js — the same
+//  altitudes the multi-level advection forecaster steers with), and the
+//  radius is derived from the live vertical exaggeration: at globe view
+//  that reproduces the historical 1.003 / 1.008 / 1.013 / 1.018 stack, and
+//  on approach the levels fan apart to ~1.003 / 1.016 / 1.051 / 1.093 —
+//  a stack the camera descends into rather than looks at.
+//
+//  The surface level is PINNED by the clearance floor (10 m barely moves at
+//  any exaggeration), so it stays welded to the deck while the pressure
+//  levels climb away from it. That contrast is the altitude cue.
 // ═══════════════════════════════════════════════════════════════
 const WIND_LEVEL_DEFS = {
     w850: {
         checkbox: 'lyr-wind-850', pip: 'wind-850', label: '850 hPa wind',
-        radius: R_EARTH * 1.008, n: 4000, trailLen: 24, baseSegs: 14,
+        altKm: AtmoScale.LEVEL_ALTITUDE_KM[850], n: 4000, trailLen: 24, baseSegs: 14,
         maxWind: 60, farFrac: 0.6, renderOrder: 3.05, uKey: 'u850', vKey: 'v850',
         // Sage → mint → amber: reads "warm boundary-layer flow" against the
         // surface layer's blue→white→magenta.
@@ -7647,7 +7751,7 @@ const WIND_LEVEL_DEFS = {
     },
     w500: {
         checkbox: 'lyr-wind-500', pip: 'wind-500', label: '500 hPa wind',
-        radius: R_EARTH * 1.013, n: 4000, trailLen: 24, baseSegs: 14,
+        altKm: AtmoScale.LEVEL_ALTITUDE_KM[500], n: 4000, trailLen: 24, baseSegs: 14,
         maxWind: 80, farFrac: 0.6, renderOrder: 3.15, uKey: 'u500', vKey: 'v500',
         // Violet → lavender → cyan: the cool mid-troposphere identity.
         ramp: (s, out) => {
@@ -7667,7 +7771,7 @@ const WIND_LEVEL_DEFS = {
     },
     jet: {
         checkbox: 'lyr-jet', pip: 'jet', label: '250 hPa jet',
-        radius: R_EARTH * 1.018, n: 3500, trailLen: 34, baseSegs: 22,
+        altKm: AtmoScale.LEVEL_ALTITUDE_KM[250], n: 3500, trailLen: 34, baseSegs: 22,
         maxWind: 100, farFrac: 0.7, renderOrder: 3.3, uKey: 'u250', vKey: 'v250',
         // Crimson → gold → white-hot, longest trails + fastest ramp: the
         // jet should read as the most energetic thing on the globe.
@@ -7707,12 +7811,53 @@ function _windLayerVisible() {
         || Object.values(_windLevels).some(st => st.inst?.mesh.visible);
 }
 
+// Test/console probe (same family as window.__evCamera): the LIVE state of
+// the altitude stack — what radius each level is actually drawing at right
+// now, not what atmo-scale computed. The two can only agree if the ramp is
+// reaching the instances, which is precisely what a gate has to prove and
+// what a screenshot cannot (a level with no upstream data draws nothing, so
+// "I see no fan-out" is ambiguous between a wiring bug and a dead feed —
+// `hasData` disambiguates it).
+window.__evWindStack = () => ({
+    exag: _atmoExag,
+    levels: [
+        { key: 'sfc', radius: windParticles._radius,
+          visible: windParticles.mesh.visible, hasData: windParticles.hasData() },
+        ...Object.entries(_windLevels).map(([key, st]) => ({
+            key,
+            radius:  st.inst?._radius ?? null,
+            visible: st.inst?.mesh.visible ?? false,
+            hasData: st.inst?.hasData() ?? false,
+            created: st.inst != null,
+        })),
+    ],
+    arrowRadius: windArrows?._radius ?? null,
+});
+
+// Companion probe for the profile-column layer: whether it is drawing and
+// how many vertices it actually emitted. A screenshot cannot distinguish
+// "correctly hidden at this zoom" from "broken", and the layer is gated on
+// two independent conditions — so the gate needs to read the gate.
+window.__evWindColumns = () => ({
+    visible: windColumns.visible,
+    fadeIn:  WIND_COLUMN_FADE_IN,
+    zoom01:  windParticles.zoom01,
+    sites:   windColumns.mesh.geometry.attributes.position.count,
+});
+
 function _ensureWindLevel(key) {
     const st = _windLevels[key];
     if (st.inst) return st.inst;
     const d = st.def;
+    // Seat the new shell at the LIVE exaggeration, not at a construction
+    // constant. Levels are created lazily on first enable, and _applyAtmoScale
+    // early-returns while the exaggeration is unchanged — so a level switched
+    // on at a resting camera used to keep its build radius until the user next
+    // dollied, silently drawing 850 hPa at the wrong altitude relative to the
+    // rest of the stack. Altitude is the def; radius is derived, always.
     st.inst = new WindParticles(earthMesh, d.n, {
-        radius: d.radius, trailLen: d.trailLen, baseSegs: d.baseSegs,
+        radius: AtmoScale.radiusForAltitude(d.altKm, _atmoExag),
+        trailLen: d.trailLen, baseSegs: d.baseSegs,
         maxWindMs: d.maxWind, speedColor: d.ramp, farFrac: d.farFrac,
         renderOrder: d.renderOrder,
     });
@@ -13975,6 +14120,9 @@ function animate() {
         windParticles.windBuf != null,
     );
 
+    // ── Vertical wind-profile columns (js/wind-column.js) ────────────────
+    _updateWindColumns();
+
     // ── Solar wind particle stream (interplanetary → magnetopause)
     solarWindParticles.tick(dt, earthU.u_sun_dir.value);
 
@@ -14136,16 +14284,28 @@ function animate() {
 // ═══════════════════════════════════════════════════════════════
 const _tiltDir = new THREE.Vector3();
 let _tiltBlend = 0;
-const TILT_NEAR_D = 0.035;   // dSurf where tilt saturates (≈ the floor)
+// dSurf where the tilt saturates. Was "≈ the floor" when CAM_FLOOR was
+// 1.025; the floor is now the ground clearance 1.0040, so the tilt reaches
+// full well BEFORE the floor and holds through the last of the dolly.
+// That is the wanted behaviour — the horizon should already be level by the
+// time you are flying inside the wind stack — so the value stays put.
+const TILT_NEAR_D = 0.035;
 const TILT_FAR_D  = 0.16;    // dSurf where tilt begins
 function _updateCameraDepth(dt) {
     const camR  = camera.position.length();
     const dSurf = Math.max(1e-4, camR - R_EARTH);
 
     // Dynamic near plane: ~22% of the height above the surface, clamped.
-    // At orbit (dSurf 2) it rests at the 0.05 cap; at the 1.025 floor it
-    // reaches 0.0055 — in front of every shell yet fine enough that the
-    // depth buffer stops shimmering against the ground at close range.
+    // At orbit (dSurf 2) it rests at the 0.05 cap; at the CAM_FLOOR (now the
+    // ground clearance 1.0040, not the old 1.025 shell-stack floor) dSurf is
+    // 0.004 and this lands on the 0.0005 lower clamp — a 200:0.0005 depth
+    // ratio. Coarser than it looks: the shells that used to crowd the near
+    // plane no longer sit at fixed radii, and the cloud VOLUME does not use
+    // the depth buffer at all (it resolves occlusion analytically), so the
+    // only thing still depth-fighting down here is ground-anchored overlay
+    // geometry. Do not raise the lower clamp to "fix" a shimmer without
+    // checking which layer is actually fighting — see the Mars depth-ratio
+    // note in CLAUDE.md.
     const near = Math.min(0.05, Math.max(0.0005, dSurf * 0.22));
     if (Math.abs(near - camera.near) > camera.near * 0.15) {
         camera.near = near;
@@ -14202,7 +14362,30 @@ window.__evCamera = () => ({
     tilt:    _tiltBlend,
     flying:  _flyTarget != null,
     band:    document.body.dataset.evAlt ?? null,
+    // Vertical-exaggeration ramp state (js/atmo-scale.js). Exposed here
+    // rather than in a second probe because every consumer of it — the
+    // altitude-stack gate included — also needs the camera distance that
+    // produced it, and reading them from two calls can straddle a frame.
+    exag:    _atmoExag,
+    radii:   _atmoRadii,
 });
+
+// Place the camera at a given distance from the globe centre, preserving
+// bearing. The altitude ramp is a function of camera range, so verifying it
+// means DRIVING that range — and a scripted OrbitControls dolly is a stream
+// of wheel events whose landing distance depends on damping and frame rate,
+// which is not a thing a gate can assert against. Same reason Mars exposes
+// __marsLab.setQuality with a lock.
+//
+// Clamped to the live control limits so a test cannot park the camera
+// somewhere the user could never reach and then assert about it.
+window.__evSetCamDist = (d) => {
+    const want = Math.max(controls.minDistance,
+                          Math.min(controls.maxDistance, Number(d) || 1));
+    camera.position.normalize().multiplyScalar(want);
+    controls.update();
+    return camera.position.length();
+};
 
 // ═══════════════════════════════════════════════════════════════
 //  USER LOCATION BEACON  (must be declared before animate() runs)
