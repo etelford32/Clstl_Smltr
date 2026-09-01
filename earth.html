@@ -4521,8 +4521,11 @@ function _setCloudQuality(q) {
     // hoisted from the block below — undefined on the init-time call.
     if (cloudVolumeU) {
         const ladder = marchLadder(q);
-        cloudVolumeU.u_steps.value       = ladder.primary;
-        cloudVolumeU.u_light_steps.value = ladder.light;
+        // ?cloud_steps= pins the primary budget across tier changes so a gate
+        // on a slow rasteriser stays reachable; the light march still rides
+        // the tier.
+        cloudVolumeU.u_steps.value       = _volumetricInitialSteps ?? ladder.primary;
+        cloudVolumeU.u_light_steps.value = _volumetricInitialSteps ? 1 : ladder.light;
     }
     // Cloud shells collapse toward the composite below the full tier
     // (hoisted fn, guarded against the init-time call before the meshes
@@ -4530,6 +4533,10 @@ function _setCloudQuality(q) {
     _updateCloudShellMode();
 }
 function _governResolution(frameMs) {
+    // Arming runs off the same per-frame signal as the governor, so "a
+    // sustained good stretch" is measured in frames the GPU actually
+    // delivered rather than in wall-clock time a stalled tab would also pass.
+    _tickVolumetricArming();
     // Ignore intervals that don't reflect GPU load: a backgrounded tab pauses
     // rAF (huge gap on return), and an occasional GC pause / sync data decode
     // can spike one frame. Skip those — but DON'T cap at a low frame time, or a
@@ -4862,20 +4869,64 @@ function _updateCloudShellMode() {
     const cloudsOn  = document.getElementById('lyr-clouds')?.checked ?? true;
     const research  = cloudU.u_research_mode.value > 0.5;
     const q         = cloudU.u_quality.value;
-    const volumetric = cloudsOn && !research && q > 0.83 && !_volumetricDisabled;
+    const volumetric = cloudsOn && !research && q > 0.83 && !_volumetricDisabled && _volumetricArmed;
     const split      = cloudsOn && !research && !volumetric && q > 0.83;
     if (cloudVolumeMesh) cloudVolumeMesh.visible = volumetric;
     cloudMesh.visible = cloudsOn && !volumetric && !split;
     for (const m of cloudShellMeshes) m.visible = split;
 }
 
+// ── Volumetric arming ──────────────────────────────────────────────────
+// The march is the most expensive thing this page can draw, and the perf
+// governor is REACTIVE — it needs a few hundred milliseconds of bad frame
+// times before it demotes. Entering the volumetric path on frame 1 means a
+// weak GPU pays full march cost for exactly the stretch where the page is
+// still booting textures and feeds, which is the worst possible moment and
+// the one a first-time visitor sees. Worse, at software-GL speeds a single
+// frame can take long enough that the main thread never yields, so the
+// governor's own re-evaluation is starved and it cannot demote itself out
+// of the hole it fell into.
+//
+// So the path ARMS rather than starting on. The page renders on the decal
+// shells until it has sustained the top tier for a stretch of real frames,
+// and only then promotes. A device that cannot hold the tier never enters
+// the march at all — including CI's software rasteriser, which is why
+// tests that need this path force it explicitly.
+var  _volumetricInitialSteps = null;   // ?cloud_steps= override
+const VOLUMETRIC_ARM_FRAMES = 90;      // ~1.5 s at 60 fps
+let  _volArmCount = 0;
+var  _volumetricArmed = false;
+function _tickVolumetricArming() {
+    if (_volumetricArmed || _volumetricDisabled) return;
+    // Any demotion resets the count: we want a sustained good stretch, not
+    // a lucky one.
+    if (_cloudQIdx > 0) { _volArmCount = 0; return; }
+    if (++_volArmCount < VOLUMETRIC_ARM_FRAMES) return;
+    _volumetricArmed = true;
+    _updateCloudShellMode();
+}
+
 // Escape hatch for the volumetric path, matching the ?cloud_quality= /
-// ?cloud_strength= precedent: `earth.html?volumetric=0` or
-// window.setVolumetricClouds(false) drops to the decal shells for a
-// side-by-side comparison without touching the governor.
+// ?cloud_strength= precedent. `?volumetric=0` pins the decal shells for a
+// side-by-side comparison; `?volumetric=1` skips the arming delay (what a
+// gate needs — CI never sustains the tier, so it would otherwise never see
+// the path it is trying to test). window.setVolumetricClouds(bool) does the
+// same from the console. Neither touches the governor: a forced-on path is
+// still demoted the moment the tier drops.
 var _volumetricDisabled = new URLSearchParams(location.search).get('volumetric') === '0';
+{
+    const p = new URLSearchParams(location.search);
+    if (p.get('volumetric') === '1') _volumetricArmed = true;
+    // Initial march budget override, for the same reason: a gate on a
+    // software rasteriser has to be able to reach this path cheaply, and the
+    // budget cannot be lowered from the console until the page has already
+    // rendered a frame at the default.
+    const st = Number(p.get('cloud_steps'));
+    if (Number.isFinite(st) && st >= 4 && st <= 64) _volumetricInitialSteps = st;
+}
 window.setVolumetricClouds = (on) => {
     _volumetricDisabled = !on;
+    if (on) _volumetricArmed = true;   // an explicit ask skips the arming wait
     _updateCloudShellMode();
     console.info(`[CloudDebug] volumetric clouds ${on ? 'ON' : 'OFF'} → ${window.__evCloudMode()}`);
 };
@@ -6938,7 +6989,23 @@ class WindParticles {
         // Trail brightness amplification at close zoom — same particle count,
         // richer apparent density. Held below 2× so additive blending doesn't
         // saturate the white midpoint of the speed ramp.
-        const trailBoost = 1.0 + 0.7 * this.zoom01;
+        // Per-trail brightness vs. zoom. This is an OVERLAP correction, and it
+        // used to run the wrong way: 1.0 + 0.7·zoom01 was dimmest at globe
+        // view, which is exactly where the field is densest.
+        //
+        // The blending is additive, so on-screen brightness is the SUM of
+        // every trail crossing a pixel. At globe view several thousand trails
+        // land on a few hundred thousand pixels and pile up until the sum
+        // clips — which is what turned the layer into a flat white haze and
+        // destroyed the speed colour ramp along with it (everything saturates
+        // to white regardless of speed). Zoomed in, the same trails spread
+        // over many more pixels and barely overlap, so they need MORE gain,
+        // not less.
+        //
+        // So: run it the other way. Dimmer per trail when they are stacked,
+        // brighter when they are sparse. The close-zoom end keeps its
+        // historical 1.7 so the view the LOD was tuned against is unchanged.
+        const trailBoost = 0.62 + 1.08 * this.zoom01;
 
         const tmp = { u: 0, v: 0, s: 0 };
 
