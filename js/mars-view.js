@@ -26,6 +26,9 @@ import {
     formatK, formatPa, formatDensity,
 } from './mars-climate-layer.js';
 import { dustOpacity, MARS_CLIMATE_MODEL } from './mars-atmosphere-model.js';
+import { MarsTileInset } from './mars-tile-inset.js';
+import { BUNDLED_BASE_GSD_M, boundsToUv, describeLayer, formatGsd } from './mars-tiles.js';
+import { FocusFootprint } from './focus-footprint.js';
 
 const SURFACE_RADIUS = 1;
 const RELIEF_EXAGGERATION = 5;
@@ -189,6 +192,13 @@ let cameraTween = null;
 let cardFocusAction = null;
 let surfaceModeActive = false;
 let surfaceLocation = null;
+// Streamed NASA Trek imagery. Default ON — it is the layer that makes the
+// surface real rather than a 15 km/px wash — but every consumer degrades to
+// the bundled texture, so a dead tile service costs the page nothing but
+// resolution (and a provenance line that says so).
+let tileLayerEnabled = true;
+// null lets js/mars-tiles.js pick by footprint; a layer key pins it.
+let tileLayerPreferred = null;
 let regionalTerrainCenter = null;
 let lastSurfaceFocus = null;
 // Local vertical the controls' orbit axis was last built for. Travelling far
@@ -838,6 +848,108 @@ regionalTerrainMaterial.onBeforeCompile = (shader) => {
                 diffuseColor.rgb *= clamp(1.0 + shade * amp, 0.45, 1.55);
             }`);
 };
+
+/**
+ * ═══ REAL-IMAGERY INSET ════════════════════════════════════════════════════
+ * Every surface on this page sampled ONE 1440×720 global texture — 4 px/°,
+ * ~15 km/px. That is why the 520 km regional patch (~37 texels wide) rendered
+ * as a smooth wash and why js/terrain-wfc.js had to synthesize over the gap:
+ * below 15 km there was no data to draw.
+ *
+ * This blends a streamed NASA Trek mosaic over the base map wherever the
+ * camera is actually looking — 232 m/px Viking, 100 m/px THEMIS, ~5 m/px CTX.
+ * The synth layer keeps its job of covering what no instrument resolved; it
+ * just has far less to cover now.
+ *
+ * WHY A SECOND SAMPLER AND NOT A TILED MESH. The globe and the regional patch
+ * both already carry GLOBAL EQUIRECT UVs (see latLonUv), so one uniform rect in
+ * that same UV space addresses both meshes identically. Rebuilding the page
+ * around quadtree patch meshes would be an enormous change for the same pixels.
+ * `js/earth-detail-inset.js` made the same call for the same reason.
+ *
+ * Three things here are load-bearing:
+ *
+ *  - `vTileUv` is declared from the `uv` attribute directly, NOT reused from
+ *    three's `vMapUv`. vMapUv only exists under `#ifdef USE_MAP`, and
+ *    `surfaceTexture` is null whenever the bundled JPEG fails to load — the
+ *    shader would then fail to COMPILE and take the whole globe with it, on
+ *    exactly the degraded path that most needs to keep rendering.
+ *  - The inset texture is tagged SRGBColorSpace, so WebGL decodes it in
+ *    hardware and `texture2D` returns LINEAR values — matching `diffuseColor`
+ *    after `<map_fragment>`. Blending raw sRGB into linear would wash the
+ *    inset out by roughly a gamma.
+ *  - The alpha channel carries COVERAGE. Tiles that failed to load are left
+ *    transparent by the stitcher, so the base texture shows through a hole
+ *    rather than a fabricated colour.
+ */
+const tileInsetUniforms = {
+    uTileMap: { value: null },
+    // uMin, vMin, uMax, vMax in the same UV space as latLonUv().
+    uTileRect: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uTileStrength: { value: 0 },
+    // Edge falloff, in units of the rect's own span. The inset is a rectangle
+    // over a continuous map; without a soft edge its border reads as a box.
+    uTileFeather: { value: 0.06 },
+};
+
+function installTileInset(material, cacheKey) {
+    const previous = material.onBeforeCompile;
+    material.customProgramCacheKey = () => cacheKey;
+    material.onBeforeCompile = (shader, renderer) => {
+        if (previous) previous(shader, renderer);
+        Object.assign(shader.uniforms, tileInsetUniforms);
+        shader.vertexShader = shader.vertexShader
+            .replace('#include <common>', `
+                varying vec2 vTileUv;
+                #include <common>`)
+            .replace('#include <begin_vertex>', `
+                #include <begin_vertex>
+                vTileUv = uv;`);
+        shader.fragmentShader = shader.fragmentShader
+            .replace('#include <common>', `
+                uniform sampler2D uTileMap;
+                uniform vec4 uTileRect;
+                uniform float uTileStrength;
+                uniform float uTileFeather;
+                varying vec2 vTileUv;
+                #include <common>`)
+            .replace('#include <map_fragment>', `
+                #include <map_fragment>
+                if (uTileStrength > 0.001) {
+                    // A plan straddling the antimeridian keeps unwrapped
+                    // columns, so its uMax can exceed 1. Lifting u by a full
+                    // turn when it falls west of the rect is what lets the
+                    // east half of such an inset find itself.
+                    float tu = vTileUv.x;
+                    if (tu < uTileRect.x) tu += 1.0;
+                    vec2 span = max(uTileRect.zw - uTileRect.xy, vec2(1e-6));
+                    vec2 t = (vec2(tu, vTileUv.y) - uTileRect.xy) / span;
+                    if (t.x > 0.0 && t.x < 1.0 && t.y > 0.0 && t.y < 1.0) {
+                        vec4 inset = texture2D(uTileMap, t);
+                        vec2 edge = smoothstep(vec2(0.0), vec2(uTileFeather), t)
+                            * (vec2(1.0) - smoothstep(vec2(1.0 - uTileFeather), vec2(1.0), t));
+                        // inset.a is COVERAGE, not opacity: a tile that failed
+                        // to load is transparent, and the base map shows
+                        // through it rather than an invented colour.
+                        float w = min(edge.x, edge.y) * uTileStrength * inset.a;
+                        diffuseColor.rgb = mix(diffuseColor.rgb, inset.rgb, w);
+                    }
+                }`);
+    };
+    material.needsUpdate = true;
+}
+
+const tilesSourceElement = document.querySelector('#tiles-source');
+installTileInset(surfaceMaterial, 'mars-globe-tile-inset');
+installTileInset(regionalTerrainMaterial, 'mars-regolith-detail+tile-inset');
+
+const tileInset = new MarsTileInset();
+const globeFootprint = new FocusFootprint({
+    camera, earthObject: marsGroup, radius: SURFACE_RADIUS, minIntervalMs: 900,
+});
+let tileInsetPending = false;
+let tileInsetLastAt = 0;
+const TILE_INSET_INTERVAL_MS = 700;
 
 const regionalTerrain = new THREE.Mesh(new THREE.BufferGeometry(), regionalTerrainMaterial);
 regionalTerrain.name = 'mola-regional-terrain';
@@ -2478,10 +2590,12 @@ function setLayer(name, enabled) {
         landmarks.setCategoryVisible('crater', enabled);
     } else if (name === 'landmark-polar') landmarks.setCategoryVisible('polar', enabled);
     else if (name === 'rotate') setAutoRotate(enabled);
+    else if (name === 'tiles') setTileLayerEnabled(enabled);
 }
 
 function layerIsVisible(name) {
     if (name === 'imagery') return Boolean(surfaceMaterial.map);
+    if (name === 'tiles') return tileLayerEnabled;
     // While the explorer is up the globe meshes are force-hidden, so the honest
     // answer for "is relief on" is the pending value in the restore map.
     if (name === 'relief') {
@@ -3901,6 +4015,25 @@ window.__marsLab = Object.freeze({
             shares: synthShares ? { ...synthShares } : null,
         },
     }),
+    /**
+     * Streamed-imagery state: which mosaic is under the camera, at what
+     * resolution, how much of it arrived, and whether the view has out-zoomed
+     * the data. The browser gate reads this to assert the page never claims
+     * resolution it does not have.
+     */
+    tileState: () => ({
+        ...tileInset.state(),
+        enabled: tileLayerEnabled,
+        preferred: tileLayerPreferred,
+        strength: tileInsetUniforms.uTileStrength.value,
+        rect: tileInsetUniforms.uTileRect.value.toArray(),
+        bundledGsdM: BUNDLED_BASE_GSD_M,
+    }),
+    /** Pin a tile layer (null returns to the footprint ladder). QA/tests only. */
+    setTileLayer: (key) => {
+        tileLayerPreferred = key ?? null;
+        tileInsetLastAt = 0;
+    },
     /** Pin a quality rung (lock stops the ladder re-adjusting). QA/tests only. */
     setQuality: (index, { lock = false } = {}) => {
         qualityLocked = Boolean(lock);
@@ -3982,6 +4115,183 @@ function updateGridFade(cameraDistance) {
     if (Math.abs(gridMaterial.opacity - target) > 0.002) gridMaterial.opacity = target;
 }
 
+/**
+ * ═══ TILE INSET DRIVER ═════════════════════════════════════════════════════
+ * Decides WHAT ground to stream and hands it to MarsTileInset; the module does
+ * the planning and stitching, this owns the policy.
+ *
+ * The two modes ask different questions, and answering both with the camera
+ * footprint was wrong:
+ *
+ *   - GLOBE mode: the sub-camera footprint, straight off FocusFootprint (the
+ *     same primitive the Earth page's weather patch and GIBS inset use).
+ *   - SURFACE mode: the REGIONAL PATCH's own extent, not the camera's. The
+ *     surface camera looks at the horizon, so its sub-camera point is not the
+ *     ground being rendered — planning from it would stream imagery for a
+ *     patch of ground that is off-screen behind the viewer.
+ *
+ * Throttled and idempotent: `update()` returns early when the plan key has not
+ * changed, so calling this on a timer costs one plan and a Map lookup.
+ */
+
+/**
+ * Ground width to stream in surface mode.
+ *
+ * NOT the whole 520 km patch. Planning the full patch every time pins the
+ * inset at whatever level 520 km fits the tile budget in — measured at 650 m/px
+ * over Jezero, against a mosaic that publishes 232 m/px. The camera is often
+ * 5 km from its target by then, so the page was holding back nearly 3× of real
+ * resolution exactly where a pilot is reading the ground.
+ *
+ * So the footprint SHRINKS with the camera, which is what makes zooming reveal
+ * more data instead of more interpolation. Bounded at both ends: never wider
+ * than the patch that is actually drawn, and never so tight that a small
+ * camera move re-plans (the inset's own LRU absorbs the rest).
+ */
+const SURFACE_TILE_SPAN_PER_RANGE = 3;
+const SURFACE_TILE_MIN_SPAN_KM = 12;
+
+function surfaceTileSpanKm() {
+    const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_KM;
+    if (!Number.isFinite(rangeKm)) return REGIONAL_TERRAIN_EXTENT_KM;
+    return THREE.MathUtils.clamp(
+        rangeKm * SURFACE_TILE_SPAN_PER_RANGE,
+        SURFACE_TILE_MIN_SPAN_KM,
+        REGIONAL_TERRAIN_EXTENT_KM,
+    );
+}
+
+function tileFootprint() {
+    if (surfaceModeActive && regionalTerrainCenter) {
+        // Centred on the explorer's location, sized by the camera. Longitude
+        // widens by 1/cos(lat) for the same ground distance; clamped so a
+        // near-polar patch cannot ask for a footprint that wraps into itself.
+        const halfLatDeg = (surfaceTileSpanKm() / 2) / MARS_RADIUS_KM * (180 / Math.PI);
+        const cosLat = Math.max(0.08, Math.cos(THREE.MathUtils.degToRad(regionalTerrainCenter.latDeg)));
+        const halfLonDeg = Math.min(90, halfLatDeg / cosLat);
+        const latMin = Math.max(-90, regionalTerrainCenter.latDeg - halfLatDeg);
+        const latMax = Math.min(90, regionalTerrainCenter.latDeg + halfLatDeg);
+        const lonMin = ((regionalTerrainCenter.lonDeg - halfLonDeg + 540) % 360) - 180;
+        return {
+            latMin, latMax, lonMin, lonMax: lonMin + halfLonDeg * 2,
+            spanLatDeg: halfLatDeg * 2,
+        };
+    }
+    const fp = globeFootprint.getFootprint();
+    if (!fp) return null;
+    return {
+        latMin: fp.latMin, latMax: fp.latMax,
+        lonMin: fp.lonMin, lonMax: fp.lonMin + fp.spanLonDeg,
+        spanLatDeg: fp.spanLatDeg,
+    };
+}
+
+function tickTileInset(now) {
+    if (!tileLayerEnabled) return;
+    if (tileInsetPending || now - tileInsetLastAt < TILE_INSET_INTERVAL_MS) return;
+    const footprint = tileFootprint();
+    if (!footprint) return;
+    tileInsetPending = true;
+    tileInsetLastAt = now;
+    tileInset.update(footprint, { preferred: tileLayerPreferred })
+        .then((run) => { if (run) applyTileInset(run); })
+        .catch(() => {})
+        .finally(() => {
+            tileInsetPending = false;
+            updateTileProvenance();
+        });
+}
+
+/** Upload a finished stitch and point the shader rect at it. */
+function applyTileInset(run) {
+    const texture = new THREE.CanvasTexture(run.canvas);
+    // Hardware sRGB decode — see the installTileInset header. Without this the
+    // inset blends raw sRGB into a linear diffuseColor and washes out.
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;   // NPOT-safe, and the canvas is one mip
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    texture.needsUpdate = true;
+
+    const previous = tileInsetUniforms.uTileMap.value;
+    tileInsetUniforms.uTileMap.value = texture;
+    // Dispose AFTER the swap. Disposing the live texture first drops the GL
+    // object the next frame would have sampled.
+    if (previous && previous !== texture) previous.dispose();
+
+    const uv = boundsToUv(run.plan.boundsDeg);
+    tileInsetUniforms.uTileRect.value.set(uv.uMin, uv.vMin, uv.uMax, uv.vMax);
+    tileInsetUniforms.uTileStrength.value = tileLayerEnabled ? 1 : 0;
+    updateTileProvenance();
+}
+
+function clearTileInset() {
+    tileInsetUniforms.uTileStrength.value = 0;
+    updateTileProvenance();
+}
+
+/**
+ * The layer row's own provenance line. This is the page's ONE claim about
+ * where the pixels under the camera came from, and it carries both halves of
+ * the honesty split: which archival mosaic is drawn (with its epoch and native
+ * resolution), and — when the camera has out-zoomed the data — that what is on
+ * screen is interpolated. A dead tile service says so plainly rather than
+ * leaving the row describing imagery that is not there.
+ */
+function updateTileProvenance() {
+    if (!tilesSourceElement) return;
+    if (!tileLayerEnabled) {
+        tilesSourceElement.textContent =
+            `off · bundled Viking mosaic only (${formatGsd(BUNDLED_BASE_GSD_M)})`;
+        return;
+    }
+    const state = tileInset.state();
+    if (state.status === 'unavailable' || state.status === 'empty' || state.status === 'error') {
+        tilesSourceElement.textContent =
+            `NASA Trek unavailable · showing the bundled ${formatGsd(BUNDLED_BASE_GSD_M)} Viking mosaic`;
+        return;
+    }
+    if (state.status === 'base') {
+        // The whole-globe view. An inset here would resolve no better than the
+        // texture already on the sphere, so the base map IS the right answer —
+        // and saying that beats implying tiles are on their way.
+        tilesSourceElement.textContent =
+            `global view · bundled Viking mosaic (${formatGsd(BUNDLED_BASE_GSD_M)}) · `
+            + 'zoom in for NASA Trek imagery';
+        return;
+    }
+    if (!state.layer) {
+        tilesSourceElement.textContent = state.status === 'loading'
+            ? 'NASA Trek · loading tiles for the visible ground…'
+            : 'NASA Trek mosaics · streaming for the visible ground';
+        return;
+    }
+    const parts = [describeLayer(state.layer, { upsampled: state.upsampled, gsdM: state.gsdM })];
+    if (state.coverage != null && state.coverage < 0.999) {
+        // Partial coverage is normal over the CTX mosaic's real holes, and the
+        // page shows the base map through them. Saying so beats a silent gap.
+        parts.push(`${Math.round(state.coverage * 100)}% tile coverage`);
+    }
+    if (state.viaProxy) parts.push('via edge proxy');
+    tilesSourceElement.textContent = parts.join(' · ');
+}
+
+
+function setTileLayerEnabled(enabled) {
+    tileLayerEnabled = Boolean(enabled);
+    if (!tileLayerEnabled) {
+        clearTileInset();
+        return;
+    }
+    // Re-arm rather than re-fetch: a cached stitch for the current footprint
+    // comes straight back out of the inset's LRU.
+    tileInsetLastAt = 0;
+    if (tileInset.current()) tileInsetUniforms.uTileStrength.value = 1;
+    updateTileProvenance();
+}
+
 function animate(now) {
     requestAnimationFrame(animate);
     if (lastFrameAt) sampleFrame(now - lastFrameAt);
@@ -4007,6 +4317,8 @@ function animate(now) {
     // Stars are at infinity, so the field rides with the camera. This is also
     // what keeps `far` small enough for a usable depth buffer in both modes.
     starField.position.copy(camera.position);
+    globeFootprint.tick(now);
+    tickTileInset(now);
     if (surfaceModeActive) {
         cameraRadial.copy(camera.position).normalize();
         surfaceHeadlamp.position.copy(camera.position);
