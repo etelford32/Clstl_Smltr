@@ -195,6 +195,8 @@ test.describe('auth funnel', () => {
         // The cookie-consent banner owns the bottom edge while open: the rail
         // must yield to it, then appear once the visitor decides.
         const consent = page.locator('.pp-consent-banner');
+        // The banner self-mounts on DOMContentLoaded — give it a moment.
+        await consent.waitFor({ state: 'visible', timeout: 4000 }).catch(() => {});
         if (await consent.isVisible().catch(() => false)) {
             await expect(rail).not.toHaveClass(/on/);
             await consent.locator('[data-action="reject"]').click();

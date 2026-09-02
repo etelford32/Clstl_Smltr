@@ -143,6 +143,7 @@ img{display:block}
   padding:8px 10px 8px 16px;border-radius:999px;background:rgba(7,2,26,.92);border:1px solid rgba(154,133,255,.35);
   box-shadow:0 12px 40px rgba(0,0,0,.5),var(--glow-uv-sm);backdrop-filter:blur(10px);transition:transform .35s ease,opacity .3s;opacity:0;
   max-width:calc(100vw - 24px)}
+#cta-rail[hidden]{display:none}  /* author display:flex above would otherwise beat the UA [hidden] rule */
 #cta-rail.on{transform:translate(-50%,0);opacity:1}
 #cta-rail .rail-copy{font-size:.82rem;color:var(--fg-2);white-space:nowrap}
 #cta-rail .rail-copy b{color:var(--fg-1)}
@@ -666,6 +667,12 @@ window.addEventListener('message', (e) => {
   }, { threshold: 0 });
   obs.observe(hero);
   window.addEventListener('pp-consent-changed', () => setTimeout(apply, 50));
+  // The banner self-mounts on DOMContentLoaded (after the module graph, so
+  // possibly AFTER the visitor has already scrolled) and is removed on
+  // decision — watch body's direct children so both edges re-evaluate.
+  try {
+    new MutationObserver(apply).observe(document.body, { childList: true });
+  } catch {}
   rail.querySelector('[data-rail-dismiss]').addEventListener('click', () => {
     try { sessionStorage.setItem(KEY, '1'); } catch {}
     rail.classList.remove('on');
