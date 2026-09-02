@@ -154,6 +154,19 @@
         .form-sub { font-size: .88rem; color: #888; margin-bottom: 30px; }
         .form-sub a { color: #a080ff; text-decoration: none; }
         .form-sub a:hover { text-decoration: underline; }
+        /* Gated-bounce context (?next=): most arrivals here came from a
+           sign-in-gated page and have NO account yet. Say where they were
+           headed and give them the free-account door in the same breath. */
+        .auth-context { display: none; margin: -14px 0 18px; padding: 10px 14px; border-radius: 10px;
+            background: rgba(128,64,255,.10); border: 1px solid rgba(160,128,255,.28);
+            font-size: .84rem; color: #cfc4ee; line-height: 1.5; }
+        .auth-context.show { display: block; }
+        .auth-context b { color: #fff; }
+        .auth-context a { color: #d2b8ff; font-weight: 600; }
+        .btn-create { display: block; text-align: center; margin-top: 12px; padding: 12px; border-radius: 8px;
+            border: 1px solid rgba(160,128,255,.45); background: rgba(128,64,255,.08); color: #d9c8ff;
+            font-weight: 600; font-size: .9rem; text-decoration: none; transition: background .2s, border-color .2s; }
+        .btn-create:hover { background: rgba(128,64,255,.16); border-color: rgba(190,160,255,.7); }
 
         /* Form fields */
         .form-group { margin-bottom: 16px; }
@@ -308,7 +321,7 @@ window.addEventListener('message', (e) => {
             <p>Sign in to resume your astrophysics journey — real-time simulations and live space weather await.</p>
             <div class="side-stat-row">
                 <div class="side-stat">
-                    <span class="num">17</span>
+                    <span class="num">40+</span>
                     <span class="label">Simulations</span>
                 </div>
                 <div class="side-stat">
@@ -328,7 +341,11 @@ window.addEventListener('message', (e) => {
             <!-- ── Sign-in view ── -->
             <div id="signin-view">
                 <div class="form-title">Sign in</div>
-                <div class="form-sub">New here? <a href="signup.html">Create a free account →</a></div>
+                <div class="form-sub">New here? <a href="signup.html?plan=free" data-signup-link>Create a free account →</a></div>
+                <div class="auth-context" id="signin-context" role="note">
+                    Sign in to open <b data-context-dest>where you were headed</b> — or
+                    <a href="signup.html?plan=free" data-signup-link>create a free account</a> and get there in about 30 seconds.
+                </div>
 
                 <div class="auth-alert" id="login-alert">
                     <span>⚠</span> <span id="alert-msg">Invalid email or password.</span>
@@ -369,7 +386,7 @@ window.addEventListener('message', (e) => {
                 <form id="signin-form" novalidate>
                     <div class="form-group">
                         <label for="email">Email Address</label>
-                        <input type="email" id="email" name="email" placeholder="jane@example.com" autocomplete="email" required>
+                        <input type="email" id="email" name="email" placeholder="jane@example.com" autocomplete="email" required autofocus>
                         <div class="form-error" id="err-email">Please enter a valid email address.</div>
                     </div>
 
@@ -391,6 +408,11 @@ window.addEventListener('message', (e) => {
                     </div>
 
                     <button type="submit" class="btn-submit" id="btn-submit">Sign In →</button>
+                    <!-- The exit for visitors with no account. signin.html is
+                         where every sign-in-gated page bounces new visitors;
+                         without this door a text link in the sub-line was the
+                         only way out. Carries ?next= (signup.html honours it). -->
+                    <a class="btn-create" id="signin-create-account" href="signup.html?plan=free" data-signup-link>New here? Create a free account →</a>
 
                     <!-- Magic-link toggle. Two states share this single
                          element; the JS swaps the label + form mode. -->
@@ -593,17 +615,91 @@ window.addEventListener('message', (e) => {
 </script>
 <script>
     // ── Funnel helper (window-scoped, exposed by js/auth-funnel.js) ─
-    // Module scripts above already loaded auth-funnel.js, which sets
-    // window.ppFunnel as a side-effect. The classic <script> below
-    // can't `import`, so we read it from window. Guarded so a module-
-    // load failure doesn't take the whole sign-in page down with it.
-    const _funnel = (typeof window !== 'undefined' && window.ppFunnel) || {
-        step: () => {}, stepDeferred: () => {}, id: () => null,
+    // LOAD-ORDER: this is a classic <script>, so it executes at PARSE time,
+    // before every <script type="module"> on the page (modules are
+    // deferred). window.ppFunnel is therefore NOT set yet on this line.
+    // The old `window.ppFunnel || stub` captured the stub permanently and
+    // silently dropped every stage below (first_interaction, submit,
+    // succeeded, failed…) — the admin funnel read "signin_view →
+    // signin_first_interaction: 100% lost" for weeks. Resolve the singleton
+    // AT CALL TIME; anything fired before the module lands is queued on
+    // window.ppFunnelQueue, which js/auth-funnel.js drains on load. Still
+    // guarded so a module-load failure never breaks the form.
+    // Gate: tests/funnel-shim.mjs + tests/auth-funnel.spec.js.
+    window.ppFunnelQueue = window.ppFunnelQueue || [];
+    const _funnel = {
+        step: (stage, props) => {
+            try {
+                if (window.ppFunnel) window.ppFunnel.step(stage, props);
+                else window.ppFunnelQueue.push(['step', stage, props]);
+            } catch {}
+        },
+        stepDeferred: (stage, props) => {
+            try {
+                if (window.ppFunnel) window.ppFunnel.stepDeferred(stage, props);
+                else window.ppFunnelQueue.push(['stepDeferred', stage, props]);
+            } catch {}
+        },
+        id: () => { try { return window.ppFunnel?.id?.() ?? null; } catch { return null; } },
     };
     // Stable error-category mapper (js/auth-funnel.js side-effect). Passed
     // as `code` on *_failed steps so a top-reasons histogram can group by
-    // a fixed key instead of the drifting free-text `reason`.
-    const _classifyErr = (typeof window !== 'undefined' && window.ppClassifyAuthError) || (() => 'unknown');
+    // a fixed key instead of the drifting free-text `reason`. Resolved at
+    // call time for the same load-order reason as _funnel above.
+    const _classifyErr = (err) => {
+        try { return (window.ppClassifyAuthError || (() => 'unknown'))(err); } catch { return 'unknown'; }
+    };
+
+    // ── Gated-bounce context (?next=) ────────────────────────────────
+    // Same same-origin allowlist as readSafeNext() in the module above
+    // (duplicated here because this classic script runs before it). When a
+    // sign-in-gated page bounced the visitor here, name the destination and
+    // thread ?next= through every "create a free account" link so a new
+    // visitor who signs up still lands where they were going.
+    (function () {
+        let next = null;
+        try {
+            const raw = new URLSearchParams(location.search).get('next');
+            if (raw && raw.startsWith('/') && !raw.startsWith('//')) {
+                const u = new URL(raw, location.origin);
+                const safe = u.pathname + u.search + u.hash;
+                if (u.origin === location.origin && safe.length <= 512) next = safe;
+            }
+        } catch {}
+        if (!next) return;
+        const NAMES = {
+            '/space-weather.html': 'the Space Weather Dashboard',
+            '/dashboard.html':     'your dashboard',
+            '/auroracle.html':     'AurOracle',
+            '/operations.html':    'the Operations Console',
+            '/earth.html':         'EarthView',
+            '/account.html':       'your account settings',
+            '/flux-rope-live.html':'the CME Compounding Watch',
+        };
+        let path = next;
+        try { path = new URL(next, location.origin).pathname; } catch {}
+        const dest = NAMES[path] || null;
+        const ctx = document.getElementById('signin-context');
+        if (ctx) {
+            const b = ctx.querySelector('[data-context-dest]');
+            if (b && dest) b.textContent = dest;
+            ctx.classList.add('show');
+        }
+        document.querySelectorAll('[data-signup-link]').forEach((a) => {
+            try {
+                const u = new URL(a.getAttribute('href'), location.href);
+                u.searchParams.set('next', next);
+                a.setAttribute('href', u.pathname.replace(/^\//, '') + u.search);
+            } catch {}
+        });
+    })();
+    // Count the create-account exit as its own stage so "signin_view → left
+    // for signup" is visible next to "signin_view → first_interaction".
+    // (Not in the ordered stages CTE — it lands in client_telemetry and the
+    // replay RPC, just not in the ranked summary.)
+    document.querySelectorAll('[data-signup-link]').forEach((a) => {
+        a.addEventListener('click', () => _funnel.step('signin_signup_cta_click', { placement: a.id || 'sub' }));
+    });
 
     // ── Time-to-first-interaction signal ────────────────────────────
     // Fires once on the first focus of any input on the form. Indicates

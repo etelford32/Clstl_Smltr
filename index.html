@@ -116,7 +116,41 @@ img{display:block}
   background:rgba(2,0,10,.6);padding:4px 10px;border-radius:4px;border:1px solid rgba(154,133,255,.25);backdrop-filter:blur(4px)}
 .demo-live-tag::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 6px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite}
 #sky-console-host{min-height:540px}
+
+/* ── HERO CAPTURE — the above-the-fold conversion (2026-09) ─────────────
+   The S5 band sat under two heavy iframes and was reached by ~7% of
+   landing views (29 of 436, funnel read 2026-09). This form is the same
+   [data-aurora-capture] contract (js/aurora-capture.js wires every form on
+   the page; source "home-hero" keeps the two placements separable in the
+   admin funnel). One field, no account, nothing to choose. */
+.hero-capture{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center;margin:18px auto 0;max-width:560px}
+.hero-capture input[type=email]{flex:1 1 240px;min-width:0;background:rgba(2,0,10,.72);border:1px solid rgba(154,133,255,.35);
+  color:var(--fg-1);padding:12px 16px;border-radius:8px;font-size:.95rem;font-family:var(--font-sans)}
+.hero-capture input[type=email]::placeholder{color:var(--fg-4)}
+.hero-capture input[type=email]:focus{outline:none;border-color:var(--uv-400);box-shadow:0 0 0 3px rgba(157,58,255,.22)}
+.hero-capture button{flex:0 0 auto;padding:12px 22px;font-size:.8rem}
+.hero-capture .aurora-status{text-align:center;flex-basis:100%;min-height:1.2em}
+.hero-capture .aurora-status:empty{display:none}
+.hero-fineprint{text-align:center;font-size:.74rem;color:var(--fg-4);margin-top:8px;letter-spacing:.02em}
 .hero-cta{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:24px}
+.hero-cta-note{flex-basis:100%;text-align:center;font-size:.74rem;color:var(--fg-4);margin-top:-2px}
+
+/* ── CTA RAIL — sticky follow-up once the hero has scrolled away ───────────
+   Appears only after #hero leaves the viewport, hides for signed-in
+   visitors and after a dismiss (sessionStorage), never overlaps the
+   nav. Two doors: free alerts (scrolls to the S5 band) and free account. */
+#cta-rail{position:fixed;left:50%;bottom:14px;transform:translate(-50%,120%);z-index:60;display:flex;align-items:center;gap:10px;
+  padding:8px 10px 8px 16px;border-radius:999px;background:rgba(7,2,26,.92);border:1px solid rgba(154,133,255,.35);
+  box-shadow:0 12px 40px rgba(0,0,0,.5),var(--glow-uv-sm);backdrop-filter:blur(10px);transition:transform .35s ease,opacity .3s;opacity:0;
+  max-width:calc(100vw - 24px)}
+#cta-rail.on{transform:translate(-50%,0);opacity:1}
+#cta-rail .rail-copy{font-size:.82rem;color:var(--fg-2);white-space:nowrap}
+#cta-rail .rail-copy b{color:var(--fg-1)}
+#cta-rail .rail-btn{padding:8px 16px;font-size:.7rem;border-radius:999px;white-space:nowrap}
+#cta-rail .rail-link{font-size:.78rem;color:var(--uv-300);white-space:nowrap;border-bottom:1px solid rgba(183,101,255,.35)}
+#cta-rail .rail-x{background:none;border:0;color:var(--fg-4);font-size:1rem;cursor:pointer;padding:4px 6px;line-height:1}
+#cta-rail .rail-x:hover{color:var(--fg-1)}
+@media(max-width:640px){#cta-rail .rail-copy,#cta-rail .rail-link{display:none}#cta-rail{gap:6px;padding:6px 6px 6px 10px}}
 .btn-primary{padding:13px 30px;background:var(--grad-uv-pink);border-radius:8px;color:#fff;font-family:var(--font-display);font-weight:700;font-size:.88rem;letter-spacing:.12em;text-transform:uppercase;transition:filter .2s,transform .15s,box-shadow .25s;border:none;cursor:pointer;box-shadow:var(--glow-uv-md)}
 .btn-primary:hover{filter:brightness(1.12);transform:translateY(-2px);box-shadow:var(--glow-uv-lg)}
 .btn-secondary{padding:13px 30px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:8px;color:#ddd;font-size:.95rem;font-weight:600;transition:background .2s,border-color .2s,transform .15s}
@@ -328,11 +362,29 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
         <span style="--dot:#ff8c5a">Why your temperature does what it does</span>
         <span style="--dot:#8ff0ff">Forecasts validated on the May 2024 G5</span>
       </div>
+      <!-- Above-the-fold capture. Same contract as the S5 band (initAuroraCapture
+           wires both); data-source="home-hero" keeps this placement's
+           aurora_capture_* stages separable from the band's "home". The submit
+           button carries data-funnel-cta so the delegated listener counts it as
+           a landing CTA click as well. -->
+      <form class="hero-capture" data-aurora-capture data-source="home-hero" novalidate aria-label="Get free aurora alerts by email">
+        <input type="email" inputmode="email" autocomplete="email" placeholder="you@email.com — get free aurora alerts" aria-label="Email for free aurora alerts" required>
+        <input type="text" name="company" tabindex="-1" autocomplete="off"
+               aria-hidden="true" style="position:absolute;left:-9999px;opacity:0;height:0;width:0">
+        <button type="submit" class="btn-primary" data-funnel-cta="hero_alerts_submit">Alert me <span aria-hidden="true">→</span></button>
+        <span data-aurora-status class="aurora-status" role="status" aria-live="polite"></span>
+      </form>
+      <p class="hero-fineprint">Free · no account needed · one email when the aurora comes within reach of you · unsubscribe in one click</p>
     </div>
     <div id="sky-console-host" aria-label="Personal sky conditions console"></div>
+    <!-- Primary = the free account (the funnel's landing → signup handoff);
+         the dashboard stays as the secondary door. It is sign-in gated, so
+         for a new visitor it lands on signin.html — which now carries its
+         own "create a free account" exit for exactly that bounce. -->
     <div class="hero-cta" role="group" aria-label="Primary actions">
-      <a href="space-weather.html" class="btn-primary" data-funnel-cta="hero_magnetosphere" aria-label="Open the full space weather dashboard">Open the full dashboard <span aria-hidden="true">→</span></a>
-      <a href="#aurora" class="btn-secondary" data-funnel-cta="hero_alerts" aria-label="Get free aurora alerts">Get free aurora alerts <span aria-hidden="true">↓</span></a>
+      <a href="signup.html?plan=free" class="btn-primary" data-funnel-cta="hero_signup" aria-label="Get started free — create your account">Get started free <span aria-hidden="true">→</span></a>
+      <a href="space-weather.html" class="btn-secondary" data-funnel-cta="hero_magnetosphere" aria-label="Open the full space weather dashboard">Open the full dashboard <span aria-hidden="true">→</span></a>
+      <span class="hero-cta-note">Free forever on Observer · no credit card · saves your location, alerts and dashboards</span>
     </div>
   </div>
 </section>
@@ -406,7 +458,7 @@ window.addEventListener('message', (e) => {
     <div class="aurora-capture-copy">
       <span class="aurora-kicker">AurOracle · Free Alerts</span>
       <h2>Never miss an aurora again.</h2>
-      <p>AurOracle watches the solar wind for you — 7-night outlooks, 30-day forecasts, and an alert the moment conditions break for your location.</p>
+      <p>AurOracle watches the solar wind for you — 7-night outlooks, 30-day forecasts, and an alert the moment conditions break for your location. No account needed.</p>
     </div>
     <form data-aurora-capture data-source="home" novalidate>
       <input type="email" inputmode="email" autocomplete="email" placeholder="you@email.com" aria-label="Email" required>
@@ -416,7 +468,7 @@ window.addEventListener('message', (e) => {
       <button type="submit">Get free alerts →</button>
       <span data-aurora-status class="aurora-status" role="status" aria-live="polite"></span>
     </form>
-    <p class="aurora-trust">Forecasts run on the same physics engine validated against the May 2024 G5 superstorm.</p>
+    <p class="aurora-trust">Free · one email per storm, never a newsletter · unsubscribe in one click · forecasts run on the same physics engine validated against the May 2024 G5 superstorm.</p>
   </div>
 </section>
 <script type="module">
@@ -573,6 +625,68 @@ window.addEventListener('message', (e) => {
 </section>
 
 </main>
+
+<!-- ── CTA RAIL — follows the visitor once the hero scrolls away ───────────
+     Two doors, both already on the page: free alerts (scrolls to the S5
+     band and focuses its email field) and the free account. Hidden for
+     signed-in visitors (pp_auth mirror, same read as the console chip) and
+     after a dismiss for the rest of the tab. Its links carry
+     data-funnel-cta, so the delegated listener counts them. -->
+<div id="cta-rail" role="complementary" aria-label="Get alerts or create a free account" hidden>
+  <span class="rail-copy"><b>Never miss an aurora.</b> Free alerts for your sky.</span>
+  <a href="#aurora" class="btn-primary rail-btn" data-funnel-cta="rail_alerts" data-rail-alerts>Get free alerts</a>
+  <a href="signup.html?plan=free" class="rail-link" data-funnel-cta="rail_signup">or create a free account →</a>
+  <button type="button" class="rail-x" aria-label="Dismiss" data-rail-dismiss>×</button>
+</div>
+<script>
+(function () {
+  const rail = document.getElementById('cta-rail');
+  const hero = document.getElementById('hero');
+  if (!rail || !hero || !('IntersectionObserver' in window)) return;
+  const KEY = 'pp_cta_rail_dismissed';
+  let signedIn = false;
+  try {
+    const raw = localStorage.getItem('pp_auth') || sessionStorage.getItem('pp_auth');
+    signedIn = !!(raw && JSON.parse(raw)?.signedIn);
+  } catch {}
+  let dismissed = false;
+  try { dismissed = sessionStorage.getItem(KEY) === '1'; } catch {}
+  if (signedIn || dismissed) return;
+  rail.hidden = false;
+  // The cookie-consent banner (js/cookie-consent.js, z-index 9000, removed
+  // from the DOM once the visitor decides) owns the bottom edge while it is
+  // open — two stacked bars there would bury the rail and crowd the choice.
+  // Yield to it and re-evaluate on 'pp-consent-changed'.
+  let heroOut = false;
+  const consentOpen = () => !!document.querySelector('.pp-consent-banner');
+  const apply = () => rail.classList.toggle('on', heroOut && !consentOpen());
+  const obs = new IntersectionObserver((entries) => {
+    heroOut = !entries.some(e => e.isIntersecting);
+    apply();
+  }, { threshold: 0 });
+  obs.observe(hero);
+  window.addEventListener('pp-consent-changed', () => setTimeout(apply, 50));
+  rail.querySelector('[data-rail-dismiss]').addEventListener('click', () => {
+    try { sessionStorage.setItem(KEY, '1'); } catch {}
+    rail.classList.remove('on');
+    setTimeout(() => { rail.hidden = true; }, 350);
+  });
+  rail.querySelector('[data-rail-alerts]').addEventListener('click', () => {
+    // Land the visitor IN the field, not just near it.
+    setTimeout(() => {
+      const input = document.querySelector('#aurora [data-aurora-capture] input[type="email"]');
+      if (input) input.focus({ preventScroll: true });
+    }, 450);
+  });
+  // Signing in mid-session (nav re-renders on auth-changed) retires the rail.
+  window.addEventListener('auth-changed', () => {
+    try {
+      const raw = localStorage.getItem('pp_auth') || sessionStorage.getItem('pp_auth');
+      if (raw && JSON.parse(raw)?.signedIn) { rail.classList.remove('on'); rail.hidden = true; }
+    } catch {}
+  });
+})();
+</script>
 
 <!-- ── FOOTER ─────────────────────────────────────────────────────────────── -->
 <footer id="site-footer" role="contentinfo">

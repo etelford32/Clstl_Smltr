@@ -121,6 +121,92 @@ test.describe('auth funnel', () => {
         expect(stages, 'landing_cta_click emitted').toContain('landing_cta_click');
     });
 
+    // ── Classic-script stages (load-order regression) ───────────────────
+    // signin.html / signup.html fire first_interaction / submit / succeeded
+    // from CLASSIC <script> blocks, which run at parse time — before any
+    // module sets window.ppFunnel. A parse-time `window.ppFunnel || stub`
+    // capture silently dropped ALL of them (admin funnel: "signin_view →
+    // signin_first_interaction: 100% lost"). These two tests observe the
+    // stage on the wire; tests/funnel-shim.mjs pins the shim's shape.
+    test('signin.html emits signin_first_interaction on first field focus', async ({ page }) => {
+        const events = attachFunnelInterceptor(page);
+        await page.goto('/signin.html', { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(300);
+        // Blur first: the email field is autofocused at parse time (before the
+        // module lands) and the queued stage must replay — but make the
+        // interaction explicit too so the test proves the live path.
+        await page.evaluate(() => document.activeElement?.blur?.());
+        await page.focus('#password');
+        await page.waitForTimeout(150);
+        await flushTelemetry(page);
+        const stages = events.map(e => e.metadata?.stage);
+        expect(stages, 'signin_first_interaction emitted').toContain('signin_first_interaction');
+    });
+
+    test('signup.html emits signup_first_interaction on first field focus', async ({ page }) => {
+        const events = attachFunnelInterceptor(page);
+        await page.goto('/signup.html?plan=free', { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(300);
+        await page.focus('#email');
+        await page.waitForTimeout(150);
+        await flushTelemetry(page);
+        const stages = events.map(e => e.metadata?.stage);
+        expect(stages, 'signup_first_interaction emitted').toContain('signup_first_interaction');
+    });
+
+    test('signin.html ?next= names the destination and threads it into the signup links', async ({ page }) => {
+        await page.goto('/signin.html?next=%2Fspace-weather.html', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('#signin-context')).toBeVisible();
+        await expect(page.locator('#signin-context')).toContainText('Space Weather Dashboard');
+        const href = await page.locator('#signin-create-account').getAttribute('href');
+        expect(href).toContain('signup.html');
+        expect(href).toContain('next=%2Fspace-weather.html');
+        // Off-origin next must be ignored (open-redirect guard).
+        await page.goto('/signin.html?next=https%3A%2F%2Fevil.example', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('#signin-context')).toBeHidden();
+        expect(await page.locator('#signin-create-account').getAttribute('href')).not.toContain('evil');
+    });
+
+    test('index.html hero capture emits aurora_capture_* with source home-hero', async ({ page }) => {
+        const events = attachFunnelInterceptor(page);
+        await page.route('**/api/subscribe/aurora', (route) =>
+            route.fulfill({ status: 202, contentType: 'application/json', body: '{"ok":true}' }));
+        await page.goto('/index.html', { waitUntil: 'domcontentloaded' });
+        const form = page.locator('form[data-source="home-hero"]');
+        await form.scrollIntoViewIfNeeded();
+        await form.locator('input[type="email"]').fill('visitor@example.com');
+        await form.locator('button[type="submit"]').click();
+        await expect(form.locator('.aurora-upsell a[data-funnel-cta="aurora_capture_upsell"]')).toBeVisible();
+        await flushTelemetry(page);
+        const hero = events.filter(e => e.metadata?.source === 'home-hero').map(e => e.metadata?.stage);
+        expect(hero).toContain('aurora_capture_view');
+        expect(hero).toContain('aurora_capture_submit');
+        expect(hero).toContain('aurora_capture_succeeded');
+        // The submit button doubles as a landing CTA click.
+        const ctas = events.filter(e => e.metadata?.stage === 'landing_cta_click').map(e => e.metadata?.cta);
+        expect(ctas).toContain('hero_alerts_submit');
+    });
+
+    test('index.html CTA rail appears once the hero scrolls away and dismisses for the tab', async ({ page }) => {
+        await page.goto('/index.html', { waitUntil: 'domcontentloaded' });
+        const rail = page.locator('#cta-rail');
+        await expect(rail).not.toHaveClass(/on/);
+        await page.locator('#aurora').scrollIntoViewIfNeeded();
+        // The cookie-consent banner owns the bottom edge while open: the rail
+        // must yield to it, then appear once the visitor decides.
+        const consent = page.locator('.pp-consent-banner');
+        if (await consent.isVisible().catch(() => false)) {
+            await expect(rail).not.toHaveClass(/on/);
+            await consent.locator('[data-action="reject"]').click();
+        }
+        await expect(rail).toHaveClass(/on/);
+        await rail.locator('[data-rail-dismiss]').click();
+        await expect(rail).toBeHidden();
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.locator('#aurora').scrollIntoViewIfNeeded();
+        await expect(page.locator('#cta-rail')).toBeHidden();
+    });
+
     test('all auth_funnel events carry a funnel_id', async ({ page }) => {
         const events = attachFunnelInterceptor(page);
         await page.goto('/signin.html', { waitUntil: 'domcontentloaded' });
