@@ -102,6 +102,10 @@ export class MarsLandmarks {
         this.disposables = [];
         this.enabled = true;
         this.highlighted = null;
+        // landmark → is it on the camera-facing hemisphere, as of the last
+        // update(). Read by isPickable(); see the note there on why picking
+        // cannot go on category visibility alone.
+        this.facing = new Map();
 
         const track = object => { this.disposables.push(object); return object; };
         const dotTexture = track(glowTexture());
@@ -172,6 +176,37 @@ export class MarsLandmarks {
     }
 
     /**
+     * Can this landmark be hovered or clicked right now?
+     *
+     * Category visibility is NOT enough. The hit meshes are never hidden — only
+     * labels are LOD-gated — and the globe mesh is not in the raycast set, so a
+     * ray cast at the middle of the disc passes straight through the planet and
+     * strikes markers on the FAR SIDE. Picking on category visibility alone
+     * meant clicking bare ground near the centre of Mars could open a feature
+     * standing behind it, which reads as the page picking at random.
+     *
+     * `frontFacing` is refreshed every frame by update(); before the first
+     * frame it is undefined, which correctly reads as not pickable.
+     */
+    isPickable(landmark) {
+        if (!this.isLandmarkVisible(landmark)) return false;
+        return this.facing.get(landmark) === true;
+    }
+
+    /**
+     * Every landmark plus its current facing, for the feature index. Returned
+     * as plain data (never the three.js entries) so the UI cannot reach into
+     * the scene graph through it.
+     */
+    list() {
+        return this.entries.map(entry => ({
+            landmark: entry.landmark,
+            frontFacing: this.facing.get(entry.landmark) === true,
+            visible: this.isLandmarkVisible(entry.landmark),
+        }));
+    }
+
+    /**
      * Mark one landmark as hovered. Every marker on this globe is clickable and
      * none of them looked it — there was no cursor change and no highlight, so
      * the only way to discover that the atlas is interactive was to click a dot
@@ -195,6 +230,10 @@ export class MarsLandmarks {
         const facingThreshold = cameraDistance < 1.72 ? 0.72 : 0.17;
         for (const entry of this.entries) {
             const frontFacing = entry.normal.dot(cameraDirection) > facingThreshold;
+            // Picking reads this, so it has to be the SAME test the rendering
+            // uses — a marker you can see is a marker you can click, and one
+            // you cannot see is not.
+            this.facing.set(entry.landmark, frontFacing);
             const hovered = this.highlighted === entry.landmark;
             const labelDistance = localCamera.distanceTo(entry.label.position);
             const labelScale = THREE.MathUtils.clamp(labelDistance / 2.4, 0.11, 1);

@@ -13,7 +13,7 @@ import {
     observationFreshness,
 } from './mars-mission-state.js?v=20260809-live';
 import { MarsLandmarks } from './mars-landmarks.js?v=20260809-live';
-import { MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
+import { MARS_LANDMARKS, MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
 import { fetchMarsSkyEphemeris } from './horizons.js';
 import { MarsSky } from './mars-sky.js';
 import {
@@ -26,6 +26,9 @@ import {
     formatK, formatPa, formatDensity,
 } from './mars-climate-layer.js';
 import { dustOpacity, MARS_CLIMATE_MODEL } from './mars-atmosphere-model.js';
+import { MarsTileInset } from './mars-tile-inset.js';
+import { BUNDLED_BASE_GSD_M, boundsToUv, describeLayer, formatGsd } from './mars-tiles.js';
+import { FocusFootprint } from './focus-footprint.js';
 
 const SURFACE_RADIUS = 1;
 const RELIEF_EXAGGERATION = 5;
@@ -189,6 +192,13 @@ let cameraTween = null;
 let cardFocusAction = null;
 let surfaceModeActive = false;
 let surfaceLocation = null;
+// Streamed NASA Trek imagery. Default ON — it is the layer that makes the
+// surface real rather than a 15 km/px wash — but every consumer degrades to
+// the bundled texture, so a dead tile service costs the page nothing but
+// resolution (and a provenance line that says so).
+let tileLayerEnabled = true;
+// null lets js/mars-tiles.js pick by footprint; a layer key pins it.
+let tileLayerPreferred = null;
 let regionalTerrainCenter = null;
 let lastSurfaceFocus = null;
 // Local vertical the controls' orbit axis was last built for. Travelling far
@@ -838,6 +848,108 @@ regionalTerrainMaterial.onBeforeCompile = (shader) => {
                 diffuseColor.rgb *= clamp(1.0 + shade * amp, 0.45, 1.55);
             }`);
 };
+
+/**
+ * ═══ REAL-IMAGERY INSET ════════════════════════════════════════════════════
+ * Every surface on this page sampled ONE 1440×720 global texture — 4 px/°,
+ * ~15 km/px. That is why the 520 km regional patch (~37 texels wide) rendered
+ * as a smooth wash and why js/terrain-wfc.js had to synthesize over the gap:
+ * below 15 km there was no data to draw.
+ *
+ * This blends a streamed NASA Trek mosaic over the base map wherever the
+ * camera is actually looking — 232 m/px Viking, 100 m/px THEMIS, ~5 m/px CTX.
+ * The synth layer keeps its job of covering what no instrument resolved; it
+ * just has far less to cover now.
+ *
+ * WHY A SECOND SAMPLER AND NOT A TILED MESH. The globe and the regional patch
+ * both already carry GLOBAL EQUIRECT UVs (see latLonUv), so one uniform rect in
+ * that same UV space addresses both meshes identically. Rebuilding the page
+ * around quadtree patch meshes would be an enormous change for the same pixels.
+ * `js/earth-detail-inset.js` made the same call for the same reason.
+ *
+ * Three things here are load-bearing:
+ *
+ *  - `vTileUv` is declared from the `uv` attribute directly, NOT reused from
+ *    three's `vMapUv`. vMapUv only exists under `#ifdef USE_MAP`, and
+ *    `surfaceTexture` is null whenever the bundled JPEG fails to load — the
+ *    shader would then fail to COMPILE and take the whole globe with it, on
+ *    exactly the degraded path that most needs to keep rendering.
+ *  - The inset texture is tagged SRGBColorSpace, so WebGL decodes it in
+ *    hardware and `texture2D` returns LINEAR values — matching `diffuseColor`
+ *    after `<map_fragment>`. Blending raw sRGB into linear would wash the
+ *    inset out by roughly a gamma.
+ *  - The alpha channel carries COVERAGE. Tiles that failed to load are left
+ *    transparent by the stitcher, so the base texture shows through a hole
+ *    rather than a fabricated colour.
+ */
+const tileInsetUniforms = {
+    uTileMap: { value: null },
+    // uMin, vMin, uMax, vMax in the same UV space as latLonUv().
+    uTileRect: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uTileStrength: { value: 0 },
+    // Edge falloff, in units of the rect's own span. The inset is a rectangle
+    // over a continuous map; without a soft edge its border reads as a box.
+    uTileFeather: { value: 0.06 },
+};
+
+function installTileInset(material, cacheKey) {
+    const previous = material.onBeforeCompile;
+    material.customProgramCacheKey = () => cacheKey;
+    material.onBeforeCompile = (shader, renderer) => {
+        if (previous) previous(shader, renderer);
+        Object.assign(shader.uniforms, tileInsetUniforms);
+        shader.vertexShader = shader.vertexShader
+            .replace('#include <common>', `
+                varying vec2 vTileUv;
+                #include <common>`)
+            .replace('#include <begin_vertex>', `
+                #include <begin_vertex>
+                vTileUv = uv;`);
+        shader.fragmentShader = shader.fragmentShader
+            .replace('#include <common>', `
+                uniform sampler2D uTileMap;
+                uniform vec4 uTileRect;
+                uniform float uTileStrength;
+                uniform float uTileFeather;
+                varying vec2 vTileUv;
+                #include <common>`)
+            .replace('#include <map_fragment>', `
+                #include <map_fragment>
+                if (uTileStrength > 0.001) {
+                    // A plan straddling the antimeridian keeps unwrapped
+                    // columns, so its uMax can exceed 1. Lifting u by a full
+                    // turn when it falls west of the rect is what lets the
+                    // east half of such an inset find itself.
+                    float tu = vTileUv.x;
+                    if (tu < uTileRect.x) tu += 1.0;
+                    vec2 span = max(uTileRect.zw - uTileRect.xy, vec2(1e-6));
+                    vec2 t = (vec2(tu, vTileUv.y) - uTileRect.xy) / span;
+                    if (t.x > 0.0 && t.x < 1.0 && t.y > 0.0 && t.y < 1.0) {
+                        vec4 inset = texture2D(uTileMap, t);
+                        vec2 edge = smoothstep(vec2(0.0), vec2(uTileFeather), t)
+                            * (vec2(1.0) - smoothstep(vec2(1.0 - uTileFeather), vec2(1.0), t));
+                        // inset.a is COVERAGE, not opacity: a tile that failed
+                        // to load is transparent, and the base map shows
+                        // through it rather than an invented colour.
+                        float w = min(edge.x, edge.y) * uTileStrength * inset.a;
+                        diffuseColor.rgb = mix(diffuseColor.rgb, inset.rgb, w);
+                    }
+                }`);
+    };
+    material.needsUpdate = true;
+}
+
+const tilesSourceElement = document.querySelector('#tiles-source');
+installTileInset(surfaceMaterial, 'mars-globe-tile-inset');
+installTileInset(regionalTerrainMaterial, 'mars-regolith-detail+tile-inset');
+
+const tileInset = new MarsTileInset();
+const globeFootprint = new FocusFootprint({
+    camera, earthObject: marsGroup, radius: SURFACE_RADIUS, minIntervalMs: 900,
+});
+let tileInsetPending = false;
+let tileInsetLastAt = 0;
+const TILE_INSET_INTERVAL_MS = 700;
 
 const regionalTerrain = new THREE.Mesh(new THREE.BufferGeometry(), regionalTerrainMaterial);
 regionalTerrain.name = 'mola-regional-terrain';
@@ -2478,10 +2590,12 @@ function setLayer(name, enabled) {
         landmarks.setCategoryVisible('crater', enabled);
     } else if (name === 'landmark-polar') landmarks.setCategoryVisible('polar', enabled);
     else if (name === 'rotate') setAutoRotate(enabled);
+    else if (name === 'tiles') setTileLayerEnabled(enabled);
 }
 
 function layerIsVisible(name) {
     if (name === 'imagery') return Boolean(surfaceMaterial.map);
+    if (name === 'tiles') return tileLayerEnabled;
     // While the explorer is up the globe meshes are force-hidden, so the honest
     // answer for "is relief on" is the pending value in the restore map.
     if (name === 'relief') {
@@ -3331,6 +3445,12 @@ const pointer = new THREE.Vector2();
 const pointerStarts = new Map();
 // Movement past which a pointer gesture counts as a drag rather than a click.
 const DRAG_THRESHOLD_PX = 7;
+// Double-tap-to-land window. 360 ms was tighter than the platform conventions
+// it competes with (Chromium and iOS both synthesise a double-tap out to
+// ~500 ms), so a deliberate but unhurried double-tap fell through to two
+// separate selections and the visitor got nothing.
+const DOUBLE_TAP_MS = 500;
+const DOUBLE_TAP_SLOP_PX = 32;
 
 /**
  * Right-drag translation across the terrain, in surface mode only.
@@ -3403,6 +3523,110 @@ function showLandmark(landmark) {
     landmarkCard.hidden = false;
 }
 
+/**
+ * ═══ FEATURE INDEX ═════════════════════════════════════════════════════════
+ * Every landmark, reachable without hunting for it.
+ *
+ * The atlas holds 18 features, but the globe's LOD only LABELS priority-1 at
+ * mission-orbit range (MarsLandmarks.update: maximumPriority is 1 beyond 2.45
+ * scene units), and at any moment roughly half the atlas is on the far side.
+ * So 14 of 18 features could only be found by sweeping the cursor across the
+ * sphere hoping for a hover — which is not exploration, it is a search
+ * problem the page was making the visitor solve.
+ *
+ * Picking a row flies the camera there AND opens the card. Flying is what
+ * brings the marker inside the LOD and onto the near hemisphere, so the list
+ * is also what makes the globe markers reachable at all.
+ *
+ * The list is built ONCE. Rebuilding it per filter keystroke would drop the
+ * row the visitor is arrowing through, and rebuilding it per frame would
+ * churn 18 nodes against a render loop that is already the bottleneck.
+ */
+const featureListElement = document.querySelector('#feature-list');
+const featureFilterElement = document.querySelector('#feature-filter');
+const featureEmptyElement = document.querySelector('#feature-empty');
+const featureRows = [];
+
+function buildFeatureIndex() {
+    if (!featureListElement) return;
+    // Grouped by category, and alphabetical inside a group: the atlas order is
+    // authoring order, which is meaningless to a reader looking for a name.
+    const ordered = [...MARS_LANDMARKS].sort((a, b) => (
+        a.category === b.category
+            ? a.name.localeCompare(b.name)
+            : Object.keys(MARS_LANDMARK_CATEGORIES).indexOf(a.category)
+              - Object.keys(MARS_LANDMARK_CATEGORIES).indexOf(b.category)
+    ));
+    let lastCategory = null;
+    for (const landmark of ordered) {
+        const category = MARS_LANDMARK_CATEGORIES[landmark.category];
+        if (landmark.category !== lastCategory) {
+            lastCategory = landmark.category;
+            const heading = document.createElement('div');
+            heading.className = 'layer-group-title';
+            heading.style.padding = '8px 3px 2px';
+            heading.textContent = category.label;
+            featureListElement.append(heading);
+        }
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'feature-item';
+        row.setAttribute('role', 'listitem');
+        row.style.color = `#${category.color.toString(16).padStart(6, '0')}`;
+        row.innerHTML = '<span class="feature-dot" aria-hidden="true"></span>'
+            + `<span class="feature-name"></span><span class="feature-size"></span>`;
+        row.querySelector('.feature-name').textContent = landmark.name;
+        row.querySelector('.feature-size').textContent =
+            `${landmark.diameterKm.toLocaleString(undefined, { maximumFractionDigits: 0 })} km`;
+        row.addEventListener('click', () => selectFeature(landmark));
+        featureListElement.append(row);
+        featureRows.push({ landmark, row, heading: null, haystack: `${landmark.name} ${category.label}`.toLowerCase() });
+    }
+}
+
+function selectFeature(landmark) {
+    // Card first, then the flight: showLandmark sets cardFocusAction, and
+    // focusSurfacePoint overwrites lastSurfaceFocus — doing it the other way
+    // round leaves the card's "Fly here" pointing at the previous target.
+    showLandmark(landmark);
+    focusSurfacePoint(landmark.latDeg, landmark.lonDeg, { label: landmark.name });
+    for (const entry of featureRows) {
+        entry.row.setAttribute('aria-current', String(entry.landmark === landmark));
+    }
+    // Turning the category back on is the difference between "nothing
+    // happened" and a marker appearing where the camera just flew.
+    const toggle = document.querySelector(`[data-layer="landmark-${
+        landmark.category === 'basin' || landmark.category === 'crater' ? 'basins' : landmark.category}"]`);
+    if (toggle && !toggle.checked) {
+        toggle.checked = true;
+        toggle.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+}
+
+function filterFeatureIndex(query) {
+    const needle = query.trim().toLowerCase();
+    let shown = 0;
+    for (const entry of featureRows) {
+        const match = !needle || entry.haystack.includes(needle);
+        entry.row.hidden = !match;
+        if (match) shown += 1;
+    }
+    // Category headings are only meaningful while their group has rows.
+    for (const heading of featureListElement.querySelectorAll('.layer-group-title')) {
+        let next = heading.nextElementSibling;
+        let any = false;
+        while (next && !next.classList.contains('layer-group-title')) {
+            if (!next.hidden) { any = true; break; }
+            next = next.nextElementSibling;
+        }
+        heading.hidden = !any;
+    }
+    if (featureEmptyElement) featureEmptyElement.hidden = shown > 0;
+}
+
+buildFeatureIndex();
+featureFilterElement?.addEventListener('input', event => filterFeatureIndex(event.target.value));
+
 function showSkyBody(record, key) {
     document.querySelector('#landmark-card-category').textContent = 'JPL Horizons · Mars topocentric sky';
     document.querySelector('#landmark-card-name').textContent = record.name;
@@ -3425,7 +3649,7 @@ function pickPointOfInterest(clientX, clientY) {
         return true;
     }
     const hit = raycaster.intersectObjects(landmarks.hitTargets, false)
-        .find(intersection => landmarks.isLandmarkVisible(intersection.object.userData.landmark));
+        .find(intersection => landmarks.isPickable(intersection.object.userData.landmark));
     if (!hit) return false;
     showLandmark(hit.object.userData.landmark);
     return true;
@@ -3500,7 +3724,7 @@ function updateHover(clientX, clientY) {
     }
 
     const hit = raycaster.intersectObjects(landmarks.hitTargets, false)
-        .find(intersection => landmarks.isLandmarkVisible(intersection.object.userData.landmark));
+        .find(intersection => landmarks.isPickable(intersection.object.userData.landmark));
     if (hit) {
         const landmark = hit.object.userData.landmark;
         sky.setHighlight(null);
@@ -3587,10 +3811,18 @@ canvas.addEventListener('pointerup', event => {
     }
 
     if (start.pointerType === 'touch') {
-        const now = performance.now();
+        // event.timeStamp, NOT performance.now(). Both share a time origin, but
+        // timeStamp is when the BROWSER generated the event while
+        // performance.now() here is when this handler finally ran. On a busy
+        // frame — which this page has, it drives a 66k-vertex terrain rebuild —
+        // delivery lags by hundreds of ms, so a genuine quick double-tap was
+        // measured as one slow pair and silently ignored. Measured on a
+        // software rasteriser: two taps dispatched back-to-back arrived 914 ms
+        // apart by handler clock. The window is the user's cadence, not ours.
+        const now = event.timeStamp;
         const isDoubleTap = lastTouchTap
-            && now - lastTouchTap.time < 360
-            && Math.hypot(event.clientX - lastTouchTap.x, event.clientY - lastTouchTap.y) < 28;
+            && now - lastTouchTap.time < DOUBLE_TAP_MS
+            && Math.hypot(event.clientX - lastTouchTap.x, event.clientY - lastTouchTap.y) < DOUBLE_TAP_SLOP_PX;
         if (isDoubleTap) {
             lastTouchTap = null;
             if (enterSurfaceAtClientPoint(event.clientX, event.clientY)) {
@@ -3901,6 +4133,50 @@ window.__marsLab = Object.freeze({
             shares: synthShares ? { ...synthShares } : null,
         },
     }),
+    /**
+     * Streamed-imagery state: which mosaic is under the camera, at what
+     * resolution, how much of it arrived, and whether the view has out-zoomed
+     * the data. The browser gate reads this to assert the page never claims
+     * resolution it does not have.
+     */
+    tileState: () => ({
+        ...tileInset.state(),
+        enabled: tileLayerEnabled,
+        preferred: tileLayerPreferred,
+        strength: tileInsetUniforms.uTileStrength.value,
+        rect: tileInsetUniforms.uTileRect.value.toArray(),
+        bundledGsdM: BUNDLED_BASE_GSD_M,
+    }),
+    /**
+     * The feature index and each landmark's current facing. The browser gate
+     * reads this to assert that a landmark behind the planet is not pickable —
+     * the hit meshes are never hidden and the globe is not in the raycast set,
+     * so picking on category visibility alone struck markers through Mars.
+     */
+    landmarkIndex: () => ({
+        rows: featureRows.length,
+        features: landmarks.list().map(entry => ({
+            name: entry.landmark.name,
+            category: entry.landmark.category,
+            latDeg: entry.landmark.latDeg,
+            lonDeg: entry.landmark.lonDeg,
+            frontFacing: entry.frontFacing,
+            visible: entry.visible,
+            pickable: landmarks.isPickable(entry.landmark),
+        })),
+    }),
+    /** Fly to a named feature the way the index does. QA/tests only. */
+    selectFeature: (name) => {
+        const landmark = MARS_LANDMARKS.find(l => l.name === name);
+        if (!landmark) return false;
+        selectFeature(landmark);
+        return true;
+    },
+    /** Pin a tile layer (null returns to the footprint ladder). QA/tests only. */
+    setTileLayer: (key) => {
+        tileLayerPreferred = key ?? null;
+        tileInsetLastAt = 0;
+    },
     /** Pin a quality rung (lock stops the ladder re-adjusting). QA/tests only. */
     setQuality: (index, { lock = false } = {}) => {
         qualityLocked = Boolean(lock);
@@ -3982,6 +4258,183 @@ function updateGridFade(cameraDistance) {
     if (Math.abs(gridMaterial.opacity - target) > 0.002) gridMaterial.opacity = target;
 }
 
+/**
+ * ═══ TILE INSET DRIVER ═════════════════════════════════════════════════════
+ * Decides WHAT ground to stream and hands it to MarsTileInset; the module does
+ * the planning and stitching, this owns the policy.
+ *
+ * The two modes ask different questions, and answering both with the camera
+ * footprint was wrong:
+ *
+ *   - GLOBE mode: the sub-camera footprint, straight off FocusFootprint (the
+ *     same primitive the Earth page's weather patch and GIBS inset use).
+ *   - SURFACE mode: the REGIONAL PATCH's own extent, not the camera's. The
+ *     surface camera looks at the horizon, so its sub-camera point is not the
+ *     ground being rendered — planning from it would stream imagery for a
+ *     patch of ground that is off-screen behind the viewer.
+ *
+ * Throttled and idempotent: `update()` returns early when the plan key has not
+ * changed, so calling this on a timer costs one plan and a Map lookup.
+ */
+
+/**
+ * Ground width to stream in surface mode.
+ *
+ * NOT the whole 520 km patch. Planning the full patch every time pins the
+ * inset at whatever level 520 km fits the tile budget in — measured at 650 m/px
+ * over Jezero, against a mosaic that publishes 232 m/px. The camera is often
+ * 5 km from its target by then, so the page was holding back nearly 3× of real
+ * resolution exactly where a pilot is reading the ground.
+ *
+ * So the footprint SHRINKS with the camera, which is what makes zooming reveal
+ * more data instead of more interpolation. Bounded at both ends: never wider
+ * than the patch that is actually drawn, and never so tight that a small
+ * camera move re-plans (the inset's own LRU absorbs the rest).
+ */
+const SURFACE_TILE_SPAN_PER_RANGE = 3;
+const SURFACE_TILE_MIN_SPAN_KM = 12;
+
+function surfaceTileSpanKm() {
+    const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_KM;
+    if (!Number.isFinite(rangeKm)) return REGIONAL_TERRAIN_EXTENT_KM;
+    return THREE.MathUtils.clamp(
+        rangeKm * SURFACE_TILE_SPAN_PER_RANGE,
+        SURFACE_TILE_MIN_SPAN_KM,
+        REGIONAL_TERRAIN_EXTENT_KM,
+    );
+}
+
+function tileFootprint() {
+    if (surfaceModeActive && regionalTerrainCenter) {
+        // Centred on the explorer's location, sized by the camera. Longitude
+        // widens by 1/cos(lat) for the same ground distance; clamped so a
+        // near-polar patch cannot ask for a footprint that wraps into itself.
+        const halfLatDeg = (surfaceTileSpanKm() / 2) / MARS_RADIUS_KM * (180 / Math.PI);
+        const cosLat = Math.max(0.08, Math.cos(THREE.MathUtils.degToRad(regionalTerrainCenter.latDeg)));
+        const halfLonDeg = Math.min(90, halfLatDeg / cosLat);
+        const latMin = Math.max(-90, regionalTerrainCenter.latDeg - halfLatDeg);
+        const latMax = Math.min(90, regionalTerrainCenter.latDeg + halfLatDeg);
+        const lonMin = ((regionalTerrainCenter.lonDeg - halfLonDeg + 540) % 360) - 180;
+        return {
+            latMin, latMax, lonMin, lonMax: lonMin + halfLonDeg * 2,
+            spanLatDeg: halfLatDeg * 2,
+        };
+    }
+    const fp = globeFootprint.getFootprint();
+    if (!fp) return null;
+    return {
+        latMin: fp.latMin, latMax: fp.latMax,
+        lonMin: fp.lonMin, lonMax: fp.lonMin + fp.spanLonDeg,
+        spanLatDeg: fp.spanLatDeg,
+    };
+}
+
+function tickTileInset(now) {
+    if (!tileLayerEnabled) return;
+    if (tileInsetPending || now - tileInsetLastAt < TILE_INSET_INTERVAL_MS) return;
+    const footprint = tileFootprint();
+    if (!footprint) return;
+    tileInsetPending = true;
+    tileInsetLastAt = now;
+    tileInset.update(footprint, { preferred: tileLayerPreferred })
+        .then((run) => { if (run) applyTileInset(run); })
+        .catch(() => {})
+        .finally(() => {
+            tileInsetPending = false;
+            updateTileProvenance();
+        });
+}
+
+/** Upload a finished stitch and point the shader rect at it. */
+function applyTileInset(run) {
+    const texture = new THREE.CanvasTexture(run.canvas);
+    // Hardware sRGB decode — see the installTileInset header. Without this the
+    // inset blends raw sRGB into a linear diffuseColor and washes out.
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;   // NPOT-safe, and the canvas is one mip
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    texture.needsUpdate = true;
+
+    const previous = tileInsetUniforms.uTileMap.value;
+    tileInsetUniforms.uTileMap.value = texture;
+    // Dispose AFTER the swap. Disposing the live texture first drops the GL
+    // object the next frame would have sampled.
+    if (previous && previous !== texture) previous.dispose();
+
+    const uv = boundsToUv(run.plan.boundsDeg);
+    tileInsetUniforms.uTileRect.value.set(uv.uMin, uv.vMin, uv.uMax, uv.vMax);
+    tileInsetUniforms.uTileStrength.value = tileLayerEnabled ? 1 : 0;
+    updateTileProvenance();
+}
+
+function clearTileInset() {
+    tileInsetUniforms.uTileStrength.value = 0;
+    updateTileProvenance();
+}
+
+/**
+ * The layer row's own provenance line. This is the page's ONE claim about
+ * where the pixels under the camera came from, and it carries both halves of
+ * the honesty split: which archival mosaic is drawn (with its epoch and native
+ * resolution), and — when the camera has out-zoomed the data — that what is on
+ * screen is interpolated. A dead tile service says so plainly rather than
+ * leaving the row describing imagery that is not there.
+ */
+function updateTileProvenance() {
+    if (!tilesSourceElement) return;
+    if (!tileLayerEnabled) {
+        tilesSourceElement.textContent =
+            `off · bundled Viking mosaic only (${formatGsd(BUNDLED_BASE_GSD_M)})`;
+        return;
+    }
+    const state = tileInset.state();
+    if (state.status === 'unavailable' || state.status === 'empty' || state.status === 'error') {
+        tilesSourceElement.textContent =
+            `NASA Trek unavailable · showing the bundled ${formatGsd(BUNDLED_BASE_GSD_M)} Viking mosaic`;
+        return;
+    }
+    if (state.status === 'base') {
+        // The whole-globe view. An inset here would resolve no better than the
+        // texture already on the sphere, so the base map IS the right answer —
+        // and saying that beats implying tiles are on their way.
+        tilesSourceElement.textContent =
+            `global view · bundled Viking mosaic (${formatGsd(BUNDLED_BASE_GSD_M)}) · `
+            + 'zoom in for NASA Trek imagery';
+        return;
+    }
+    if (!state.layer) {
+        tilesSourceElement.textContent = state.status === 'loading'
+            ? 'NASA Trek · loading tiles for the visible ground…'
+            : 'NASA Trek mosaics · streaming for the visible ground';
+        return;
+    }
+    const parts = [describeLayer(state.layer, { upsampled: state.upsampled, gsdM: state.gsdM })];
+    if (state.coverage != null && state.coverage < 0.999) {
+        // Partial coverage is normal over the CTX mosaic's real holes, and the
+        // page shows the base map through them. Saying so beats a silent gap.
+        parts.push(`${Math.round(state.coverage * 100)}% tile coverage`);
+    }
+    if (state.viaProxy) parts.push('via edge proxy');
+    tilesSourceElement.textContent = parts.join(' · ');
+}
+
+
+function setTileLayerEnabled(enabled) {
+    tileLayerEnabled = Boolean(enabled);
+    if (!tileLayerEnabled) {
+        clearTileInset();
+        return;
+    }
+    // Re-arm rather than re-fetch: a cached stitch for the current footprint
+    // comes straight back out of the inset's LRU.
+    tileInsetLastAt = 0;
+    if (tileInset.current()) tileInsetUniforms.uTileStrength.value = 1;
+    updateTileProvenance();
+}
+
 function animate(now) {
     requestAnimationFrame(animate);
     if (lastFrameAt) sampleFrame(now - lastFrameAt);
@@ -4007,6 +4460,8 @@ function animate(now) {
     // Stars are at infinity, so the field rides with the camera. This is also
     // what keeps `far` small enough for a usable depth buffer in both modes.
     starField.position.copy(camera.position);
+    globeFootprint.tick(now);
+    tickTileInset(now);
     if (surfaceModeActive) {
         cameraRadial.copy(camera.position).normalize();
         surfaceHeadlamp.position.copy(camera.position);
