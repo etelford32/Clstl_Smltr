@@ -81,6 +81,7 @@ test('A landmark behind the planet cannot be picked through it', async ({ page }
 });
 
 test('The feature index reaches every landmark, including the far side', async ({ page }) => {
+    test.slow();
     const errors = collectPageErrors(page);
     await bootMars(page);
 
@@ -135,6 +136,9 @@ test('The feature filter narrows the list and explains an empty result', async (
 
 test('Hovering shows the affordance, clicking opens the card, clicking away dismisses it',
     async ({ page }) => {
+        // Flies the camera and then sweeps for a hover — minutes under suite
+        // load on software GL.
+        test.slow();
         const errors = collectPageErrors(page);
         await bootMars(page);
         const box = await page.locator('#mars-canvas').boundingBox();
@@ -194,6 +198,7 @@ test('Hovering shows the affordance, clicking opens the card, clicking away dism
     });
 
 test('Double-tap uses the event clock, not the handler clock', async ({ page }) => {
+    test.slow();
     const errors = collectPageErrors(page);
     await bootMars(page);
     const box = await page.locator('#mars-canvas').boundingBox();

@@ -117,6 +117,10 @@ async function bootMars(page) {
 const tileState = (page) => page.evaluate(() => window.__marsLab.tileState());
 
 test('Streamed Trek imagery replaces the 15 km/px base map and says what it is', async ({ page }) => {
+    // Boots the 3D stack AND lands the surface explorer, both of which are
+    // minutes-long on a software rasteriser under suite load. Same reason
+    // tests/mars-smoke.spec.js marks its heavy cases slow.
+    test.slow();
     const errors = collectPageErrors(page);
     const counts = await mockTileService(page);
     await bootMars(page);
@@ -163,6 +167,7 @@ test('Streamed Trek imagery replaces the 15 km/px base map and says what it is',
 });
 
 test('Landing the surface explorer streams imagery for the patch, not the camera', async ({ page }) => {
+    test.slow();
     const errors = collectPageErrors(page);
     await mockTileService(page);
     await bootMars(page);
@@ -190,6 +195,7 @@ test('Landing the surface explorer streams imagery for the patch, not the camera
 });
 
 test('A dead tile service falls back to the bundled texture and SAYS so', async ({ page }) => {
+    test.slow();
     const errors = collectPageErrors(page);
     // Nothing resolves — the state this sandbox reproduces for real, and the
     // state production will show if NASA's layer ids have moved.
@@ -218,6 +224,7 @@ test('A dead tile service falls back to the bundled texture and SAYS so', async 
 });
 
 test('Partial coverage renders and is disclosed rather than claimed as whole', async ({ page }) => {
+    test.slow();
     // Only CTX is unreachable: the realistic steady state, since its mosaic has
     // genuine holes. The page must degrade to a global layer, not go blank.
     await mockTileService(page, { layers: ['imagery', 'thermal', 'topo'] });
@@ -234,6 +241,7 @@ test('Partial coverage renders and is disclosed rather than claimed as whole', a
 });
 
 test('The imagery layer can be switched off, and the page says what remains', async ({ page }) => {
+    test.slow();
     await mockTileService(page);
     await bootMars(page);
     await page.evaluate(() => window.__marsLab.enterSurfaceExplorer(18.44, 77.45, { label: 'Jezero' }));
