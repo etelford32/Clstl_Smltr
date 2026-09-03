@@ -271,5 +271,28 @@ try {
         // signin.html / signup.html that pass a `code` alongside `reason`
         // on *_failed steps but can't `import`.
         window.ppClassifyAuthError = classifyAuthError;
+
+        // LOAD-ORDER CONTRACT (2026-09): classic <script> blocks execute at
+        // parse time, BEFORE any <script type="module"> — modules are
+        // deferred — so a classic script that reads window.ppFunnel while
+        // parsing always sees `undefined`. signin.html / signup.html used to
+        // capture it ONCE into a no-op stub, which silently dropped every
+        // stage they fire (first_interaction, submit, succeeded, failed…)
+        // and made the admin funnel read "signin_view → first_interaction:
+        // 100% lost". Those pages now resolve window.ppFunnel at CALL time
+        // and push anything fired before this module lands onto
+        // window.ppFunnelQueue as ['step'|'stepDeferred', stage, props].
+        // Drain it here, then swap the array for a live sink so a straggler
+        // push still records instead of accumulating. Gate:
+        // tests/funnel-shim.mjs + tests/auth-funnel.spec.js.
+        const queued = window.ppFunnelQueue;
+        const sink = { push: (entry) => {
+            try {
+                const [method, stage, props] = Array.isArray(entry) ? entry : [];
+                if (method === 'step' || method === 'stepDeferred') funnel[method](stage, props);
+            } catch {}
+        } };
+        if (Array.isArray(queued)) queued.forEach((entry) => sink.push(entry));
+        window.ppFunnelQueue = sink;
     }
 } catch {}

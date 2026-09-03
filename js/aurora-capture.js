@@ -39,7 +39,8 @@ function ensureStyles() {
 .aurora-capture-band button{background:var(--c-storm,#ffb066);color:#03010e;font-weight:600;
   border:0;padding:11px 18px;border-radius:8px;cursor:pointer;font-size:.95rem}
 .aurora-capture-band button:hover{filter:brightness(1.08)}
-.aurora-status{color:var(--c-text-muted,#7a98a8);font-size:13px;flex-basis:100%}`;
+.aurora-status{color:var(--c-text-muted,#7a98a8);font-size:13px;flex-basis:100%}
+.aurora-upsell a{color:var(--c-storm,#ffb066);font-weight:600;border-bottom:1px solid rgba(var(--c-storm-rgb,255,160,80),.4)}`;
     const el = document.createElement('style');
     el.id = STYLE_ID;
     el.textContent = css;
@@ -55,11 +56,22 @@ function readUtm() {
     return Object.keys(u).length ? u : null;
 }
 
+/**
+ * Wire EVERY [data-aurora-capture] form under `root`. A page may carry more
+ * than one (index.html: the above-the-fold hero form, source "home-hero",
+ * plus the S5 band, source "home") — each is independent and its stages
+ * carry its own `source`, so the admin funnel can compare placements.
+ * Before 2026-09 only the FIRST match was wired; a second form would have
+ * rendered but silently done nothing on submit.
+ */
 export function initAuroraCapture(root = document) {
-    const form = root.querySelector('[data-aurora-capture]');
-    if (!form) return;
-
+    const forms = root.querySelectorAll('[data-aurora-capture]');
+    if (!forms.length) return;
     ensureStyles();
+    forms.forEach((form) => wireForm(form));
+}
+
+function wireForm(form) {
     const source = form.getAttribute('data-source') || 'unknown';
     const input  = form.querySelector('input[type="email"]');
     const status = form.querySelector('[data-aurora-status]');
@@ -101,7 +113,14 @@ export function initAuroraCapture(root = document) {
             });
             if (res.status === 202) {
                 funnel.step('aurora_capture_succeeded', { source });
-                form.innerHTML = `<p data-aurora-status class="aurora-status" style="color:var(--c-storm,#ffb066)">Check your inbox to confirm — then you're set for the next storm. 🌌</p>`;
+                // Success state doubles as the free-account upsell: the visitor
+                // just proved intent, and a free account is what lets the alert
+                // be tuned to their exact location (AurOracle). The link carries
+                // data-funnel-cta so index.html's delegated listener records a
+                // landing_cta_click → signup_view handoff; on pages without that
+                // listener the attribute is inert.
+                form.innerHTML = `<p data-aurora-status class="aurora-status" style="color:var(--c-storm,#ffb066)">Check your inbox to confirm — then you're set for the next storm. 🌌</p>
+<p class="aurora-status aurora-upsell">Want alerts tuned to your exact spot? <a href="signup.html?plan=free" data-funnel-cta="aurora_capture_upsell">Create a free account →</a></p>`;
             } else {
                 funnel.step('aurora_capture_failed', { source, code: res.status });
                 status.textContent = 'Something went wrong. Try again in a moment.';
