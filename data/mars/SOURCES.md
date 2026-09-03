@@ -1,8 +1,9 @@
 # Mars data pipelines
 
-mars.html reads from four sources. Each has an explicit degradation path, and
+mars.html reads from five sources. Each has an explicit degradation path, and
 the page always states which one produced what is on screen — see
-`__marsLab.feedState()` for the machine-readable version.
+`__marsLab.feedState()` (and `__marsLab.tileState()` for the imagery) for the
+machine-readable version.
 
 | Feed | Route | Live source | Falls back to |
 |------|-------|-------------|---------------|
@@ -10,6 +11,26 @@ the page always states which one produced what is on screen — see
 | Mars geometry + season | `/api/mars/ephemeris` | JPL Horizons | analytic model in `js/mars-mission-state.js` |
 | Surface weather | `/api/mars/weather` | NASA MEDA / REMS / InSight | bundled MEDA snapshot (sol 1133) |
 | Sky directions | `/api/horizons` | JPL Horizons topocentric | nothing — bodies report unavailable |
+| Surface imagery tiles | `/api/mars/tiles` | NASA Solar System Treks WMTS | bundled 1440×720 Viking texture |
+
+## What "real-time" means on this page
+
+**No spacecraft images Mars continuously.** There is no live surface feed and
+there will not be one, so the page splits the claim in two and states both
+halves wherever imagery is drawn:
+
+- **The map is archival.** Every mosaic in the tile stack carries an epoch and
+  a native resolution — Viking MDIM 2.1 (1976–80, 232 m/px), THEMIS day IR
+  (2002–11, 100 m/px), CTX (2006–22, ~5 m/px), MOLA colour relief (1997–2001,
+  463 m/px). The layer row prints them.
+- **The view is live.** Rotation, sub-solar point, terminator, local mean solar
+  time, season and Earth range come from `/api/mars/ephemeris` (JPL Horizons)
+  and move in real time over that archival map.
+
+Anything that claims a *current* observation of the surface is a bug. If a
+genuinely live imagery product is ever adopted (MARCI daily global maps are the
+realistic candidate), it is a FEED and belongs in the table above with a
+freshness contract — not in the archival tile catalogue.
 
 **Freshness reality check.** Of these, only the Horizons feeds are dependably
 current. The NASA rover daily-summary endpoints under `mars.nasa.gov/rss/api/`
@@ -31,6 +52,7 @@ gates the registration.
 | `mars-ephemeris` | `/api/mars/ephemeris` | JPL Horizons answered | fell back to the analytic Ls model |
 | `mars-route` | `/api/mars/route` | live MMGIS traverse | serving the bundled route snapshot |
 | `mars-weather` | `/api/mars/weather` | a rover returned a usable observation | every NASA rover feed is offline |
+| `mars-tiles` | `/api/mars/tiles` | every catalogued mosaic answered | at least one layer is unreachable; the page falls back to the bundled texture for it |
 
 **These routes never return 5xx.** Each has a working client-side fallback, and
 a 5xx would be indistinguishable from "the site is down" to a client whose
@@ -47,6 +69,50 @@ that can be ~11° of Ls wrong.
 Upstream reachability from the Vercel edge is separately pinged by
 `/api/health` (`mars-mmgis`, `mars-rss`, `jpl-horizons`). Those rows are
 `edge_authoritative` because all three are proxied server-side.
+
+## Surface imagery tiles (`/api/mars/tiles`)
+
+Everything on the page used to sample ONE 1440×720 global texture — 4 px/°,
+≈14.8 km/px. The 520 km regional patch spans ~37 of those texels, which is why
+landing the surface explorer rendered a smooth wash and why `js/terrain-wfc.js`
+had to synthesize over the gap. This route streams the real mosaics instead:
+NASA's Solar System Treks publish them as WMTS pyramids, taking the ground
+sample distance under the camera to 232 m/px, 100 m/px or ~5 m/px.
+
+Two forms, split on whether a tile coordinate is present:
+
+```sh
+curl -s https://parkersphysics.com/api/mars/tiles | jq '.resolved, .unreachable'
+curl -s 'https://parkersphysics.com/api/mars/tiles?layer=imagery&z=3&x=5&y=2' -o tile.jpg
+```
+
+**The layer identifiers are UNVERIFIED.** Egress to trek.nasa.gov was blocked
+by policy when this shipped, so each logical layer resolves from an ordered
+CANDIDATE LIST in `js/mars-tiles.js` and the route reports which one answered —
+the same pattern as `api/_lib/noaa-regions.js`. **One production request against
+the capability form settles the schema; record the winners in
+`assets/mars/SOURCES.md` and only then trim the candidate lists.**
+
+Three things about this route are deliberate:
+
+1. **Browser-direct first, proxy second.** `js/mars-tile-inset.js` fetches each
+   tile straight from the upstream and only falls back to this route. A descent
+   pulls tens of tiles and routing all of them through a serverless function
+   would be pure waste. CORS is *required*, not merely nice: WebGL refuses to
+   upload a tainted canvas, so a non-CORS tile breaks the whole stitched inset.
+2. **Tile failures pass the upstream status through unchanged.** A 404 is a real
+   coverage hole in the CTX mosaic (draw the base map and move on); a 5xx is an
+   outage. Flattening both to one status erases a distinction the client uses.
+3. **No passthrough URL parameter, ever.** The client names a layer and a
+   z/row/col; the URL is rebuilt from the frozen catalogue. Adding a URL
+   parameter would turn a public endpoint into an open proxy —
+   `tests/mars-tiles-route.mjs` gates that.
+
+Below the deepest published level the plan sets `upsampled` and the page says
+"beyond native resolution" rather than quietly interpolating. At whole-globe
+framing no inset is fetched at all (`MIN_INSET_GAIN`): the pyramid there
+resolves no better than the texture already on the sphere, and dozens of round
+trips for an invisible difference is not a feature.
 
 The client's own view of which tier won is `window.__marsLab.feedState()`.
 

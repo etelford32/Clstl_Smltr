@@ -411,6 +411,12 @@ export const PIPELINES = [
       cadence_s: 3_600, prewarm: 'medium', probeTimeoutMs: 16_000,
       warnAgeS:  3 * 3600, critAgeS: 12 * 3600,
       notes: 'Amber is the expected steady state: NASA rover daily-summary feeds are frozen/retired, so the page serves a bundled MEDA snapshot and labels it historical.' },
+    { id: 'mars-tiles',         label: 'Mars surface tiles (Trek WMTS)',
+      endpoint: '/api/mars/tiles',
+      category: 'planetary', upstream: 'NASA Solar System Treks',
+      cadence_s: 86_400, prewarm: 'cold', probeTimeoutMs: 20_000,
+      warnAgeS: 24 * 3600, critAgeS: 72 * 3600,
+      notes: 'Capability probe, not a data feed: the no-coordinate form reports which candidate layer id answered per layer. Amber means at least one of the four mosaics is unreachable and mars.html has fallen back to the bundled 1440x720 Viking texture for it. The tiles themselves are archival and cached immutable for a year.' },
 ];
 
 /**
