@@ -733,7 +733,11 @@ function authChipHtml() {
         const plan = a.plan && a.plan !== 'free' ? ` · ${esc(a.plan)}` : '';
         return `<a class="sc-auth in" href="/dashboard.html" data-funnel-cta="console_dashboard">◈ ${name}${plan}</a>`;
     }
-    return `<a class="sc-auth" href="/signin.html" data-funnel-cta="console_signin">Sign in — save your sky</a>`;
+    // Anonymous visitors get the FREE-ACCOUNT door, not the sign-in door:
+    // signin.html is a dead end for someone with no account (2026-09 funnel
+    // read: the landing → signup handoff was 2 of 18 CTA clicks). Returning
+    // users still have Sign In in the nav and the link on signup.html.
+    return `<a class="sc-auth" href="/signup.html?plan=free" data-funnel-cta="console_signup">Save your sky — free account</a>`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

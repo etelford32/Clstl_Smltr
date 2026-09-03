@@ -145,6 +145,12 @@
         .form-sub { font-size: .88rem; color: #888; margin-bottom: 28px; }
         .form-sub a { color: #a080ff; text-decoration: none; }
         .form-sub a:hover { text-decoration: underline; }
+        .invite-details { margin-bottom: 16px; }
+        .invite-details summary { cursor: pointer; font-size: .82rem; color: #a080ff; list-style: none; }
+        .invite-details summary::-webkit-details-marker { display: none; }
+        .invite-details summary::before { content: '›'; display: inline-block; margin-right: 6px; transition: transform .15s; }
+        .invite-details[open] summary::before { transform: rotate(90deg); }
+        .signup-reassure { text-align: center; font-size: .78rem; color: #8a94a8; margin-top: 12px; line-height: 1.5; }
 
         /* Plan selector */
         .plan-pills {
@@ -332,7 +338,7 @@
             <h1>Sign Up — Explore the Universe</h1>
             <p>Parkers Physics is a physics-first space-weather platform: real-time NASA/NOAA data, MHD-grounded models, and interactive 3D simulations — straight in your browser, no install.</p>
             <ul class="side-features">
-                <li><span class="dot"></span> 17 interactive 3D simulations</li>
+                <li><span class="dot"></span> 40+ simulations on one physics engine</li>
                 <li><span class="dot"></span> Live solar wind, Kp index &amp; IMF Bz</li>
                 <li><span class="dot"></span> Real NASA DONKI &amp; NOAA SWPC feeds</li>
                 <li><span class="dot"></span> Stars, black holes &amp; the galactic map</li>
@@ -387,14 +393,6 @@
                 </div>
 
                 <form id="signup-form" novalidate>
-                    <!-- Invite code (optional). Pre-filled from ?code= URL param when
-                         the user arrives via an admin-issued email invite. -->
-                    <div class="form-group">
-                        <label for="invite-code">Invite Code <span style="font-weight:400;color:#778;font-size:.85em">(optional)</span></label>
-                        <input type="text" id="invite-code" name="invite_code" placeholder="ABCDEFGH" autocomplete="off" style="text-transform:uppercase;letter-spacing:.08em">
-                        <div id="invite-status" style="font-size:.78rem;margin-top:6px;min-height:1.1em"></div>
-                    </div>
-
                     <div class="form-row">
                         <div class="form-group">
                             <label for="first-name">First Name</label>
@@ -421,6 +419,21 @@
                         <div class="form-error" id="err-pw">Password must be at least 8 characters.</div>
                     </div>
 
+                    <!-- Invite code (optional), COLLAPSED and last: an empty
+                         optional field at the top of the form was the first
+                         thing every landing-page arrival saw. Pre-filled and
+                         auto-opened from ?code= / ?invite= by the invite module
+                         above (admin-issued email invites). Ids are unchanged —
+                         js/admin-invites.js wiring reads #invite-code. -->
+                    <details class="invite-details" id="invite-details">
+                        <summary>Have an invite code?</summary>
+                        <div class="form-group" style="margin-top:10px">
+                            <label for="invite-code">Invite Code <span style="font-weight:400;color:#778;font-size:.85em">(optional)</span></label>
+                            <input type="text" id="invite-code" name="invite_code" placeholder="ABCDEFGH" autocomplete="off" style="text-transform:uppercase;letter-spacing:.08em">
+                            <div id="invite-status" style="font-size:.78rem;margin-top:6px;min-height:1.1em"></div>
+                        </div>
+                    </details>
+
                     <label class="form-check">
                         <input type="checkbox" id="terms" required>
                         I agree to the <a href="eula.html" target="_blank">Terms of Service</a> and <a href="privacy.html" target="_blank">Privacy Policy</a>
@@ -428,6 +441,7 @@
                     <div class="form-error" id="err-terms" style="margin-top:-12px;margin-bottom:12px;">You must agree to continue.</div>
 
                     <button type="submit" class="btn-submit" id="btn-submit">Create Account →</button>
+                    <p class="signup-reassure">Free forever on the Free plan — no credit card. Paid plans cancel anytime.</p>
                 </form>
 
                 <!-- Social auth — see signin.html for the same wiring. -->
@@ -529,7 +543,12 @@
     const emailInput   = document.getElementById('email');
     const statusEl     = document.getElementById('invite-status');
 
-    if (urlCode)  codeInput.value  = urlCode;
+    if (urlCode) {
+        codeInput.value = urlCode;
+        // The invite field is collapsed by default (conversion: it is not the
+        // first thing a new visitor should see). An invite link opens it.
+        document.getElementById('invite-details')?.setAttribute('open', '');
+    }
     if (urlEmail) emailInput.value = urlEmail;
 
     let _validatedInvite = null;   // { plan, inviteId, isTargeted } when valid
@@ -727,16 +746,41 @@
                 '<li><span class="ck">✓</span><span>' + i + '</span></li>').join('') +
             '</ul>';
     }
-    // Funnel helper — populated by js/auth-funnel.js's window-side-effect.
-    // Same fallback pattern as signin.html so a module-load failure
-    // never breaks the sign-up form.
-    const _funnel = (typeof window !== 'undefined' && window.ppFunnel) || {
-        step: () => {}, stepDeferred: () => {}, id: () => null,
+    // ── Funnel helper — same load-order-safe shim as signin.html ─
+    // LOAD-ORDER: this is a classic <script>, so it executes at PARSE time,
+    // before every <script type="module"> on the page (modules are
+    // deferred). window.ppFunnel is therefore NOT set yet on this line.
+    // The old `window.ppFunnel || stub` captured the stub permanently and
+    // silently dropped every stage below (first_interaction, submit,
+    // succeeded, failed…) — the admin funnel read "signup_view →
+    // signup_first_interaction: 100% lost" for weeks. Resolve the singleton
+    // AT CALL TIME; anything fired before the module lands is queued on
+    // window.ppFunnelQueue, which js/auth-funnel.js drains on load. Still
+    // guarded so a module-load failure never breaks the form.
+    // Gate: tests/funnel-shim.mjs + tests/auth-funnel.spec.js.
+    window.ppFunnelQueue = window.ppFunnelQueue || [];
+    const _funnel = {
+        step: (stage, props) => {
+            try {
+                if (window.ppFunnel) window.ppFunnel.step(stage, props);
+                else window.ppFunnelQueue.push(['step', stage, props]);
+            } catch {}
+        },
+        stepDeferred: (stage, props) => {
+            try {
+                if (window.ppFunnel) window.ppFunnel.stepDeferred(stage, props);
+                else window.ppFunnelQueue.push(['stepDeferred', stage, props]);
+            } catch {}
+        },
+        id: () => { try { return window.ppFunnel?.id?.() ?? null; } catch { return null; } },
     };
     // Stable error-category mapper (js/auth-funnel.js side-effect). Passed
-    // as `code` on signup_failed so a top-reasons histogram groups by a
-    // fixed key rather than the drifting free-text `reason`.
-    const _classifyErr = (typeof window !== 'undefined' && window.ppClassifyAuthError) || (() => 'unknown');
+    // as `code` on *_failed steps so a top-reasons histogram can group by
+    // a fixed key instead of the drifting free-text `reason`. Resolved at
+    // call time for the same load-order reason as _funnel above.
+    const _classifyErr = (err) => {
+        try { return (window.ppClassifyAuthError || (() => 'unknown'))(err); } catch { return 'unknown'; }
+    };
 
     function selectPlan(val) {
         document.querySelectorAll('.plan-pill').forEach(p => p.classList.remove('selected'));
@@ -774,7 +818,7 @@
             ms_to_engage: Date.now() - _engageMs,
         });
     }
-    ['first-name','last-name','email','password','code'].forEach(id => {
+    ['first-name','last-name','email','password','invite-code'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('focus', () => _markEngagement(id), { once: true });
     });

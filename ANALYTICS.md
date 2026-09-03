@@ -57,7 +57,8 @@ won't show up in the ordered funnel summary.
 | Page | Stage | When |
 |---|---|---|
 | index.html | `landing_view` | Page load |
-| index.html | `landing_cta_click` | Any `[data-funnel-cta]` click |
+| index.html | `landing_cta_click` | Any `[data-funnel-cta]` click (hero `hero_signup` / `hero_magnetosphere` / `hero_alerts_submit`, the console chip `console_signup`, the CTA rail `rail_alerts` / `rail_signup`, the post-capture `aurora_capture_upsell`, pricing, depth ladder, footer) |
+| index.html / earth.html / gannon / st-patrick | `aurora_capture_view` → `focus` → `submit` → `succeeded` / `failed` | The anonymous email capture (`js/aurora-capture.js`). Every stage carries `source`; index.html has TWO placements — `home-hero` (above the fold) and `home` (the S5 band) — compare them by source |
 | signup.html | `signup_view` | Page load |
 | signup.html | `signup_plan_selected` | Plan pill clicked |
 | signup.html | `signup_invite_entered` | Invite code entered |
@@ -74,6 +75,7 @@ won't show up in the ordered funnel summary.
 | signin.html | `signin_view` | Page load |
 | signin.html | `signin_method_selected` | Magic-link toggle |
 | signin.html | `signin_first_interaction` | First field focus |
+| signin.html | `signin_signup_cta_click` | "Create a free account" exit clicked (`placement` = sub-line / `signin-create-account` button). Not in the ordered stages CTE — visible in replay + raw rows only |
 | signin.html | `signin_validation_error` | Submit blocked |
 | signin.html | `signin_submit` | Form submit accepted |
 | signin.html | `signin_failed` | Bad credentials / magic-link error |
@@ -90,6 +92,19 @@ won't show up in the ordered funnel summary.
 | auth-callback.html | `auth_callback_succeeded` | Returning user |
 | auth-callback.html | `auth_callback_signup` | New OAuth/magic-link account |
 | auth-callback.html | `auth_callback_failed` | Provider/Supabase error |
+
+**Load-order trap (fixed 2026-09).** signin.html / signup.html fire every
+post-view stage from CLASSIC `<script>` blocks, which run at parse time —
+before any `<script type="module">` has set `window.ppFunnel`. They used to
+capture `window.ppFunnel || stub` once, so `signin_first_interaction`,
+`signin_submit`, `signin_succeeded`, `signup_first_interaction` … were
+silently dropped and the admin card read "signin_view → first_interaction:
+100% lost". The pages now resolve `window.ppFunnel` at call time and queue
+early calls on `window.ppFunnelQueue`, which `js/auth-funnel.js` drains on
+load. `node tests/funnel-shim.mjs` pins the shape; `tests/auth-funnel.spec.js`
+observes the stages on the wire. Funnel rows before the fix under-count every
+stage after `signin_view` / `signup_view` — don't read a pre-fix "100% lost"
+as user behaviour.
 
 ### Reading the funnel
 
