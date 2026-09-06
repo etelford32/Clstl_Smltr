@@ -97,6 +97,17 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'constellation', w: 50 },
         ],
     },
+    // Homepage background carousel (js/home-carousel.js). RUNNING since
+    // 2026-09-06: control = the live magnetosphere alone, carousel = the
+    // same canvas as slide 0 plus captured loops of seven simulations
+    // cycling behind the hero copy. QA-force: ?exp_home_bg_carousel=carousel.
+    home_bg_carousel: {
+        status: 'running',
+        variants: [
+            { id: 'control',  w: 50 },
+            { id: 'carousel', w: 50 },
+        ],
+    },
     // CONCLUDED 2026-07 — the redesign shipped in place as index.html and
     // the middleware 50/50 split was retired (`/` always serves index.html;
     // middleware.js keeps only host canonicalization). No page calls
@@ -159,6 +170,11 @@ export const EXPERIMENT_GOALS = Object.freeze({
     sw_layout_v1: [
         { stage: 'sw_panel_interact',  label: 'Panel interaction (primary)' },
         { stage: 'sw_dwell_60s',       label: 'Dwelled 60 s' },
+    ],
+    home_bg_carousel: [
+        { stage: 'landing_cta_click',  label: 'CTA click (primary)' },
+        { stage: 'scroll_depth',       label: 'Scroll past hero' },
+        { stage: 'signup_succeeded',   label: 'Signup' },
     ],
 });
 

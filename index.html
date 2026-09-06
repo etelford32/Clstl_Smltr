@@ -87,8 +87,19 @@ img{display:block}
    (js/hero-space-weather.js — self-handles WebGL failure / reduced motion);
    the console floats above it on opaque surfaces so the data stays
    readable no matter how hot the bloom runs. */
-#hero{position:relative;overflow:hidden;background:radial-gradient(ellipse at 50% 30%,#071026 0%,#03010e 70%);padding:38px 16px 46px}
+/* The layered radial gradients are the no-WebGL / reduced-motion echo of the
+   canvas' deep-field nebula (js/hero-space-weather.js NEBULA_FRAG) — the
+   hero reads "intergalactic" on the fallback path too, at zero cost. */
+#hero{position:relative;overflow:hidden;padding:38px 16px 46px;background:
+  radial-gradient(ellipse 60% 40% at 18% 22%,rgba(91,30,255,.22),transparent 70%),
+  radial-gradient(ellipse 50% 35% at 82% 70%,rgba(0,150,170,.16),transparent 70%),
+  radial-gradient(ellipse 35% 25% at 60% 15%,rgba(255,31,156,.10),transparent 70%),
+  radial-gradient(ellipse at 50% 30%,#071026 0%,#03010e 70%)}
 #hero-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
+/* Background carousel (js/home-carousel.js, experiment home_bg_carousel):
+   the .hc-layer is inserted right after the canvas so #hero::after — the
+   legibility scrim below — still paints ABOVE the media. Its own styles are
+   injected by the module; only the stacking contract lives here. */
 #hero::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 70% 60% at 50% 40%,rgba(2,0,10,.5),rgba(2,0,10,.15) 75%)}
 .hero-inner{position:relative;z-index:1;max-width:1000px;margin:0 auto}
 .hero-top{text-align:center;margin-bottom:22px}
@@ -345,7 +356,9 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
      renders a personal conditions console — Air quality (default) / Major
      events / Temperature / Space weather / Aurora (secondary by design) —
      over the cinematic live-magnetosphere canvas (js/hero-space-weather.js,
-     kept from the 2026-07 hero as the backdrop). Space data comes from the
+     kept from the 2026-07 hero as the backdrop; 2026-09 added its deep-field
+     nebula and, for the home_bg_carousel variant, js/home-carousel.js
+     cycling captured simulations behind the copy — see that module). Space data comes from the
      page's single SpaceWeatherFeed; Earth data from js/home-conditions.js
      (per-location Open-Meteo). See the wiring module at the bottom of
      <body>. The H1 is the 2026-07 home_headline experiment WINNER — do not
@@ -762,6 +775,7 @@ window.addEventListener('message', (e) => {
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { initHomeTicker } from './js/home-ticker.js';
 import { initSkyConsole } from './js/home-sky-console.js';
+import { experiments } from './js/experiments.js';
 
 /* Intersection-observer fade-ins */
 (function(){
@@ -796,13 +810,27 @@ try {
    with a cap so the hero's swpc-update listener attaches before the first
    feed dispatch, but a hung network can never stall the console. */
 const heroCanvas = document.getElementById('hero-canvas');
+let heroReady = Promise.resolve(null);
 if (heroCanvas && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  const heroReady = import('./js/hero-space-weather.js')
-    .then(m => new m.HeroSpaceWeather(heroCanvas).start())
-    .catch(() => { heroCanvas.style.display = 'none'; });
+  heroReady = import('./js/hero-space-weather.js')
+    .then(m => { const h = new m.HeroSpaceWeather(heroCanvas); h.start(); return h; })
+    .catch(() => { heroCanvas.style.display = 'none'; return null; });
   await Promise.race([heroReady, new Promise(r => setTimeout(r, 4000))]);
 } else if (heroCanvas) {
   heroCanvas.style.display = 'none';
+}
+
+/* Background carousel — experiment home_bg_carousel (js/experiments.js).
+   Control keeps the live magnetosphere alone; the carousel variant keeps
+   it as slide 0 and cycles captured loops of seven simulations behind the
+   copy (js/home-carousel.js, media + manifest from
+   scripts/capture-home-carousel.mjs). Mounted AFTER the hero import so its
+   poster fetch never races the canvas for first paint, and never awaited —
+   a missing manifest simply leaves the live hero. */
+if (experiments.assign('home_bg_carousel') === 'carousel') {
+  import('./js/home-carousel.js')
+    .then(m => m.mountHomeCarousel(document.getElementById('hero'), { hero3d: heroReady }))
+    .catch(err => console.warn('[home] carousel failed to mount:', err));
 }
 
 /* ONE feed for the whole page — started after all listeners are attached. */
