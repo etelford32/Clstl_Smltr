@@ -61,11 +61,11 @@ test.describe('home background carousel', () => {
         await expect.poll(() => page.evaluate(() => window.__ppCarousel.index)).toBe((firstCaptured + 1) % slides.length);
 
         // The primary CTA is still the top hit under the pointer.
-        const cta = page.locator('#hero a[data-funnel-cta="hero_signup"]');
+        const cta = page.locator('#hero a[data-funnel-cta="hero_magnetosphere"]');
         const box = await cta.boundingBox();
         const top = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('a')?.getAttribute('data-funnel-cta'),
             { x: box.x + box.width / 2, y: box.y + box.height / 2 });
-        expect(top).toBe('hero_signup');
+        expect(top).toBe('hero_magnetosphere');
     });
 
     test('control variant mounts nothing', async ({ page }) => {

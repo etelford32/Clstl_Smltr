@@ -128,21 +128,17 @@ img{display:block}
 .demo-live-tag::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 6px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite}
 #sky-console-host{min-height:540px}
 
-/* ── HERO CAPTURE — the above-the-fold conversion (2026-09) ─────────────
-   The S5 band sat under two heavy iframes and was reached by ~7% of
-   landing views (29 of 436, funnel read 2026-09). This form is the same
-   [data-aurora-capture] contract (js/aurora-capture.js wires every form on
-   the page; source "home-hero" keeps the two placements separable in the
-   admin funnel). One field, no account, nothing to choose. */
-.hero-capture{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center;margin:18px auto 0;max-width:560px}
-.hero-capture input[type=email]{flex:1 1 240px;min-width:0;background:rgba(2,0,10,.72);border:1px solid rgba(154,133,255,.35);
-  color:var(--fg-1);padding:12px 16px;border-radius:8px;font-size:.95rem;font-family:var(--font-sans)}
-.hero-capture input[type=email]::placeholder{color:var(--fg-4)}
-.hero-capture input[type=email]:focus{outline:none;border-color:var(--uv-400);box-shadow:0 0 0 3px rgba(157,58,255,.22)}
-.hero-capture button{flex:0 0 auto;padding:12px 22px;font-size:.8rem}
-.hero-capture .aurora-status{text-align:center;flex-basis:100%;min-height:1.2em}
-.hero-capture .aurora-status:empty{display:none}
-.hero-fineprint{text-align:center;font-size:.74rem;color:var(--fg-4);margin-top:8px;letter-spacing:.02em}
+/* ── ONE ASK (2026-09-06) ────────────────────────────────────────────────
+   This REVERTS the #997 above-the-fold email capture and drops the
+   "Get started free" primary. 60 days of the anonymous funnel: 25 sessions
+   clicked "Open the full dashboard", 0 clicked "Get started free", 0
+   submitted the hero email form (1 focus in 30 days). Three asks in one
+   viewport and the two that nobody wanted were the loudest. The hero now
+   asks the one thing visitors demonstrably want — to see the live
+   dashboard — and the account ask moves to where intent is proven: the
+   sign-in wall's own "create a free account" exit, the console's
+   "Save your sky" chip, and the S5 band below. Don't re-add a second
+   button here without a new funnel read. */
 .hero-cta{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:24px}
 .hero-cta-note{flex-basis:100%;text-align:center;font-size:.74rem;color:var(--fg-4);margin-top:-2px}
 
@@ -362,7 +358,8 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
      page's single SpaceWeatherFeed; Earth data from js/home-conditions.js
      (per-location Open-Meteo). See the wiring module at the bottom of
      <body>. The H1 is the 2026-07 home_headline experiment WINNER — do not
-     reword it without a new experiment. -->
+     reword it without a new experiment. ONE ask below the console (the
+     dashboard) — see the "ONE ASK" CSS note for the funnel numbers. -->
 <section id="hero" aria-label="Your sky, live: air, temperature, major events">
   <canvas id="hero-canvas" aria-hidden="true"></canvas>
   <div class="hero-inner">
@@ -376,29 +373,15 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
         <span style="--dot:#ff8c5a">Why your temperature does what it does</span>
         <span style="--dot:#8ff0ff">Forecasts validated on the May 2024 G5</span>
       </div>
-      <!-- Above-the-fold capture. Same contract as the S5 band (initAuroraCapture
-           wires both); data-source="home-hero" keeps this placement's
-           aurora_capture_* stages separable from the band's "home". The submit
-           button carries data-funnel-cta so the delegated listener counts it as
-           a landing CTA click as well. -->
-      <form class="hero-capture" data-aurora-capture data-source="home-hero" novalidate aria-label="Get free aurora alerts by email">
-        <input type="email" inputmode="email" autocomplete="email" placeholder="you@email.com — get free aurora alerts" aria-label="Email for free aurora alerts" required>
-        <input type="text" name="company" tabindex="-1" autocomplete="off"
-               aria-hidden="true" style="position:absolute;left:-9999px;opacity:0;height:0;width:0">
-        <button type="submit" class="btn-primary" data-funnel-cta="hero_alerts_submit">Alert me <span aria-hidden="true">→</span></button>
-        <span data-aurora-status class="aurora-status" role="status" aria-live="polite"></span>
-      </form>
-      <p class="hero-fineprint">Free · no account needed · one email when the aurora comes within reach of you · unsubscribe in one click</p>
-    </div>
     <div id="sky-console-host" aria-label="Personal sky conditions console"></div>
-    <!-- Primary = the free account (the funnel's landing → signup handoff);
-         the dashboard stays as the secondary door. It is sign-in gated, so
-         for a new visitor it lands on signin.html — which now carries its
-         own "create a free account" exit for exactly that bounce. -->
-    <div class="hero-cta" role="group" aria-label="Primary actions">
-      <a href="signup.html?plan=free" class="btn-primary" data-funnel-cta="hero_signup" aria-label="Get started free — create your account">Get started free <span aria-hidden="true">→</span></a>
-      <a href="space-weather.html" class="btn-secondary" data-funnel-cta="hero_magnetosphere" aria-label="Open the full space weather dashboard">Open the full dashboard <span aria-hidden="true">→</span></a>
-      <span class="hero-cta-note">Free forever on Observer · no credit card · saves your location, alerts and dashboards</span>
+    <!-- ONE ask (see the CSS note above): the dashboard, which is what the
+         funnel shows people actually click. It is sign-in gated; a new
+         visitor lands on signin.html, which carries its own "create a free
+         account" exit for exactly that bounce. The funnel id stays
+         hero_magnetosphere so the before/after series is continuous. -->
+    <div class="hero-cta" role="group" aria-label="Primary action">
+      <a href="space-weather.html" class="btn-primary" data-funnel-cta="hero_magnetosphere" aria-label="Open the live space weather dashboard">Open the live dashboard <span aria-hidden="true">→</span></a>
+      <span class="hero-cta-note">Free · a free account saves your location, alerts and dashboards · no credit card</span>
     </div>
   </div>
 </section>

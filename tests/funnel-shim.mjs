@@ -49,15 +49,22 @@ for (const id of m[1].split(',').map((x) => x.trim().replace(/^'|'$/g, ''))) {
     assert.ok(signup.includes(`id="${id}"`), `signup.html: first-interaction field #${id} does not exist in the markup`);
 }
 
-// Landing capture: two placements, distinct sources, both wired by the ONE
-// initAuroraCapture() (which must iterate every form, not just the first).
+// Landing capture: ONE placement, the S5 band. The 2026-09 above-the-fold
+// copy (source "home-hero") was removed 2026-09-06 after 60 days of the
+// funnel showed 0 submits — the hero carries ONE ask now (see index.html's
+// "ONE ASK" note). initAuroraCapture() still iterates every form so a
+// second placement elsewhere keeps working.
 const index = read('index.html');
 const sources = [...index.matchAll(/data-aurora-capture data-source="([^"]+)"/g)].map((x) => x[1]);
-assert.deepEqual(sources.sort(), ['home', 'home-hero'], 'index.html must carry the hero + band capture forms');
+assert.deepEqual(sources.sort(), ['home'], 'index.html must carry exactly the S5 band capture form');
 const capture = read('js/aurora-capture.js');
 assert.ok(/querySelectorAll\('\[data-aurora-capture\]'\)/.test(capture), 'aurora-capture.js must wire every [data-aurora-capture] form');
 assert.ok(/aurora_capture_upsell/.test(capture), 'aurora-capture.js success state must carry the free-account upsell');
-assert.ok(/data-funnel-cta="hero_signup"/.test(index), 'index.html hero must carry the free-account primary CTA');
+// ONE ask in the hero: the dashboard button (hero_magnetosphere), nothing else.
+const heroHtml = index.slice(index.indexOf('<section id="hero"'), index.indexOf('<!-- ── S2 · LIVE TICKER'));
+const heroCtas = [...heroHtml.matchAll(/data-funnel-cta="([^"]+)"/g)].map((x) => x[1]);
+assert.deepEqual(heroCtas, ['hero_magnetosphere'], `index.html hero must carry exactly one CTA (got ${heroCtas.join(', ')})`);
+assert.ok(!/hero_signup|hero_alerts_submit/.test(index), 'index.html: the retired hero asks must not come back without a funnel read');
 assert.ok(/id="cta-rail"/.test(index), 'index.html must carry the CTA rail');
 
 console.log('funnel-shim: ok');

@@ -167,24 +167,26 @@ test.describe('auth funnel', () => {
         expect(await page.locator('#signin-create-account').getAttribute('href')).not.toContain('evil');
     });
 
-    test('index.html hero capture emits aurora_capture_* with source home-hero', async ({ page }) => {
+    test('index.html band capture emits aurora_capture_* with source home; the hero has ONE ask', async ({ page }) => {
+        // 2026-09-06: the above-the-fold capture (source home-hero) was
+        // retired — 0 submits in 60 days — and the hero carries one CTA.
         const events = attachFunnelInterceptor(page);
         await page.route('**/api/subscribe/aurora', (route) =>
             route.fulfill({ status: 202, contentType: 'application/json', body: '{"ok":true}' }));
         await page.goto('/index.html', { waitUntil: 'domcontentloaded' });
-        const form = page.locator('form[data-source="home-hero"]');
+        await expect(page.locator('#hero [data-funnel-cta]')).toHaveCount(1);
+        await expect(page.locator('#hero [data-funnel-cta]')).toHaveAttribute('data-funnel-cta', 'hero_magnetosphere');
+        await expect(page.locator('form[data-source="home-hero"]')).toHaveCount(0);
+        const form = page.locator('form[data-source="home"]');
         await form.scrollIntoViewIfNeeded();
         await form.locator('input[type="email"]').fill('visitor@example.com');
         await form.locator('button[type="submit"]').click();
         await expect(form.locator('.aurora-upsell a[data-funnel-cta="aurora_capture_upsell"]')).toBeVisible();
         await flushTelemetry(page);
-        const hero = events.filter(e => e.metadata?.source === 'home-hero').map(e => e.metadata?.stage);
-        expect(hero).toContain('aurora_capture_view');
-        expect(hero).toContain('aurora_capture_submit');
-        expect(hero).toContain('aurora_capture_succeeded');
-        // The submit button doubles as a landing CTA click.
-        const ctas = events.filter(e => e.metadata?.stage === 'landing_cta_click').map(e => e.metadata?.cta);
-        expect(ctas).toContain('hero_alerts_submit');
+        const band = events.filter(e => e.metadata?.source === 'home').map(e => e.metadata?.stage);
+        expect(band).toContain('aurora_capture_view');
+        expect(band).toContain('aurora_capture_submit');
+        expect(band).toContain('aurora_capture_succeeded');
     });
 
     test('index.html CTA rail appears once the hero scrolls away and dismisses for the tab', async ({ page }) => {
