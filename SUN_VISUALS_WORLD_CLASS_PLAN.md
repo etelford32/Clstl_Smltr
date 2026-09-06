@@ -8,7 +8,7 @@
 > `SUN_CONVECTION_UPGRADE_PLAN.md` for the convection work this plan sits on
 > top of and does NOT redo.
 
-*Status: Phases 0–2 IMPLEMENTED (2026-09-06); Phases 3–6 planned. Decisions
+*Status: Phases 0–3 IMPLEMENTED (2026-09-06); Phases 4–6 planned. Decisions
 in §1 are locked by the repo owner.*
 
 ### Progress log
@@ -108,6 +108,53 @@ in §1 are locked by the repo owner.*
   - **Colour pipeline is still display-referred upstream** (sunFS's own
     acesFilm; no OutputPass). The exposure multiply here is adaptation on
     tonemapped input; moving tone mapping to the end of the chain is Phase 6.
+- **2026-09-06 — Phase 3 (done).** The volumetric AIA corona
+  (`js/corona-volumetric.js`) is now the DEFAULT corona of every EUV channel
+  view — it had been hiding behind `?corona=volumetric` while the channel
+  views drew NO corona at all. It mounts lazily on the first channel view
+  (`ensureVolumetricCorona()` in sun.html), renders on camera layer 1 through
+  the new `js/corona-accumulate.js` pass (interleaved-gradient jitter per
+  pixel advanced by the golden ratio per frame; history blended 1/(n+1)
+  down to 1/33 while the camera is still; any camera motion, channel switch,
+  AR update or loop rebuild resets — no reprojection needed for an additive,
+  camera-locked layer), and lights its arcades from the PFSS-lite atlas
+  splatted into a loop-density volume (`js/corona-loop-density.js`, PURE:
+  R = closed lines → emission, G = open lines → topological coronal-hole
+  suppression; `tests/corona-volumetric.mjs`, 10 checks). White light gains
+  the Thomson K-corona + dust F-corona in coronaFS from the closed-form
+  Baumbach–Allen LOS integrals (constants pinned by the node test and
+  printed for the GLSL mirror; `u_kcorona` = 0 disables). **Findings:**
+  - **`js/field-atlas.js` could never load its WASM**: `'./js/sunfield-wasm/…'`
+    resolves relative to the module (already in `js/`) → `js/js/…` → every
+    atlas build, including `?debug=field` / `?debug=prominence`, had been
+    failing silently. Fixed (one path); the loop volume now builds in
+    ~70–120 ms for ~300 lines.
+  - **The tracer's AR arcades peak only 0.005–0.008 R☉ up** (measured on
+    three planted ARs; the seed ring sits at 0.04–0.10 rad and the buried
+    dipole keeps those lines low). A 64³ Cartesian cube (voxel 0.078 R☉)
+    could not resolve them and a 12-step chord march sampled that layer
+    ~once — so the volume moved to a **256×128×32 SHELL grid** (lon × lat ×
+    √-stretched height; slice 1 is at 1.5 Mm) and the march is **two-scale**
+    (6 coarse steps outside r = 1.30, 10 fine steps inside, 6 coarse behind
+    on limb rays; front-to-back order kept). A/B against the legacy march
+    via `u_marchLegacy` (kept as the perf/brightness reference): mean
+    accumulated brightness 0.0169 vs 0.0204, peak 0.79 vs 0.81 — same
+    energy, finer structure. At the default framing the loops are still
+    ~1 px tall; they show at the limb and when zoomed. **Raising the seed
+    ring / apex heights to the observed 0.05–0.15 R☉ is a Rust change**
+    (cargo test + WASM rebuild per CLAUDE.md) — Phase 4 candidate, not
+    done here.
+  - **The smoke suite's noise filter was swallowing shader-compile
+    errors**: a failed compile dumps the GLSL source, whose comments mention
+    swpc/noaa/sdo, so the whole message matched the "expected feed noise"
+    regex. coronaFS failed to compile for an entire run while all 10 tests
+    stayed green. `isExpectedNoise` now refuses anything matching
+    `Shader Error|GLSL|ERROR: 0:|program not valid` before the feed regex.
+  - The magnetogram view shows no EUV corona (a magnetogram has none); the
+    layer toggle now routes to whichever corona renderer the view uses.
+  - Verified on software GL only (2 fps, accumulation reaches ~18 frames in
+    the screenshots); the K-corona is deliberately subtle (0.048 of the limb
+    brightness at 2 R☉) and needs a GPU + real frames to judge.
 
 ---
 
@@ -479,7 +526,7 @@ owner's GPU, and *identical* screenshots on the Phase 0 baseline scenes
 | 0 | `tests/sun-visual.spec.js`, `tests/fixtures/sdo/*`, `scripts/make-sdo-synthetic-fixtures.mjs`, `scripts/fetch-sdo-fixtures.mjs`, `scripts/lib/sdo-synth.mjs`, `tests/__visual__/` (baselines: pending GPU) | `sun.html` (`__sun.freeze`, `__sun.perf`), `playwright.config.js` (`snapshotPathTemplate`) |
 | 1 | `js/sun-observed.js`, `tests/sun-observed.mjs` | `sun.html` (photosphere uniforms + sunFS + chip UI + mode handlers), `api/solar/aia.js` (headers + `meta=1`), `js/pipeline-registry.js` (`solar-aia`), `api/health.js` (`sdo-latest`), `tests/sun-smoke.spec.js` |
 | 2 | `js/sun-post.js`, `tests/sun-post.mjs` | `sun.html` (composer wiring: UnrealBloom ×2 + radialDiffuse → `SunPostPass`; Doppler save/restore; resize; animate drive; `flareAdd` overlay in sunFS), `tests/sun-smoke.spec.js` |
-| 3 | `tests/corona-volumetric.mjs` | `js/corona-volumetric.js`, `js/corona-volumetric-mount.js` |
+| 3 | `js/corona-loop-density.js`, `js/corona-accumulate.js`, `tests/corona-volumetric.mjs` | `js/corona-volumetric.js` (loop sampler, two-scale jittered march, `u_marchLegacy`), `js/corona-volumetric-mount.js` (layer 1, `setLoopDensity`, `setJitter`), `js/field-atlas.js` (WASM path fix), `sun.html` (lazy default mount, accumulation pass, loop rebuild, K/F corona in coronaFS), `tests/sun-smoke.spec.js` |
 | 4 | `tests/solar-fluid.mjs` | `js/solar-fluid.js`, `sun.html` `sunFS` |
 | 5 | `js/sun-camera.js`, `tests/sun-camera.mjs` | `sun.html`, `js/preview-mode.js` |
 | 6 | `js/vendor/three-0.17x/`, `js/sun-render.js`, `tests/sunfield-kernel-smoke.mjs`, `scripts/lint-three-vendor.mjs` | `sun.html` import map |

@@ -1712,6 +1712,8 @@ import { SolarDynamo } from './js/solar-dynamo.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { SunPostPass }        from './js/sun-post.js';   // Phase 2 HDR post chain (mip-chain bloom + exposure)
+import { CoronaAccumPass }    from './js/corona-accumulate.js';   // Phase 3 jittered-march temporal integration
+import { rasterizeLoopDensity } from './js/corona-loop-density.js';   // Phase 3 PFSS lines → loop-density volume
 import { ShaderPass }         from 'three/addons/postprocessing/ShaderPass.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
 import { loadRealHistory } from './js/history-loader.js';
@@ -2263,6 +2265,7 @@ const uniforms = {
     u_obsKind:           { value: 0.0 },   // 0 HMI continuum · 1 AIA EUV · 2 HMI magnetogram
     u_obsTint:           { value: new THREE.Vector3(1.25, 1.02, 0.70) },  // greyscale HMI → the page's photosphere palette (tune on hardware)
     u_obsGrid:           { value: 1.0 },   // faint 15° graticule on the UNOBSERVED hemisphere
+    u_kcorona:           { value: 1.0 },   // Phase 3 — white-light Thomson K + dust F corona (coronaFS); 0 disables
     // ── Live solar wind uniforms (driven by DSCOVR/ACE L1 pipeline) ──
     u_wind_speed_norm:   { value: 0.23 },  // (400-250)/650 ≈ 0.23 nominal slow wind
     u_wind_density_norm: { value: 0.20 },  // 5/25 = 0.20 nominal background
@@ -5166,6 +5169,7 @@ scene.add(trMesh);
 // read as fine bright streaks at the rim instead of soft halos.
 const coronaFS = /* glsl */`
     precision highp float;
+    uniform float u_kcorona;            // Phase 3 — Thomson K + F corona amplitude (1 = on, 0 = off)
     uniform float u_time;
     uniform float u_activity;
     uniform float u_rot;
@@ -5186,6 +5190,7 @@ const coronaFS = /* glsl */`
     uniform vec4  u_arSpots[8];   // active-region positions/area for PFSS streamer kicks
     uniform int   u_arSpotCount;
     varying vec3 vNormal;
+    varying vec3 vObjDir;             // object-space radial dir from glowVS — Phase 3 K-corona impact parameter
     varying vec3 vViewDir;
 
     float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
@@ -5531,6 +5536,28 @@ const coronaFS = /* glsl */`
 
         col *= pulse;
 
+        // ── Thomson-scattered K-corona + dust F-corona (Phase 3) ──────────
+        // MIRRORS js/corona-loop-density.js kCoronaLos / fCoronaLos (the
+        // node test prints these constants): Baumbach–Allen n_e integrated
+        // along the whole line of sight at impact parameter b (R☉), normalised
+        // to 1 at the limb; F = 0.10·b^-2.3. b is the ray's closest approach
+        // to the Sun's centre — the true coronagraph coordinate — so the
+        // brightness law is honest whatever the camera does. Streamers
+        // modulate K (the belt holds the density); F is smooth. The same
+        // silhouette fade as the shell keeps the 2.5 R☉ edge invisible.
+        {
+            vec3  pW   = vObjDir * 2.5;
+            vec3  ray  = normalize(pW - cameraPosition);
+            float bImp = max(length(cross(pW, ray)), 1.0);
+            float kLos = 0.04740 * pow(bImp, -0.5) + 0.45852 * pow(bImp, -5.0) + 0.49408 * pow(bImp, -15.0);
+            float fLos = 0.10 * pow(bImp, -2.3);
+            float belt = 0.55 + 0.45 * helmetBelt;
+            vec3 kCol = vec3(1.00, 0.97, 0.92) * kLos * belt * u_kcorona * 1.10;
+            vec3 fCol = vec3(1.00, 0.90, 0.78) * fLos * u_kcorona * 0.60;
+            col   += kCol + fCol;
+            alpha += (kLos * belt * 0.55 + fLos * 0.25) * u_kcorona;
+        }
+
         // ── Soft Reinhard tone-map — keeps the composite from blowing
         // out when many channels stack, while keeping the punch in the
         // bright streamer/AR-ray regions.
@@ -5559,34 +5586,87 @@ scene.add(coronaMesh);
 const _coronaMode    = (new URLSearchParams(location.search).get('corona') || 'multit').toLowerCase();
 const _coronaChannel = (new URLSearchParams(location.search).get('coronaChannel') || '171');
 let volumetricCorona = null;
+let coronaAccum      = null;     // Phase 3 — js/corona-accumulate.js (temporal integration pass)
+let _volCoronaPromise = null;
+let _loopDensityTex   = null;
+let _loopBuildPending = false;
 
-if (_coronaMode === 'volumetric' || _coronaMode === 'vol') {
-    (async () => {
+// ── Phase 3 (SUN_VISUALS_WORLD_CLASS_PLAN.md): the volumetric AIA corona is
+// the DEFAULT corona of every EUV channel view (it used to hide behind
+// ?corona=volumetric while the channel views drew NO corona at all). It
+// mounts lazily on the first channel view, renders on camera layer 1 through
+// CoronaAccumPass (jittered march, integrated over frames while the camera
+// is still), and lights its arcades from the PFSS-lite atlas splatted into a
+// loop-density volume. White light keeps the multit shell (coronaMesh) with
+// the new Thomson K-corona; ?corona=volumetric still forces the volumetric
+// renderer in white light too.
+async function ensureVolumetricCorona() {
+    if (volumetricCorona) return volumetricCorona;
+    if (_volCoronaPromise) return _volCoronaPromise;
+    _volCoronaPromise = (async () => {
         try {
             const mod = await import('./js/corona-volumetric-mount.js');
-            volumetricCorona = mod.mountVolumetricCorona({
-                scene,
-                baseUniforms: uniforms,
-                channel:      _coronaChannel,
+            volumetricCorona = mod.mountVolumetricCorona({ scene, baseUniforms: uniforms, channel: _coronaChannel });
+            volumetricCorona.setVisible(false);
+            coronaAccum = new CoronaAccumPass(THREE, {
+                scene, camera, corona: volumetricCorona,
+                width: canvasWrap.clientWidth || 1280, height: canvasWrap.clientHeight || 720,
             });
-            // Hide the legacy coronaMesh so the two corona renderers don't
-            // double-up. Toggle stays wired so the user's "Corona" checkbox
-            // controls the volumetric mesh once it's mounted.
-            coronaMesh.visible = false;
-            const togCorona = document.getElementById('tog-corona');
-            if (togCorona) {
-                togCorona.addEventListener('change', e => {
-                    volumetricCorona.setVisible(e.target.checked);
-                });
-                volumetricCorona.setVisible(togCorona.checked !== false);
-            }
-            // Initial population from whatever liveRegions are loaded.
+            composer.insertPass(coronaAccum, 1);          // right after the RenderPass, before the post chain
             _refreshVolumetricCorona();
+            return volumetricCorona;
         } catch (e) {
-            console.warn('[corona-vol] init failed, falling back to legacy:', e);
-            coronaMesh.visible = true;
+            console.warn('[corona-vol] init failed, channel views keep the disk only:', e);
+            _volCoronaPromise = null;
+            return null;
         }
     })();
+    return _volCoronaPromise;
+}
+
+// Build (or rebuild) the loop-density volume from the PFSS-lite atlas. Runs
+// the WASM tracer on the current AR list + default polar holes; failure
+// (no WASM, no ARs) leaves u_loopOn = 0 and the analytic arcades draw —
+// offline/CI must still show a corona.
+async function _rebuildLoopDensity() {
+    if (!volumetricCorona || _loopBuildPending) return;
+    _loopBuildPending = true;
+    try {
+        const mod = await import('./js/field-atlas.js');
+        await mod.ensureFieldAtlasWasm();
+        const ars   = mod.arsFromLiveRegions(liveRegions, parseLoc);
+        const holes = mod.defaultPolarHoles(uniforms?.u_activity?.value ?? 0.5);
+        const ssR   = parseFloat(document.getElementById('sl-source-surface')?.value);
+        const t0 = performance.now();
+        const atlas = mod.computeFieldAtlas(ars, holes, {
+            sourceSurface: Number.isFinite(ssR) ? ssR : 2.5,
+            seedsPerAr: 28, seedsGlobal: 192, samplesPerLine: 64, maxLines: 1200,
+        });
+        const rast = rasterizeLoopDensity(atlas);
+        if (_loopDensityTex) _loopDensityTex.dispose();
+        _loopDensityTex = new THREE.DataTexture(rast.data, rast.layout.width, rast.layout.height, THREE.RGBAFormat, THREE.UnsignedByteType);
+        _loopDensityTex.minFilter = THREE.LinearFilter; _loopDensityTex.magFilter = THREE.LinearFilter;
+        _loopDensityTex.wrapS = THREE.ClampToEdgeWrapping; _loopDensityTex.wrapT = THREE.ClampToEdgeWrapping;
+        _loopDensityTex.generateMipmaps = false; _loopDensityTex.needsUpdate = true;
+        volumetricCorona.setLoopDensity(_loopDensityTex, rast);
+        volumetricCorona.loopBuildMs = performance.now() - t0;
+        coronaAccum?.reset();
+    } catch (e) {
+        console.warn('[corona-vol] loop-density build failed (analytic arcades stay):', e?.message || e);
+        volumetricCorona?.setLoopDensity(null, null);
+    } finally {
+        _loopBuildPending = false;
+    }
+}
+
+if (_coronaMode === 'volumetric' || _coronaMode === 'vol') {
+    ensureVolumetricCorona().then((vc) => {
+        if (!vc) { coronaMesh.visible = true; return; }
+        // Legacy flag: the volumetric renderer replaces the white-light shell too.
+        coronaMesh.visible = false;
+        const togCorona = document.getElementById('tog-corona');
+        vc.setVisible(togCorona ? togCorona.checked !== false : true);
+    });
 }
 
 // Build AR/hole inputs from liveRegions + the activity-driven default polar
@@ -5614,6 +5694,8 @@ function _refreshVolumetricCorona() {
         { latRad: -85 * Math.PI / 180, lonRad:   Math.PI,  depth: polarSize },
     ];
     volumetricCorona.update(ars, holes);
+    coronaAccum?.reset();
+    _rebuildLoopDensity();
 }
 
 // ─── OUTER CORONA / HELIOSPHERE GLOW (r=4.0) ─────────────────────────────────
@@ -8131,8 +8213,8 @@ document.getElementById('tog-chrom').addEventListener('change',  e => {
     _refreshLayerIsolation();
 });
 document.getElementById('tog-corona').addEventListener('change', e => {
-    coronaMesh.visible = e.target.checked;
     _setLayerActive('lr-corona', e.target.checked);
+    _applyViewLayers(parseFloat(document.getElementById('view-mode')?.value) || 0);   // routes to the active corona renderer
 });
 document.getElementById('tog-loops').addEventListener('change',  e => { if (loopGroup)  loopGroup.visible  = e.target.checked; });
 document.getElementById('tog-nanoflares')?.addEventListener('change', e => {
@@ -8292,9 +8374,24 @@ function _setDoppler(on) {
 // EUV channels (171/193/211).
 function _applyViewLayers(channel) {
     const togOn = (id) => document.getElementById(id)?.checked !== false;
-    const coronaOn = channel ? false : togOn('tog-corona');
-    if (volumetricCorona) volumetricCorona.setVisible(coronaOn);
-    else if (coronaMesh)  coronaMesh.visible = coronaOn;
+    const coronaOn = togOn('tog-corona');
+    const forceVol = _coronaMode === 'volumetric' || _coronaMode === 'vol';
+    if (channel) {
+        // EUV / magnetogram view: the volumetric AIA corona (Phase 3), lazily mounted.
+        coronaMesh.visible = false;
+        ensureVolumetricCorona().then((vc) => {
+            if (!vc) return;
+            if ((parseFloat(document.getElementById('view-mode')?.value) || 0) !== channel) return;   // view changed meanwhile
+            const ch = VIEW_MODE_CHANNEL[channel];
+            if (ch === 'mag') { vc.setVisible(false); return; }   // a magnetogram has no EUV corona to show
+            vc.setChannel(ch);
+            vc.setVisible(coronaOn);
+        });
+    } else {
+        // White light: the multit shell with its Thomson K-corona (or the volumetric renderer under ?corona=volumetric).
+        if (volumetricCorona) volumetricCorona.setVisible(forceVol && coronaOn);
+        coronaMesh.visible = forceVol ? false : coronaOn;
+    }
     if (chromoMesh) chromoMesh.visible = channel ? false : togOn('tog-chrom');
     if (trMesh)     trMesh.visible     = channel ? false : togOn('tog-tr');
     if (promGroup)  promGroup.visible  = channel ? false : togOn('tog-prom');
@@ -8328,6 +8425,7 @@ function resize() {
     renderer.setSize(w, h, false);
     composer.setSize(w, h);
     if (sunPost) sunPost.setSize(w, h);
+    if (coronaAccum) coronaAccum.setSize(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 new ResizeObserver(resize).observe(canvasWrap);
@@ -11639,6 +11737,9 @@ window.__sun = {
     get fluid() { return solarFluid; },
     get composer() { return composer; },
     get post() { return sunPost; },                          // Phase 2 HDR post chain (bloom + exposure state)
+    get coronaVol() { return volumetricCorona; },            // Phase 3 volumetric AIA corona (null until a channel view mounts it)
+    get coronaAccum() { return coronaAccum; },               // Phase 3 temporal integration pass
+    ensureCorona: () => ensureVolumetricCorona(),
     setRegions: (r) => { liveRegions = r || []; },   // debug/test: inject active regions
     rebuildMarkers: () => buildRegionMarkers(),       // debug/test: rebuild AR markers
     get regionCount() { return liveRegions.length; },

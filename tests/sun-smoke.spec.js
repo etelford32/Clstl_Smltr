@@ -81,6 +81,12 @@ function attachConsoleRecorder(page) {
 // when the sandbox has no outbound network; the console text carries only
 // the status, never the URL, so the status code is the only handle.
 function isExpectedNoise(text) {
+    // A shader-compile failure dumps the whole GLSL source, whose comments
+    // mention swpc/noaa/sdo — so without this guard the noise filter below
+    // swallowed a broken corona shader (measured: coronaFS failed to compile
+    // for a full run while every test stayed green). Compile errors are
+    // never noise.
+    if (/Shader Error|GLSL|ERROR: 0:|program not valid|Program Info Log/i.test(text || '')) return false;
     return /supabase|jsdelivr|unpkg|cdn|Failed to fetch|net::ERR|ERR_|CORS|swpc|noaa|donki|\bhek\b|nasa|soho|sdo|gibs|celestrak|telemetry|429|404|501|502|503|net::/i
         .test(text || '');
 }
@@ -376,6 +382,11 @@ test.describe('sun.html smoke', () => {
             st: window.__sun.observed, chip: document.getElementById('sun-provenance').textContent,
         }));
 
+        // Plant three ARs (SWPC is unreachable in CI) so the PFSS atlas has
+        // arcades to splat; the mount's first refresh reads liveRegions.
+        await page.evaluate(() => window.__sun.setRegions([
+            { loc: 'N15W20', area: 420, mag: 'beta-gamma' }, { loc: 'S12E35', area: 260, mag: 'beta' }, { loc: 'N22E60', area: 140, mag: 'beta' },
+        ]));
         // 171 Å → the AIA frame (kind 1, AIA disk fraction ≈ 0.390 measured).
         await setView('2');
         await page.waitForFunction(() => window.__sun.observed?.mode === 'observed' && window.__sun.observed.channel === '171', { timeout: BOOT_TIMEOUT_MS });
@@ -385,13 +396,34 @@ test.describe('sun.html smoke', () => {
         expect(Math.abs(s.geomR - 0.390)).toBeLessThan(0.390 * 0.012);
         expect(s.chip).toMatch(/^OBSERVED · SDO\/AIA 171 Å/);
 
-        // Magnetogram → HMI LOS (kind 2).
+        // Phase 3: the channel view mounts the volumetric AIA corona (it used
+        // to draw none), the accumulation pass integrates frames, and the
+        // arcades come from the PFSS atlas splatted into the loop volume.
+        await page.waitForFunction(() => window.__sun.coronaVol && window.__sun.coronaVol.mesh.visible
+            && window.__sun.coronaAccum?.state.frames > 1, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.coronaVol.loopOn || window.__sun.coronaVol.loopStats, { timeout: BOOT_TIMEOUT_MS });
+        const cor = await page.evaluate(() => ({
+            channel: window.__sun.coronaVol.currentChannel, loopOn: window.__sun.coronaVol.loopOn,
+            stats: window.__sun.coronaVol.loopStats, accum: window.__sun.coronaAccum.state,
+            layer: window.__sun.coronaVol.mesh.layers.mask, whiteShell: window.__sun.layers.corona.visible,
+        }));
+        expect(cor.channel).toBe('171');
+        expect(cor.layer, 'corona mesh renders on layer 1 (the accumulation pass), not the main pass').toBe(2);
+        expect(cor.whiteShell, 'white-light shell hidden in a channel view').toBe(false);
+        expect(cor.accum.active).toBe(true);
+        expect(cor.loopOn, `PFSS loop volume built (${JSON.stringify(cor.stats)})`).toBe(true);
+        expect(cor.stats.closed).toBeGreaterThan(0);
+
+        // Magnetogram → HMI LOS (kind 2); no EUV corona over a magnetogram.
         await setView('6');
         await page.waitForFunction(() => window.__sun.observed?.channel === 'mag' && window.__sun.observed.mode === 'observed', { timeout: BOOT_TIMEOUT_MS });
         s = await obs();
         expect(s.kind).toBe(2);
+        await page.waitForFunction(() => window.__sun.coronaVol && !window.__sun.coronaVol.mesh.visible, { timeout: BOOT_TIMEOUT_MS });
         await setView('0');
         await page.waitForFunction(() => window.__sun.observed?.channel === 'white' && window.__sun.observed.mode === 'observed', { timeout: BOOT_TIMEOUT_MS });
+        // Back in white light the multit shell (with the Thomson K-corona) is the corona again.
+        await page.waitForFunction(() => window.__sun.layers.corona.visible && !window.__sun.coronaVol.mesh.visible, { timeout: BOOT_TIMEOUT_MS });
 
         // Cutaway is a MODEL view: observed off while peeled, back when un-peeled.
         await setTog('tog-cutaway', true);

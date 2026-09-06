@@ -31,6 +31,27 @@
  *   the sphere — so an AR is a localised bright cell, a coronal hole a
  *   localised dim cell, and the quiet corona is the diffuse fill.
  *
+ * ── Phase 3 (SUN_VISUALS_WORLD_CLASS_PLAN.md) ─────────────────────────────
+ *   • FIELD-ALIGNED EMISSION: the PFSS-lite atlas is splatted into a
+ *     256×128×32 SHELL-grid loop-density volume (js/corona-loop-density.js —
+ *     lon × lat × √-stretched height, R = closed lines, G = open lines,
+ *     stored as √density in a 2-D slice atlas) and read here with two
+ *     bilinear taps + a slice mix. Closed density lights the
+ *     arcades as a DEM term (warm 6.05 + hot 6.30 components, so 171/193/
+ *     211 all see them); open density SUPPRESSES emission near the surface
+ *     (coronal holes derived from topology). The analytic half-torus
+ *     arcade and Gaussian hole cells remain as the fallback when no atlas
+ *     is available (u_loopOn = 0) — offline/CI must still draw a corona.
+ *   • JITTERED, TWO-SCALE MARCH: the ray start is offset per pixel by
+ *     interleaved-gradient noise (Jimenez) advanced per frame by the golden
+ *     ratio, so the steps no longer band; js/corona-accumulate.js integrates
+ *     the jittered frames over time while the camera is still (≈16× samples
+ *     at 1× cost). The chord is split at the r = 1.30 R☉ shell: the outer
+ *     corona takes the coarse steps, the low corona — where the arcades
+ *     live, 0.005–0.15 R☉ up, invisible to a 12-step chord march (measured)
+ *     — gets its own 10 fine steps. Front-to-back order is preserved across
+ *     the three segments so filament extinction stays correct.
+ *
  * ── Channel table ────────────────────────────────────────────────────────
  *   Each channel has (log T_peak, σ_logT, pseudocolor, photDim, label).
  *   photDim is the multiplier applied to the photosphere shader's output
@@ -123,6 +144,16 @@ export const CORONA_VOL_FRAG = /* glsl */`
     uniform float u_time;
     uniform float u_unrest;             // 0..1 live restlessness (X-ray driven)
 
+    // Phase 3 — loop-density slice atlas (js/corona-loop-density.js) + jitter
+    uniform sampler2D u_loopTex;        // tilesX×tilesY height slices of nlon×nlat; R=√closed, G=√open
+    uniform float u_loopOn;             // 0 = analytic fallback only
+    uniform vec3  u_loopDims;           // (nlon, nlat, nh)
+    uniform vec2  u_loopTiles;          // (tilesX, tilesY)
+    uniform float u_loopRMax;           // R☉ extent of the volume (2.5)
+    uniform float u_loopGain;           // arcade emission gain
+    uniform float u_jitter;             // per-frame ray-start phase (golden-ratio sequence)
+    uniform float u_marchLegacy;        // 1 = the pre-Phase-3 single 12-step chord march (A/B + perf reference)
+
     varying vec3 vWorldPos;
 
     // Hash-based noise for granulation-scale variation in the DEM
@@ -148,6 +179,36 @@ export const CORONA_VOL_FRAG = /* glsl */`
         if (u_channel_sigT < 1e-3) return 0.0;
         float d = (logT - u_channel_logT) / u_channel_sigT;
         return exp(-0.5 * d * d);
+    }
+
+    // ── Loop-density read (mirrors sampleLoopDensity in corona-loop-density.js)
+    // Two bilinear taps on the slice atlas (slices z0 and z0+1) mixed by the
+    // fractional slice — trilinear on GLSL ES 1.0 without sampler3D.
+    vec2 loopSlice(vec2 vla, float ih) {
+        float tx = mod(ih, u_loopTiles.x);
+        float ty = floor(ih / u_loopTiles.x);
+        vec2 dimsLA = u_loopDims.xy;
+        vec2 px = (vec2(tx, ty) * dimsLA + clamp(vla + 0.5, vec2(0.5), dimsLA - 0.5)) / (u_loopTiles * dimsLA);
+        return texture2D(u_loopTex, px).rg;
+    }
+    // Shell coordinates mirror corona-loop-density.js shellCoords():
+    // lon = atan(x, z) (scene convention), lat = asin(y/r), h_n = √((r−1)/(r_max−1)).
+    vec2 loopDensity(vec3 p_local) {
+        if (u_loopOn < 0.5) return vec2(0.0);
+        float r = length(p_local);
+        if (r < u_sun_radius || r > u_loopRMax) return vec2(0.0);
+        float lon = atan(p_local.x, p_local.z);
+        float lat = asin(clamp(p_local.y / r, -1.0, 1.0));
+        float hn  = sqrt(max(r - u_sun_radius, 0.0) / (u_loopRMax - u_sun_radius));
+        vec3 v = vec3((lon / 6.28318530718 + 0.5) * u_loopDims.x - 0.5,
+                      (lat / 3.14159265359 + 0.5) * u_loopDims.y - 0.5,
+                      hn * (u_loopDims.z - 1.0));
+        float h0 = floor(v.z);
+        float fh = v.z - h0;
+        vec2 a = loopSlice(v.xy, h0);
+        vec2 b = loopSlice(v.xy, min(h0 + 1.0, u_loopDims.z - 1.0));
+        vec2 e = mix(a, b, fh);
+        return e * e;                    // stored as √density → back to linear
     }
 
     // ── Synthetic DEM at a point in sun-local space ────────────────────────
@@ -187,6 +248,23 @@ export const CORONA_VOL_FRAG = /* glsl */`
                             * (0.30 + 0.45 * n1 + 0.25 * n2);
         float quiet_logT = 6.00 + 0.10 * (u_activity - 0.5);
         emission += quiet_density * channelResponse(quiet_logT) * 0.40;
+
+        // ── Field-aligned emission from the PFSS atlas (Phase 3) ──────────
+        // Closed-line density lights the real arcades; open-line density
+        // darkens the low corona (topological coronal holes). Both fade with
+        // altitude like the plasma they trace.
+        vec2 ld = loopDensity(p_local);
+        if (ld.x > 1e-4) {
+            float loopCol = ld.x * exp(-h / 0.45) * u_loopGain
+                          * (0.65 + 0.35 * vnoise(p_local * 30.0 + vec3(u_time * 0.03)));   // per-thread variance
+            // Loops span 0.7–3 MK: a warm (171-dominant), medium (193) and hot
+            // (211/94) component so every coronal channel sees its own share
+            // of the same arcade — the atlas gives the geometry, the DEM the
+            // colour balance.
+            float loopResp = channelResponse(5.90) * 0.50 + channelResponse(6.15) * 0.30 + channelResponse(6.45) * 0.20;
+            emission += loopCol * loopResp * 9.0;
+        }
+        float openHole = clamp(ld.y * 1.4, 0.0, 1.0) * exp(-h / 0.5);
 
         // ── Combined per-AR contribution ─────────────────────────────────
         for (int k = 0; k < ${N_AR_SLOTS}; k++) {
@@ -340,7 +418,7 @@ export const CORONA_VOL_FRAG = /* glsl */`
             float angH   = acos(cosA);
             holeMask = max(holeMask, hDepth * exp(-angH * angH / 0.18));
         }
-        emission *= (1.0 - holeMask);
+        emission *= (1.0 - max(holeMask, openHole * 0.75));
         // Live "unrest" breathing — the EUV corona's diffuse emission gently
         // throbs, faster and deeper the more active the Sun actually is, so
         // the channel views read as a living plasma rather than a still.
@@ -380,6 +458,17 @@ export const CORONA_VOL_FRAG = /* glsl */`
             t_exit = min(t_exit, hit_phot.x);
         }
 
+        // ── Two-scale front-to-back march (Phase 3) ───────────────────────
+        // The chord is split at the R_FINE shell: coarse steps outside it,
+        // fine steps inside (the arcades live within 0.15 R☉ of the surface
+        // and a 12-step chord march sampled that layer ~once, if at all).
+        // Segments are visited in ray order so transmission stays causal.
+        const float R_FINE = 1.30;
+        vec2 hit_fine = raySphere(ro, rd, u_sun_world, u_sun_radius * R_FINE);
+        float tf_in  = clamp(hit_fine.x, 0.0, t_exit);
+        float tf_out = (hit_fine.y > 0.0) ? clamp(hit_fine.y, 0.0, t_exit) : 0.0;
+        bool hasFine = hit_fine.y > 0.0 && tf_out > tf_in + 1e-4;
+
         // ── Front-to-back transmission integration ────────────────────────
         // Standard volumetric compositing:
         //   emission_total += transmission · sample_emission · ds
@@ -395,25 +484,62 @@ export const CORONA_VOL_FRAG = /* glsl */`
         // shader was the dominant frame-time consumer; the early-out below
         // (transmission < 0.01) typically terminates the loop in 6-8 steps
         // for AR-rich pixels anyway.
-        const int N_STEPS = 12;
-        float step_size = t_exit / float(N_STEPS);
         float emission = 0.0;
         float transmission = 1.0;
-        for (int i = 0; i < N_STEPS; i++) {
-            float t = step_size * (float(i) + 0.5);
-            vec3 p_world = ro + rd * t;
-            vec3 p_local = p_world - u_sun_world;
-
-            float em, fil;
-            demSample(p_local, em, fil);
-
-            emission += transmission * em * step_size;
-            float dtau = fil * step_size * u_filament_opacity;
-            transmission *= exp(-dtau);
-
-            // Cheap early-out: once the column is essentially opaque, no
-            // further depth contributes.
-            if (transmission < 0.01) break;
+        // Interleaved-gradient noise (Jimenez 2014) per pixel, advanced per
+        // frame by u_jitter — decorrelates the step phase across pixels and
+        // frames so the steps never band; the accumulation pass averages it.
+        float ign = fract(52.9829189 * fract(0.06711056 * gl_FragCoord.x + 0.00583715 * gl_FragCoord.y));
+        float jit = fract(ign + u_jitter);
+        // Segment bounds in ray order: [0, A] coarse, [A, B] fine, [B, t_exit] coarse.
+        float segA = hasFine ? tf_in  : t_exit;
+        float segB = hasFine ? tf_out : t_exit;
+        const int N_COARSE = 6;
+        const int N_FINE   = 10;
+        if (u_marchLegacy > 0.5) {
+            // Reference: one 12-step chord march (what Phase 3 replaced).
+            float ds = t_exit / 12.0;
+            for (int i = 0; i < 12; i++) {
+                float t = ds * (float(i) + jit);
+                float em, fil; demSample(ro + rd * t - u_sun_world, em, fil);
+                emission += transmission * em * ds;
+                transmission *= exp(-fil * ds * u_filament_opacity);
+                if (transmission < 0.01) break;
+            }
+            segA = 0.0; segB = t_exit; hasFine = false;
+        }
+        // 1. outer corona in front of the shell
+        if (u_marchLegacy < 0.5) {
+            float ds = segA / float(N_COARSE);
+            if (ds > 1e-5) for (int i = 0; i < N_COARSE; i++) {
+                float t = ds * (float(i) + jit);
+                float em, fil; demSample(ro + rd * t - u_sun_world, em, fil);
+                emission += transmission * em * ds;
+                transmission *= exp(-fil * ds * u_filament_opacity);
+                if (transmission < 0.01) break;
+            }
+        }
+        // 2. the low corona (fine)
+        if (hasFine && transmission >= 0.01) {
+            float ds = (segB - segA) / float(N_FINE);
+            for (int i = 0; i < N_FINE; i++) {
+                float t = segA + ds * (float(i) + jit);
+                float em, fil; demSample(ro + rd * t - u_sun_world, em, fil);
+                emission += transmission * em * ds;
+                transmission *= exp(-fil * ds * u_filament_opacity);
+                if (transmission < 0.01) break;
+            }
+        }
+        // 3. outer corona behind the shell (limb rays only)
+        if (segB < t_exit - 1e-4 && transmission >= 0.01) {
+            float ds = (t_exit - segB) / float(N_COARSE);
+            for (int i = 0; i < N_COARSE; i++) {
+                float t = segB + ds * (float(i) + jit);
+                float em, fil; demSample(ro + rd * t - u_sun_world, em, fil);
+                emission += transmission * em * ds;
+                transmission *= exp(-fil * ds * u_filament_opacity);
+                if (transmission < 0.01) break;
+            }
         }
 
         // White-light mode disables the volumetric corona entirely
