@@ -8,7 +8,7 @@
 > `SUN_CONVECTION_UPGRADE_PLAN.md` for the convection work this plan sits on
 > top of and does NOT redo.
 
-*Status: Phases 0–1 IMPLEMENTED (2026-09-06); Phases 2–6 planned. Decisions
+*Status: Phases 0–2 IMPLEMENTED (2026-09-06); Phases 3–6 planned. Decisions
 in §1 are locked by the repo owner.*
 
 ### Progress log
@@ -74,6 +74,40 @@ in §1 are locked by the repo owner.*
   - **HMI tint** `u_obsTint` (1.25, 1.02, 0.70) and the observed/procedural
     seam brightness were set on software GL and need the owner's eye; both
     are live on `__sun.uniforms`.
+- **2026-09-06 — Phase 2 (done).** `js/sun-post.js`: ONE composer pass
+  replacing both `UnrealBloomPass`es and the retired radial K-corona gather
+  (`radialDiffusePass` + its 80-line shader are deleted — Phase 3's Thomson
+  K-corona replaces what it approximated). Jimenez mip-chain bloom (13-tap
+  downsample, Karis average on mip 0, six half-res mips at 720p, 9-tap tent
+  upsample, no threshold ⇒ no rings), GPU 1×1 log-luminance reduction read
+  back every 4 frames into the PURE `ExposureController`
+  (`tests/sun-post.mjs`, 6 checks: geometric-mean calibration, τ 1.2 s /
+  0.5 s asymmetry to 63.2 %, EV clamps, NaN-safe, recalibrate), soft
+  shoulder above 1.0, dither, and lens effects (ghosts / CA / grain) behind
+  `?lens=1` — OFF in Observed by default. `__sun.post.state` exposes EV,
+  L̄, strength, mips. Smoke spec asserts the chain is live (6 mips, finite
+  readback, lens off). The two rendering-panel bloom checkboxes still work
+  (ambient = base strength, flare = boost). **Findings:**
+  - **A global strength boost on an un-thresholded bloom lit the whole disk
+    white on an X-flare (measured).** The flare boost is therefore applied
+    to the BRIGHT PASS of the blurred image only (`max(bloom − 0.65, 0)`),
+    which is what "tight, on-demand" meant in the old two-pass design.
+  - **Lens ghosts must read the NORMALISED bloom** — `tBloom` is the sum of
+    the whole chain (n+1 mips); an un-normalised ghost read blew the disk
+    out at 7× (measured). Ghosts also threshold at 0.55 so the disk's own
+    glow cannot re-light the disk.
+  - **The flare kernel / ribbons / arcade / EIT wave are captured as
+    `flareAdd`** (everything that section adds to `col`) and drawn ON TOP
+    of the observed disk at 0.7 as an event overlay — the observed mix had
+    silently erased the page's GOES-driven flare visuals on the near side.
+    Observed pixels are still never recoloured; this is an additive marker.
+  - **Exposure calibration is frame-count based** (20 readbacks × every 4
+    frames = 80 frames ≈ 1.3 s at 60 fps); on software GL (~2 fps) it
+    reaches calibration only after ~40 s, so headless screenshots show
+    EV 0 — expected, not a fault.
+  - **Colour pipeline is still display-referred upstream** (sunFS's own
+    acesFilm; no OutputPass). The exposure multiply here is adaptation on
+    tonemapped input; moving tone mapping to the end of the chain is Phase 6.
 
 ---
 
@@ -444,7 +478,7 @@ owner's GPU, and *identical* screenshots on the Phase 0 baseline scenes
 |---|---|---|
 | 0 | `tests/sun-visual.spec.js`, `tests/fixtures/sdo/*`, `scripts/make-sdo-synthetic-fixtures.mjs`, `scripts/fetch-sdo-fixtures.mjs`, `scripts/lib/sdo-synth.mjs`, `tests/__visual__/` (baselines: pending GPU) | `sun.html` (`__sun.freeze`, `__sun.perf`), `playwright.config.js` (`snapshotPathTemplate`) |
 | 1 | `js/sun-observed.js`, `tests/sun-observed.mjs` | `sun.html` (photosphere uniforms + sunFS + chip UI + mode handlers), `api/solar/aia.js` (headers + `meta=1`), `js/pipeline-registry.js` (`solar-aia`), `api/health.js` (`sdo-latest`), `tests/sun-smoke.spec.js` |
-| 2 | `js/sun-post.js`, `tests/sun-post.mjs` | `sun.html` (composer wiring 2353–2550) |
+| 2 | `js/sun-post.js`, `tests/sun-post.mjs` | `sun.html` (composer wiring: UnrealBloom ×2 + radialDiffuse → `SunPostPass`; Doppler save/restore; resize; animate drive; `flareAdd` overlay in sunFS), `tests/sun-smoke.spec.js` |
 | 3 | `tests/corona-volumetric.mjs` | `js/corona-volumetric.js`, `js/corona-volumetric-mount.js` |
 | 4 | `tests/solar-fluid.mjs` | `js/solar-fluid.js`, `sun.html` `sunFS` |
 | 5 | `js/sun-camera.js`, `tests/sun-camera.mjs` | `sun.html`, `js/preview-mode.js` |

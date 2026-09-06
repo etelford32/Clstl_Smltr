@@ -344,6 +344,13 @@ test.describe('sun.html smoke', () => {
         // Observed ⇒ real-time rotation multiplier, and the HUD says so.
         expect(st.rot).toBeLessThan(0.01);
         expect(st.hudRot).toContain('real-time');
+        // Phase 2 post chain is live: a 6-mip bloom chain at 720p and a finite
+        // luminance readback (the exposure controller is being fed).
+        const post = await page.evaluate(() => window.__sun.post.state);
+        expect(post.mips).toBe(6);
+        expect(Number.isFinite(post.avgLogLum), 'luminance readback works').toBe(true);
+        expect(post.bloomEnabled && post.flareEnabled).toBe(true);
+        expect(post.lens, 'lens effects are OFF by default in Observed mode').toBe(false);
         const filtered = errors.filter((e) => !isExpectedNoise(e.text));
         if (filtered.length) console.error('Console errors:', filtered);
         expect(filtered, 'no errors on the observed path').toHaveLength(0);

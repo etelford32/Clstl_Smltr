@@ -1711,7 +1711,7 @@ import { SolarFluid } from './js/solar-fluid.js';
 import { SolarDynamo } from './js/solar-dynamo.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { SunPostPass }        from './js/sun-post.js';   // Phase 2 HDR post chain (mip-chain bloom + exposure)
 import { ShaderPass }         from 'three/addons/postprocessing/ShaderPass.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
 import { loadRealHistory } from './js/history-loader.js';
@@ -2371,7 +2371,7 @@ const canvasWrap = document.getElementById('canvas-wrap');
 canvasWrap.appendChild(renderer.domElement);
 
 // ── Post-processing pipeline: Bloom + Radial diffusion ────────────────────────
-let composer, bloomAmbient, bloomFlare, radialDiffusePass;
+let composer, sunPost;
 {
     const W = canvasWrap.clientWidth  || 1280;
     const H = canvasWrap.clientHeight || 720;
@@ -2379,137 +2379,46 @@ let composer, bloomAmbient, bloomFlare, radialDiffusePass;
     composer  = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
 
-    // Phase 4.5 — two-pass bloom. Each pass is independently toggleable
-    // and tuned for one job, so the pipeline isn't a single-compromise
-    // setting that has to serve both calm-corona ambience and impulsive-
-    // flare punch.
+    // ── Phase 2 (SUN_VISUALS_WORLD_CLASS_PLAN.md) — HDR post chain ────────
+    // ONE pass: Jimenez mip-chain bloom (no threshold, cannot ring — the two
+    // UnrealBloomPasses it replaces produced the 2026-06 "glow circles"),
+    // exposure adaptation calibrated to the default view, soft shoulder,
+    // optional lens effects (?lens=1; Phase 5 drives them). The retired
+    // radial K-corona gather ("radialDiffusePass", off since June) is gone —
+    // Phase 3's Thomson-scattered K-corona replaces what it approximated.
+    // js/sun-post.js header documents the maths; tests/sun-post.mjs pins the
+    // exposure controller.
     //
-    //   AMBIENT bloom — wide, gentle, low threshold, always-on.
-    //     Catches the bright limb + coronal streamer structure and gives
-    //     the disk its characteristic glowing-disk feel even at solar
-    //     minimum. Wide radius (0.85) softens HDR edges without making
-    //     individual features blob together.
-    //
-    //   FLARE bloom — tight, high threshold, strength gated by
-    //     u_flare_intensity. Only kicks in for blown-out flare-flash
-    //     pixels; produces the signature impulsive punch without
-    //     blooming the calm-disk pixels around it. Tight radius (0.20)
-    //     keeps the punch localised to the kernel.
+    //   AMBIENT bloom (tog-bloom-ambient) — the base strength, breathing
+    //     gently with activity + Kp (driven per frame in animate()).
+    //   FLARE bloom   (tog-bloom-flare)   — a strength boost gated by
+    //     u_flare_intensity (knee 0.15) so the impulsive flash keeps its punch.
     //
     // URL flag ?bloom=ambient|flare|both|off (default both) sets initial
     // visibility; the two checkboxes in the rendering panel override.
-    bloomAmbient = new UnrealBloomPass(new THREE.Vector2(W, H), 0.18, 0.28, 0.85);
-    bloomFlare   = new UnrealBloomPass(new THREE.Vector2(W, H), 0.00, 0.20, 1.10);
-    composer.addPass(bloomAmbient);
-    composer.addPass(bloomFlare);
+    sunPost = new SunPostPass(THREE, {
+        width: W, height: H,
+        lens: new URLSearchParams(location.search).get('lens') === '1',
+    });
+    composer.addPass(sunPost);
 
     {
         const initBloom = (new URLSearchParams(location.search).get('bloom') || 'both').toLowerCase();
         const wantAmb = initBloom === 'both' || initBloom === 'ambient';
         const wantFlr = initBloom === 'both' || initBloom === 'flare';
-        bloomAmbient.enabled = wantAmb;
-        bloomFlare.enabled   = wantFlr;
+        sunPost.bloomEnabled = wantAmb;
+        sunPost.flareEnabled = wantFlr;
         const togA = document.getElementById('tog-bloom-ambient');
         const togF = document.getElementById('tog-bloom-flare');
         if (togA) {
             togA.checked = wantAmb;
-            togA.addEventListener('change', e => { bloomAmbient.enabled = e.target.checked; });
+            togA.addEventListener('change', e => { sunPost.bloomEnabled = e.target.checked; });
         }
         if (togF) {
             togF.checked = wantFlr;
-            togF.addEventListener('change', e => { bloomFlare.enabled = e.target.checked; });
+            togF.addEventListener('change', e => { sunPost.flareEnabled = e.target.checked; });
         }
     }
-
-    // ── Vectorised limb-corona scatter ───────────────────────────────────────
-    // Simulates K-corona Thomson scattering: photons from the bright solar limb
-    // scatter off free electrons along the observer's line of sight, producing
-    // a radially-directed glow that falls off as ~r⁻².
-    //
-    // Implementation: for each pixel in the corona annulus, sample along the
-    // inward radial direction (toward the solar centre) to gather limb photons,
-    // then add a weighted fraction to the outward pixel.  The key difference
-    // from a Gaussian blur is that light only travels RADIALLY — no tangential
-    // spread — matching the streamer/plume morphology in real coronagraph images.
-    const diffuseShader = {
-        uniforms: {
-            tDiffuse:        { value: null },
-            resolution:      { value: new THREE.Vector2(W, H) },
-            center:          { value: new THREE.Vector2(0.5, 0.5) },
-            // Phase 4.1 — when a flare flash makes the limb extremely bright,
-            // the radial gather × 0.07 still produces a giant horizontal
-            // "death laser". This uniform dampens the multiplier and clamps
-            // the gathered HDR magnitude so flares don't blow out the
-            // postprocess pipeline.
-            uFlareIntensity: { value: 0.0 },
-        },
-        vertexShader: /* glsl */`
-            varying vec2 vUv;
-            void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
-        `,
-        fragmentShader: /* glsl */`
-            precision highp float;
-            uniform sampler2D tDiffuse;
-            uniform vec2      resolution;
-            uniform vec2      center;
-            uniform float     uFlareIntensity;
-            varying vec2      vUv;
-
-            void main() {
-                vec2  ar   = vec2(resolution.x / resolution.y, 1.0);
-                vec2  dir  = vUv - center;                // points away from sun
-                float dist = length(dir * ar);            // aspect-corrected distance
-
-                // Corona annulus: between the solar disk edge (~0.145) and
-                // ~1.9× disk radius (~0.27).  Outside this ring we return
-                // the original pixel untouched — no unnecessary blur.
-                float inner = 0.140;
-                float outer = 0.270;
-                float mask  = smoothstep(inner, inner + 0.025, dist)
-                            * smoothstep(outer, outer - 0.040, dist);
-
-                vec4 orig = texture2D(tDiffuse, vUv);
-                if (mask < 0.002) { gl_FragColor = orig; return; }
-
-                // Gather limb photons by sampling inward along the radial vector.
-                // Exponential weights: the closest inward samples dominate,
-                // producing a sharp inner brightening that falls off outward.
-                vec2  inDir = -normalize(dir);   // inward unit vector
-                vec4  accum = vec4(0.0);
-                float wSum  = 0.0;
-                const int STEPS = 14;
-                for (int i = 1; i <= STEPS; i++) {
-                    float fi  = float(i);
-                    // Sample spacing widens slightly so outer corona gets
-                    // contribution from farther inward regions.
-                    float off = fi * fi * 0.00065;
-                    vec2  uv  = vUv + inDir * off;
-                    float w   = exp(-fi * 0.28);          // exponential falloff
-                    accum    += texture2D(tDiffuse, clamp(uv, vec2(0.0), vec2(1.0))) * w;
-                    wSum     += w;
-                }
-                accum /= wSum;
-
-                // Phase 4.1 — clamp the per-channel HDR gather so an over-
-                // bright limb (e.g. flare flash) can't drive the radial-ray
-                // contribution to blow-out levels. 1.6 is well above any
-                // calm-corona limb but capped enough to kill the death-laser.
-                vec3 accumClamped = min(accum.rgb, vec3(1.6));
-
-                // Dampen the gather strength during flares: the flash
-                // already saturates the photosphere shader; the radial
-                // pass adding more on top is what produced the giant
-                // horizontal rays in the screenshot. 0.07 → 0.018 at peak.
-                float strength = mix(0.07, 0.018, clamp(uFlareIntensity, 0.0, 1.0));
-
-                // Add the gathered limb light to the original pixel.
-                gl_FragColor = vec4(orig.rgb + accumClamped * mask * strength, orig.a);
-            }
-        `,
-    };
-    radialDiffusePass = new ShaderPass(diffuseShader);
-    composer.addPass(radialDiffusePass);
-    radialDiffusePass.enabled = false;   // off: produced radial glow circles
 
     // ── Space occlusion — corona-to-space shadow boundary ────────────────────
     // Final pass: smoothly darkens pixels beyond the bright corona annulus,
@@ -3287,6 +3196,14 @@ const sunFS = /* glsl */`
         col = mix(col, blackbody(max(penT, 4200.0)) * (0.80 + fibrils),
                   penumbra * smoothstep(0.0, 0.15, mu) * u_showSpots);
 
+        // Observed-disk overlay bookkeeping: everything the AR arcade + flare
+        // ribbon section ADDS below is captured as flareAdd so the live flare
+        // event (kernel, ribbons, arcade, EIT wave) can be drawn ON TOP of the
+        // observed frame as an event overlay — the observed mix below would
+        // otherwise erase it on the near side. Observed pixels themselves are
+        // never recoloured; this is an additive marker for a GOES-driven event.
+        vec3 colPreFlare = col;
+
         // ── Active-region UV/EUV brightening (hot blue-white arcade) ─────────
         col += mix(vec3(1.3, 0.95, 0.40), vec3(0.80, 0.90, 1.50),
                    flareActive) * flareActive * 0.75 * u_showFlares;
@@ -3382,6 +3299,7 @@ const sunFS = /* glsl */`
                 col += vec3(0.30, 1.10, 0.80) * eitWave * u_showFlares;
             }
         }
+        vec3 flareAdd = max(col - colPreFlare, vec3(0.0));
 
         // ── Pores — small dark magnetic concentrations in network lanes ────
         // Pores are tiny sunspot-like features (<3500 km) without a
@@ -3492,6 +3410,7 @@ const sunFS = /* glsl */`
         // or shape (plan §5). EUV / magnetogram modes composite below.
         if (u_obsOn > 0.5 && u_viewMode < 0.5) {
             col = mix(col, obsRGB * u_obsTint, obsW);
+            col += flareAdd * obsW * 0.7;     // live flare event overlay on the observed disk
         }
         // ── EUV / magnetogram wavelength views ─────────────────────────────
         // Recolour the whole disc to an SDO channel, synthesised from structural
@@ -8327,9 +8246,7 @@ function _setDoppler(on) {
         uniforms.u_doppler.value = 1.0;
         _obsSuspend('doppler');          // Doppler is a MODEL view (plan §1: model-only toggles)
         // Damp the warm K-corona post-passes so the blue/red map reads cleanly.
-        if (bloomAmbient)      { _dopSaved.bloom   = bloomAmbient.enabled;      bloomAmbient.enabled = false; }
-        if (bloomFlare)        { _dopSaved.bloomF  = bloomFlare.enabled;        bloomFlare.enabled   = false; }
-        if (radialDiffusePass) { _dopSaved.diffuse = radialDiffusePass.enabled; radialDiffusePass.enabled = false; }
+        if (sunPost) { _dopSaved.bloom = sunPost.bloomEnabled; _dopSaved.bloomF = sunPost.flareEnabled; sunPost.bloomEnabled = false; sunPost.flareEnabled = false; }
         if (_outerGlowMesh)    { _dopSaved.outer   = _outerGlowMesh.visible;    _outerGlowMesh.visible = false; }
         sunLOD.visible = true;          _syncLayerUI('tog-photosphere', 'lr-photosphere', true);
         chromoMesh.visible = false;     _syncLayerUI('tog-chrom', 'lr-chrom', false);
@@ -8350,9 +8267,7 @@ function _setDoppler(on) {
         uniforms.u_doppler.value = 0.0;
         _obsResume('doppler');
         if (_dopSaved) {
-            if (bloomAmbient)      bloomAmbient.enabled      = _dopSaved.bloom;
-            if (bloomFlare)        bloomFlare.enabled        = _dopSaved.bloomF;
-            if (radialDiffusePass) radialDiffusePass.enabled = _dopSaved.diffuse;
+            if (sunPost) { sunPost.bloomEnabled = _dopSaved.bloom; sunPost.flareEnabled = _dopSaved.bloomF; }
             if (_outerGlowMesh)    _outerGlowMesh.visible    = _dopSaved.outer;
             sunLOD.visible = _dopSaved.phot;               _syncLayerUI('tog-photosphere', 'lr-photosphere', _dopSaved.phot);
             chromoMesh.visible = _dopSaved.chrom;          _syncLayerUI('tog-chrom', 'lr-chrom', _dopSaved.chrom);
@@ -8412,8 +8327,7 @@ function resize() {
     if (!w || !h) return;
     renderer.setSize(w, h, false);
     composer.setSize(w, h);
-    if (bloomAmbient) bloomAmbient.resolution.set(w, h);
-    if (bloomFlare)   bloomFlare.resolution.set(w, h);
+    if (sunPost) sunPost.setSize(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 new ResizeObserver(resize).observe(canvasWrap);
@@ -8490,13 +8404,6 @@ function animate() {
     // explicit `&& smartTour.active` short-circuits cleanly on early frames.
     if (smartTour && smartTour.active) {
         smartTour.tick(performance.now());
-    }
-
-    // Phase 4.1 — keep the radial-corona-diffusion pass in sync with the
-    // current flare flash so the gather strength + HDR clamp dampen the
-    // horizontal "death laser" during M/X events.
-    if (radialDiffusePass) {
-        radialDiffusePass.uniforms.uFlareIntensity.value = uniforms.u_flare_intensity.value;
     }
 
     // Phase 4.3 — keep the volumetric corona's per-frame inputs synced.
@@ -8784,17 +8691,11 @@ function animate() {
     //     during calm periods (so calm-disk pixels never trigger this
     //     pass even at threshold 1.10), spikes during M/X impulsive
     //     flash, decays with the same envelope as the photosphere flash.
-    if (bloomAmbient) {
-        const target = 0.035 + uniforms.u_activity.value * 0.025
-                     + uniforms.u_kp_norm.value * 0.02;
-        bloomAmbient.strength = THREE.MathUtils.lerp(bloomAmbient.strength, target, 0.04);
-    }
-    if (bloomFlare) {
-        const flareI = uniforms.u_flare_intensity.value;
-        // Kick in above 0.15 so micro-pops don't trigger a flash; ramp
-        // sharply so X-class events get the full punch.
-        const target = flareI < 0.15 ? 0.0 : (flareI - 0.15) * 0.55;
-        bloomFlare.strength = THREE.MathUtils.lerp(bloomFlare.strength, target, 0.20);
+    if (sunPost) {
+        // Base (ambient) strength breathes with activity + Kp; the pass lerps
+        // toward it. The flare boost is gated inside the pass (knee 0.15).
+        sunPost.bloomStrength = 0.05 + uniforms.u_activity.value * 0.03 + uniforms.u_kp_norm.value * 0.02;
+        sunPost.flareIntensity = uniforms.u_flare_intensity.value;
     }
     if (solarFluid && uniforms.u_fluidOn.value > 0.5) {
         solarFluid.step(renderer);
@@ -11737,6 +11638,7 @@ window.__sun = {
     uniforms,
     get fluid() { return solarFluid; },
     get composer() { return composer; },
+    get post() { return sunPost; },                          // Phase 2 HDR post chain (bloom + exposure state)
     setRegions: (r) => { liveRegions = r || []; },   // debug/test: inject active regions
     rebuildMarkers: () => buildRegionMarkers(),       // debug/test: rebuild AR markers
     get regionCount() { return liveRegions.length; },
