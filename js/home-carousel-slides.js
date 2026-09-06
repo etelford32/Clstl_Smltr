@@ -147,7 +147,9 @@ export const CAPTURED_SLIDES = Object.freeze([
             crop: '#c',
             ready: 'typeof window.__evCloudMode === "function"',
             hide: ['nav', '#hud', '#loc-panel', '#layer-panel', '#info-panel', '#sat-status', '#verdict-host',
-                   '#models-panel-host', '#probability-picker-host', '#renewables-panel-host', '#ct-readouts'],
+                   '#models-panel-host', '#probability-picker-host', '#renewables-panel-host', '#ct-readouts',
+                   // These two hold legend canvases, so the generic stripper keeps them.
+                   '#wx-panel', '#probe-panel'],
             settleMs: 10000,
             clipMs: 7000,
         },
