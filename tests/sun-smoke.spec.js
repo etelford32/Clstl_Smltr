@@ -13,9 +13,52 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { solarEphemeris } from '../js/sun-observed.js';
 
-const URL = '/sun.html';
+const PAGE = '/sun.html';
 const BOOT_TIMEOUT_MS = 20_000;
+
+// ── Observed-disk fixtures (SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 1) ─────────
+// The synthetic SDO frames under tests/fixtures/sdo stand in for
+// /api/solar/aia so CI never needs nasa.gov. See that folder's README.
+const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'sdo');
+const FIXTURE_MANIFEST = JSON.parse(readFileSync(join(FIXTURE_DIR, 'manifest.json'), 'utf8'));
+
+/** Serve the synthetic frame for the requested channel, with the provenance header the page reads. */
+// Stamp frames 7 min old by default so the chip reads live (the manifest's
+// noon epoch would honestly read 'expired' by the afternoon — and did).
+async function routeAiaToFixtures(page, { observedAt = new Date(Date.now() - 7 * 60 * 1000).toISOString() } = {}) {
+    const hits = [];
+    await page.route('**/api/solar/aia*', (route) => {
+        const u = new URL(route.request().url());
+        const ch = u.searchParams.get('channel') || 'white';
+        hits.push(ch);
+        const frame = FIXTURE_MANIFEST.frames[ch] || FIXTURE_MANIFEST.frames.white;
+        route.fulfill({
+            status: 200,
+            headers: {
+                'Content-Type': 'image/png',
+                'X-AIA-Channel': ch,
+                'X-AIA-Mode': 'live',
+                'X-SDO-Observed-At': observedAt,
+                'Access-Control-Expose-Headers': 'X-AIA-Channel, X-AIA-Mode, X-SDO-Observed-At',
+            },
+            body: readFileSync(join(FIXTURE_DIR, frame.file)),
+        });
+    });
+    return hits;
+}
+
+/** Make the proxy fail like a sandbox without egress (502 JSON, the route's real failure shape). */
+async function routeAiaDown(page) {
+    await page.route('**/api/solar/aia*', (route) => route.fulfill({
+        status: 502, contentType: 'application/json',
+        body: JSON.stringify({ error: 'aia_unavailable', detail: 'test: feed down' }),
+    }));
+}
 
 function attachConsoleRecorder(page) {
     const errors = [];
@@ -61,7 +104,7 @@ test.describe('sun.html smoke', () => {
 
     test('boots and renders frames without shader/console errors', async ({ page }) => {
         const errors = attachConsoleRecorder(page);
-        await page.goto(URL);
+        await page.goto(PAGE);
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         // Let the WebGL scene + post-processing render several frames; a broken
         // shader would have logged a compile error by now.
@@ -75,7 +118,7 @@ test.describe('sun.html smoke', () => {
 
     test('all 7 structural layers toggle without throwing', async ({ page }) => {
         const errors = attachConsoleRecorder(page);
-        await page.goto(URL);
+        await page.goto(PAGE);
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         await page.waitForTimeout(500);
 
@@ -121,7 +164,7 @@ test.describe('sun.html smoke', () => {
     });
 
     test('animation loop keeps advancing', async ({ page }) => {
-        await page.goto(URL);
+        await page.goto(PAGE);
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         const f0 = await page.evaluate(() => window.__sun.frames);
         await page.waitForTimeout(1000);
@@ -131,7 +174,7 @@ test.describe('sun.html smoke', () => {
 
     test('cutaway peel toggles + depth slider without throwing', async ({ page }) => {
         const errors = attachConsoleRecorder(page);
-        await page.goto(URL);
+        await page.goto(PAGE);
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         await page.waitForTimeout(500);
 
@@ -177,7 +220,7 @@ test.describe('sun.html smoke', () => {
 
     test('Doppler velocity view toggles cleanly', async ({ page }) => {
         const errors = attachConsoleRecorder(page);
-        await page.goto(URL);
+        await page.goto(PAGE);
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         await page.waitForTimeout(500);
 
@@ -212,7 +255,7 @@ test.describe('sun.html smoke', () => {
 
     test('EUV / magnetogram wavelength views cycle cleanly', async ({ page }) => {
         const errors = attachConsoleRecorder(page);
-        await page.goto(URL);
+        await page.goto(PAGE);
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         await page.waitForTimeout(500);
 
@@ -241,5 +284,157 @@ test.describe('sun.html smoke', () => {
         const filtered = errors.filter((e) => !isExpectedNoise(e.text));
         if (filtered.length) console.error('Console errors:', filtered);
         expect(filtered, 'no errors cycling wavelength views').toHaveLength(0);
+    });
+
+    // ── Observed disk (Phase 1) ──────────────────────────────────────────────
+    test('feed down → boots in MODEL mode, chip says so, u_obsOn stays 0', async ({ page }) => {
+        const errors = attachConsoleRecorder(page);
+        await routeAiaDown(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.observed && window.__sun.observed.reason === 'feed-down', { timeout: BOOT_TIMEOUT_MS });
+        const st = await page.evaluate(() => ({
+            obsOn: window.__sun.uniforms.u_obsOn.value,
+            mode:  window.__sun.observed.mode,
+            chip:  document.getElementById('sun-provenance').textContent,
+            cls:   document.getElementById('sun-provenance').className,
+        }));
+        expect(st.obsOn, 'u_obsOn is 0 with no frame').toBe(0);
+        expect(st.mode).toBe('model');
+        expect(st.chip).toMatch(/^MODEL · procedural photosphere · feed down$/);
+        expect(st.cls).toContain('prov-model');
+        // The procedural photosphere still renders (this IS the CI path).
+        await page.waitForFunction(() => window.__sun.frames > 5, { timeout: BOOT_TIMEOUT_MS });
+        const filtered = errors.filter((e) => !isExpectedNoise(e.text));
+        if (filtered.length) console.error('Console errors:', filtered);
+        expect(filtered, 'no errors on the feed-down path').toHaveLength(0);
+    });
+
+    test('observed by default: fixture frame wraps the disk, chip says OBSERVED with instrument + age, rotation goes real-time', async ({ page }) => {
+        const errors = attachConsoleRecorder(page);
+        const hits = await routeAiaToFixtures(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.observed?.mode === 'observed', { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.frames > 5, { timeout: BOOT_TIMEOUT_MS });
+        const st = await page.evaluate(() => {
+            const u = window.__sun.uniforms;
+            return {
+                obsOn: u.u_obsOn.value, hasTex: !!u.u_obsTex.value, kind: u.u_obsKind.value,
+                geom: u.u_obsGeom.value.toArray(), b0: u.u_obsB0.value,
+                rot: u.u_rot.value, hudRot: document.getElementById('hud-rot').textContent,
+                state: window.__sun.observed,
+                chip: document.getElementById('sun-provenance').textContent,
+                cls: document.getElementById('sun-provenance').className,
+            };
+        });
+        expect(hits[0], 'first fetch is the white-light frame').toBe('white');
+        expect(st.obsOn).toBe(1);
+        expect(st.hasTex).toBe(true);
+        expect(st.kind).toBe(0);
+        expect(st.state.channel).toBe('white');
+        expect(st.state.pAngleApplied, 'P is exposed, not applied').toBe(false);
+        expect(st.chip).toMatch(/^OBSERVED · SDO\/HMI continuum · \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · 7 min old$/);
+        expect(st.cls).toContain('prov-observed');
+        // Disk geometry is MEASURED from the frame (synthetic HMI: r = 0.465 of the frame).
+        expect(st.state.geometry).toBe('measured');
+        expect(Math.abs(st.geom[2] - 0.465)).toBeLessThan(0.465 * 0.012);
+        // B0 is the ephemeris value for the frame's observation time (today − 7 min).
+        expect(Math.abs(st.b0 * 180 / Math.PI - solarEphemeris(new Date()).b0Deg)).toBeLessThan(0.05);
+        // Observed ⇒ real-time rotation multiplier, and the HUD says so.
+        expect(st.rot).toBeLessThan(0.01);
+        expect(st.hudRot).toContain('real-time');
+        const filtered = errors.filter((e) => !isExpectedNoise(e.text));
+        if (filtered.length) console.error('Console errors:', filtered);
+        expect(filtered, 'no errors on the observed path').toHaveLength(0);
+    });
+
+    test('EUV mode fetches the matching AIA frame; cutaway / Doppler drop to MODEL and restore; chip click toggles', async ({ page }) => {
+        const errors = attachConsoleRecorder(page);
+        const hits = await routeAiaToFixtures(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.observed?.mode === 'observed', { timeout: BOOT_TIMEOUT_MS });
+        const setView = (v) => page.evaluate((val) => {
+            const el = document.getElementById('view-mode');
+            el.value = val; el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, v);
+        const setTog = (id, on) => page.evaluate(({ id, on }) => {
+            const el = document.getElementById(id);
+            if (el.checked !== on) { el.checked = on; el.dispatchEvent(new Event('change', { bubbles: true })); }
+        }, { id, on });
+        const obs = () => page.evaluate(() => ({
+            on: window.__sun.uniforms.u_obsOn.value, kind: window.__sun.uniforms.u_obsKind.value,
+            geomR: window.__sun.uniforms.u_obsGeom.value.z,
+            st: window.__sun.observed, chip: document.getElementById('sun-provenance').textContent,
+        }));
+
+        // 171 Å → the AIA frame (kind 1, AIA disk fraction ≈ 0.390 measured).
+        await setView('2');
+        await page.waitForFunction(() => window.__sun.observed?.mode === 'observed' && window.__sun.observed.channel === '171', { timeout: BOOT_TIMEOUT_MS });
+        let s = await obs();
+        expect(hits).toContain('171');
+        expect(s.kind).toBe(1);
+        expect(Math.abs(s.geomR - 0.390)).toBeLessThan(0.390 * 0.012);
+        expect(s.chip).toMatch(/^OBSERVED · SDO\/AIA 171 Å/);
+
+        // Magnetogram → HMI LOS (kind 2).
+        await setView('6');
+        await page.waitForFunction(() => window.__sun.observed?.channel === 'mag' && window.__sun.observed.mode === 'observed', { timeout: BOOT_TIMEOUT_MS });
+        s = await obs();
+        expect(s.kind).toBe(2);
+        await setView('0');
+        await page.waitForFunction(() => window.__sun.observed?.channel === 'white' && window.__sun.observed.mode === 'observed', { timeout: BOOT_TIMEOUT_MS });
+
+        // Cutaway is a MODEL view: observed off while peeled, back when un-peeled.
+        await setTog('tog-cutaway', true);
+        await page.waitForTimeout(150);
+        s = await obs();
+        expect(s.on).toBe(0);
+        expect(s.chip).toMatch(/^MODEL · procedural photosphere · cutaway$/);
+        await setTog('tog-cutaway', false);
+        await page.waitForFunction(() => window.__sun.observed?.mode === 'observed', { timeout: BOOT_TIMEOUT_MS });
+        s = await obs();
+        expect(s.on).toBe(1);
+
+        // Doppler likewise.
+        await setTog('tog-doppler', true);
+        await page.waitForTimeout(150);
+        s = await obs();
+        expect(s.on).toBe(0);
+        expect(s.chip).toMatch(/^MODEL · procedural photosphere · Doppler$/);
+        await setTog('tog-doppler', false);
+        await page.waitForFunction(() => window.__sun.observed?.mode === 'observed', { timeout: BOOT_TIMEOUT_MS });
+
+        // The chip is the toggle: click → Model (sim rotation restored), click → Observed.
+        await page.evaluate(() => document.getElementById('sun-provenance').click());
+        await page.waitForTimeout(100);
+        s = await obs();
+        expect(s.on).toBe(0);
+        expect(s.chip).toMatch(/^MODEL · procedural photosphere$/);
+        const rotModel = await page.evaluate(() => window.__sun.uniforms.u_rot.value);
+        expect(rotModel).toBeGreaterThanOrEqual(0.2);
+        await page.evaluate(() => document.getElementById('sun-provenance').click());
+        await page.waitForFunction(() => window.__sun.observed?.mode === 'observed', { timeout: BOOT_TIMEOUT_MS });
+        s = await obs();
+        expect(s.on).toBe(1);
+
+        const filtered = errors.filter((e) => !isExpectedNoise(e.text));
+        if (filtered.length) console.error('Console errors:', filtered);
+        expect(filtered, 'no errors switching observed/model').toHaveLength(0);
+    });
+
+    test('?observed=0 boots in MODEL mode by user choice (rotation stays the sim rate)', async ({ page }) => {
+        await routeAiaToFixtures(page);
+        await page.goto(PAGE + '?observed=0');
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForTimeout(300);
+        const st = await page.evaluate(() => ({
+            on: window.__sun.uniforms.u_obsOn.value, rot: window.__sun.uniforms.u_rot.value,
+            chip: document.getElementById('sun-provenance').textContent,
+        }));
+        expect(st.on).toBe(0);
+        expect(st.rot).toBe(1);
+        expect(st.chip).toMatch(/^MODEL · procedural photosphere$/);
     });
 });

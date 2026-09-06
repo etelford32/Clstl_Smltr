@@ -119,6 +119,19 @@ nav {
 #btn-center     { bottom:16px; right:12px; }
 /* SDO imagery button */
 #btn-sdo { top:12px; right:115px; }
+/* Observed / Model provenance chip (SUN_VISUALS_WORLD_CLASS_PLAN.md §5: the
+   chip is never wrong). Top-centre: the HUD owns top-left, the buttons own
+   top-right. Click toggles Observed ↔ Model. */
+#sun-provenance {
+    top:12px; left:50%; transform:translateX(-50%);
+    max-width:calc(100vw - 460px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    font-variant-numeric:tabular-nums; letter-spacing:.2px;
+}
+#sun-provenance.prov-observed { border-color:rgba(110,220,150,.55); color:#9fe6ad; }
+#sun-provenance.prov-stale    { border-color:rgba(255,200,60,.65);  color:#ffd166; }
+#sun-provenance.prov-model    { border-color:rgba(255,130,70,.55);  color:#ffb38a; }
+#sun-provenance::before { content:'●'; margin-right:7px; font-size:9px; vertical-align:1px; }
+@media (max-width: 768px) { #sun-provenance { top:auto; bottom:64px; max-width:calc(100vw - 24px); font-size:11px; } }
 #btn-sw  { top:12px; right:215px; }
 
 /* ─── SDO Live Imagery drawer ──────────────────────────────── */
@@ -778,6 +791,7 @@ import './js/telemetry.js';
         <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
         <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
         <button class="cv-btn" id="btn-sdo" title="Live SDO imagery">🔭 SDO Live</button>
+        <button class="cv-btn prov-model" id="sun-provenance" title="Observed (SDO frame on the near side) ↔ Model (procedural photosphere). Click to toggle." aria-live="polite">MODEL · procedural photosphere · loading</button>
         <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data">⚡ Weather</a>
         <div id="backdrop"></div>
 
@@ -1707,6 +1721,7 @@ import { SolarLSTM, normalise as lstmNormalise, denormalise as lstmDenorm, FEATU
 import { initSunWatch } from './js/sun-watch.js';
 import { startFluxRopeProvider, trainStateAt, scrubMarks } from './js/sun-flux-rope.js';
 import { initSunRopeOverlay } from './js/sun-rope-overlay.js';
+import { SunObserved, VIEW_MODE_CHANNEL, REAL_TIME_ROT_MUL, solarEphemeris } from './js/sun-observed.js';
 
 
 // PANEL
@@ -2236,6 +2251,18 @@ const uniforms = {
     u_fluidDebug:        { value: 0.0 },
     u_showSpots:         { value: 1.0 },   // 1 = show sunspots, 0 = hide
     u_showFlares:        { value: 1.0 },   // 1 = show flares,   0 = hide
+    // ── OBSERVED disk (SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 1) — the live SDO
+    // frame wrapped on the Earth-facing hemisphere; js/sun-observed.js drives
+    // these. u_obsOn is never 1 with a null texture (the chip must not lie).
+    u_obsOn:             { value: 0.0 },
+    u_obsTex:            { value: null },
+    u_obsPrev:           { value: null },
+    u_obsFade:           { value: 1.0 },   // cross-fade prev→current frame (0..1)
+    u_obsGeom:           { value: new THREE.Vector4(0.5, 0.5, 0.465, 0) },  // (cx, 1−cy, r, −): disk in texture space
+    u_obsB0:             { value: 0.0 },   // heliographic latitude of disk centre, radians
+    u_obsKind:           { value: 0.0 },   // 0 HMI continuum · 1 AIA EUV · 2 HMI magnetogram
+    u_obsTint:           { value: new THREE.Vector3(1.25, 1.02, 0.70) },  // greyscale HMI → the page's photosphere palette (tune on hardware)
+    u_obsGrid:           { value: 1.0 },   // faint 15° graticule on the UNOBSERVED hemisphere
     // ── Live solar wind uniforms (driven by DSCOVR/ACE L1 pipeline) ──
     u_wind_speed_norm:   { value: 0.23 },  // (400-250)/650 ≈ 0.23 nominal slow wind
     u_wind_density_norm: { value: 0.20 },  // 5/25 = 0.20 nominal background
@@ -2653,6 +2680,16 @@ const sunFS = /* glsl */`
     uniform float u_rot;
     uniform float u_showSpots;
     uniform float u_showFlares;
+    // Observed disk (js/sun-observed.js — the module header documents the geometry)
+    uniform float     u_obsOn;
+    uniform sampler2D u_obsTex;
+    uniform sampler2D u_obsPrev;
+    uniform float     u_obsFade;
+    uniform vec4      u_obsGeom;
+    uniform float     u_obsB0;
+    uniform float     u_obsKind;
+    uniform vec3      u_obsTint;
+    uniform float     u_obsGrid;
     uniform float u_f107_norm;       // F10.7 solar cycle proxy [0-1]: 0=min, 1=max
     uniform float u_electron_norm;   // GOES >2MeV electron flux [0-1]
     uniform float u_proton_norm;     // GOES >10MeV proton flux [0-1]
@@ -2878,6 +2915,35 @@ const sunFS = /* glsl */`
         float sinLat2 = sin(lat) * sin(lat);
         float diffRot  = 1.0 - 0.19 * sinLat2 - 0.09 * sinLat2 * sinLat2;
         float rotLon   = lon + u_time * 0.014 * u_rot * diffRot;
+
+        // ── OBSERVED disk sample (Phase 1) ────────────────────────────────
+        // De-rotate this fragment to the observation epoch with the SAME
+        // rotation the AR slots apply (x = c·x0 − s·z0, z = s·x0 + c·z0 about
+        // +y by u_time·0.014·u_rot·diffRot — see the u_arSpots fill), tilt
+        // into the Earth-view frame by B0, and read the frame orthographically
+        // (u = cx + x·r, v = (1−cy) + y·r). obsW is the observed weight: 1 on
+        // the near side, a soft roll-off over the last 0.08 of q.z into the
+        // procedural limb fringe, 0 on the far side. The frame's own limb
+        // darkening is real — no shading is layered over an observed pixel.
+        float obsW   = 0.0;
+        vec3  obsRGB = vec3(0.0);
+        float gridLon = lon;
+        if (u_obsOn > 0.5) {
+            float ra = u_time * 0.014 * u_rot * diffRot;
+            float cr = cos(ra), sr = sin(ra);
+            vec3  pN = normalize(vPosition);
+            vec3  p0 = vec3(cr * pN.x + sr * pN.z, pN.y, -sr * pN.x + cr * pN.z);
+            gridLon  = atan(p0.x, p0.z);
+            float cb = cos(u_obsB0), sb = sin(u_obsB0);
+            vec3  q  = vec3(p0.x, p0.y * cb - p0.z * sb, p0.y * sb + p0.z * cb);
+            if (q.z > 0.0) {
+                vec2 tuv = vec2(u_obsGeom.x + q.x * u_obsGeom.z, u_obsGeom.y + q.y * u_obsGeom.z);
+                vec3 a = texture2D(u_obsTex,  tuv).rgb;
+                vec3 b = texture2D(u_obsPrev, tuv).rgb;
+                obsRGB = mix(b, a, u_obsFade);
+                obsW   = smoothstep(0.0, 0.08, q.z);
+            }
+        }
         // Combined rotation factor used by all texture-scrolling terms below
         float rotF     = u_rot * diffRot;
 
@@ -3419,6 +3485,14 @@ const sunFS = /* glsl */`
         // the bloom-accumulated output).
         col = acesFilm(col * 0.95) * 1.18;
 
+        // ── OBSERVED disk composite (white light) ─────────────────────────
+        // The observed pixel replaces the procedural photosphere wherever it
+        // exists; only a tint maps the greyscale HMI continuum onto the page's
+        // palette. Nothing procedural may change an observed pixel's colour
+        // or shape (plan §5). EUV / magnetogram modes composite below.
+        if (u_obsOn > 0.5 && u_viewMode < 0.5) {
+            col = mix(col, obsRGB * u_obsTint, obsW);
+        }
         // ── EUV / magnetogram wavelength views ─────────────────────────────
         // Recolour the whole disc to an SDO channel, synthesised from structural
         // fields already computed: magnetic network (sgNet), active-region plage,
@@ -3479,7 +3553,23 @@ const sunFS = /* glsl */`
                 euv = vec3(0.5 + b * 0.5) * (0.65 + 0.35 * mu);
             }
             if (u_viewMode < 5.5) euv *= (1.0 - umbra * 0.85);          // sunspots read dark in EUV too
+            // OBSERVED channel frame (AIA / HMI magnetogram) on the near side;
+            // the synthetic ramp stays as the far-side fill + offline fallback.
+            if (u_obsOn > 0.5) euv = mix(euv, obsRGB, obsW);
             col = euv;
+        }
+
+        // Far-side graticule: a faint 15° heliographic grid on the hemisphere
+        // that is NOT observed — the at-a-glance cue that this half is the
+        // model, in white light and in the EUV / magnetogram views alike.
+        // Drawn in the observation-epoch frame so it turns with the features,
+        // and only while an observed frame is on (u_obsOn is 0 in Doppler).
+        if (u_obsOn > 0.5 && u_obsGrid > 0.5) {
+            float gStep = 0.26179939;   // 15°
+            float gLat = abs(fract(lat / gStep + 0.5) - 0.5) * gStep;
+            float gLon = abs(fract(gridLon / gStep + 0.5) - 0.5) * gStep * cos(lat);
+            float g = 1.0 - min(smoothstep(0.0, 0.004, gLat), smoothstep(0.0, 0.004, gLon));
+            col = mix(col, col * 0.55 + vec3(0.14, 0.08, 0.03), g * (1.0 - obsW) * 0.65);
         }
 
         // ── Doppler velocity mode (Phase 5) ───────────────────────────────
@@ -3537,6 +3627,76 @@ try {
 } catch (e) {
     console.warn('[Sun] fluid solver unavailable, using procedural granulation:', e.message);
     uniforms.u_fluidOn.value = 0.0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ☉ OBSERVED DISK — SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 1 (observed-by-default)
+//  The Earth-facing hemisphere is the live SDO frame (HMI continuum in white
+//  light, the AIA channel in EUV modes, HMI LOS in magnetogram mode) through
+//  /api/solar/aia; the far side and every model-only view (cutaway, Doppler)
+//  stay procedural. The #sun-provenance chip says which is on screen.
+//
+//  Rotation: an observed frame is a snapshot, so while Observed is on the
+//  rotation rate is REAL TIME (REAL_TIME_ROT_MUL × the rotation slider) —
+//  the sim's ~2900× default would carry the observation off the near side
+//  in minutes. Model mode restores the slider's sim rate. The disk is also
+//  de-rotated in sunFS by the same rotation the AR slots use, so image
+//  sunspots and shader sunspots never separate whatever the clock does.
+// ═══════════════════════════════════════════════════════════════════════════
+let sunObserved = null;
+let _obsUserOn = true;                       // the chip toggle (?observed=0 starts off)
+const _obsSuspenders = new Set();            // 'cutaway' | 'doppler' — model-only views
+let _obsRotSaved = null;                     // slider rate to restore on Model
+function _obsShouldBeOn() { return _obsUserOn && _obsSuspenders.size === 0; }
+function _obsSliderRot() { return +(document.getElementById('sl-rot')?.value) || 1.0; }
+function _obsApply(reason) {
+    if (!sunObserved) return;
+    const hudRot = document.getElementById('hud-rot');
+    if (_obsShouldBeOn()) {
+        if (_obsRotSaved == null) _obsRotSaved = uniforms.u_rot.value;
+        uniforms.u_rot.value = REAL_TIME_ROT_MUL * _obsSliderRot();
+        if (hudRot) hudRot.textContent = 'real-time · 27.3';
+        sunObserved.setEnabled(true);
+    } else {
+        sunObserved.setEnabled(false, reason);
+        if (_obsRotSaved != null) { uniforms.u_rot.value = _obsSliderRot(); _obsRotSaved = null; }
+        if (hudRot) hudRot.textContent = (25.4 / _obsSliderRot()).toFixed(1);
+    }
+}
+function _obsSuspend(why) { _obsSuspenders.add(why); _obsApply(why); }
+function _obsResume(why)  { _obsSuspenders.delete(why); _obsApply('user'); }
+function _obsRenderChip(state) {
+    const el = document.getElementById('sun-provenance');
+    if (!el) return;
+    el.textContent = state.label;
+    el.classList.remove('prov-observed', 'prov-stale', 'prov-model');
+    const stale = state.mode === 'observed' && /stale|expired|refresh failed/.test(state.label);
+    el.classList.add(state.mode === 'observed' ? (stale ? 'prov-stale' : 'prov-observed') : 'prov-model');
+    el.title = state.mode === 'observed'
+        ? `Observed: SDO frame on the Earth-facing hemisphere (disk geometry ${state.geometry}, B0 ${state.b0Deg.toFixed(2)}°, P ${state.pDeg.toFixed(1)}° not applied — frames are north-up). Far side is procedural (15° grid). Click for Model.`
+        : 'Model: procedural photosphere on the whole sphere. Click for Observed (live SDO frame).';
+}
+{
+    const qp = new URLSearchParams(location.search);
+    if (qp.get('observed') === '0') _obsUserOn = false;
+    sunObserved = new SunObserved({
+        THREE, uniforms,
+        base: qp.get('aiaBase') || '/api/solar/aia',
+        res:  (window.devicePixelRatio || 1) >= 1.5 ? 2048 : 1024,
+        onState: _obsRenderChip,
+    });
+    // Look from Earth's direction: disk centre sits at heliographic lat B0, so
+    // the visible limb and the observed/model terminator coincide on load.
+    const b0 = solarEphemeris(new Date()).b0Deg * Math.PI / 180;
+    camera.position.set(0, Math.sin(b0) * 6, Math.cos(b0) * 6);
+    controls.update();
+    document.getElementById('sun-provenance')?.addEventListener('click', () => {
+        _obsUserOn = !_obsUserOn;
+        _obsApply('user');
+    });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sunObserved?.refresh(); });
+    _obsApply('user');
+    sunObserved.start();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -8095,6 +8255,7 @@ function _setCutaway(on) {
         uniforms.u_cut.value.set(d.x, d.y, d.z);
         uniforms.u_cutOffset.value = _cutDepthFromSlider();
         uniforms.u_cutaway.value = 1.0;
+        _obsSuspend('cutaway');          // the peel exposes the MODEL interior
         // Turn the convective shell into a SOLID, depth-tested boiling surface so
         // the peeled window shows real structured convection occluding space —
         // not the additive ghost-glow it uses as an overlay. (The additive
@@ -8115,6 +8276,7 @@ function _setCutaway(on) {
     } else {
         uniforms.u_cutaway.value = 0.0;
         uniforms.u_cutOffset.value = 2.0;   // plane beyond the sphere = no clip
+        _obsResume('cutaway');
         // Restore the additive ghost-shell overlay material.
         cm.blending    = THREE.AdditiveBlending;
         cm.transparent = true;
@@ -8163,6 +8325,7 @@ function _setDoppler(on) {
             core: coreMesh.visible, radiative: radiativeMesh.visible, convective: convectiveMesh.visible,
         };
         uniforms.u_doppler.value = 1.0;
+        _obsSuspend('doppler');          // Doppler is a MODEL view (plan §1: model-only toggles)
         // Damp the warm K-corona post-passes so the blue/red map reads cleanly.
         if (bloomAmbient)      { _dopSaved.bloom   = bloomAmbient.enabled;      bloomAmbient.enabled = false; }
         if (bloomFlare)        { _dopSaved.bloomF  = bloomFlare.enabled;        bloomFlare.enabled   = false; }
@@ -8185,6 +8348,7 @@ function _setDoppler(on) {
         if (legend) legend.style.display = 'block';
     } else {
         uniforms.u_doppler.value = 0.0;
+        _obsResume('doppler');
         if (_dopSaved) {
             if (bloomAmbient)      bloomAmbient.enabled      = _dopSaved.bloom;
             if (bloomFlare)        bloomFlare.enabled        = _dopSaved.bloomF;
@@ -8224,6 +8388,7 @@ function _applyViewLayers(channel) {
 document.getElementById('view-mode')?.addEventListener('change', e => {
     const m = parseFloat(e.target.value) || 0;
     uniforms.u_viewMode.value = m;
+    sunObserved?.setChannel(VIEW_MODE_CHANNEL[m] || 'white');   // observed frame follows the channel
     // EUV/magnetogram and Doppler are mutually exclusive views.
     if (m > 0) {
         const dop = document.getElementById('tog-doppler');
@@ -8271,10 +8436,17 @@ let liveFlares    = [];   // [{time, cls, loc, reg}, ...]
 let liveXrayFlux  = null; // W/m² (latest GOES reading)
 
 // ANIMATE
+// Frame-time ring for window.__sun.perf (Phase 0: every visual PR reports a
+// number). p50/p95 over the last 120 frames, wall clock, includes the composer.
+const _perfRing = new Float32Array(120); let _perfN = 0, _perfLast = 0;
 function animate() {
     requestAnimationFrame(animate);
+    const nowMs = performance.now();
+    if (_perfLast) { _perfRing[_perfN % 120] = nowMs - _perfLast; _perfN++; }
+    _perfLast = nowMs;
     const dt = 0.010 * simSpeed;
     uniforms.u_time.value += dt;
+    if (sunObserved) sunObserved.tick();
 
     // Phase 2 prominence bundles — re-classify each frame so EP state machines
     // and class transitions evolve smoothly. Then tick uniforms (time, camera
@@ -8681,10 +8853,12 @@ document.getElementById('sl-activity').addEventListener('input', function() {
     document.getElementById('hud-activity').textContent  = this.value;
 });
 document.getElementById('sl-rot').addEventListener('input', function() {
-    uniforms.u_rot.value = +this.value;
+    // Observed ⇒ real-time rate × slider; Model ⇒ the sim rate (see the observed block).
+    const observedOn = sunObserved && _obsShouldBeOn();
+    uniforms.u_rot.value = observedOn ? REAL_TIME_ROT_MUL * +this.value : +this.value;
     document.getElementById('disp-rot').textContent = (+this.value).toFixed(1) + '×';
     const rotDays = (25.4 / +this.value).toFixed(1);
-    document.getElementById('hud-rot').textContent = rotDays;
+    document.getElementById('hud-rot').textContent = observedOn ? 'real-time · ' + (27.3 / +this.value).toFixed(1) : rotDays;
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -11590,6 +11764,20 @@ window.__sun = {
     },
     get frames() { return renderer.info.render.frame; },
     get watch() { return window.__sunWatch; },           // Sun Watch dock handle
+    // Observed-disk hooks (SUN_VISUALS_WORLD_CLASS_PLAN.md Phases 0–1)
+    get observed() { return sunObserved ? sunObserved.getState() : null; },   // provenance snapshot
+    get observedCtl() { return sunObserved; },
+    setObserved: (on) => { _obsUserOn = !!on; _obsApply('user'); },
+    refreshObserved: () => sunObserved?.refresh(true),
+    /** Freeze the sim clock at a fixed u_time so a screenshot is deterministic. */
+    freeze: (simTime = 120) => { setSimSpeed(0); uniforms.u_time.value = simTime; },
+    /** Rolling frame-time statistics (ms) — p50 / p95 over the last 120 frames. */
+    get perf() {
+        const n = Math.min(_perfN, 120);
+        if (!n) return { n: 0, p50: null, p95: null };
+        const a = Array.from(_perfRing.subarray(0, n)).sort((x, y) => x - y);
+        return { n, p50: a[Math.floor(n * 0.5)], p95: a[Math.min(n - 1, Math.floor(n * 0.95))] };
+    },
     get scrubTrack() { return _scrubTrack; },            // event-track draw list (test hook)
     get scrubTimeline() { return swpcTimeline; },        // 7d+24h scrub data (test hook)
 };

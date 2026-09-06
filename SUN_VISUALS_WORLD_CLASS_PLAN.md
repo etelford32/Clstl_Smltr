@@ -8,13 +8,72 @@
 > `SUN_CONVECTION_UPGRADE_PLAN.md` for the convection work this plan sits on
 > top of and does NOT redo.
 
-*Status: PLANNED (2026-09-06). Decisions in §1 are locked by the repo owner.
-Nothing below is implemented yet.*
+*Status: Phases 0–1 IMPLEMENTED (2026-09-06); Phases 2–6 planned. Decisions
+in §1 are locked by the repo owner.*
 
 ### Progress log
 
 - **2026-09-06** — plan written. Owner decisions: no game engine (§2),
   observed-by-default disk (§1).
+- **2026-09-06 — Phase 0 (done, software-GL half).** `tests/sun-visual.spec.js`
+  (`@gpu`, skipped unless `SUN_GPU=1`; 6 scenes × 720p/1440p; fixtures
+  routed, off-origin blocked, sim clock frozen via `__sun.freeze`), the
+  `snapshotPathTemplate` in `playwright.config.js` → `tests/__visual__/`,
+  `window.__sun.perf` (p50/p95 over 120 frames) and `__sun.freeze`.
+  **NASA egress is blocked from the build sandbox**, so the committed
+  fixtures are SYNTHETIC (`tests/fixtures/sdo/synthetic_*.png`, 512², ~0.9 MB,
+  rendered by `scripts/make-sdo-synthetic-fixtures.mjs` with the real
+  browse-frame geometry + three planted ARs; README in the folder says so).
+  `scripts/fetch-sdo-fixtures.mjs` writes the real set on a machine with
+  egress and the visual spec prefers it. **The baseline PNGs are NOT yet
+  captured** — that half of Phase 0 needs the owner's GPU:
+  `SUN_GPU=1 npx playwright test tests/sun-visual.spec.js --update-snapshots`,
+  then commit `tests/__visual__/` and add the GPU + perf numbers here.
+- **2026-09-06 — Phase 1 (done).** `js/sun-observed.js` (pure half:
+  Meeus B0/P ephemeris — pinned to the ±7.25° / ±26.25° extremes —,
+  disk→sphere projection, disk MEASUREMENT from the decoded frame with
+  per-instrument fallbacks, chip label; browser half: fetch through the
+  proxy, cross-fade, keep-last-good, visibility-aware refresh),
+  `tests/sun-observed.mjs` (17 checks incl. the 1.5° AR-alignment tolerance
+  on the fixture ground truth), sunFS observed sample + composite (white
+  light, EUV, magnetogram; far-side 15° graticule), the `#sun-provenance`
+  chip (top-centre; click toggles Observed ↔ Model; `?observed=0`),
+  `api/solar/aia.js` provenance headers + `meta=1` JSON, `solar-aia`
+  registered in `js/pipeline-registry.js` (it had been unmonitored since
+  July) + `sdo-latest` in `api/health.js`. `tests/sun-smoke.spec.js` gains
+  four tests (feed-down → MODEL, observed boot, channel/cutaway/Doppler/chip
+  round-trips, `?observed=0`); all 10 green on software GL. Verified by
+  eye on software GL only: the planted west spot lands upper-right, the east
+  spots left, north up. **Decisions and findings made while building:**
+  - **Observed ⇒ real-time rotation.** The page's sim rotates ~2900× real
+    time (0.014 rad per sim unit at 0.6 units/s), which would carry an
+    observed frame off the near side in ~6 min. While Observed is on,
+    `u_rot` = `REAL_TIME_ROT_MUL` × the rotation slider (one synodic
+    rotation in 27.28 d); Model restores the slider's sim rate; the HUD
+    says "real-time". The frame is also de-rotated in sunFS by exactly the
+    AR-slot rotation, so image spots and shader spots stay locked whatever
+    the clock does.
+  - **Pre-existing discrepancy, not touched:** the AR slots (`u_arSpots`)
+    rotate EASTWARD at 0.014 rad/unit while the marker `regionGroup`
+    rotates WESTWARD at 0.004·2π/unit (`solarRotAngle`) — markers and
+    shader sunspots have always drifted apart at sim rate. Invisible at
+    real-time rate; a Phase 4 fix candidate (make both the slot math).
+  - **B0 is applied, P is not.** NASA's browse frames are north-up, so only
+    B0 (disk-centre latitude, up to ±7.25°) orients the projection; P is
+    computed and shown in the chip tooltip as `not applied`. The default
+    camera now sits on Earth's direction `(0, sin B0, cos B0)` so the
+    visible limb and the observed/model terminator coincide on load.
+  - **Disk radius is measured, per instrument.** HMI ≈ 0.465 and AIA ≈
+    0.390 of the frame radius (plate scales differ). The Stage
+    (`js/stage/stage.js:307`) uses 0.485 for both, ~25 % too large for its
+    171 shell — recorded here, not fixed here (different page).
+  - **Far-side graticule is 15°, not the 3° the plan first said** — 3° is
+    a moiré at 128 segments. GONG far-side seeding of the far hemisphere is
+    DEFERRED (the `series` format exists on `/api/solar/farside`; wiring it
+    into a plage term is a small follow-up, listed in §9).
+  - **HMI tint** `u_obsTint` (1.25, 1.02, 0.70) and the observed/procedural
+    seam brightness were set on software GL and need the owner's eye; both
+    are live on `__sun.uniforms`.
 
 ---
 
@@ -383,8 +442,8 @@ owner's GPU, and *identical* screenshots on the Phase 0 baseline scenes
 
 | Phase | New | Modified |
 |---|---|---|
-| 0 | `tests/sun-visual.spec.js`, `tests/fixtures/sdo/*`, `tests/__visual__/sun/*` | `sun.html` (`__sun.setClock`, `__sun.aiaBase`, `__sun.perf`), `playwright.config.js` (`@gpu` grep) |
-| 1 | `js/sun-observed.js`, `tests/sun-observed.mjs` | `sun.html` (photosphere uniforms + chip UI), `api/solar/aia.js` (headers), `js/pipeline-registry.js` (`solar-aia`), `tests/sun-smoke.spec.js` |
+| 0 | `tests/sun-visual.spec.js`, `tests/fixtures/sdo/*`, `scripts/make-sdo-synthetic-fixtures.mjs`, `scripts/fetch-sdo-fixtures.mjs`, `scripts/lib/sdo-synth.mjs`, `tests/__visual__/` (baselines: pending GPU) | `sun.html` (`__sun.freeze`, `__sun.perf`), `playwright.config.js` (`snapshotPathTemplate`) |
+| 1 | `js/sun-observed.js`, `tests/sun-observed.mjs` | `sun.html` (photosphere uniforms + sunFS + chip UI + mode handlers), `api/solar/aia.js` (headers + `meta=1`), `js/pipeline-registry.js` (`solar-aia`), `api/health.js` (`sdo-latest`), `tests/sun-smoke.spec.js` |
 | 2 | `js/sun-post.js`, `tests/sun-post.mjs` | `sun.html` (composer wiring 2353–2550) |
 | 3 | `tests/corona-volumetric.mjs` | `js/corona-volumetric.js`, `js/corona-volumetric-mount.js` |
 | 4 | `tests/solar-fluid.mjs` | `js/solar-fluid.js`, `sun.html` `sunFS` |
@@ -477,6 +536,11 @@ log. Re-read CLAUDE.md §5 before opening it.
 
 ## 9. Deferred / open
 
+- **GONG far-side plage seeding** (`/api/solar/farside?format=series` →
+  the strongest detections modulate a far-hemisphere plage term; no
+  invented sunspots). Deferred from Phase 1; small.
+- **Markers vs shader spots rotation sense** — see the Phase 1 log entry;
+  fold into Phase 4 when the photosphere shader is open anyway.
 - **Historical frames for the scrubber** (Helioviewer `getJP2Image` →
   edge decode). Needs a JP2 decoder at the edge or a client-side WASM
   OpenJPEG; not free. Until then the scrubber keeps the honest
