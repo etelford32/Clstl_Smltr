@@ -24,7 +24,11 @@ test.describe('home background carousel', () => {
         test.slow();
         await offline(page);
         await page.goto('/index.html?exp_home_bg_carousel=carousel&debug=1', { waitUntil: 'domcontentloaded' });
-        await page.waitForFunction(() => !!window.__ppCarousel, null, { timeout: 30_000 });
+        // The carousel mounts after the hero's import resolves; under software
+        // GL that import compiles the bloom + magnetosphere shaders on the
+        // main thread and can hold the page for 30–60 s (measured 30 s+ on
+        // a cold CI run). Real hardware does it in ~1 s.
+        await page.waitForFunction(() => !!window.__ppCarousel, null, { timeout: 90_000 });
 
         const slides = await page.evaluate(() => window.__ppCarousel.slides);
         expect(slides.length).toBeGreaterThanOrEqual(2);
@@ -73,10 +77,11 @@ test.describe('home background carousel', () => {
     });
 
     test('reduced motion: a still poster, no clip, no cycling', async ({ page }) => {
+        test.slow();
         await offline(page);
         await page.emulateMedia({ reducedMotion: 'reduce' });
         await page.goto('/index.html?exp_home_bg_carousel=carousel&debug=1', { waitUntil: 'domcontentloaded' });
-        await page.waitForFunction(() => !!window.__ppCarousel, null, { timeout: 30_000 });
+        await page.waitForFunction(() => !!window.__ppCarousel, null, { timeout: 60_000 });
         const slides = await page.evaluate(() => window.__ppCarousel.slides);
         expect(slides).not.toContain('live-magnetosphere');      // no canvas → no live slide
         expect(await page.evaluate(() => window.__ppCarousel.stillsOnly)).toBe(true);
