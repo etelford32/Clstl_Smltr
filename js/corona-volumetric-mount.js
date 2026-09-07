@@ -73,6 +73,17 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
         u_filament_opacity:   { value: ch.filOpacity },
 
         u_time:               baseUniforms.u_time || { value: 0 },
+        u_unrest:             baseUniforms.u_unrest || { value: 0 },
+
+        // Phase 3 — loop-density atlas + jitter (see corona-loop-density.js)
+        u_loopTex:            { value: null },
+        u_loopOn:             { value: 0.0 },
+        u_loopDims:           { value: new THREE.Vector3(256, 128, 32) },
+        u_loopTiles:          { value: new THREE.Vector2(4, 8) },
+        u_loopRMax:           { value: CORONA_RADIUS },
+        u_loopGain:           { value: 1.0 },
+        u_jitter:             { value: 0.0 },
+        u_marchLegacy:        { value: 0.0 },
     };
 
     const material = new THREE.ShaderMaterial({
@@ -91,9 +102,16 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
     mesh.renderOrder = renderOrder;
     mesh.frustumCulled = false;
     mesh.userData.label = 'volumetric corona (Phase 4.3)';
+    // Phase 3: the corona is rendered by js/corona-accumulate.js on LAYER 1
+    // (camera.layers is 0 in the main RenderPass), jittered and integrated
+    // over frames. If no accumulation pass adopts it, call
+    // `adoptMainScene()` to put it back on layer 0.
+    mesh.layers.set(1);
     scene.add(mesh);
 
     let _currentChannel = channel;
+    let _loopStats = null;
+    let _onChannelChange = null;
 
     return {
         mesh, material, uniforms,
@@ -111,7 +129,35 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
             uniforms.u_channel_color.value.setRGB(c.color[0], c.color[1], c.color[2]);
             uniforms.u_filament_opacity.value  = c.filOpacity;
             _currentChannel = name;
+            if (_onChannelChange) _onChannelChange(name);
         },
+
+        /** Phase 3 — install the loop-density slice atlas (a THREE.DataTexture from rasterizeLoopDensity). */
+        setLoopDensity(texture, rast) {
+            if (!texture || !rast || rast.empty) {
+                uniforms.u_loopOn.value = 0.0;
+                uniforms.u_loopTex.value = null;
+                _loopStats = rast ? rast.stats : null;
+                return;
+            }
+            uniforms.u_loopTex.value   = texture;
+            uniforms.u_loopDims.value.set(rast.dims.nlon, rast.dims.nlat, rast.dims.nh);
+            uniforms.u_loopTiles.value.set(rast.layout.tilesX, rast.layout.tilesY);
+            uniforms.u_loopRMax.value  = rast.rMax;
+            uniforms.u_loopOn.value    = 1.0;
+            _loopStats = rast.stats;
+        },
+        get loopStats() { return _loopStats; },
+        get loopOn() { return uniforms.u_loopOn.value > 0.5; },
+
+        /** Per-frame jitter phase (the accumulation pass drives this). */
+        setJitter(phase) { uniforms.u_jitter.value = phase; },
+
+        /** The accumulation pass registers here so a channel switch resets its history. */
+        onChannelChange(fn) { _onChannelChange = fn; },
+
+        /** Render in the main scene instead (no accumulation pass). */
+        adoptMainScene() { mesh.layers.set(0); },
 
         setVisible(b) { mesh.visible = !!b; },
 
