@@ -304,6 +304,11 @@ export const SIMULATIONS = [
       category: 'deep-space', group: 'black-holes',
       tier: 'public', icon: 'observatory',
       blurb: 'Two black-hole merger simulations side by side, one story.' },
+    // ── Cosmic web ────────────────────────────────────────────────────────
+    { id: 'bootes-void', href: 'bootes-void.html', title: 'Boötes Void',
+      category: 'deep-space', group: 'cosmic-web',
+      tier: 'public', icon: 'void', badge: 'NEW',
+      blurb: 'The dynamical footprint of a supervoid — delete it, subtract the two universes.' },
 
     // ══ Research ══════════════════════════════════════════════════════════
     // ── Hindcast Lab ──────────────────────────────────────────────────────

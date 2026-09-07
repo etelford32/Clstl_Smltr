@@ -186,6 +186,19 @@ export const GLYPHS = {
         `<path d="M20 9.4c0 5-4 9-9 9-3.3 0-5.8-2-5.8-4.5 0-2 1.6-3.4 3.5-3.4"/>` +
         NODE(12, 12, 1.4),
 
+    void:
+        // A cosmic void: an EMPTY ring with the structure pushed out to its
+        // rim. Drawn as a dashed circle rather than a solid one because the
+        // thing being named has no boundary — it has a profile — and a solid
+        // ring reads as a bubble with a wall. The four rim nodes are the
+        // compensating wall; the absent centre is the whole point, so nothing
+        // goes there. (An earlier version put a node at the middle, which made
+        // it read as a planet at 20px.)
+        `<circle cx="12" cy="12" r="7.4" stroke-dasharray="2.6 2.4"/>` +
+        NODE(12, 3.4, 1.5) + NODE(20.6, 12, 1.5) +
+        NODE(12, 20.6, 1.5) + NODE(3.4, 12, 1.5) +
+        `<path d="M12 8.2v-2.6M15.8 12h2.6M12 15.8v2.6M8.2 12H5.6"/>`,
+
     // ── Craft / operations ──────────────────────────────────────────────
     satellite:
         `<rect x="9.4" y="9.4" width="5.2" height="5.2" rx="1"/>` +

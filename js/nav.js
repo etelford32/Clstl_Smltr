@@ -182,6 +182,8 @@ const NAV_ITEMS = {
         { href: 'blackhole-observatory.html', label: 'Black Hole Observatory', sub: 'Three UMBH systems · one canvas',     tier: 'public', icon: 'observatory', badge: 'NEW', id: 'blackhole-observatory' },
         { href: 'sagittarius.html',           label: 'Sagittarius A*',         sub: 'Galactic center · live',              tier: 'public', icon: 'black-hole-core', id: 'sagittarius' },
         { href: 'black-hole-fluid.html',      label: 'Black Hole Accretion',   sub: 'Fluid dynamics simulation',           tier: 'public', icon: 'accretion' },
+        { section: 'Cosmic web' },
+        { href: 'bootes-void.html',           label: 'Boötes Void',            sub: 'Supervoid dynamics · the counterfactual', tier: 'public', icon: 'void', badge: 'NEW', id: 'bootes-void' },
     ],
 
     // Research keeps the 2026-07-25 "run vs read" split the author asked for —

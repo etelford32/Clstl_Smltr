@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boötes Void · Dynamical Footprint · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/bootes-void.html">
+<meta name="description" content="A void has no push. It has a missing pull. This runs the chain from the Boötes underdensity to the peculiar-velocity, gravitational and tidal fields around it — then deletes the void and subtracts the two universes to measure exactly how far it reaches.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/bootes-void.html">
+<meta property="og:title" content="The Boötes Void — measuring what an absence does">
+<meta property="og:description" content="δ(r) → Δ(<r) → v_r → Φ → g → T_ij, and then the counterfactual: fill the void to cosmic mean, subtract the fields, and see what is left.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/bootes-void.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Boötes Void — Parkers Physics">
+<meta name="twitter:description" content="Not “does a void have gravity”. How far does this one reach, and where do its own walls take over?">
+<meta name="twitter:image" content="https://parkersphysics.com/static/og/bootes-void.jpg">
+
+<!-- Canonical nav: structure + styling owned by js/nav.js + js/nav-styles.css.
+     All page CSS below is bv- prefixed; there is intentionally NO nav styling
+     here (js/nav-styles.css owns it). -->
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
+
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+    min-height:100vh;
+    background:#03010e;
+    color:#cdd5e4;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    overflow-x:hidden;
+}
+.skip-link{position:absolute;left:-9999px;top:0;background:#ffd700;color:#000;padding:8px 16px;font-weight:700;border-radius:0 0 6px 6px;z-index:9999}
+.skip-link:focus{left:16px}
+
+.bv-wrap { max-width:1340px; margin:0 auto; padding:0 18px 60px; }
+
+/* ── Hero ─────────────────────────────────────────────────────────────── */
+.bv-hero { padding:26px 4px 10px; display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; }
+.bv-hero h1 {
+    font-size:1.5rem; font-weight:800;
+    background:linear-gradient(45deg,#4fc3f7,#c792ea,#ff9a56);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.bv-hero .bv-sub { font-size:.85rem; color:#8b94ad; }
+.bv-badge {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:.7rem; font-weight:700; letter-spacing:.08em; color:#4fc3f7;
+    border:1px solid rgba(79,195,247,.35); border-radius:999px; padding:3px 10px;
+}
+.bv-badge::before { content:''; width:7px; height:7px; border-radius:50%; background:#4fc3f7; box-shadow:0 0 8px #4fc3f7; }
+
+.bv-lede { font-size:.9rem; line-height:1.65; color:#9aa4bd; max-width:78ch; padding:0 4px 16px; }
+.bv-lede strong { color:#cdd5e4; font-weight:600; }
+.bv-lede em { color:#c792ea; font-style:normal; }
+
+/* The provenance banner. Permanent, not dismissible — see §Provenance. */
+.bv-provenance {
+    display:flex; gap:12px; align-items:flex-start;
+    background:rgba(255,154,86,.07); border:1px solid rgba(255,154,86,.28);
+    border-radius:10px; padding:11px 14px; margin:0 4px 20px;
+    font-size:.78rem; line-height:1.6; color:#c8b49c;
+}
+.bv-provenance strong { color:#ff9a56; }
+.bv-provenance .bv-prov-mark { flex:0 0 auto; font-weight:800; color:#ff9a56; }
+
+/* ── Stage ────────────────────────────────────────────────────────────── */
+.bv-stage-grid { display:grid; grid-template-columns:1fr 268px; gap:12px; margin-bottom:16px; }
+.bv-stage-box {
+    position:relative; background:rgba(6,9,28,.72);
+    border:1px solid rgba(90,110,160,.26); border-radius:14px; overflow:hidden;
+    min-height:460px;
+}
+#bv-stage { display:block; width:100%; height:62vh; min-height:420px; max-height:680px; }
+#bv-stage-fallback {
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    padding:28px; text-align:center; font-size:.82rem; color:#8b94ad; line-height:1.6;
+}
+/* LOAD-BEARING. An author `display:flex` (specificity 1-0-0 via the id) beats
+   the UA sheet's `[hidden]{display:none}` (0-1-0), so the fallback rendered
+   straight through a perfectly working WebGL canvas — the message said the
+   stage could not draw while the stage was drawing behind it. Same failure the
+   Mars feature list hit (`.feature-item[hidden]`, CLAUDE.md §Exploring Mars).
+   Any element in this file that is toggled with `hidden` AND given a display
+   needs its own [hidden] rule; do not remove these. */
+#bv-stage-fallback[hidden] { display:none; }
+#bv-busy[hidden] { display:none; }
+.bv-stage-caption {
+    position:absolute; left:12px; bottom:10px; right:12px;
+    font-size:.72rem; color:#8b94ad; line-height:1.5;
+    text-shadow:0 1px 6px #03010e; pointer-events:none;
+}
+.bv-stage-caption b { color:#cdd5e4; }
+.bv-stage-caption .bv-max { color:#4fc3f7; }
+#bv-busy {
+    position:absolute; top:10px; right:12px; font-size:.68rem; letter-spacing:.08em;
+    color:#ffb84d; background:rgba(3,1,14,.72); border:1px solid rgba(255,184,77,.3);
+    border-radius:999px; padding:3px 10px;
+}
+
+.bv-rail {
+    background:rgba(6,9,28,.72); border:1px solid rgba(90,110,160,.26);
+    border-radius:14px; padding:12px 13px; font-size:.76rem;
+    display:flex; flex-direction:column; gap:12px;
+    max-height:min(680px, 62vh + 40px); overflow-y:auto;
+}
+.bv-rail h3 {
+    font-size:.68rem; letter-spacing:.1em; text-transform:uppercase;
+    color:#7d879e; font-weight:700; margin-bottom:6px;
+}
+.bv-rail label { display:block; margin-bottom:7px; color:#9aa4bd; }
+.bv-rail select, .bv-rail input[type=range] { width:100%; }
+.bv-rail select {
+    background:#0a0f24; color:#cdd5e4; border:1px solid rgba(90,110,160,.4);
+    border-radius:7px; padding:5px 7px; font:inherit; font-size:.76rem;
+}
+.bv-rail input[type=range] { accent-color:#4fc3f7; margin-top:3px; }
+.bv-rail .bv-val { color:#4fc3f7; font-variant-numeric:tabular-nums; font-weight:600; }
+.bv-check { display:flex; align-items:center; gap:7px; margin-bottom:5px; color:#9aa4bd; }
+.bv-check input { accent-color:#4fc3f7; }
+.bv-btn {
+    background:rgba(79,195,247,.12); color:#4fc3f7;
+    border:1px solid rgba(79,195,247,.36); border-radius:8px;
+    padding:6px 10px; font:inherit; font-size:.74rem; cursor:pointer; width:100%;
+}
+.bv-btn:hover { background:rgba(79,195,247,.2); }
+.bv-hint { font-size:.68rem; color:#6f7893; line-height:1.55; }
+
+/* ── Cards ────────────────────────────────────────────────────────────── */
+.bv-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(370px,1fr)); gap:12px; }
+.bv-card {
+    background:rgba(6,9,28,.72); border:1px solid rgba(90,110,160,.26);
+    border-radius:14px; padding:14px 16px 16px;
+}
+.bv-card.bv-wide { grid-column:1 / -1; }
+.bv-card h2 {
+    font-size:.9rem; font-weight:700; color:#cdd5e4; margin-bottom:3px;
+    display:flex; align-items:baseline; gap:9px; flex-wrap:wrap;
+}
+.bv-tag {
+    font-size:.62rem; letter-spacing:.09em; font-weight:800; text-transform:uppercase;
+    color:#4fc3f7; border:1px solid rgba(79,195,247,.32); border-radius:5px; padding:1px 6px;
+}
+.bv-tag.bv-tag-null { color:#ffb84d; border-color:rgba(255,184,77,.34); }
+.bv-tag.bv-tag-model { color:#ff9a56; border-color:rgba(255,154,86,.34); }
+.bv-card .bv-q { font-size:.76rem; color:#8b94ad; line-height:1.55; margin-bottom:10px; }
+.bv-card canvas { width:100%; height:186px; display:block; margin:4px 0 10px; }
+
+.bv-rows { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:.77rem; }
+.bv-rows dt { color:#7d879e; }
+.bv-rows dd { color:#cdd5e4; font-variant-numeric:tabular-nums; }
+.bv-verdict {
+    margin-top:10px; font-size:.76rem; line-height:1.6; color:#9aa4bd;
+    border-left:2px solid rgba(79,195,247,.4); padding-left:10px;
+}
+.bv-verdict.bv-caution { border-left-color:rgba(255,184,77,.5); color:#c8b49c; }
+
+.bv-headline {
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px;
+    margin:2px 0 12px;
+}
+.bv-stat {
+    background:rgba(79,195,247,.06); border:1px solid rgba(79,195,247,.2);
+    border-radius:10px; padding:10px 12px;
+}
+.bv-stat .bv-k { font-size:.66rem; letter-spacing:.08em; text-transform:uppercase; color:#7d879e; }
+.bv-stat .bv-v { font-size:1.05rem; font-weight:700; color:#4fc3f7; font-variant-numeric:tabular-nums; margin-top:2px; }
+.bv-stat .bv-n { font-size:.68rem; color:#6f7893; line-height:1.5; margin-top:3px; }
+
+.bv-math {
+    font-family:ui-monospace,'SFMono-Regular',Menlo,monospace; font-size:.74rem;
+    color:#8fa6d8; background:rgba(79,195,247,.05);
+    border:1px solid rgba(90,110,160,.2); border-radius:8px;
+    padding:8px 11px; margin:8px 0 10px; overflow-x:auto; white-space:pre;
+}
+
+.bv-foot { margin-top:26px; font-size:.72rem; color:#767f9a; line-height:1.7; }
+.bv-foot a { color:#8fa6d8; }
+.bv-foot h4 { color:#9aa4bd; font-size:.76rem; margin:16px 0 5px; }
+.bv-foot ul { margin:0 0 0 18px; }
+.bv-foot li { margin-bottom:3px; }
+
+@media (max-width: 980px) {
+    .bv-stage-grid { grid-template-columns:1fr; }
+    .bv-rail { max-height:none; }
+    #bv-stage { height:52vh; min-height:340px; }
+    .bv-cards { grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<!-- Canonical nav SHELL: js/nav.js initNav() populates this element in
+     place — it does NOT create one, so removing this tag silently removes
+     the site navigation (that exact bug shipped once; keep the shell). -->
+<nav></nav>
+
+<header class="bv-wrap bv-hero">
+    <h1>The Boötes Void</h1>
+    <span class="bv-badge">Dynamical footprint</span>
+    <span class="bv-sub">A million cubic megaparsecs of almost nothing — and what its absence does to everything around it</span>
+</header>
+
+<main id="main-content" class="bv-wrap">
+
+<p class="bv-lede">
+    The interesting question was never <em>does a void have gravity</em>. Of course it does.
+    The question is whether the Boötes underdensity leaves a <strong>measurable dynamical
+    signature</strong> in the cosmic web around it, and out to what radius it still matters.
+    This page runs that chain end to end — density to integrated contrast to peculiar
+    velocity to potential to gravity to tidal shear — and then performs the experiment
+    that actually answers it: <strong>fill the void back in to cosmic mean density, leave
+    everything else exactly as it was, and subtract the two universes.</strong>
+</p>
+
+<p class="bv-lede">
+    A void does not push. There is no repulsive force anywhere in this. There is simply
+    <em>less inward attraction from the empty direction</em>, so matter's motion on top of
+    the Hubble flow is outward — and that outflow, the tidal squeeze that builds the void's
+    own wall, the cold spot it prints on the microwave background and the shear it puts on
+    background galaxies are all consequences of one missing 10¹⁶ M☉.
+</p>
+
+<div class="bv-provenance">
+    <span class="bv-prov-mark">MODEL</span>
+    <div>
+        <strong>What is measured and what is modelled.</strong>
+        The void's position, redshift, size and galaxy deficit are published measurements
+        (Kirshner et al. 1981, 1987), and the named clusters around it are transcribed from
+        the literature at <span data-bv="anchorAccuracy">—</span>.
+        <strong>Everything else on this page is a model.</strong> The continuous density
+        field is a fitted HSW profile, not a reconstruction; the filaments, nodes and
+        galaxies you can see in the render are a <em>seeded synthetic realisation</em>
+        constrained to carry the profile's own compensating-wall mass and to point towards
+        the real cluster directions. Nobody has published a matter-density reconstruction of
+        this region — that observation is the thing this page is arguing for. No number here
+        is a detection.
+    </div>
+</div>
+
+<!-- ── The stage ─────────────────────────────────────────────────────── -->
+<section class="bv-stage-grid">
+    <div class="bv-stage-box">
+        <canvas id="bv-stage" aria-label="Three-dimensional view of the Boötes Void and the modelled cosmic web around it"></canvas>
+        <div id="bv-stage-fallback" hidden>
+            WebGL is unavailable in this browser, so the 3D stage cannot draw.
+            Every number the render illustrates is in the figures below — the physics
+            does not live in the picture.
+        </div>
+        <div id="bv-busy" hidden>COMPUTING</div>
+        <div class="bv-stage-caption">
+            <b data-bv="fieldMode">—</b> · longest arrow = <span class="bv-max" data-bv="fieldMax">—</span>
+            <br><span data-bv="fieldLegend">—</span>
+        </div>
+    </div>
+
+    <aside class="bv-rail">
+        <div>
+            <h3>Field</h3>
+            <label>
+                <select data-bv-control="mode">
+                    <option value="delta" selected>Δg — the void's own contribution</option>
+                    <option value="gravityA">Gravity — real universe (A)</option>
+                    <option value="gravityB">Gravity — no Boötes (B)</option>
+                    <option value="velocity">Peculiar velocity</option>
+                    <option value="tidal">Tidal compression axis</option>
+                </select>
+            </label>
+            <p class="bv-hint">
+                Arrow length is normalised <em>per field</em> — the four differ by more than
+                an order of magnitude, so one absolute scale would render three of them
+                invisible. Directions are comparable across modes; magnitudes are printed.
+            </p>
+        </div>
+
+        <div>
+            <h3>Profile</h3>
+            <label>
+                <select data-bv-control="preset">
+                    <option value="hsw-supervoid" selected>HSW supervoid (default)</option>
+                    <option value="deep-core">Deep core</option>
+                </select>
+            </label>
+            <label>
+                Tracer bias b = <span class="bv-val" data-bv="bias">1.50</span>
+                <input type="range" data-bv-control="bias" min="1.1" max="2.2" step="0.05" value="1.5">
+            </label>
+            <p class="bv-hint">
+                <strong>This slider is the error budget.</strong> Voids are measured in
+                galaxies; gravity responds to matter. δ<sub>m</sub> = δ<sub>g</sub>/b, and
+                b is uncertain at the ±20 % level, so everything downstream carries that
+                ±20 % linearly.
+            </p>
+        </div>
+
+        <div>
+            <h3>Surrounding web</h3>
+            <label>
+                Clumpiness = <span class="bv-val" data-bv="clumpiness">0.65</span>
+                <input type="range" data-bv-control="clumpiness" min="0" max="1" step="0.05" value="0.65">
+            </label>
+            <p class="bv-hint">
+                0 spreads the wall mass into a near-uniform shell; 1 concentrates it into
+                nodes and filaments. The <em>total mass never changes</em> — it is the
+                profile's own wall — so this knob asks a question about geometry alone.
+            </p>
+            <button class="bv-btn" id="bv-reroll" type="button">Re-roll the web (seed <span data-bv="seed">—</span>)</button>
+        </div>
+
+        <div>
+            <h3>Reach threshold</h3>
+            <label>
+                Velocity horizon at <span class="bv-val" data-bv="velocityThreshold">50 km/s</span>
+                <input type="range" data-bv-control="threshold" min="10" max="200" step="10" value="50">
+            </label>
+            <p class="bv-hint">
+                "How far does it reach" has no answer without a threshold. This one is
+                stated in the units a peculiar-velocity survey measures in.
+            </p>
+        </div>
+
+        <div>
+            <h3>Layers</h3>
+            <label class="bv-check"><input type="checkbox" data-bv-control="layer:tracers" checked> Tracer galaxies</label>
+            <label class="bv-check"><input type="checkbox" data-bv-control="layer:web" checked> Filaments &amp; nodes</label>
+            <label class="bv-check"><input type="checkbox" data-bv-control="layer:field" checked> Vector field</label>
+            <label class="bv-check"><input type="checkbox" data-bv-control="layer:shell" checked> R<sub>eff</sub> shell</label>
+            <label class="bv-check"><input type="checkbox" data-bv-control="layer:markers" checked> Clusters &amp; sightline</label>
+            <label class="bv-check"><input type="checkbox" data-bv-control="redshiftSpace"> Redshift space</label>
+            <label class="bv-check"><input type="checkbox" data-bv-control="autorotate" checked> Auto-rotate</label>
+            <button class="bv-btn" id="bv-reframe" type="button">Reframe</button>
+        </div>
+    </aside>
+</section>
+
+<!-- ── Headline numbers ──────────────────────────────────────────────── -->
+<div class="bv-headline">
+    <div class="bv-stat">
+        <div class="bv-k">Effective radius</div>
+        <div class="bv-v" data-bv="rEffMpc">—</div>
+        <div class="bv-n">from <span data-bv="rEffHinv">—</span> at h = <span data-bv="h">—</span>.
+            Reading the literature's h⁻¹ number as Mpc shrinks the void by 1.48×.</div>
+    </div>
+    <div class="bv-stat">
+        <div class="bv-k">Angular radius on the sky</div>
+        <div class="bv-v" data-bv="angularRadius">—</div>
+        <div class="bv-n">at z = <span data-bv="redshift">—</span>, <span data-bv="distance">—</span> comoving.
+            A quarter of the way from horizon to zenith.</div>
+    </div>
+    <div class="bv-stat">
+        <div class="bv-k">Missing mass</div>
+        <div class="bv-v" data-bv="massDeficit">—</div>
+        <div class="bv-n">against <span data-bv="wallMass">—</span> piled into the wall around it.</div>
+    </div>
+    <div class="bv-stat">
+        <div class="bv-k">Velocity horizon</div>
+        <div class="bv-v" data-bv="velocityHorizon">—</div>
+        <div class="bv-n">beyond this the void alone could not have induced
+            <span data-bv="velocityThreshold">—</span> of peculiar motion.</div>
+    </div>
+</div>
+
+<div class="bv-cards">
+
+<!-- Level 1 — characterisation ─────────────────────────────────────── -->
+<section class="bv-card">
+    <h2>The density field <span class="bv-tag bv-tag-model">Level 1 · fitted</span></h2>
+    <p class="bv-q">
+        δ(r) is what a survey measures. Δ(&lt;r), the volume average inside r, is what
+        gravity responds to — and the gap between them is why the outflow keeps growing
+        outward through a wall where δ has already turned positive.
+    </p>
+    <canvas data-bv-chart="density" aria-label="Density contrast and integrated density contrast against radius"></canvas>
+    <dl class="bv-rows">
+        <dt>Core δ<sub>g</sub> (galaxies)</dt><dd data-bv="deltaGCore">—</dd>
+        <dt>Core δ<sub>m</sub> (matter)</dt><dd data-bv="deltaMCore">—</dd>
+        <dt>Δ(&lt;R<sub>eff</sub>) in matter</dt><dd data-bv="deltaMeanMatter">—</dd>
+        <dt>Δ(&lt;R<sub>eff</sub>) in galaxies</dt><dd data-bv="deltaMeanGalaxy">—</dd>
+        <dt>Raw count deficit</dt><dd data-bv="countDeficit">—</dd>
+        <dt>Counted / expected</dt><dd data-bv="countGalaxies">—</dd>
+    </dl>
+    <p class="bv-verdict bv-caution">
+        <strong>These last two numbers disagree with the profile, and the page does not
+        reconcile them.</strong> The famous count comes from sparse pencil-beam surveys
+        over a region whose boundary was <em>defined</em> by its emptiness, counting the
+        brightest and therefore most strongly biased galaxies there are. The profile's
+        Δ(&lt;R<sub>eff</sub>) is a volume average over a fitted smooth field. Both are
+        true statements; only the second one drives gravity.
+    </p>
+</section>
+
+<section class="bv-card">
+    <h2>Compensation <span class="bv-tag">Level 1</span></h2>
+    <p class="bv-q">
+        A void expels matter, and that matter piles into a wall. If the wall exactly repaid
+        the deficit the void would have no gravitational reach at all beyond it. It does not
+        quite — and the residual is why it does.
+    </p>
+    <canvas data-bv-chart="compensation" aria-label="Cumulative enclosed mass excess against radius"></canvas>
+    <dl class="bv-rows">
+        <dt>Compensation C</dt><dd data-bv="compensation">—</dd>
+        <dt>Wall mass</dt><dd data-bv="wallMass">—</dd>
+        <dt>Interior deficit</dt><dd data-bv="massDeficit">—</dd>
+    </dl>
+    <p class="bv-verdict"><span data-bv="compensationVerdict">—</span>.</p>
+</section>
+
+<!-- Test 1 ─────────────────────────────────────────────────────────── -->
+<section class="bv-card">
+    <h2>Test 1 — the outflow <span class="bv-tag">prediction</span></h2>
+    <p class="bv-q">
+        Linear theory turns the integrated deficit directly into a peculiar velocity. This
+        is the primary observable: a peculiar-velocity survey around Boötes either finds
+        this coherent outflow or it does not.
+    </p>
+    <div class="bv-math">v_r(r) = −⅓ f(z) a H(z) r Δ(&lt;r) · (1+Δ)^(−1/6)</div>
+    <canvas data-bv-chart="velocity" aria-label="Radial peculiar velocity against radius"></canvas>
+    <dl class="bv-rows">
+        <dt>Peak outflow</dt><dd data-bv="peakOutflow">—</dd>
+        <dt>…at radius</dt><dd data-bv="peakOutflowRadius">—</dd>
+        <dt>At 40 Mpc</dt><dd data-bv="outflowAt40">—</dd>
+        <dt>Growth rate f(z)</dt><dd data-bv="growthRate">—</dd>
+    </dl>
+    <p class="bv-verdict">
+        The peak sits <em>inside</em> the wall, not at it, because the velocity tracks
+        Δ(&lt;r) rather than δ(r). The dashed curve is strict linear theory; the solid one
+        carries the spherical-collapse correction, and the 5–25 % between them is the same
+        size as the systematic such a survey would be fighting.
+    </p>
+</section>
+
+<!-- Test 2 ─────────────────────────────────────────────────────────── -->
+<section class="bv-card">
+    <h2>Test 2 — density against velocity <span class="bv-tag">identity</span></h2>
+    <p class="bv-q">
+        Density says where matter is missing. Velocity says how gravity responded. They are
+        different measurements, and linear theory says they must agree:
+    </p>
+    <div class="bv-math">∇·v = −a H f δ_m</div>
+    <canvas data-bv-chart="continuity" aria-label="Density contrast against normalised velocity divergence"></canvas>
+    <p class="bv-verdict">
+        The two curves are the same curve, normalised. That is not a fit — it is an
+        identity, and <code>tests/bootes-void-model.mjs</code> verifies it in integral form
+        (the divergence theorem) against a quadrature that shares no code with the kernel.
+        For a real survey this is the strongest single consistency check available: if the
+        observed velocity divergence matched the observed density deficit, the void would be
+        confirmed as a dynamically evolving gravitational structure rather than a gap in
+        sampling.
+    </p>
+</section>
+
+<!-- Test 3 ─────────────────────────────────────────────────────────── -->
+<section class="bv-card">
+    <h2>Test 3 — the tidal signature <span class="bv-tag">Level 2</span></h2>
+    <p class="bv-q">
+        A void does not build its wall by pushing. It squeezes radially while letting go
+        tangentially, and matter flattens into the shell. That is a statement about the
+        eigenvalues of the tidal tensor, and it has a clean closed form.
+    </p>
+    <div class="bv-math">λ_radial      = δ(r) − ⅔ Δ(&lt;r)
+λ_tangential  = ⅓ Δ(&lt;r)   (twice — degenerate)
+trace         = δ(r)         ⇐ Poisson, exactly</div>
+    <dl class="bv-rows">
+        <dt>λ<sub>radial</sub> at R<sub>eff</sub></dt><dd data-bv="tidalRadial">—</dd>
+        <dt>λ<sub>tangential</sub></dt><dd data-bv="tidalTangential">—</dd>
+    </dl>
+    <p class="bv-verdict">
+        <span data-bv="tidalReading">—</span>.
+        Note the degeneracy: the two tangential eigenvalues are <em>equal</em>, so a
+        spherical void defines no preferred tangential direction at all. The only
+        orientation it predicts is "perpendicular to the radius", which is what Test 5
+        measures — and asking instead about e₂ or e₃ returns a number that looks like a
+        measurement and is an artefact of the eigen-solver.
+    </p>
+</section>
+
+<!-- Test 4 ─────────────────────────────────────────────────────────── -->
+<section class="bv-card bv-wide">
+    <h2>Test 4 — delete Boötes <span class="bv-tag">the experiment</span></h2>
+    <p class="bv-q">
+        Two universes. In <strong>A</strong>, the measured underdensity sits inside its
+        clumped wall. In <strong>B</strong>, the underdensity is filled to cosmic mean and
+        <em>everything else is byte-for-byte identical</em> — same wall, same seed, same
+        particles. Subtract the gravity fields and what is left is the void's own
+        contribution, exactly. Switch the stage to <em>Δg</em> to see it in three dimensions.
+    </p>
+    <div class="bv-math">Δg = g(A) − g(B) = g(the interior deficit alone)</div>
+    <canvas data-bv-chart="influence" aria-label="The void's share of local peculiar acceleration against radius, with a 16 to 84 percentile band"></canvas>
+    <dl class="bv-rows">
+        <dt>Void's share of |g| at R<sub>eff</sub></dt><dd data-bv="shareAtEff">—</dd>
+        <dt>…at 2 R<sub>eff</sub></dt><dd data-bv="shareAtTwo">—</dd>
+        <dt>Δg at R<sub>eff</sub></dt><dd data-bv="deltaGAtEff">—</dd>
+        <dt>Velocity horizon</dt><dd data-bv="velocityHorizon">—</dd>
+        <dt>Directions where the web overtakes</dt><dd data-bv="crossoverFraction">—</dd>
+        <dt>…median crossover radius</dt><dd data-bv="crossoverRadius">—</dd>
+    </dl>
+    <p class="bv-verdict">
+        <strong>The band is the result.</strong> A single "radius of influence" would hide
+        the thing that makes the question interesting: the void reaches much further into
+        empty directions than it does towards Corona Borealis, and turning the clumpiness
+        slider up widens that spread without moving the median. Note also what is
+        <em>not</em> reported here — the fractional change |Δg|/|g| — because the void and
+        its own wall pull in opposite directions and nearly cancel outside the shell, so
+        that ratio grows without bound exactly where the void's absolute influence is
+        vanishing. It is not a conservative measure; it is backwards.
+    </p>
+</section>
+
+<!-- Test 5 ─────────────────────────────────────────────────────────── -->
+<section class="bv-card">
+    <h2>Test 5 — does it organise the web? <span class="bv-tag bv-tag-null">with its control</span></h2>
+    <p class="bv-q">
+        If the void's tidal field organises the filaments around it, their orientations
+        should be preferentially perpendicular to its compression axis. Measured as
+        mean |cos θ| against the isotropic null of exactly 0.5.
+    </p>
+    <dl class="bv-rows">
+        <dt>mean |cos θ| vs the void's e₁</dt><dd data-bv="alignVoidMean">—</dd>
+        <dt>significance</dt><dd data-bv="alignVoidZ">—</dd>
+        <dt>segments</dt><dd data-bv="alignN">—</dd>
+        <dt>isotropic 1σ on the mean</dt><dd data-bv="alignSigma">—</dd>
+        <dt>positive control (web's own field)</dt><dd data-bv="alignWebZ">—</dd>
+    </dl>
+    <p class="bv-verdict bv-caution">
+        <span data-bv="alignVoidVerdict">—</span>.
+        <br><strong>The control is circular on purpose.</strong> The filaments were drawn
+        between the same particles whose tidal field it measures, so it must come out hugely
+        significant — that is how you check a statistic can see an alignment at all. Only
+        the void row is a result, because the void's tidal field was used to place nothing.
+    </p>
+</section>
+
+<!-- Test 6 ─────────────────────────────────────────────────────────── -->
+<section class="bv-card">
+    <h2>Test 6 — redshift-space distortion <span class="bv-tag">Level 3</span></h2>
+    <p class="bv-q">
+        The outflow contaminates the redshifts it is measured with. The near wall is
+        blueshifted and placed too close; the far wall is redshifted and placed too far.
+        Both move outward, so the void <em>inflates</em> along the sightline.
+    </p>
+    <div class="bv-math">s∥ = r∥ + v∥ / (a H)</div>
+    <canvas data-bv-chart="rsd" aria-label="Apparent line-of-sight elongation against radius"></canvas>
+    <dl class="bv-rows">
+        <dt>ε at ½ R<sub>eff</sub></dt><dd data-bv="rsdEpsilon">—</dd>
+        <dt>ξ₂/ξ₀ at 0.6 R<sub>eff</sub></dt><dd data-bv="rsdQuadrupole">—</dd>
+        <dt>β = f/b</dt><dd data-bv="rsdBeta">—</dd>
+    </dl>
+    <p class="bv-verdict">
+        <span data-bv="rsdReading">—</span>. Tick <em>Redshift space</em> on the stage to
+        displace the tracer galaxies — and only the tracers, since the mass does not move
+        just because our distance estimate for it is wrong. What this test actually
+        delivers is β, not the void: void RSD is a growth-rate measurement.
+    </p>
+</section>
+
+<!-- Test 7 ─────────────────────────────────────────────────────────── -->
+<section class="bv-card">
+    <h2>Test 7 — weak lensing <span class="bv-tag bv-tag-null">honest null</span></h2>
+    <p class="bv-q">
+        Less projected mass than average means a diverging lens: background galaxies are
+        stretched <em>radially</em> around a void, the opposite sign to a cluster.
+    </p>
+    <canvas data-bv-chart="lensing" aria-label="Excess surface density and signal to noise against projected radius"></canvas>
+    <dl class="bv-rows">
+        <dt>Peak ΔΣ</dt><dd data-bv="lensingPeak">—</dd>
+        <dt>Peak γ<sub>t</sub></dt><dd data-bv="lensingShear">—</dd>
+        <dt>Best annulus SNR</dt><dd data-bv="lensingSnr">—</dd>
+    </dl>
+    <p class="bv-verdict bv-caution"><span data-bv="lensingVerdict">—</span>.</p>
+</section>
+
+<!-- Test 8 ─────────────────────────────────────────────────────────── -->
+<section class="bv-card">
+    <h2>Test 8 — the ISW imprint <span class="bv-tag bv-tag-null">honest null</span></h2>
+    <p class="bv-q">
+        The void's potential is a hill, and in a Λ-dominated universe that hill has been
+        flattening. A photon crossing it does not get back all the energy it spent climbing,
+        so it arrives cold.
+    </p>
+    <div class="bv-math">ΔT/T = (2/c³) ∫ Φ̇ dl,    Φ̇ = Φ H (f − 1)</div>
+    <canvas data-bv-chart="isw" aria-label="Integrated Sachs-Wolfe temperature shift against angular radius"></canvas>
+    <dl class="bv-rows">
+        <dt>Central ΔT</dt><dd data-bv="iswCentral">—</dd>
+        <dt>Sign</dt><dd data-bv="iswSign">—</dd>
+    </dl>
+    <p class="bv-verdict bv-caution"><span data-bv="iswVerdict">—</span>.</p>
+</section>
+
+<!-- Model card ─────────────────────────────────────────────────────── -->
+<section class="bv-card bv-wide">
+    <h2>What the render is made of <span class="bv-tag bv-tag-model">model card</span></h2>
+    <dl class="bv-rows">
+        <dt>Web particles</dt><dd data-bv="webParticles">—</dd>
+        <dt>Filament segments</dt><dd data-bv="webFilaments">—</dd>
+        <dt>Seed</dt><dd data-bv="seed">—</dd>
+        <dt>Clumpiness</dt><dd data-bv="clumpiness">—</dd>
+        <dt>Profile preset</dt><dd data-bv="presetNote">—</dd>
+        <dt>Anchor accuracy</dt><dd data-bv="anchorAccuracy">—</dd>
+    </dl>
+    <p class="bv-verdict">
+        The web carries <em>exactly</em> the profile's own compensating-wall mass — nobody
+        typed a cluster mass in, because any mass typed in would make "does the void or the
+        filament dominate?" a question about what somebody typed. Particle radii are drawn
+        from the profile's own δ⁺(r)r² measure, so the clumped model and the smooth model
+        have identical enclosed-mass profiles and the only thing that differs between them
+        is arrangement. The named clusters set <em>where</em> the mass concentrates, not
+        how much of it there is.
+    </p>
+</section>
+
+</div><!-- /.bv-cards -->
+
+<div class="bv-foot">
+    <h4>Sources for the measured inputs</h4>
+    <ul>
+        <li>Kirshner, Oemler, Schechter &amp; Shectman 1981, ApJ 248, L57 — <em>A million cubic megaparsec void in Boötes</em> (discovery; the quoted radius is the cube root of the quoted volume).</li>
+        <li>Kirshner, Oemler, Schechter &amp; Shectman 1987, ApJ 314, 493 — the deeper survey.</li>
+        <li>Weistrop et al. 1992, ApJ 396, 471; Szomoru et al. 1996, AJ 111, 2150; Cruzen et al. 2002, AJ 123, 142 — the galaxies that <em>are</em> inside it.</li>
+        <li>Hamaus, Sutter &amp; Wandelt 2014, PRL 112, 251302 — the universal void density profile used here.</li>
+        <li>Hamaus et al. 2016, PRL 117, 091302 — void RSD and the growth-rate measurement Test 6 points at.</li>
+        <li>Planck 2018 results VI, A&amp;A 641, A6 — the background cosmology.</li>
+        <li>Cluster positions transcribed from the Abell catalogue via NED. Not fetched: astronomy archives are unreachable from this repo's build environment, the same as NASA is for the Sun page. <code>data/bootes/SOURCES.md</code> records what that costs and how to refresh it.</li>
+    </ul>
+
+    <h4>How to read this page</h4>
+    <ul>
+        <li>Everything labelled <em>identity</em> is mathematics and is verified to machine precision by <code>node tests/bootes-void-model.mjs</code>.</li>
+        <li>Everything labelled <em>fitted</em> or <em>model</em> depends on the profile, and the profile depends on the bias slider. Move it and watch how much moves with it.</li>
+        <li>Everything labelled <em>honest null</em> is a prediction that current instruments cannot detect for a single void. That is the correct answer, and saying so is the point.</li>
+        <li>Lengths are comoving Mpc, never h⁻¹ Mpc. Velocities are peculiar, never recession. Accelerations are quoted in km/s per Gyr because 10⁻¹³ m/s² is not a number anyone can hold.</li>
+    </ul>
+
+    <p style="margin-top:14px">
+        Kernels: <code>js/bootes-void-model.js</code> (physics) ·
+        <code>js/bootes-web-model.js</code> (the synthetic web) ·
+        <code>js/bootes-void-data.js</code> (the measured inputs).
+        All three are pure — no DOM, no fetch, no ambient time — and gated by
+        <code>tests/bootes-void-model.mjs</code> and <code>tests/bootes-web-model.mjs</code>.
+    </p>
+</div>
+
+</main>
+
+<script type="module">
+import { initBootesPage } from './js/bootes/page.js';
+try {
+    initBootesPage(document);
+} catch (err) {
+    // A boot failure must not take the page with it: the prose and the sources
+    // carry the argument, and the provenance banner is the one thing that must
+    // never disappear because a script threw.
+    console.error('[bootes] init failed', err);
+    const fb = document.getElementById('bv-stage-fallback');
+    if (fb) { fb.hidden = false; fb.textContent = 'The simulation failed to start in this browser.'; }
+}
+</script>
+<script type="module">import { initNav } from "./js/nav.js?v=20260714"; initNav("bootes-void");</script>
+</body>
+</html>

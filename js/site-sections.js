@@ -186,6 +186,13 @@ export const SITE_SECTIONS = [
               note: 'Structure and classification you can drive — the HR diagram with the lid off.' },
             { id: 'black-holes', label: 'Black holes',
               note: 'Ray-marched horizons, accretion flows, and ultramassive mergers.' },
+            // Added 2026-09. A supervoid is neither a star nor a black hole,
+            // and filing it under either would have made the group label a
+            // lie. This takes Deep Space to 3 headers, which is the cap in the
+            // INVARIANT above — the next thing that lands in this section goes
+            // into an existing group or onto the hub page only.
+            { id: 'cosmic-web', label: 'Cosmic web',
+              note: 'Structure on the largest scales — and the emptiness that shapes it.' },
         ],
     },
     {
