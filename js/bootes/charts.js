@@ -91,7 +91,11 @@ const fmt = (v) => {
 function frame(ctx, w, h, { xMin, xMax, yMin, yMax, xLabel, yLabel, markX = [] }) {
     const padL = 46;
     const padR = 10;
-    const padT = 12;
+    // padT leaves a clear band ABOVE the plot for the y-axis label. At 12 the
+    // label sat inside the plot area and collided with the topmost tick label
+    // ("void share of |g|" straight through "1.00" on the influence chart),
+    // which reads as a rendering fault rather than as a crowded axis.
+    const padT = 24;
     const padB = 26;
     const px = (x) => padL + (x - xMin) / (xMax - xMin) * (w - padL - padR);
     const py = (y) => h - padB - (y - yMin) / (yMax - yMin) * (h - padT - padB);
@@ -150,7 +154,7 @@ function frame(ctx, w, h, { xMin, xMax, yMin, yMax, xLabel, yLabel, markX = [] }
             ctx.fillStyle = mark.color || PALETTE.dim;
             ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
-            ctx.fillText(mark.label, px(mark.x) + 3, padT + 1 + markRow * 12);
+            ctx.fillText(mark.label, px(mark.x) + 3, padT + 2 + markRow * 12);
             markRow++;
         }
     }
@@ -161,12 +165,9 @@ function frame(ctx, w, h, { xMin, xMax, yMin, yMax, xLabel, yLabel, markX = [] }
     ctx.textBaseline = 'bottom';
     if (xLabel) ctx.fillText(xLabel, w - padR, h - 2);
     if (yLabel) {
-        ctx.save();
-        ctx.translate(10, padT);
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
-        ctx.fillText(yLabel, 0, 0);
-        ctx.restore();
+        ctx.fillText(yLabel, 2, 2);
     }
     return { px, py, padL, padR, padT, padB };
 }
