@@ -190,6 +190,7 @@ test.describe('auth funnel', () => {
     });
 
     test('index.html CTA rail appears once the hero scrolls away and dismisses for the tab', async ({ page }) => {
+        test.slow();
         await page.goto('/index.html', { waitUntil: 'domcontentloaded' });
         const rail = page.locator('#cta-rail');
         await expect(rail).not.toHaveClass(/on/);
@@ -197,8 +198,16 @@ test.describe('auth funnel', () => {
         // The cookie-consent banner owns the bottom edge while open: the rail
         // must yield to it, then appear once the visitor decides.
         const consent = page.locator('.pp-consent-banner');
-        // The banner self-mounts on DOMContentLoaded — give it a moment.
-        await consent.waitFor({ state: 'visible', timeout: 4000 }).catch(() => {});
+        // The banner self-mounts on DOMContentLoaded. The wait used to be 4 s,
+        // which is a RACE, not a settle: when index.html is slow (software GL,
+        // and heavier still on the home_bg_carousel variant arm) the banner
+        // mounts after the wait, the reject click below is skipped, and the
+        // rail then correctly yields to a banner nobody dismissed — so the
+        // assertion fails on a page that is behaving exactly as designed.
+        // Measured failing that way in a combined spec run. 20 s is a settle:
+        // the banner either mounts and is dismissed, or consent was already
+        // stored and it never mounts at all (the .catch path).
+        await consent.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
         if (await consent.isVisible().catch(() => false)) {
             await expect(rail).not.toHaveClass(/on/);
             await consent.locator('[data-action="reject"]').click();

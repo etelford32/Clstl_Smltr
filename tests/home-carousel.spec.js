@@ -69,8 +69,23 @@ test.describe('home background carousel', () => {
     });
 
     test('control variant mounts nothing', async ({ page }) => {
+        test.slow();
         await offline(page);
-        await page.goto('/index.html?exp_home_bg_carousel=control&debug=1', { waitUntil: 'load' });
+        // domcontentloaded, NOT 'load'. index.html carries two lazy iframes of
+        // full WebGL apps (earth.html and space-weather.html?preview=1), so the
+        // load event can be minutes away on a software rasteriser — measured
+        // here as a hard 60 s timeout, i.e. this gate could not fail honestly,
+        // it could only time out. Wait instead for the point in the page's
+        // trailing module where the mount decision has certainly been taken:
+        // the hero either booted (__ppHero, set at the end of start() under
+        // debug=1) or hid its canvas (the WebGL-failure and import-failure
+        // paths both do). The carousel branch is the next statement after that
+        // block, so a short settle past it is enough to assert the negative.
+        await page.goto('/index.html?exp_home_bg_carousel=control&debug=1', { waitUntil: 'domcontentloaded' });
+        await page.waitForFunction(() => {
+            const c = document.getElementById('hero-canvas');
+            return !!window.__ppHero || (c && c.style.display === 'none');
+        }, null, { timeout: 60_000 });
         await page.waitForTimeout(2500);
         await expect(page.locator('#hero .hc-layer')).toHaveCount(0);
         expect(await page.evaluate(() => !!window.__ppCarousel)).toBe(false);
