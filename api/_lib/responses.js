@@ -45,17 +45,45 @@ export const CORS_HEADERS = Object.freeze({
 
 /**
  * JSON success response with edge-cache hints.
+ *
+ * Auto-stamps `fetched_at` (ISO timestamp of response generation) onto
+ * plain-object bodies that don't already declare one. The system-status
+ * page reads `fetched_at` to compute a row's "Age" — without this stamp
+ * the row falls back to "no freshness info" even when the endpoint is
+ * healthy. Arrays + primitives pass through untouched (their freshness
+ * is read from the trailing element's `time_tag` / `timestamp` /
+ * `observed`, see status.html). Callers that already produce a
+ * meaningful timestamp (`updated`, `data.updated`, etc.) keep it; the
+ * stamp here represents response-side recency, which is exactly what
+ * the status page wants.
+ *
  * @param {any} body
- * @param {{ maxAge?: number, swr?: number, status?: number, headers?: object }} [opts]
+ * @param {{ maxAge?: number, swr?: number, status?: number, headers?: object,
+ *           stampFetchedAt?: boolean }} [opts]
  */
 export function jsonOk(body, opts = {}) {
     const {
-        maxAge  = DEFAULT_SUCCESS_MAX_AGE,
-        swr     = DEFAULT_SUCCESS_SWR,
-        status  = 200,
-        headers = {},
+        maxAge          = DEFAULT_SUCCESS_MAX_AGE,
+        swr             = DEFAULT_SUCCESS_SWR,
+        status          = 200,
+        headers         = {},
+        stampFetchedAt  = true,
     } = opts;
-    return Response.json(body, {
+
+    let payload = body;
+    if (
+        stampFetchedAt
+        && body
+        && typeof body === 'object'
+        && !Array.isArray(body)
+        && !('fetched_at' in body)
+    ) {
+        // Splice the stamp in *first* so it appears at the top of the
+        // pretty-printed JSON — small DX win when poking endpoints.
+        payload = { fetched_at: new Date().toISOString(), ...body };
+    }
+
+    return Response.json(payload, {
         status,
         headers: {
             'Cache-Control': `public, s-maxage=${maxAge}, stale-while-revalidate=${swr}`,
