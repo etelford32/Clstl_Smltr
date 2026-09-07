@@ -167,27 +167,30 @@ test.describe('auth funnel', () => {
         expect(await page.locator('#signin-create-account').getAttribute('href')).not.toContain('evil');
     });
 
-    test('index.html hero capture emits aurora_capture_* with source home-hero', async ({ page }) => {
+    test('index.html band capture emits aurora_capture_* with source home; the hero has ONE ask', async ({ page }) => {
+        // 2026-09-06: the above-the-fold capture (source home-hero) was
+        // retired — 0 submits in 60 days — and the hero carries one CTA.
         const events = attachFunnelInterceptor(page);
         await page.route('**/api/subscribe/aurora', (route) =>
             route.fulfill({ status: 202, contentType: 'application/json', body: '{"ok":true}' }));
         await page.goto('/index.html', { waitUntil: 'domcontentloaded' });
-        const form = page.locator('form[data-source="home-hero"]');
+        await expect(page.locator('#hero [data-funnel-cta]')).toHaveCount(1);
+        await expect(page.locator('#hero [data-funnel-cta]')).toHaveAttribute('data-funnel-cta', 'hero_magnetosphere');
+        await expect(page.locator('form[data-source="home-hero"]')).toHaveCount(0);
+        const form = page.locator('form[data-source="home"]');
         await form.scrollIntoViewIfNeeded();
         await form.locator('input[type="email"]').fill('visitor@example.com');
         await form.locator('button[type="submit"]').click();
         await expect(form.locator('.aurora-upsell a[data-funnel-cta="aurora_capture_upsell"]')).toBeVisible();
         await flushTelemetry(page);
-        const hero = events.filter(e => e.metadata?.source === 'home-hero').map(e => e.metadata?.stage);
-        expect(hero).toContain('aurora_capture_view');
-        expect(hero).toContain('aurora_capture_submit');
-        expect(hero).toContain('aurora_capture_succeeded');
-        // The submit button doubles as a landing CTA click.
-        const ctas = events.filter(e => e.metadata?.stage === 'landing_cta_click').map(e => e.metadata?.cta);
-        expect(ctas).toContain('hero_alerts_submit');
+        const band = events.filter(e => e.metadata?.source === 'home').map(e => e.metadata?.stage);
+        expect(band).toContain('aurora_capture_view');
+        expect(band).toContain('aurora_capture_submit');
+        expect(band).toContain('aurora_capture_succeeded');
     });
 
     test('index.html CTA rail appears once the hero scrolls away and dismisses for the tab', async ({ page }) => {
+        test.slow();
         await page.goto('/index.html', { waitUntil: 'domcontentloaded' });
         const rail = page.locator('#cta-rail');
         await expect(rail).not.toHaveClass(/on/);
@@ -195,8 +198,16 @@ test.describe('auth funnel', () => {
         // The cookie-consent banner owns the bottom edge while open: the rail
         // must yield to it, then appear once the visitor decides.
         const consent = page.locator('.pp-consent-banner');
-        // The banner self-mounts on DOMContentLoaded — give it a moment.
-        await consent.waitFor({ state: 'visible', timeout: 4000 }).catch(() => {});
+        // The banner self-mounts on DOMContentLoaded. The wait used to be 4 s,
+        // which is a RACE, not a settle: when index.html is slow (software GL,
+        // and heavier still on the home_bg_carousel variant arm) the banner
+        // mounts after the wait, the reject click below is skipped, and the
+        // rail then correctly yields to a banner nobody dismissed — so the
+        // assertion fails on a page that is behaving exactly as designed.
+        // Measured failing that way in a combined spec run. 20 s is a settle:
+        // the banner either mounts and is dismissed, or consent was already
+        // stored and it never mounts at all (the .catch path).
+        await consent.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
         if (await consent.isVisible().catch(() => false)) {
             await expect(rail).not.toHaveClass(/on/);
             await consent.locator('[data-action="reject"]').click();

@@ -15,6 +15,8 @@
  *   • Solar-wind particles that DEFLECT around the bow shock (Shue boundary
  *     from engine.analysis) and heat up in the magnetosheath — the "shield
  *     doing its job" money shot. Particle colour follows IMF Bz.
+ *   • Deep field — fbm nebula on a BackSide shell inside the stars (the
+ *     'intergalactic' backdrop). Second rung of the perf ladder.
  *   • Bloom — UnrealBloomPass composited as an additive overlay on top of the
  *     untouched base frame. Same pattern (and same reason) as
  *     ring-current-globe.js: the composer's own to-screen path clears the
@@ -23,7 +25,7 @@
  *     earth-directed CME with an ETA.
  *   • Perf guards — real frame clock, RAF fully parked when the tab is hidden
  *     or the hero is scrolled away (IntersectionObserver), and a one-way
- *     degradation ladder (drop bloom, then halve particles) on slow devices.
+ *     degradation ladder (drop bloom, then the deep field, then halve particles) on slow devices.
  *
  * Graceful fallback: any WebGL failure hides the canvas; the CSS gradient
  * backdrop in index.html remains and the live ticker/HUD stay functional.
@@ -204,6 +206,50 @@ const WIND_FRAG = /* glsl */`
     }
 `;
 
+
+// ── Deep field — the "intergalactic" backdrop (2026-09) ─────────────────────
+// A BackSide sphere just inside the star shell carrying an fbm nebula: two
+// cool bands (UV violet / teal) with a faint magenta rim, drifting on a
+// ~minute-scale clock. Additive and dim on purpose — it has to sit UNDER the
+// H1 and the email capture without competing with them; the #hero::after
+// scrim in index.html still paints above the whole canvas. It is the second
+// rung of the perf ladder (after bloom) because it is a full-screen fbm.
+const NEBULA_VERT = /* glsl */`
+    varying vec3 vDir;
+    void main(){
+        vDir = normalize(position);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+const NEBULA_FRAG = /* glsl */`
+    ${GLSL_NOISE}
+    uniform float u_time;
+    uniform float u_gain;
+    varying vec3 vDir;
+    void main(){
+        vec3 d = vDir;
+        float t = u_time * 0.006;
+        // Domain warp so the bands curl instead of reading as static blobs.
+        vec3 q = d * 2.2 + vec3(t, -t * 0.7, t * 0.4);
+        float w = fbm3(q * 1.7 + 3.1);
+        float n1 = fbm3(q + w * 0.9);
+        float n2 = fbm3(q * 2.3 - w * 0.6 + vec3(7.0, 1.0, 3.0));
+        // Two broad bands hugging a tilted "galactic" plane.
+        float plane = abs(dot(d, normalize(vec3(0.25, 1.0, 0.35))));
+        float band  = smoothstep(0.55, 0.0, plane);
+        float violet = smoothstep(0.42, 0.78, n1) * band;
+        float teal   = smoothstep(0.50, 0.85, n2) * (0.6 + 0.4 * band);
+        float rim    = smoothstep(0.62, 0.9, n1 * n2 * 2.0) * band;
+        vec3 col = vec3(0.30, 0.10, 0.55) * violet
+                 + vec3(0.05, 0.32, 0.42) * teal
+                 + vec3(0.55, 0.12, 0.40) * rim;
+        // Keep the sunward side (particles + sun sprites) quieter.
+        float sunside = smoothstep(-0.2, 0.9, d.x);
+        col *= (1.0 - 0.45 * sunside);
+        gl_FragColor = vec4(col * u_gain, 1.0);
+    }
+`;
+
 export class HeroSpaceWeather {
     /**
      * @param {HTMLCanvasElement} canvas
@@ -236,6 +282,7 @@ export class HeroSpaceWeather {
             this._initCamera();
             this._initLighting();
             this._initEarth();
+            this._initDeepField();
             this._initStars();
             this._initSun();
             this._initCmeCue();
@@ -297,7 +344,7 @@ export class HeroSpaceWeather {
     }
 
     _maybeRun() {
-        const active = !this._stopped && this._visible && this._pageVisible;
+        const active = !this._stopped && this._visible && this._pageVisible && !this._covered;
         if (active && !this._animId && this._renderer) {
             this._clock.getDelta();               // flush the paused interval
             this._animId = requestAnimationFrame(this._animate.bind(this));
@@ -462,6 +509,36 @@ export class HeroSpaceWeather {
         this._scene.add(new THREE.Points(geo, mat));
     }
 
+    // ── Deep field (see NEBULA_FRAG) ──────────────────────────────────────────
+    _initDeepField() {
+        this._nebU = { u_time: { value: 0 }, u_gain: { value: 0.85 } };
+        const mat = new THREE.ShaderMaterial({
+            uniforms: this._nebU,
+            vertexShader:   NEBULA_VERT,
+            fragmentShader: NEBULA_FRAG,
+            side:        THREE.BackSide,
+            depthWrite:  false,
+            depthTest:   false,
+            blending:    THREE.AdditiveBlending,
+            fog:         false,
+        });
+        const mesh = new THREE.Mesh(new THREE.SphereGeometry(260, 24, 16), mat);
+        mesh.renderOrder = -10;   // first, so everything composites over it
+        mesh.frustumCulled = false;
+        this._nebula = mesh;
+        this._scene.add(mesh);
+    }
+
+    /**
+     * Something opaque is covering the canvas (the background carousel on a
+     * captured slide). Parks the RAF like off-screen does — the GPU goes to
+     * whatever is actually visible. Re-enabled BEFORE the cover fades out.
+     */
+    setCovered(covered) {
+        this._covered = !!covered;
+        this._maybeRun();
+    }
+
     // ── Sun — radial-gradient sprites that feed the bloom pass ────────────────
     _initSun() {
         const tex = _radialTexture([
@@ -624,6 +701,7 @@ export class HeroSpaceWeather {
         this._earthU.u_time.value = t;
         this._cloudU.u_time.value = t;
         this._starU.u_time.value  = t;
+        if (this._nebU) this._nebU.u_time.value = t;
 
         // ── Magnetosphere: live state + real dt every frame ────────────────
         this._engine.tick(t, SUN_DIR, this._state, dt);
@@ -682,6 +760,9 @@ export class HeroSpaceWeather {
         if (this._bloomOn && this._frameEma > 45) {
             this._bloomOn = false;
             console.info('[HeroSpaceWeather] slow device — bloom disabled');
+        } else if (!this._bloomOn && this._nebula?.visible && this._frameEma > 55) {
+            this._nebula.visible = false;
+            console.info('[HeroSpaceWeather] slow device — deep field disabled');
         } else if (!this._bloomOn && this._frameEma > 60 && !this._halved) {
             this._halved = true;
             this._particles.geometry.setDrawRange(0, Math.floor(this._opts.particleCount / 2));

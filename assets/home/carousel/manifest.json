@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "generatedAt": "2026-09-06T20:32:25.729Z",
+  "slides": [
+    {
+      "id": "flux-rope",
+      "poster": "assets/home/carousel/flux-rope.jpg",
+      "clip": "assets/home/carousel/flux-rope.webm",
+      "width": 1600,
+      "height": 540,
+      "source": "/space-weather.html?preview=1",
+      "capturedAt": "2026-09-06T20:26:47.063Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 69813,
+        "clip": 339124
+      }
+    },
+    {
+      "id": "ring-current",
+      "poster": "assets/home/carousel/ring-current.jpg",
+      "clip": "assets/home/carousel/ring-current.webm",
+      "width": 1212,
+      "height": 666,
+      "source": "/ring-current.html",
+      "capturedAt": "2026-09-06T20:27:23.960Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 52167,
+        "clip": 528739
+      }
+    },
+    {
+      "id": "mars",
+      "poster": "assets/home/carousel/mars.jpg",
+      "clip": "assets/home/carousel/mars.webm",
+      "width": 1600,
+      "height": 850,
+      "source": "/mars.html",
+      "capturedAt": "2026-09-06T20:28:06.391Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 61575,
+        "clip": 442725
+      }
+    },
+    {
+      "id": "moon",
+      "poster": "assets/home/carousel/moon.jpg",
+      "clip": "assets/home/carousel/moon.webm",
+      "width": 1600,
+      "height": 850,
+      "source": "/moon.html",
+      "capturedAt": "2026-09-06T20:28:38.132Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 51117,
+        "clip": 405703
+      }
+    },
+    {
+      "id": "earth",
+      "poster": "assets/home/carousel/earth.jpg",
+      "clip": "assets/home/carousel/earth.webm",
+      "width": 1600,
+      "height": 850,
+      "source": "/earth.html?verdict=0",
+      "capturedAt": "2026-09-06T20:32:25.675Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 208990,
+        "clip": 430807
+      }
+    },
+    {
+      "id": "tiga",
+      "poster": "assets/home/carousel/tiga.jpg",
+      "clip": "assets/home/carousel/tiga.webm",
+      "width": 1284,
+      "height": 560,
+      "source": "/tiga.html",
+      "capturedAt": "2026-09-06T20:30:26.342Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 31877,
+        "clip": 436728
+      }
+    },
+    {
+      "id": "pollution",
+      "poster": "assets/home/carousel/pollution.jpg",
+      "clip": "assets/home/carousel/pollution.webm",
+      "width": 950,
+      "height": 474,
+      "source": "/pollution.html",
+      "capturedAt": "2026-09-06T20:30:47.594Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 27373,
+        "clip": 269978
+      }
+    }
+  ]
+}

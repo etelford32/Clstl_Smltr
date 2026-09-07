@@ -57,8 +57,8 @@ won't show up in the ordered funnel summary.
 | Page | Stage | When |
 |---|---|---|
 | index.html | `landing_view` | Page load |
-| index.html | `landing_cta_click` | Any `[data-funnel-cta]` click (hero `hero_signup` / `hero_magnetosphere` / `hero_alerts_submit`, the console chip `console_signup`, the CTA rail `rail_alerts` / `rail_signup`, the post-capture `aurora_capture_upsell`, pricing, depth ladder, footer) |
-| index.html / earth.html / gannon / st-patrick | `aurora_capture_view` → `focus` → `submit` → `succeeded` / `failed` | The anonymous email capture (`js/aurora-capture.js`). Every stage carries `source`; index.html has TWO placements — `home-hero` (above the fold) and `home` (the S5 band) — compare them by source |
+| index.html | `landing_cta_click` | Any `[data-funnel-cta]` click (hero `hero_magnetosphere` — the ONE hero ask since 2026-09-06; `hero_signup` / `hero_alerts_submit` are historical, retired after 0 clicks / 0 submits in 60 days — the console chip `console_signup`, the CTA rail `rail_alerts` / `rail_signup`, the post-capture `aurora_capture_upsell`, pricing, depth ladder, footer) |
+| index.html / earth.html / gannon / st-patrick | `aurora_capture_view` → `focus` → `submit` → `succeeded` / `failed` | The anonymous email capture (`js/aurora-capture.js`). Every stage carries `source`; index.html carries the `home` (S5 band) placement — `home-hero` (above the fold, 2026-09) is historical, retired 2026-09-06 |
 | signup.html | `signup_view` | Page load |
 | signup.html | `signup_plan_selected` | Plan pill clicked |
 | signup.html | `signup_invite_entered` | Invite code entered |
