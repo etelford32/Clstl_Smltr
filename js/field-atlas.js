@@ -39,7 +39,7 @@ let _initPromise = null;
 let _lastAtlas = null;
 let _lastTextures = null;
 
-const WASM_URL = './js/sunfield-wasm/sunfield_wasm.js';
+const WASM_URL = './sunfield-wasm/sunfield_wasm.js';   // relative to THIS module (js/), not the page — './js/…' resolved to js/js/… and silently broke every atlas build (fixed 2026-09-06, plan Phase 3)
 
 /** Load the WASM module once. Idempotent and concurrent-safe. */
 export function ensureFieldAtlasWasm() {

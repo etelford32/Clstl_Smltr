@@ -1,0 +1,311 @@
+{
+  "synthetic": true,
+  "generated": "2026-09-06T14:58:59.279Z",
+  "epoch": "2026-09-06T12:00:00Z",
+  "size": 512,
+  "planted": [
+    {
+      "id": "AR-A",
+      "latDeg": 15,
+      "lonDeg": 20,
+      "areaMh": 420,
+      "polarity": 1
+    },
+    {
+      "id": "AR-B",
+      "latDeg": -12,
+      "lonDeg": -35,
+      "areaMh": 260,
+      "polarity": -1
+    },
+    {
+      "id": "AR-C",
+      "latDeg": 22,
+      "lonDeg": -60,
+      "areaMh": 140,
+      "polarity": 1
+    }
+  ],
+  "frames": {
+    "131": {
+      "file": "synthetic_131.png",
+      "synthetic": true,
+      "channel": "131",
+      "code": "0131",
+      "instrument": "aia",
+      "epoch": "2026-09-06T12:00:00Z",
+      "b0Deg": -4,
+      "geom": {
+        "cx": 0.5,
+        "cy": 0.5,
+        "r": 0.39
+      },
+      "planted": [
+        {
+          "id": "AR-A",
+          "latDeg": 15,
+          "lonDeg": 20,
+          "px": 321.96750076121464,
+          "py": 191.80194777344616,
+          "visible": true
+        },
+        {
+          "id": "AR-B",
+          "latDeg": -12,
+          "lonDeg": -35,
+          "px": 143.9710505619729,
+          "py": 286.2540642665132,
+          "visible": true
+        },
+        {
+          "id": "AR-C",
+          "latDeg": 22,
+          "lonDeg": -60,
+          "px": 95.6639943203279,
+          "py": 174.92340869767042,
+          "visible": true
+        }
+      ]
+    },
+    "171": {
+      "file": "synthetic_171.png",
+      "synthetic": true,
+      "channel": "171",
+      "code": "0171",
+      "instrument": "aia",
+      "epoch": "2026-09-06T12:00:00Z",
+      "b0Deg": -4,
+      "geom": {
+        "cx": 0.5,
+        "cy": 0.5,
+        "r": 0.39
+      },
+      "planted": [
+        {
+          "id": "AR-A",
+          "latDeg": 15,
+          "lonDeg": 20,
+          "px": 321.96750076121464,
+          "py": 191.80194777344616,
+          "visible": true
+        },
+        {
+          "id": "AR-B",
+          "latDeg": -12,
+          "lonDeg": -35,
+          "px": 143.9710505619729,
+          "py": 286.2540642665132,
+          "visible": true
+        },
+        {
+          "id": "AR-C",
+          "latDeg": 22,
+          "lonDeg": -60,
+          "px": 95.6639943203279,
+          "py": 174.92340869767042,
+          "visible": true
+        }
+      ]
+    },
+    "193": {
+      "file": "synthetic_193.png",
+      "synthetic": true,
+      "channel": "193",
+      "code": "0193",
+      "instrument": "aia",
+      "epoch": "2026-09-06T12:00:00Z",
+      "b0Deg": -4,
+      "geom": {
+        "cx": 0.5,
+        "cy": 0.5,
+        "r": 0.39
+      },
+      "planted": [
+        {
+          "id": "AR-A",
+          "latDeg": 15,
+          "lonDeg": 20,
+          "px": 321.96750076121464,
+          "py": 191.80194777344616,
+          "visible": true
+        },
+        {
+          "id": "AR-B",
+          "latDeg": -12,
+          "lonDeg": -35,
+          "px": 143.9710505619729,
+          "py": 286.2540642665132,
+          "visible": true
+        },
+        {
+          "id": "AR-C",
+          "latDeg": 22,
+          "lonDeg": -60,
+          "px": 95.6639943203279,
+          "py": 174.92340869767042,
+          "visible": true
+        }
+      ]
+    },
+    "211": {
+      "file": "synthetic_211.png",
+      "synthetic": true,
+      "channel": "211",
+      "code": "0211",
+      "instrument": "aia",
+      "epoch": "2026-09-06T12:00:00Z",
+      "b0Deg": -4,
+      "geom": {
+        "cx": 0.5,
+        "cy": 0.5,
+        "r": 0.39
+      },
+      "planted": [
+        {
+          "id": "AR-A",
+          "latDeg": 15,
+          "lonDeg": 20,
+          "px": 321.96750076121464,
+          "py": 191.80194777344616,
+          "visible": true
+        },
+        {
+          "id": "AR-B",
+          "latDeg": -12,
+          "lonDeg": -35,
+          "px": 143.9710505619729,
+          "py": 286.2540642665132,
+          "visible": true
+        },
+        {
+          "id": "AR-C",
+          "latDeg": 22,
+          "lonDeg": -60,
+          "px": 95.6639943203279,
+          "py": 174.92340869767042,
+          "visible": true
+        }
+      ]
+    },
+    "304": {
+      "file": "synthetic_304.png",
+      "synthetic": true,
+      "channel": "304",
+      "code": "0304",
+      "instrument": "aia",
+      "epoch": "2026-09-06T12:00:00Z",
+      "b0Deg": -4,
+      "geom": {
+        "cx": 0.5,
+        "cy": 0.5,
+        "r": 0.39
+      },
+      "planted": [
+        {
+          "id": "AR-A",
+          "latDeg": 15,
+          "lonDeg": 20,
+          "px": 321.96750076121464,
+          "py": 191.80194777344616,
+          "visible": true
+        },
+        {
+          "id": "AR-B",
+          "latDeg": -12,
+          "lonDeg": -35,
+          "px": 143.9710505619729,
+          "py": 286.2540642665132,
+          "visible": true
+        },
+        {
+          "id": "AR-C",
+          "latDeg": 22,
+          "lonDeg": -60,
+          "px": 95.6639943203279,
+          "py": 174.92340869767042,
+          "visible": true
+        }
+      ]
+    },
+    "white": {
+      "file": "synthetic_white.png",
+      "synthetic": true,
+      "channel": "white",
+      "code": "HMIIC",
+      "instrument": "hmi",
+      "epoch": "2026-09-06T12:00:00Z",
+      "b0Deg": -4,
+      "geom": {
+        "cx": 0.5,
+        "cy": 0.5,
+        "r": 0.465
+      },
+      "planted": [
+        {
+          "id": "AR-A",
+          "latDeg": 15,
+          "lonDeg": 20,
+          "px": 334.65355859990973,
+          "py": 179.45616849910886,
+          "visible": true
+        },
+        {
+          "id": "AR-B",
+          "latDeg": -12,
+          "lonDeg": -35,
+          "px": 122.42702182389078,
+          "py": 292.0721535485349,
+          "visible": true
+        },
+        {
+          "id": "AR-C",
+          "latDeg": 22,
+          "lonDeg": -60,
+          "px": 64.83014707423712,
+          "py": 159.33175652414548,
+          "visible": true
+        }
+      ]
+    },
+    "mag": {
+      "file": "synthetic_mag.png",
+      "synthetic": true,
+      "channel": "mag",
+      "code": "HMIB",
+      "instrument": "hmi",
+      "epoch": "2026-09-06T12:00:00Z",
+      "b0Deg": -4,
+      "geom": {
+        "cx": 0.5,
+        "cy": 0.5,
+        "r": 0.465
+      },
+      "planted": [
+        {
+          "id": "AR-A",
+          "latDeg": 15,
+          "lonDeg": 20,
+          "px": 334.65355859990973,
+          "py": 179.45616849910886,
+          "visible": true
+        },
+        {
+          "id": "AR-B",
+          "latDeg": -12,
+          "lonDeg": -35,
+          "px": 122.42702182389078,
+          "py": 292.0721535485349,
+          "visible": true
+        },
+        {
+          "id": "AR-C",
+          "latDeg": 22,
+          "lonDeg": -60,
+          "px": 64.83014707423712,
+          "py": 159.33175652414548,
+          "visible": true
+        }
+      ]
+    }
+  }
+}

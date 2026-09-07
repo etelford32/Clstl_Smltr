@@ -35,6 +35,10 @@ const UPSTREAMS = [
     { source: 'swpc-f107',      url: 'https://services.swpc.noaa.gov/json/f107_cm_flux.json',                   edge_authoritative: false },
     { source: 'swpc-ap-daily',  url: 'https://services.swpc.noaa.gov/text/daily-geomagnetic-indices.txt',       edge_authoritative: false },
     { source: 'donki-cme',    url: `https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/CME?api_key=${NASA_KEY}`, edge_authoritative: true },
+    // SDO browse frames — proxied by /api/solar/aia (the observed disk on
+    // sun.html + the Stage / globe / heliosphere live Suns), so this row IS
+    // authoritative. Smallest frame NASA serves, to keep the probe cheap.
+    { source: 'sdo-latest',   url: 'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg', edge_authoritative: true },
     // Mars upstreams. Both are proxied through the edge (/api/mars/route and
     // /api/mars/weather), so these rows ARE authoritative. mars.nasa.gov has
     // been intermittent since 2024 — a `down` here is the expected steady
