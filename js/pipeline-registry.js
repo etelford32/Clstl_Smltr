@@ -121,6 +121,14 @@ export const PIPELINES = [
       warnAgeS:  36 * 3600, critAgeS: 72 * 3600,
       notes: 'Observed + predicted F10.7 series (drag models, Sun Watch cycle tab). Shipped unmonitored until Sun Watch adopted it.' },
 
+    { id: 'solar-aia',          label: 'SDO/AIA + HMI full-disk frames',
+      endpoint: '/api/solar/aia',
+      probePath: '/api/solar/aia?meta=1&channel=white',   // JSON provenance; the endpoint itself streams a JPEG
+      category: 'space-weather', upstream: 'NASA SDO (browse frames)',
+      cadence_s: 720,   prewarm: 'hot', probeTimeoutMs: 12_000,
+      warnAgeS:  30 * 60, critAgeS: 90 * 60,
+      notes: 'The OBSERVED disk on sun.html (default) + the Stage / globe / heliosphere live Suns. Shipped 2026-07 unmonitored; registered with the sun.html observed-by-default work (SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 1). meta=1 answers 200 + freshness:expired when NASA is unreachable so the row reads DOWN, not broken.' },
+
     { id: 'hek-coronal-holes',  label: 'HEK coronal holes',
       endpoint: '/api/hek/coronal-holes',
       category: 'events', upstream: 'LMSAL HEK',

@@ -3,6 +3,11 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
     testDir: './tests',
+    // Screenshot baselines (only tests/sun-visual.spec.js uses them; opt-in via
+    // SUN_GPU=1 on real hardware — see that spec's header). Kept project- and
+    // platform-agnostic on purpose: one baseline per scene, captured on the GPU
+    // the plan's progress log names.
+    snapshotPathTemplate: '{testDir}/__visual__/{testFileName}/{arg}{ext}',
     timeout: 60_000,
     retries: 1,
     use: {
