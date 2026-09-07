@@ -206,7 +206,64 @@ body {
 .tg-key-sw.tg-key-line { height:4px; margin-top:6px; border-radius:2px; }
 .tg-key-lb { color:#cdd5e4; }
 .tg-key-lb i { color:#8b94ad; font-style:normal; display:block; font-size:.66rem; }
-@media (max-width:768px) { .tg-key { max-width:70%; font-size:.66rem; } }
+@media (max-width:768px) { .tg-key { max-width:58%; font-size:.66rem; } }
+
+/* ── View controls + the hover readout ────────────────────────────────────
+   The readout is pointer-events:none on purpose: it sits over the canvas and
+   an overlay that swallows a drag turns "explore the scene" into "the camera
+   stopped working near the bottom of the frame". */
+.tg-nav {
+    position:absolute; right:12px; top:12px; z-index:3;
+    display:flex; flex-wrap:wrap; justify-content:flex-end; gap:4px; align-items:center;
+    background:rgba(4,7,20,.78); border:1px solid rgba(90,110,160,.3);
+    border-radius:10px; padding:5px 6px; backdrop-filter:blur(6px);
+}
+.tg-nav-btn {
+    font:inherit; font-size:.68rem; font-weight:600; letter-spacing:.03em;
+    color:#cdd5e4; background:rgba(90,110,160,.14);
+    border:1px solid rgba(90,110,160,.3); border-radius:6px;
+    padding:4px 8px; cursor:pointer; white-space:nowrap;
+}
+.tg-nav-btn:hover { background:rgba(127,230,195,.16); border-color:rgba(127,230,195,.45); color:#e4e9f5; }
+.tg-nav-btn:focus-visible { outline:2px solid #7fe6c3; outline-offset:2px; }
+.tg-nav-zoom { min-width:28px; text-align:center; font-size:.82rem; line-height:1.1; padding:3px 6px; }
+.tg-nav-gap { width:1px; align-self:stretch; background:rgba(90,110,160,.32); margin:0 2px; }
+.tg-readout {
+    position:absolute; left:12px; right:12px; bottom:10px; z-index:2;
+    pointer-events:none;
+    font-size:.68rem; line-height:1.45; color:#8b94ad;
+    font-variant-numeric:tabular-nums;
+    background:rgba(4,7,20,.72); border:1px solid rgba(90,110,160,.22);
+    border-radius:8px; padding:6px 10px; backdrop-filter:blur(6px);
+}
+/* Load-bearing: both children are spans, and an author display rule anywhere
+   above would beat the UA sheet's [hidden]{display:none}. The same omission
+   left every row of the Mars feature index on screen. */
+.tg-readout > span[hidden] { display:none; }
+.tg-readout b { color:#e4e9f5; font-weight:600; }
+.tg-readout i { color:#7fe6c3; font-style:normal; }
+.tg-readout u { color:#ff9a56; text-decoration:none; }
+.tg-readout em { color:#767f9a; font-style:italic; }
+.tg-stage canvas:focus-visible { outline:2px solid #7fe6c3; outline-offset:-2px; }
+/* Which hint you get follows the POINTER, not the viewport width: the two
+   describe different gestures, and a narrow desktop window still has a wheel
+   and a right button. Same reasoning as nav.js's hover gating. */
+.tg-hint-touch { display:none; }
+@media (hover: none), (pointer: coarse) {
+    .tg-hint-mouse { display:none; }
+    .tg-hint-touch { display:inline; }
+}
+@media (max-width:768px) {
+    /* The key is top-left and the cluster is top-right on the SAME row of a
+       330px stage, so the cluster sheds its three optional framings — Reset
+       recentres and reframes, and Pole/Equator are a drag away. Nothing here
+       is reachable only on a desktop; measured at 390px, keeping all six
+       wrapped the cluster into the key. */
+    .tg-nav { right:8px; top:8px; padding:4px; gap:3px; }
+    .tg-nav-opt { display:none; }
+    .tg-nav-btn { font-size:.62rem; padding:3px 6px; }
+    .tg-readout { left:8px; right:8px; bottom:8px; font-size:.62rem; padding:5px 8px; }
+}
 
 .tg-stage .tg-stage-msg {
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
@@ -296,6 +353,35 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
             <button type="button" class="tg-key-toggle" id="tg-key-toggle" aria-expanded="true"
                     aria-controls="tg-key-body">Key</button>
             <ul class="tg-key-body" id="tg-key-body"></ul>
+        </div>
+        <!-- Framing shortcuts. These START a flight; they do not hold the
+             camera — the next drag, scroll or arrow key cancels whatever is
+             running. See the CAMERA section of js/geomag/core-3d.js. -->
+        <div class="tg-nav" id="tg-nav" hidden role="group" aria-label="View controls">
+            <button type="button" class="tg-nav-btn" data-view="reset"
+                    title="Back to this layer's framing (R)">Reset</button>
+            <button type="button" class="tg-nav-btn tg-nav-opt" data-view="pole"
+                    title="Look down the spin axis">Pole</button>
+            <button type="button" class="tg-nav-btn tg-nav-opt" data-view="equator"
+                    title="Look along the equator">Equator</button>
+            <button type="button" class="tg-nav-btn tg-nav-opt" data-view="recentre"
+                    title="Put the pivot back at Earth's centre">Recentre</button>
+            <span class="tg-nav-gap" aria-hidden="true"></span>
+            <button type="button" class="tg-nav-btn tg-nav-zoom" data-view="in" aria-label="Zoom in"
+                    title="Zoom in (+)">+</button>
+            <button type="button" class="tg-nav-btn tg-nav-zoom" data-view="out" aria-label="Zoom out"
+                    title="Zoom out (&minus;)">&minus;</button>
+        </div>
+        <!-- The readout. Its numbers come from igrf.js at the picked point, not
+             from reading the shader's colours back. pointer-events:none so it
+             can never eat a drag. -->
+        <div class="tg-readout" id="tg-readout" hidden>
+            <span class="tg-readout-hint" id="tg-readout-hint"><span class="tg-hint-mouse">Drag orbits
+                &middot; scroll zooms &middot; right-drag pans &middot; double-click focuses
+                &middot; hover reads the field &middot; keys &larr; &rarr; &uarr; &darr; + &minus; R</span><span
+                class="tg-hint-touch">Drag orbits &middot; pinch zooms &middot; two fingers pan
+                &middot; double-tap focuses &middot; tap reads the field</span></span>
+            <span class="tg-readout-probe" id="tg-readout-probe" hidden></span>
         </div>
     </div>
     <div class="tg-stagebar">
@@ -1718,6 +1804,68 @@ function drawRikitake() {
 let scene3d = null;
 let raf3d = null;
 
+/**
+ * The hover readout.
+ *
+ * Every number here arrives from the scene as a KERNEL value — igrf.js
+ * evaluated at the picked point on the same coefficients the shells are
+ * textured from. This function formats and never computes; if a quantity
+ * appears here that the probe did not hand over, that is a bug.
+ */
+function fmtNt(nt) {
+    const a = Math.abs(nt);
+    if (a >= 1e5) return `${(nt / 1000).toFixed(0)} µT`;
+    if (a >= 1e4) return `${(nt / 1000).toFixed(1)} µT`;
+    return `${Math.round(nt).toLocaleString()} nT`;
+}
+const fmtLat = (v) => `${Math.abs(v).toFixed(1)}°${v >= 0 ? 'N' : 'S'}`;
+const fmtLon = (v) => `${Math.abs(v).toFixed(1)}°${v >= 0 ? 'E' : 'W'}`;
+
+function renderProbe(p) {
+    const hint = $('tg-readout-hint');
+    const out = $('tg-readout-probe');
+    if (!p) { out.hidden = true; hint.hidden = false; return; }
+    const where = `${fmtLat(p.latDeg)}, ${fmtLon(p.lonDeg)}`;
+    let html;
+    if (p.kind === 'observatory') {
+        // Both latitudes, side by side, for the reason observatories.js gives:
+        // geographic and geomagnetic differ by up to 9.5° and mixing them up
+        // is the exact error that cost this programme weeks.
+        html = `<b>${p.code} · ${p.label}</b> — ${where} · geomagnetic `
+            + `${p.gmLatDeg.toFixed(1)}° · B<sub>r</sub> <u>${fmtNt(p.brNt)}</u>`
+            + ` · |B| <i>${fmtNt(p.fNt)}</i>`;
+    } else if (p.brNt !== undefined) {
+        const depth = p.depthKm > 1
+            ? ` · ${Math.round(p.depthKm).toLocaleString()} km down` : '';
+        html = `<b>${p.label}</b> — ${where}${depth} · B<sub>r</sub> `
+            + `<u>${fmtNt(p.brNt)}</u> · |B| <i>${fmtNt(p.fNt)}</i>`;
+    } else {
+        // No field value below the core–mantle boundary, by design. The probe
+        // hands over the reason and the layer's own diagnostics instead.
+        const bits = [`<b>${p.label}</b> — ${where} · `
+            + `${Math.round(p.depthKm).toLocaleString()} km down`];
+        if (p.sigma !== undefined) {
+            bits.push(`σ ${p.sigma.toExponential(0)} S/m`);
+            bits.push(p.canSustainDynamo ? '<i>dynamo possible</i>' : 'no dynamo');
+        }
+        html = `${bits.join(' · ')} <em>— ${p.note}</em>`;
+    }
+    out.innerHTML = html;
+    out.hidden = false;
+    hint.hidden = true;
+}
+
+$('tg-nav').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-view]');
+    if (!btn || !scene3d) return;
+    const v = btn.dataset.view;
+    // The zoom pair is direct manipulation and cancels any running flight
+    // itself (see zoomBy); the rest start one.
+    if (v === 'in') scene3d.zoomBy(1 / 1.35);
+    else if (v === 'out') scene3d.zoomBy(1.35);
+    else scene3d.setViewPreset(v);
+});
+
 async function boot3d() {
     const host = $('tg-stage');
     const msg = $('tg-stage-msg');
@@ -1730,6 +1878,12 @@ async function boot3d() {
         // Exposed so tests/tiga-smoke.spec.js can assert the clip plane really
         // tracks the camera. Read-only from the page's point of view.
         window.__tigaScene = scene3d;
+        // Camera + probe state for tests, matching the __evCamera convention
+        // earth.html uses. Read-only from the page's point of view.
+        window.__tigaCamera = () => (scene3d ? scene3d.cameraState() : null);
+        scene3d.setProbeHandler(renderProbe);
+        $('tg-nav').hidden = false;
+        $('tg-readout').hidden = false;
         msg.remove();
         apply3d();
         applyScreening();
@@ -1754,6 +1908,11 @@ async function boot3d() {
         scene3d.renderer.domElement.addEventListener('webglcontextlost', (e) => {
             e.preventDefault();
             if (raf3d) cancelAnimationFrame(raf3d);
+            // Hide the view controls with the view. A Reset button over a dead
+            // canvas, and a readout frozen on whatever was last under the
+            // pointer, both claim the scene is still live.
+            $('tg-nav').hidden = true;
+            $('tg-readout').hidden = true;
             host.insertAdjacentHTML('beforeend',
                 '<div class="tg-stage-msg">3D context lost — reload to restore it. '
                 + 'Everything else on this page is pure computation and is unaffected.</div>');

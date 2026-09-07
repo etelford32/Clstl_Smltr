@@ -184,8 +184,63 @@ the §3.0.1 punchline on screen rather than 800px below it.
 The cutaway plane is re-derived from the camera every frame, so opening it
 always opens *toward the viewer*. A world-fixed plane is the obvious
 implementation and the wrong one: orbit 180° and the opening is behind the
-body. Camera range spans 0.14–30 R_E, from inside the inner core out to roughly
-the sunward magnetopause.
+body. The azimuth it uses is the camera's bearing **from the pivot**, not its
+world bearing — those stopped agreeing the moment panning was enabled, and the
+two expressions are identical while the pivot sits at the centre.
+
+### 3.0.2 The camera — the page may start a flight, it may not hold the camera
+
+Camera range spans 0.14–30 R_E, from inside the inner core out to roughly the
+sunward magnetopause. Getting a 214× range to feel like one instrument took
+four decisions, and the first of them is a bug fix.
+
+**The framing flight is one-shot and interruptible.** It used to be a standing
+spring: `render()` eased `camera.position` toward the active layer's framing
+distance *every frame, forever*. OrbitControls reads the camera position back
+at the top of its own `update()`, so the spring was not a flight — it silently
+reverted the user's own zoom about a second after every scroll, and it scaled
+the camera's **world** position, which is only "dolly" while the pivot is at
+the origin. With `zoomToCursor` moving the pivot off the origin on every
+scroll, it slewed the camera sideways as well. The flight is now a tween that
+any drag, scroll, pinch, key or button cancels, working in the pivot's frame.
+It eases on an e-folding **time**, not a per-frame fraction, so the same
+flight lasts ~1.2 s at 60 fps and ~1.2 s on a software rasteriser; the
+per-frame version took eight seconds on the CI runner and read as a hang.
+
+**`zoomToCursor` is off; panning is on and bounded.** Zoom-to-cursor sounds
+friendlier and on a body-centred scene it is not: three.js r160 re-places
+`controls.target` in front of the camera on every cursor zoom, so a few
+scrolls near the limb walk the orbit pivot off the planet and dragging then
+orbits a point in empty space. Moving the pivot is now explicit — double-click
+to focus, **Recentre** to put it back — and panning (right-drag, two fingers,
+the pan bound `maxTargetRadius = 2.6 R_E`) is what lets you put something
+other than the centre of the Earth in the middle of the frame.
+
+**Near and far ride the distance.** A fixed 0.05 near plane against a 0.14
+minimum distance clips a third of the way to the pivot, so zooming into the
+inner core sliced its front off at exactly the moment someone got interested;
+a fixed far of 100 against a 2.2 R_E scene spends depth precision on nothing.
+Both now track the camera, with hysteresis so they are not rewritten every
+frame. Rotate speed tracks it too — a fixed angular rate that feels controlled
+at 3 R_E whips the horizon past at 0.2.
+
+**The pointer probe reads the kernel, not the picture.** Hovering reports
+latitude, longitude, depth, B_r and |B| at the picked point, evaluated with
+`igrf.js fieldGeocentric` on the *same* coefficients the shells are textured
+from — never by sampling the shader's own colormap back, which would report
+the palette. Picking is analytic (every pickable is a sphere about the origin,
+so the intersection is a quadratic) rather than a raycast against ~20k
+triangles per shell per pointer move, and observatory markers on the far limb
+are not pickable, because a marker you cannot see is not one you can click.
+**Below the core–mantle boundary the probe reports no field value at all**:
+IGRF is a potential field, the region below the CMB contains its own source
+currents, and continuing the model into them is not a measurement. The readout
+says that instead of printing an authoritative-looking number, and hands over
+the layer's conductivity and dynamo verdict in its place.
+
+The whole cluster is keyboard-reachable — the canvas is focusable, arrows
+orbit, `+`/`−` zoom, `R` resets. A data surface only a mouse can explore is a
+WCAG 2.1.1 failure, and this one carries readings.
 
 ### 3.1 Numerical gates, all passing
 
@@ -242,7 +297,17 @@ the sunward magnetopause.
    sense inverted, reporting ~80% of the planet as reversed — wrong in a way
    that looks like a result. The gate now asserts a pure dipole field contains
    *exactly zero* reversed flux, which cannot pass with an inverted sign.
-8. **Convergence near an eigenvalue collision**. A fixed settle budget
+8. **A camera spring dressed up as a flight** (new). `render()` eased the
+   camera toward the layer's framing distance on every frame with no
+   termination and no interrupt, so the user's zoom was reverted about a
+   second after every scroll — the view did not look broken in a screenshot,
+   it looked broken in the hand. Two rules came out of it: a framing change is
+   a one-shot tween that direct manipulation cancels, and anything that eases
+   toward a goal needs a *termination condition*, because an exponential
+   approach never arrives. `tests/tiga-smoke.spec.js` now zooms with a real
+   wheel event and asserts the zoom is still there 2 s later, which is long
+   past the point where the old spring had eaten it.
+9. **Convergence near an eigenvalue collision**. A fixed settle budget
    left the quadrupole family unconverged near |D| ≈ 220 — where two of its
    real eigenvalues collide into a complex pair — returning +3.76 for a value
    near −0.5. That single bad sample inverted the family comparison and put a

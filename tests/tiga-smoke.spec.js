@@ -425,11 +425,11 @@ test.describe('tiga.html', () => {
         expect(a).not.toBeNull();
         expect(Math.abs(a.nx - a.want)).toBeLessThan(0.02);
 
-        // Setting the camera position by hand does NOT work here and it is worth
-        // saying why: OrbitControls keeps its own damped spherical state and
-        // restores the camera from it on the next update, so a direct write is
-        // reverted before the clip is derived. The offset slider is the honest
-        // way to move the plane relative to the camera.
+        // The offset slider, not a synthetic drag: a drag tests whether
+        // Playwright can reach OrbitControls, which is not the behaviour under
+        // test. (Writing camera.position directly DOES take effect — r160's
+        // update() re-derives its spherical from the camera every frame — but
+        // going through the control that a user actually has is the point.)
         await page.locator('#tg-3d-cutaz').fill('90');
         await page.locator('#tg-3d-cutaz').dispatchEvent('input');
         await page.waitForTimeout(500);
@@ -582,6 +582,236 @@ test.describe('tiga.html', () => {
         const constant = await page.evaluate(() => window.__tigaScene.clipPlane.constant);
         expect(constant).toBeLessThan(0.192);
         expect(constant).toBeGreaterThanOrEqual(0);
+    });
+
+    /**
+     * ── THE CAMERA ────────────────────────────────────────────────────────
+     *
+     * The regression this whole test exists for: render() used to ease
+     * camera.position toward the active layer's framing distance EVERY FRAME,
+     * forever, and OrbitControls reads the camera position back at the top of
+     * its own update() — so a scroll moved the camera and the page put it back
+     * about a second later. "Zoom works" therefore cannot be tested by zooming
+     * and reading the result immediately; the assertion has to be that the
+     * zoom is STILL there after the old spring would have eaten it.
+     */
+    async function bootStage(page, layer) {
+        await killFeed(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+        if (layer) await page.click(`[data-layer="${layer}"]`);
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+        if (await page.locator('#tg-stage-msg').count()) return false;
+        await page.waitForFunction(() => typeof window.__tigaCamera === 'function');
+        // Clicking a layer tab scrolls the SPINE into view, which puts the
+        // stage off the top of the window — and the page pauses GL when the
+        // stage is offscreen, on purpose. Without scrolling back, the flight
+        // never advances and every camera assertion below waits forever.
+        await page.locator('#tg-stage').scrollIntoViewIfNeeded();
+        await page.waitForFunction(
+            () => { const c = window.__tigaCamera(); return c && !c.flying; },
+            null, { timeout: 45000 });
+        return true;
+    }
+
+    test('a zoom the user asks for is still there a second later', async ({ page }) => {
+        test.setTimeout(180000);
+        if (!await bootStage(page, 'core')) test.skip(true, 'no WebGL on this runner');
+
+        const framed = await page.evaluate(() => window.__tigaCamera());
+        expect(framed.dist).toBeGreaterThan(1.2);
+        expect(framed.dist).toBeLessThan(2.6);
+
+        // A REAL wheel event, not a method call — the whole failure was in how
+        // the page reacted to the controls, so the controls have to be in the
+        // loop.
+        const box = await page.locator('#tg-stage canvas').boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.wheel(0, -900);
+        await page.waitForTimeout(150);
+        const zoomed = await page.evaluate(() => window.__tigaCamera().dist);
+        expect(zoomed).toBeLessThan(framed.dist * 0.8);
+
+        // The old spring pulled the camera back at 7% per frame: 2 s is ~120
+        // frames, which took it to within 0.03% of the layer default. If this
+        // assertion fails, the standing ease is back.
+        await page.waitForTimeout(2000);
+        const held = await page.evaluate(() => window.__tigaCamera().dist);
+        expect(Math.abs(held - zoomed)).toBeLessThan(0.02);
+
+        // Zooming out again must also stick, in the other direction.
+        await page.mouse.wheel(0, 900);
+        await page.waitForTimeout(1600);
+        const out = await page.evaluate(() => window.__tigaCamera().dist);
+        expect(out).toBeGreaterThan(zoomed + 0.05);
+    });
+
+    test('the near plane rides the distance so close range does not clip', async ({ page }) => {
+        test.setTimeout(180000);
+        if (!await bootStage(page, 'core')) test.skip(true, 'no WebGL on this runner');
+
+        // A fixed 0.05 near plane against a 0.14 minimum distance puts the
+        // clip a third of the way to the pivot — the inner core loses its
+        // front half at exactly the zoom where someone got interested.
+        await page.evaluate(() => window.__tigaScene.zoomBy(0.01));   // clamps to the floor
+        await page.waitForTimeout(400);
+        const near = await page.evaluate(() => window.__tigaCamera());
+        expect(near.dist).toBeLessThan(0.3);
+        expect(near.near).toBeLessThan(near.dist * 0.05);
+        // Far only has to clear the scene (2.2 R_E of field line plus the pan
+        // bound); a fixed 100 is depth precision spent on empty space.
+        expect(near.far).toBeLessThan(12);
+
+        await page.evaluate(() => window.__tigaScene.zoomBy(200));    // clamps to the ceiling
+        await page.waitForTimeout(400);
+        const far = await page.evaluate(() => window.__tigaCamera());
+        expect(far.dist).toBeGreaterThan(20);
+        expect(far.near).toBeGreaterThan(near.near);
+        expect(far.far).toBeGreaterThan(far.dist);
+    });
+
+    test('panning moves the pivot, and Recentre brings it home', async ({ page }) => {
+        test.setTimeout(180000);
+        if (!await bootStage(page, 'field')) test.skip(true, 'no WebGL on this runner');
+
+        const start = await page.evaluate(() => window.__tigaCamera().targetRadius);
+        expect(start).toBeLessThan(0.01);
+
+        const box = await page.locator('#tg-stage canvas').boundingBox();
+        const cx = box.x + box.width / 2;
+        const cy = box.y + box.height / 2;
+        await page.mouse.move(cx, cy);
+        await page.mouse.down({ button: 'right' });
+        for (let i = 1; i <= 8; i++) await page.mouse.move(cx + i * 12, cy + i * 4);
+        await page.mouse.up({ button: 'right' });
+        await page.waitForTimeout(900);
+
+        // Panning was OFF before this change, so "explore the scene" meant
+        // "orbit the centre of the Earth and nothing else".
+        const panned = await page.evaluate(() => window.__tigaCamera().targetRadius);
+        expect(panned).toBeGreaterThan(0.02);
+        // …but bounded, so a pan can never lose the planet.
+        expect(panned).toBeLessThanOrEqual(2.61);
+
+        await page.click('.tg-nav-btn[data-view="recentre"]');
+        await page.waitForFunction(
+            () => { const c = window.__tigaCamera(); return c && !c.flying; },
+            null, { timeout: 30000 });
+        expect(await page.evaluate(() => window.__tigaCamera().targetRadius)).toBeLessThan(0.01);
+    });
+
+    test('a framing flight yields to the user instead of fighting them', async ({ page }) => {
+        test.setTimeout(180000);
+        if (!await bootStage(page, 'core')) test.skip(true, 'no WebGL on this runner');
+
+        // Start a long flight, then interrupt it one frame later. The camera
+        // must stop where the user left it, not resume its trip.
+        await page.evaluate(() => window.__tigaScene.flyTo({ dist: 26 }));
+        await page.waitForTimeout(120);
+        const box = await page.locator('#tg-stage canvas').boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.wheel(0, -240);
+        await page.waitForTimeout(60);
+        expect(await page.evaluate(() => window.__tigaCamera().flying)).toBe(false);
+
+        const stopped = await page.evaluate(() => window.__tigaCamera().dist);
+        // It stopped where the user left it, and it never got to the goal.
+        expect(stopped).toBeLessThan(25);
+        await page.waitForTimeout(1500);
+        const later = await page.evaluate(() => window.__tigaCamera().dist);
+        expect(Math.abs(later - stopped)).toBeLessThan(0.02);
+
+        // Reset is how you get the framing back — deliberately, not by waiting.
+        await page.click('.tg-nav-btn[data-view="reset"]');
+        await page.waitForFunction(
+            () => { const c = window.__tigaCamera(); return c && !c.flying; },
+            null, { timeout: 30000 });
+        const home = await page.evaluate(() => window.__tigaCamera().dist);
+        expect(Math.abs(home - 1.55)).toBeLessThan(0.05);   // LAYER_VIEW.core.dist
+    });
+
+    test('the keyboard can drive the view', async ({ page }) => {
+        test.setTimeout(180000);
+        if (!await bootStage(page, 'core')) test.skip(true, 'no WebGL on this runner');
+
+        // A data surface only a mouse can reach is a WCAG 2.1.1 failure, and
+        // this one carries readings.
+        await page.locator('#tg-stage canvas').focus();
+        const before = await page.evaluate(() => {
+            const p = window.__tigaScene.camera.position;
+            return { x: p.x, y: p.y, z: p.z };
+        });
+        for (let i = 0; i < 6; i++) await page.keyboard.press('ArrowRight');
+        await page.waitForTimeout(200);
+        const after = await page.evaluate(() => {
+            const p = window.__tigaScene.camera.position;
+            return { x: p.x, y: p.y, z: p.z };
+        });
+        expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeGreaterThan(0.05);
+
+        const d0 = await page.evaluate(() => window.__tigaCamera().dist);
+        for (let i = 0; i < 4; i++) await page.keyboard.press('=');
+        await page.waitForTimeout(200);
+        expect(await page.evaluate(() => window.__tigaCamera().dist)).toBeLessThan(d0 * 0.9);
+
+        await page.keyboard.press('r');
+        await page.waitForFunction(
+            () => { const c = window.__tigaCamera(); return c && !c.flying; },
+            null, { timeout: 30000 });
+        expect(Math.abs(await page.evaluate(() => window.__tigaCamera().dist) - 1.55)).toBeLessThan(0.05);
+    });
+
+    test('hovering reads the field from the kernel, and says nothing below the CMB', async ({ page }) => {
+        test.setTimeout(180000);
+        // External layer: the surface shell is the visible one, so a pick at
+        // the middle of the disc lands on it.
+        if (!await bootStage(page, 'external')) test.skip(true, 'no WebGL on this runner');
+
+        const box = await page.locator('#tg-stage canvas').boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.waitForFunction(() => window.__tigaCamera()?.probe, null, { timeout: 20000 });
+
+        const probe = await page.evaluate(() => window.__tigaCamera().probe);
+        expect(['surface', 'observatory']).toContain(probe.kind);
+        // Earth's surface field runs 22–67 µT. A probe that read the shader's
+        // colormap back instead of the kernel could not land in that window.
+        expect(probe.fNt).toBeGreaterThan(20000);
+        expect(probe.fNt).toBeLessThan(70000);
+        expect(Math.abs(probe.latDeg)).toBeLessThanOrEqual(90);
+        expect(Math.abs(probe.lonDeg)).toBeLessThanOrEqual(180);
+        await expect(page.locator('#tg-readout-probe')).toBeVisible();
+        await expect(page.locator('#tg-readout-probe')).toContainText(/nT|µT/);
+        await expect(page.locator('#tg-readout-hint')).toBeHidden();
+
+        // Now the inner core, which is INSIDE the source region. IGRF is a
+        // potential field and continuing it into its own source currents is
+        // not a measurement — the readout must say so rather than print an
+        // authoritative-looking number.
+        //
+        // Reaching it means getting inside the CMB: the CMB shell is at 0.546
+        // R_E and the inner core at 0.192, so from outside, a centred ray hits
+        // the CMB first and reports the CMB field — which is correct, and is
+        // the headline quantity of this page.
+        await page.click('[data-layer="core"]');
+        await page.locator('#tg-stage').scrollIntoViewIfNeeded();
+        await page.waitForFunction(
+            () => { const c = window.__tigaCamera(); return c && !c.flying; },
+            null, { timeout: 45000 });
+        await page.evaluate(() => window.__tigaScene.zoomBy(0.22));
+        await page.mouse.move(box.x + box.width / 2 + 3, box.y + box.height / 2);
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.waitForFunction(
+            () => window.__tigaCamera()?.probe?.kind === 'inner', null, { timeout: 20000 });
+        const inner = await page.evaluate(() => window.__tigaCamera().probe);
+        expect(inner.brNt).toBeUndefined();
+        expect(inner.note).toMatch(/cannot be continued below/);
+        await expect(page.locator('#tg-readout-probe')).toContainText('core–mantle boundary');
+
+        // Leaving the canvas puts the hint back.
+        await page.mouse.move(box.x + box.width / 2, box.y - 40);
+        await expect(page.locator('#tg-readout-hint')).toBeVisible();
     });
 
     test('every layer carries its honest label', async ({ page }) => {
