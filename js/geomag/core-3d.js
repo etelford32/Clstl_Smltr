@@ -45,11 +45,35 @@
  * Radii are TRUE: Earth 6371 km → 1.0, CMB 3480 → 0.546, inner core 1221.5 →
  * 0.192. No compression. The one exaggeration is field-line tube RADIUS, which
  * is a drawing width and not a physical quantity.
+ *
+ * ── THE CAMERA IS THE USER'S, NOT THE PAGE'S ─────────────────────────────
+ *
+ * Read the CAMERA section below before touching anything that moves the view.
+ * The rule it enforces, in one line: THE PAGE MAY START A FLIGHT, IT MAY NOT
+ * HOLD THE CAMERA. Framing changes (a layer switch, a preset, Reset) are
+ * one-shot tweens that any drag, scroll, pinch or arrow key cancels. The
+ * previous version eased toward the layer's distance every frame forever,
+ * which silently reverted the user's own zoom about a second after every
+ * scroll — the single worst thing this view did.
+ *
+ * Also load-bearing: `zoomToCursor` is OFF (it walks the orbit pivot off the
+ * planet), panning is ON but bounded by `maxTargetRadius`, and near/far ride
+ * the camera distance so the 214× zoom range does not clip the inner core at
+ * one end or waste depth precision at the other.
+ *
+ * ── THE PROBE READS THE KERNEL, NOT THE PICTURE ──────────────────────────
+ *
+ * Hovering reports a field value at the picked point. It comes from
+ * `fieldGeocentric` on the SAME coefficients the shells are textured from —
+ * never from sampling the texture back, which would report the colormap
+ * rather than the field. Below the core–mantle boundary it reports no field
+ * value at all, because a potential field continued into its own source
+ * currents is not a measurement of anything.
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { coeffsAt, dipole, REF_RADIUS_KM } from './igrf.js';
+import { coeffsAt, dipole, fieldGeocentric, REF_RADIUS_KM } from './igrf.js';
 import {
     radialFieldSphere, seedFieldLines, R_CMB_KM, R_INNER_CORE_KM, continuationGain,
 } from './field-lines.js';
@@ -62,6 +86,35 @@ import { KYOTO_TABLE1 } from './observatories.js';
 const R_EARTH = 1;
 const R_CMB = R_CMB_KM / REF_RADIUS_KM;
 const R_IC = R_INNER_CORE_KM / REF_RADIUS_KM;
+
+// ── The camera envelope ──────────────────────────────────────────────────────
+// One place, because four of these used to be literals scattered through the
+// constructor and the render loop, and two of them disagreed.
+const DIST_MIN = 0.14;          // inside the inner core
+const DIST_MAX = 30;            // ~the sunward magnetopause
+const TARGET_MAX = 2.6;         // how far the pivot may be panned from centre
+const SCENE_RADIUS = 2.2;       // field lines run to 13,500 km = 2.12 R_E
+const NEAR_MIN = 0.0015;
+const NEAR_MAX = 0.06;
+const LAYER_MODE_DIST = 2.75;   // framing that fits the whole layer stack
+// Flights ease with an e-folding TIME, not a per-frame fraction. A per-frame
+// constant makes the same flight take 0.8 s at 60 fps and eight seconds on a
+// software rasteriser — measured: the layer switch looked like it had hung.
+const FLIGHT_TAU = 0.28;        // seconds
+const FLIGHT_DT_MAX = 0.1;      // clamp, so a backgrounded tab does not teleport
+const FLIGHT_SNAP_ANGLE = 4e-3; // rad, ~0.23°
+const FLIGHT_SNAP_POS = 4e-3;   // R_E
+const HOME_AZIMUTH = Math.PI / 4;        // matches the boot position, 45°
+const HOME_POLAR = 70 * Math.PI / 180;
+const OBS_CATCH_PX = 22;        // observatory dots are ~6 px at the wide framing
+const DEGR = Math.PI / 180;
+
+// Scratch. Allocating a Vector3 per pointer move is how a hover handler ends
+// up in the GC profile.
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _sph = new THREE.Spherical();
 
 /**
  * ── THE PALETTE IS EXPORTED, AND THAT IS THE POINT ───────────────────────
@@ -101,6 +154,9 @@ export const OBSERVATORY_COLORS = Object.freeze({ north: 0xc792ea, south: 0x7fe6
 
 /** The tangent cylinder — geometry, not a material surface. */
 export const TANGENT_CYLINDER_COLOR = 0x7fe6c3;
+
+/** The ring drawn at whatever the pointer probe is currently reading. */
+const PROBE_MARKER_COLOR = 0x7fe6c3;
 
 // ── Shaders ──────────────────────────────────────────────────────────────────
 
@@ -315,23 +371,23 @@ export class CoreFieldScene {
         this.renderer.domElement.style.display = 'block';
 
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(42, 1, 0.05, 100);
+        this.camera = new THREE.PerspectiveCamera(42, 1, NEAR_MAX, 100);
         this.camera.position.set(2.45, 1.25, 2.45);
 
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-        this.controls.enableDamping = true;
-        this.controls.dampingFactor = 0.08;
-        // Range spans from INSIDE the inner core (0.14 R_E) out to 30 R_E,
-        // which is roughly the sunward magnetopause — so the same view covers
-        // "what the solid inner core looks like from within" and "where this
-        // field stops being Earth's problem". Zoom speed is damped because a
-        // 200× range on a linear wheel makes the near end unusable.
-        this.controls.minDistance = 0.14;
-        this.controls.maxDistance = 30;
-        this.controls.zoomSpeed = 0.65;
-        this.controls.rotateSpeed = 0.85;
-        this.controls.enablePan = false;
-        this.controls.zoomToCursor = true;
+        this._configureControls();
+
+        // Camera state. `_flight` is a ONE-SHOT framing tween or null; see
+        // flyTo() for why it must not be a standing spring.
+        this._flight = null;
+        this._pointer = null;
+        this._probe = null;
+        this._probeDirty = false;
+        this._probeCam = new THREE.Vector3();
+        this._onProbe = null;
+        this._cssW = 600;
+        this._cssH = 420;
+        this._installNavigation();
 
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
         const key = new THREE.DirectionalLight(0xbfd4ff, 1.0);
@@ -352,6 +408,7 @@ export class CoreFieldScene {
         this.clipPlane = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 2.0);
 
         this._buildLayerShells();
+        this._buildProbeMarker();
         this._buildTangentCylinder();
         this._buildInnerCore();
         this._buildCmb();
@@ -364,7 +421,6 @@ export class CoreFieldScene {
         // cutting, because a cut between two spheres of different size reads
         // as a different object; a flight reads as the same Earth seen closer.
         this.layer = 'external';
-        this._targetDist = LAYER_VIEW.external.dist;
 
         // Handed to the key so it reads the same constants the materials do.
         this.palettes = {
@@ -375,6 +431,600 @@ export class CoreFieldScene {
         this._onResize = () => this.resize();
         window.addEventListener('resize', this._onResize);
         this.resize();
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // CAMERA
+    //
+    // THE BUG THIS SECTION EXISTS TO KILL, stated plainly because it shipped
+    // and it made the view feel broken: render() used to ease
+    // `camera.position` toward the active layer's framing distance EVERY
+    // FRAME, unconditionally and forever. OrbitControls reads the camera's
+    // position back at the top of its own update(), so that ease was never a
+    // flight — it was a permanent spring that dragged the user's own zoom back
+    // to the layer default in about a second. Scrolling did something, and
+    // then the page undid it. On top of that the spring scaled the camera's
+    // WORLD position, which is only the same thing as "dolly" while the orbit
+    // target sits at the origin — and `zoomToCursor` moves the target off the
+    // origin on every scroll, so the spring also slewed the camera sideways.
+    //
+    // The framing flight is now a one-shot tween that any interaction cancels,
+    // it works in the target's frame, and the two settings that made the pivot
+    // wander are re-decided below.
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * OrbitControls configuration, and two deliberate departures from what was
+     * here before:
+     *
+     *   • `zoomToCursor` is OFF. It sounds like the friendlier option and on a
+     *     body-centred scene it is not: r160 re-places `controls.target` in
+     *     front of the camera on every cursor zoom, so a few scrolls near the
+     *     limb walk the orbit pivot off the planet — and then dragging orbits
+     *     about a point in empty space, which is the "camera has a mind of its
+     *     own" complaint in its purest form. The pivot is the one thing that
+     *     has to stay predictable. Double-click (`focusOn`) is the explicit,
+     *     visible way to move it and "Recentre" puts it back.
+     *   • Panning is ON, bounded by `maxTargetRadius`. Exploring a scene means
+     *     being able to put something other than the centre of the Earth in
+     *     the middle of the frame — a reversed-flux patch, the far end of a
+     *     field line. The bound is what stops a pan from losing the planet.
+     *
+     * Zoom speed is 1.5, not the old 0.65. The dolly is multiplicative
+     * (0.95^speed per notch), so across a 214× range the old value needed
+     * ~160 wheel notches end to end. It was not "damped", it was inert.
+     */
+    _configureControls() {
+        const c = this.controls;
+        c.enableDamping = true;
+        c.dampingFactor = 0.08;
+        // Range spans from INSIDE the inner core out to roughly the sunward
+        // magnetopause — so the same view covers "what the solid inner core
+        // looks like from within" and "where this field stops being Earth's
+        // problem".
+        c.minDistance = DIST_MIN;
+        c.maxDistance = DIST_MAX;
+        c.zoomSpeed = 1.5;
+        c.rotateSpeed = 0.85;
+        c.enablePan = true;
+        c.panSpeed = 0.8;
+        c.screenSpacePanning = true;
+        c.zoomToCursor = false;
+        c.maxTargetRadius = TARGET_MAX;
+        c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+        c.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+    }
+
+    /**
+     * Pointer, keyboard and the interaction that cancels a flight.
+     *
+     * The canvas is made focusable on purpose: this view carries readings, and
+     * a data surface that only a mouse can reach is a WCAG 2.1.1 failure. The
+     * same page already treats its wide tables that way.
+     */
+    _installNavigation() {
+        const el = this.renderer.domElement;
+        el.tabIndex = 0;
+        el.setAttribute('role', 'application');
+        el.setAttribute('aria-label',
+            "Earth's interior and magnetic field in 3D. Drag to orbit, scroll to zoom, "
+            + 'right-drag or two fingers to pan, double-click to focus. '
+            + 'Arrow keys orbit, plus and minus zoom, R resets the view.');
+        el.style.touchAction = 'none';
+        el.style.cursor = 'grab';
+
+        // ANY interaction cancels the framing flight. Without this the flight
+        // and the user fight over the same camera, which is the whole bug.
+        this._onControlStart = () => {
+            this._flight = null;
+            el.style.cursor = 'grabbing';
+        };
+        this._onControlEnd = () => {
+            el.style.cursor = this._probe ? 'crosshair' : 'grab';
+        };
+        this.controls.addEventListener('start', this._onControlStart);
+        this.controls.addEventListener('end', this._onControlEnd);
+
+        const ndc = (e) => {
+            const r = el.getBoundingClientRect();
+            return {
+                x: ((e.clientX - r.left) / (r.width || 1)) * 2 - 1,
+                y: -((e.clientY - r.top) / (r.height || 1)) * 2 + 1,
+            };
+        };
+        this._onPointerMove = (e) => {
+            // Pen and touch report a position too, but a finger is already
+            // driving the orbit — probing under it just fights the gesture.
+            if (e.pointerType === 'touch' && e.buttons) return;
+            this._pointer = ndc(e);
+            this._probeDirty = true;
+        };
+        this._onPointerLeave = () => {
+            this._pointer = null;
+            this._probeDirty = true;
+        };
+        this._onDblClick = (e) => {
+            const p = ndc(e);
+            const hit = this._pick(p.x, p.y);
+            if (hit) this.focusOn(hit.point);
+        };
+        this._onKeyDown = (e) => this._handleKey(e);
+
+        // Touch has no hover, so without a tap path the readout — the whole
+        // "explore the data" half of this view — would be desktop-only.
+        this._onPointerDown = (e) => {
+            if (e.pointerType !== 'touch') return;
+            this._tap = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+        };
+        this._onPointerUp = (e) => {
+            if (e.pointerType !== 'touch' || !this._tap) return;
+            const moved = Math.hypot(e.clientX - this._tap.x, e.clientY - this._tap.y);
+            // event.timeStamp, not performance.now(): same origin, but timeStamp
+            // is when the browser GENERATED the event while performance.now() in
+            // the handler is when a busy frame finally got round to running it.
+            // Mars measured a genuine quick tap at 914 ms by handler clock.
+            const dt = e.timeStamp - this._tap.t;
+            this._tap = null;
+            if (moved > 12 || dt > 600) return;   // that was a drag, not a tap
+            this._pointer = ndc(e);
+            this._probeDirty = true;
+        };
+
+        el.addEventListener('pointermove', this._onPointerMove);
+        el.addEventListener('pointerleave', this._onPointerLeave);
+        el.addEventListener('pointerdown', this._onPointerDown);
+        el.addEventListener('pointerup', this._onPointerUp);
+        el.addEventListener('dblclick', this._onDblClick);
+        el.addEventListener('keydown', this._onKeyDown);
+    }
+
+    _handleKey(e) {
+        if (e.altKey || e.ctrlKey || e.metaKey) return;
+        const step = (e.shiftKey ? 8 : 3) * DEGR;
+        const k = e.key;
+        if (k === 'r' || k === 'R' || k === '0') { this.resetView(); e.preventDefault(); return; }
+        let dAz = 0, dPolar = 0, zoom = 1;
+        if (k === 'ArrowLeft') dAz = -step;
+        else if (k === 'ArrowRight') dAz = step;
+        else if (k === 'ArrowUp') dPolar = -step;
+        else if (k === 'ArrowDown') dPolar = step;
+        else if (k === '+' || k === '=') zoom = 1 / 1.18;
+        else if (k === '-' || k === '_') zoom = 1.18;
+        else return;
+        e.preventDefault();
+        if (dAz || dPolar) this.orbitBy(dAz, dPolar);
+        if (zoom !== 1) this.zoomBy(zoom);
+        this._probeDirty = true;
+    }
+
+    /** Orbit the camera about the current pivot, in radians. */
+    orbitBy(dAzimuth, dPolar) {
+        // Direct manipulation, so it takes the camera off autopilot — exactly
+        // as a drag does through the controls' own 'start' event.
+        this._flight = null;
+        const t = this.controls.target;
+        const off = _v1.copy(this.camera.position).sub(t);
+        _sph.setFromVector3(off);
+        _sph.theta += dAzimuth;
+        // Stop short of the poles: at phi exactly 0 the azimuth is undefined
+        // and the view snaps a quarter turn on the next drag.
+        _sph.phi = Math.max(0.02, Math.min(Math.PI - 0.02, _sph.phi + dPolar));
+        off.setFromSpherical(_sph);
+        this.camera.position.copy(t).add(off);
+        this.camera.lookAt(t);
+    }
+
+    /** Dolly by a multiplicative factor (<1 moves in), clamped to the envelope. */
+    zoomBy(factor) {
+        this._flight = null;
+        const t = this.controls.target;
+        const off = _v1.copy(this.camera.position).sub(t);
+        const d = off.length() || DIST_MIN;
+        off.setLength(Math.max(DIST_MIN, Math.min(DIST_MAX, d * factor)));
+        this.camera.position.copy(t).add(off);
+        this._probeDirty = true;
+    }
+
+    /**
+     * Start a framing flight. Every field is optional and every one of them is
+     * a GOAL, not a standing constraint — `_updateFlight` clears `_flight` the
+     * moment it arrives, and `controls`'s own 'start' event clears it the
+     * moment the user touches anything. That distinction is the fix.
+     *
+     * @param {object}  [g]
+     * @param {number}  [g.dist]        distance from the pivot, R_E
+     * @param {THREE.Vector3} [g.target] where the pivot should end up
+     * @param {number}  [g.azimuthDeg]
+     * @param {number}  [g.polarDeg]    0 = down the spin axis, 90 = equatorial
+     */
+    flyTo({ dist, target, azimuthDeg, polarDeg } = {}) {
+        this._flightT = null;
+        this._flight = {
+            radius: dist == null ? null : Math.max(DIST_MIN, Math.min(DIST_MAX, dist)),
+            target: target ? target.clone().clampLength(0, TARGET_MAX) : null,
+            theta: azimuthDeg == null ? null : azimuthDeg * DEGR,
+            phi: polarDeg == null ? null
+                : Math.max(0.02, Math.min(Math.PI - 0.02, polarDeg * DEGR)),
+        };
+    }
+
+    _reducedMotion() {
+        return typeof matchMedia === 'function'
+            && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
+    _updateFlight() {
+        const f = this._flight;
+        if (!f) return;
+        const now = (typeof performance !== 'undefined' ? performance : Date).now();
+        const dt = this._flightT == null
+            ? 1 / 60 : Math.min(FLIGHT_DT_MAX, Math.max(0, (now - this._flightT) / 1000));
+        this._flightT = now;
+        // Exponential approach with a fixed time constant, so the flight lasts
+        // about the same 1.2 s whether the GPU manages 60 fps or 8. Someone who
+        // asked not to see motion gets the destination, not the trip — the rest
+        // of this page already honours the preference, and a camera that swings
+        // across the screen is exactly what the preference is about.
+        const k = this._reducedMotion() ? 1 : 1 - Math.exp(-dt / FLIGHT_TAU);
+
+        const t = this.controls.target;
+        let done = true;
+        if (f.target) {
+            if (t.distanceTo(f.target) < FLIGHT_SNAP_POS) t.copy(f.target);
+            else { t.lerp(f.target, k); done = false; }
+        }
+        const off = _v1.copy(this.camera.position).sub(t);
+        _sph.setFromVector3(off);
+        if (f.radius != null) {
+            // Snap once the remainder is below a fraction of the goal, rather
+            // than chasing an asymptote forever. An exponential ease NEVER
+            // arrives, so "done" has to be a decision, not an equality.
+            const eps = Math.max(FLIGHT_SNAP_POS, Math.abs(f.radius) * 0.004);
+            if (Math.abs(f.radius - _sph.radius) < eps) _sph.radius = f.radius;
+            else { _sph.radius += (f.radius - _sph.radius) * k; done = false; }
+        }
+        if (f.theta != null) {
+            // Shortest way round. Without the wrap a preset 5° away can take
+            // the 355° route because the two numbers happen to straddle ±π.
+            let d = f.theta - _sph.theta;
+            while (d > Math.PI) d -= 2 * Math.PI;
+            while (d < -Math.PI) d += 2 * Math.PI;
+            if (Math.abs(d) < FLIGHT_SNAP_ANGLE) _sph.theta += d;
+            else { _sph.theta += d * k; done = false; }
+        }
+        if (f.phi != null) {
+            const d = f.phi - _sph.phi;
+            if (Math.abs(d) < FLIGHT_SNAP_ANGLE) _sph.phi += d;
+            else { _sph.phi += d * k; done = false; }
+        }
+        _sph.makeSafe();
+        off.setFromSpherical(_sph);
+        this.camera.position.copy(t).add(off);
+        this.camera.lookAt(t);
+        if (done) this._flight = null;
+    }
+
+    /**
+     * Near and far ride the distance, and so does the rotate rate.
+     *
+     * The near plane used to be a fixed 0.05 against a 0.14 minimum distance —
+     * a third of the way to the pivot — so zooming into the inner core sliced
+     * the front off it and the view appeared to break at exactly the moment
+     * someone got interested. Far used to be a fixed 100 against a scene 2.2
+     * R_E across, which is depth range spent on nothing. Same lesson as the
+     * Mars page's per-mode near/far, three orders of magnitude smaller.
+     *
+     * Rotate speed rides distance because a fixed angular rate that feels
+     * controlled at 3 R_E whips the horizon past at 0.2.
+     */
+    _updateCameraRange() {
+        const dist = this.camera.position.distanceTo(this.controls.target);
+        const near = Math.max(NEAR_MIN, Math.min(NEAR_MAX, dist * 0.02));
+        const far = dist + TARGET_MAX + SCENE_RADIUS + 1;
+        if (Math.abs(near - this.camera.near) > near * 0.05
+            || Math.abs(far - this.camera.far) > 0.5) {
+            this.camera.near = near;
+            this.camera.far = far;
+            this.camera.updateProjectionMatrix();
+        }
+        this.controls.rotateSpeed = Math.max(0.28, Math.min(0.9, 0.24 + 0.28 * dist));
+    }
+
+    /** The framing this layer/mode asks for, in one place. */
+    _framingDistance() {
+        if (this.layerMode) return LAYER_MODE_DIST;
+        return (LAYER_VIEW[this.layer] || LAYER_VIEW.external).dist;
+    }
+
+    /** Back to the boot framing: pivot at the centre, layer's own distance. */
+    resetView() {
+        this.flyTo({
+            dist: this._framingDistance(),
+            target: new THREE.Vector3(0, 0, 0),
+            azimuthDeg: HOME_AZIMUTH / DEGR,
+            polarDeg: HOME_POLAR / DEGR,
+        });
+    }
+
+    /**
+     * Named framings. 'pole' and 'equator' change only the direction, so they
+     * compose with whatever zoom the user has already dialled in — flying them
+     * back out to a default distance would throw away the thing they were
+     * looking at.
+     */
+    setViewPreset(name) {
+        switch (name) {
+            case 'pole':     this.flyTo({ polarDeg: 8 }); break;
+            case 'equator':  this.flyTo({ polarDeg: 90 }); break;
+            case 'recentre': this.flyTo({ target: new THREE.Vector3(0, 0, 0) }); break;
+            case 'wide':     this.flyTo({ dist: Math.min(DIST_MAX, this._framingDistance() * 2.4) }); break;
+            default:         this.resetView();
+        }
+    }
+
+    /** Make a scene point the pivot and close in on it. Bound to double-click. */
+    focusOn(point) {
+        const dist = this.camera.position.distanceTo(this.controls.target);
+        this.flyTo({
+            target: point.clone(),
+            // Never all the way in: landing exactly on a shell puts the near
+            // plane inside it and the target vanishes into its own surface.
+            dist: Math.max(DIST_MIN * 2.2, dist * 0.55),
+        });
+    }
+
+    // ── The probe: point at the scene, read the kernel ───────────────────────
+
+    /**
+     * Which shells are pickable right now, with the radius each one actually
+     * occupies. Everything here is a sphere centred on the origin, which is
+     * what makes the analytic pick below possible.
+     *
+     * The mantle shell is deliberately absent: it is an additive volumetric
+     * cue for skin-depth attenuation, not a surface, and letting it swallow
+     * every pick would mean you could never point at the planet inside it.
+     */
+    _shellCandidates() {
+        const out = [];
+        const opacityOf = (mesh) => (
+            mesh.material?.uniforms?.uOpacity?.value
+            ?? (mesh.material?.transparent ? mesh.material.opacity : 1));
+        // `radius` is where the MESH is (what the ray must hit); `reportKm` is
+        // the physical radius the reading belongs to. They differ for the
+        // surface shell, which is drawn at 0.999 R_E purely to keep it off the
+        // mantle in the depth buffer — reporting that offset as "6 km down"
+        // would be a drawing artifact printed as a measurement.
+        const push = (mesh, radius, kind, label, clipped = false, reportKm = null) => {
+            if (!mesh || !mesh.visible || opacityOf(mesh) < 0.12) return;
+            out.push({ radius, kind, label, clipped, reportKm });
+        };
+        if (this.layerMode) {
+            for (const m of this.layerShells.children) {
+                const L = m.userData.layer;
+                if (!L) continue;
+                push(m, L.rOuterKm / REF_RADIUS_KM, 'layer', L.name, true);
+            }
+        } else {
+            push(this.surface, R_EARTH * 0.999, 'surface', 'Surface', false, REF_RADIUS_KM);
+            push(this.cmb, R_CMB, 'cmb', 'Core–mantle boundary');
+            push(this.innerCore, R_IC, 'inner', 'Inner core');
+        }
+        return out;
+    }
+
+    /**
+     * Ray → concentric shells, solved ANALYTICALLY rather than by raycasting.
+     *
+     * Every pickable is a sphere about the origin, so |o + t·d|² = r² is a
+     * quadratic and the answer is exact. THREE.Raycaster would walk ~20k
+     * triangles per shell per pointer move to hit the TESSELLATION instead of
+     * the sphere — measurably worse and less accurate, on a path that runs
+     * every frame the pointer is over the canvas.
+     */
+    _pick(ndcX, ndcY) {
+        if (!this._c) return null;
+
+        // Observatories win ties. The dots are 0.022 R_E, which is about six
+        // pixels at the External framing, so demanding a pixel-exact hit on
+        // one is not a reasonable thing to ask of anybody.
+        if (this.observatories.visible) {
+            let best = null;
+            let bestPx = OBS_CATCH_PX;
+            for (const m of this.observatories.children) {
+                // A marker on the far limb is not one you can see, so it is not
+                // one you can click — the rule the Mars atlas had to learn the
+                // hard way. m.position is radial, so this is the near-side test.
+                if (m.position.dot(_v2.copy(this.camera.position).sub(m.position)) <= 0) continue;
+                _v3.copy(m.position).project(this.camera);
+                if (_v3.z > 1) continue;
+                const dx = (_v3.x - ndcX) * this._cssW * 0.5;
+                const dy = (_v3.y - ndcY) * this._cssH * 0.5;
+                const d = Math.hypot(dx, dy);
+                if (d < bestPx) { bestPx = d; best = m; }
+            }
+            if (best) return this._observatoryProbe(best);
+        }
+
+        const o = this.camera.position;
+        const dir = _v1.set(ndcX, ndcY, 0.5).unproject(this.camera).sub(o).normalize();
+        const b = o.dot(dir);
+        const oo = o.dot(o);
+        let hit = null;
+        for (const cand of this._shellCandidates()) {
+            const disc = b * b - (oo - cand.radius * cand.radius);
+            if (disc < 0) continue;
+            const root = Math.sqrt(disc);
+            for (const t of [-b - root, -b + root]) {
+                if (t <= 1e-4) continue;
+                if (hit && t >= hit.t) continue;
+                const p = new THREE.Vector3().copy(dir).multiplyScalar(t).add(o);
+                // The cutaway is a clipping plane, and a raycast knows nothing
+                // about clipping planes: without this you can pick the wall of
+                // a shell that is not on screen.
+                if (cand.clipped && this.cutaway > 0
+                    && this.clipPlane.distanceToPoint(p) < 0) continue;
+                hit = { t, cand, point: p };
+                break;
+            }
+        }
+        return hit ? this._shellProbe(hit.cand, hit.point) : null;
+    }
+
+    /**
+     * Scene frame → geocentric, then the kernel.
+     *
+     * three.js Y is the spin axis and three.js Z is −y_geo, the same convention
+     * `_buildFieldLines` and `_buildObservatories` use. Getting it wrong
+     * mirrors longitude, which produces a perfectly plausible-looking map of
+     * the wrong planet.
+     */
+    _shellProbe(cand, point) {
+        const r = point.length() || 1e-6;
+        const xg = point.x, yg = -point.z, zg = point.y;
+        const latDeg = Math.asin(Math.max(-1, Math.min(1, zg / r))) / DEGR;
+        let lonDeg = Math.atan2(yg, xg) / DEGR;
+        if (lonDeg > 180) lonDeg -= 360;
+        const radiusKm = cand.reportKm != null ? cand.reportKm : r * REF_RADIUS_KM;
+        const info = {
+            kind: cand.kind,
+            label: cand.label,
+            latDeg,
+            lonDeg,
+            radiusKm,
+            depthKm: REF_RADIUS_KM - radiusKm,
+            point,
+        };
+        if (radiusKm >= R_CMB_KM - 1) {
+            const f = fieldGeocentric(
+                this._c, this.nmax, Math.max(radiusKm, R_CMB_KM),
+                (90 - latDeg) * DEGR, lonDeg * DEGR);
+            info.brNt = f.br;
+            info.fNt = Math.hypot(f.br, f.btheta, f.bphi);
+        } else {
+            // Below the CMB there are source currents, and a potential-field
+            // continuation into its own sources is not a field value — it is
+            // an extrapolation of a model outside its domain. Say so instead
+            // of printing a number that would look authoritative.
+            info.note = 'inside the source region — IGRF is a potential field and '
+                + 'cannot be continued below the core–mantle boundary';
+            const L = (this.layerDiagnostics || []).find((x) => x.name === cand.label);
+            if (L) {
+                info.sigma = L.sigma;
+                info.state = L.state;
+                info.canSustainDynamo = L.canSustainDynamo;
+                info.diffusionTimeYears = L.diffusionTimeYears;
+            }
+        }
+        return info;
+    }
+
+    _observatoryProbe(mesh) {
+        const code = mesh.userData.code;
+        const v = KYOTO_TABLE1[code];
+        const f = fieldGeocentric(
+            this._c, this.nmax, REF_RADIUS_KM, (90 - v.latDeg) * DEGR, v.lonDeg * DEGR);
+        return {
+            kind: 'observatory',
+            code,
+            label: v.name,
+            latDeg: v.latDeg,
+            // Kyoto publishes east longitude in 0–360; the rest of this readout
+            // is signed, and mixing the two in one line is how you get a
+            // station on the wrong side of the planet.
+            lonDeg: ((v.lonDeg + 540) % 360) - 180,
+            gmLatDeg: v.gmLatDeg,
+            invariantLatDeg: v.invariantLatDeg,
+            radiusKm: REF_RADIUS_KM,
+            depthKm: 0,
+            brNt: f.br,
+            fNt: Math.hypot(f.br, f.btheta, f.bphi),
+            point: mesh.position.clone(),
+        };
+    }
+
+    /**
+     * A tangent ring at whatever the probe is reading.
+     *
+     * On a mouse the cursor already says where the reading is; on a phone
+     * nothing does, and a tap-to-read with no visible anchor is a number
+     * floating free of the picture. depthTest is off with a high renderOrder
+     * so the ring is never half-swallowed by the shell it is sitting on.
+     */
+    _buildProbeMarker() {
+        const geo = new THREE.RingGeometry(0.018, 0.026, 28);
+        const mat = new THREE.MeshBasicMaterial({
+            color: PROBE_MARKER_COLOR, transparent: true, opacity: 0.92,
+            side: THREE.DoubleSide, depthTest: false, depthWrite: false,
+        });
+        this.probeMarker = new THREE.Mesh(geo, mat);
+        this.probeMarker.visible = false;
+        this.probeMarker.renderOrder = 6;
+        this.scene.add(this.probeMarker);
+    }
+
+    _placeProbeMarker(probe) {
+        const m = this.probeMarker;
+        if (!m) return;
+        if (!probe || !probe.point) { m.visible = false; return; }
+        // Just clear of the surface it is annotating, and scaled with the
+        // camera so it stays a legible ring at 30 R_E without swamping the
+        // patch it marks at 0.2.
+        m.position.copy(probe.point).multiplyScalar(1.004);
+        m.lookAt(0, 0, 0);
+        const dist = this.camera.position.distanceTo(this.controls.target);
+        m.scale.setScalar(Math.max(0.32, Math.min(6, dist * 0.34)));
+        m.visible = true;
+    }
+
+    /**
+     * Hand the page a callback that receives the probe (or null) whenever it
+     * changes. The scene formats nothing — it hands over kernel numbers and
+     * the page decides how to print them.
+     */
+    setProbeHandler(fn) { this._onProbe = typeof fn === 'function' ? fn : null; }
+
+    _updateProbe() {
+        // Re-pick when the pointer moves OR when the camera does — hold the
+        // cursor still and orbit, and the reading has to follow the geometry
+        // under it. Nothing to do at all when there is no pointer and nothing
+        // is currently reported.
+        if (!this._pointer && !this._probe) return;
+        const moved = this._probeCam.distanceToSquared(this.camera.position) > 1e-8;
+        if (!this._probeDirty && !moved) return;
+        this._probeDirty = false;
+        this._probeCam.copy(this.camera.position);
+        const next = this._pointer ? this._pick(this._pointer.x, this._pointer.y) : null;
+
+        // Fire only on a real change. This runs inside the render loop, and a
+        // handler that rewrites a DOM node 60 times a second to print the same
+        // string is a layout cost for nothing.
+        const sig = (q) => (q ? `${q.kind}|${q.code || q.label}|`
+            + `${q.latDeg.toFixed(2)}|${q.lonDeg.toFixed(2)}` : '');
+        if (sig(next) === sig(this._probe)) {
+            // Same reading, but the ring still has to follow the camera.
+            this._placeProbeMarker(this._probe);
+            return;
+        }
+        this.renderer.domElement.style.cursor = next ? 'crosshair' : 'grab';
+        this._probe = next;
+        this._placeProbeMarker(next);
+        if (this._onProbe) this._onProbe(next);
+    }
+
+    /** Camera + probe state, for tests and for the page's readouts. */
+    cameraState() {
+        const t = this.controls.target;
+        return {
+            dist: this.camera.position.distanceTo(t),
+            near: this.camera.near,
+            far: this.camera.far,
+            target: { x: t.x, y: t.y, z: t.z },
+            targetRadius: t.length(),
+            flying: !!this._flight,
+            layer: this.layer,
+            layerMode: !!this.layerMode,
+            probe: this._probe ? { ...this._probe, point: undefined } : null,
+        };
     }
 
     /**
@@ -461,7 +1111,12 @@ export class CoreFieldScene {
      * prerequisite.
      */
     _updateClip() {
-        const p = this.camera.position;
+        // The camera's azimuth AS SEEN FROM THE PIVOT, not its world azimuth.
+        // With panning enabled the two stop agreeing, and a cut derived from
+        // the world position then opens toward the origin rather than toward
+        // the eye. Reduces to the old expression exactly while the pivot is at
+        // the centre, which is what the smoke test pins.
+        const p = _v1.copy(this.camera.position).sub(this.controls.target);
         const az = Math.atan2(p.z, p.x) + (this.cutAzimuthOffset || 0);
         this.clipPlane.normal.set(-Math.cos(az), 0, -Math.sin(az));
         // Constant runs from outside the body (no cut) to the centre.
@@ -481,7 +1136,7 @@ export class CoreFieldScene {
             // Pull back far enough to see the whole stack. At the Core layer's
             // 1.55 the crust is outside the frame, which is the one thing a
             // layer view must not do.
-            this._targetDist = 2.75;
+            this.flyTo({ dist: LAYER_MODE_DIST, target: new THREE.Vector3(0, 0, 0) });
         }
     }
 
@@ -572,8 +1227,15 @@ export class CoreFieldScene {
     setLayer(name) {
         const v = LAYER_VIEW[name] || LAYER_VIEW.external;
         this.layer = name;
-        this._targetDist = this.layerMode ? 2.75 : v.dist;
+        // A layer switch is an explicit framing request, so it re-centres the
+        // pivot as well as changing the distance — otherwise switching layers
+        // after a pan flies you toward a framing of empty space. It is a
+        // one-shot flight: the next drag, scroll or key cancels it.
         this._targetOpacity = v;
+        this.flyTo({
+            dist: this.layerMode ? LAYER_MODE_DIST : v.dist,
+            target: new THREE.Vector3(0, 0, 0),
+        });
         this.observatories.visible = v.obs;
         if (this.layerMode) {
             // The layer stack is its own view of the interior; the field
@@ -617,6 +1279,11 @@ export class CoreFieldScene {
         this.nmax = nmax;
         const c = coeffsAt(year);
         const d = dipole(c);
+        // The pointer probe evaluates the field at the picked point from THESE
+        // coefficients — the same ones the shells are textured from. A probe
+        // with its own copy would be a second source of truth that drifts the
+        // first time the epoch slider moves.
+        this._c = c;
 
         // ── CMB radial field → data texture ─────────────────────────────
         const nLat = 121, nLon = 241;
@@ -790,6 +1457,10 @@ export class CoreFieldScene {
         this.renderer.setSize(w, h, false);
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
+        // The probe's observatory catch radius is in CSS pixels, so it needs
+        // the CSS size — not the drawing-buffer size, which carries the DPR.
+        this._cssW = w;
+        this._cssH = h;
     }
 
     /** Render one frame. The caller owns the loop so it can pause offscreen. */
@@ -797,15 +1468,15 @@ export class CoreFieldScene {
         if (this.disposed) return;
         const t = this.clock.getElapsedTime();
 
-        // Ease the camera toward the layer's framing, and cross-fade the
-        // shells. Exponential smoothing rather than a tween so an impatient
-        // click mid-flight retargets cleanly instead of queueing.
+        // Advance the framing flight, if one is running. It is ONE-SHOT and
+        // self-clearing — see the CAMERA section for the standing-spring
+        // version this replaced and why it made zooming impossible.
+        this._updateFlight();
+        this._updateCameraRange();
+
+        // Cross-fade the shells. Exponential smoothing rather than a tween so
+        // an impatient click mid-fade retargets cleanly instead of queueing.
         const v = this._targetOpacity || LAYER_VIEW[this.layer] || LAYER_VIEW.external;
-        const dist = this.camera.position.length();
-        const want = this._targetDist;
-        if (Math.abs(dist - want) > 1e-3) {
-            this.camera.position.multiplyScalar(1 + (want / dist - 1) * 0.07);
-        }
         const ease = (u, target) => u + (target - u) * 0.08;
         this.mantleUniforms.uOpacity.value = ease(
             this.mantleUniforms.uOpacity.value, this.layerMode ? 0 : v.mantle);
@@ -840,12 +1511,25 @@ export class CoreFieldScene {
         // Re-derive the cut from the camera each frame, so orbiting rotates the
         // opening with you instead of hiding it.
         if (this.cutaway > 0) this._updateClip();
+        // After controls.update(), so the reading under the pointer describes
+        // the frame that is about to be drawn rather than the previous one.
+        this._updateProbe();
         this.renderer.render(this.scene, this.camera);
     }
 
     dispose() {
         this.disposed = true;
         window.removeEventListener('resize', this._onResize);
+        const el = this.renderer.domElement;
+        el.removeEventListener('pointermove', this._onPointerMove);
+        el.removeEventListener('pointerleave', this._onPointerLeave);
+        el.removeEventListener('pointerdown', this._onPointerDown);
+        el.removeEventListener('pointerup', this._onPointerUp);
+        el.removeEventListener('dblclick', this._onDblClick);
+        el.removeEventListener('keydown', this._onKeyDown);
+        this.controls.removeEventListener('start', this._onControlStart);
+        this.controls.removeEventListener('end', this._onControlEnd);
+        this._onProbe = null;
         this.controls.dispose();
         this.scene.traverse((o) => {
             if (o.geometry) o.geometry.dispose();
